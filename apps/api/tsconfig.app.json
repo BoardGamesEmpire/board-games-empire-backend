@@ -25,6 +25,9 @@
       "path": "../../libs/api/users/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/metrics/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {

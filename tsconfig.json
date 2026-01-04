@@ -20,6 +20,9 @@
     },
     {
       "path": "./libs/api/config"
+    },
+    {
+      "path": "./libs/common/metrics"
     }
   ]
 }
