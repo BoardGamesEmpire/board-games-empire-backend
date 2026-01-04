@@ -34,7 +34,8 @@
         "libs/api/auth/*",
         "libs/api/users/*",
         "libs/server/context/*",
-        "libs/api/config/*"
+        "libs/api/config/*",
+        "libs/common/metrics/*"
       ]
     },
     {
@@ -79,7 +80,8 @@
         "libs/api/auth/*",
         "libs/api/users/*",
         "libs/server/context/*",
-        "libs/api/config/*"
+        "libs/api/config/*",
+        "libs/common/metrics/*"
       ],
       "options": {
         "typecheck": {
