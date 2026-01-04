@@ -1,0 +1,26 @@
+{
+  "name": "@board-games-empire-backend/api-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "implicitDependencies": [
+      "@board-games-empire-backend/api"
+    ],
+    "targets": {
+      "e2e": {
+        "executor": "@nx/jest:jest",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "options": {
+          "jestConfig": "apps/api-e2e/jest.config.ts",
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "@board-games-empire-backend/api:build",
+          "@board-games-empire-backend/api:serve"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "overrides": [
+    {
+      "files": ".prettierrc",
+      "options": { "parser": "json" }
+    }
+  ],
+  "singleQuote": true,
+  "arrowParens": "always",
+  "endOfLine": "lf",
+  "trailingComma": "all",
+  "printWidth": 120,
+  "bracketSpacing": true,
+  "tabWidth": 2,
+  "plugins": ["prettier-plugin-organize-imports"]
+}

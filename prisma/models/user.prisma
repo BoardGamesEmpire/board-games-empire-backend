@@ -1,0 +1,29 @@
+
+model User {
+  id              String     @id @default(cuid(2))
+
+  banExpires      DateTime? @map("ban_expires") @db.Timestamptz(3)
+  banned          Boolean?   @default(false)
+  banReason       String?   @map("ban_reason")
+
+  displayUsername String? @map("display_username")
+  username        String?
+
+  email           String
+  emailVerified Boolean   @default(false) @map("email_verified")
+
+  image         String?
+  name            String
+
+  role            String?
+
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  sessions        Session[]
+  accounts        Account[]
+
+  @@unique([email])
+  @@unique([username])
+  @@map("users")
+}

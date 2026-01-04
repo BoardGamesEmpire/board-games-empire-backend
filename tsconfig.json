@@ -1,0 +1,25 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./apps/api-e2e"
+    },
+    {
+      "path": "./apps/api"
+    },
+    {
+      "path": "./libs/database"
+    },
+    {
+      "path": "./libs/api/auth"
+    },
+    {
+      "path": "./libs/api/users"
+    },
+    {
+      "path": "./libs/api/config"
+    }
+  ]
+}
