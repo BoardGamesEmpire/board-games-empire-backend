@@ -29,6 +29,12 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
       this.logger.error(error);
       throw error;
     }
+
+    this.$on('query', (e) => {
+      console.log('Query: ' + e.query);
+      console.log('Params: ' + e.params);
+      console.log('Duration: ' + e.duration + 'ms');
+    });
   }
 
   async onModuleDestroy() {

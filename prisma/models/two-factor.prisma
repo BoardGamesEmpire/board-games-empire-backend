@@ -1,0 +1,13 @@
+model TwoFactor {
+  id          String @id @default(cuid(2))
+
+  secret      String
+  backupCodes String @map("backup_codes")
+
+  userId      String @map("user_id")
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([secret])
+  @@index([userId])
+  @@map("two_factor")
+}

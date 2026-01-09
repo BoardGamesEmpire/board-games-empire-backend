@@ -9,6 +9,6 @@ export class UsersController {
 
   @Get('me')
   me(@Session() session: UserSession) {
-    return { user: session.user };
+    return { user: session?.user };
   }
 }

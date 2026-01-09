@@ -1,0 +1,35 @@
+model Apikey {
+  id                  String    @id @default(cuid(2))
+
+  name                String?
+  start               String?
+  prefix              String?
+  key                 String
+
+  userId              String    @map("user_id")
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  refillInterval      Int? @map("refill_interval")
+  refillAmount        Int? @map("refill_amount")
+  lastRefillAt        DateTime? @map("last_refill_at") @db.Timestamptz(3)
+
+  enabled             Boolean?  @default(true)
+  rateLimitEnabled    Boolean?  @default(true) @map("rate_limit_enabled")
+  rateLimitTimeWindow Int?      @default(86400000) @map("rate_limit_time_window")
+  rateLimitMax        Int?      @default(10) @map("rate_limit_max")
+  requestCount        Int?      @default(0) @map("request_count")
+  remaining           Int?
+
+  lastRequest         DateTime? @map("last_request") @db.Timestamptz(3)
+  permissions         String?
+
+  metadata            String?
+
+  expiresAt           DateTime? @map("expires_at") @db.Timestamptz(3)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([key])
+  @@index([userId])
+  @@map("apikeys")
+}

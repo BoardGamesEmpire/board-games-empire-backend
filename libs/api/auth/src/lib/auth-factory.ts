@@ -1,9 +1,21 @@
+import { passkey } from '@better-auth/passkey';
 import type { PrismaClient } from '@bge/database';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import { admin, genericOAuth, username } from 'better-auth/plugins';
+import {
+  admin,
+  anonymous,
+  apiKey,
+  deviceAuthorization,
+  genericOAuth,
+  lastLoginMethod,
+  oneTap,
+  oneTimeToken,
+  openAPI,
+  twoFactor,
+} from 'better-auth/plugins';
 import process from 'node:process';
 
 export function authFactory(client: PrismaClient, configService?: ConfigService) {
@@ -14,7 +26,22 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
   const port = configService?.get<number>('server.port') || parseInt(process.env.PORT || '33333', 10);
   const trustedOrigins = options.trusted.map((origin) => origin.replace(/{PORT}\/?$/i, port.toString()));
 
-  const plugins: BetterAuthPlugin[] = [admin()];
+  const plugins: BetterAuthPlugin[] = [
+    admin(),
+    anonymous(),
+    apiKey(),
+    lastLoginMethod(),
+    oneTap(),
+    oneTimeToken(),
+    openAPI(),
+    passkey(),
+    twoFactor(),
+
+    deviceAuthorization({
+      verificationUri: '/device',
+    }),
+  ];
+
   if (hasOIDC(configService)) {
     const oidcConfig = buildOIDC(configService);
     Logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`, 'authFactory');
@@ -34,17 +61,41 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
 
   if (options.useEmailPass) {
     Logger.log('Enabling Email & Password authentication', 'authFactory');
-    plugins.push(username());
   }
 
   return betterAuth({
+    telemetry: { enabled: false },
+    advanced: {
+      cookiePrefix: 'bge_auth_',
+    },
     basePath: '/api/auth',
+    appName: 'BoardGamesEmpire',
     baseURL: `${options.hostUrl}/api/auth`,
+    user: {
+      fields: {
+        name: 'username',
+      },
+      additionalFields: {
+        firstName: {
+          type: 'string',
+          required: false,
+          map: 'first_name',
+        },
+        lastName: {
+          type: 'string',
+          required: false,
+          map: 'last_name',
+        },
+      },
+    },
     hooks: {},
+    experimental: {
+      joins: true,
+    },
     url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(client, {
-      usePlural: true,
+      debugLogs: true,
       transaction: true,
       provider: 'postgresql',
     }),

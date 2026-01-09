@@ -1,6 +1,7 @@
 import { ApiConfigModule } from '@bge/api-config';
 import { AuthModule } from '@bge/auth';
 import { DatabaseModule } from '@bge/database';
+import { HealthModule } from '@bge/health';
 import { MetricsModule } from '@bge/metrics';
 import { UsersModule } from '@bge/users';
 import { Module } from '@nestjs/common';
@@ -49,6 +50,7 @@ import * as crypto from 'node:crypto';
     // Feature modules
     AuthModule,
     UsersModule,
+    HealthModule,
     MetricsModule,
   ],
   controllers: [],

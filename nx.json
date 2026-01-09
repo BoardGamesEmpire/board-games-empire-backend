@@ -35,7 +35,8 @@
         "libs/api/users/*",
         "libs/server/context/*",
         "libs/api/config/*",
-        "libs/common/metrics/*"
+        "libs/common/metrics/*",
+        "libs/common/health/*"
       ]
     },
     {
@@ -81,7 +82,8 @@
         "libs/api/users/*",
         "libs/server/context/*",
         "libs/api/config/*",
-        "libs/common/metrics/*"
+        "libs/common/metrics/*",
+        "libs/common/health/*"
       ],
       "options": {
         "typecheck": {

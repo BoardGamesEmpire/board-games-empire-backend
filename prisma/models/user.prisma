@@ -7,21 +7,30 @@ model User {
   banReason       String?   @map("ban_reason")
 
   displayUsername String? @map("display_username")
-  username        String?
+  username            String
+
+  isAnonymous      Boolean?    @default(false) @map("is_anonymous")
 
   email           String
-  emailVerified Boolean   @default(false) @map("email_verified")
+  emailVerified   Boolean   @default(false) @map("email_verified")
 
-  image         String?
-  name            String
+  image           String?
 
+  firstName      String?   @map("first_name")
+  lastName       String?   @map("last_name")
+
+  twoFactorEnabled Boolean? @default(false) @map("two_factor_enabled")
   role            String?
 
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  sessions        Session[]
-  accounts        Account[]
+  accounts         Account[]
+  apikeys          Apikey[]
+  deviceCodes      DeviceCode[]
+  passkeys         Passkey[]
+  sessions         Session[]
+  twofactors       TwoFactor[]
 
   @@unique([email])
   @@unique([username])

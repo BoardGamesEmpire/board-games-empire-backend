@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client"
   output   = "../libs/database/src/lib/generated"
