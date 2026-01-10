@@ -10,6 +10,8 @@
     "*.sql"
   ],
   "words": [
+    "aaguid",
+    "Apikey",
     "authtag",
     "Boardgame",
     "boardgameaccessory",
@@ -50,6 +52,7 @@
     "rxdart",
     "thallesp",
     "Timestamptz",
+    "twofactors",
     "videogame",
     "willsoto",
     "yearpublished",

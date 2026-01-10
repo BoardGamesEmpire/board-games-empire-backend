@@ -1,16 +1,18 @@
 model Session {
   id             String   @id @default(cuid(2))
 
-  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
   token     String
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
   ipAddress String?  @map("ip_address")
   userAgent String?  @map("user_agent")
 
+  impersonatedBy String? @map("impersonated_by")
+
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
-  impersonatedBy String? @map("impersonated_by")
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([token])
   @@index([userId])
