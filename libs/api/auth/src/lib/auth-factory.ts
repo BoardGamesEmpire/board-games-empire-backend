@@ -95,7 +95,7 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
     url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(client, {
-      debugLogs: true,
+      debugLogs: configService?.get<boolean>('server.is_production') === false || false,
       transaction: true,
       provider: 'postgresql',
     }),

@@ -31,9 +31,9 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     }
 
     this.$on('query', (e) => {
-      console.log('Query: ' + e.query);
-      console.log('Params: ' + e.params);
-      console.log('Duration: ' + e.duration + 'ms');
+      this.logger.log('Query: ' + e.query);
+      this.logger.log('Params: ' + e.params);
+      this.logger.log('Duration: ' + e.duration + 'ms');
     });
   }
 
