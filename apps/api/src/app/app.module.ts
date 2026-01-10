@@ -4,9 +4,11 @@ import { DatabaseModule } from '@bge/database';
 import { HealthModule } from '@bge/health';
 import { MetricsModule } from '@bge/metrics';
 import { UsersModule } from '@bge/users';
+import KeyvRedis from '@keyv/redis';
+import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { ConfigService } from '@nestjs/config';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { ClsModule } from 'nestjs-cls';
@@ -19,7 +21,6 @@ import * as crypto from 'node:crypto';
 
     // Rate limiting
     ThrottlerModule.forRootAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
         throttlers: [
@@ -33,7 +34,17 @@ import * as crypto from 'node:crypto';
     }),
 
     DatabaseModule,
+    CacheModule.registerAsync({
+      isGlobal: true,
+      inject: [ConfigService],
+      useFactory: async (configService: ConfigService) => ({
+        stores: [new KeyvRedis(configService.get('redis'))],
+        ttl: configService.get<number>('cache.ttl'),
+        max: configService.get<number>('cache.max'),
+      }),
+    }),
 
+    // Logging
     LoggerModule.forRoot({
       forRoutes: ['*'],
     }),
@@ -59,6 +70,10 @@ import * as crypto from 'node:crypto';
     {
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheInterceptor,
     },
   ],
 })
