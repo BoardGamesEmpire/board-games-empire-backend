@@ -1,5 +1,6 @@
 import { passkey } from '@better-auth/passkey';
 import type { PrismaClient } from '@bge/database';
+import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
@@ -18,7 +19,7 @@ import {
 } from 'better-auth/plugins';
 import process from 'node:process';
 
-export function authFactory(client: PrismaClient, configService?: ConfigService) {
+export function authFactory(client: PrismaClient, configService?: ConfigService, cache?: Cache) {
   Logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`, 'authFactory');
 
   const options = buildOptions(configService);
@@ -26,6 +27,7 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
   const port = configService?.get<number>('server.port') || parseInt(process.env.PORT || '33333', 10);
   const trustedOrigins = options.trusted.map((origin) => origin.replace(/{PORT}\/?$/i, port.toString()));
 
+  // TODO: Make plugins configurable
   const plugins: BetterAuthPlugin[] = [
     admin(),
     anonymous(),
@@ -45,6 +47,7 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
   if (hasOIDC(configService)) {
     const oidcConfig = buildOIDC(configService);
     Logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`, 'authFactory');
+
     plugins.push(
       genericOAuth({
         config: [
@@ -89,9 +92,7 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
       },
     },
     hooks: {},
-    experimental: {
-      joins: true,
-    },
+    experimental: { joins: true },
     url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(client, {
@@ -99,6 +100,19 @@ export function authFactory(client: PrismaClient, configService?: ConfigService)
       transaction: true,
       provider: 'postgresql',
     }),
+    secondaryStorage: cache
+      ? {
+          get(key: string) {
+            return cache.get(`auth_${key}`);
+          },
+          set(key: string, ...params: [value: any, ttl?: number]) {
+            return cache.set(`auth_${key}`, ...params);
+          },
+          async delete(key: string) {
+            await cache.del(`auth_${key}`);
+          },
+        }
+      : undefined,
     emailAndPassword: { enabled: options.useEmailPass },
     trustedOrigins,
     plugins,

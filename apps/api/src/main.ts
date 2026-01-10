@@ -60,6 +60,8 @@ async function bootstrap() {
     .enableCors({
       origin: [env.provide('BETTER_AUTH_URL', { defaultValue: '*' }), '*'],
       credentials: true,
+      methods: ['GET', 'PATCH', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     });
 
   if (configService.get<boolean>('swagger.enabled')) {
