@@ -1,0 +1,65 @@
+model GameImage {
+  id String @id @default(cuid(2))
+
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  // Image-specific fields
+  width  Int
+  height Int
+  format String
+
+  // Context-specific fields
+  isDefault Boolean @default(false) @map("is_default")
+  isCover   Boolean @default(false) @map("is_cover")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([gameId])
+  @@map("game_images")
+}
+
+model EventImage {
+  id      String @id @default(cuid(2))
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId String @map("event_id")
+
+  // Image-specific fields
+  width  Int
+  height Int
+  format String
+
+  // Context-specific fields
+  isFeatured Boolean   @default(false) @map("is_featured")
+  takenAt    DateTime? @map("taken_at") @db.Timestamptz(3)
+
+  @@index([eventId])
+  @@map("event_images")
+}
+
+// In due time, add models for:
+// Character, NPC, Location, UserProfile, Household, GamePlaySession, RuleVariant, etc.
+
+// model CampaignImage {
+//   id      String   @id @default(cuid(2))
+//   media   Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+//   mediaId String   @map("media_id")
+
+//   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+//   campaignId String   @map("campaign_id")
+
+//   width  Int
+//   height Int
+//   format String
+
+//   isSecret Boolean @default(false) @map("is_secret") // DM-only view
+//   category String? // "map", "npc_portrait", "scene"
+
+//   @@index([campaignId])
+//   @@map("campaign_images")
+// }

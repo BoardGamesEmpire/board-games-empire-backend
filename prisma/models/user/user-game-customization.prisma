@@ -1,0 +1,34 @@
+// For overriding game specifics within a user's collection
+model UserGameCustomization {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @map("user_id")
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  title       String? @map("title")
+  subtitle    String? @map("subtitle")
+  description String? @map("description")
+  image       String? @map("image")
+  publishYear Int?    @map("publish_year")
+
+  minPlayers Int? @map("min_players")
+  maxPlayers Int? @map("max_players")
+
+  playingTime Int? @map("playing_time")
+  minPlayTime Int? @map("min_play_time")
+  maxPlayTime Int? @map("max_play_time")
+
+  minAge     Int?   @map("min_age")
+  complexity Float? @map("complexity")
+
+  customizationNotes String? @map("customization_notes")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, gameId])
+  @@map("user_game_customizations")
+}

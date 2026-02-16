@@ -1,0 +1,26 @@
+model Account {
+  id String @id @default(cuid(2))
+
+  accountId  String @map("account_id")
+  providerId String @map("provider_id")
+
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  accessToken          String?   @map("access_token")
+
+  idToken String? @map("id_token")
+
+  refreshToken          String?   @map("refresh_token")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(3)
+
+  scope    String?
+  password String?
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("accounts")
+}

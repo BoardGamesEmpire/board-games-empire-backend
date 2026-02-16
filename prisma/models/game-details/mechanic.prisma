@@ -1,0 +1,33 @@
+model Mechanic {
+  id String @id @default(cuid(2))
+
+  name        String  @unique
+  description String?
+  complexity  Int?
+
+  games GameMechanic[]
+
+  usageCount         Int?   @map("usage_count")
+  compatibilityScore Float? @map("compatibility_score")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("mechanics")
+}
+
+model GameMechanic {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id])
+  mechanicId String   @map("mechanic_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, mechanicId])
+  @@map("game_mechanics")
+}

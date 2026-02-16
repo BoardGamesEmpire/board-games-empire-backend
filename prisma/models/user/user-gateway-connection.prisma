@@ -1,0 +1,44 @@
+model UserGatewayConnection {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  gateway   GameGateway @relation(fields: [gatewayId], references: [id])
+  gatewayId String      @map("gateway_id")
+
+  // External profile
+  externalUserId   String  @map("external_user_id") // BGG username, Steam ID, etc.
+  externalUsername String? @map("external_username")
+  profileUrl       String? @map("profile_url")
+
+  // Auth (if needed)
+  accessToken  String?   @map("access_token")
+  refreshToken String?   @map("refresh_token")
+  tokenExpiry  DateTime? @map("token_expiry") @db.Timestamptz(3)
+
+  // Sync settings
+  syncEnabled         Boolean       @default(true) @map("sync_enabled")
+  syncInterval        Int           @default(24) @map("sync_interval") // hours
+  syncDirection       SyncDirection @default(FromSource) @map("sync_direction")
+  autoAddToCollection Boolean       @default(true) @map("auto_add_to_collection")
+
+  // Gateway-specific settings
+  settings Json? // { syncWishlist: true, syncRatings: true, excludeTags: [...] }
+
+  // Sync status
+  lastSyncedAt      DateTime?   @map("last_synced_at") @db.Timestamptz(3)
+  lastSyncStatus    SyncStatus? @map("last_sync_status")
+  lastSyncError     String?     @map("last_sync_error")
+  consecutiveErrors Int         @default(0) @map("consecutive_errors")
+
+  syncLogs UserGatewaySyncLog[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, gatewayId, externalUserId])
+  @@index([userId])
+  @@index([lastSyncedAt])
+  @@map("user_gateway_connections")
+}

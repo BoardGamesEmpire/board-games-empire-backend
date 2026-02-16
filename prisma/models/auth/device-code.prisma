@@ -1,0 +1,20 @@
+model DeviceCode {
+  id String @id @default(cuid(2))
+
+  clientId String? @map("client_id")
+
+  deviceCode      String    @map("device_code")
+  pollingInterval Int?      @map("polling_interval")
+  lastPolledAt    DateTime? @map("last_polled_at") @db.Timestamptz(3)
+
+  status String
+  scope  String?
+
+  userCode String  @map("user_code")
+  userId   String? @map("user_id")
+  user     User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@map("device_codes")
+}

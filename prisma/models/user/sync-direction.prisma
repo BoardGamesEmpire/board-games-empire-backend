@@ -1,0 +1,7 @@
+enum SyncDirection {
+  FromSource // BGG → System - make a priority
+  ToSource // System → BGG - future, if possible
+  Bidirectional // future, if possible
+
+  @@map("sync_directions")
+}

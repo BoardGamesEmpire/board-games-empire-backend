@@ -1,0 +1,28 @@
+model EventGameVote {
+  id String @id @default(cuid(2))
+
+  eventGame   EventGame @relation(fields: [eventGameId], references: [id])
+  eventGameId String    @map("event_game_id")
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @map("user_id")
+
+  Event   Event?  @relation(fields: [eventId], references: [id])
+  eventId String? @map("event_id")
+
+  voteType VoteType @map("vote_type")
+  priority Int? // Optional: rank preferences (1=highest)
+  comment  String?
+
+  @@unique([eventGameId, userId])
+  @@index([userId])
+  @@map("event_game_votes")
+}
+
+enum VoteType {
+  For
+  Against
+  Interested
+
+  @@map("vote_types")
+}

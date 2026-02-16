@@ -1,0 +1,48 @@
+model Artist {
+  id String @id @default(cuid(2))
+
+  name      String
+  fullName  String? @map("full_name")
+  website   String?
+  biography String?
+  country   String?
+
+  socialMedia Json? @map("social_media")
+
+  games GameArtist[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("artists")
+}
+
+model GameArtist {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  artist   Artist @relation(fields: [artistId], references: [id])
+  artistId String @map("artist_id")
+
+  role    ArtistRole @default(Primary) @map("role")
+  details String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, artistId])
+  @@map("game_artists")
+}
+
+enum ArtistRole {
+  Primary
+  Cover
+  Component
+  Illustration
+  Graphic
+  Supporting
+
+  @@map("artist_roles")
+}

@@ -1,0 +1,14 @@
+enum GamePlayContext {
+  Campaign
+  Casual
+  Competitive
+  Convention
+  Demo
+  League
+  OneShot
+  OrganizedEvent
+  Tournament
+  Virtual
+
+  @@map("game_play_contexts")
+}

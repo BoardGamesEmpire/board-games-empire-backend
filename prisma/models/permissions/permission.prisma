@@ -1,0 +1,107 @@
+
+// TODO: ... what's really necessary?
+enum Permission {
+  TransferOwnership
+  ManageRoles
+  ViewRoles
+
+  // User Management
+  ManageUsers
+  ViewUsers
+  ViewOwnProfile
+  UpdateOwnProfile
+
+  // Household Management
+  CreateHousehold
+  UpdateHousehold
+  DeleteHousehold
+  ManageHouseholdMembers
+  CreateHouseholdRoles
+  ViewHousehold
+  JoinHousehold
+  InviteToHousehold
+
+  // Game Collection
+  AddGameToCollection
+  RemoveGameFromCollection
+  UpdateGameInCollection
+  ViewGameCollection
+
+  // Event Management
+  ManageEvent
+  CreateEvent
+  UpdateEvent
+  DeleteEvent
+  ViewEvent
+  ManageEventParticipants
+  InviteToEvent
+  JoinEvent
+  CancelEvent
+  ArchiveEvent
+  ExportEventData
+
+
+  // Game Play Sessions
+  CreateGameSession
+  UpdateGameSession
+  DeleteGameSession
+  ViewGameSession
+  JoinGameSession
+  RecordGamePlay
+
+  // Campaign Management
+  CreateCampaign
+  UpdateCampaign
+  DeleteCampaign
+  ManageCampaignMembers
+
+  // Rule Variants
+  CreateRuleVariant
+  UpdateRuleVariant
+  DeleteRuleVariant
+
+  // Game Data
+  CreateGame
+  UpdateGame
+  DeleteGame
+
+  // Content Moderation
+  ModerateContent
+
+  // System Settings
+  ManageSystemSettings
+
+  // Content Access
+  ViewPublicContent
+
+  // Game Customization Permissions
+  CreatePrivateGame
+  ViewPrivateGames // View games marked as private
+  ApproveGameCreationRequests
+
+  // User Customization Permissions
+  CreateUserGameCustomization
+  UpdateUserGameCustomization
+  DeleteUserGameCustomization
+  ViewUserGameCustomization // View other users' customizations
+
+  // Game Data Management
+  ImportGameFromExternalAPI
+  ManageGameMetadata
+
+  // Game Sharing Permissions
+  ShareGameWithUser
+  ShareGameWithHousehold
+  EditSharedGame
+  ViewSharedGame
+
+  // Game Visibility Permissions
+  ChangeGameVisibility
+
+  // Media permissions
+  ModerateMedia
+  UploadMedia
+  DeleteMedia
+
+  @@map("permissions")
+}

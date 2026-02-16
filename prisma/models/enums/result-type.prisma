@@ -1,0 +1,10 @@
+enum ResultType {
+  Custom
+  Elimination
+  Placement
+  Points
+  Score
+  Time
+
+  @@map("result_types")
+}

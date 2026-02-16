@@ -1,0 +1,32 @@
+model SessionPlayer {
+  id String @id @default(cuid(2))
+
+  gamePlaySession   GamePlaySession @relation(fields: [gamePlaySessionId], references: [id], onDelete: Cascade)
+  gamePlaySessionId String          @map("game_play_session_id")
+
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String? @map("user_id")
+
+  guestName String? @map("guest_name")
+
+  // campaignCharacter   CampaignCharacter? @relation(fields: [campaignCharacterId], references: [id])
+  // campaignCharacterId String?            @map("campaign_character_id")
+
+  playerPosition Int?    @map("player_position")
+  team           String?
+
+  joinedAt DateTime  @default(now()) @map("joined_at") @db.Timestamptz(3)
+  leftAt   DateTime? @map("left_at") @db.Timestamptz(3)
+
+  finalScore Float?   @map("final_score")
+  placement  Int?
+  won        Boolean? @map("won")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gamePlaySessionId, userId])
+  @@index([userId])
+  @@index([gamePlaySessionId])
+  @@map("session_players")
+}

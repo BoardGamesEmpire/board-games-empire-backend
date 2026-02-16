@@ -1,0 +1,67 @@
+// TODO: leader board?
+model Game {
+  id          String  @id @default(cuid(2))
+  title       String
+  subtitle    String?
+  description String?
+  image       String?
+  publishYear Int?    @map("publish_year")
+
+  minPlayers  Int? @map("min_players")
+  maxPlayers  Int? @map("max_players")
+  playingTime Int? @map("playing_time")
+
+  minPlayTime        Int?         @map("min_play_time")
+  minPlayTimeMeasure TimeMeasure? @map("min_play_time_measure")
+  maxPlayTime        Int?         @map("max_play_time")
+  maxPlayTimeMeasure TimeMeasure? @map("max_play_time_measure")
+  minAge             Int?         @map("min_age")
+
+  complexity Float?
+
+  // Metadata
+  totalPlayCount Int    @default(0) @map("total_play_count")
+  averageRating  Float? @map("average_rating")
+  ownedByCount   Int    @default(0) @map("owned_by_count")
+
+  // Relations
+  categories GameCategory[]
+  mechanics  GameMechanic[]
+  families   GameFamily[]
+  designers  GameDesigner[]
+  artists    GameArtist[]
+  publishers GamePublisher[]
+
+  gameImages    GameImage[]
+  gameVideos    GameVideo[]
+  gameDocuments GameDocument[]
+
+  versions             GameVersion[]
+  expansions           GameExpansion[]          @relation("BaseGame")
+  compatibleExpansions ExpansionCompatibility[]
+
+  userCollections GameCollection[]
+
+  gameLists GameList[]
+  tags      GameTag[]
+
+  gameSources GameSource[]
+
+  eventGames   EventGame[]
+  // campaigns    Campaign[]
+  ruleVariants RuleVariant[]
+  playSessions GamePlaySession[]
+  loans        GameLoan[]
+
+  // Access control
+  visibility  Visibility @default(Public)
+  createdBy   User?      @relation("GamesCreated", fields: [createdById], references: [id])
+  createdById String?    @map("created_by_id")
+
+  userCustomizations UserGameCustomization[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("games")
+}

@@ -1,9 +1,9 @@
 model Session {
-  id             String   @id @default(cuid(2))
+  id String @id @default(cuid(2))
 
   token     String
-  ipAddress String?  @map("ip_address")
-  userAgent String?  @map("user_agent")
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
 
   impersonatedBy String? @map("impersonated_by")
 

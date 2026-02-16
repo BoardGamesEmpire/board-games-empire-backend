@@ -1,0 +1,40 @@
+model GameVideo {
+  id      String @id @default(cuid(2))
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  // Video-specific fields
+  duration   Int
+  codec      String?
+  resolution String?
+
+  // Context-specific fields
+  isTrailer Boolean @default(false) @map("is_trailer")
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([gameId])
+  @@map("game_videos")
+}
+
+model EventVideo {
+  id      String @id @default(cuid(2))
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId String @map("event_id")
+
+  // Video-specific fields
+  duration   Int
+  codec      String?
+  resolution String?
+
+  // Context-specific fields
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([eventId])
+  @@map("event_videos")
+}

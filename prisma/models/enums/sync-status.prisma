@@ -1,0 +1,8 @@
+enum SyncStatus {
+  Success
+  Partial
+  Failed
+  InProgress
+
+  @@map("sync_statuses")
+}

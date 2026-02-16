@@ -1,0 +1,9 @@
+enum PricingModel {
+  Free
+  Freemium
+  Mixed
+  PaidUpfront
+  Subscription
+
+  @@map("pricing_models")
+}
