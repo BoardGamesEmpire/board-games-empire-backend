@@ -1,5 +1,5 @@
 model Role {
-  id          String  @id @default(cuid(2))
+  id String @id @default(cuid(2))
 
   name        String  @unique
   description String?
@@ -32,14 +32,14 @@ model RolePermission {
 
 enum SystemRole {
   Owner
-  Admin @map("Administrator")
+  Admin           @map("Administrator")
   Moderator
   User
-  HouseholdOwner @map("Household Owner")
-  HouseholdAdmin @map("Household Admin")
+  HouseholdOwner  @map("Household Owner")
+  HouseholdAdmin  @map("Household Admin")
   HouseholdMember @map("Household Member")
-  HouseholdGuest @map("Household Guest")
-  EventHost @map("Event Host")
-  EventMember @map("Event Member")
-  EventGuest @map("Event Guest")
+  HouseholdGuest  @map("Household Guest")
+  EventHost       @map("Event Host")
+  EventMember     @map("Event Member")
+  EventGuest      @map("Event Guest")
 }

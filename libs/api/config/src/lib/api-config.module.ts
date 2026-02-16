@@ -7,8 +7,8 @@ import { configuration, configurationValidationSchema, env } from './configs';
 @Module({
   imports: [
     ConfigModule.forRoot({
-      envFilePath: [`${process.cwd()}/env/.env.${process.env.NODE_ENV}`],
-      load: [...configuration],
+      envFilePath: [`${process.cwd()}/.env`],
+      load: [...Object.values(configuration)],
       cache: true,
       isGlobal: true,
       expandVariables: true,

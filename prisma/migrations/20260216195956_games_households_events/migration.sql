@@ -207,7 +207,7 @@ CREATE TABLE "game_expansion_rule_variants" (
     "override_category" "rule_categories",
     "override_rule_text" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "ruleVariantUsageId" TEXT,
+    "rule_variant_usage_id" TEXT,
 
     CONSTRAINT "game_expansion_rule_variants_pkey" PRIMARY KEY ("id")
 );
@@ -307,7 +307,7 @@ CREATE TABLE "game_version_rule_variants" (
     "override_category" "rule_categories",
     "override_rule_text" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "ruleVariantUsageId" TEXT,
+    "rule_variant_usage_id" TEXT,
 
     CONSTRAINT "game_version_rule_variants_pkey" PRIMARY KEY ("id")
 );
@@ -879,7 +879,7 @@ CREATE TABLE "rule_variants" (
     "replaced_rule_ref" TEXT,
     "rulebook_page" INTEGER,
     "rulebook_edition" TEXT,
-    "ruleText" TEXT NOT NULL,
+    "rule_text" TEXT NOT NULL,
     "examples" TEXT,
     "created_by_id" TEXT NOT NULL,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
@@ -1375,7 +1375,7 @@ ALTER TABLE "game_expansion_rule_variants" ADD CONSTRAINT "game_expansion_rule_v
 ALTER TABLE "game_expansion_rule_variants" ADD CONSTRAINT "game_expansion_rule_variants_game_expansion_id_fkey" FOREIGN KEY ("game_expansion_id") REFERENCES "game_expansions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "game_expansion_rule_variants" ADD CONSTRAINT "game_expansion_rule_variants_ruleVariantUsageId_fkey" FOREIGN KEY ("ruleVariantUsageId") REFERENCES "rule_variant_usages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "game_expansion_rule_variants" ADD CONSTRAINT "game_expansion_rule_variants_rule_variant_usage_id_fkey" FOREIGN KEY ("rule_variant_usage_id") REFERENCES "rule_variant_usages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_expansions" ADD CONSTRAINT "game_expansions_base_game_id_fkey" FOREIGN KEY ("base_game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -1408,7 +1408,7 @@ ALTER TABLE "game_version_rule_variants" ADD CONSTRAINT "game_version_rule_varia
 ALTER TABLE "game_version_rule_variants" ADD CONSTRAINT "game_version_rule_variants_game_version_id_fkey" FOREIGN KEY ("game_version_id") REFERENCES "game_versions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "game_version_rule_variants" ADD CONSTRAINT "game_version_rule_variants_ruleVariantUsageId_fkey" FOREIGN KEY ("ruleVariantUsageId") REFERENCES "rule_variant_usages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "game_version_rule_variants" ADD CONSTRAINT "game_version_rule_variants_rule_variant_usage_id_fkey" FOREIGN KEY ("rule_variant_usage_id") REFERENCES "rule_variant_usages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_versions" ADD CONSTRAINT "game_versions_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;

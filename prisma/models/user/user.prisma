@@ -71,8 +71,8 @@ model User {
   ruleVariants RuleVariant[]
 
   permissionsGranted UserPermission[] @relation("PermissionGranter")
-  permissions UserPermission[]
-  roles       UserRole[]
+  permissions        UserPermission[]
+  roles              UserRole[]
 
   @@unique([email])
   @@unique([username])

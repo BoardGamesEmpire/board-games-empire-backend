@@ -12,7 +12,7 @@ model GameExpansionRuleVariant {
 
   createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   ruleVariantUsage   RuleVariantUsage? @relation(fields: [ruleVariantUsageId], references: [id])
-  ruleVariantUsageId String?
+  ruleVariantUsageId String?           @map("rule_variant_usage_id")
 
   @@unique([ruleVariantId, gameExpansionId])
   @@map("game_expansion_rule_variants")

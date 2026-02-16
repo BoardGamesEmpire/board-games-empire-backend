@@ -27,7 +27,7 @@ model RuleVariant {
   rulebookPage    Int?    @map("rulebook_page")
   rulebookEdition String? @map("rulebook_edition")
 
-  ruleText String
+  ruleText String  @map("rule_text")
   examples String?
 
   createdBy   User    @relation(fields: [createdById], references: [id])

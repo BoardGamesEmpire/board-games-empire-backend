@@ -468,19 +468,4 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   }
 
   logger.log('✅ All permissions assigned');
-
-  return {
-    roles: {
-      owner,
-      admin: adminRole,
-      moderator: moderatorRole,
-      user: userRole,
-      householdOwner: householdOwnerRole,
-      householdAdmin: householdAdminRole,
-      householdMember: householdMemberRole,
-      householdGuest: householdGuestRole,
-      eventHost: eventHostRole,
-      eventGuest: eventGuestRole,
-    },
-  };
 }

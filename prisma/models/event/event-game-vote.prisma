@@ -7,7 +7,7 @@ model EventGameVote {
   user   User   @relation(fields: [userId], references: [id])
   userId String @map("user_id")
 
-  Event   Event?  @relation(fields: [eventId], references: [id])
+  event   Event?  @relation(fields: [eventId], references: [id])
   eventId String? @map("event_id")
 
   voteType VoteType @map("vote_type")

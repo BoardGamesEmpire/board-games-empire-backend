@@ -1,17 +1,20 @@
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 import { env } from './env';
+import { isTrue } from './helpers/helpers';
 
 export interface DatabaseConfig {
   adaptor: string;
   port: number;
   host: string;
   database: string;
+  logQueries: boolean;
   schema: string;
   user: string;
   password: string;
 }
 
+// TODO: support building the database URL from individual components if DATABASE_URL is not provided
 export default registerAs('database', () =>
   env.provideMany<DatabaseConfig>([
     {
@@ -19,6 +22,12 @@ export default registerAs('database', () =>
       defaultValue: '',
       key: 'DATABASE_URL',
       allowEmptyString: true,
+    },
+    {
+      keyTo: 'logQueries',
+      mutators: isTrue,
+      defaultValue: false,
+      key: 'DATABASE_LOG_QUERIES',
     },
     {
       keyTo: 'adaptor',
