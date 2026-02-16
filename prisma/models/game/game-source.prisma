@@ -1,0 +1,51 @@
+model GameSource {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  // External integration
+  gateway    GameGateway? @relation(fields: [gatewayId], references: [id])
+  gatewayId  String?      @map("gateway_id")
+  externalId String?      @map("external_id")
+  sourceUrl  String?      @map("source_url")
+
+  // Sync management
+  metadata     Json?     @map("metadata")
+  lastSynced   DateTime? @map("last_synced") @db.Timestamptz(3)
+  syncEnabled  Boolean   @default(true) @map("sync_enabled")
+  syncInterval Int?      @map("sync_interval") // hours
+
+  // Implementation details
+  title       String?
+  url         String?
+  publisher   Publisher? @relation(fields: [publisherId], references: [id])
+  publisherId String?    @map("publisher_id")
+
+  releaseDate DateTime? @map("release_date") @db.Timestamptz(3)
+  version     String?
+  lastUpdated DateTime? @map("last_updated") @db.Timestamptz(3)
+
+  pricingModel   PricingModel? @map("pricing_model")
+  basePrice      Float?        @map("base_price")
+  hasPurchases   Boolean       @default(false) @map("has_purchases")
+  isSubscription Boolean       @default(false) @map("is_subscription")
+
+  // Platform features
+  supportsSolo   Boolean @default(false) @map("supports_solo")
+  supportsLocal  Boolean @default(false) @map("supports_local")
+  supportsOnline Boolean @default(false) @map("supports_online")
+  hasAsyncPlay   Boolean @default(false) @map("has_async_play")
+  hasRealtime    Boolean @default(false) @map("has_realtime")
+  hasTutorial    Boolean @default(false) @map("has_tutorial")
+
+  storeIdentifiers Json? @map("store_identifiers")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, externalId])
+  @@index([gatewayId])
+  @@index([lastSynced])
+  @@map("game_sources")
+}

@@ -7,7 +7,7 @@ import { PrismaClient } from './client';
 export class DatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
 
-  constructor(configService: ConfigService) {
+  constructor(private readonly configService: ConfigService) {
     Logger.log('Initializing DatabaseService', DatabaseService.name);
 
     super({
@@ -30,11 +30,13 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
       throw error;
     }
 
-    this.$on('query', (e) => {
-      this.logger.log('Query: ' + e.query);
-      this.logger.log('Params: ' + e.params);
-      this.logger.log('Duration: ' + e.duration + 'ms');
-    });
+    if (this.configService.get<string>('database.logQueries')) {
+      this.$on('query', (e) => {
+        this.logger.log('Query: ' + e.query);
+        this.logger.log('Params: ' + e.params);
+        this.logger.log('Duration: ' + e.duration + 'ms');
+      });
+    }
   }
 
   async onModuleDestroy() {

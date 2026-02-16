@@ -1,0 +1,13 @@
+model GameList {
+  id String @id @default(cuid(2))
+
+  list   List   @relation(fields: [listId], references: [id])
+  listId String @map("list_id")
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  priority Int @default(0)
+
+  @@map("game_lists")
+}

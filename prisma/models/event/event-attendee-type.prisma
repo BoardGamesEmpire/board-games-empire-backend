@@ -1,0 +1,7 @@
+enum EventAttendeeType {
+  Participant
+  Guest
+  Organizer
+
+  @@map("attendee_types")
+}

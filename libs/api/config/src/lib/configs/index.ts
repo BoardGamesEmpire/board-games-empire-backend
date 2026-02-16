@@ -12,7 +12,7 @@ import server, { serverConfigValidationSchema } from './server.config';
 import swagger, { swaggerConfigValidationSchema } from './swagger.config';
 import throttle, { throttleConfigValidationSchema } from './throttle.config';
 
-export const configuration = [
+export const configuration = {
   auth,
   cache,
   database,
@@ -26,7 +26,7 @@ export const configuration = [
   server,
   swagger,
   throttle,
-];
+};
 
 export const configurationValidationSchema = {
   ...authConfigValidationSchema,

@@ -1,0 +1,36 @@
+model GameLoan {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  collection   GameCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collectionId String         @map("collection_id")
+
+  lender   User   @relation("LoansGiven", fields: [lenderId], references: [id])
+  lenderId String @map("lender_id")
+
+  // Can be user or non-user
+  borrower      User?   @relation("LoansReceived", fields: [borrowerId], references: [id])
+  borrowerId    String? @map("borrower_id")
+  borrowerName  String? @map("borrower_name")
+  borrowerEmail String? @map("borrower_email")
+
+  loanDate           DateTime  @default(now()) @map("loan_date") @db.Timestamptz(3)
+  expectedReturnDate DateTime? @map("expected_return_date") @db.Timestamptz(3)
+  returnedDate       DateTime? @map("returned_date") @db.Timestamptz(3)
+
+  status            LoanStatus     @default(Active)
+  conditionAtLoan   GameCondition? @map("condition_at_loan")
+  conditionAtReturn GameCondition? @map("condition_at_return")
+  notes             String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([lenderId])
+  @@index([borrowerId])
+  @@index([collectionId])
+  @@index([status])
+  @@map("loaned_games")
+}

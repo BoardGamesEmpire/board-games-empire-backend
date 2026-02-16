@@ -1,0 +1,58 @@
+model GamePlaySession {
+  id String @id @default(cuid(2))
+
+  event   Event?  @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  eventId String? @map("event_id")
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  // campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  // campaignId String?   @map("campaign_id")
+
+  gameVersion   GameVersion? @relation(fields: [gameVersionId], references: [id], onDelete: SetNull)
+  gameVersionId String?      @map("game_version_id")
+
+  expansionsUsed GamePlaySessionExpansion[]
+  rulesUsed      RuleVariantUsage[]
+
+  sessionNumber Int?    @map("session_number")
+  tableNumber   Int?    @map("table_number") // For multi-table events
+  chapter       String?
+  milestone     String?
+
+  // characterSessions  CharacterSession[]
+  // campaignLocation   CampaignLocation?       @relation(fields: [campaignLocationId], references: [id])
+  // campaignLocationId String?                 @map("campaign_location_id")
+  // npcAppearances     CampaignNPCAppearance[]
+  // sessionOutcome     CampaignSessionOutcome?
+
+  playDate DateTime @default(now()) @map("play_date") @db.Timestamptz(3)
+  duration Int?     @map("duration")
+  location String?
+
+  context GamePlayContext @default(Casual)
+
+  players SessionPlayer[]
+  results GamePlayResult[]
+
+  household   Household? @relation(fields: [householdId], references: [id])
+  householdId String?    @map("household_id")
+
+  venue          String?
+  isComplete     Boolean @default(false) @map("is_complete")
+  wasInterrupted Boolean @default(false) @map("was_interrupted")
+
+  playtime Int?    @map("playtime")
+  turns    Int?
+  notes    String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([eventId])
+  @@index([gameId])
+  // @@index([campaignId])
+  @@index([playDate])
+  @@map("game_play_sessions")
+}

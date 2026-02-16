@@ -1,0 +1,16 @@
+model RuleVariantUsageVersion {
+  id String @id @default(cuid(2))
+
+  ruleVariantUsage   RuleVariantUsage @relation(fields: [ruleVariantUsageId], references: [id], onDelete: Cascade)
+  ruleVariantUsageId String           @map("rule_variant_usage_id")
+
+  gameVersion   GameVersion @relation(fields: [gameVersionId], references: [id], onDelete: Cascade)
+  gameVersionId String      @map("game_version_id")
+
+  wasApplicable  Boolean @default(true) @map("was_applicable")
+  requiresErrata Boolean @default(false) @map("requires_errata")
+  errataDetails  String? @map("errata_details")
+
+  @@unique([ruleVariantUsageId, gameVersionId])
+  @@map("rule_variant_usage_versions")
+}

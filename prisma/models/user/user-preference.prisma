@@ -1,0 +1,38 @@
+model UserPreferences {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique @map("user_id")
+
+  // Theme preferences
+  theme       String  @default("system") @map("theme") // light, dark, system
+  accentColor String? @map("accent_color")
+
+  // Privacy preferences
+  showOnlineStatus        Boolean @default(true) @map("show_online_status")
+  showLastActive          Boolean @default(true) @map("show_last_active")
+  allowFriendRequests     Boolean @default(true) @map("allow_friend_requests")
+  showCollectionToFriends Boolean @default(true) @map("show_collection_to_friends")
+  showGamePlayHistory     Boolean @default(true) @map("show_game_play_history")
+
+  // Notification preferences
+  emailNotifications Json? @map("email_notifications") // Structured notification preferences
+  pushNotifications  Json? @map("push_notifications")
+
+  // Game preferences
+  preferredPlayerCount Int?     @map("preferred_player_count")
+  preferredGameLength  Int?     @map("preferred_game_length") // In minutes
+  favoriteCategories   String[] @map("favorite_categories")
+  favoriteMechanics    String[] @map("favorite_mechanics")
+  dislikedCategories   String[] @map("disliked_categories")
+  dislikedMechanics    String[] @map("disliked_mechanics")
+
+  language                Language?  @relation(fields: [languageId], references: [id])
+  languageId              String?    @map("language_id")
+  defaultReviewVisibility Visibility @default(Private) @map("default_review_visibility")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("user_preferences")
+}

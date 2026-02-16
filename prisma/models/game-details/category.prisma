@@ -1,0 +1,36 @@
+model Category {
+  id String @id @default(cuid(2))
+
+  name        String  @unique
+  description String?
+
+  parentCategory   Category?  @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id])
+  parentCategoryId String?    @map("parent_category_id")
+  subcategories    Category[] @relation("CategoryHierarchy")
+
+  games GameCategory[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("categories")
+}
+
+model GameCategory {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId String   @map("category_id")
+
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, categoryId])
+  @@unique([gameId, isPrimary], name: "uniquePrimaryCategoryPerGame", map: "unique_primary_category_per_game")
+  @@map("game_categories")
+}

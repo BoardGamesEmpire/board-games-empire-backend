@@ -1,0 +1,26 @@
+model GameVersion {
+  id     String @id @default(cuid(2))
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  versionName String  @map("version_name")
+  releaseYear Int?    @map("release_year")
+  isBaseline  Boolean @default(false) @map("is_baseline")
+
+  // Hierarchy for edition variants
+  parentVersion   GameVersion?  @relation("VersionHierarchy", fields: [parentVersionId], references: [id])
+  parentVersionId String?       @map("parent_version_id")
+  childVersions   GameVersion[] @relation("VersionHierarchy")
+
+  ruleVariants GameVersionRuleVariant[]
+
+  playSessionsUsed  GamePlaySession[]
+  ruleVariantUsages RuleVariantUsageVersion[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([gameId])
+  @@index([parentVersionId])
+  @@map("game_versions")
+}

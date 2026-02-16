@@ -1,0 +1,11 @@
+enum EventParticipantRole {
+  CoHost
+  Guest
+  Host
+  Moderator
+  Organizer
+  Participant
+  Spectator
+
+  @@map("event_participant_roles")
+}

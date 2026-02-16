@@ -1,0 +1,45 @@
+// TODO: event [category] game restrictions?
+model Event {
+  id String @id @default(cuid(2))
+
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String    @map("household_id")
+
+  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdById String @map("created_by_id")
+
+  title       String
+  image       String?
+  description String?
+  location    String?
+  url         String?
+  type        EventType @default(CasualGathering)
+
+  visibility        Visibility @default(Friends)
+  allowGuestInvites Boolean    @default(true) @map("allow_guest_invites")
+
+  maxTotalParticipants Int?    @map("max_total_participants")
+  strictCapacity       Boolean @default(false) @map("strict_capacity")
+
+  startDate DateTime  @map("start_date") @db.Timestamptz(3)
+  endDate   DateTime? @map("end_date") @db.Timestamptz(3)
+
+  memberPermissions EventMemberPermission[]
+
+  eventImages      EventImage[]
+  eventVideos      EventVideo[]
+  eventDocuments   EventDocument[]
+  gamePlaySessions GamePlaySession[]
+  attendees        EventAttendee[]
+  votedGames       EventGameVote[]
+  suggestedGames   EventGame[]
+  invites          Invite[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([householdId])
+  @@index([createdById])
+  @@index([startDate])
+  @@map("events")
+}

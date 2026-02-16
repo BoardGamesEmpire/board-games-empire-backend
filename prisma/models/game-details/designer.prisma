@@ -1,0 +1,49 @@
+model Designer {
+  id String @id @default(cuid(2))
+
+  name      String  @unique
+  fullName  String? @map("full_name")
+  website   String?
+  biography String?
+  country   String?
+
+  boardGameGeekUrl String? @map("board_game_geek_url")
+  debutYear        Int?    @map("debut_year")
+
+  totalCollaborators         Int?    @map("total_collaborators")
+  mostFrequentCollaboratorId String? @map("most_frequent_collaborator_id")
+
+  games GameDesigner[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("designers")
+}
+
+model GameDesigner {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  designer   Designer @relation(fields: [designerId], references: [id])
+  designerId String   @map("designer_id")
+
+  role DesignerRole @default(Primary)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, designerId])
+  @@map("game_designers")
+}
+
+enum DesignerRole {
+  Primary
+  Secondary
+  Developer
+  Contributor
+
+  @@map("designer_roles")
+}

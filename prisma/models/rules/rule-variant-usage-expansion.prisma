@@ -1,0 +1,16 @@
+model RuleVariantUsageExpansion {
+  id String @id @default(cuid(2))
+
+  ruleVariantUsage   RuleVariantUsage @relation(fields: [ruleVariantUsageId], references: [id], onDelete: Cascade)
+  ruleVariantUsageId String           @map("rule_variant_usage_id")
+
+  gameExpansion   GameExpansion @relation(fields: [gameExpansionId], references: [id], onDelete: Cascade)
+  gameExpansionId String        @map("game_expansion_id")
+
+  wasApplicable        Boolean @default(true) @map("was_applicable")
+  requiredModification Boolean @default(false) @map("required_modification")
+  notes                String?
+
+  @@unique([ruleVariantUsageId, gameExpansionId])
+  @@map("rule_variant_usage_expansions")
+}

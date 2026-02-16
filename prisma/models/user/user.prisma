@@ -1,0 +1,80 @@
+// TODO: social/friend system? follow? user blocking.
+model User {
+  id String @id @default(cuid(2))
+
+  banExpires DateTime? @map("ban_expires") @db.Timestamptz(3)
+  banned     Boolean?  @default(false)
+  banReason  String?   @map("ban_reason")
+
+  displayUsername String? @map("display_username")
+  username        String
+
+  isAnonymous Boolean? @default(false) @map("is_anonymous")
+
+  email         String
+  emailVerified Boolean @default(false) @map("email_verified")
+
+  image String?
+
+  firstName String? @map("first_name")
+  lastName  String? @map("last_name")
+
+  twoFactorEnabled Boolean? @default(false) @map("two_factor_enabled")
+  role             String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  accounts           Account[]
+  apikeys            Apikey[]
+  deviceCodes        DeviceCode[]
+  passkeys           Passkey[]
+  sessions           Session[]
+  preferences        UserPreferences?
+  twofactors         TwoFactor[]
+  sessionPlayers     SessionPlayer[]
+  userMedia          Media[]
+  lists              List[]
+  gatewayConnections UserGatewayConnection[]
+
+  householdOwner  Household[]
+  householdRoles  HouseholdRole[]
+  householdMember HouseholdMember[]
+
+  invitesReceived Invite[] @relation("InvitesReceived")
+  invitesSent     Invite[] @relation("InvitesSent")
+  approvedInvites Invite[] @relation("ApprovedInvites")
+
+  eventsCreated                 Event[]
+  eventGameVotes                EventGameVote[]
+  eventsAttended                EventAttendee[]
+  eventMemberPermissions        EventMemberPermission[]
+  eventMemberPermissionsGranter EventMemberPermission[] @relation("EventPermissionGranter")
+
+  loansGiven    GameLoan[] @relation("LoansGiven")
+  loansReceived GameLoan[] @relation("LoansReceived")
+
+  gameCollections    GameCollection[]
+  gameTags           GameTag[]
+  gamesCreated       Game[]                  @relation("GamesCreated")
+  gameCustomizations UserGameCustomization[]
+
+  gameGatewaysCreated GameGateway[] @relation("GameGatewayCreator")
+
+  // campaignsOwned    Campaign[] @relation("CampaignOwner")
+  // campaignsMastered Campaign[] @relation("CampaignGameMaster")
+  // campaignCharacters               CampaignCharacter[]
+  // campaignDataReveals              CampaignDataReveal[]
+  // campaignMemberPermissions        CampaignMemberPermission[]
+  // campaignMemberPermissionsGranter CampaignMemberPermission[] @relation("CampaignPermissionGranter")
+
+  ruleVariants RuleVariant[]
+
+  permissionsGranted UserPermission[] @relation("PermissionGranter")
+  permissions        UserPermission[]
+  roles              UserRole[]
+
+  @@unique([email])
+  @@unique([username])
+  @@map("users")
+}

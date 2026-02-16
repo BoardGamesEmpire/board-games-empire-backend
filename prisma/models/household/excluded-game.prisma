@@ -1,0 +1,16 @@
+// Allows for household members to exclude certain games
+model ExcludedGame {
+  id String @id @default(cuid(2))
+
+  householdMember   HouseholdMember @relation(fields: [householdMemberId], references: [id])
+  householdMemberId String          @map("household_member_id")
+
+  gameCollection   GameCollection @relation(fields: [gameCollectionId], references: [id])
+  gameCollectionId String         @map("game_collection_id")
+
+  excludedReason String?  @map("excluded_reason")
+  excludedAt     DateTime @default(now()) @map("excluded_at") @db.Timestamptz(3)
+
+  @@unique([householdMemberId, gameCollectionId])
+  @@map("excluded_games")
+}

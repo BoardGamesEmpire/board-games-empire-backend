@@ -1,0 +1,63 @@
+model Family {
+  id String @id @default(cuid(2))
+
+  name        String  @unique
+  description String?
+
+  publisher   Publisher? @relation(fields: [publisherId], references: [id])
+  publisherId String?    @map("publisher_id")
+
+  logoUrl String? @map("logo_url")
+  website String?
+
+  familyType FamilyType @default(Series) @map("family_type")
+
+  parentFamily   Family?  @relation("FamilyHierarchy", fields: [parentFamilyId], references: [id])
+  parentFamilyId String?  @map("parent_family_id")
+  subfamilies    Family[] @relation("FamilyHierarchy")
+
+  games GameFamily[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("families")
+}
+
+model GameFamily {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  family   Family @relation(fields: [familyId], references: [id])
+  familyId String @map("family_id")
+
+  position Int?
+
+  releaseOrder Int? @map("release_order")
+  storyOrder   Int? @map("story_order")
+
+  isStandalone    Boolean  @default(true) @map("is_standalone")
+  requiredGameIds String[] @map("required_game_ids")
+
+  note String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, familyId])
+  @@map("game_families")
+}
+
+enum FamilyType {
+  Series
+  Universe
+  Reimplementation
+  System
+  Brand
+  Collection
+  Publisher
+
+  @@map("family_types")
+}

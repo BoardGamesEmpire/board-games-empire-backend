@@ -1,0 +1,20 @@
+model GameLocation {
+  id String @id @default(cuid(2))
+
+  collection   GameCollection? @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collectionId String?         @map("collection_id")
+
+  name      String
+  address   String?
+  isDefault Boolean @default(false) @map("is_default")
+
+  // Default household for user collections
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: SetNull)
+  householdId String?    @map("household_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([collectionId])
+  @@map("game_locations")
+}

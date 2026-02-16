@@ -1,0 +1,55 @@
+model Publisher {
+  id String @id @default(cuid(2))
+
+  name        String  @unique
+  legalName   String? @map("legal_name")
+  website     String?
+  country     String?
+  foundedYear Int?    @map("founded_year")
+
+  parentCompany   Publisher?  @relation("PublisherSubsidiary", fields: [parentCompanyId], references: [id])
+  parentCompanyId String?     @map("parent_company_id")
+  subsidiaries    Publisher[] @relation("PublisherSubsidiary")
+
+  isActive Boolean @default(true) @map("is_active")
+  logoUrl  String? @map("logo_url")
+
+  games   GamePublisher[]
+  sources GameSource[]
+
+  publishedFamilies Family[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("publishers")
+}
+
+model GamePublisher {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  publisher   Publisher @relation(fields: [publisherId], references: [id])
+  publisherId String    @map("publisher_id")
+
+  role        PublisherRole @default(Primary) @map("role")
+  releaseYear Int?          @map("release_year")
+  region      String?       @map("region")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, publisherId])
+  @@map("game_publishers")
+}
+
+enum PublisherRole {
+  Primary
+  Localization
+  Distribution
+  Reprint
+
+  @@map("publisher_roles")
+}

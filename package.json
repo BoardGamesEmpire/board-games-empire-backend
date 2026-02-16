@@ -20,6 +20,7 @@
     "db:migrate:z": "zen migrate dev --name",
     "db:migrate": "prisma migrate dev --name",
     "db:reset": "zen migrate reset",
+    "db:seed": "prisma db seed",
     "db:resolve": "zen migrate resolve",
     "db:status": "zen migrate status",
     "dep-graph": "nx dep-graph",

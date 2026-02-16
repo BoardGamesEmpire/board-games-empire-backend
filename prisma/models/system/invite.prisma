@@ -1,0 +1,70 @@
+enum InviteStatus {
+  Accepted
+  AwaitingApproval
+  Declined
+  Expired
+  Pending
+  Revoked
+  Withdrawn
+
+  @@map("invite_statuses")
+}
+
+enum InviteType {
+  Event
+  Household
+  System
+  Campaign
+
+  @@map("invite_types")
+}
+
+model Invite {
+  id String @id @default(cuid(2))
+
+  status InviteStatus @default(Pending)
+  type   InviteType
+
+  // Sender
+  inviter   User   @relation("InvitesSent", fields: [inviterId], references: [id])
+  inviterId String @map("inviter_id")
+
+  // Recipient (may not have account yet)
+  invitee      User?   @relation("InvitesReceived", fields: [inviteeId], references: [id])
+  inviteeId    String? @map("invitee_id")
+  inviteeEmail String? @map("invitee_email")
+  inviteeName  String? @map("invitee_name")
+
+  // Context (polymorphic)
+  event       Event?     @relation(fields: [eventId], references: [id])
+  eventId     String?    @map("event_id")
+  household   Household? @relation(fields: [householdId], references: [id])
+  householdId String?    @map("household_id")
+  // campaign    Campaign?  @relation(fields: [campaignId], references: [id])
+  // campaignId  String?    @map("campaign_id")
+
+  // Type-specific data
+  role     Role?   @relation(fields: [roleId], references: [id])
+  roleId   String? @map("role_id") // For household/campaign roles
+  message  String?
+  metadata Json? // For system invites or custom data
+
+  token     String   @unique // email confirmation token
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  needsApproval Boolean   @default(false) @map("needs_approval")
+  approvedBy    User?     @relation("ApprovedInvites", fields: [approvedById], references: [id])
+  approvedById  String?   @map("approved_by_id")
+  approvedAt    DateTime? @map("approved_at") @db.Timestamptz(3)
+
+  respondedAt DateTime? @map("responded_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([inviteeId])
+  @@index([inviteeEmail])
+  @@index([status])
+  @@index([type, status])
+  @@map("invites")
+}

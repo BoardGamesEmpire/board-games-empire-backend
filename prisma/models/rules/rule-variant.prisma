@@ -1,0 +1,54 @@
+// TODO: this is likely overly complicated
+model RuleVariant {
+  id String @id @default(cuid(2))
+
+  name        String
+  description String
+
+  // campaign   Campaign? @relation(fields: [campaignId], references: [id])
+  // campaignId String?   @map("campaign_id")
+
+  game   Game?   @relation(fields: [gameId], references: [id])
+  gameId String? @map("game_id")
+
+  household   Household? @relation(fields: [householdId], references: [id])
+  householdId String?    @map("household_id")
+
+  gameExpansions GameExpansionRuleVariant[]
+  gameVersions   GameVersionRuleVariant[]
+
+  category RuleCategory @default(General)
+  ruleType RuleType     @default(Addition) @map("rule_type")
+
+  compatibilityMode RuleCompatibilityMode @default(ExactMatch) @map("compatibility_mode")
+
+  modifiesCore    Boolean @default(false) @map("modifies_core")
+  replacedRuleRef String? @map("replaced_rule_ref")
+  rulebookPage    Int?    @map("rulebook_page")
+  rulebookEdition String? @map("rulebook_edition")
+
+  ruleText String  @map("rule_text")
+  examples String?
+
+  createdBy   User    @relation(fields: [createdById], references: [id])
+  createdById String  @map("created_by_id")
+  isActive    Boolean @default(true) @map("is_active")
+
+  source         String?
+  discussionLink String? @map("discussion_link")
+
+  version           String       @default("1.0")
+  previousVersion   RuleVariant? @relation("RuleVersions", fields: [previousVersionId], references: [id])
+  previousVersionId String?      @unique @map("previous_version_id")
+  nextVersion       RuleVariant? @relation("RuleVersions")
+
+  sessionsUsed RuleVariantUsage[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([gameId])
+  // @@index([campaignId])
+  @@index([householdId])
+  @@map("rule_variants")
+}

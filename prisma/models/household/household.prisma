@@ -1,0 +1,28 @@
+// Grouping of users that live in the same household
+model Household {
+  id String @id @default(cuid(2))
+
+  description String?
+  name        String
+  image       String?
+
+  language   Language @relation(fields: [languageId], references: [id])
+  languageId String   @map("language_id")
+
+  owner   User   @relation(fields: [ownerId], references: [id])
+  ownerId String @map("owner_id")
+
+  // campaigns        Campaign[]
+  events           Event[]
+  gameLocations    GameLocation[]
+  gamePlaySessions GamePlaySession[]
+  invites          Invite[]
+  members          HouseholdMember[]
+  roleAssignments  HouseholdRole[]
+  ruleVariants     RuleVariant[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("households")
+}

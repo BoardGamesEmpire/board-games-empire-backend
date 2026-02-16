@@ -1,0 +1,10 @@
+enum RuleCompatibilityMode {
+  AllExpansions
+  AllVersions
+  BaseGameOnly
+  ExactMatch
+  SpecificExpansions
+  SpecificVersions
+
+  @@map("rule_compatibility_modes")
+}
