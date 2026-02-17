@@ -1,7 +1,6 @@
+import { env, isTrue, splitTrimFilter } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { env } from './env';
-import { isTrue, splitTrimFilter } from './helpers/helpers';
 
 export interface HealthConfig {
   httpHealthCheckUrls: string[];

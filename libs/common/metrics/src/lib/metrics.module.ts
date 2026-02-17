@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { PrometheusModule } from '@willsoto/nestjs-prometheus';
+import prometheusConfig from './configuration/prometheus.config';
 import { MetricsController } from './metrics.controller';
 
 @Module({
   imports: [
+    ConfigModule.forFeature(prometheusConfig),
     PrometheusModule.registerAsync({
-      imports: [ConfigModule],
       inject: [ConfigService],
       controller: MetricsController,
       useFactory: (config: ConfigService) => ({

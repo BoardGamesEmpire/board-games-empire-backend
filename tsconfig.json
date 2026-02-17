@@ -19,13 +19,13 @@
       "path": "./libs/api/users"
     },
     {
-      "path": "./libs/api/config"
-    },
-    {
       "path": "./libs/common/metrics"
     },
     {
       "path": "./libs/common/health"
+    },
+    {
+      "path": "./libs/common/env"
     }
   ]
 }

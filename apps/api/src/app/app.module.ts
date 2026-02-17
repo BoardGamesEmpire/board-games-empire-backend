@@ -1,23 +1,36 @@
-import { ApiConfigModule } from '@bge/api-config';
 import { AuthModule } from '@bge/auth';
 import { DatabaseModule } from '@bge/database';
+import { env } from '@bge/env';
 import { HealthModule } from '@bge/health';
 import { MetricsModule } from '@bge/metrics';
 import { UsersModule } from '@bge/users';
 import KeyvRedis from '@keyv/redis';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
+import { configuration, configurationValidationSchema } from './configuration';
 
 @Module({
   imports: [
-    ApiConfigModule,
+    ConfigModule.forRoot({
+      load: [...Object.values(configuration)],
+      cache: true,
+      isGlobal: true,
+      expandVariables: true,
+      validationSchema: configurationValidationSchema,
+      validationOptions: {
+        abortEarly: true,
+        cache: !env.isProduction,
+        debug: !env.isProduction,
+        stack: !env.isProduction,
+      },
+    }),
 
     // Rate limiting
     ThrottlerModule.forRootAsync({
