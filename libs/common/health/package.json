@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "health",
+    "name": "@board-games-empire/health",
     "tags": [
       "common",
       "health"

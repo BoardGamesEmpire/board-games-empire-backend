@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "database",
+    "name": "@board-games-empire/database",
     "tags": [
       "database"
     ]

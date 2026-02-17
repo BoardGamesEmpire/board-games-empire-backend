@@ -150,7 +150,7 @@
     "apps/*",
     "libs/*",
     "libs/api/*",
-    "libs/server/*",
+    "libs/common/env",
     "libs/common/*"
   ]
 }
