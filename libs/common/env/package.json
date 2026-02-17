@@ -1,5 +1,5 @@
 {
-  "name": "@bge/api-config",
+  "name": "@bge/env",
   "version": "0.0.1",
   "private": true,
   "main": "./src/index.ts",
@@ -13,12 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "api-config",
-    "tags": [
-      "libs",
-      "api",
-      "config"
-    ]
+    "name": "env"
   },
   "dependencies": {}
 }

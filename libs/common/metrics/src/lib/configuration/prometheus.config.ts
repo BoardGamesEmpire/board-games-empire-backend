@@ -1,6 +1,5 @@
+import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
-import { env } from './env';
-import { isTrue } from './helpers/helpers';
 
 export interface PrometheusConfig {
   defaultMetrics: {

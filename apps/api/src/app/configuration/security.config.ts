@@ -1,7 +1,6 @@
+import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { env } from './env';
-import { isTrue } from './helpers/helpers';
 
 export interface SecurityConfig {
   saltRounds: number;

@@ -1,23 +1,47 @@
-import { ApiConfigModule } from '@bge/api-config';
-import { DatabaseModule, DatabaseService } from '@bge/database';
+import { DatabaseService, databaseConfig } from '@bge/database';
+import { env } from '@bge/env';
 import { Logger, Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import * as path from 'node:path';
 import { languagesSeed } from './seeds/languages.seed';
 import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
 
+const envFilePath = path.resolve(process.cwd(), '.env');
 type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
 
-// TODO: seeds broken, fix in separate PR
 @Module({
-  imports: [ApiConfigModule, DatabaseModule],
+  imports: [
+    ConfigModule.forRoot({
+      envFilePath,
+      load: [databaseConfig],
+      cache: true,
+      isGlobal: true,
+      expandVariables: true,
+      validationOptions: {
+        abortEarly: true,
+        cache: !env.isProduction,
+        debug: !env.isProduction,
+        stack: !env.isProduction,
+      },
+    }),
+  ],
 })
 class SeedModule {}
 
+/**
+ * running 'npm run db:seed' without direct instantiation of DatabaseService fails to inject the ConfigService,
+ * possibly due to decorator metadata not being properly emitted.
+ */
 async function bootstrap() {
-  const app = await NestFactory.create(SeedModule);
+  const app = await NestFactory.createApplicationContext(SeedModule);
 
   const logger = new Logger(SeedModule.name);
-  const prisma = app.get(DatabaseService);
+  const configService = app.get(ConfigService);
+
+  // not great but it works for now
+  const prisma = new DatabaseService(configService);
+  await prisma.$connect();
 
   const seeds: Seeder[] = [languagesSeed, rolesAndPermissionsSeed];
 
@@ -35,6 +59,7 @@ async function bootstrap() {
       }
     }
   } finally {
+    await prisma.$disconnect();
     await app.close();
   }
 

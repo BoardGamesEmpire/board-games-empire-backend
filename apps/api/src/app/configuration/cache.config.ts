@@ -1,6 +1,6 @@
+import { env } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { env } from './env';
 
 export interface CacheConfig {
   ttl: number;

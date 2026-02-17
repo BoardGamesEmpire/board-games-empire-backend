@@ -1,9 +1,8 @@
+import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 import * as path from 'node:path';
 import process from 'node:process';
-import { env } from './env';
-import { isTrue } from './helpers/helpers';
 
 export interface GraphQLConfig {
   debug: boolean;

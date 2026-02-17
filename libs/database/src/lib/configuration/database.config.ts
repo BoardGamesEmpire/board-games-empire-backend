@@ -1,7 +1,6 @@
+import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import { env } from './env';
-import { isTrue } from './helpers/helpers';
 
 export interface DatabaseConfig {
   adaptor: string;
@@ -15,7 +14,7 @@ export interface DatabaseConfig {
 }
 
 // TODO: support building the database URL from individual components if DATABASE_URL is not provided
-export default registerAs('database', () =>
+export const databaseConfig = registerAs('database', () =>
   env.provideMany<DatabaseConfig>([
     {
       keyTo: 'url',

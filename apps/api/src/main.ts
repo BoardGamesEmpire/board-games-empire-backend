@@ -1,6 +1,6 @@
-import { env } from '@bge/api-config';
 import { authFactory } from '@bge/auth';
 import { DatabaseService } from '@bge/database';
+import { env } from '@bge/env';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';

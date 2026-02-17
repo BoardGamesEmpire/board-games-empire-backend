@@ -1,9 +1,8 @@
+import { env, removeUndefinedFields, splitTrimFilter } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import { JwtModuleOptions } from '@nestjs/jwt';
 import type { EnvManyResult } from '@status/envirator';
 import Joi from 'joi';
-import { env } from './env';
-import { removeUndefinedFields, splitTrimFilter } from './helpers/helpers';
 
 function shape(record: EnvManyResult): JwtModuleOptions {
   return removeUndefinedFields({
