@@ -14,7 +14,7 @@ export interface DatabaseConfig {
 }
 
 // TODO: support building the database URL from individual components if DATABASE_URL is not provided
-export default registerAs('database', () =>
+export const databaseConfig = registerAs('database', () =>
   env.provideMany<DatabaseConfig>([
     {
       keyTo: 'url',

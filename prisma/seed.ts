@@ -1,10 +1,9 @@
-import { DatabaseService } from '@bge/database';
+import { DatabaseService, databaseConfig } from '@bge/database';
 import { env } from '@bge/env';
 import { Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import * as path from 'node:path';
-import databaseConfiguration from '../libs/database/src/lib/config/database.config';
 import { languagesSeed } from './seeds/languages.seed';
 import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
 
@@ -15,7 +14,7 @@ type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
   imports: [
     ConfigModule.forRoot({
       envFilePath,
-      load: [databaseConfiguration],
+      load: [databaseConfig],
       cache: true,
       isGlobal: true,
       expandVariables: true,
