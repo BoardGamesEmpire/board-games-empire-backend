@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "auth",
+    "name": "@board-games-empire/auth",
     "tags": [
       "api",
       "auth"

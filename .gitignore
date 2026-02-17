@@ -44,13 +44,5 @@ Thumbs.db
 
 .nx/cache
 .nx/workspace-data
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
 
 test-output
-
-/generated/prisma
-
-/generated/prisma
-
-/prisma/libs/database/src/lib/generated

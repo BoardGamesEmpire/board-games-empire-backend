@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { readFileSync } from 'fs';
+const { readFileSync } = require('fs')
 
 // Reading the SWC compilation config for the spec files
 const swcJestConfig = JSON.parse(
@@ -9,13 +9,13 @@ const swcJestConfig = JSON.parse(
 // Disable .swcrc look-up by SWC core because we're passing in swcJestConfig ourselves
 swcJestConfig.swcrc = false;
 
-export default {
-  displayName: 'database',
+module.exports = {
+  displayName: '@board-games-empire-backend/api',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
   transform: {
-    '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
+    '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig]
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
-  coverageDirectory: 'test-output/jest/coverage',
+  coverageDirectory: 'test-output/jest/coverage'
 };

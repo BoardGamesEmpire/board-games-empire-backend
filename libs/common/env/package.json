@@ -13,6 +13,9 @@
     "./package.json": "./package.json"
   },
   "nx": {
+    "tags": [
+      "env"
+    ],
     "name": "env"
   },
   "dependencies": {}

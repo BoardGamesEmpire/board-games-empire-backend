@@ -6,10 +6,8 @@
     "importHelpers": true,
     "isolatedModules": true,
     "lib": ["es2022"],
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
     "noEmitOnError": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
@@ -17,7 +15,7 @@
     "noUnusedLocals": true,
     "skipLibCheck": true,
     "strict": true,
-    "target": "esnext",
-    "customConditions": ["@board-games-empire-backend/backend"]
+    "target": "es2022",
+    "customConditions": ["@board-games-empire/backend"]
   }
 }
