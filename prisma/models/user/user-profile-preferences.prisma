@@ -7,14 +7,14 @@ model FavoriteCategory {
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   categoryId String   @map("category_id")
 
-  sortOrder Int? @default(0) @map("sort_order")
+  sortOrder Int?    @default(0) @map("sort_order")
   // user can indicate why they like this category
   note      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, categoryId])
-  @@index([profileId])
+  @@index([categoryId])
   @@map("favorite_categories")
 }
 
@@ -27,13 +27,13 @@ model FavoriteMechanic {
   mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
   mechanicId String   @map("mechanic_id")
 
-  sortOrder Int? @default(0) @map("sort_order")
+  sortOrder Int?    @default(0) @map("sort_order")
   note      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, mechanicId])
-  @@index([profileId])
+  @@index([mechanicId])
   @@map("favorite_mechanics")
 }
 
@@ -46,13 +46,13 @@ model FavoriteGame {
   game   Game   @relation("FavoriteGames", fields: [gameId], references: [id], onDelete: Cascade)
   gameId String @map("game_id")
 
-  rank Int? @default(0)
-  note      String?
+  rank Int?    @default(0)
+  note String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, gameId])
-  @@index([profileId])
+  @@index([gameId])
   @@map("favorite_games")
 }
 
@@ -65,14 +65,14 @@ model DislikedCategory {
   category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   categoryId String   @map("category_id")
 
-  sortOrder Int @default(0) @map("sort_order")
+  sortOrder Int     @default(0) @map("sort_order")
   // user can indicate why they dislike this category
   note      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, categoryId])
-  @@index([profileId])
+  @@index([categoryId])
   @@map("disliked_categories")
 }
 
@@ -85,13 +85,13 @@ model DislikedMechanic {
   mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
   mechanicId String   @map("mechanic_id")
 
-  sortOrder Int? @default(0) @map("sort_order")
+  sortOrder Int?    @default(0) @map("sort_order")
   note      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, mechanicId])
-  @@index([profileId])
+  @@index([mechanicId])
   @@map("disliked_mechanics")
 }
 
@@ -104,12 +104,12 @@ model DislikedGame {
   game   Game   @relation("DislikedGames", fields: [gameId], references: [id], onDelete: Cascade)
   gameId String @map("game_id")
 
-  sortOrder Int @default(0) @map("sort_order")
+  sortOrder Int     @default(0) @map("sort_order")
   note      String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([profileId, gameId])
-  @@index([profileId])
+  @@index([gameId])
   @@map("disliked_games")
 }

@@ -60,8 +60,8 @@ model Game {
   createdById String?    @map("created_by_id")
 
   userCustomizations UserGameCustomization[]
-  favorites          FavoriteGame[]         @relation("FavoriteGames")
-  disliked           DislikedGame[]         @relation("DislikedGames")
+  favorites          FavoriteGame[]          @relation("FavoriteGames")
+  disliked           DislikedGame[]          @relation("DislikedGames")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

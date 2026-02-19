@@ -1,5 +1,5 @@
 import { passkey } from '@better-auth/passkey';
-import { PrismaClient, SystemRole } from '@bge/database';
+import { PrismaClient, SystemRole, Theme } from '@bge/database';
 import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -116,8 +116,9 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
               data: {
                 preferences: {
                   create: {
-                    theme: 'system',
-                    preferredPlayerCount: 0,
+                    theme: Theme.System,
+                    emailNotifications: {},
+                    pushNotifications: {},
                   },
                 },
 
@@ -127,7 +128,7 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
                       user.name ||
                       <string>user.username ||
                       user.email?.split('@')[0],
-                  }
+                  },
                 },
 
                 roles: {

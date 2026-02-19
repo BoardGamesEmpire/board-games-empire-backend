@@ -5,7 +5,7 @@ model UserPreferences {
   userId String @unique @map("user_id")
 
   // Theme preferences
-  theme       String  @default("system") @map("theme") // light, dark, system
+  theme       Theme   @default(System)
   accentColor String? @map("accent_color")
 
   // Privacy preferences
@@ -27,4 +27,12 @@ model UserPreferences {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("user_preferences")
+}
+
+enum Theme {
+  Light
+  Dark
+  System
+
+  @@map("themes")
 }

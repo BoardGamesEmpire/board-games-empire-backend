@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import { languagesSeed } from './seeds/languages.seed';
 import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
 import { systemSettingsSeed } from './seeds/system-settings.seed';
-import { gameLengthsSeed } from './seeds/game-lengths.seed';``
+import { gameLengthsSeed } from './seeds/game-lengths.seed';
 
 const envFilePath = path.resolve(process.cwd(), '.env');
 type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;

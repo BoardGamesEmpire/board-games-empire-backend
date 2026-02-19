@@ -1,7 +1,7 @@
 model SystemSetting {
   id String @id @default(cuid(2))
 
-  singleton Boolean @default(true) @unique
+  singleton Boolean @unique @default(true)
 
   allowPasswordResets   Boolean @default(true) @map("allow_password_resets")
   allowUserRegistration Boolean @default(true) @map("allow_user_registration")

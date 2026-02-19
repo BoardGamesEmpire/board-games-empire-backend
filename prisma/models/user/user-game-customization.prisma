@@ -30,5 +30,6 @@ model UserGameCustomization {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([userId, gameId])
+  @@index([gameId])
   @@map("user_game_customizations")
 }

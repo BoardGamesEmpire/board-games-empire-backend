@@ -85,6 +85,9 @@ CREATE TYPE "invite_types" AS ENUM ('Event', 'Household', 'System', 'Campaign');
 -- CreateEnum
 CREATE TYPE "sync_directions" AS ENUM ('FromSource', 'ToSource', 'Bidirectional');
 
+-- CreateEnum
+CREATE TYPE "themes" AS ENUM ('Light', 'Dark', 'System');
+
 -- AlterTable
 ALTER TABLE "users" DROP COLUMN "display_username";
 
@@ -944,9 +947,9 @@ CREATE TABLE "invites" (
 
 -- CreateTable
 CREATE TABLE "languages" (
+    "id" TEXT NOT NULL,
     "abbreviation" VARCHAR(2) NOT NULL,
     "code" VARCHAR(3) NOT NULL,
-    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
 
     CONSTRAINT "languages_pkey" PRIMARY KEY ("id")
@@ -1047,7 +1050,7 @@ CREATE TABLE "user_permissions" (
 CREATE TABLE "user_preferences" (
     "id" TEXT NOT NULL,
     "user_id" TEXT NOT NULL,
-    "theme" TEXT NOT NULL DEFAULT 'system',
+    "theme" "themes" NOT NULL DEFAULT 'System',
     "accent_color" TEXT,
     "show_online_status" BOOLEAN NOT NULL DEFAULT true,
     "show_last_active" BOOLEAN NOT NULL DEFAULT true,
@@ -1325,13 +1328,22 @@ CREATE INDEX "session_players_game_play_session_id_idx" ON "session_players"("ga
 CREATE UNIQUE INDEX "session_players_game_play_session_id_user_id_key" ON "session_players"("game_play_session_id", "user_id");
 
 -- CreateIndex
+CREATE INDEX "excluded_games_game_collection_id_idx" ON "excluded_games"("game_collection_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "excluded_games_household_member_id_game_collection_id_key" ON "excluded_games"("household_member_id", "game_collection_id");
+
+-- CreateIndex
+CREATE INDEX "household_members_user_id_idx" ON "household_members"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "household_members_household_id_user_id_key" ON "household_members"("household_id", "user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "household_roles_household_member_id_key" ON "household_roles"("household_member_id");
+
+-- CreateIndex
+CREATE INDEX "household_roles_role_id_idx" ON "household_roles"("role_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "household_roles_household_member_id_role_id_key" ON "household_roles"("household_member_id", "role_id");
@@ -1361,7 +1373,13 @@ CREATE UNIQUE INDEX "roles_name_key" ON "roles"("name");
 CREATE UNIQUE INDEX "role_permissions_role_id_permission_key" ON "role_permissions"("role_id", "permission");
 
 -- CreateIndex
+CREATE INDEX "rule_variant_usage_expansions_game_expansion_id_idx" ON "rule_variant_usage_expansions"("game_expansion_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "rule_variant_usage_expansions_rule_variant_usage_id_game_ex_key" ON "rule_variant_usage_expansions"("rule_variant_usage_id", "game_expansion_id");
+
+-- CreateIndex
+CREATE INDEX "rule_variant_usage_versions_game_version_id_idx" ON "rule_variant_usage_versions"("game_version_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "rule_variant_usage_versions_rule_variant_usage_id_game_vers_key" ON "rule_variant_usage_versions"("rule_variant_usage_id", "game_version_id");
@@ -1409,6 +1427,9 @@ CREATE UNIQUE INDEX "languages_name_key" ON "languages"("name");
 CREATE UNIQUE INDEX "system_settings_singleton_key" ON "system_settings"("singleton");
 
 -- CreateIndex
+CREATE INDEX "user_game_customizations_game_id_idx" ON "user_game_customizations"("game_id");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "user_game_customizations_user_id_game_id_key" ON "user_game_customizations"("user_id", "game_id");
 
 -- CreateIndex
@@ -1424,49 +1445,58 @@ CREATE UNIQUE INDEX "user_gateway_connections_user_id_gateway_id_external_user_i
 CREATE INDEX "user_gateway_sync_logs_connection_id_idx" ON "user_gateway_sync_logs"("connection_id");
 
 -- CreateIndex
+CREATE INDEX "user_permissions_permission_idx" ON "user_permissions"("permission");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "user_permissions_user_id_permission_resource_type_resource__key" ON "user_permissions"("user_id", "permission", "resource_type", "resource_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
 
 -- CreateIndex
-CREATE INDEX "favorite_categories_profile_id_idx" ON "favorite_categories"("profile_id");
+CREATE INDEX "favorite_categories_category_id_idx" ON "favorite_categories"("category_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "favorite_categories_profile_id_category_id_key" ON "favorite_categories"("profile_id", "category_id");
 
 -- CreateIndex
-CREATE INDEX "favorite_mechanics_profile_id_idx" ON "favorite_mechanics"("profile_id");
+CREATE INDEX "favorite_mechanics_mechanic_id_idx" ON "favorite_mechanics"("mechanic_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "favorite_mechanics_profile_id_mechanic_id_key" ON "favorite_mechanics"("profile_id", "mechanic_id");
 
 -- CreateIndex
-CREATE INDEX "favorite_games_profile_id_idx" ON "favorite_games"("profile_id");
+CREATE INDEX "favorite_games_game_id_idx" ON "favorite_games"("game_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "favorite_games_profile_id_game_id_key" ON "favorite_games"("profile_id", "game_id");
 
 -- CreateIndex
-CREATE INDEX "disliked_categories_profile_id_idx" ON "disliked_categories"("profile_id");
+CREATE INDEX "disliked_categories_category_id_idx" ON "disliked_categories"("category_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "disliked_categories_profile_id_category_id_key" ON "disliked_categories"("profile_id", "category_id");
 
 -- CreateIndex
-CREATE INDEX "disliked_mechanics_profile_id_idx" ON "disliked_mechanics"("profile_id");
+CREATE INDEX "disliked_mechanics_mechanic_id_idx" ON "disliked_mechanics"("mechanic_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "disliked_mechanics_profile_id_mechanic_id_key" ON "disliked_mechanics"("profile_id", "mechanic_id");
 
 -- CreateIndex
-CREATE INDEX "disliked_games_profile_id_idx" ON "disliked_games"("profile_id");
+CREATE INDEX "disliked_games_game_id_idx" ON "disliked_games"("game_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "disliked_games_profile_id_game_id_key" ON "disliked_games"("profile_id", "game_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_profiles_user_id_key" ON "user_profiles"("user_id");
+
+-- CreateIndex
+CREATE INDEX "user_profiles_user_id_idx" ON "user_profiles"("user_id");
+
+-- CreateIndex
+CREATE INDEX "user_roles_role_id_idx" ON "user_roles"("role_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_roles_user_id_role_id_key" ON "user_roles"("user_id", "role_id");

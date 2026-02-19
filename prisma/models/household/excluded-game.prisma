@@ -12,5 +12,6 @@ model ExcludedGame {
   excludedAt     DateTime @default(now()) @map("excluded_at") @db.Timestamptz(3)
 
   @@unique([householdMemberId, gameCollectionId])
+  @@index([gameCollectionId])
   @@map("excluded_games")
 }

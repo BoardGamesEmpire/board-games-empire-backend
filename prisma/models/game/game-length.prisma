@@ -1,19 +1,19 @@
 model GameLength {
   id String @id @default(cuid(2))
-  
-  name        String  @unique 
-  description String? 
-  
-  minMinutes Int     @map("min_minutes") 
-  maxMinutes Int?    @map("max_minutes") 
-  
-  displayOrder Int @map("display_order") 
+
+  name        String  @unique
+  description String?
+
+  minMinutes Int  @map("min_minutes")
+  maxMinutes Int? @map("max_minutes")
+
+  displayOrder Int     @map("display_order")
   isActive     Boolean @default(true) @map("is_active")
-  
+
   profiles UserProfile[] @relation("PreferredGameLength")
-  
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-  
+
   @@map("game_lengths")
 }

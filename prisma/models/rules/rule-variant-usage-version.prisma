@@ -12,5 +12,6 @@ model RuleVariantUsageVersion {
   errataDetails  String? @map("errata_details")
 
   @@unique([ruleVariantUsageId, gameVersionId])
+  @@index([gameVersionId])
   @@map("rule_variant_usage_versions")
 }

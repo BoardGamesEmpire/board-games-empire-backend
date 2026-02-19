@@ -8,9 +8,9 @@ model Category {
   parentCategoryId String?    @map("parent_category_id")
   subcategories    Category[] @relation("CategoryHierarchy")
 
-  games        GameCategory[]
-  favorites    FavoriteCategory[]
-  disliked     DislikedCategory[]
+  games     GameCategory[]
+  favorites FavoriteCategory[]
+  disliked  DislikedCategory[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
