@@ -16,7 +16,7 @@
       "path": "./libs/api/auth"
     },
     {
-      "path": "./libs/api/users"
+      "path": "./libs/api/user"
     },
     {
       "path": "./libs/common/metrics"
@@ -26,6 +26,15 @@
     },
     {
       "path": "./libs/common/env"
+    },
+    {
+      "path": "./libs/api/household"
+    },
+    {
+      "path": "./libs/api/language"
+    },
+    {
+      "path": "./libs/api/system-settings"
     }
   ]
 }

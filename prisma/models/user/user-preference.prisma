@@ -19,14 +19,6 @@ model UserPreferences {
   emailNotifications Json? @map("email_notifications") // Structured notification preferences
   pushNotifications  Json? @map("push_notifications")
 
-  // Game preferences
-  preferredPlayerCount Int?     @map("preferred_player_count")
-  preferredGameLength  Int?     @map("preferred_game_length") // In minutes
-  favoriteCategories   String[] @map("favorite_categories")
-  favoriteMechanics    String[] @map("favorite_mechanics")
-  dislikedCategories   String[] @map("disliked_categories")
-  dislikedMechanics    String[] @map("disliked_mechanics")
-
   language                Language?  @relation(fields: [languageId], references: [id])
   languageId              String?    @map("language_id")
   defaultReviewVisibility Visibility @default(Private) @map("default_review_visibility")

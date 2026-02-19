@@ -13,7 +13,7 @@ export async function languagesSeed(prisma: PrismaClient) {
   for (const language of languages) {
     await prisma.language.upsert({
       create: language,
-      update: {},
+      update: language,
       where: {
         abbreviation: language.abbreviation,
       },

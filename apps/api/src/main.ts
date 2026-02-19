@@ -1,6 +1,7 @@
 import { authFactory } from '@bge/auth';
 import { DatabaseService } from '@bge/database';
 import { env } from '@bge/env';
+import { Cache } from '@nestjs/cache-manager';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -39,6 +40,9 @@ async function bootstrap() {
         validationError: {
           target: false,
           value: false,
+        },
+        transformOptions: {
+          enableImplicitConversion: true,
         },
       }),
     )
@@ -82,10 +86,11 @@ async function bootstrap() {
   }
 
   const dbService = app.get(DatabaseService);
+  const cacheService = app.get(Cache);
   const server = app.getHttpAdapter().getInstance();
-  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authFactory(dbService, configService)));
+  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authFactory(dbService, configService, cacheService)));
 
-  const port = configService.get<number>('port', 33333);
+  const port = configService.get<number>('server.port', 33333);
   await app.listen(port);
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
 }

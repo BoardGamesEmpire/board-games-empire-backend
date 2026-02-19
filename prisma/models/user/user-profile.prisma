@@ -1,0 +1,47 @@
+
+// @todo availablilty? experience/skill level? competitive? 
+model UserProfile {
+  id String @id @default(cuid(2))
+  
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @unique @map("user_id")
+  
+  // About Me
+  bio             String? @db.Text
+  displayName     String? @map("display_name")
+  pronouns        String? 
+  location        String? 
+  avatarUrl       String? @map("avatar_url")
+  
+  // Game Preferences
+  favoriteCategories FavoriteCategory[]
+  favoriteMechanics  FavoriteMechanic[]
+  favoriteGames      FavoriteGame[]
+  dislikedCategories DislikedCategory[]
+  dislikedMechanics  DislikedMechanic[]
+  dislikedGames      DislikedGame[]
+
+  preferredGameLength   GameLength? @relation("PreferredGameLength", fields: [preferredGameLengthId], references: [id])
+  preferredGameLengthId String?     @map("preferred_game_length_id")
+  
+  preferredPlayerCount Int?     @map("preferred_player_count")
+
+  // Social Preferences
+  willingToTeach     Boolean @default(true) @map("willing_to_teach")
+  openToNewPlayers   Boolean @default(true) @map("open_to_new_players")
+  houseRulesPreference String? @map("house_rules_preference") // "Strictly Source", "Flexible", "House rules welcome"
+  
+  // Practical Info - could be useful for Game Night snacks!!
+  dietaryRestrictions String? @map("dietary_restrictions")
+  accessibilityNeeds  String? @map("accessibility_needs")
+  hostingCapability   Boolean @default(false) @map("hosting_capability")
+  
+  // Visibility
+  visibility    Visibility @default(Public)
+  isSearchable Boolean @default(true) @map("is_searchable")
+  
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  
+  @@map("user_profiles")
+}

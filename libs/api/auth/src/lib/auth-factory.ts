@@ -1,10 +1,11 @@
 import { passkey } from '@better-auth/passkey';
-import type { PrismaClient } from '@bge/database';
+import { PrismaClient, SystemRole } from '@bge/database';
 import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import process from 'node:process';
 import {
   admin,
   anonymous,
@@ -17,15 +18,17 @@ import {
   openAPI,
   twoFactor,
 } from 'better-auth/plugins';
-import process from 'node:process';
 
-export function authFactory(client: PrismaClient, configService?: ConfigService, cache?: Cache) {
-  Logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`, 'authFactory');
+export function authFactory(prisma: PrismaClient, configService?: ConfigService, cache?: Cache) {
+  const logger = new Logger('AuthFactory');
+  logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
 
   const options = buildOptions(configService);
 
   const port = configService?.get<number>('server.port') || parseInt(process.env.PORT || '33333', 10);
   const trustedOrigins = options.trusted.map((origin) => origin.replace(/{PORT}\/?$/i, port.toString()));
+
+  logger.log(`Trusted origins set to: ${trustedOrigins.join(', ')}`);
 
   // TODO: Make plugins configurable
   const plugins: BetterAuthPlugin[] = [
@@ -46,7 +49,7 @@ export function authFactory(client: PrismaClient, configService?: ConfigService,
 
   if (hasOIDC(configService)) {
     const oidcConfig = buildOIDC(configService);
-    Logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`, 'authFactory');
+    logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`);
 
     plugins.push(
       genericOAuth({
@@ -63,13 +66,14 @@ export function authFactory(client: PrismaClient, configService?: ConfigService,
   }
 
   if (options.useEmailPass) {
-    Logger.log('Enabling Email & Password authentication', 'authFactory');
+    logger.log('Enabling Email & Password authentication');
   }
 
   return betterAuth({
     telemetry: { enabled: false },
     advanced: {
       cookiePrefix: 'bge_auth_',
+      disableOriginCheck: options.disableOriginCheck,
     },
     basePath: '/api/auth',
     appName: 'BoardGamesEmpire',
@@ -95,11 +99,54 @@ export function authFactory(client: PrismaClient, configService?: ConfigService,
     experimental: { joins: true },
     url: options.hostUrl,
     secret: options.secret,
-    database: prismaAdapter(client, {
-      debugLogs: configService?.get<boolean>('server.is_production') === false || false,
+    database: prismaAdapter(prisma, {
+      debugLogs: configService?.get<boolean>('server.is_production') === false,
       transaction: true,
       provider: 'postgresql',
     }),
+    databaseHooks: {
+      user: {
+        create: {
+          async after(user) {
+            const usersCount = await prisma.user.count();
+            const role = usersCount === 1 ? SystemRole.Owner : SystemRole.User;
+
+            await prisma.user.update({
+              where: { id: user.id },
+              data: {
+                preferences: {
+                  create: {
+                    theme: 'system',
+                    preferredPlayerCount: 0,
+                  },
+                },
+
+                profile: {
+                  create: {
+                    displayName:
+                      user.name ||
+                      <string>user.username ||
+                      user.email?.split('@')[0],
+                  }
+                },
+
+                roles: {
+                  create: {
+                    role: {
+                      connect: {
+                        name: role,
+                      },
+                    },
+                  },
+                },
+              },
+            });
+
+            logger.debug(`Assigned role '${role}' to new user with ID ${user.id}`);
+          },
+        },
+      },
+    },
     secondaryStorage: cache
       ? {
           get(key: string) {
@@ -124,17 +171,19 @@ function buildOptions(configService?: ConfigService) {
   const envSecret = process.env.BETTER_AUTH_SECRET;
   const envOrigins = process.env.TRUSTED_ORIGINS?.split(',') || [];
   const envEmailPass = process.env.USE_EMAIL_PASSWORD_AUTH === 'true';
+  const disableOriginCheck = process.env.DISABLE_ORIGIN_CHECK === 'true';
 
   if (configService instanceof ConfigService) {
     const hostUrl = configService.getOrThrow<string>('auth.url');
     const secret = configService.getOrThrow<string>('auth.secret');
     const trusted = configService.getOrThrow<string[]>('auth.trustedOrigins');
     const useEmailPass = configService.getOrThrow<boolean>('auth.useEmailPasswordAuth');
+    const disableOriginCheck = configService.get<boolean>('auth.disableOriginCheck');
 
-    return { hostUrl, secret, trusted, useEmailPass };
+    return { hostUrl, secret, trusted, useEmailPass, disableOriginCheck };
   }
 
-  return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass };
+  return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass, disableOriginCheck };
 }
 
 function hasOIDC(configService?: ConfigService) {

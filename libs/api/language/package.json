@@ -1,5 +1,5 @@
 {
-  "name": "@bge/users",
+  "name": "@bge/language",
   "version": "0.0.1",
   "private": true,
   "main": "./src/index.ts",
@@ -13,10 +13,10 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/users",
+    "name": "@board-games-empire/language",
     "tags": [
       "api",
-      "users"
+      "language"
     ]
   },
   "dependencies": {}

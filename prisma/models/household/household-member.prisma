@@ -10,6 +10,8 @@ model HouseholdMember {
   showAllGames           Boolean        @default(true) @map("show_all_games")
   excludedFromHouseholds ExcludedGame[]
 
+  role HouseholdRole?
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

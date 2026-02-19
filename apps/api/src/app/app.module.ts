@@ -2,8 +2,10 @@ import { AuthModule } from '@bge/auth';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { HealthModule } from '@bge/health';
+import { HouseholdModule } from '@bge/household';
+import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
-import { UsersModule } from '@bge/users';
+import { UserModule } from '@bge/user';
 import KeyvRedis from '@keyv/redis';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
@@ -15,6 +17,8 @@ import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
+import { SystemSettingsModule } from '@bge/system-settings';
+
 
 @Module({
   imports: [
@@ -73,7 +77,10 @@ import { configuration, configurationValidationSchema } from './configuration';
 
     // Feature modules
     AuthModule,
-    UsersModule,
+    UserModule,
+    HouseholdModule,
+    LanguageModule,
+    SystemSettingsModule,
     HealthModule,
     MetricsModule,
   ],

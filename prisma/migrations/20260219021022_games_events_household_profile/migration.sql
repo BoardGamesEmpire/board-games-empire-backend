@@ -1,3 +1,9 @@
+/*
+  Warnings:
+
+  - You are about to drop the column `display_username` on the `users` table. All the data in the column will be lost.
+
+*/
 -- CreateEnum
 CREATE TYPE "auth_types" AS ENUM ('ApiKey', 'Basic', 'Certificate', 'HMAC', 'JWT', 'None', 'OAuth', 'PSK');
 
@@ -78,6 +84,9 @@ CREATE TYPE "invite_types" AS ENUM ('Event', 'Household', 'System', 'Campaign');
 
 -- CreateEnum
 CREATE TYPE "sync_directions" AS ENUM ('FromSource', 'ToSource', 'Bidirectional');
+
+-- AlterTable
+ALTER TABLE "users" DROP COLUMN "display_username";
 
 -- CreateTable
 CREATE TABLE "attendee_game_lists" (
@@ -252,6 +261,21 @@ CREATE TABLE "game_gateways" (
 );
 
 -- CreateTable
+CREATE TABLE "game_lengths" (
+    "id" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "min_minutes" INTEGER NOT NULL,
+    "max_minutes" INTEGER,
+    "display_order" INTEGER NOT NULL,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+
+    CONSTRAINT "game_lengths_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "game_locations" (
     "id" TEXT NOT NULL,
     "collection_id" TEXT,
@@ -333,6 +357,7 @@ CREATE TABLE "games" (
     "subtitle" TEXT,
     "description" TEXT,
     "image" TEXT,
+    "thumbnail" TEXT,
     "publish_year" INTEGER,
     "min_players" INTEGER,
     "max_players" INTEGER,
@@ -663,8 +688,7 @@ CREATE TABLE "household_members" (
 -- CreateTable
 CREATE TABLE "household_roles" (
     "id" TEXT NOT NULL,
-    "household_id" TEXT NOT NULL,
-    "user_id" TEXT NOT NULL,
+    "household_member_id" TEXT NOT NULL,
     "role_id" TEXT NOT NULL,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -678,8 +702,7 @@ CREATE TABLE "households" (
     "description" TEXT,
     "name" TEXT NOT NULL,
     "image" TEXT,
-    "language_id" TEXT NOT NULL,
-    "owner_id" TEXT NOT NULL,
+    "language_id" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 
@@ -932,6 +955,7 @@ CREATE TABLE "languages" (
 -- CreateTable
 CREATE TABLE "system_settings" (
     "id" TEXT NOT NULL,
+    "singleton" BOOLEAN NOT NULL DEFAULT true,
     "allow_password_resets" BOOLEAN NOT NULL DEFAULT true,
     "allow_user_registration" BOOLEAN NOT NULL DEFAULT true,
     "allow_username_change" BOOLEAN NOT NULL DEFAULT true,
@@ -1032,18 +1056,109 @@ CREATE TABLE "user_preferences" (
     "show_game_play_history" BOOLEAN NOT NULL DEFAULT true,
     "email_notifications" JSONB,
     "push_notifications" JSONB,
-    "preferred_player_count" INTEGER,
-    "preferred_game_length" INTEGER,
-    "favorite_categories" TEXT[],
-    "favorite_mechanics" TEXT[],
-    "disliked_categories" TEXT[],
-    "disliked_mechanics" TEXT[],
     "language_id" TEXT,
     "default_review_visibility" "visibility_types" NOT NULL DEFAULT 'Private',
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 
     CONSTRAINT "user_preferences_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "favorite_categories" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "category_id" TEXT NOT NULL,
+    "sort_order" INTEGER DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "favorite_categories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "favorite_mechanics" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "mechanic_id" TEXT NOT NULL,
+    "sort_order" INTEGER DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "favorite_mechanics_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "favorite_games" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "game_id" TEXT NOT NULL,
+    "rank" INTEGER DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "favorite_games_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "disliked_categories" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "category_id" TEXT NOT NULL,
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "disliked_categories_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "disliked_mechanics" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "mechanic_id" TEXT NOT NULL,
+    "sort_order" INTEGER DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "disliked_mechanics_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "disliked_games" (
+    "id" TEXT NOT NULL,
+    "profile_id" TEXT NOT NULL,
+    "game_id" TEXT NOT NULL,
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+    "note" TEXT,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "disliked_games_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "user_profiles" (
+    "id" TEXT NOT NULL,
+    "user_id" TEXT NOT NULL,
+    "bio" TEXT,
+    "display_name" TEXT,
+    "pronouns" TEXT,
+    "location" TEXT,
+    "avatar_url" TEXT,
+    "preferred_game_length_id" TEXT,
+    "preferred_player_count" INTEGER,
+    "willing_to_teach" BOOLEAN NOT NULL DEFAULT true,
+    "open_to_new_players" BOOLEAN NOT NULL DEFAULT true,
+    "house_rules_preference" TEXT,
+    "dietary_restrictions" TEXT,
+    "accessibility_needs" TEXT,
+    "hosting_capability" BOOLEAN NOT NULL DEFAULT false,
+    "visibility" "visibility_types" NOT NULL DEFAULT 'Public',
+    "is_searchable" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(3) NOT NULL,
+
+    CONSTRAINT "user_profiles_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -1106,6 +1221,9 @@ CREATE INDEX "game_expansions_parent_expansion_id_idx" ON "game_expansions"("par
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_gateways_name_key" ON "game_gateways"("name");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "game_lengths_name_key" ON "game_lengths"("name");
 
 -- CreateIndex
 CREATE INDEX "game_locations_collection_id_idx" ON "game_locations"("collection_id");
@@ -1213,7 +1331,10 @@ CREATE UNIQUE INDEX "excluded_games_household_member_id_game_collection_id_key" 
 CREATE UNIQUE INDEX "household_members_household_id_user_id_key" ON "household_members"("household_id", "user_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "household_roles_household_id_user_id_role_id_key" ON "household_roles"("household_id", "user_id", "role_id");
+CREATE UNIQUE INDEX "household_roles_household_member_id_key" ON "household_roles"("household_member_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "household_roles_household_member_id_role_id_key" ON "household_roles"("household_member_id", "role_id");
 
 -- CreateIndex
 CREATE INDEX "game_documents_game_id_idx" ON "game_documents"("game_id");
@@ -1285,6 +1406,9 @@ CREATE UNIQUE INDEX "languages_code_key" ON "languages"("code");
 CREATE UNIQUE INDEX "languages_name_key" ON "languages"("name");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "system_settings_singleton_key" ON "system_settings"("singleton");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "user_game_customizations_user_id_game_id_key" ON "user_game_customizations"("user_id", "game_id");
 
 -- CreateIndex
@@ -1304,6 +1428,45 @@ CREATE UNIQUE INDEX "user_permissions_user_id_permission_resource_type_resource_
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_preferences_user_id_key" ON "user_preferences"("user_id");
+
+-- CreateIndex
+CREATE INDEX "favorite_categories_profile_id_idx" ON "favorite_categories"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "favorite_categories_profile_id_category_id_key" ON "favorite_categories"("profile_id", "category_id");
+
+-- CreateIndex
+CREATE INDEX "favorite_mechanics_profile_id_idx" ON "favorite_mechanics"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "favorite_mechanics_profile_id_mechanic_id_key" ON "favorite_mechanics"("profile_id", "mechanic_id");
+
+-- CreateIndex
+CREATE INDEX "favorite_games_profile_id_idx" ON "favorite_games"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "favorite_games_profile_id_game_id_key" ON "favorite_games"("profile_id", "game_id");
+
+-- CreateIndex
+CREATE INDEX "disliked_categories_profile_id_idx" ON "disliked_categories"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "disliked_categories_profile_id_category_id_key" ON "disliked_categories"("profile_id", "category_id");
+
+-- CreateIndex
+CREATE INDEX "disliked_mechanics_profile_id_idx" ON "disliked_mechanics"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "disliked_mechanics_profile_id_mechanic_id_key" ON "disliked_mechanics"("profile_id", "mechanic_id");
+
+-- CreateIndex
+CREATE INDEX "disliked_games_profile_id_idx" ON "disliked_games"("profile_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "disliked_games_profile_id_game_id_key" ON "disliked_games"("profile_id", "game_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "user_profiles_user_id_key" ON "user_profiles"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "user_roles_user_id_role_id_key" ON "user_roles"("user_id", "role_id");
@@ -1528,19 +1691,13 @@ ALTER TABLE "household_members" ADD CONSTRAINT "household_members_user_id_fkey" 
 ALTER TABLE "household_members" ADD CONSTRAINT "household_members_household_id_fkey" FOREIGN KEY ("household_id") REFERENCES "households"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "household_roles" ADD CONSTRAINT "household_roles_household_id_fkey" FOREIGN KEY ("household_id") REFERENCES "households"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "household_roles" ADD CONSTRAINT "household_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "household_roles" ADD CONSTRAINT "household_roles_household_member_id_fkey" FOREIGN KEY ("household_member_id") REFERENCES "household_members"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "household_roles" ADD CONSTRAINT "household_roles_role_id_fkey" FOREIGN KEY ("role_id") REFERENCES "roles"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "households" ADD CONSTRAINT "households_language_id_fkey" FOREIGN KEY ("language_id") REFERENCES "languages"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "households" ADD CONSTRAINT "households_owner_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "households" ADD CONSTRAINT "households_language_id_fkey" FOREIGN KEY ("language_id") REFERENCES "languages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_lists" ADD CONSTRAINT "game_lists_list_id_fkey" FOREIGN KEY ("list_id") REFERENCES "lists"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1667,6 +1824,48 @@ ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_user_id_fkey" FO
 
 -- AddForeignKey
 ALTER TABLE "user_preferences" ADD CONSTRAINT "user_preferences_language_id_fkey" FOREIGN KEY ("language_id") REFERENCES "languages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_categories" ADD CONSTRAINT "favorite_categories_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_categories" ADD CONSTRAINT "favorite_categories_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_mechanics" ADD CONSTRAINT "favorite_mechanics_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_mechanics" ADD CONSTRAINT "favorite_mechanics_mechanic_id_fkey" FOREIGN KEY ("mechanic_id") REFERENCES "mechanics"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_games" ADD CONSTRAINT "favorite_games_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "favorite_games" ADD CONSTRAINT "favorite_games_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_categories" ADD CONSTRAINT "disliked_categories_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_categories" ADD CONSTRAINT "disliked_categories_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "categories"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_mechanics" ADD CONSTRAINT "disliked_mechanics_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_mechanics" ADD CONSTRAINT "disliked_mechanics_mechanic_id_fkey" FOREIGN KEY ("mechanic_id") REFERENCES "mechanics"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_games" ADD CONSTRAINT "disliked_games_profile_id_fkey" FOREIGN KEY ("profile_id") REFERENCES "user_profiles"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "disliked_games" ADD CONSTRAINT "disliked_games_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_profiles" ADD CONSTRAINT "user_profiles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "user_profiles" ADD CONSTRAINT "user_profiles_preferred_game_length_id_fkey" FOREIGN KEY ("preferred_game_length_id") REFERENCES "game_lengths"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "user_roles" ADD CONSTRAINT "user_roles_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

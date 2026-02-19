@@ -1,0 +1,115 @@
+model FavoriteCategory {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  sortOrder Int? @default(0) @map("sort_order")
+  // user can indicate why they like this category
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, categoryId])
+  @@index([profileId])
+  @@map("favorite_categories")
+}
+
+model FavoriteMechanic {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  sortOrder Int? @default(0) @map("sort_order")
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, mechanicId])
+  @@index([profileId])
+  @@map("favorite_mechanics")
+}
+
+model FavoriteGame {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  game   Game   @relation("FavoriteGames", fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  rank Int? @default(0)
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, gameId])
+  @@index([profileId])
+  @@map("favorite_games")
+}
+
+model DislikedCategory {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  sortOrder Int @default(0) @map("sort_order")
+  // user can indicate why they dislike this category
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, categoryId])
+  @@index([profileId])
+  @@map("disliked_categories")
+}
+
+model DislikedMechanic {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  sortOrder Int? @default(0) @map("sort_order")
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, mechanicId])
+  @@index([profileId])
+  @@map("disliked_mechanics")
+}
+
+model DislikedGame {
+  id String @id @default(cuid(2))
+
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  game   Game   @relation("DislikedGames", fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  sortOrder Int @default(0) @map("sort_order")
+  note      String?
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([profileId, gameId])
+  @@index([profileId])
+  @@map("disliked_games")
+}

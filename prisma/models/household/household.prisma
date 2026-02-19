@@ -6,11 +6,8 @@ model Household {
   name        String
   image       String?
 
-  language   Language @relation(fields: [languageId], references: [id])
-  languageId String   @map("language_id")
-
-  owner   User   @relation(fields: [ownerId], references: [id])
-  ownerId String @map("owner_id")
+  language   Language? @relation(fields: [languageId], references: [id])
+  languageId String?   @map("language_id")
 
   // campaigns        Campaign[]
   events           Event[]
@@ -18,7 +15,6 @@ model Household {
   gamePlaySessions GamePlaySession[]
   invites          Invite[]
   members          HouseholdMember[]
-  roleAssignments  HouseholdRole[]
   ruleVariants     RuleVariant[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

@@ -5,6 +5,7 @@ model Game {
   subtitle    String?
   description String?
   image       String?
+  thumbnail   String?
   publishYear Int?    @map("publish_year")
 
   minPlayers  Int? @map("min_players")
@@ -59,6 +60,8 @@ model Game {
   createdById String?    @map("created_by_id")
 
   userCustomizations UserGameCustomization[]
+  favorites          FavoriteGame[]         @relation("FavoriteGames")
+  disliked           DislikedGame[]         @relation("DislikedGames")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
