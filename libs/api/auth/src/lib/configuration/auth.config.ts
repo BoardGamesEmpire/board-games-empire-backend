@@ -4,10 +4,15 @@ import Joi from 'joi';
 
 export interface AuthConfig {
   authSecret: string;
-  authUrl: string;
   disableEmailSignUp: boolean;
+  disableOriginCheck: boolean;
+  oidcClientId: string;
+  oidcClientSecret: string;
+  oidcProviderId: string;
+  oidcWellKnownUrl: string;
   sendEmailVerification: boolean;
   trustedOrigins: string[];
+  url: string;
   useEmailPasswordAuth: boolean;
 }
 
@@ -32,6 +37,12 @@ export default registerAs('auth', () =>
       key: 'TRUSTED_ORIGINS',
       defaultValue: 'http://localhost',
       mutators: splitTrimFilter,
+    },
+    {
+      keyTo: 'disableOriginCheck',
+      key: 'DISABLE_ORIGIN_CHECK',
+      defaultValue: false,
+      mutators: [isTrue, (value: boolean) => (env.isProduction ? false : value)],
     },
     {
       keyTo: 'useEmailPasswordAuth',
@@ -88,5 +99,6 @@ export const authConfigValidationSchema = {
   OIDC_WELL_KNOWN_URL: Joi.string().uri().optional().allow(''),
   SEND_EMAIL_VERIFICATION: Joi.boolean().optional(),
   TRUSTED_ORIGINS: Joi.string().optional(),
+  DISABLE_ORIGIN_CHECK: Joi.boolean().optional(),
   USE_EMAIL_PASSWORD_AUTH: Joi.boolean().optional(),
 };

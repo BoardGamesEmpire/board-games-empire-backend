@@ -17,5 +17,6 @@ model UserPermission {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([userId, permission, resourceType, resourceId])
+  @@index([permission])
   @@map("user_permissions")
 }

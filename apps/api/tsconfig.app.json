@@ -23,10 +23,19 @@
   ],
   "references": [
     {
-      "path": "../../libs/api/users/tsconfig.lib.json"
+      "path": "../../libs/api/system-settings/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/user/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/metrics/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/language/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/household/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/health/tsconfig.lib.json"

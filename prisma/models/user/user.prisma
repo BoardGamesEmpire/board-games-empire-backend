@@ -6,8 +6,7 @@ model User {
   banned     Boolean?  @default(false)
   banReason  String?   @map("ban_reason")
 
-  displayUsername String? @map("display_username")
-  username        String
+  username String
 
   isAnonymous Boolean? @default(false) @map("is_anonymous")
 
@@ -31,14 +30,13 @@ model User {
   passkeys           Passkey[]
   sessions           Session[]
   preferences        UserPreferences?
+  profile            UserProfile?
   twofactors         TwoFactor[]
   sessionPlayers     SessionPlayer[]
   userMedia          Media[]
   lists              List[]
   gatewayConnections UserGatewayConnection[]
 
-  householdOwner  Household[]
-  householdRoles  HouseholdRole[]
   householdMember HouseholdMember[]
 
   invitesReceived Invite[] @relation("InvitesReceived")

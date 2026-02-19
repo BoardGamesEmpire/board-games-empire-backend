@@ -6,6 +6,8 @@ import { NestFactory } from '@nestjs/core';
 import * as path from 'node:path';
 import { languagesSeed } from './seeds/languages.seed';
 import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
+import { systemSettingsSeed } from './seeds/system-settings.seed';
+import { gameLengthsSeed } from './seeds/game-lengths.seed';
 
 const envFilePath = path.resolve(process.cwd(), '.env');
 type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
@@ -32,6 +34,8 @@ class SeedModule {}
 /**
  * running 'npm run db:seed' without direct instantiation of DatabaseService fails to inject the ConfigService,
  * possibly due to decorator metadata not being properly emitted.
+ *
+ * @todo explore a migrations and seeds service that can run on startup
  */
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(SeedModule);
@@ -43,7 +47,7 @@ async function bootstrap() {
   const prisma = new DatabaseService(configService);
   await prisma.$connect();
 
-  const seeds: Seeder[] = [languagesSeed, rolesAndPermissionsSeed];
+  const seeds: Seeder[] = [systemSettingsSeed, languagesSeed, rolesAndPermissionsSeed, gameLengthsSeed];
 
   logger.log(`Starting database seeding...${seeds.length} seeds to run.`);
 

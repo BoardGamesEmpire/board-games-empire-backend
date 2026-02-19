@@ -12,5 +12,6 @@ model RuleVariantUsageExpansion {
   notes                String?
 
   @@unique([ruleVariantUsageId, gameExpansionId])
+  @@index([gameExpansionId])
   @@map("rule_variant_usage_expansions")
 }

@@ -1,11 +1,8 @@
 model HouseholdRole {
   id String @id @default(cuid(2))
 
-  household   Household @relation(fields: [householdId], references: [id])
-  householdId String    @map("household_id")
-
-  user   User   @relation(fields: [userId], references: [id])
-  userId String @map("user_id")
+  householdMember   HouseholdMember @relation(fields: [householdMemberId], references: [id])
+  householdMemberId String          @unique @map("household_member_id")
 
   role   Role   @relation(fields: [roleId], references: [id])
   roleId String @map("role_id")
@@ -13,6 +10,7 @@ model HouseholdRole {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([householdId, userId, roleId])
+  @@unique([householdMemberId, roleId])
+  @@index([roleId])
   @@map("household_roles")
 }

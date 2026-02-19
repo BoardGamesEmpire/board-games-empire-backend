@@ -5,7 +5,9 @@ model Mechanic {
   description String?
   complexity  Int?
 
-  games GameMechanic[]
+  games     GameMechanic[]
+  favorites FavoriteMechanic[]
+  disliked  DislikedMechanic[]
 
   usageCount         Int?   @map("usage_count")
   compatibilityScore Float? @map("compatibility_score")
