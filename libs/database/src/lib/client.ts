@@ -1,4 +1,3 @@
-export * from './generated/client';
-export * from './generated/commonInputTypes';
-export * from './generated/enums';
+export * from './generated/input';
 export * from './generated/models';
+export * from './generated/schema';

@@ -1,0 +1,31 @@
+model GameCollection {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  quantity Int @default(1)
+
+  rating      Int?
+  playCount   Int?      @map("play_count")
+  playAgain   Boolean?  @map("play_again")
+  favorite    Boolean?
+  comment     String?
+  lastPlayed  DateTime? @map("last_played") @db.Timestamptz(3)
+  lastUpdated DateTime? @map("last_updated") @db.Timestamptz(3)
+
+  excludedFromHouseholds ExcludedGame[]
+  locations              GameLocation[]
+  eventAttendeeGameLists EventAttendeeGameList[]
+  loadedGames            GameLoan[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, gameId])
+  @@index([userId])
+  @@map("game_collections")
+}

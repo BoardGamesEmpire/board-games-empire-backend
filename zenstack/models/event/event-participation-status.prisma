@@ -1,0 +1,8 @@
+enum EventParticipationStatus {
+  Attending
+  Invited
+  Maybe
+  NotAttending
+
+  @@map("event_participation_statuses")
+}

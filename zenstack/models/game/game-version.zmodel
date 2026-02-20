@@ -1,0 +1,30 @@
+import '../game/game'
+import '../mixins/mixins'
+import '../game-play/game-play-session'
+import '../rules/rule-variant'
+import '../rules/rule-variant-usage-version'
+
+model GameVersion with BaseFields {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  versionName String  @map("version_name")
+  releaseYear Int?    @map("release_year")
+  isBaseline  Boolean @default(false) @map("is_baseline")
+
+  // Hierarchy for edition variants
+  parentVersion   GameVersion?  @relation("VersionHierarchy", fields: [parentVersionId], references: [id])
+  parentVersionId String?       @map("parent_version_id")
+  childVersions   GameVersion[] @relation("VersionHierarchy")
+
+  ruleVariants GameVersionRuleVariant[]
+
+  playSessionsUsed  GamePlaySession[]
+  ruleVariantUsages RuleVariantUsageVersion[]
+
+  @@index([gameId])
+  @@index([parentVersionId])
+  @@map("game_versions")
+
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

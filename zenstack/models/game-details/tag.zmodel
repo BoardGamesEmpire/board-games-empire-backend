@@ -1,0 +1,32 @@
+import '../user/user'
+import '../game/game'
+import '../mixins/mixins'
+
+model Tag with BaseFieldsNoUpdate {
+  name        String  @unique
+  description String?
+
+  games GameTag[]
+
+  @@map("tags")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model GameTag with BaseFieldsNoUpdate {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  tag   Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tagId String @map("tag_id")
+
+  addedBy   User   @relation(fields: [addedById], references: [id])
+  addedById String @map("added_by_id")
+
+  @@unique([gameId, tagId])
+  @@map("game_tags")
+
+  @@allow('read', true)
+  @@allow('all', addedById == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

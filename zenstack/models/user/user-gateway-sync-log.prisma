@@ -1,0 +1,18 @@
+model UserGatewaySyncLog {
+  id String @id @default(cuid(2))
+
+  connection   UserGatewayConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  connectionId String                @map("connection_id")
+
+  startedAt   DateTime   @map("started_at") @db.Timestamptz(3)
+  completedAt DateTime?  @map("completed_at") @db.Timestamptz(3)
+  status      SyncStatus
+
+  gamesAdded   Int   @default(0) @map("games_added")
+  gamesUpdated Int   @default(0) @map("games_updated")
+  gamesRemoved Int   @default(0) @map("games_removed")
+  errors       Json? // Detailed error info
+
+  @@index([connectionId])
+  @@map("user_gateway_sync_logs")
+}

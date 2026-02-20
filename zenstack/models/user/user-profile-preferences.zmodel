@@ -1,0 +1,107 @@
+import '../game-details/category'
+import '../mixins/mixins'
+import './user-profile'
+
+model FavoriteCategory with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  sortOrder Int?    @default(0) @map("sort_order")
+  // user can indicate why they like this category
+  note      String?
+
+  @@unique([profileId, categoryId])
+  @@index([categoryId])
+  @@map("favorite_categories")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model FavoriteMechanic with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  sortOrder Int?    @default(0) @map("sort_order")
+  note      String?
+
+  @@unique([profileId, mechanicId])
+  @@index([mechanicId])
+  @@map("favorite_mechanics")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model FavoriteGame with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  game   Game   @relation("FavoriteGames", fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  rank Int?    @default(0)
+  note String?
+
+  @@unique([profileId, gameId])
+  @@index([gameId])
+  @@map("favorite_games")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model DislikedCategory with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  sortOrder Int     @default(0) @map("sort_order")
+  // user can indicate why they dislike this category
+  note      String?
+
+  @@unique([profileId, categoryId])
+  @@index([categoryId])
+  @@map("disliked_categories")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model DislikedMechanic with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  sortOrder Int?    @default(0) @map("sort_order")
+  note      String?
+
+  @@unique([profileId, mechanicId])
+  @@index([mechanicId])
+  @@map("disliked_mechanics")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model DislikedGame with BaseFieldsNoUpdate {
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  profileId String      @map("profile_id")
+
+  game   Game   @relation("DislikedGames", fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  sortOrder Int     @default(0) @map("sort_order")
+  note      String?
+
+  @@unique([profileId, gameId])
+  @@index([gameId])
+  @@map("disliked_games")
+
+  @@allow('all', profileId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

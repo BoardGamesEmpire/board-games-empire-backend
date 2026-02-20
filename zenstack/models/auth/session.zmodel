@@ -1,0 +1,22 @@
+import '../user/user'
+import '../mixins/mixins'
+
+model Session with BaseFields {
+  token     String
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+
+  impersonatedBy String? @map("impersonated_by")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@unique([token])
+  @@index([userId])
+  @@map("sessions")
+
+  // Users can manage their own sessions, admins have full access
+  @@allow('all', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

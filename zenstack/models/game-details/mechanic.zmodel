@@ -1,0 +1,35 @@
+import '../game/game'
+import '../user/user-preferences'
+import '../mixins/mixins'
+
+model Mechanic with BaseFields {
+  name        String  @unique
+  description String?
+  complexity  Int?
+
+  games     GameMechanic[]
+  favorites FavoriteMechanic[]
+  disliked  DislikedMechanic[]
+
+  usageCount         Int?   @map("usage_count")
+  compatibilityScore Float? @map("compatibility_score")
+
+  @@map("mechanics")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model GameMechanic with BaseFields {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  @@unique([gameId, mechanicId])
+  @@map("game_mechanics")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

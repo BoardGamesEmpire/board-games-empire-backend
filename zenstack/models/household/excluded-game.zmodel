@@ -1,0 +1,23 @@
+import '../game/game-collection'
+import './household-member'
+
+// Allows for household members to exclude certain games
+model ExcludedGame {
+  id String @id @default(cuid(2))
+
+  householdMember   HouseholdMember @relation(fields: [householdMemberId], references: [id])
+  householdMemberId String          @map("household_member_id")
+
+  gameCollection   GameCollection @relation(fields: [gameCollectionId], references: [id])
+  gameCollectionId String         @map("game_collection_id")
+
+  excludedReason String?  @map("excluded_reason")
+  excludedAt     DateTime @default(now()) @map("excluded_at") @db.Timestamptz(3)
+
+  @@unique([householdMemberId, gameCollectionId])
+  @@index([gameCollectionId])
+  @@map("excluded_games")
+
+  // Household members can see their own excluded games; admins can see all and manage
+  @@allow('all', householdMember.userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+}

@@ -1,0 +1,19 @@
+import '../user/user'
+import './game-list'
+import '../mixins/mixins'
+
+model List with BaseFieldsNoUpdate {
+  name String @default("My Wishlist")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  games GameList[]
+
+  @@map("lists")
+
+  // Anyone can read lists
+  @@allow('read', true)
+  // Only the list owner or an admin can manage the list
+  @@allow('all', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

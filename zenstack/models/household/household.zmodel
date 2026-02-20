@@ -1,0 +1,33 @@
+import '../system/language'
+import '../event/event'
+import '../game/game-location'
+import '../game-play/game-play-session'
+import '../system/invite'
+import './household-member'
+import '../rules/rule-variant'
+import '../mixins/mixins'
+
+// Grouping of users that live in the same household
+model Household with BaseFields {
+  description String?
+  name        String
+  image       String?
+
+  language   Language? @relation(fields: [languageId], references: [id])
+  languageId String?   @map("language_id")
+
+  // campaigns        Campaign[]
+  events           Event[]
+  gameLocations    GameLocation[]
+  gamePlaySessions GamePlaySession[]
+  invites          Invite[]
+  members          HouseholdMember[]
+  ruleVariants     RuleVariant[]
+
+  @@index([languageId])
+  @@map("households")
+
+  // Household members can see the household; admins can manage
+  @@allow('read', members.some(member.userId == auth().id) || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+  @@allow('update,delete', auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+}

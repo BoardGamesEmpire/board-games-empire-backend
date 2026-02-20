@@ -1,10 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from './client';
+import { ZenStackClient } from '@zenstackhq/orm';
+import { type SchemaType } from './client';
 
 @Injectable()
-export class DatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+export class DatabaseService extends ZenStackClient<SchemaType> implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
 
   constructor(private readonly configService: ConfigService) {
@@ -41,5 +42,13 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
 
   async onModuleDestroy() {
     await this.$disconnect();
+  }
+
+  /**
+   * Returns a ZenStack-enhanced Prisma client bound to the provided user context.
+   * Uses ZenStack v3 Prisma Client Extensions.
+   */
+  public forUser(user?: any) {
+    return this.$extends(withPolicy({ user }));
   }
 }

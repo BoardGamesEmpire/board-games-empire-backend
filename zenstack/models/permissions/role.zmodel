@@ -1,0 +1,58 @@
+import '../system/invite'
+import '../user/user-role'
+import '../household/household-role'
+import './permission'
+
+model Role {
+  id String @id @default(cuid(2))
+
+  name        String  @unique
+  description String?
+  isSystem    Boolean @default(false) @map("is_system")
+
+  permissions RolePermission[]
+  invites     Invite[]
+
+  userRoles      UserRole[]
+  householdRoles HouseholdRole[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("roles")
+
+  // Everyone can read roles in order to be assigned to them, only admins can manage them
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model RolePermission {
+  id     String @id @default(cuid(2))
+  role   Role   @relation(fields: [roleId], references: [id])
+  roleId String @map("role_id")
+
+  permission Permission
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([roleId, permission])
+  @@map("role_permissions")
+
+  // Everyone can read role permissions mapping, only admins can manage them
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+enum SystemRole {
+  Owner
+  Admin           @map("Administrator")
+  Moderator
+  User
+  HouseholdOwner  @map("Household Owner")
+  HouseholdAdmin  @map("Household Admin")
+  HouseholdMember @map("Household Member")
+  HouseholdGuest  @map("Household Guest")
+  EventHost       @map("Event Host")
+  EventMember     @map("Event Member")
+  EventGuest      @map("Event Guest")
+}

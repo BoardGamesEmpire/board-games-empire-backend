@@ -1,0 +1,31 @@
+model GameGateway {
+  id          String  @id @default(cuid(2))
+  name        String  @unique
+  description String?
+
+  messageContext String? @map("message_context")
+  iconUrl        String? @map("icon_url")
+  logoUrl        String? @map("logo_url")
+  websiteUrl     String? @map("website_url")
+
+  baseUrl          String? @map("base_url")
+  apiDocumentation String? @map("api_documentation")
+  apiVersion       String? @map("api_version")
+
+  enabled        Boolean  @default(true)
+  authType       AuthType @map("auth_type")
+  authParameters Json?    @map("auth_parameters")
+
+  usageCount Int       @default(0) @map("usage_count")
+  lastUsed   DateTime? @map("last_used") @db.Timestamptz(3)
+
+  gameSources            GameSource[]
+  userGatewayConnections UserGatewayConnection[]
+
+  createdBy   User?    @relation("GameGatewayCreator", fields: [createdById], references: [id])
+  createdById String?  @map("created_by_id")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("game_gateways")
+}

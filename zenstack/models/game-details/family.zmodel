@@ -1,0 +1,62 @@
+import '../game/game'
+import '../mixins/mixins'
+
+model Family with BaseFields {
+  name        String  @unique
+  description String?
+
+  publisher   Publisher? @relation(fields: [publisherId], references: [id])
+  publisherId String?    @map("publisher_id")
+
+  logoUrl String? @map("logo_url")
+  website String?
+
+  familyType FamilyType @default(Series) @map("family_type")
+
+  parentFamily   Family?  @relation("FamilyHierarchy", fields: [parentFamilyId], references: [id])
+  parentFamilyId String?  @map("parent_family_id")
+  subfamilies    Family[] @relation("FamilyHierarchy")
+
+  games GameFamily[]
+
+  @@map("families")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model GameFamily with BaseFields {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  familyId String @map("family_id")
+
+  position Int?
+
+  releaseOrder Int? @map("release_order")
+  storyOrder   Int? @map("story_order")
+
+  isStandalone    Boolean  @default(true) @map("is_standalone")
+  requiredGameIds String[] @map("required_game_ids")
+
+  note String?
+
+  @@unique([gameId, familyId])
+  @@map("game_families")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+enum FamilyType {
+  Series
+  Universe
+  Reimplementation
+  System
+  Brand
+  Collection
+  Publisher
+
+  @@map("family_types")
+}

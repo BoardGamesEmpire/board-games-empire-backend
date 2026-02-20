@@ -1,0 +1,49 @@
+import '../game/game'
+import '../mixins/mixins'
+
+model Artist with BaseFields {
+  name      String
+  fullName  String? @map("full_name")
+  website   String?
+  biography String?
+  country   String?
+
+  socialMedia Json? @map("social_media")
+
+  games GameArtist[]
+
+  @@map("artists")
+
+  // Anyone can read artists, admins can manage
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model GameArtist with BaseFields {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  artist   Artist @relation(fields: [artistId], references: [id], onDelete: Cascade)
+  artistId String @map("artist_id")
+
+  role    ArtistRole @default(Primary) @map("role")
+  details String?
+
+  @@unique([gameId, artistId])
+  @@map("game_artists")
+
+  // Read if you can read the game; Admin/Owner can manage
+  @@allow('read', true) // assuming game artists themselves are public knowledge
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+enum ArtistRole {
+  Primary
+  Cover
+  Component
+  Illustration
+  Graphic
+  Supporting
+
+  @@map("artist_roles")
+}

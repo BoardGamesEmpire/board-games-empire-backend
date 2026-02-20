@@ -1,0 +1,8 @@
+enum LoanStatus {
+  Active
+  Returned
+  Overdue
+  Cancelled
+
+  @@map("loan_statuses")
+}

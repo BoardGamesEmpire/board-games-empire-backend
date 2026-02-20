@@ -1,0 +1,27 @@
+import './household-role'
+import '../mixins/mixins'
+import './excluded-game'
+import '../user/user'
+import './household'
+
+model HouseholdMember with BaseFields {
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @map("user_id")
+
+  householdId String    @map("household_id")
+  household   Household @relation(fields: [householdId], references: [id])
+
+  showAllGames           Boolean        @default(true) @map("show_all_games")
+  excludedFromHouseholds ExcludedGame[]
+
+  role HouseholdRole?
+
+  @@unique([householdId, userId])
+  @@index([userId])
+  @@map("household_members")
+
+  // Household members can see their own membership; admins can see all and manage
+  @@allow('read', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+  @@allow('update', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+  @@allow('delete', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+}

@@ -1,0 +1,14 @@
+model EventGame {
+  id      String @id @default(cuid(2))
+  event   Event  @relation(fields: [eventId], references: [id])
+  eventId String @map("event_id")
+  game    Game   @relation(fields: [gameId], references: [id])
+  gameId  String @map("game_id")
+
+  suggestedBy   EventAttendee @relation(fields: [suggestedById], references: [id])
+  suggestedById String        @map("suggested_by_id")
+
+  votes EventGameVote[]
+
+  @@map("event_games")
+}

@@ -1,0 +1,10 @@
+enum RuleType {
+  Addition
+  Clarification
+  Modification
+  Replacement
+  Restriction
+  Removal
+
+  @@map("rule_types")
+}

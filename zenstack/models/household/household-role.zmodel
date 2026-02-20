@@ -1,0 +1,19 @@
+import '../permissions/role'
+import './household-member'
+import '../mixins/mixins'
+
+model HouseholdRole with BaseFields {
+  householdMember   HouseholdMember @relation(fields: [householdMemberId], references: [id])
+  householdMemberId String          @unique @map("household_member_id")
+
+  role   Role   @relation(fields: [roleId], references: [id])
+  roleId String @map("role_id")
+
+  @@unique([householdMemberId, roleId])
+  @@index([roleId])
+  @@map("household_roles")
+
+  // Household members can see their own roles; admins can see all and manage
+  @@allow('read', householdMember.userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+  @@allow('create,delete', auth().roles?[role.name == 'Admin' || role.name == 'Owner' || role.name == 'HouseholdOwner' || role.name == 'HouseholdAdmin'])
+}

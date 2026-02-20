@@ -1,0 +1,27 @@
+import '../user/user'
+import '../mixins/mixins'
+
+model Account with BaseFields {
+  accountId  String @map("account_id")
+  providerId String @map("provider_id")
+
+  accessTokenExpiresAt DateTime? @map("access_token_expires_at") @db.Timestamptz(3)
+  accessToken          String?   @map("access_token")
+
+  idToken String? @map("id_token")
+
+  refreshToken          String?   @map("refresh_token")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at") @db.Timestamptz(3)
+
+  scope    String?
+  password String?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  @@index([userId])
+  @@map("accounts")
+
+  // Only the owning user or admins can access auth accounts
+  @@allow('all', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

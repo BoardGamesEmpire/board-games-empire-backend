@@ -1,0 +1,19 @@
+import '../permissions/role'
+import '../mixins/mixins'
+import './user'
+
+model UserRole with BaseFieldsNoUpdate {
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @map("user_id")
+
+  role   Role   @relation(fields: [roleId], references: [id])
+  roleId String @map("role_id")
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+
+  // Users can see their own roles, admins can see all and manage
+  @@allow('read', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+  @@allow('create,delete', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

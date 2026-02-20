@@ -1,0 +1,31 @@
+model Media {
+  id String @id @default(cuid(2))
+
+  url          String
+  thumbnailUrl String? @map("thumbnail_url")
+  title        String?
+  caption      String?
+  altText      String? @map("alt_text")
+
+  fileSize     Int?    @map("file_size") // bytes
+  mimeType     String? @map("mime_type")
+  originalName String? @map("original_name")
+
+  uploader   User   @relation(fields: [uploaderId], references: [id])
+  uploaderId String @map("uploader_id")
+
+  visibility Visibility @default(Public)
+
+  // Child relations
+  gameImages     GameImage[]
+  gameVideos     GameVideo[]
+  gameDocuments  GameDocument[]
+  eventImages    EventImage[]
+  eventVideos    EventVideo[]
+  eventDocuments EventDocument[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("media")
+}

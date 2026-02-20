@@ -1,0 +1,20 @@
+import './list'
+import '../game/game'
+import '../mixins/mixins'
+
+model GameList with BaseFieldsNoUpdate {
+  list   List   @relation(fields: [listId], references: [id], onDelete: Cascade)
+  listId String @map("list_id")
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  priority Int @default(0)
+
+  @@map("game_lists")
+
+  // Anyone can read items on a list
+  @@allow('read', true)
+  // Only the list owner or an admin can manage items on the list
+  @@allow('all', list.userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

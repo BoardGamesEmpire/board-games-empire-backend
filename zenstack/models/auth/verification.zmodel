@@ -1,0 +1,15 @@
+import '../mixins/mixins'
+
+model Verification with BaseFields {
+  identifier String
+  value      String
+
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verifications")
+
+  // System-managed table for verifications, full access for admins.
+  // Anonymous operations skip policy checks server-side via `db.bypass()`.
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

@@ -1,0 +1,24 @@
+import '../user/user'
+import '../mixins/mixins'
+
+model Passkey with BaseFieldsNoUpdate {
+  name      String?
+  publicKey String  @map("public_key")
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  credentialID String  @map("credential_id")
+  counter      Int
+  deviceType   String  @map("device_type")
+  backedUp     Boolean @map("backed_up")
+  transports   String?
+  aaguid       String?
+
+  @@index([userId])
+  @@index([credentialID])
+  @@map("passkeys")
+
+  // Users can manage their own passkeys, admins have full access
+  @@allow('all', userId == auth().id || auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

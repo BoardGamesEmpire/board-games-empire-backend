@@ -1,0 +1,28 @@
+model RuleVariantUsage {
+  id String @id @default(cuid(2))
+
+  ruleVariant   RuleVariant @relation(fields: [ruleVariantId], references: [id], onDelete: Cascade)
+  ruleVariantId String      @map("rule_variant_id")
+
+  session   GamePlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String          @map("session_id")
+
+  gameExpansions GameExpansionRuleVariant[]
+  gameVersions   GameVersionRuleVariant[]
+
+  // Voting support
+  wasVotedOn   Boolean? @map("was_voted_on")
+  votesFor     Int?     @map("votes_for")
+  votesAgainst Int?     @map("votes_against")
+
+  wasEffective Boolean? @map("was_effective")
+  notes        String?
+
+  createdAt                  DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  ruleVariantUsageExpansions RuleVariantUsageExpansion[]
+  ruleVariantUsageVersions   RuleVariantUsageVersion[]
+
+  @@unique([ruleVariantId, sessionId])
+  @@index([sessionId])
+  @@map("rule_variant_usages")
+}

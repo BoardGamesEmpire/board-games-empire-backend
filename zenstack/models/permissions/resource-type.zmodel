@@ -1,0 +1,17 @@
+enum ResourceType {
+  Campaign
+  Event
+  Game
+  GameCollection
+  GameCreationRequest
+  GameCustomization
+  GamePlaySession
+  GameSharing
+  Household
+  RuleVariant
+  System
+  User
+  UserGameCustomization
+
+  @@map("resource_types")
+}

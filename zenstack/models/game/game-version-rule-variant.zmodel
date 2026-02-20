@@ -1,0 +1,27 @@
+import '../rules/rule-variant'
+import '../game/game-version'
+import '../rules/rule-category'
+import '../rules/rule-variant-usage'
+import '../mixins/mixins'
+
+model GameVersionRuleVariant with BaseFieldsNoUpdate {
+  id String @id @default(cuid(2))
+
+  ruleVariant   RuleVariant @relation(fields: [ruleVariantId], references: [id], onDelete: Cascade)
+  ruleVariantId String      @map("rule_variant_id")
+
+  gameVersion   GameVersion @relation(fields: [gameVersionId], references: [id], onDelete: Cascade)
+  gameVersionId String      @map("game_version_id")
+
+  overrideCategory RuleCategory? @map("override_category")
+  overrideRuleText String?       @map("override_rule_text")
+
+  ruleVariantUsage   RuleVariantUsage? @relation(fields: [ruleVariantUsageId], references: [id])
+  ruleVariantUsageId String?           @map("rule_variant_usage_id")
+
+  @@unique([ruleVariantId, gameVersionId])
+  @@map("game_version_rule_variants")
+
+  // TODO: rule creator
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

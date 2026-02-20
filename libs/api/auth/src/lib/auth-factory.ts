@@ -3,9 +3,8 @@ import { PrismaClient, SystemRole, Theme } from '@bge/database';
 import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { zenstackAdapter } from '@zenstackhq/better-auth';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
-import { prismaAdapter } from 'better-auth/adapters/prisma';
-import process from 'node:process';
 import {
   admin,
   anonymous,
@@ -18,6 +17,7 @@ import {
   openAPI,
   twoFactor,
 } from 'better-auth/plugins';
+import process from 'node:process';
 
 export function authFactory(prisma: PrismaClient, configService?: ConfigService, cache?: Cache) {
   const logger = new Logger('AuthFactory');
@@ -99,7 +99,7 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
     experimental: { joins: true },
     url: options.hostUrl,
     secret: options.secret,
-    database: prismaAdapter(prisma, {
+    database: zenstackAdapter(prisma, {
       debugLogs: configService?.get<boolean>('server.is_production') === false,
       transaction: true,
       provider: 'postgresql',
@@ -124,10 +124,7 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
 
                 profile: {
                   create: {
-                    displayName:
-                      user.name ||
-                      <string>user.username ||
-                      user.email?.split('@')[0],
+                    displayName: user.name || <string>user.username || user.email?.split('@')[0],
                   },
                 },
 

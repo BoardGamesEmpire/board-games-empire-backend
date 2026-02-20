@@ -1,0 +1,38 @@
+import '../game/game'
+import '../user/user-preferences'
+import '../mixins/mixins'
+
+model Category with BaseFields {
+  name        String  @unique
+  description String?
+
+  parentCategory   Category?  @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id])
+  parentCategoryId String?    @map("parent_category_id")
+  subcategories    Category[] @relation("CategoryHierarchy")
+
+  games     GameCategory[]
+  favorites FavoriteCategory[]
+  disliked  DislikedCategory[]
+
+  @@map("categories")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}
+
+model GameCategory with BaseFields {
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  @@unique([gameId, categoryId])
+  @@unique([gameId, isPrimary], name: "uniquePrimaryCategoryPerGame", map: "unique_primary_category_per_game")
+  @@map("game_categories")
+
+  @@allow('read', true)
+  @@allow('all', auth().roles?[role.name == 'Admin' || role.name == 'Owner'])
+}

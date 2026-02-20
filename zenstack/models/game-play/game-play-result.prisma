@@ -1,0 +1,16 @@
+model GamePlayResult {
+  id String @id @default(cuid(2))
+
+  gamePlaySession   GamePlaySession @relation(fields: [gamePlaySessionId], references: [id], onDelete: Cascade)
+  gamePlaySessionId String          @map("game_play_session_id")
+
+  resultType ResultType @default(Score) @map("result_type")
+
+  scoringPhase      String? @map("scoring_phase")
+  scoreDetails      Json?   @map("score_details")
+  teamScores        Json?   @map("team_scores")
+  individualMetrics Json?   @map("individual_metrics")
+
+  @@index([gamePlaySessionId])
+  @@map("game_play_results")
+}
