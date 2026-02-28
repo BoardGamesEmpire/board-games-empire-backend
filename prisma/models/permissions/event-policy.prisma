@@ -1,0 +1,39 @@
+model EventPolicy {
+  id      String @id @default(cuid(2))
+
+  event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventId String @unique @map("event_id")
+
+  // Invite controls
+  allowMemberInvites Boolean @default(true)  @map("allow_member_invites")
+  allowGuestInvites  Boolean @default(true) @map("allow_guest_invites")
+  maxAttendees       Int?                    @map("max_attendees")
+
+  // Game restrictions
+  restrictToGameCategories Boolean       @default(false) @map("restrict_to_game_categories")
+  allowedCategories        EventCategory[]
+
+  // Participation controls
+  requireHostApprovalToJoin Boolean @default(false) @map("require_host_approval")
+  allowSpectators           Boolean @default(true)  @map("allow_spectators")
+  maxTotalParticipants Int?    @map("max_total_participants")
+  strictCapacity       Boolean @default(false) @map("strict_capacity")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt      @map("updated_at") @db.Timestamptz(3)
+
+  @@map("event_policies")
+}
+
+model EventCategory {
+  id   String @id @default(cuid(2))
+
+  eventPolicy EventPolicy @relation(fields: [eventPolicyId], references: [id], onDelete: Cascade)
+  eventPolicyId String @map("event_policy_id")
+
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String @map("category_id")
+
+  @@unique([eventPolicyId, categoryId])
+  @@map("event_categories")
+}

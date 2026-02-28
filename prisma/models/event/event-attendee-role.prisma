@@ -1,0 +1,16 @@
+model EventAttendeeRole {
+  id String @id @default(cuid(2))
+
+  eventAttendee   EventAttendee @relation(fields: [eventAttendeeId], references: [id], onDelete: Cascade)
+  eventAttendeeId String        @unique @map("event_attendee_id")
+
+  role   Role   @relation(fields: [roleId], references: [id])
+  roleId String @map("role_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt      @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([eventAttendeeId, roleId])
+  @@index([roleId])
+  @@map("event_attendee_roles")
+}

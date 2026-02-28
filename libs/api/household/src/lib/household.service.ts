@@ -1,10 +1,13 @@
 import { DatabaseService, InviteStatus, SystemRole } from '@bge/database';
+import { PaginationQueryDto } from '@bge/shared';
+import { accessibleBy } from '@casl/prisma';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { ClsService } from 'nestjs-cls';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 
 @Injectable()
 export class HouseholdService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(private readonly db: DatabaseService, private readonly cls: ClsService) {}
 
   async getHouseholdById(id: string) {
     // consider a raw query instead of this madness
@@ -162,14 +165,18 @@ export class HouseholdService {
     });
   }
 
-  async getHouseholdsForUser(userId: string) {
+  async getHouseholdsForUser(pagination: PaginationQueryDto) {
+    const userAbility = this.cls.get('userAbility');
+    const apiKeyAbility = this.cls.get('apiKeyAbility');
+
     return this.db.household.findMany({
       where: {
-        members: {
-          some: {
-            userId,
-          },
-        },
+        AND: [
+          accessibleBy(userAbility).Household,
+          // If there's an API key with permissions, include those as well. We want the intersection
+          // of both permissions
+          apiKeyAbility ? accessibleBy(apiKeyAbility).Household : {},
+        ],
       },
       include: {
         language: {
@@ -179,7 +186,6 @@ export class HouseholdService {
           },
         },
         members: {
-          where: { userId },
           include: {
             role: {
               include: {
@@ -194,18 +200,20 @@ export class HouseholdService {
           },
         },
       },
+      skip: pagination.offset,
+      take: pagination.limit,
     });
   }
 
   /**
    * @todo soft delete?
-   * 
-   * @param id 
-   * @returns 
+   *
+   * @param id
+   * @returns
    */
   async deleteHousehold(id: string) {
     return this.db.household.delete({
-      where: { id }
+      where: { id },
     });
   }
 }
