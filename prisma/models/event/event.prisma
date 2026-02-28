@@ -16,15 +16,11 @@ model Event {
   type        EventType @default(CasualGathering)
 
   visibility        Visibility @default(Friends)
-  allowGuestInvites Boolean    @default(true) @map("allow_guest_invites")
-
-  maxTotalParticipants Int?    @map("max_total_participants")
-  strictCapacity       Boolean @default(false) @map("strict_capacity")
 
   startDate DateTime  @map("start_date") @db.Timestamptz(3)
   endDate   DateTime? @map("end_date") @db.Timestamptz(3)
 
-  memberPermissions EventMemberPermission[]
+  eventPolicy      EventPolicy?
 
   eventImages      EventImage[]
   eventVideos      EventVideo[]

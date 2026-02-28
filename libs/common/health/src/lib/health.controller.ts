@@ -1,5 +1,6 @@
 import { Controller, Get, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckService, HttpHealthIndicator } from '@nestjs/terminus';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import { wrapSurrogate } from 'surrogate';
@@ -7,6 +8,7 @@ import { wrapSurrogate } from 'surrogate';
 /**
  * @todo Identify why Surrogate Proxy is undefined
  */
+@ApiTags('health')
 @AllowAnonymous()
 @Controller('health')
 export class HealthController implements OnModuleInit {

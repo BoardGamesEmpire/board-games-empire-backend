@@ -1,7 +1,6 @@
 enum Visibility {
   Friends
   FriendsOfFriends
-  FriendsOfHouseholds
   Household
   Private
   Public

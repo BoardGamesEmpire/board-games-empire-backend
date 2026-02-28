@@ -35,6 +35,12 @@
     },
     {
       "path": "./libs/api/system-settings"
+    },
+    {
+      "path": "./libs/common/permissions"
+    },
+    {
+      "path": "./libs/common/shared"
     }
   ]
 }

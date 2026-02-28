@@ -5,6 +5,8 @@ import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
+import { ContextGuard, PermissionsModule } from '@bge/permissions';
+import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import KeyvRedis from '@keyv/redis';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
@@ -12,13 +14,12 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
-import { SystemSettingsModule } from '@bge/system-settings';
-
 
 @Module({
   imports: [
@@ -77,12 +78,13 @@ import { SystemSettingsModule } from '@bge/system-settings';
 
     // Feature modules
     AuthModule,
-    UserModule,
+    HealthModule,
     HouseholdModule,
     LanguageModule,
-    SystemSettingsModule,
-    HealthModule,
     MetricsModule,
+    PermissionsModule,
+    SystemSettingsModule,
+    UserModule,
   ],
   controllers: [],
   providers: [
@@ -91,6 +93,15 @@ import { SystemSettingsModule } from '@bge/system-settings';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    {
+      provide: APP_GUARD,
+      useClass: AuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ContextGuard,
+    },
+
     {
       provide: APP_INTERCEPTOR,
       useClass: CacheInterceptor,
