@@ -3,8 +3,6 @@ model EventAttendee {
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
   eventId String @map("event_id")
 
-  type EventAttendeeType @default(Participant)
-
   user   User?   @relation(fields: [userId], references: [id])
   userId String? @map("user_id")
 
@@ -12,7 +10,8 @@ model EventAttendee {
   guestEmail String? @map("guest_email")
 
   status EventParticipationStatus @default(Invited)
-  role   EventParticipantRole     @default(Participant)
+
+  role EventAttendeeRole?
 
   invitedBy   EventAttendee?  @relation("InvitedAttendees", fields: [invitedById], references: [id])
   invitedById String?         @map("invited_by_id")
@@ -25,7 +24,7 @@ model EventAttendee {
   rsvpDate DateTime? @map("rsvp_date") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt      @map("updated_at") @db.Timestamptz(3)
 
   @@unique([eventId, userId])
   @@index([eventId])

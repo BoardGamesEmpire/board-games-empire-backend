@@ -21,9 +21,10 @@ model Apikey {
   remaining           Int?
 
   lastRequest DateTime? @map("last_request") @db.Timestamptz(3)
-  permissions String?
 
   metadata String?
+
+  scopes ApiKeyScope[]
 
   expiresAt DateTime? @map("expires_at") @db.Timestamptz(3)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)

@@ -5,6 +5,7 @@ enum RuleCompatibilityMode {
   ExactMatch
   SpecificExpansions
   SpecificVersions
+  Universal
 
   @@map("rule_compatibility_modes")
 }

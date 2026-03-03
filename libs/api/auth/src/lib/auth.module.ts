@@ -5,24 +5,29 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { authFactory } from './auth-factory';
 import authConfig from './configuration/auth.config';
-import { StrategyController } from './strategy.controller';
-import { StrategyService } from './strategy.service';
+import { UserProvisioningService } from './provisioning/user-provisioning.service';
+import { StrategyController, StrategyService } from './strategy';
 
 @Module({
   imports: [
     ConfigModule.forFeature(authConfig),
     DatabaseModule,
     BetterAuthModule.forRootAsync({
-      useFactory: (databaseClient: DatabaseService, configService: ConfigService, cache: Cache) => {
-        const auth = authFactory(databaseClient, configService, cache);
+      useFactory: (
+        databaseClient: DatabaseService,
+        configService: ConfigService,
+        cache: Cache,
+        userProvisioningService: UserProvisioningService,
+      ) => {
+        const auth = authFactory(databaseClient, configService, cache, userProvisioningService);
         return { auth };
       },
-      imports: [DatabaseModule],
-      inject: [DatabaseService, ConfigService, CACHE_MANAGER],
+      imports: [DatabaseModule, AuthModule],
+      inject: [DatabaseService, ConfigService, CACHE_MANAGER, UserProvisioningService],
     }),
   ],
   controllers: [StrategyController],
-  providers: [StrategyService],
-  exports: [StrategyService],
+  providers: [StrategyService, UserProvisioningService],
+  exports: [StrategyService, UserProvisioningService],
 })
 export class AuthModule {}

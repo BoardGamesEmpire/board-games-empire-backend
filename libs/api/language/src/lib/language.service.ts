@@ -1,5 +1,6 @@
-import { DatabaseService } from '@bge/database';
-import { Injectable } from '@nestjs/common';
+import { DatabaseService, Prisma } from '@bge/database';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaError } from '@status/codes';
 
 @Injectable()
 export class LanguageService {
@@ -10,8 +11,18 @@ export class LanguageService {
   }
 
   async getLanguageById(id: string) {
-    return this.db.language.findUniqueOrThrow({
-      where: { id },
-    });
+    try {
+      return await this.db.language.findUniqueOrThrow({
+        where: { id },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === PrismaError.DependentRecordNotFound) {
+          throw new NotFoundException(`Language with id ${id} not found`);
+        }
+      }
+
+      throw error;
+    }
   }
 }

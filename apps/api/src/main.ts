@@ -1,4 +1,4 @@
-import { authFactory } from '@bge/auth';
+import { authFactory, UserProvisioningService } from '@bge/auth';
 import { DatabaseService } from '@bge/database';
 import { env } from '@bge/env';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -87,8 +87,12 @@ async function bootstrap() {
 
   const dbService = app.get(DatabaseService);
   const cacheService = app.get(CACHE_MANAGER);
+  const userProvisioningService = app.get(UserProvisioningService);
   const server = app.getHttpAdapter().getInstance();
-  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authFactory(dbService, configService, cacheService)));
+  server.all(
+    `/${globalPrefix}/auth/*any`,
+    toNodeHandler(authFactory(dbService, configService, cacheService, userProvisioningService)),
+  );
 
   const port = configService.get<number>('server.port', 33333);
   await app.listen(port);

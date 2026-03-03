@@ -23,10 +23,13 @@
   ],
   "references": [
     {
+      "path": "../../libs/api/user/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/user/tsconfig.lib.json"
+      "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/metrics/tsconfig.lib.json"

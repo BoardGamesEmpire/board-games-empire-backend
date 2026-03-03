@@ -1,0 +1,18 @@
+model ApiKeyScope {
+  id       String @id @default(cuid(2))
+
+  apiKey Apikey @relation(fields: [apiKeyId], references: [id], onDelete: Cascade)
+  apiKeyId String @map("api_key_id")
+
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  permissionId String @map("permission_id")
+
+  resourceType ResourceType @map("resource_type")
+  resourceId   String?      @map("resource_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([apiKeyId, permissionId, resourceType, resourceId])
+  @@index([permissionId])
+  @@map("api_key_scopes")
+}

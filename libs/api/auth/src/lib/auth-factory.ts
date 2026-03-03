@@ -1,15 +1,13 @@
 import { passkey } from '@better-auth/passkey';
-import { PrismaClient, SystemRole, Theme } from '@bge/database';
+import type { PrismaClient, User } from '@bge/database';
 import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
-import process from 'node:process';
 import {
   admin,
   anonymous,
-  apiKey,
   deviceAuthorization,
   genericOAuth,
   lastLoginMethod,
@@ -18,8 +16,15 @@ import {
   openAPI,
   twoFactor,
 } from 'better-auth/plugins';
+import process from 'node:process';
+import { UserProvisioningService } from './provisioning/user-provisioning.service';
 
-export function authFactory(prisma: PrismaClient, configService?: ConfigService, cache?: Cache) {
+export function authFactory(
+  prisma: PrismaClient,
+  configService?: ConfigService,
+  cache?: Cache,
+  userProvisioningService?: UserProvisioningService,
+) {
   const logger = new Logger('AuthFactory');
   logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
 
@@ -34,11 +39,9 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
   const plugins: BetterAuthPlugin[] = [
     admin(),
     anonymous(),
-    apiKey(),
     lastLoginMethod(),
     oneTap(),
     oneTimeToken(),
-    openAPI(),
     passkey(),
     twoFactor(),
 
@@ -46,6 +49,11 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
       verificationUri: '/device',
     }),
   ];
+
+  if (configService?.get<boolean>('swagger.enabled')) {
+    logger.log('Enabling OpenAPI plugin for API documentation');
+    plugins.push(openAPI());
+  }
 
   if (hasOIDC(configService)) {
     const oidcConfig = buildOIDC(configService);
@@ -101,49 +109,18 @@ export function authFactory(prisma: PrismaClient, configService?: ConfigService,
     secret: options.secret,
     database: prismaAdapter(prisma, {
       debugLogs: configService?.get<boolean>('server.is_production') === false,
-      transaction: true,
+      transaction: false,
       provider: 'postgresql',
     }),
     databaseHooks: {
       user: {
         create: {
-          async after(user) {
-            const usersCount = await prisma.user.count();
-            const role = usersCount === 1 ? SystemRole.Owner : SystemRole.User;
+          async after(user: any) {
+            if (!userProvisioningService) {
+              throw new Error('UserProvisioningService not provided to authFactory');
+            }
 
-            await prisma.user.update({
-              where: { id: user.id },
-              data: {
-                preferences: {
-                  create: {
-                    theme: Theme.System,
-                    emailNotifications: {},
-                    pushNotifications: {},
-                  },
-                },
-
-                profile: {
-                  create: {
-                    displayName:
-                      user.name ||
-                      <string>user.username ||
-                      user.email?.split('@')[0],
-                  },
-                },
-
-                roles: {
-                  create: {
-                    role: {
-                      connect: {
-                        name: role,
-                      },
-                    },
-                  },
-                },
-              },
-            });
-
-            logger.debug(`Assigned role '${role}' to new user with ID ${user.id}`);
+            await userProvisioningService.provisionNewUser(user as User);
           },
         },
       },

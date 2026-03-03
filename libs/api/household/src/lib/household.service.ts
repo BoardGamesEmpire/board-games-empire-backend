@@ -1,4 +1,7 @@
-import { DatabaseService, InviteStatus, SystemRole } from '@bge/database';
+import { DatabaseService, Household, InviteStatus, SystemRole } from '@bge/database';
+import { AppAbility } from '@bge/permissions';
+import { PaginationQueryDto } from '@bge/shared';
+import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 
@@ -6,13 +9,19 @@ import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 export class HouseholdService {
   constructor(private readonly db: DatabaseService) {}
 
-  async getHouseholdById(id: string) {
+  async getHouseholdById(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     // consider a raw query instead of this madness
+
     const household = await this.db.household.findUnique({
-      where: { id },
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
       include: {
         invites: {
-          where: { status: InviteStatus.Pending },
+          where: {
+            AND: [{ status: InviteStatus.Pending }],
+          },
         },
 
         language: {
@@ -23,6 +32,12 @@ export class HouseholdService {
         },
 
         members: {
+          select: {
+            userId: true,
+            householdId: true,
+            showAllGames: true,
+          },
+
           include: {
             user: {
               select: {
@@ -30,7 +45,14 @@ export class HouseholdService {
                 username: true,
               },
             },
+
             role: {
+              select: {
+                id: true,
+                householdMemberId: true,
+                roleId: true,
+              },
+
               include: {
                 role: {
                   select: {
@@ -127,7 +149,13 @@ export class HouseholdService {
     return this.db.household.create({
       data: {
         ...rest,
-        language: languageId ? { connect: { id: languageId } } : undefined,
+        language: languageId
+          ? {
+              connect: {
+                id: languageId,
+              },
+            }
+          : undefined,
 
         members: {
           create: {
@@ -147,30 +175,41 @@ export class HouseholdService {
     });
   }
 
-  async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
+  async updateHousehold(
+    id: string,
+    updateHouseholdDto: UpdateHouseholdDto,
+    userAbility: AppAbility,
+    apiKeyAbility?: AppAbility,
+  ) {
     if (Object.keys(updateHouseholdDto).length === 0) {
       throw new BadRequestException('At least one field must be provided for update');
     }
 
     const { languageId, ...rest } = updateHouseholdDto;
     return this.db.household.update({
-      where: { id },
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
       data: {
         ...rest,
-        language: languageId ? { connect: { id: languageId } } : undefined,
+        language: languageId
+          ? {
+              connect: {
+                id: languageId,
+              },
+            }
+          : undefined,
       },
     });
   }
 
-  async getHouseholdsForUser(userId: string) {
+  async getHouseholdsForUser(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.household.findMany({
       where: {
-        members: {
-          some: {
-            userId,
-          },
-        },
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
       },
+
       include: {
         language: {
           select: {
@@ -178,8 +217,8 @@ export class HouseholdService {
             name: true,
           },
         },
+
         members: {
-          where: { userId },
           include: {
             role: {
               include: {
@@ -194,18 +233,35 @@ export class HouseholdService {
           },
         },
       },
+
+      skip: pagination.offset,
+      take: pagination.limit,
     });
   }
 
   /**
    * @todo soft delete?
-   * 
-   * @param id 
-   * @returns 
+   *
+   * @param id
+   * @returns
    */
-  async deleteHousehold(id: string) {
+  async deleteHousehold(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.household.delete({
-      where: { id }
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
     });
+  }
+
+  private createHouseholdWhereAnd(userAbility: AppAbility, apiKeyAbility?: AppAbility): WhereInput<Household>[] {
+    const whereAnd: WhereInput<Household>[] = [];
+    if (userAbility) {
+      whereAnd.push(accessibleBy(userAbility).Household);
+    }
+    if (apiKeyAbility) {
+      whereAnd.push(accessibleBy(apiKeyAbility).Household);
+    }
+    return whereAnd;
   }
 }
