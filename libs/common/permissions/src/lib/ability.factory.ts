@@ -41,7 +41,9 @@ export class AbilityFactory {
       });
     });
 
-    return ability.build();
+    return ability.build({
+      detectSubjectType: (object) => (object?.constructor?.name || object) as ExtractSubjectType<Subjects>,
+    });
   }
 
   createForApiKey(apiKey: ApikeyWithScopes): AppAbility {
@@ -69,7 +71,7 @@ export class AbilityFactory {
     for (const permission of permissions) {
       let parsedConditions: Record<string, any> | undefined = undefined;
 
-      if (permission.conditions) {
+      if (Object.keys(permission.conditions || {}).length > 0) {
         const templated = cloneDeep(permission.conditions);
         const rendered = Mustache.render(JSON.stringify(templated), context);
         parsedConditions = JSON.parse(rendered);

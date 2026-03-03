@@ -56,11 +56,11 @@ enum SystemRole {
 }
 
 enum Action {
-  Create
-  Read
-  Update
-  Delete
-  Manage
+  Create @map("create")
+  Read   @map("read")
+  Update @map("update")
+  Delete @map("delete")
+  Manage @map("manage")
 
   @@map("actions")
 }

@@ -1,21 +1,27 @@
-import { DatabaseService, InviteStatus, SystemRole } from '@bge/database';
+import { DatabaseService, Household, InviteStatus, SystemRole } from '@bge/database';
+import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { accessibleBy } from '@casl/prisma';
+import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { ClsService } from 'nestjs-cls';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 
 @Injectable()
 export class HouseholdService {
-  constructor(private readonly db: DatabaseService, private readonly cls: ClsService) {}
+  constructor(private readonly db: DatabaseService) {}
 
-  async getHouseholdById(id: string) {
+  async getHouseholdById(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     // consider a raw query instead of this madness
+
     const household = await this.db.household.findUnique({
-      where: { id },
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
       include: {
         invites: {
-          where: { status: InviteStatus.Pending },
+          where: {
+            AND: [{ status: InviteStatus.Pending }],
+          },
         },
 
         language: {
@@ -26,6 +32,12 @@ export class HouseholdService {
         },
 
         members: {
+          select: {
+            userId: true,
+            householdId: true,
+            showAllGames: true,
+          },
+
           include: {
             user: {
               select: {
@@ -33,7 +45,14 @@ export class HouseholdService {
                 username: true,
               },
             },
+
             role: {
+              select: {
+                id: true,
+                householdMemberId: true,
+                roleId: true,
+              },
+
               include: {
                 role: {
                   select: {
@@ -130,7 +149,13 @@ export class HouseholdService {
     return this.db.household.create({
       data: {
         ...rest,
-        language: languageId ? { connect: { id: languageId } } : undefined,
+        language: languageId
+          ? {
+              connect: {
+                id: languageId,
+              },
+            }
+          : undefined,
 
         members: {
           create: {
@@ -150,34 +175,41 @@ export class HouseholdService {
     });
   }
 
-  async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
+  async updateHousehold(
+    id: string,
+    updateHouseholdDto: UpdateHouseholdDto,
+    userAbility: AppAbility,
+    apiKeyAbility?: AppAbility,
+  ) {
     if (Object.keys(updateHouseholdDto).length === 0) {
       throw new BadRequestException('At least one field must be provided for update');
     }
 
     const { languageId, ...rest } = updateHouseholdDto;
     return this.db.household.update({
-      where: { id },
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
       data: {
         ...rest,
-        language: languageId ? { connect: { id: languageId } } : undefined,
+        language: languageId
+          ? {
+              connect: {
+                id: languageId,
+              },
+            }
+          : undefined,
       },
     });
   }
 
-  async getHouseholdsForUser(pagination: PaginationQueryDto) {
-    const userAbility = this.cls.get('userAbility');
-    const apiKeyAbility = this.cls.get('apiKeyAbility');
-
+  async getHouseholdsForUser(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.household.findMany({
       where: {
-        AND: [
-          accessibleBy(userAbility).Household,
-          // If there's an API key with permissions, include those as well. We want the intersection
-          // of both permissions
-          apiKeyAbility ? accessibleBy(apiKeyAbility).Household : {},
-        ],
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
       },
+
       include: {
         language: {
           select: {
@@ -185,6 +217,7 @@ export class HouseholdService {
             name: true,
           },
         },
+
         members: {
           include: {
             role: {
@@ -200,6 +233,7 @@ export class HouseholdService {
           },
         },
       },
+
       skip: pagination.offset,
       take: pagination.limit,
     });
@@ -211,9 +245,23 @@ export class HouseholdService {
    * @param id
    * @returns
    */
-  async deleteHousehold(id: string) {
+  async deleteHousehold(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.household.delete({
-      where: { id },
+      where: {
+        id,
+        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+      },
     });
+  }
+
+  private createHouseholdWhereAnd(userAbility: AppAbility, apiKeyAbility?: AppAbility): WhereInput<Household>[] {
+    const whereAnd: WhereInput<Household>[] = [];
+    if (userAbility) {
+      whereAnd.push(accessibleBy(userAbility).Household);
+    }
+    if (apiKeyAbility) {
+      whereAnd.push(accessibleBy(apiKeyAbility).Household);
+    }
+    return whereAnd;
   }
 }

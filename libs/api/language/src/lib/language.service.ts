@@ -1,5 +1,6 @@
 import { DatabaseService, Prisma } from '@bge/database';
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaError } from '@status/codes';
 
 @Injectable()
 export class LanguageService {
@@ -16,7 +17,9 @@ export class LanguageService {
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        throw new NotFoundException(`Language with id ${id} not found`);
+        if (error.code === PrismaError.DependentRecordNotFound) {
+          throw new NotFoundException(`Language with id ${id} not found`);
+        }
       }
 
       throw error;

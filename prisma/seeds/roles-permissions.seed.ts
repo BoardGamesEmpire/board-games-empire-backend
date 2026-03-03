@@ -3,6 +3,8 @@ import type { Logger } from '@nestjs/common';
 
 /**
  * Initialize default roles and permissions
+ *
+ * @todo refinements - these need work
  */
 export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logger) {
   // ============================================
@@ -13,8 +15,11 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   const permissionsToCreate = [
     // --- Global Admin/Owner ---
     { action: Action.Manage, subject: 'all', slug: 'manage:all', reason: 'Unrestricted access for Owner' },
+    { action: Action.Manage, subject: 'all', slug: 'manage:content:moderate', reason: 'Moderate app content' },
+    { action: Action.Read, subject: 'all', slug: 'read:public_content', reason: 'View public content' },
 
     // --- App Level / User ---
+    // TODO: consider the ability to block other users from viewing your profile, etc.
     { action: Action.Read, subject: 'User', slug: 'read:user:profile', reason: 'View user profiles' },
     {
       action: Action.Update,
@@ -25,6 +30,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     { action: Action.Read, subject: 'Game', slug: 'read:game', reason: 'View games' },
     { action: Action.Create, subject: 'Game', slug: 'create:game', reason: 'Create games' },
+
+    // TODO: We should probably have conditions here to only allow updating/deleting games you created or that are in your collection, etc. Otherwise users could mess with each other's games.
     { action: Action.Update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
     { action: Action.Delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
 
@@ -33,26 +40,50 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     {
       action: Action.Create,
       subject: 'GameCollection',
+      conditions: { userId: '{{ user.id }}' },
       slug: 'create:game_collection',
       reason: 'Add game to collection',
     },
     {
       action: Action.Update,
       subject: 'GameCollection',
+      conditions: { userId: '{{ user.id }}' },
       slug: 'update:game_collection',
       reason: 'Update game in collection',
     },
     {
       action: Action.Delete,
       subject: 'GameCollection',
+      conditions: { userId: '{{ user.id }}' },
       slug: 'delete:game_collection',
       reason: 'Remove game from collection',
     },
 
     // --- Households ---
     { action: Action.Create, subject: 'Household', slug: 'create:household', reason: 'Create a household' },
-    { action: Action.Read, subject: 'Household', slug: 'read:household', reason: 'View a household' },
-    { action: Action.Update, subject: 'Household', slug: 'update:household', reason: 'Update a household' },
+    { action: Action.Read, subject: 'Household', slug: 'read:households', reason: 'View households' },
+    {
+      action: Action.Read,
+      subject: 'Household',
+      conditions: {
+        householdId: '{{ householdId }}',
+        members: { some: { userId: '{{ user.id }}' } },
+      },
+      slug: 'read:household',
+      reason: 'View household details',
+    },
+
+    // TODO: We should probably have more granular permissions here to allow for different levels of household management, etc. Otherwise, any member could update the household details
+    {
+      action: Action.Update,
+      subject: 'Household',
+      conditions: {
+        id: '{{ householdId }}',
+        members: { some: { userId: '{{ user.id }}' } },
+      },
+      slug: 'update:household',
+      reason: 'Update a household',
+    },
     {
       action: Action.Delete,
       subject: 'Household',
@@ -71,92 +102,221 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     {
       action: Action.Manage,
       subject: 'HouseholdMember',
+      conditions: {
+        householdId: '{{ householdId }}',
+        members: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+          },
+        },
+      },
       slug: 'manage:household_member',
       reason: 'Manage household members',
     },
     {
       action: Action.Create,
       subject: 'HouseholdRole',
+      conditions: {
+        householdId: '{{ householdId }}',
+        members: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+          },
+        },
+      },
       slug: 'create:household_role',
       reason: 'Create household roles',
     },
+
+    // TODO: maybe defer to a household policy?
     {
       action: Action.Create,
-      subject: 'HouseholdInvite',
+      subject: 'Invite',
+      conditions: {
+        householdId: '{{ householdId }}',
+        members: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+          },
+        },
+      },
       slug: 'create:household_invite',
       reason: 'Invite to household',
     },
+
+    // TODO: this is likely too simplistic
     {
       action: Action.Create,
       subject: 'HouseholdMember',
+      conditions: {
+        householdId: '{{ householdId }}',
+      },
       slug: 'create:household_member:join',
       reason: 'Join household',
     },
 
     // --- Events ---
     { action: Action.Create, subject: 'Event', slug: 'create:event', reason: 'Create an event' },
+
+    // TODO household specific event permissions? i.e read:household_event etc
     { action: Action.Read, subject: 'Event', slug: 'read:event', reason: 'View an event' },
-    { action: Action.Update, subject: 'Event', slug: 'update:event', reason: 'Update an event' },
-    { action: Action.Delete, subject: 'Event', slug: 'delete:event', reason: 'Delete an event' },
+    {
+      action: Action.Update,
+      subject: 'Event',
+      conditions: {
+        id: '{{ eventId }}',
+        attendees: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventModerator'] } } },
+          },
+        },
+      },
+      slug: 'update:event',
+      reason: 'Update an event',
+    },
+    {
+      action: Action.Delete,
+      subject: 'Event',
+      conditions: { createdById: '{{ user.id }}' },
+      slug: 'delete:event',
+      reason: 'Delete an event as creator',
+    },
+
+    // TODO: this needs conditions to validate moderator role and scope
+    {
+      action: Action.Delete,
+      subject: 'Event',
+      slug: 'delete:event:moderate',
+      reason: 'Delete any event as moderator',
+    },
+
+    // TODO: this doesn't actually ensure the event is being cancelled...
     {
       action: Action.Update,
       subject: 'Event',
       fields: ['status'],
-      conditions: { status: 'CANCELLED' },
+      conditions: {
+        id: '{{ eventId }}',
+        attendees: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['EventHost', 'EventCoHost'] } } },
+          },
+        },
+      },
       slug: 'update:event:status:cancel-event',
       reason: 'Cancel an event',
     },
+
+    // An event can be archived if it is cancelled and the user is the host
     {
       action: Action.Update,
       subject: 'Event',
       fields: ['status'],
-      conditions: { status: 'CANCELLED' },
+      conditions: {
+        id: '{{ eventId }}',
+        status: 'Cancelled',
+        attendees: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: 'EventHost' } },
+          },
+        },
+      },
       slug: 'update:event:status:archive-event',
       reason: 'Archive a cancelled event',
     },
-    { action: Action.Create, subject: 'EventAttendee', slug: 'create:event_attendee:join', reason: 'Join an event' },
-    { action: Action.Create, subject: 'EventInvite', slug: 'create:event_invite', reason: 'Invite to event' },
+    {
+      action: Action.Create,
+      subject: 'Invite',
+      conditions: {
+        eventId: '{{ eventId }}',
+        event: {
+          attendees: {
+            some: {
+              userId: '{{ user.id }}',
+              role: { role: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventParticipant'] } } },
+            },
+          },
+        },
+      },
+      slug: 'create:event_invite',
+      reason: 'Invite to event',
+    },
     {
       action: Action.Manage,
       subject: 'EventAttendee',
+      conditions: { eventId: '{{ eventId }}' },
       slug: 'manage:event_attendee',
       reason: 'Manage event participants',
     },
 
     // --- Game Sessions ---
-    { action: Action.Read, subject: 'GameSession', slug: 'read:game_session', reason: 'View a game session' },
-    { action: Action.Create, subject: 'GameSession', slug: 'create:game_session', reason: 'Create a game session' },
-    { action: Action.Update, subject: 'GameSession', slug: 'update:game_session', reason: 'Update a game session' },
-    { action: Action.Delete, subject: 'GameSession', slug: 'delete:game_session', reason: 'Delete a game session' },
     {
       action: Action.Create,
-      subject: 'GameSessionAttendee',
-      slug: 'create:game_session_attendee:join',
+      subject: 'GamePlayResult',
+      slug: 'create:play_record',
+      reason: 'Create a play record',
+    },
+    { action: Action.Read, subject: 'GamePlaySession', slug: 'read:game_play_session', reason: 'View a game session' },
+    {
+      action: Action.Create,
+      subject: 'GamePlaySession',
+      slug: 'create:game_play_session',
+      reason: 'Create a game session',
+    },
+    {
+      action: Action.Update,
+      subject: 'GamePlaySession',
+      slug: 'update:game_play_session',
+      reason: 'Update a game session',
+    },
+    {
+      action: Action.Delete,
+      subject: 'GamePlaySession',
+      slug: 'delete:game_play_session',
+      reason: 'Delete a game session',
+    },
+    {
+      action: Action.Create,
+      subject: 'SessionPlayer',
+      slug: 'create:session_player:join',
       reason: 'Join a game session',
     },
     {
       action: Action.Create,
-      subject: 'GameSessionAttendee',
-      conditions: { role: 'OBSERVER' },
-      slug: 'create:game_session_attendee:observer:join',
-      reason: 'Join session as observer',
+      subject: 'SessionPlayer',
+      slug: 'create:session_player:observer:join',
+      reason: 'Join a game session as observer',
     },
 
-    // --- Campaigns ---
-    { action: Action.Create, subject: 'Campaign', slug: 'create:campaign', reason: 'Create campaign' },
-    { action: Action.Update, subject: 'Campaign', slug: 'update:campaign', reason: 'Update campaign' },
-    { action: Action.Delete, subject: 'Campaign', slug: 'delete:campaign', reason: 'Delete campaign' },
-    {
-      action: Action.Manage,
-      subject: 'CampaignMember',
-      slug: 'manage:campaign_member',
-      reason: 'Manage campaign members',
-    },
-
-    // --- Rule Variants & Media ---
+    // --- Rule Variants ---
     { action: Action.Create, subject: 'RuleVariant', slug: 'create:rule_variant', reason: 'Create rule variant' },
-    { action: Action.Update, subject: 'RuleVariant', slug: 'update:rule_variant', reason: 'Update rule variant' },
-    { action: Action.Delete, subject: 'RuleVariant', slug: 'delete:rule_variant', reason: 'Delete rule variant' },
+    {
+      action: Action.Update,
+      subject: 'RuleVariant',
+      conditions: {
+        createdById: '{{ user.id }}',
+      },
+      slug: 'update:rule_variant',
+      reason: 'Update rule variant',
+    },
+    {
+      action: Action.Delete,
+      subject: 'RuleVariant',
+      conditions: {
+        createdById: '{{ user.id }}',
+      },
+      slug: 'delete:rule_variant',
+      reason: 'Delete rule variant',
+    },
+
+    // --- Media ---
+    // TODO: expand media permissions
     { action: Action.Create, subject: 'Media', slug: 'create:media:upload', reason: 'Upload media' },
 
     // --- Customization ---
@@ -169,12 +329,18 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     {
       action: Action.Update,
       subject: 'UserGameCustomization',
+      conditions: {
+        userId: '{{ user.id }}',
+      },
       slug: 'update:user_game_customization',
       reason: 'Update customization',
     },
     {
       action: Action.Delete,
       subject: 'UserGameCustomization',
+      conditions: {
+        userId: '{{ user.id }}',
+      },
       slug: 'delete:user_game_customization',
       reason: 'Delete customization',
     },
@@ -228,6 +394,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     { name: SystemRole.EventOrganizer, description: 'Logistics focused, no moderation' },
     { name: SystemRole.EventModerator, description: 'Moderator scoped to an event' },
     { name: SystemRole.EventParticipant, description: 'Active participant in an event' },
+
+    // is there are difference?
     { name: SystemRole.EventGuest, description: 'Limited access event guest' },
     { name: SystemRole.EventSpectator, description: 'Read-only observer for an event' },
   ];
@@ -245,23 +413,24 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // Helper to map permissions to roles
   const assignPermissions = async (roleName: string, slugs: string[]) => {
-    const roleId = rolesByName[roleName].id;
+    const roleId: string = rolesByName[roleName].id;
     for (const slug of slugs) {
-      if (!permissionsBySlug[slug]) {
-        logger.warn(`Permission slug not found: ${slug}`);
-        continue;
+      const permission = permissionsBySlug[slug];
+      if (!permission) {
+        throw new Error(`Permission with slug ${slug} not found for role ${roleName}`);
       }
+
       await prisma.rolePermission.upsert({
         where: {
           roleId_permissionId: {
             roleId,
-            permissionId: permissionsBySlug[slug].id,
+            permissionId: permission.id,
           },
         },
         update: {},
         create: {
           roleId,
-          permissionId: permissionsBySlug[slug].id,
+          permissionId: permission.id,
         },
       });
     }
@@ -280,13 +449,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   await assignPermissions(SystemRole.Moderator, [
     'read:user:profile',
     'read:game_collection',
-    'read:game_session',
+    'read:game_play_session',
     'read:event',
     'read:household',
+    'read:households',
     'read:public_content',
     'manage:content:moderate',
-    'delete:event',
-    'delete:game_session',
+    'delete:event:moderate',
+    'delete:game_play_session',
     'update:event',
   ]);
 
@@ -296,8 +466,11 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:user:profile:own',
     'create:game',
     'create:event',
-    'create:campaign',
     'create:household',
+    'read:household',
+    'read:households',
+    'read:event',
+    'read:game_play_session',
     'create:rule_variant',
     'create:game_collection',
     'delete:game_collection',
@@ -307,14 +480,13 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:user_game_customization',
     'delete:user_game_customization',
     'create:household_member:join',
-    'create:event_attendee:join',
-    'create:game_session_attendee:join',
-    'read:public_content',
+    'create:session_player:join',
   ]);
 
   // HOUSEHOLD OWNER
   await assignPermissions(SystemRole.HouseholdOwner, [
     'read:household',
+    'read:households',
     'update:household',
     'delete:household',
     'manage:household_member',
@@ -325,13 +497,9 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:event',
     'manage:event_attendee',
     'create:event_invite',
-    'create:game_session',
-    'update:game_session',
-    'delete:game_session',
-    'create:campaign',
-    'update:campaign',
-    'delete:campaign',
-    'manage:campaign_member',
+    'create:game_play_session',
+    'update:game_play_session',
+    'delete:game_play_session',
     'create:rule_variant',
     'update:rule_variant',
     'delete:rule_variant',
@@ -342,6 +510,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // HOUSEHOLD ADMIN
   await assignPermissions(SystemRole.HouseholdAdmin, [
     'read:household',
+    'read:households',
     'update:household',
     'manage:household_member',
     'create:household_role',
@@ -350,11 +519,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event',
     'manage:event_attendee',
     'create:event_invite',
-    'create:game_session',
-    'update:game_session',
-    'create:campaign',
-    'update:campaign',
-    'manage:campaign_member',
+    'create:game_play_session',
+    'update:game_play_session',
     'create:rule_variant',
     'update:rule_variant',
     'create:play_record',
@@ -363,11 +529,11 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // HOUSEHOLD MEMBER
   await assignPermissions(SystemRole.HouseholdMember, [
     'read:household',
+    'read:households',
     'read:event',
-    'create:event_attendee:join',
-    'read:game_session',
-    'create:game_session_attendee:join',
-    'create:game_session',
+    'read:game_play_session',
+    'create:session_player:join',
+    'create:game_play_session',
     'create:play_record',
     'create:rule_variant',
     'read:game_collection',
@@ -376,10 +542,10 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // HOUSEHOLD GUEST
   await assignPermissions(SystemRole.HouseholdGuest, [
     'read:household',
+    'read:households',
     'read:event',
-    'create:event_attendee:join',
-    'read:game_session',
-    'create:game_session_attendee:join',
+    'read:game_play_session',
+    'create:session_player:join',
   ]);
 
   // EVENT HOST
@@ -391,11 +557,11 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event:status:archive-event',
     'manage:event_attendee',
     'create:event_invite',
-    'create:game_session',
+    'create:game_play_session',
     'create:play_record',
-    'read:game_session',
-    'update:game_session',
-    'delete:game_session',
+    'read:game_play_session',
+    'update:game_play_session',
+    'delete:game_play_session',
   ]);
 
   // EVENT CO-HOST
@@ -405,11 +571,11 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event:status:cancel-event',
     'manage:event_attendee',
     'create:event_invite',
-    'create:game_session',
+    'create:game_play_session',
     'create:play_record',
-    'read:game_session',
-    'update:game_session',
-    'delete:game_session',
+    'read:game_play_session',
+    'update:game_play_session',
+    'delete:game_play_session',
   ]);
 
   // EVENT ORGANIZER
@@ -424,19 +590,18 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   await assignPermissions(SystemRole.EventModerator, [
     'read:event',
     'update:event',
-    'delete:game_session',
+    'delete:game_play_session',
     'manage:event_attendee',
   ]);
 
   // EVENT PARTICIPANT
   await assignPermissions(SystemRole.EventParticipant, [
     'read:event',
-    'create:event_attendee:join',
     'create:event_invite',
-    'read:game_session',
-    'create:game_session_attendee:join',
-    'create:game_session',
-    'update:game_session',
+    'read:game_play_session',
+    'create:session_player:join',
+    'create:game_play_session',
+    'update:game_play_session',
     'create:play_record',
     'create:rule_variant',
     'create:media:upload',
@@ -446,16 +611,15 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // EVENT GUEST
   await assignPermissions(SystemRole.EventGuest, [
     'read:event',
-    'create:event_attendee:join',
-    'read:game_session',
-    'create:game_session_attendee:join',
+    'read:game_play_session',
+    'create:session_player:join',
   ]);
 
   // EVENT SPECTATOR
   await assignPermissions(SystemRole.EventSpectator, [
     'read:event',
-    'create:game_session_attendee:observer:join',
-    'read:game_session',
+    'create:session_player:observer:join',
+    'read:game_play_session',
   ]);
 
   logger.log('✅ All permissions assigned.');

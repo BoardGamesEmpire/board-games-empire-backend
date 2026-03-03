@@ -1,5 +1,5 @@
 import { IS_PUBLIC_KEY } from '@bge/shared';
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
 import assert from 'node:assert';
@@ -8,6 +8,8 @@ import type { AppAbility, PolicyHandler } from '../interfaces';
 
 @Injectable()
 export class PoliciesGuard implements CanActivate {
+  private readonly logger = new Logger(PoliciesGuard.name);
+
   constructor(private reflector: Reflector, private cls: ClsService) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -38,6 +40,12 @@ export class PoliciesGuard implements CanActivate {
       assert(keyPasses, new ForbiddenException('This API Key does not have the required permissions for this action.'));
     }
 
+    this.logger.debug(
+      `Access granted by PoliciesGuard: userAbility=${JSON.stringify(
+        userAbility.rules,
+      )}, apiKeyAbility=${JSON.stringify(apiKeyAbility?.rules)}`,
+    );
+
     return true;
   }
 
@@ -45,6 +53,7 @@ export class PoliciesGuard implements CanActivate {
     if (typeof handler === 'function') {
       return handler(ability);
     }
+
     return handler.handle(ability);
   }
 }

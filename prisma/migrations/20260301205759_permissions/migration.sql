@@ -18,10 +18,16 @@
 
 */
 -- CreateEnum
+CREATE TYPE "event_statuses" AS ENUM ('Archived', 'Cancelled', 'Completed', 'Ongoing', 'Planning', 'Scheduled');
+
+-- CreateEnum
 CREATE TYPE "system_roles" AS ENUM ('Owner', 'Admin', 'Moderator', 'User', 'HouseholdOwner', 'HouseholdAdmin', 'HouseholdMember', 'HouseholdGuest', 'EventHost', 'EventCoHost', 'EventOrganizer', 'EventModerator', 'EventParticipant', 'EventGuest', 'EventSpectator');
 
 -- CreateEnum
-CREATE TYPE "actions" AS ENUM ('Create', 'Read', 'Update', 'Delete', 'Manage');
+CREATE TYPE "actions" AS ENUM ('create', 'read', 'update', 'delete', 'manage');
+
+-- AlterEnum
+ALTER TYPE "rule_compatibility_modes" ADD VALUE 'Universal';
 
 -- AlterEnum
 BEGIN;
@@ -74,7 +80,8 @@ DROP COLUMN "type";
 -- AlterTable
 ALTER TABLE "events" DROP COLUMN "allow_guest_invites",
 DROP COLUMN "max_total_participants",
-DROP COLUMN "strict_capacity";
+DROP COLUMN "strict_capacity",
+ADD COLUMN     "status" "event_statuses" NOT NULL DEFAULT 'Planning';
 
 -- AlterTable
 ALTER TABLE "role_permissions" DROP COLUMN "permission",

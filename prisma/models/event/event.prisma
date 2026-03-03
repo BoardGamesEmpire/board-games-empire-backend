@@ -9,6 +9,7 @@ model Event {
   createdById String @map("created_by_id")
 
   title       String
+  status      EventStatus @default(Planning)
   image       String?
   description String?
   location    String?
@@ -38,4 +39,15 @@ model Event {
   @@index([createdById])
   @@index([startDate])
   @@map("events")
+}
+
+enum EventStatus {
+  Archived
+  Cancelled
+  Completed
+  Ongoing
+  Planning
+  Scheduled
+
+  @@map("event_statuses")
 }

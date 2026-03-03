@@ -1,4 +1,5 @@
 import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
+import type { Request } from 'express';
 import { ClsService } from 'nestjs-cls';
 import { AbilityFactory } from '../ability.factory';
 import type { ApikeyWithScopes } from '../interfaces';
@@ -27,12 +28,12 @@ export class ContextGuard implements CanActivate {
 
       this.cls.set('user', userGraph);
       this.cls.set('userAbility', ability);
+    }
 
-      const apiKey = request.apiKey;
-      if (apiKey) {
-        const apikeyAbility = this.abilityFactory.createForApiKey(apiKey);
-        this.cls.set('apiKeyAbility', apikeyAbility);
-      }
+    const apiKey = request.apiKey;
+    if (apiKey) {
+      const apikeyAbility = this.abilityFactory.createForApiKey(apiKey);
+      this.cls.set('apiKeyAbility', apikeyAbility);
     }
 
     return true;

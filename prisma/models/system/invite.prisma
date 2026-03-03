@@ -35,7 +35,7 @@ model Invite {
   inviteeEmail String? @map("invitee_email")
   inviteeName  String? @map("invitee_name")
 
-  // Context (polymorphic)
+  // Context
   event       Event?     @relation(fields: [eventId], references: [id])
   eventId     String?    @map("event_id")
   household   Household? @relation(fields: [householdId], references: [id])
