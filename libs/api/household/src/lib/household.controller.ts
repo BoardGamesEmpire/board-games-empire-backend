@@ -52,9 +52,7 @@ export class HouseholdController {
     );
   }
 
-  // @CheckPolicies((ability, householdId: string) =>
-  //   ability.can(Action.read, subject(ResourceType.Household, { id: householdId })),
-  // )
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get(':id')
   getById(@Param('id') id: string) {
     this.logger.debug(`Fetching household with ID: ${id}`);
