@@ -14,45 +14,46 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   const permissionsToCreate = [
     // --- Global Admin/Owner ---
-    { action: Action.Manage, subject: 'all', slug: 'manage:all', reason: 'Unrestricted access for Owner' },
-    { action: Action.Manage, subject: 'all', slug: 'manage:content:moderate', reason: 'Moderate app content' },
-    { action: Action.Read, subject: 'all', slug: 'read:public_content', reason: 'View public content' },
+    { action: Action.manage, subject: 'all', slug: 'manage:all', reason: 'Unrestricted access for Owner' },
+    { action: Action.manage, subject: 'all', slug: 'manage:content:moderate', reason: 'Moderate app content' },
+    { action: Action.read, subject: 'all', slug: 'read:public_content', reason: 'View public content' },
 
     // --- App Level / User ---
     // TODO: consider the ability to block other users from viewing your profile, etc.
-    { action: Action.Read, subject: 'User', slug: 'read:user:profile', reason: 'View user profiles' },
+    { action: Action.read, subject: 'UserProfile', slug: 'read:user:profile', reason: 'View user profiles' },
     {
-      action: Action.Update,
-      subject: 'User',
+      action: Action.update,
+      subject: 'UserProfile',
       conditions: { id: '{{ user.id }}' },
       slug: 'update:user:profile:own',
       reason: 'Update own profile',
     },
-    { action: Action.Read, subject: 'Game', slug: 'read:game', reason: 'View games' },
-    { action: Action.Create, subject: 'Game', slug: 'create:game', reason: 'Create games' },
+
+    { action: Action.read, subject: 'Game', slug: 'read:game', reason: 'View games' },
+    { action: Action.create, subject: 'Game', slug: 'create:game', reason: 'Create games' },
 
     // TODO: We should probably have conditions here to only allow updating/deleting games you created or that are in your collection, etc. Otherwise users could mess with each other's games.
-    { action: Action.Update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
-    { action: Action.Delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
+    { action: Action.update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
+    { action: Action.delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
 
     // Game Collection
-    { action: Action.Read, subject: 'GameCollection', slug: 'read:game_collection', reason: 'View game collections' },
+    { action: Action.read, subject: 'GameCollection', slug: 'read:game_collection', reason: 'View game collections' },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'GameCollection',
       conditions: { userId: '{{ user.id }}' },
       slug: 'create:game_collection',
       reason: 'Add game to collection',
     },
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'GameCollection',
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:game_collection',
       reason: 'Update game in collection',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'GameCollection',
       conditions: { userId: '{{ user.id }}' },
       slug: 'delete:game_collection',
@@ -60,14 +61,21 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // --- Households ---
-    { action: Action.Create, subject: 'Household', slug: 'create:household', reason: 'Create a household' },
-    { action: Action.Read, subject: 'Household', slug: 'read:households', reason: 'View households' },
+    { action: Action.create, subject: 'Household', slug: 'create:household', reason: 'Create a household' },
     {
-      action: Action.Read,
+      action: Action.read,
       subject: 'Household',
       conditions: {
-        householdId: '{{ householdId }}',
         members: { some: { userId: '{{ user.id }}' } },
+      },
+      slug: 'read:households',
+      reason: 'View households',
+    },
+    {
+      action: Action.read,
+      subject: 'Household',
+      conditions: {
+        id: '{{ householdId }}',
       },
       slug: 'read:household',
       reason: 'View household details',
@@ -75,7 +83,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // TODO: We should probably have more granular permissions here to allow for different levels of household management, etc. Otherwise, any member could update the household details
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'Household',
       conditions: {
         id: '{{ householdId }}',
@@ -85,7 +93,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Update a household',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'Household',
       conditions: {
         id: '{{ householdId }}',
@@ -100,7 +108,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Delete a household',
     },
     {
-      action: Action.Manage,
+      action: Action.manage,
       subject: 'HouseholdMember',
       conditions: {
         householdId: '{{ householdId }}',
@@ -115,7 +123,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Manage household members',
     },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'HouseholdRole',
       conditions: {
         householdId: '{{ householdId }}',
@@ -132,7 +140,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // TODO: maybe defer to a household policy?
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'Invite',
       conditions: {
         householdId: '{{ householdId }}',
@@ -149,7 +157,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // TODO: this is likely too simplistic
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'HouseholdMember',
       conditions: {
         householdId: '{{ householdId }}',
@@ -159,12 +167,12 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // --- Events ---
-    { action: Action.Create, subject: 'Event', slug: 'create:event', reason: 'Create an event' },
+    { action: Action.create, subject: 'Event', slug: 'create:event', reason: 'Create an event' },
 
     // TODO household specific event permissions? i.e read:household_event etc
-    { action: Action.Read, subject: 'Event', slug: 'read:event', reason: 'View an event' },
+    { action: Action.read, subject: 'Event', slug: 'read:event', reason: 'View an event' },
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'Event',
       conditions: {
         id: '{{ eventId }}',
@@ -179,7 +187,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Update an event',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'Event',
       conditions: { createdById: '{{ user.id }}' },
       slug: 'delete:event',
@@ -188,7 +196,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // TODO: this needs conditions to validate moderator role and scope
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'Event',
       slug: 'delete:event:moderate',
       reason: 'Delete any event as moderator',
@@ -196,7 +204,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // TODO: this doesn't actually ensure the event is being cancelled...
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'Event',
       fields: ['status'],
       conditions: {
@@ -214,7 +222,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // An event can be archived if it is cancelled and the user is the host
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'Event',
       fields: ['status'],
       conditions: {
@@ -231,7 +239,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Archive a cancelled event',
     },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'Invite',
       conditions: {
         eventId: '{{ eventId }}',
@@ -248,7 +256,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Invite to event',
     },
     {
-      action: Action.Manage,
+      action: Action.manage,
       subject: 'EventAttendee',
       conditions: { eventId: '{{ eventId }}' },
       slug: 'manage:event_attendee',
@@ -257,47 +265,47 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // --- Game Sessions ---
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'GamePlayResult',
       slug: 'create:play_record',
       reason: 'Create a play record',
     },
-    { action: Action.Read, subject: 'GamePlaySession', slug: 'read:game_play_session', reason: 'View a game session' },
+    { action: Action.read, subject: 'GamePlaySession', slug: 'read:game_play_session', reason: 'View a game session' },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'GamePlaySession',
       slug: 'create:game_play_session',
       reason: 'Create a game session',
     },
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'GamePlaySession',
       slug: 'update:game_play_session',
       reason: 'Update a game session',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'GamePlaySession',
       slug: 'delete:game_play_session',
       reason: 'Delete a game session',
     },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'SessionPlayer',
       slug: 'create:session_player:join',
       reason: 'Join a game session',
     },
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'SessionPlayer',
       slug: 'create:session_player:observer:join',
       reason: 'Join a game session as observer',
     },
 
     // --- Rule Variants ---
-    { action: Action.Create, subject: 'RuleVariant', slug: 'create:rule_variant', reason: 'Create rule variant' },
+    { action: Action.create, subject: 'RuleVariant', slug: 'create:rule_variant', reason: 'Create rule variant' },
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'RuleVariant',
       conditions: {
         createdById: '{{ user.id }}',
@@ -306,7 +314,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Update rule variant',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'RuleVariant',
       conditions: {
         createdById: '{{ user.id }}',
@@ -317,17 +325,17 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // --- Media ---
     // TODO: expand media permissions
-    { action: Action.Create, subject: 'Media', slug: 'create:media:upload', reason: 'Upload media' },
+    { action: Action.create, subject: 'Media', slug: 'create:media:upload', reason: 'Upload media' },
 
     // --- Customization ---
     {
-      action: Action.Create,
+      action: Action.create,
       subject: 'UserGameCustomization',
       slug: 'create:user_game_customization',
       reason: 'Create customization',
     },
     {
-      action: Action.Update,
+      action: Action.update,
       subject: 'UserGameCustomization',
       conditions: {
         userId: '{{ user.id }}',
@@ -336,7 +344,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Update customization',
     },
     {
-      action: Action.Delete,
+      action: Action.delete,
       subject: 'UserGameCustomization',
       conditions: {
         userId: '{{ user.id }}',
@@ -467,9 +475,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:game',
     'create:event',
     'create:household',
-    'read:household',
     'read:households',
-    'read:event',
     'read:game_play_session',
     'create:rule_variant',
     'create:game_collection',

@@ -33,8 +33,9 @@ jobs:
 
       - run: npm ci
 
-      # Generate db typings before running typecheck
+      # Generate db typings and proto files before running typecheck
       - run: npm run db:generate
+      - run: npm run proto:generate
 
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
       # - run: npx nx record -- echo Hello World

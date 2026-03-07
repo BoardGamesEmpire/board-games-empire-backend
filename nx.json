@@ -52,7 +52,7 @@
       "options": {
         "targetName": "test"
       },
-      "exclude": ["apps/api-e2e/**/*"]
+      "exclude": ["apps/api-e2e/**/*", "apps/gateway-coordinator-e2e/**/*"]
     },
     {
       "plugin": "@nx/docker",
@@ -74,6 +74,11 @@
       "cache": true,
       "dependsOn": ["^build"],
       "inputs": ["production", "^production"]
+    }
+  },
+  "release": {
+    "version": {
+      "preVersionCommand": "npx nx run-many -t build"
     }
   }
 }

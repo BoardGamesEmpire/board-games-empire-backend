@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package bge.coordinator.v1;
+
+import "google/protobuf/empty.proto";
+import "grpc/health/v1/health.proto";
+
+option java_package = "com.bge.coordinator.v1";
+option java_multiple_files = true;
+
+service CoordinatorService {
+  // Liveness - is the coordinator process alive?
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // Standard gRPC health check (delegates to registered gateway health)
+  rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+}
+
+message PingRequest {
+  // Optional trace ID for correlation
+  optional string correlation_id = 1;
+}
+
+message PingResponse {
+  string correlation_id = 1;
+  int64 timestamp_ms = 2;
+  string coordinator_version = 3;
+}

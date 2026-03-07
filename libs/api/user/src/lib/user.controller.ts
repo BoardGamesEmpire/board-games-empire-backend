@@ -1,6 +1,9 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Action, ResourceType } from '@bge/database';
+import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard, Session, type UserSession } from '@thallesp/nestjs-better-auth';
+import { UserSearchQueryDto } from './dto/user-search-query.dto';
 import { UserService } from './user.service';
 
 @ApiTags('users')
@@ -12,5 +15,12 @@ export class UserController {
   @Get('me')
   me(@Session() session: UserSession) {
     return { user: session?.user };
+  }
+
+  @UseGuards(PoliciesGuard)
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.UserProfile))
+  @Get('search')
+  search(@Query() query: UserSearchQueryDto, @Session() session: UserSession) {
+    return this.userService.searchUsers(session.user.id, query);
   }
 }
