@@ -27,6 +27,9 @@ CREATE TYPE "system_roles" AS ENUM ('Owner', 'Admin', 'Moderator', 'User', 'Hous
 CREATE TYPE "actions" AS ENUM ('create', 'read', 'update', 'delete', 'manage');
 
 -- AlterEnum
+ALTER TYPE "resource_types" ADD VALUE 'UserProfile';
+
+-- AlterEnum
 ALTER TYPE "rule_compatibility_modes" ADD VALUE 'Universal';
 
 -- AlterEnum
@@ -81,11 +84,15 @@ DROP COLUMN "type";
 ALTER TABLE "events" DROP COLUMN "allow_guest_invites",
 DROP COLUMN "max_total_participants",
 DROP COLUMN "strict_capacity",
+ADD COLUMN     "deleted_at" TIMESTAMPTZ(3),
 ADD COLUMN     "status" "event_statuses" NOT NULL DEFAULT 'Planning';
 
 -- AlterTable
 ALTER TABLE "role_permissions" DROP COLUMN "permission",
 ADD COLUMN     "permission_id" TEXT NOT NULL;
+
+-- AlterTable
+ALTER TABLE "rule_variants" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
 
 -- AlterTable
 ALTER TABLE "user_permissions" DROP COLUMN "permission",
@@ -184,9 +191,6 @@ CREATE UNIQUE INDEX "event_attendee_roles_event_attendee_id_key" ON "event_atten
 
 -- CreateIndex
 CREATE INDEX "event_attendee_roles_role_id_idx" ON "event_attendee_roles"("role_id");
-
--- CreateIndex
-CREATE UNIQUE INDEX "event_attendee_roles_event_attendee_id_role_id_key" ON "event_attendee_roles"("event_attendee_id", "role_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "event_policies_event_id_key" ON "event_policies"("event_id");

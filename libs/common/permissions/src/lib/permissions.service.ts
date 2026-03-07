@@ -12,6 +12,7 @@ export class PermissionsService {
 
   async getUserRoleGraph(userId: string) {
     const cacheKey = `bge:user:permissions:${userId}`;
+    await this.cache.del(cacheKey); // TODO: remove this line, just for testing right now
     const cachedGraph = await this.cache.get<UserWithRoles>(cacheKey);
     if (cachedGraph) {
       this.logger.debug(`User role graph cache hit for user ${userId}`);

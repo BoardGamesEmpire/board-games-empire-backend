@@ -7,10 +7,10 @@ export class UserProvisioningService {
 
   constructor(private readonly db: DatabaseService) {}
 
-  async provisionNewUser(user: User): Promise<void> {
+  async provisionNewUser(user: User & { name?: string }): Promise<void> {
     const displayName = user.firstName
       ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim()
-      : user.username ?? user.email?.split('@')[0];
+      : (user.name || user.username) ?? user.email?.split('@')[0];
 
     // Determine role: first committed user becomes Owner, all others get User
     const usersCount = await this.db.user.count();

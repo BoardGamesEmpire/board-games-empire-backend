@@ -41,6 +41,15 @@
     },
     {
       "path": "./libs/common/shared"
+    },
+    {
+      "path": "./apps/gateway-coordinator-e2e"
+    },
+    {
+      "path": "./apps/gateway-coordinator"
+    },
+    {
+      "path": "./libs/proto/gateway"
     }
   ]
 }

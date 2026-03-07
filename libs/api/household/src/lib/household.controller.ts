@@ -9,6 +9,7 @@ import {
   ForbiddenException,
   Get,
   Inject,
+  Logger,
   Param,
   Patch,
   Post,
@@ -27,13 +28,15 @@ import { HouseholdService } from './household.service';
 @ApiTags('households')
 @Controller('households')
 export class HouseholdController {
+  private readonly logger = new Logger(HouseholdController.name);
+
   constructor(
     private readonly householdService: HouseholdService,
     private readonly cls: ClsService,
     @Inject(CACHE_MANAGER) private cache: Cache,
   ) {}
 
-  @CheckPolicies((ability) => ability.can(Action.Read, ResourceType.Household))
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get()
   getHouseholdsForUser(@Query() pagination: PaginationQueryDto) {
     const userAbility = this.getUserAbility();
@@ -41,7 +44,7 @@ export class HouseholdController {
     return from(this.householdService.getHouseholdsForUser(pagination, userAbility, apiKeyAbility));
   }
 
-  @CheckPolicies((ability) => ability.can(Action.Create, ResourceType.Household))
+  @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Household))
   @Post()
   create(@Session() session: UserSession, @Body() createHouseholdDto: CreateHouseholdDto) {
     return from(this.householdService.create(session.user.id, createHouseholdDto)).pipe(
@@ -49,15 +52,19 @@ export class HouseholdController {
     );
   }
 
-  @CheckPolicies((ability) => ability.can(Action.Read, ResourceType.Household))
+  // @CheckPolicies((ability, householdId: string) =>
+  //   ability.can(Action.read, subject(ResourceType.Household, { id: householdId })),
+  // )
   @Get(':id')
   getById(@Param('id') id: string) {
+    this.logger.debug(`Fetching household with ID: ${id}`);
+
     const userAbility = this.getUserAbility();
     const apiKeyAbility = this.cls.get<AppAbility>('apiKeyAbility');
     return from(this.householdService.getHouseholdById(id, userAbility, apiKeyAbility));
   }
 
-  @CheckPolicies((ability) => ability.can(Action.Update, ResourceType.Household))
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Household))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateHouseholdDto: UpdateHouseholdDto) {
     const userAbility = this.getUserAbility();
@@ -65,7 +72,7 @@ export class HouseholdController {
     return from(this.householdService.updateHousehold(id, updateHouseholdDto, userAbility, apiKeyAbility));
   }
 
-  @CheckPolicies((ability) => ability.can(Action.Delete, ResourceType.Household))
+  @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Household))
   @Delete(':id')
   async delete(@Param('id') id: string) {
     const userAbility = this.getUserAbility();

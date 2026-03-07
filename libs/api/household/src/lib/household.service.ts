@@ -1,12 +1,16 @@
-import { DatabaseService, Household, InviteStatus, SystemRole } from '@bge/database';
+import { DatabaseService, Household, InviteStatus, Prisma, SystemRole } from '@bge/database';
 import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { accessibleBy, WhereInput } from '@casl/prisma';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { PrismaError } from '@status/codes';
+import assert from 'node:assert';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 
 @Injectable()
 export class HouseholdService {
+  private readonly logger = new Logger(HouseholdService.name);
+
   constructor(private readonly db: DatabaseService) {}
 
   async getHouseholdById(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
@@ -32,27 +36,21 @@ export class HouseholdService {
         },
 
         members: {
-          select: {
-            userId: true,
-            householdId: true,
-            showAllGames: true,
-          },
-
           include: {
             user: {
               select: {
                 id: true,
                 username: true,
+                profile: {
+                  select: {
+                    avatarUrl: true,
+                    displayName: true,
+                  },
+                },
               },
             },
 
             role: {
-              select: {
-                id: true,
-                householdMemberId: true,
-                roleId: true,
-              },
-
               include: {
                 role: {
                   select: {
@@ -186,22 +184,34 @@ export class HouseholdService {
     }
 
     const { languageId, ...rest } = updateHouseholdDto;
-    return this.db.household.update({
-      where: {
-        id,
-        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
-      },
-      data: {
-        ...rest,
-        language: languageId
-          ? {
-              connect: {
-                id: languageId,
-              },
-            }
-          : undefined,
-      },
-    });
+
+    try {
+      return await this.db.household.update({
+        where: {
+          id,
+          AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+        },
+        data: {
+          ...rest,
+          language: languageId
+            ? {
+                connect: {
+                  id: languageId,
+                },
+              }
+            : undefined,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Error updating household with id ${id}`, error);
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === PrismaError.DependentRecordNotFound) {
+          throw new NotFoundException(`Household with id ${id} not found or you don't have permission to update it.`);
+        }
+      }
+
+      throw error;
+    }
   }
 
   async getHouseholdsForUser(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
@@ -220,6 +230,19 @@ export class HouseholdService {
 
         members: {
           include: {
+            user: {
+              select: {
+                id: true,
+                username: true,
+                profile: {
+                  select: {
+                    avatarUrl: true,
+                    displayName: true,
+                  },
+                },
+              },
+            },
+
             role: {
               include: {
                 role: {
@@ -240,28 +263,49 @@ export class HouseholdService {
   }
 
   /**
-   * @todo soft delete?
+   * @todo soft delete - also need to consider how this affects invites and game collection sharing
    *
    * @param id
    * @returns
    */
   async deleteHousehold(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
-    return this.db.household.delete({
-      where: {
-        id,
-        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
-      },
-    });
+    try {
+      const count = await this.db.household.count({ where: { id } });
+      assert(count > 0, new NotFoundException(`Household with id ${id} not found`));
+
+      return await this.db.household.delete({
+        where: {
+          id,
+          AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Error deleting household with id ${id}`, error);
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === PrismaError.DependentRecordNotFound) {
+          throw new NotFoundException(`Household with id ${id} not found`);
+        }
+      }
+
+      throw error;
+    }
   }
 
   private createHouseholdWhereAnd(userAbility: AppAbility, apiKeyAbility?: AppAbility): WhereInput<Household>[] {
     const whereAnd: WhereInput<Household>[] = [];
-    if (userAbility) {
-      whereAnd.push(accessibleBy(userAbility).Household);
+
+    try {
+      if (userAbility) {
+        whereAnd.push(accessibleBy(userAbility).Household);
+      }
+      if (apiKeyAbility) {
+        whereAnd.push(accessibleBy(apiKeyAbility).Household);
+      }
+    } catch (error) {
+      this.logger.error('Error creating where conditions for household access control', error);
+      throw new ForbiddenException("You don't have permission to access this resource.");
     }
-    if (apiKeyAbility) {
-      whereAnd.push(accessibleBy(apiKeyAbility).Household);
-    }
+
     return whereAnd;
   }
 }

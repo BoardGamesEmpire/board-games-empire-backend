@@ -1,0 +1,9 @@
+version: v2
+plugins:
+  - local: protoc-gen-ts_proto
+    out: src/gen
+    opt:
+      - nestJs=true
+      - exportCommonSymbols=false
+      - outputJsonMethods=false
+      - esModuleInterop=true

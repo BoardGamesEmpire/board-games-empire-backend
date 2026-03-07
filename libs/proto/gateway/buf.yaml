@@ -1,0 +1,18 @@
+version: v2
+modules:
+  - path: src/proto
+    name: buf.build/board-games-empire/bge-coordinator
+    includes:
+      - src/proto/bge/coordinator
+  - path: src/proto
+    name: buf.build/board-games-empire/bge-gateway
+    includes:
+      - src/proto/bge/gateway
+lint:
+  use:
+    - STANDARD
+breaking:
+  use:
+    - FILE
+deps:
+  - buf.build/grpc/grpc
