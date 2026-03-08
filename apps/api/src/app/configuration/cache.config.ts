@@ -7,13 +7,14 @@ export interface CacheConfig {
   max: number;
 }
 
+const FIVE_MINUTES_IN_MS = 1000 * 60 * 5;
+
 export default registerAs('cache', () =>
   env.provideMany<CacheConfig>([
     {
       keyTo: 'ttl',
       key: 'CACHE_TTL',
-      // 5 minutes in ms
-      defaultValue: 1000 * 60 * 5,
+      defaultValue: FIVE_MINUTES_IN_MS,
       mutators: parseInt,
     },
     {
@@ -26,9 +27,6 @@ export default registerAs('cache', () =>
 );
 
 export const cacheConfigValidationSchema = {
-  CACHE_TTL: Joi.number()
-    .integer()
-    .min(0)
-    .default(60 * 5 * 1000),
+  CACHE_TTL: Joi.number().integer().min(0).default(FIVE_MINUTES_IN_MS),
   CACHE_MAX: Joi.number().integer().min(0).default(100),
 };

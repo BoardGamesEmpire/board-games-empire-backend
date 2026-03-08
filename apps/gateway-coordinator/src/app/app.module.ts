@@ -1,10 +1,27 @@
+import { env } from '@bge/env';
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { ConfigModule } from '@nestjs/config';
+import { configuration, configurationValidationSchema } from './configuration';
+import { CoordinatorModule } from './coordinator/coordinator.module';
 
 @Module({
-  imports: [],
-  controllers: [AppController],
-  providers: [AppService],
+  imports: [
+    ConfigModule.forRoot({
+      load: [...Object.values(configuration)],
+      cache: true,
+      isGlobal: true,
+      expandVariables: true,
+      validationSchema: configurationValidationSchema,
+      validationOptions: {
+        abortEarly: true,
+        cache: !env.isProduction,
+        debug: !env.isProduction,
+        stack: !env.isProduction,
+      },
+    }),
+    CoordinatorModule,
+  ],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}

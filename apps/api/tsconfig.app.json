@@ -50,6 +50,9 @@
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/auth/tsconfig.lib.json"
     }
   ]

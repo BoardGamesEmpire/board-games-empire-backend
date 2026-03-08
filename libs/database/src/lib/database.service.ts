@@ -1,7 +1,7 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from './client';
+import { Prisma, PrismaClient } from './client';
 
 @Injectable()
 export class DatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -21,7 +21,7 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     });
   }
 
-  public async onModuleInit() {
+  public async onModuleInit(): Promise<void> {
     try {
       await this.$connect();
       this.logger.log('Database connected');
@@ -31,7 +31,8 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     }
 
     if (this.configService.get<string>('database.logQueries')) {
-      this.$on('query', (e) => {
+      // @ts-expect-error - TS likes to whine about non-existent problems
+      this.$on('query', (e: Prisma.QueryEvent) => {
         this.logger.log('Query: ' + e.query);
         this.logger.log('Params: ' + e.params);
         this.logger.log('Duration: ' + e.duration + 'ms');
@@ -39,7 +40,7 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     }
   }
 
-  async onModuleDestroy() {
+  async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }
 }
