@@ -23,7 +23,7 @@
     "buf-export": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "buf export src/proto --exclude-imports=false -o src/proto-export",
+        "command": "buf export src/proto --exclude-imports=false -o proto-export",
         "cwd": "libs/proto/gateway"
       }
     },

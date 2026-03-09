@@ -19,7 +19,7 @@ module.exports = {
         "./src/assets",
         {
           glob: '**/*.proto',
-          input: '../../libs/proto/gateway/src/proto-export',
+          input: '../../libs/proto/gateway/proto-export',
           output: 'proto',
         },
       ],

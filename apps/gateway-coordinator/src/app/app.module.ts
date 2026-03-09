@@ -1,8 +1,10 @@
+import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { configuration, configurationValidationSchema } from './configuration';
 import { CoordinatorModule } from './coordinator/coordinator.module';
+import { GatewayRegistryModule } from './gateway-registry/gateway-registry.module';
 
 @Module({
   imports: [
@@ -19,7 +21,9 @@ import { CoordinatorModule } from './coordinator/coordinator.module';
         stack: !env.isProduction,
       },
     }),
+    DatabaseModule,
     CoordinatorModule,
+    GatewayRegistryModule,
   ],
   controllers: [],
   providers: [],

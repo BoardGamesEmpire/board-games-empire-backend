@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire-backend/api-e2e",
+  "name": "@board-games-empire/api-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@board-games-empire-backend/api"
+      "@board-games-empire/api"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@board-games-empire-backend/api:build",
-          "@board-games-empire-backend/api:serve"
+          "@board-games-empire/api:build",
+          "@board-games-empire/api:serve"
         ]
       }
     }

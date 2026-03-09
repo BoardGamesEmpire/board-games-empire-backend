@@ -8,9 +8,14 @@ model GameGateway {
   logoUrl        String? @map("logo_url")
   websiteUrl     String? @map("website_url")
 
-  baseUrl          String? @map("base_url")
+  // Informational fields about the gateway's API (if applicable)
+  apiBaseUrl       String? @map("api_base_url")
   apiDocumentation String? @map("api_documentation")
   apiVersion       String? @map("api_version")
+
+  // Connection details for the gateway
+  connectionUrl  String @map("connection_url")
+  connectionPort Int   @map("connection_port")
 
   enabled        Boolean  @default(true)
   authType       AuthType @map("auth_type")

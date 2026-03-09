@@ -1,5 +1,5 @@
 {
-  "name": "@board-games-empire-backend/api",
+  "name": "@board-games-empire/api",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -63,15 +63,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@board-games-empire-backend/api:build",
+          "buildTarget": "@board-games-empire/api:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@board-games-empire-backend/api:build:development"
+            "buildTarget": "@board-games-empire/api:build:development"
           },
           "production": {
-            "buildTarget": "@board-games-empire-backend/api:build:production"
+            "buildTarget": "@board-games-empire/api:build:production"
           }
         }
       },
