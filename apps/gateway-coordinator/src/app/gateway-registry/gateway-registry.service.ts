@@ -34,7 +34,7 @@ export class GatewayRegistryService {
       },
     });
 
-    client.connect();
+    await client.connect();
     this.registry.set(options.gatewayId, client);
     this.logger.log(`Gateway ${options.gatewayId} connected at ${url}`);
   }

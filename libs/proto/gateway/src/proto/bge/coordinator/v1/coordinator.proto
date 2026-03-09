@@ -8,7 +8,7 @@ option java_package = "com.bge.coordinator.v1";
 option java_multiple_files = true;
 
 // Facilitates communication between the main application and gateway processes,
-// managing their lifecycle and health status.;
+// managing their lifecycle and health status.
 service CoordinatorService {
   // Liveness - is the coordinator process alive?
   rpc Ping(PingRequest) returns (PingResponse);
