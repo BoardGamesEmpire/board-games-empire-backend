@@ -10,7 +10,7 @@ const swcJestConfig = JSON.parse(
 swcJestConfig.swcrc = false;
 
 module.exports = {
-  displayName: '@board-games-empire-backend/api',
+  displayName: '@board-games-empire/api',
   preset: '../../jest.preset.js',
   testEnvironment: 'node',
   transform: {

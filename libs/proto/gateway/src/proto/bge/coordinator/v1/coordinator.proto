@@ -2,18 +2,23 @@ syntax = "proto3";
 
 package bge.coordinator.v1;
 
-import "google/protobuf/empty.proto";
 import "grpc/health/v1/health.proto";
 
 option java_package = "com.bge.coordinator.v1";
 option java_multiple_files = true;
 
+// Facilitates communication between the main application and gateway processes,
+// managing their lifecycle and health status.;
 service CoordinatorService {
   // Liveness - is the coordinator process alive?
   rpc Ping(PingRequest) returns (PingResponse);
 
-  // Standard gRPC health check (delegates to registered gateway health)
-  rpc Health(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+  // Standard gRPC health check
+  rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+
+  // Gateway lifecycle - called by main app GameGatewayService
+  rpc ConnectGateway(ConnectGatewayRequest) returns (ConnectGatewayResponse);
+  rpc DisconnectGateway(DisconnectGatewayRequest) returns (DisconnectGatewayResponse);
 }
 
 message PingRequest {
@@ -25,4 +30,31 @@ message PingResponse {
   string correlation_id = 1;
   int64 timestamp_ms = 2;
   string coordinator_version = 3;
+}
+
+
+// ─── Gateway lifecycle ───────────────────────────────────────────────────────
+
+message ConnectGatewayRequest {
+  string gateway_id = 1;
+  string connection_url = 2;
+  int32 connection_port = 3;
+  // Serialized AuthType enum value - parsed to Prisma AuthType in coordinator
+  string auth_type = 4;
+  // JSON-serialized auth parameters, structure depends on auth_type
+  optional string auth_parameters_json = 5;
+}
+
+message ConnectGatewayResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message DisconnectGatewayRequest {
+  string gateway_id = 1;
+}
+
+message DisconnectGatewayResponse {
+  bool success = 1;
+  optional string error = 2;
 }

@@ -4,9 +4,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire-backend/api with Nx",
+      "name": "Debug @board-games-empire/api with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire-backend/api"],
+      "runtimeArgs": ["nx", "serve", "@board-games-empire/api"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },

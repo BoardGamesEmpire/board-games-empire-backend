@@ -1,4 +1,11 @@
-import type { HealthCheckRequest, PingRequest } from '@board-games-empire/proto-gateway';
+import type {
+  ConnectGatewayRequest,
+  ConnectGatewayResponse,
+  DisconnectGatewayRequest,
+  DisconnectGatewayResponse,
+  HealthCheckRequest,
+  PingRequest,
+} from '@board-games-empire/proto-gateway';
 import {
   CoordinatorServiceController,
   CoordinatorServiceControllerMethods,
@@ -16,12 +23,20 @@ export class CoordinatorController implements CoordinatorServiceController {
 
   constructor(private readonly coordinatorService: CoordinatorService) {}
 
+  connectGateway(request: ConnectGatewayRequest): Promise<ConnectGatewayResponse> {
+    return this.coordinatorService.connectGateway(request);
+  }
+
+  disconnectGateway(request: DisconnectGatewayRequest): DisconnectGatewayResponse {
+    return this.coordinatorService.disconnectGateway(request);
+  }
+
   ping(request: PingRequest): PingResponse {
     this.logger.log('Ping request received');
     return this.coordinatorService.ping(request);
   }
 
-  health(
+  check(
     request: HealthCheckRequest,
   ): Promise<HealthCheckResponse> | Observable<HealthCheckResponse> | HealthCheckResponse {
     return this.coordinatorService.healthCheck(request);

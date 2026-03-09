@@ -1,4 +1,9 @@
+import { AuthType, Prisma } from '@bge/database';
 import {
+  ConnectGatewayRequest,
+  ConnectGatewayResponse,
+  DisconnectGatewayRequest,
+  DisconnectGatewayResponse,
   HealthCheckRequest,
   HealthCheckResponse,
   HealthCheckResponse_ServingStatus,
@@ -8,33 +13,51 @@ import {
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
-import { CreateCoordinatorDto } from './dto/create-coordinator.dto';
-import { UpdateCoordinatorDto } from './dto/update-coordinator.dto';
+import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
 @Injectable()
 export class CoordinatorService {
   private readonly logger = new Logger(CoordinatorService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService, private readonly registry: GatewayRegistryService) {}
 
-  create(createCoordinatorDto: CreateCoordinatorDto) {
-    return 'This action adds a new coordinator';
+  async connectGateway(request: ConnectGatewayRequest): Promise<ConnectGatewayResponse> {
+    const authType = request.authType as AuthType;
+
+    if (!Object.values(AuthType).includes(authType)) {
+      return { success: false, error: `Unknown auth type: '${request.authType}'` };
+    }
+
+    try {
+      const authParameters = request.authParametersJson
+        ? (JSON.parse(request.authParametersJson) as Record<string, unknown>)
+        : undefined;
+
+      await this.registry.connect({
+        gatewayId: request.gatewayId,
+        connectionUrl: request.connectionUrl,
+        connectionPort: request.connectionPort,
+        authType,
+        authParameters: authParameters as Prisma.JsonValue,
+      });
+
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`ConnectGateway failed for ${request.gatewayId}: ${message}`);
+      return { success: false, error: message };
+    }
   }
 
-  findAll() {
-    return `This action returns all coordinator`;
-  }
-
-  findOne(id: number) {
-    return `This action returns a #${id} coordinator`;
-  }
-
-  update(id: number, updateCoordinatorDto: UpdateCoordinatorDto) {
-    return `This action updates a #${id} coordinator`;
-  }
-
-  remove(id: number) {
-    return `This action removes a #${id} coordinator`;
+  disconnectGateway(request: DisconnectGatewayRequest): DisconnectGatewayResponse {
+    try {
+      this.registry.disconnect(request.gatewayId);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`DisconnectGateway failed for ${request.gatewayId}: ${message}`);
+      return { success: false, error: message };
+    }
   }
 
   ping(request: PingRequest): PingResponse {

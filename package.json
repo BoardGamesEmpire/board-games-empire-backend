@@ -28,7 +28,7 @@
     "nx": "nx",
     "prisma": "prisma",
     "proto:check": "nx run proto-gateway:buf-format-check && nx run proto-gateway:buf-lint",
-    "proto:clean": "rimraf libs/proto/gateway/src/gen && rimraf libs/proto/gateway/src/proto-export",
+    "proto:clean": "rimraf libs/proto/gateway/src/gen && rimraf libs/proto/gateway/proto-export",
     "proto:deps": "buf dep update libs/proto/gateway",
     "proto:format": "nx run proto-gateway:buf-format",
     "preproto:generate": "npm run proto:clean && npm run proto:deps",
