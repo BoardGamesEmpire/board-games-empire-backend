@@ -1,0 +1,23 @@
+{
+  "name": "@board-games-empire/database",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/database/src",
+  "projectType": "library",
+  "tags": ["database", "prisma"],
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "prisma generate"
+      },
+      "inputs": ["{workspaceRoot}/prisma/**/*.prisma", "{workspaceRoot}/prisma.config.ts"],
+      "outputs": ["{projectRoot}/src/lib/generated"]
+    },
+    "typecheck": {
+      "dependsOn": ["generate"]
+    },
+    "test": {
+      "dependsOn": ["generate"]
+    }
+  }
+}

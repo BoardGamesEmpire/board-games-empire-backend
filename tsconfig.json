@@ -50,6 +50,9 @@
     },
     {
       "path": "./libs/proto/gateway"
+    },
+    {
+      "path": "./libs/api/gateway-coordinator-client"
     }
   ]
 }

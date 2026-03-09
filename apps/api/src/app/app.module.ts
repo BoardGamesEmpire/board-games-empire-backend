@@ -1,4 +1,5 @@
 import { AuthModule } from '@bge/auth';
+import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { HealthModule } from '@bge/health';
@@ -78,6 +79,7 @@ import { configuration, configurationValidationSchema } from './configuration';
 
     // Feature modules
     AuthModule,
+    GatewayCoordinatorClientModule,
     HealthModule,
     HouseholdModule,
     LanguageModule,

@@ -28,7 +28,7 @@ jobs:
       # Cache node_modules
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
 
       - run: npm ci
@@ -38,7 +38,6 @@ jobs:
       - run: npm run proto:generate
 
       # Prepend any command with "nx record --" to record its logs to Nx Cloud
-      # - run: npx nx record -- echo Hello World
       - run: npx nx run-many -t typecheck
       - run: npx nx affected -t test --parallel --maxParallel=3 --passWithNoTests
       - run: npx nx affected -t lint build --parallel --maxParallel=3
