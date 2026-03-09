@@ -11,7 +11,7 @@ service GatewayService {
   rpc Ping(GatewayPingRequest) returns (GatewayPingResponse);
 
   // Standard health — gateways should report per-service health here
-  rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+  rpc Health(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
 }
 
 message GatewayPingRequest {

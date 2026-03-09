@@ -27,6 +27,8 @@ export default registerAs('coordinatorClient', () =>
 );
 
 export const coordinatorConfigValidationSchema = {
-  GATEWAY_COORDINATOR_HOST: Joi.string().hostname().default('0.0.0.0'),
+  GATEWAY_COORDINATOR_HOST: Joi.alternatives()
+    .try(Joi.string().hostname(), Joi.string().ip({ version: ['ipv4', 'ipv6'] }))
+    .default('0.0.0.0'),
   GATEWAY_COORDINATOR_PORT: Joi.number().default(50052),
 };

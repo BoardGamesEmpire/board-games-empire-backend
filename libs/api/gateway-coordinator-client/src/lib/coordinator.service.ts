@@ -1,12 +1,15 @@
 import { CoordinatorServiceClient, PingResponse } from '@board-games-empire/proto-gateway';
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
-import { interval, mergeMap, Observable } from 'rxjs';
+import * as crypto from 'node:crypto';
+import { interval, mergeMap, Observable, Subscription } from 'rxjs';
 import { COORDINATOR_SERVICE_TOKEN } from './constants';
 
 @Injectable()
-export class GatewayCoordinatorClientService implements OnModuleInit {
+export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(GatewayCoordinatorClientService.name);
   private coordinatorService!: CoordinatorServiceClient;
+  private subscription!: Subscription;
 
   constructor(
     @Inject(COORDINATOR_SERVICE_TOKEN)
@@ -18,16 +21,20 @@ export class GatewayCoordinatorClientService implements OnModuleInit {
 
     // TODO: Implement a more robust health check mechanism, possibly with retries and backoff strategy.
     const PING_INTERVAL = 1000 * 60; // 1 minute
-    interval(PING_INTERVAL)
-      .pipe(mergeMap(() => this.ping()))
+    this.subscription = interval(PING_INTERVAL)
+      .pipe(mergeMap(() => this.ping(crypto.randomUUID())))
       .subscribe({
         next: (response) => {
-          console.log('Ping response:', response);
+          this.logger.log('Ping response:', response);
         },
         error: (err) => {
-          console.error('Ping error:', err);
+          this.logger.error('Ping error:', err);
         },
       });
+  }
+
+  onModuleDestroy() {
+    this.subscription?.unsubscribe();
   }
 
   ping(correlationId?: string): Observable<PingResponse> {

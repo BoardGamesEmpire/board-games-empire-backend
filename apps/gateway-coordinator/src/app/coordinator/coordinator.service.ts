@@ -1,5 +1,11 @@
-import { PingRequest, PingResponse } from '@board-games-empire/proto-gateway';
-import { Injectable } from '@nestjs/common';
+import {
+  HealthCheckRequest,
+  HealthCheckResponse,
+  HealthCheckResponse_ServingStatus,
+  PingRequest,
+  PingResponse,
+} from '@board-games-empire/proto-gateway';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
 import { CreateCoordinatorDto } from './dto/create-coordinator.dto';
@@ -7,6 +13,8 @@ import { UpdateCoordinatorDto } from './dto/update-coordinator.dto';
 
 @Injectable()
 export class CoordinatorService {
+  private readonly logger = new Logger(CoordinatorService.name);
+
   constructor(private readonly configService: ConfigService) {}
 
   create(createCoordinatorDto: CreateCoordinatorDto) {
@@ -34,6 +42,14 @@ export class CoordinatorService {
       correlationId: request?.correlationId || crypto.randomUUID(),
       timestampMs: Date.now(),
       coordinatorVersion: this.configService.get<string>('coordinator.version') || 'unknown',
+    };
+  }
+
+  healthCheck(request: HealthCheckRequest): HealthCheckResponse {
+    this.logger.log(`Health check request received for service: ${request.service}`);
+
+    return {
+      status: HealthCheckResponse_ServingStatus.SERVING,
     };
   }
 }

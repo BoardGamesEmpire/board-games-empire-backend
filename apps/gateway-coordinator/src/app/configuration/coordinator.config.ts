@@ -33,7 +33,9 @@ export default registerAs('coordinator', () =>
 );
 
 export const coordinatorConfigValidationSchema = {
-  COORDINATOR_GRPC_HOST: Joi.string().hostname().default('0.0.0.0'),
+  COORDINATOR_GRPC_HOST: Joi.alternatives()
+    .try(Joi.string().hostname(), Joi.string().ip({ version: ['ipv4', 'ipv6'] }))
+    .default('0.0.0.0'),
   COORDINATOR_GRPC_PORT: Joi.number().default(50052),
   COORDINATOR_VERSION: Joi.string().default('1.0.0'),
 };

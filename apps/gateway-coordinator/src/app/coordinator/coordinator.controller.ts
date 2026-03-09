@@ -21,9 +21,9 @@ export class CoordinatorController implements CoordinatorServiceController {
     return this.coordinatorService.ping(request);
   }
 
-  check(
+  health(
     request: HealthCheckRequest,
   ): Promise<HealthCheckResponse> | Observable<HealthCheckResponse> | HealthCheckResponse {
-    throw new Error('Method not implemented.');
+    return this.coordinatorService.healthCheck(request);
   }
 }

@@ -22,7 +22,7 @@ async function bootstrap() {
     },
   });
   await app.listen();
-  Logger.log(`🚀 Application is running on: http://${url}`);
+  Logger.log(`🚀 Application is running on: grpc://${url}`);
 }
 
 bootstrap();

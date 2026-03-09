@@ -13,7 +13,7 @@ service CoordinatorService {
   rpc Ping(PingRequest) returns (PingResponse);
 
   // Standard gRPC health check (delegates to registered gateway health)
-  rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+  rpc Health(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
 }
 
 message PingRequest {
