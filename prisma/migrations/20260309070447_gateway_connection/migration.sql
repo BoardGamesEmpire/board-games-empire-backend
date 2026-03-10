@@ -11,3 +11,12 @@ ALTER TABLE "game_gateways" DROP COLUMN "base_url",
 ADD COLUMN     "api_base_url" TEXT,
 ADD COLUMN     "connection_port" INTEGER NOT NULL,
 ADD COLUMN     "connection_url" TEXT NOT NULL;
+
+-- AlterEnum
+ALTER TYPE "resource_types" ADD VALUE 'GameGateway';
+
+-- AlterTable
+ALTER TABLE "game_gateways" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
+
+-- AlterTable
+ALTER TABLE "games" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
