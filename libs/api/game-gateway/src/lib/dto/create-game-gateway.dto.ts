@@ -41,12 +41,12 @@ export class CreateGameGatewayDto {
   description?: string;
 
   @ApiPropertyOptional({
-    description: 'Message content for this game gateway',
+    description: 'Message context for this game gateway',
     example: 'JSON',
   })
   @IsOptional()
   @IsString()
-  messageContent?: string;
+  messageContext?: string;
 
   @ApiPropertyOptional({ description: 'URL to an icon for this game gateway' })
   @IsOptional()

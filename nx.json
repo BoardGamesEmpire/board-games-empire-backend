@@ -52,7 +52,7 @@
       "options": {
         "targetName": "test"
       },
-      "exclude": ["apps/api-e2e/**/*", "apps/gateway-coordinator-e2e/**/*"]
+      "exclude": ["apps/api-e2e/**/*", "apps/gateway-coordinator-e2e/**/*", "apps/boardgamegeek-gateway-e2e/**/*"]
     },
     {
       "plugin": "@nx/docker",
