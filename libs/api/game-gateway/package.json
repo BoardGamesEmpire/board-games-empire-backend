@@ -15,7 +15,8 @@
   "nx": {
     "name": "@board-games-empire/game-gateway",
     "tags": [
-      "api,gateway"
+      "api",
+      "gateway"
     ]
   },
   "dependencies": {}

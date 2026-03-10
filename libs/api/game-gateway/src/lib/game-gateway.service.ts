@@ -16,7 +16,7 @@ export class GameGatewayService {
   async getAll(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.gameGateway.findMany({
       where: {
-        AND: this.createGameGatewayWhereAnd(userAbility, apiKeyAbility),
+        AND: [...this.createGameGatewayWhereAnd(userAbility, apiKeyAbility), { deletedAt: null }],
       },
       skip: pagination.offset,
       take: pagination.limit,
@@ -28,7 +28,7 @@ export class GameGatewayService {
       return await this.db.gameGateway.findUniqueOrThrow({
         where: {
           id,
-          AND: this.createGameGatewayWhereAnd(userAbility, apiKeyAbility),
+          AND: [...this.createGameGatewayWhereAnd(userAbility, apiKeyAbility), { deletedAt: null }],
         },
       });
     } catch (error) {
@@ -78,13 +78,23 @@ export class GameGatewayService {
         new NotFoundException(`Game gateway with ID ${gatewayId} not found or access denied.`),
       );
 
+      const update: Prisma.GameGatewayUpdateInput = {
+        ...updateGameGatewayDTO,
+        authParameters: updateGameGatewayDTO.authParameters ? updateGameGatewayDTO.authParameters : undefined,
+      };
+
+      // Ensure we don't set authParameters to null if it's not included in the update DTO
+      if (!update.authParameters) {
+        delete update.authParameters;
+      }
+
       return await this.db.gameGateway.update({
         where: {
           id: gatewayId,
           AND: this.createGameGatewayWhereAnd(userAbility, apiKeyAbility),
         },
         data: {
-          ...(<Prisma.GameGatewayUpdateInput>updateGameGatewayDTO),
+          ...update,
         },
       });
     } catch (error) {

@@ -7,7 +7,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { ClsService } from 'nestjs-cls';
 import { from } from 'rxjs';
-import { tap } from 'rxjs/operators';
+import { map, tap } from 'rxjs/operators';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { HouseholdService } from './household.service';
 
@@ -27,7 +27,9 @@ export class HouseholdController {
   @Get()
   getHouseholdsForUser(@Query() pagination: PaginationQueryDto) {
     const abilities = this.getAbilities();
-    return from(this.householdService.getHouseholdsForUser(pagination, abilities.userAbility, abilities.apiAbility));
+    return from(
+      this.householdService.getHouseholdsForUser(pagination, abilities.userAbility, abilities.apiAbility),
+    ).pipe(map((households) => ({ households })));
   }
 
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Household))
@@ -35,6 +37,7 @@ export class HouseholdController {
   create(@Session() session: UserSession, @Body() createHouseholdDto: CreateHouseholdDto) {
     return from(this.householdService.create(session.user.id, createHouseholdDto)).pipe(
       tap(() => this.cache.del(`bge:user:permissions:${session.user.id}`)),
+      map((household) => ({ message: 'Household created successfully', household })),
     );
   }
 
@@ -44,7 +47,9 @@ export class HouseholdController {
     this.logger.debug(`Fetching household with ID: ${id}`);
 
     const abilities = this.getAbilities();
-    return from(this.householdService.getHouseholdById(id, abilities.userAbility, abilities.apiAbility));
+    return from(this.householdService.getHouseholdById(id, abilities.userAbility, abilities.apiAbility)).pipe(
+      map((household) => ({ household })),
+    );
   }
 
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Household))
@@ -53,14 +58,16 @@ export class HouseholdController {
     const abilities = this.getAbilities();
     return from(
       this.householdService.updateHousehold(id, updateHouseholdDto, abilities.userAbility, abilities.apiAbility),
-    );
+    ).pipe(map((household) => ({ message: `Household with ID ${id} updated successfully`, household })));
   }
 
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Household))
   @Delete(':id')
   async delete(@Param('id') id: string) {
     const abilities = this.getAbilities();
-    return from(this.householdService.deleteHousehold(id, abilities.userAbility, abilities.apiAbility));
+    return from(this.householdService.deleteHousehold(id, abilities.userAbility, abilities.apiAbility)).pipe(
+      map((household) => ({ message: `Household with ID ${id} deleted successfully`, household })),
+    );
   }
 
   private getAbilities() {
