@@ -44,13 +44,13 @@
       "path": "../../libs/common/health/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/game-gateway/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/auth/tsconfig.lib.json"

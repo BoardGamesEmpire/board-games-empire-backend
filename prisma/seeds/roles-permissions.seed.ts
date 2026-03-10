@@ -60,6 +60,27 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Remove game from collection',
     },
 
+    // --- Game Gateway ---
+    { action: Action.read, subject: 'GameGateway', slug: 'read:game_gateway', reason: 'View game gateway connections' },
+    {
+      action: Action.create,
+      subject: 'GameGateway',
+      slug: 'create:game_gateway',
+      reason: 'Create game gateway connections',
+    },
+    {
+      action: Action.update,
+      subject: 'GameGateway',
+      slug: 'update:game_gateway',
+      reason: 'Update game gateway connections',
+    },
+    {
+      action: Action.delete,
+      subject: 'GameGateway',
+      slug: 'delete:game_gateway',
+      reason: 'Delete game gateway connections',
+    },
+
     // --- Households ---
     { action: Action.create, subject: 'Household', slug: 'create:household', reason: 'Create a household' },
     {

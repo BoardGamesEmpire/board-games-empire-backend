@@ -5,14 +5,15 @@ enum ResourceType {
   GameCollection
   GameCreationRequest
   GameCustomization
+  GameGateway
   GamePlaySession
   GameSharing
   Household
   RuleVariant
   System
   User
-  UserProfile
   UserGameCustomization
+  UserProfile
 
   @@map("resource_types")
 }

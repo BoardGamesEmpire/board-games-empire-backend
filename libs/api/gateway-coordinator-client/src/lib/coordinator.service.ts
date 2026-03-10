@@ -1,4 +1,11 @@
-import { CoordinatorServiceClient, PingResponse } from '@board-games-empire/proto-gateway';
+import {
+  ConnectGatewayRequest,
+  ConnectGatewayResponse,
+  CoordinatorServiceClient,
+  DisconnectGatewayRequest,
+  DisconnectGatewayResponse,
+  PingResponse,
+} from '@board-games-empire/proto-gateway';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import * as crypto from 'node:crypto';
@@ -39,5 +46,13 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
 
   ping(correlationId?: string): Observable<PingResponse> {
     return this.coordinatorService.ping({ correlationId });
+  }
+
+  connectGateway(request: ConnectGatewayRequest): Observable<ConnectGatewayResponse> {
+    return this.coordinatorService.connectGateway(request);
+  }
+
+  disconnectGateway(request: DisconnectGatewayRequest): Observable<DisconnectGatewayResponse> {
+    return this.coordinatorService.disconnectGateway(request);
   }
 }

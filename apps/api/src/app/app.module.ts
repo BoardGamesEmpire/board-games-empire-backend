@@ -1,7 +1,7 @@
 import { AuthModule } from '@bge/auth';
-import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
+import { GameGatewayModule } from '@bge/game-gateway';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
@@ -79,7 +79,7 @@ import { configuration, configurationValidationSchema } from './configuration';
 
     // Feature modules
     AuthModule,
-    GatewayCoordinatorClientModule,
+    GameGatewayModule,
     HealthModule,
     HouseholdModule,
     LanguageModule,
