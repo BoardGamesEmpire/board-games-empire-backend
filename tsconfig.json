@@ -53,6 +53,9 @@
     },
     {
       "path": "./libs/api/gateway-coordinator-client"
+    },
+    {
+      "path": "./libs/api/game-gateway"
     }
   ]
 }

@@ -186,6 +186,14 @@ export class HouseholdService {
     const { languageId, ...rest } = updateHouseholdDto;
 
     try {
+      const existingHousehold = await this.db.household.count({
+        where: {
+          id,
+        },
+      });
+
+      assert(existingHousehold > 0, new NotFoundException(`Household with id ${id} not found or access denied.`));
+
       return await this.db.household.update({
         where: {
           id,
@@ -206,7 +214,7 @@ export class HouseholdService {
       this.logger.error(`Error updating household with id ${id}`, error);
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new NotFoundException(`Household with id ${id} not found or you don't have permission to update it.`);
+          throw new ForbiddenException("You don't have permission to update this resource.");
         }
       }
 
