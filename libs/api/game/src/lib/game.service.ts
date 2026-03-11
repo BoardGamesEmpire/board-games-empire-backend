@@ -18,8 +18,8 @@ export class GameService {
       where: {
         AND: this.createGameWhereAnd(abilities),
       },
-      skip: pagination.limit,
-      take: pagination.offset,
+      skip: pagination.offset,
+      take: pagination.limit,
     });
   }
 
@@ -143,7 +143,7 @@ export class GameService {
         },
       });
     } catch (error) {
-      this.logger.error(`Error updating household with id ${id}`, error);
+      this.logger.error(`Error updating game with id ${id}`, error);
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
         if (error.code === PrismaError.DependentRecordNotFound) {
           throw new ForbiddenException("You don't have permission to update this resource.");

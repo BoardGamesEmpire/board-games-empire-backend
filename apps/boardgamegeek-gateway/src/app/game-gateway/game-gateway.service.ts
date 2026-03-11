@@ -6,6 +6,7 @@ import {
   HealthCheckResponse_ServingStatus,
 } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
+import * as crypto from 'node:crypto';
 
 @Injectable()
 export class GameGatewayService {

@@ -2,7 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Body, Controller, Delete, Get, Inject, Logger, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import type { Cache } from 'cache-manager';
@@ -33,7 +33,7 @@ export class GameController {
 
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get(':id')
-  getGameById(@Query('id') id: string) {
+  getGameById(@Param('id') id: string) {
     const abilities = this.getAbilities();
     return from(this.gameService.getGame(id, abilities)).pipe(map((game) => ({ game })));
   }
@@ -50,7 +50,7 @@ export class GameController {
 
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Game))
   @Patch(':id')
-  updateGame(@Query('id') id: string, @Session() session: UserSession, @Body() updateGameDto: UpdateGameDto) {
+  updateGame(@Param('id') id: string, @Session() session: UserSession, @Body() updateGameDto: UpdateGameDto) {
     const abilities = this.getAbilities();
     return from(this.gameService.updateGame(id, updateGameDto, abilities)).pipe(
       tap((game) => this.logger.log(`Game with ID ${game.id} updated by user ${session.user.id}`)),
@@ -60,7 +60,7 @@ export class GameController {
 
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Game))
   @Delete(':id')
-  deleteGame(@Query('id') id: string) {
+  deleteGame(@Param('id') id: string) {
     const abilities = this.getAbilities();
     return from(this.gameService.deleteGame(id, abilities)).pipe(
       tap(() => this.logger.log(`Game with ID ${id} deleted`)),
