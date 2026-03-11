@@ -10,7 +10,7 @@ export class GatewayRegistryBootstrapService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     const gateways = await this.db.gameGateway.findMany({
-      where: { enabled: true },
+      where: { enabled: true, deletedAt: null },
     });
 
     this.logger.log(`Seeding gateway registry with ${gateways.length} enabled gateway(s)`);

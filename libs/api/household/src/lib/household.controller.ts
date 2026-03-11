@@ -63,7 +63,7 @@ export class HouseholdController {
 
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Household))
   @Delete(':id')
-  async delete(@Param('id') id: string) {
+  delete(@Param('id') id: string) {
     const abilities = this.getAbilities();
     return from(this.householdService.deleteHousehold(id, abilities.userAbility, abilities.apiAbility)).pipe(
       map((household) => ({ message: `Household with ID ${id} deleted successfully`, household })),

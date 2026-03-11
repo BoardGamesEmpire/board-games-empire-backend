@@ -1,6 +1,7 @@
 import { AuthModule } from '@bge/auth';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
+import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
@@ -80,6 +81,7 @@ import { configuration, configurationValidationSchema } from './configuration';
     // Feature modules
     AuthModule,
     GameGatewayModule,
+    GameModule,
     HealthModule,
     HouseholdModule,
     LanguageModule,
