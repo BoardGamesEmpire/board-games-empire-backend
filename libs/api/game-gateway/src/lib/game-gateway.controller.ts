@@ -100,22 +100,12 @@ export class GameGatewayController {
   }
 
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
-  @Get(':id/connect')
+  @Post(':id/connect')
   connect(@Param('id') id: string) {
     const abilities = this.getAbilities();
     return from(
       this.gameGatewayService.update(id, { enabled: true }, abilities.userAbility, abilities.apiAbility),
-    ).pipe(
-      concatMap((gateway: GameGateway) =>
-        gateway.enabled
-          ? this.connectToGateway(gateway)
-          : of({
-              gateway,
-              connection_response: { success: false, message: 'Gateway is disabled' },
-              connection_attempt: false,
-            }),
-      ),
-    );
+    ).pipe(concatMap((gateway: GameGateway) => this.connectToGateway(gateway)));
   }
 
   private connectToGateway(gateway: GameGateway) {
@@ -146,7 +136,7 @@ export class GameGatewayController {
   }
 
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
-  @Get(':id/disconnect')
+  @Post(':id/disconnect')
   disconnect(@Param('id') id: string) {
     const abilities = this.getAbilities();
     return from(

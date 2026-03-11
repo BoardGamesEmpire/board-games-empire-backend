@@ -2,6 +2,7 @@ import { env } from '@bge/env';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { configuration, configurationValidationSchema } from './configuration';
+import { GameGatewayModule } from './game-gateway/game-gateway.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { configuration, configurationValidationSchema } from './configuration';
         stack: !env.isProduction,
       },
     }),
+    GameGatewayModule,
   ],
 })
 export class AppModule {}

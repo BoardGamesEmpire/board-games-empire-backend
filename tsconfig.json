@@ -62,6 +62,12 @@
     },
     {
       "path": "./apps/boardgamegeek-gateway"
+    },
+    {
+      "path": "./libs/common/utils"
+    },
+    {
+      "path": "./libs/api/game"
     }
   ]
 }

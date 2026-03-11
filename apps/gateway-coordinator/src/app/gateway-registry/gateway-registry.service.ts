@@ -1,4 +1,5 @@
-import { PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';
+import { pingWithRetry } from '@bge/utils';
+import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
 import { join } from 'node:path';
@@ -34,7 +35,14 @@ export class GatewayRegistryService {
       },
     });
 
-    await client.connect();
+    const gatewayServiceClient = client.getService<GatewayServiceClient>('GatewayService');
+    const response = await pingWithRetry(gatewayServiceClient, options.gatewayId, this.logger);
+
+    this.logger.log(
+      `Successfully connected to gateway ${options.gatewayId} at ${url}. Response: ${JSON.stringify(response)}`,
+    );
+
+    // TODO: schedule health checks and auto-disconnect if unhealthy
     this.registry.set(options.gatewayId, client);
     this.logger.log(`Gateway ${options.gatewayId} connected at ${url}`);
   }

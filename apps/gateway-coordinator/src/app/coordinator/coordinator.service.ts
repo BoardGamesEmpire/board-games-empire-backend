@@ -63,7 +63,7 @@ export class CoordinatorService {
   ping(request: PingRequest): PingResponse {
     return {
       correlationId: request?.correlationId || crypto.randomUUID(),
-      timestampMs: Date.now(),
+      timestampMs: BigInt(Date.now()),
       coordinatorVersion: this.configService.get<string>('coordinator.version') || 'unknown',
     };
   }
