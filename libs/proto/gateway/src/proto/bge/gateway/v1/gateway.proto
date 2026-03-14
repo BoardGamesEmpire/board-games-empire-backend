@@ -2,16 +2,31 @@ syntax = "proto3";
 
 package bge.gateway.v1;
 
+import "bge/gateway/v1/common.proto";
 import "grpc/health/v1/health.proto";
 
-option java_package = "com.bge.gateway.v1";
-option java_multiple_files = true;
-
+// Contract all external gateway implementations must satisfy.
+// Normalization to GameSearchData/GameData happens at the gateway — the
+// coordinator and main application are intentionally ignorant of
+// source-specific schemas.
 service GatewayService {
+  // Liveness + capability advertisement
   rpc Ping(GatewayPingRequest) returns (GatewayPingResponse);
 
-  // Standard health — gateways should report per-service health here
+  // Standard gRPC health check
   rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+
+  // Stream lean search results as they resolve. Gateways that do not support
+  // pagination may silently ignore limit/offset. Must always terminate with
+  // SOURCE_DONE or ERROR.
+  rpc SearchGames(GatewaySearchRequest) returns (stream GatewaySearchResult);
+
+  // Fetch full GameData for a single game — used by the import worker.
+  rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
+
+  // Fetch expansions/DLC for a base game. Streams lean GameSearchData frames,
+  // terminated by SOURCE_DONE.
+  rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
 }
 
 message GatewayPingRequest {
@@ -21,9 +36,39 @@ message GatewayPingRequest {
 message GatewayPingResponse {
   string correlation_id = 1;
   int64 timestamp_ms = 2;
-  // Self-reported gateway identity — matches GameGateway.name in the DB
   string gateway_name = 3;
   string gateway_version = 4;
-  // Advertised capabilities (service names), though reflection is authoritative
   repeated string supported_services = 5;
+}
+
+message GatewaySearchRequest {
+  string correlation_id = 1;
+  string query = 2;
+  optional int32 limit = 3;
+  optional int32 offset = 4;
+}
+
+message GatewaySearchResult {
+  string correlation_id = 1;
+  ResultStatus status = 2;
+  optional GameSearchData game = 3; // populated on RESULT
+  optional string message = 4; // populated on ERROR / RATE_LIMITED
+  optional int32 retry_after = 5; // seconds; populated on RATE_LIMITED only
+}
+
+message FetchGameRequest {
+  string correlation_id = 1;
+  string external_id = 2;
+}
+
+message FetchGameResponse {
+  string correlation_id = 1;
+  ResultStatus status = 2;
+  optional GameData game = 3;
+  optional string message = 4;
+}
+
+message FetchExpansionsRequest {
+  string correlation_id = 1;
+  string base_external_id = 2;
 }

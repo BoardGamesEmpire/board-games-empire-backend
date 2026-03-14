@@ -2,20 +2,46 @@ model Mechanic {
   id String @id @default(cuid(2))
 
   name        String  @unique
+  slug        String  @unique // normalized for fuzzy dedup e.g. "worker-placement"
   description String?
   complexity  Int?
 
-  games     GameMechanic[]
-  favorites FavoriteMechanic[]
-  disliked  DislikedMechanic[]
-
   usageCount         Int?   @map("usage_count")
   compatibilityScore Float? @map("compatibility_score")
+
+  // Enrichment control
+  enrichmentSource String?   @map("enrichment_source")
+  frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
+
+  games          GameMechanic[]
+  favorites      FavoriteMechanic[]
+  disliked       DislikedMechanic[]
+  gatewayAliases MechanicGatewayAlias[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("mechanics")
+}
+
+// Maps gateway-specific mechanic names/IDs to the canonical Mechanic record.
+// Created on import when a fuzzy match resolves to an existing canonical record,
+// or alongside a new Mechanic when no match is found.
+model MechanicGatewayAlias {
+  id String @id @default(cuid(2))
+
+  mechanic   Mechanic @relation(fields: [mechanicId], references: [id], onDelete: Cascade)
+  mechanicId String   @map("mechanic_id")
+
+  gatewayId    String @map("gateway_id")
+  externalId   String @map("external_id")
+  platformType String @map("platform_type")
+  externalName String @map("external_name") // source name before normalization
+
+  @@unique([gatewayId, externalId])
+  @@unique([platformType, externalId])
+  @@index([mechanicId])
+  @@map("mechanic_gateway_aliases")
 }
 
 model GameMechanic {

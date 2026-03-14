@@ -68,6 +68,9 @@
     },
     {
       "path": "./libs/api/game"
+    },
+    {
+      "path": "./libs/api/search"
     }
   ]
 }

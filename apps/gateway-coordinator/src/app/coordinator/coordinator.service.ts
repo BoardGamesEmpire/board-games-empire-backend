@@ -1,17 +1,9 @@
-import { AuthType, Prisma } from '@bge/database';
-import {
-  ConnectGatewayRequest,
-  ConnectGatewayResponse,
-  DisconnectGatewayRequest,
-  DisconnectGatewayResponse,
-  HealthCheckRequest,
-  HealthCheckResponse,
-  HealthCheckResponse_ServingStatus,
-  PingRequest,
-  PingResponse,
-} from '@board-games-empire/proto-gateway';
-import { Injectable, Logger } from '@nestjs/common';
+import { AuthType, DatabaseService, Prisma } from '@bge/database';
+import * as proto from '@board-games-empire/proto-gateway';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Cache } from 'cache-manager';
 import * as crypto from 'node:crypto';
 import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
@@ -19,9 +11,14 @@ import { GatewayRegistryService } from '../gateway-registry/gateway-registry.ser
 export class CoordinatorService {
   private readonly logger = new Logger(CoordinatorService.name);
 
-  constructor(private readonly configService: ConfigService, private readonly registry: GatewayRegistryService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly registry: GatewayRegistryService,
+    private readonly db: DatabaseService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
-  async connectGateway(request: ConnectGatewayRequest): Promise<ConnectGatewayResponse> {
+  async connectGateway(request: proto.ConnectGatewayRequest): Promise<proto.ConnectGatewayResponse> {
     const authType = request.authType as AuthType;
 
     if (!Object.values(AuthType).includes(authType)) {
@@ -49,7 +46,7 @@ export class CoordinatorService {
     }
   }
 
-  disconnectGateway(request: DisconnectGatewayRequest): DisconnectGatewayResponse {
+  disconnectGateway(request: proto.DisconnectGatewayRequest): proto.DisconnectGatewayResponse {
     try {
       this.registry.disconnect(request.gatewayId);
       return { success: true };
@@ -60,19 +57,24 @@ export class CoordinatorService {
     }
   }
 
-  ping(request: PingRequest): PingResponse {
+  /**
+   * Basic ping handler for quick connectivity verification from the main application.
+   *
+   * @todo ping gateways on a schedule and track their health status, so we can return more accurate
+   * info here and proactively disconnect unhealthy gateways.
+   */
+  ping(request: proto.PingRequest): proto.PingResponse {
     return {
       correlationId: request?.correlationId || crypto.randomUUID(),
       timestampMs: BigInt(Date.now()),
-      coordinatorVersion: this.configService.get<string>('coordinator.version') || 'unknown',
+      coordinatorVersion: this.configService.get<string>('coordinator.version', 'unknown'),
     };
   }
 
-  healthCheck(request: HealthCheckRequest): HealthCheckResponse {
+  healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
     this.logger.log(`Health check request received for service: ${request.service}`);
-
     return {
-      status: HealthCheckResponse_ServingStatus.SERVING,
+      status: proto.HealthCheckResponse_ServingStatus.SERVING,
     };
   }
 }

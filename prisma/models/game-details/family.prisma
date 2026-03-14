@@ -2,6 +2,7 @@ model Family {
   id String @id @default(cuid(2))
 
   name        String  @unique
+  slug        String  @unique
   description String?
 
   publisher   Publisher? @relation(fields: [publisherId], references: [id])
@@ -16,12 +17,34 @@ model Family {
   parentFamilyId String?  @map("parent_family_id")
   subfamilies    Family[] @relation("FamilyHierarchy")
 
-  games GameFamily[]
+  // Enrichment control
+  enrichmentSource String?   @map("enrichment_source")
+  frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
+
+  games          GameFamily[]
+  gatewayAliases FamilyGatewayAlias[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("families")
+}
+
+model FamilyGatewayAlias {
+  id String @id @default(cuid(2))
+
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  familyId String @map("family_id")
+
+  gatewayId    String @map("gateway_id")
+  externalId   String @map("external_id")
+  platformType String @map("platform_type")
+  externalName String @map("external_name")
+
+  @@unique([gatewayId, externalId])
+  @@unique([platformType, externalId])
+  @@index([familyId])
+  @@map("family_gateway_aliases")
 }
 
 model GameFamily {
