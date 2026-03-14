@@ -11,6 +11,7 @@ import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
@@ -84,6 +85,10 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup(globalPrefix, app, document);
   }
+
+  const redisAdapter = new RedisIoAdapter(app);
+  await redisAdapter.connectToRedis(configService);
+  app.useWebSocketAdapter(redisAdapter);
 
   const dbService = app.get(DatabaseService);
   const cacheService = app.get(CACHE_MANAGER);

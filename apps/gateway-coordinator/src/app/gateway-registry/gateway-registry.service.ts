@@ -1,8 +1,8 @@
-import { pingWithRetry } from '@bge/utils';
+import { pingWithRetry, walkDir } from '@bge/utils';
 import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
-import { join } from 'node:path';
+import * as path from 'node:path';
 import { GatewayConnectionOptions } from '../interfaces';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 
@@ -21,15 +21,18 @@ export class GatewayRegistryService {
       this.disconnect(options.gatewayId);
     }
 
+    this.logger.log(`Connecting to gateway ${options.gatewayId} at ${url} with auth type ${options.authType}`);
+    const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
+
     const channelCredentials = this.credentialsFactory.create(options.authType, options.authParameters);
     const client = ClientProxyFactory.create({
       transport: Transport.GRPC,
       options: {
         url,
         package: PROTO_PACKAGE_NAME,
-        protoPath: [join(__dirname, 'proto', 'bge', 'gateway', 'v1', 'gateway.proto')],
+        protoPath: protoPaths,
         loader: {
-          includeDirs: [join(__dirname, 'proto')],
+          includeDirs: [path.join(__dirname, 'proto')],
         },
         credentials: channelCredentials,
       },
@@ -67,6 +70,10 @@ export class GatewayRegistryService {
     }
 
     return client;
+  }
+
+  getServiceClient(gatewayId: string): GatewayServiceClient {
+    return this.get(gatewayId).getService<GatewayServiceClient>('GatewayService');
   }
 
   isConnected(gatewayId: string): boolean {

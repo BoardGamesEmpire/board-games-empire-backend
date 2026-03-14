@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package bge.gateway.v1;
+
+enum ContentType {
+  CONTENT_TYPE_UNSPECIFIED = 0;
+  CONTENT_TYPE_BASE_GAME = 1;
+  CONTENT_TYPE_EXPANSION = 2;
+  CONTENT_TYPE_DLC = 3;
+  CONTENT_TYPE_STANDALONE_EXPANSION = 4;
+  CONTENT_TYPE_ACCESSORY = 5;
+}
+
+enum ResultStatus {
+  RESULT_STATUS_UNSPECIFIED = 0;
+  RESULT_STATUS_RESULT = 1;
+  RESULT_STATUS_SOURCE_DONE = 2;
+  RESULT_STATUS_ERROR = 3;
+  RESULT_STATUS_RATE_LIMITED = 4;
+  RESULT_STATUS_UNAVAILABLE = 5;
+}
+
+message PersonData {
+  string external_id = 1;
+  string name = 2;
+}
+
+message PublisherData {
+  string external_id = 1;
+  string name = 2;
+  optional string website = 3;
+}
+
+message MechanicData {
+  string external_id = 1;
+  string name = 2;
+}
+
+message CategoryData {
+  string external_id = 1;
+  string name = 2;
+}
+
+message FamilyData {
+  string external_id = 1;
+  string name = 2;
+  // e.g. "Game: Catan Series", "Theme: Space" — BGG families are typed
+  optional string family_type = 3;
+}
+
+// Returned by streaming search RPCs. Contains only enough data to render a
+// search result row client-side. Full game data is fetched separately via
+// FetchGame when the user selects a game to view or import.
+message GameSearchData {
+  string external_id = 1;
+  string title = 2;
+  ContentType content_type = 3;
+  optional int32 year_published = 4;
+  optional string thumbnail_url = 5;
+  optional string source_url = 6; // link to the game on the source platform
+  optional float average_rating = 7;
+  optional int32 min_players = 8;
+  optional int32 max_players = 9;
+
+  // Populated when content_type != BASE_GAME
+  optional string base_game_external_id = 10;
+}
+
+// Returned only by FetchGame. Carries all relational data needed for the
+// import worker to upsert the full game record and its associations in
+// one pass.
+message GameData {
+  // Identity
+  string external_id = 1;
+  string title = 2;
+  ContentType content_type = 3;
+
+  // Descriptive
+  optional string description = 4;
+  optional int32 year_published = 5;
+  optional string thumbnail_url = 6;
+  optional string image_url = 7;
+  optional string source_url = 8;
+
+  // Relational
+  repeated PersonData designers = 9;
+  repeated PersonData artists = 10;
+  repeated PublisherData publishers = 11;
+  repeated MechanicData mechanics = 12;
+  repeated CategoryData categories = 13;
+  repeated FamilyData families = 14;
+
+  // Stats
+  optional float average_rating = 15;
+  optional float bayes_rating = 16;
+  optional int32 ratings_count = 17;
+  optional int32 min_players = 18;
+  optional int32 max_players = 19;
+  optional int32 min_playtime = 20;
+  optional int32 max_playtime = 21;
+  optional int32 min_age = 22;
+  // Scaled by 1000 to avoid float precision issues e.g. 3.5 → 3500
+  optional int32 complexity_weight = 23;
+
+  // Populated when content_type != BASE_GAME
+  optional string base_game_external_id = 24;
+
+  // Escape hatch for platform-specific metadata (stored as JSON column).
+  // Gateways must provide matching-length parallel arrays.
+  repeated string extra_keys = 25;
+  repeated string extra_values = 26;
+}

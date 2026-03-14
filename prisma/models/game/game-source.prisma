@@ -5,10 +5,13 @@ model GameSource {
   gameId String @map("game_id")
 
   // External integration
-  gateway    GameGateway? @relation(fields: [gatewayId], references: [id])
-  gatewayId  String?      @map("gateway_id")
-  externalId String?      @map("external_id")
-  sourceUrl  String?      @map("source_url")
+  gateway      GameGateway? @relation(fields: [gatewayId], references: [id])
+  gatewayId    String?      @map("gateway_id")
+  externalId   String?      @map("external_id")
+  // Identifies the source platform type regardless of which gateway instance
+  // served it — enables cross-gateway same-platform dedup e.g. two BGG gateways
+  platformType String?      @map("platform_type") // 'bgg' | 'steam' | 'igdb' | ...
+  sourceUrl    String?      @map("source_url")
 
   // Sync management
   metadata     Json?     @map("metadata")
@@ -44,7 +47,9 @@ model GameSource {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([gameId, externalId])
+  @@unique([gatewayId, externalId])
+  @@unique([platformType, externalId])
+  @@index([gameId])
   @@index([gatewayId])
   @@index([lastSynced])
   @@map("game_sources")

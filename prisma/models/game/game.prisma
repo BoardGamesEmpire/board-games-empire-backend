@@ -23,7 +23,13 @@ model Game {
   // Metadata
   totalPlayCount Int    @default(0) @map("total_play_count")
   averageRating  Float? @map("average_rating")
+  bayesRating    Float? @map("bayes_rating")
+  ratingsCount   Int?   @map("ratings_count")
   ownedByCount   Int    @default(0) @map("owned_by_count")
+
+  // Enrichment control
+  enrichmentSource String?   @map("enrichment_source")
+  frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
   // Relations
   categories GameCategory[]
@@ -47,6 +53,7 @@ model Game {
   tags      GameTag[]
 
   gameSources GameSource[]
+  jobs        Job[]
 
   eventGames   EventGame[]
   // campaigns    Campaign[]
@@ -64,8 +71,8 @@ model Game {
   disliked           DislikedGame[]          @relation("DislikedGames")
 
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("games")
 }

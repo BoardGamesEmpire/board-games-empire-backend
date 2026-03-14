@@ -8,8 +8,8 @@ model Role {
   permissions RolePermission[]
   invites     Invite[]
 
-  userRoles      UserRole[]
-  householdRoles HouseholdRole[]
+  userRoles          UserRole[]
+  householdRoles     HouseholdRole[]
   eventAttendeeRoles EventAttendeeRole[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -19,13 +19,13 @@ model Role {
 }
 
 model RolePermission {
-  id     String @id @default(cuid(2))
+  id String @id @default(cuid(2))
 
   role   Role   @relation(fields: [roleId], references: [id])
   roleId String @map("role_id")
 
-  permission Permission @relation(fields: [permissionId], references: [id])
-  permissionId String @map("permission_id")
+  permission   Permission @relation(fields: [permissionId], references: [id])
+  permissionId String     @map("permission_id")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 

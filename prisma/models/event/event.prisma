@@ -14,14 +14,14 @@ model Event {
   description String?
   location    String?
   url         String?
-  type        EventType @default(CasualGathering)
+  type        EventType   @default(CasualGathering)
 
-  visibility        Visibility @default(Friends)
+  visibility Visibility @default(Friends)
 
   startDate DateTime  @map("start_date") @db.Timestamptz(3)
   endDate   DateTime? @map("end_date") @db.Timestamptz(3)
 
-  eventPolicy      EventPolicy?
+  eventPolicy EventPolicy?
 
   eventImages      EventImage[]
   eventVideos      EventVideo[]

@@ -8,7 +8,7 @@ model EventAttendeeRole {
   roleId String @map("role_id")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt      @map("updated_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([roleId])
   @@map("event_attendee_roles")

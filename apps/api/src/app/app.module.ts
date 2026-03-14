@@ -10,7 +10,7 @@ import { MetricsModule } from '@bge/metrics';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
-import KeyvRedis from '@keyv/redis';
+import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -57,11 +57,14 @@ import { configuration, configurationValidationSchema } from './configuration';
     CacheModule.registerAsync({
       isGlobal: true,
       inject: [ConfigService],
-      useFactory: async (configService: ConfigService) => ({
-        stores: [new KeyvRedis(configService.get('redis'))],
-        ttl: configService.get<number>('cache.ttl'),
-        max: configService.get<number>('cache.max'),
-      }),
+      async useFactory(configService: ConfigService) {
+        const options = configService.getOrThrow<RedisClientOptions>('redis');
+        return {
+          stores: [new KeyvRedis(options)],
+          ttl: configService.get<number>('cache.ttl'),
+          max: configService.get<number>('cache.max'),
+        };
+      },
     }),
 
     // Logging

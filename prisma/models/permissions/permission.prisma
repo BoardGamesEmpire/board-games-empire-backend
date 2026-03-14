@@ -1,13 +1,13 @@
 model Permission {
   id String @id @default(cuid(2))
 
-  action      Action
-  subject     String   // e.g., 'Game', 'User', 'all'
-  fields      String[] // Optional: e.g., '["title", "content"]'
-  conditions  Json?    // ABAC magic: { ownerId: '{{ user.id }}' } – templated
-  inverted    Boolean  @default(false)
-  reason      String?  // Audit trail: "Owner-only update"
-  slug        String   @unique // stable code-side identifier e.g. 'game:read'
+  action     Action
+  subject    String // e.g., 'Game', 'User', 'all'
+  fields     String[] // Optional: e.g., '["title", "content"]'
+  conditions Json? // ABAC magic: { ownerId: '{{ user.id }}' } – templated
+  inverted   Boolean  @default(false)
+  reason     String? // Audit trail: "Owner-only update"
+  slug       String   @unique // stable code-side identifier e.g. 'game:read'
 
   apiKeyScopes    ApiKeyScope[]
   rolePermissions RolePermission[]

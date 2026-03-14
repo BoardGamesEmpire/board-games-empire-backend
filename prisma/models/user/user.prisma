@@ -33,18 +33,18 @@ model User {
   userMedia          Media[]
   lists              List[]
   gatewayConnections UserGatewayConnection[]
-  householdMember HouseholdMember[]
+  householdMember    HouseholdMember[]
 
-  preferences        UserPreferences?
-  profile            UserProfile?
+  preferences UserPreferences?
+  profile     UserProfile?
 
   invitesReceived Invite[] @relation("InvitesReceived")
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")
 
-  eventsCreated                 Event[]
-  eventGameVotes                EventGameVote[]
-  eventsAttended                EventAttendee[]
+  eventsCreated  Event[]
+  eventGameVotes EventGameVote[]
+  eventsAttended EventAttendee[]
 
   loansGiven    GameLoan[] @relation("LoansGiven")
   loansReceived GameLoan[] @relation("LoansReceived")
@@ -68,6 +68,8 @@ model User {
   permissionsGranted UserPermission[] @relation("PermissionGranter")
   permissions        UserPermission[]
   roles              UserRole[]
+
+  jobs Job[]
 
   @@unique([email])
   @@unique([username])
