@@ -2,21 +2,44 @@ model Category {
   id String @id @default(cuid(2))
 
   name        String  @unique
+  slug        String  @unique
   description String?
 
   parentCategory   Category?  @relation("CategoryHierarchy", fields: [parentCategoryId], references: [id])
   parentCategoryId String?    @map("parent_category_id")
   subcategories    Category[] @relation("CategoryHierarchy")
 
-  games     GameCategory[]
-  favorites FavoriteCategory[]
-  disliked  DislikedCategory[]
+  // Enrichment control
+  enrichmentSource String?   @map("enrichment_source")
+  frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
+
+  games           GameCategory[]
+  favorites       FavoriteCategory[]
+  disliked        DislikedCategory[]
   eventCategories EventCategory[]
+  gatewayAliases  CategoryGatewayAlias[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("categories")
+}
+
+model CategoryGatewayAlias {
+  id String @id @default(cuid(2))
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  gatewayId    String @map("gateway_id")
+  externalId   String @map("external_id")
+  platformType String @map("platform_type")
+  externalName String @map("external_name")
+
+  @@unique([gatewayId, externalId])
+  @@unique([platformType, externalId])
+  @@index([categoryId])
+  @@map("category_gateway_aliases")
 }
 
 model GameCategory {

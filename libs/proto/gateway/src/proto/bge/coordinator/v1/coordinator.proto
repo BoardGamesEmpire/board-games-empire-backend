@@ -2,27 +2,38 @@ syntax = "proto3";
 
 package bge.coordinator.v1;
 
+import "bge/gateway/v1/common.proto";
 import "grpc/health/v1/health.proto";
 
-option java_package = "com.bge.coordinator.v1";
-option java_multiple_files = true;
-
-// Facilitates communication between the main application and gateway processes,
-// managing their lifecycle and health status.
+// Consumed by the main NestJS application only. Extends the existing lifecycle
+// RPCs with search and import-oriented RPCs. The coordinator fans out to
+// requested gateways concurrently and merges their streams, enriching each
+// result with deduplication metadata resolved against GameGatewayLink.
 service CoordinatorService {
-  // Liveness - is the coordinator process alive?
+  // Liveness
   rpc Ping(PingRequest) returns (PingResponse);
 
   // Standard gRPC health check
   rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
 
-  // Gateway lifecycle - called by main app GameGatewayService
   rpc ConnectGateway(ConnectGatewayRequest) returns (ConnectGatewayResponse);
   rpc DisconnectGateway(DisconnectGatewayRequest) returns (DisconnectGatewayResponse);
+
+  // Fan-out across selected (or all active) gateways. Streams lean
+  // GameSearchData frames as they arrive. Terminates when all selected
+  // gateways have emitted SOURCE_DONE or ERROR.
+  rpc SearchGames(SearchGamesRequest) returns (stream SearchGameResult);
+
+  // Fetch full GameData for a single game from a specific gateway.
+  // Used by the import worker and game detail page.
+  rpc FetchGame(CoordinatorFetchGameRequest) returns (CoordinatorFetchGameResponse);
+
+  // Fetch expansions for a base game. Coordinator resolves relevant gateways
+  // from GameGatewayLink and merges their streams.
+  rpc FetchExpansions(CoordinatorFetchExpansionsRequest) returns (stream SearchGameResult);
 }
 
 message PingRequest {
-  // Optional trace ID for correlation
   optional string correlation_id = 1;
 }
 
@@ -32,16 +43,11 @@ message PingResponse {
   string coordinator_version = 3;
 }
 
-
-// ─── Gateway lifecycle ───────────────────────────────────────────────────────
-
 message ConnectGatewayRequest {
   string gateway_id = 1;
   string connection_url = 2;
   int32 connection_port = 3;
-  // Serialized AuthType enum value - parsed to Prisma AuthType in coordinator
   string auth_type = 4;
-  // JSON-serialized auth parameters, structure depends on auth_type
   optional string auth_parameters_json = 5;
 }
 
@@ -57,4 +63,50 @@ message DisconnectGatewayRequest {
 message DisconnectGatewayResponse {
   bool success = 1;
   optional string error = 2;
+}
+
+message SearchGamesRequest {
+  string correlation_id = 1;
+  string query = 2;
+  // Empty = fan out to all active gateways
+  repeated string gateway_ids = 3;
+  optional int32 limit = 4;
+  optional int32 offset = 5;
+}
+
+message SearchGameResult {
+  string correlation_id = 1;
+  string gateway_id = 2;
+  bge.gateway.v1.ResultStatus status = 3;
+
+  // Populated on RESULT
+  optional bge.gateway.v1.GameSearchData game = 4;
+
+  // Deduplication metadata resolved by coordinator against GameGatewayLink
+  optional bool in_system = 5; // true = game already exists in local DB
+  optional string game_id = 6; // local DB Game.id when in_system = true
+
+  // Populated on ERROR / RATE_LIMITED
+  optional string message = 7;
+  optional int32 retry_after = 8;
+}
+
+message CoordinatorFetchGameRequest {
+  string correlation_id = 1;
+  string gateway_id = 2;
+  string external_id = 3;
+}
+
+message CoordinatorFetchGameResponse {
+  string correlation_id = 1;
+  string gateway_id = 2;
+  bge.gateway.v1.ResultStatus status = 3;
+  optional bge.gateway.v1.GameData game = 4;
+  optional string message = 5;
+}
+
+message CoordinatorFetchExpansionsRequest {
+  string correlation_id = 1;
+  // Local DB Game.id — coordinator resolves gateway links internally
+  string game_id = 2;
 }

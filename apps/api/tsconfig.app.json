@@ -29,6 +29,9 @@
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/search/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {

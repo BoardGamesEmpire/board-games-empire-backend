@@ -1,7 +1,5 @@
-import { authFactory, UserProvisioningService } from '@bge/auth';
-import { DatabaseService } from '@bge/database';
+import { AUTH_INSTANCE } from '@bge/auth';
 import { env } from '@bge/env';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -11,6 +9,7 @@ import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
@@ -85,14 +84,13 @@ async function bootstrap() {
     SwaggerModule.setup(globalPrefix, app, document);
   }
 
-  const dbService = app.get(DatabaseService);
-  const cacheService = app.get(CACHE_MANAGER);
-  const userProvisioningService = app.get(UserProvisioningService);
+  const redisAdapter = new RedisIoAdapter(app);
+  await redisAdapter.connectToRedis(configService);
+  app.useWebSocketAdapter(redisAdapter);
+
+  const authInstance = app.get(AUTH_INSTANCE);
   const server = app.getHttpAdapter().getInstance();
-  server.all(
-    `/${globalPrefix}/auth/*any`,
-    toNodeHandler(authFactory(dbService, configService, cacheService, userProvisioningService)),
-  );
+  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
 
   const port = configService.get<number>('server.port', 33333);
   await app.listen(port);

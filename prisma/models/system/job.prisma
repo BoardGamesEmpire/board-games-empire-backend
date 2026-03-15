@@ -1,0 +1,77 @@
+model Job {
+  id String @id @default(cuid(2))
+
+  type   JobType   @map("type")
+  status JobStatus @default(Pending) @map("status")
+
+  initiatorType InitiatorType @default(User) @map("initiator_type")
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId String? @map("user_id")
+
+  // Contextual linkage — nullable, populated depending on job type
+  gameId String? @map("game_id")
+  game   Game?   @relation(fields: [gameId], references: [id], onDelete: SetNull)
+
+  // Groups expansion children with their base game import
+  batchId String? @map("batch_id")
+
+  // BullMQ job ID for correlation with queue state
+  bullmqJobId String? @map("bullmq_job_id")
+
+  payload Json? // input snapshot
+  result  Json? // summary on completion
+  error   String?
+  note    String?
+
+  parentJob   Job?   @relation("JobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
+  parentJobId String? @map("parent_job_id")
+  childJobs   Job[]  @relation("JobHierarchy")
+
+
+  scheduledAt DateTime? @map("scheduled_at") @db.Timestamptz(3)
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(3)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([parentJobId])
+  @@index([userId, type])
+  @@index([initiatorType, type])
+  @@index([batchId])
+  @@index([status])
+  @@map("jobs")
+}
+
+enum InitiatorType {
+  User
+  System
+  Scheduler
+
+  @@map("initiator_types")
+}
+
+enum JobType {
+  GameImport
+  GameEnrich
+  ArtistEnrich
+  DesignerEnrich
+  PublisherEnrich
+  MechanicSync
+  CategorySync
+  FamilySync
+  CollectionSync
+  GatewaySeed
+
+  @@map("job_types")
+}
+
+enum JobStatus {
+  Pending
+  Running
+  Completed
+  Failed
+  Cancelled
+
+  @@map("job_statuses")
+}
