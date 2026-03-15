@@ -1,7 +1,5 @@
-import { authFactory, UserProvisioningService } from '@bge/auth';
-import { DatabaseService } from '@bge/database';
+import { AUTH_INSTANCE } from '@bge/auth';
 import { env } from '@bge/env';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -90,14 +88,9 @@ async function bootstrap() {
   await redisAdapter.connectToRedis(configService);
   app.useWebSocketAdapter(redisAdapter);
 
-  const dbService = app.get(DatabaseService);
-  const cacheService = app.get(CACHE_MANAGER);
-  const userProvisioningService = app.get(UserProvisioningService);
+  const authInstance = app.get(AUTH_INSTANCE);
   const server = app.getHttpAdapter().getInstance();
-  server.all(
-    `/${globalPrefix}/auth/*any`,
-    toNodeHandler(authFactory(dbService, configService, cacheService, userProvisioningService)),
-  );
+  server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
 
   const port = configService.get<number>('server.port', 33333);
   await app.listen(port);

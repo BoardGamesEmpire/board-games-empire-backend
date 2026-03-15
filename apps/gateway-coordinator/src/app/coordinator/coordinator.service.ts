@@ -1,9 +1,7 @@
-import { AuthType, DatabaseService, Prisma } from '@bge/database';
+import { AuthType, Prisma } from '@bge/database';
 import * as proto from '@board-games-empire/proto-gateway';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { Cache } from 'cache-manager';
 import * as crypto from 'node:crypto';
 import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
@@ -11,12 +9,7 @@ import { GatewayRegistryService } from '../gateway-registry/gateway-registry.ser
 export class CoordinatorService {
   private readonly logger = new Logger(CoordinatorService.name);
 
-  constructor(
-    private readonly configService: ConfigService,
-    private readonly registry: GatewayRegistryService,
-    private readonly db: DatabaseService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
-  ) {}
+  constructor(private readonly configService: ConfigService, private readonly registry: GatewayRegistryService) {}
 
   async connectGateway(request: proto.ConnectGatewayRequest): Promise<proto.ConnectGatewayResponse> {
     const authType = request.authType as AuthType;

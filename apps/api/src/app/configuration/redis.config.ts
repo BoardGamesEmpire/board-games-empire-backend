@@ -68,8 +68,8 @@ export default registerAs('redis', () =>
     ],
     (config) => ({
       username: config.username,
-      password: config.password,
-      database: config.database,
+      password: config.password || undefined,
+      database: config.database || undefined,
       socket: {
         host: config.host,
         port: config.port,

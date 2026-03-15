@@ -10,9 +10,7 @@ export class SearchStartDto {
 
   /**
    * Gateway IDs to include in the search.
-   * Empty array or omission = fan out to all active gateways.
    */
-  @IsOptional()
   @IsArray()
   @IsString({ each: true })
   gatewayIds!: string[];

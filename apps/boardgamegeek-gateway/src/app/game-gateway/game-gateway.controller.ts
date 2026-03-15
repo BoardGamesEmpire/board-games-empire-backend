@@ -1,46 +1,35 @@
-import {
-  FetchExpansionsRequest,
-  FetchGameRequest,
-  FetchGameResponse,
-  GatewayPingRequest,
-  GatewayPingResponse,
-  GatewaySearchRequest,
-  GatewaySearchResult,
-  GatewayServiceController,
-  GatewayServiceControllerMethods,
-  HealthCheckRequest,
-  HealthCheckResponse,
-} from '@board-games-empire/proto-gateway';
+import type * as proto from '@board-games-empire/proto-gateway';
+import { GatewayServiceControllerMethods } from '@board-games-empire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
 import { GameGatewayService } from './game-gateway.service';
 
 @GatewayServiceControllerMethods()
 @Controller()
-export class GameGatewayController implements GatewayServiceController {
+export class GameGatewayController implements proto.GatewayServiceController {
   private readonly logger = new Logger(GameGatewayController.name);
 
   constructor(private readonly gameGatewayService: GameGatewayService) {}
 
-  ping(request: GatewayPingRequest): GatewayPingResponse {
+  ping(request: proto.GatewayPingRequest): proto.GatewayPingResponse {
     this.logger.log('Ping request received');
 
     return this.gameGatewayService.ping(request);
   }
 
-  check(request: HealthCheckRequest): HealthCheckResponse {
+  check(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
     return this.gameGatewayService.healthCheck(request);
   }
 
-  searchGames(request: GatewaySearchRequest): Observable<GatewaySearchResult> {
+  searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     throw new Error('Method not implemented.');
   }
 
-  fetchGame(request: FetchGameRequest): Promise<FetchGameResponse> | Observable<FetchGameResponse> | FetchGameResponse {
+  fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
     throw new Error('Method not implemented.');
   }
 
-  fetchExpansions(request: FetchExpansionsRequest): Observable<GatewaySearchResult> {
+  fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
     throw new Error('Method not implemented.');
   }
 }

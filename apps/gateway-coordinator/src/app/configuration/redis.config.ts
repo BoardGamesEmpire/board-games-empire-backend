@@ -68,8 +68,8 @@ export default registerAs('redis', () =>
     ],
     (config) => ({
       username: config.username,
-      password: config.password,
-      database: config.database,
+      password: config.password || undefined,
+      database: config.database || undefined,
       socket: {
         host: config.host,
         port: config.port,
@@ -86,7 +86,7 @@ export default registerAs('redis', () =>
 export const redisConfigValidationSchema = {
   REDIS_HOST: Joi.string().default('localhost'),
   REDIS_PORT: Joi.number().default(6379),
-  REDIS_DATABASE: Joi.number().default(0),
+  REDIS_DATABASE: Joi.number().default(1),
   REDIS_USERNAME: Joi.string().optional().allow('').default(''),
   REDIS_PASSWORD: Joi.string().optional().allow('').default(''),
   REDIS_TLS_ENABLED: Joi.boolean().default(false),

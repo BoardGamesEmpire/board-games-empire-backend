@@ -8,6 +8,7 @@ import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
+import { SearchGatewayModule } from '@bge/search';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
@@ -90,6 +91,7 @@ import { configuration, configurationValidationSchema } from './configuration';
     LanguageModule,
     MetricsModule,
     PermissionsModule,
+    SearchGatewayModule,
     SystemSettingsModule,
     UserModule,
   ],

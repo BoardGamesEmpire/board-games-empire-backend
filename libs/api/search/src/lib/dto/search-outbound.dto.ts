@@ -1,23 +1,35 @@
 export interface WsSearchResultPayload {
   correlationId: string;
-  source: string; // gatewayId or 'local'
   games: WsGameSearchResult[];
+
+  /**
+   * gatewayId or 'local'
+   */
+  source: string;
 }
 
 export interface WsGameSearchResult {
-  externalId: string;
-  title: string;
-  contentType: string;
-  yearPublished?: number;
-  thumbnailUrl?: string;
-  sourceUrl?: string;
   averageRating?: number;
-  minPlayers?: number;
-  maxPlayers?: number;
   baseGameExternalId?: string;
-  // Deduplication metadata resolved by coordinator
+  contentType: string;
+  externalId: string;
+
+  /**
+   * local DB Game.id when inSystem = true
+   */
+  gameId?: string;
+
+  /**
+   * Deduplication metadata resolved by coordinator
+   */
   inSystem: boolean;
-  gameId?: string; // local DB Game.id when inSystem = true
+
+  maxPlayers?: number;
+  minPlayers?: number;
+  sourceUrl?: string;
+  thumbnailUrl?: string;
+  title: string;
+  yearPublished?: number;
 }
 
 export interface WsSourceDonePayload {
@@ -31,15 +43,15 @@ export interface WsSearchDonePayload {
 
 export interface WsSearchErrorPayload {
   correlationId: string;
-  source: string;
   message: string;
+  source: string;
 }
 
 export interface WsRateLimitedPayload {
   correlationId: string;
+  message: string;
   source: string;
   retryAfter: number; // seconds
-  message: string;
 }
 
 export interface WsSourceUnavailablePayload {

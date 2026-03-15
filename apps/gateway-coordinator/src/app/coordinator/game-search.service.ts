@@ -3,8 +3,8 @@ import * as proto from '@board-games-empire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
-import { EMPTY, from, merge, Observable, of } from 'rxjs';
-import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
+import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
+import { catchError, concatMap, endWith, filter, map, mergeMap, shareReplay, tap, throwIfEmpty } from 'rxjs/operators';
 import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
 @Injectable()
@@ -42,7 +42,7 @@ export class GameSearchService {
    * Used by the import worker — bypasses the search cache.
    */
   fetchGame(request: proto.CoordinatorFetchGameRequest): Observable<proto.CoordinatorFetchGameResponse> {
-    return of(this.registry.getServiceClient(request.gatewayId)).pipe(
+    return defer(() => of(this.registry.getServiceClient(request.gatewayId))).pipe(
       tap(() =>
         this.logger.debug(`Fetching game from gateway ${request.gatewayId} with externalId ${request.externalId}`),
       ),
@@ -103,12 +103,18 @@ export class GameSearchService {
           }),
         ),
       ),
+      catchError((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.error(`FetchExpansions failed for gameId ${request.gameId}: ${message}`);
+
+        return this.errorGameSearchResult(request.gameId, request.correlationId, message);
+      }),
     );
   }
 
   private searchGateway(gatewayId: string, request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     const cacheKey = this.buildSearchCacheKey(gatewayId, request);
-    const cache$ = from(this.cache.get<proto.GameSearchData[]>(cacheKey));
+    const cache$ = from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(shareReplay(1));
 
     const cacheHit$ = cache$.pipe(
       filter((cached) => cached !== undefined),

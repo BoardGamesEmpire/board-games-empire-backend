@@ -1,7 +1,7 @@
 import type * as proto from '@board-games-empire/proto-gateway';
 import { CoordinatorServiceController, CoordinatorServiceControllerMethods } from '@board-games-empire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
 
