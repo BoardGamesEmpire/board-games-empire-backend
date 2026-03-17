@@ -33,6 +33,9 @@ export class GatewayRegistryService {
         protoPath: protoPaths,
         loader: {
           includeDirs: [path.join(__dirname, 'proto')],
+          arrays: true,
+          longs: String,
+          enums: String,
         },
         credentials: channelCredentials,
       },

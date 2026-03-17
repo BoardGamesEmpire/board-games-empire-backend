@@ -22,6 +22,9 @@ import { GatewayCoordinatorClientService } from './coordinator.service';
               protoPath: [path.join(__dirname, 'proto', 'bge', 'coordinator', 'v1', 'coordinator.proto')],
               loader: {
                 includeDirs: [path.join(__dirname, 'proto')],
+                arrays: true,
+                longs: String,
+                enums: String,
               },
             },
           }),

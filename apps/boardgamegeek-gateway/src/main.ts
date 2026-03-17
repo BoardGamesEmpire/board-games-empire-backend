@@ -10,7 +10,7 @@ import { AppModule } from './app/app.module';
 async function bootstrap() {
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
   Logger.log(`Loading gRPC proto files from: ${protoPaths.join(', ')}`);
-  const url = `${env.provide('GATEWAY_GRPC_HOST')}:${env.provide('GATEWAY_GRPC_PORT')}`;
+  const url = `${env.provide('BOARDGAMEGEEK_GATEWAY_GRPC_HOST')}:${env.provide('BOARDGAMEGEEK_GATEWAY_GRPC_PORT')}`;
 
   const app = await NestFactory.createMicroservice(AppModule, {
     transport: Transport.GRPC,
@@ -20,6 +20,9 @@ async function bootstrap() {
       protoPath: protoPaths,
       loader: {
         includeDirs: [path.join(__dirname, 'proto')],
+        arrays: true,
+        longs: String,
+        enums: String,
       },
     },
   });

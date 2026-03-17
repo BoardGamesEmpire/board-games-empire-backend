@@ -88,6 +88,7 @@
     "argon2": "^0.44.0",
     "axios": "^1.13.6",
     "better-auth": "^1.5.5",
+    "bgg-ts-client": "^0.2.0",
     "cache-manager": "^7.2.8",
     "cacheable": "^2.3.3",
     "class-transformer": "^0.5.1",

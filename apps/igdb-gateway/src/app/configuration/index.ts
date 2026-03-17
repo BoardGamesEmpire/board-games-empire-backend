@@ -1,13 +1,13 @@
 import Joi from 'joi';
-import boardGameGeekConfig, { boardGameGeekConfigValidationSchema } from './boardgamegeek.config';
 import gatewayConfig, { gatewayConfigValidationSchema } from './gateway.config';
+import igdbConfig, { igdbConfigValidationSchema } from './igdb.config';
 
 export const configuration = {
   gateway: gatewayConfig,
-  boardgamegeek: boardGameGeekConfig,
+  igdb: igdbConfig,
 };
 
 export const configurationValidationSchema = Joi.object({
   ...gatewayConfigValidationSchema,
-  ...boardGameGeekConfigValidationSchema,
+  ...igdbConfigValidationSchema,
 });
