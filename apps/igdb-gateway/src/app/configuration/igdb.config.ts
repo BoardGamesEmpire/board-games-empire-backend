@@ -7,7 +7,7 @@ export interface IGDBConfig {
   client_secret: string;
 }
 
-export default registerAs('boardgamegeek', () =>
+export default registerAs('igdb', () =>
   env.provideMany<IGDBConfig>([
     {
       key: 'IGDB_CLIENT_ID',

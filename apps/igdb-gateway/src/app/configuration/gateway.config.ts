@@ -27,8 +27,8 @@ export default registerAs('gateway', () =>
 );
 
 export const gatewayConfigValidationSchema = {
-  GATEWAY_GRPC_HOST: Joi.alternatives()
+  IGDB_GATEWAY_GRPC_HOST: Joi.alternatives()
     .try(Joi.string().hostname(), Joi.string().ip({ version: ['ipv4', 'ipv6'] }))
     .default('0.0.0.0'),
-  GATEWAY_GRPC_PORT: Joi.number().default(50054),
+  IGDB_GATEWAY_GRPC_PORT: Joi.number().default(50054),
 };
