@@ -1,7 +1,8 @@
+import { type AuthType, AUTH_INSTANCE } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { DatabaseService } from '@bge/database';
 import { ResultStatus } from '@board-games-empire/proto-gateway';
-import { Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Inject, Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -9,7 +10,6 @@ import {
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
-  WsException,
 } from '@nestjs/websockets';
 import { wrapDefaults } from '@status/defaults';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
@@ -27,7 +27,6 @@ import type {
 } from './dto/search-outbound.dto';
 import { SearchCancelDto, SearchStartDto } from './dto/search-start.dto';
 
-/** Per-socket metadata stored on client.data */
 interface WsClientData {
   // userId: string;
   /** correlationId → active gRPC stream subscription */
@@ -53,7 +52,11 @@ export class SearchGateway implements OnGatewayDisconnect {
     setUndefined: true,
   });
 
-  constructor(private readonly coordinator: GatewayCoordinatorClientService, private readonly db: DatabaseService) {}
+  constructor(
+    private readonly coordinator: GatewayCoordinatorClientService,
+    private readonly db: DatabaseService,
+    @Inject(AUTH_INSTANCE) private readonly auth: AuthType,
+  ) {}
 
   async handleConnection(client: Socket): Promise<void> {
     const token = client.handshake?.auth?.token;
@@ -65,7 +68,25 @@ export class SearchGateway implements OnGatewayDisconnect {
       return;
     }
 
-    // TODO: validate token - might not be passing correct token..
+    // TODO: helper service in auth module to validate WS tokens and fetch session info, instead of
+    // calling the full auth API here or injecting auth context
+    const session = await this.auth.api.getSession({
+      headers: new Headers({
+        Authorization: `Bearer ${token}`,
+      }),
+    });
+
+    if (!session?.user) {
+      this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
+      client.disconnect(true);
+      return;
+    }
+
+    if (session.session.expiresAt < new Date()) {
+      this.logger.warn(`Expired session for WS connection: socketId=${client.id}`);
+      client.disconnect(true);
+      return;
+    }
 
     this.logger.log(`WS connected: socketId=${client.id}`);
   }
@@ -75,7 +96,20 @@ export class SearchGateway implements OnGatewayDisconnect {
     this.logger.log(`WS disconnected: socketId=${client.id}`);
   }
 
-  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }))
+  @UsePipes(
+    new ValidationPipe({
+      forbidNonWhitelisted: true,
+      transform: true,
+      whitelist: true,
+      validationError: {
+        target: false,
+        value: false,
+      },
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  )
   @SubscribeMessage(SearchEvents.SearchStart)
   async handleSearchStart(@ConnectedSocket() client: Socket, @MessageBody() dto: SearchStartDto): Promise<void> {
     this.logger.log(
@@ -85,15 +119,17 @@ export class SearchGateway implements OnGatewayDisconnect {
     );
 
     if (this.getClientData(client).activeSearches.has(dto.correlationId)) {
-      throw new WsException(`Search with correlationId ${dto.correlationId} is already active`);
+      return this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+        correlationId: dto.correlationId,
+        source: 'local',
+        message: `Search with correlationId ${dto.correlationId} is already active`,
+      });
     }
 
     await client.join(dto.correlationId);
 
-    await Promise.all([
-      dto.includeLocal !== false ? this.runLocalSearch(dto) : Promise.resolve(),
-      this.runGatewaySearch(client, dto),
-    ]);
+    // TODO: return observables and merge -- error killing one source shouldn't kill the whole search
+    await Promise.all([this.runLocalSearch(dto), this.runGatewaySearch(client, dto)]);
   }
 
   @UsePipes(new ValidationPipe({ whitelist: true }))
@@ -108,7 +144,11 @@ export class SearchGateway implements OnGatewayDisconnect {
     this.logger.log(`Search cancelled: correlationId=${dto.correlationId}`);
   }
 
-  private async runLocalSearch(options: SearchStartDto): Promise<void> {
+  private async runLocalSearch(options: SearchStartDto) {
+    if (options.includeLocal === false) {
+      return Promise.resolve();
+    }
+
     const source = 'local';
 
     try {
@@ -174,7 +214,7 @@ export class SearchGateway implements OnGatewayDisconnect {
       const stream$ = this.coordinator.searchGames({
         correlationId: dto.correlationId,
         query: dto.query,
-        gatewayIds: dto.gatewayIds,
+        gatewayIds: dto.gatewayIds || [],
         limit: dto.limit ?? undefined,
         offset: dto.offset ?? undefined,
       });

@@ -8,6 +8,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import {
   admin,
   anonymous,
+  bearer,
   deviceAuthorization,
   genericOAuth,
   lastLoginMethod,
@@ -39,6 +40,7 @@ export function authFactory(
   const plugins: BetterAuthPlugin[] = [
     admin(),
     anonymous(),
+    bearer(),
     lastLoginMethod(),
     oneTap(),
     oneTimeToken(),

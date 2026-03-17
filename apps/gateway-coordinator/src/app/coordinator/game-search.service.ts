@@ -26,6 +26,10 @@ export class GameSearchService {
    * deduplication metadata resolved against GameSource for each RESULT frame.
    */
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
+    this.logger.debug(
+      `Received search request with query '${request.query}' for gateways [${request.gatewayIds?.join(', ')}]`,
+    );
+
     const targetIds = request.gatewayIds.length > 0 ? request.gatewayIds : this.registry.connectedGatewayIds();
     if (targetIds.length === 0) {
       return EMPTY;

@@ -6,6 +6,7 @@ import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { authFactory } from './auth-factory';
 import authConfig from './configuration/auth.config';
 import { AUTH_INSTANCE } from './constants';
+import type { AuthType } from './interfaces';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
 import { StrategyController, StrategyService } from './strategy';
 
@@ -14,7 +15,7 @@ import { StrategyController, StrategyService } from './strategy';
     ConfigModule.forFeature(authConfig),
     DatabaseModule,
     BetterAuthModule.forRootAsync({
-      useFactory: (auth: ReturnType<typeof authFactory>) => ({ auth }),
+      useFactory: (auth: AuthType) => ({ auth }),
       imports: [AuthModule],
       inject: [AUTH_INSTANCE],
     }),
