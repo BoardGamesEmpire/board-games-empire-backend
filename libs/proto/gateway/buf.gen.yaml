@@ -8,3 +8,4 @@ plugins:
       - outputJsonMethods=false
       - esModuleInterop=true
       - forceLong=bigint
+      - stringEnums=true

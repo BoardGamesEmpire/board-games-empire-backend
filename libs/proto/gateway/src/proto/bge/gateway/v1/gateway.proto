@@ -44,8 +44,11 @@ message GatewayPingResponse {
 message GatewaySearchRequest {
   string correlation_id = 1;
   string query = 2;
-  optional int32 limit = 3;
-  optional int32 offset = 4;
+  // e.g. "en", "de", used for locale-specific search optimizations in gateways
+  // that support it;
+  optional string locale = 3;
+  optional int32 limit = 4;
+  optional int32 offset = 5;
 }
 
 message GatewaySearchResult {
@@ -71,4 +74,5 @@ message FetchGameResponse {
 message FetchExpansionsRequest {
   string correlation_id = 1;
   string base_external_id = 2;
+  optional string locale = 3;
 }

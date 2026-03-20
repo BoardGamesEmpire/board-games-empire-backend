@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameGatewayModule } from './game-gateway/game-gateway.module';
+import { IgdbModule } from './igdb/igdb.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { GameGatewayModule } from './game-gateway/game-gateway.module';
       },
     }),
     GameGatewayModule,
+    IgdbModule,
   ],
 })
 export class AppModule {}

@@ -55,6 +55,7 @@ export class GameSearchService {
         ...response,
         gatewayId: request.gatewayId,
       })),
+
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`FetchGame failed for gateway ${request.gatewayId}: ${message}`);
@@ -91,12 +92,18 @@ export class GameSearchService {
             .join(', ')}`,
         ),
       ),
+
       mergeMap((sources) => sources),
       filter(
         (source) => Boolean(source.gatewayId && source.externalId) && this.registry.isConnected(source.gatewayId!),
       ),
       mergeMap((source) =>
-        this.fetchExpansionsFromGateway(source.gatewayId!, source.externalId!, request.correlationId).pipe(
+        this.fetchExpansionsFromGateway(
+          source.gatewayId!,
+          source.externalId!,
+          request.correlationId,
+          request.locale,
+        ).pipe(
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.error(
@@ -107,6 +114,7 @@ export class GameSearchService {
           }),
         ),
       ),
+
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`FetchExpansions failed for gameId ${request.gameId}: ${message}`);
@@ -164,6 +172,7 @@ export class GameSearchService {
       query: request.query,
       limit: request.limit,
       offset: request.offset,
+      locale: request.locale,
     });
 
     const accumulated: proto.GameSearchData[] = [];
@@ -184,12 +193,18 @@ export class GameSearchService {
     accumulated: proto.GameSearchData[],
     cacheKey: string,
   ): Observable<proto.SearchGameResult> {
+    this.logger.debug(`Received search result from gateway ${gatewayId} with status ${result.status}`);
     const base = { correlationId: result.correlationId, gatewayId };
 
     switch (result.status) {
       case proto.ResultStatus.RESULT_STATUS_RESULT: {
-        if (!result.game) return EMPTY;
+        if (!result.game) {
+          this.logger.warn(`Received RESULT status from gateway ${gatewayId} without game data`);
 
+          return EMPTY;
+        }
+
+        this.logger.debug(`Accumulating game with externalId ${result.game.externalId} from gateway ${gatewayId}`);
         accumulated.push(result.game);
 
         // Async dedup check
@@ -207,6 +222,8 @@ export class GameSearchService {
       }
 
       case proto.ResultStatus.RESULT_STATUS_SOURCE_DONE: {
+        this.logger.debug(`Gateway ${gatewayId} has completed sending results`);
+
         // Persist accumulated results to cache once the gateway signals completion
         void this.cache.set(cacheKey, accumulated, this.searchCacheTTL);
         return of<proto.SearchGameResult>({
@@ -216,6 +233,12 @@ export class GameSearchService {
       }
 
       case proto.ResultStatus.RESULT_STATUS_RATE_LIMITED: {
+        this.logger.warn(
+          `Gateway ${gatewayId} is rate limited: ${result.message ?? 'No additional info'}, retry after ${
+            result.retryAfter ?? 'unknown'
+          } seconds`,
+        );
+
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_RATE_LIMITED,
@@ -225,17 +248,21 @@ export class GameSearchService {
       }
 
       case proto.ResultStatus.RESULT_STATUS_UNAVAILABLE: {
+        this.logger.warn(`Gateway ${gatewayId} is unavailable: ${result.message ?? 'No additional info'}`);
+
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
         });
       }
       case proto.ResultStatus.RESULT_STATUS_ERROR: {
+        this.logger.error(`Received error status from gateway ${gatewayId}: ${result.message ?? 'Unknown error'}`);
         return this.errorGameSearchResult(gatewayId, result.correlationId, result.message ?? 'Unknown error');
       }
 
       default: {
-        return EMPTY;
+        this.logger.warn(`Received unknown status ${result.status} from gateway ${gatewayId}`);
+        return this.errorGameSearchResult(gatewayId, result.correlationId, `Unknown status ${result.status}`);
       }
     }
   }
@@ -280,6 +307,7 @@ export class GameSearchService {
     gatewayId: string,
     baseExternalId: string,
     correlationId: string,
+    locale?: string,
   ): Observable<proto.SearchGameResult> {
     let client;
     try {
@@ -293,7 +321,7 @@ export class GameSearchService {
       );
     }
 
-    return client.fetchExpansions({ correlationId, baseExternalId }).pipe(
+    return client.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
       mergeMap((result: proto.GatewaySearchResult) => {
         if (result.status !== proto.ResultStatus.RESULT_STATUS_RESULT || !result.game) {
           return of<proto.SearchGameResult>({ correlationId, gatewayId, status: result.status });
@@ -336,22 +364,33 @@ export class GameSearchService {
     });
   }
 
-  private async resolveDedup(
+  private resolveDedup(
     gatewayId: string,
     externalId: string,
-  ): Promise<{ inSystem: boolean; gameId: string | undefined }> {
-    const source = await this.db.gameSource.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId } },
-      select: { gameId: true },
-    });
-
-    return {
-      inSystem: source !== null,
-      gameId: source?.gameId ?? undefined,
-    };
+  ): Observable<{ inSystem: boolean; gameId: string | undefined }> {
+    return from(
+      this.db.gameSource.findUnique({
+        where: { gatewayId_externalId: { gatewayId, externalId } },
+        select: { gameId: true },
+      }),
+    ).pipe(
+      tap((source) => {
+        this.logger.debug(
+          `Resolved dedup for gateway ${gatewayId} and externalId ${externalId}: inSystem=${source !== null}, gameId=${
+            source?.gameId
+          }`,
+        );
+      }),
+      map((source) => ({
+        inSystem: source !== null,
+        gameId: source?.gameId,
+      })),
+    );
   }
 
   private buildSearchCacheKey(gatewayId: string, request: proto.SearchGamesRequest): string {
-    return `${this.searchCachePrefix}:${gatewayId}:${request.query}:${request.limit ?? ''}:${request.offset ?? ''}`;
+    return [this.searchCachePrefix, gatewayId, request.query, request.locale, request.limit, request.offset ?? '']
+      .filter((key) => key !== undefined && key !== '' && key !== null)
+      .join(':');
   }
 }

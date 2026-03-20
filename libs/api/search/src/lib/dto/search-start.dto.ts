@@ -23,6 +23,10 @@ export class SearchStartDto {
   includeLocal?: boolean = true;
 
   @IsOptional()
+  @IsString()
+  locale?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Max(100)

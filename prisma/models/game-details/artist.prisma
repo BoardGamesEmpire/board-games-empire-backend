@@ -22,6 +22,7 @@ model Artist {
   @@map("artists")
 }
 
+// mapping canonical people/mechanics/categories to their external source identities rather than through games.
 model ArtistGatewayLink {
   id String @id @default(cuid(2))
 
