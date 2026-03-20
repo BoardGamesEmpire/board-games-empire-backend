@@ -89,7 +89,7 @@ const IGDB_RELEASE_STATUS_MAP: Readonly<Record<number, proto.ReleaseStatus>> = {
 
 function toReleaseStatus(igdbStatus: number | undefined): proto.ReleaseStatus {
   return (
-    (igdbStatus !== undefined && IGDB_RELEASE_STATUS_MAP[igdbStatus]) || proto.ReleaseStatus.RELEASE_STATUS_RELEASED
+    (igdbStatus !== undefined && IGDB_RELEASE_STATUS_MAP[igdbStatus]) || proto.ReleaseStatus.RELEASE_STATUS_UNSPECIFIED
   );
 }
 

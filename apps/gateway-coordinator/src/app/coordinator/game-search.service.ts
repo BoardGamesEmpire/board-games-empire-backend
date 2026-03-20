@@ -98,7 +98,12 @@ export class GameSearchService {
         (source) => Boolean(source.gatewayId && source.externalId) && this.registry.isConnected(source.gatewayId!),
       ),
       mergeMap((source) =>
-        this.fetchExpansionsFromGateway(source.gatewayId!, source.externalId!, request.correlationId).pipe(
+        this.fetchExpansionsFromGateway(
+          source.gatewayId!,
+          source.externalId!,
+          request.correlationId,
+          request.locale,
+        ).pipe(
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
             this.logger.error(
@@ -384,6 +389,8 @@ export class GameSearchService {
   }
 
   private buildSearchCacheKey(gatewayId: string, request: proto.SearchGamesRequest): string {
-    return [gatewayId, request.query, request.locale, request.limit, request.offset].filter((k) => k).join(':');
+    return [this.searchCachePrefix, gatewayId, request.query, request.locale, request.limit, request.offset ?? '']
+      .filter((key) => key !== undefined && key !== '' && key !== null)
+      .join(':');
   }
 }

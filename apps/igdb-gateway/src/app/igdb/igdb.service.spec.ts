@@ -27,8 +27,8 @@ describe('IGDBService', () => {
           provide: ConfigService,
           useValue: {
             getOrThrow: jest.fn().mockReturnValue({
-              client_id: 'test-client-id',
-              client_secret: 'test-client-secret',
+              clientId: 'test-client-id',
+              clientSecret: 'test-client-secret',
             }),
           },
         },
@@ -65,8 +65,6 @@ describe('IGDBService', () => {
     });
   });
 
-  // ── call — 401 retry ───────────────────────────────────────────────────────
-
   describe('call — 401 retry', () => {
     it('refreshes the token on a 401 and retries the request once', async () => {
       const request = makeRequest401ThenSuccess(MOCK_GAMES);
@@ -90,13 +88,11 @@ describe('IGDBService', () => {
       await firstValueFrom(service.call(request));
 
       expect(fetchAccessTokenSpy).toHaveBeenCalledWith({
-        client_id: 'test-client-id',
-        client_secret: 'test-client-secret',
+        clientId: 'test-client-id',
+        clientSecret: 'test-client-secret',
       });
     });
   });
-
-  // ── call — concurrent 401 race condition ───────────────────────────────────
 
   describe('call — concurrent 401 race condition', () => {
     it('issues only one token refresh when concurrent calls both receive 401', async () => {

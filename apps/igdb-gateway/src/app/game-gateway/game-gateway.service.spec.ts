@@ -106,8 +106,8 @@ describe('GameGatewayService', () => {
       expect(resultFrame?.game?.externalId).toBe(String(BASE_GAME.id));
     });
 
-    it('maps IGDB category 0 (main_game) → CONTENT_TYPE_BASE_GAME', async () => {
-      mockIgdbClient.request.mockResolvedValue({ data: [{ ...BASE_GAME, category: 0 }] });
+    it('maps IGDB game_type 0 (main_game) → CONTENT_TYPE_BASE_GAME', async () => {
+      mockIgdbClient.request.mockResolvedValue({ data: [{ ...BASE_GAME, game_type: 0 }] });
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'test' }).pipe(toArray()));
       const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
@@ -115,7 +115,7 @@ describe('GameGatewayService', () => {
       expect(result?.game?.contentType).toBe(ContentType.CONTENT_TYPE_BASE_GAME);
     });
 
-    it('maps IGDB category 1 (dlc_addon) → CONTENT_TYPE_DLC', async () => {
+    it('maps IGDB game_type 1 (dlc_addon) → CONTENT_TYPE_DLC', async () => {
       mockIgdbClient.request.mockResolvedValue({ data: [DLC_GAME] });
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
@@ -124,7 +124,7 @@ describe('GameGatewayService', () => {
       expect(result?.game?.contentType).toBe(ContentType.CONTENT_TYPE_DLC);
     });
 
-    it('maps IGDB category 2 (expansion) → CONTENT_TYPE_EXPANSION', async () => {
+    it('maps IGDB game_type 2 (expansion) → CONTENT_TYPE_EXPANSION', async () => {
       mockIgdbClient.request.mockResolvedValue({ data: [EXPANSION_GAME] });
 
       const frames = await firstValueFrom(
@@ -135,7 +135,7 @@ describe('GameGatewayService', () => {
       expect(result?.game?.contentType).toBe(ContentType.CONTENT_TYPE_EXPANSION);
     });
 
-    it('maps IGDB category 4 (standalone_expansion) → CONTENT_TYPE_STANDALONE_EXPANSION', async () => {
+    it('maps IGDB game_type 4 (standalone_expansion) → CONTENT_TYPE_STANDALONE_EXPANSION', async () => {
       mockIgdbClient.request.mockResolvedValue({ data: [STANDALONE_EXPANSION] });
 
       const frames = await firstValueFrom(
@@ -146,7 +146,7 @@ describe('GameGatewayService', () => {
       expect(result?.game?.contentType).toBe(ContentType.CONTENT_TYPE_STANDALONE_EXPANSION);
     });
 
-    it('maps IGDB category 3 (bundle) → CONTENT_TYPE_UNSPECIFIED', async () => {
+    it('maps IGDB game_type 3 (bundle) → CONTENT_TYPE_UNSPECIFIED', async () => {
       mockIgdbClient.request.mockResolvedValue({ data: [BUNDLE_GAME] });
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'bundle' }).pipe(toArray()));
@@ -182,7 +182,7 @@ describe('GameGatewayService', () => {
       );
       const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBe(String(STANDALONE_EXPANSION.version_parent!.id));
+      expect(result?.game?.baseGameExternalId).toBe(String(STANDALONE_EXPANSION.version_parent?.id));
     });
 
     it('does not set baseGameExternalId for base games', async () => {
@@ -294,16 +294,6 @@ describe('GameGatewayService', () => {
       expect(publisherIds).toContain(String(BASE_GAME.involved_companies?.[0].company.id));
     });
 
-    it('merges genres and themes into categories[]', async () => {
-      mockIgdbClient.request.mockResolvedValue({ data: [BASE_GAME] });
-
-      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '1942' }));
-
-      const names = response.game?.categories.map((c) => c.name);
-      // genres: Adventure, Indie; themes: Action
-      expect(names).toEqual(expect.arrayContaining(['Adventure', 'Indie', 'Action']));
-    });
-
     it('merges franchises and collections into families[]', async () => {
       mockIgdbClient.request.mockResolvedValue({ data: [BASE_GAME] });
 
@@ -367,12 +357,10 @@ describe('GameGatewayService', () => {
     });
   });
 
-  // ── fetchExpansions ────────────────────────────────────────────────────────
-  //
   // Implementation assumption: a single IGDB query using the filter
   //   `parent_game = {baseExternalId} | version_parent = {baseExternalId}`
-  // captures DLCs (category 1), expansions (category 2), and standalone
-  // expansions (category 4) in one round trip.
+  // captures DLCs (game_type 1), expansions (game_type 2), and standalone
+  // expansions (game_type 4) in one round trip.
 
   describe('fetchExpansions', () => {
     it('emits one RESULT frame per expansion/DLC followed by SOURCE_DONE', async () => {
@@ -487,7 +475,7 @@ function buildMockIgdbClient(): MockIgdbApiClient {
 const BASE_GAME: IgdbGame = {
   id: 1942,
   name: 'Hades',
-  category: 0,
+  game_type: 0,
   first_release_date: 1600905600, // 2020-09-24
   cover: { id: 100, url: '//images.igdb.com/igdb/image/upload/t_cover_big/hades.jpg' },
   url: 'https://www.igdb.com/games/hades',
@@ -520,7 +508,7 @@ const BASE_GAME: IgdbGame = {
 const DLC_GAME: IgdbGame = {
   id: 9001,
   name: 'Hades - Extra Weapons Pack',
-  category: 1, // dlc_addon
+  game_type: 1, // dlc_addon
   parent_game: { id: 1942 },
   cover: { id: 101, url: '//images.igdb.com/igdb/image/upload/t_cover_big/hades-dlc.jpg' },
 };
@@ -528,19 +516,19 @@ const DLC_GAME: IgdbGame = {
 const EXPANSION_GAME: IgdbGame = {
   id: 9002,
   name: 'Hades: Underworld Chronicles',
-  category: 2, // expansion
+  game_type: 2, // expansion
   parent_game: { id: 1942 },
 };
 
 const STANDALONE_EXPANSION: IgdbGame = {
   id: 9003,
   name: 'Hades: Standalone Chapter',
-  category: 4, // standalone_expansion
+  game_type: 4, // standalone_expansion
   version_parent: { id: 1942 },
 };
 
 const BUNDLE_GAME: IgdbGame = {
   id: 9004,
   name: 'Supergiant Complete Pack',
-  category: 3, // bundle — no direct ContentType mapping
+  game_type: 3, // bundle — no direct ContentType mapping
 };

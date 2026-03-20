@@ -32,34 +32,36 @@ export class GameGatewayService {
   }
 
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
-    return this.igdbService.call(searchGamesRequest(request.query, request.limit ?? 20, request.offset ?? 0)).pipe(
-      tap((games) => this.logger.log(`searchGames found ${games.length} results for query '${request.query}'`)),
+    return this.igdbService
+      .call(searchGamesRequest(request.query, request.limit ?? 20, request.offset ?? 0, request.locale))
+      .pipe(
+        tap((games) => this.logger.log(`searchGames found ${games.length} results for query '${request.query}'`)),
 
-      mergeMap((games) => games),
-      map((game) => ({
-        correlationId: request.correlationId,
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game: toGameSearchData(game),
-      })),
+        mergeMap((games) => games),
+        map((game) => ({
+          correlationId: request.correlationId,
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game: toGameSearchData(game),
+        })),
 
-      endWith<proto.GatewaySearchResult>({
-        correlationId: request.correlationId,
-        status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
-      }),
+        endWith<proto.GatewaySearchResult>({
+          correlationId: request.correlationId,
+          status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
+        }),
 
-      catchError((err) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`searchGames failed for query '${request.query}': ${message}`);
+        catchError((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(`searchGames failed for query '${request.query}': ${message}`);
 
-        return [
-          {
-            correlationId: request.correlationId,
-            status: proto.ResultStatus.RESULT_STATUS_ERROR,
-            message,
-          } satisfies proto.GatewaySearchResult,
-        ];
-      }),
-    );
+          return [
+            {
+              correlationId: request.correlationId,
+              status: proto.ResultStatus.RESULT_STATUS_ERROR,
+              message,
+            } satisfies proto.GatewaySearchResult,
+          ];
+        }),
+      );
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {

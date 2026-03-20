@@ -1,7 +1,7 @@
 import type * as proto from '@board-games-empire/proto-gateway';
 import { GatewayServiceControllerMethods } from '@board-games-empire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
-import { Observable, from } from 'rxjs';
+import { Observable } from 'rxjs';
 import { GameGatewayService } from './game-gateway.service';
 
 @GatewayServiceControllerMethods()

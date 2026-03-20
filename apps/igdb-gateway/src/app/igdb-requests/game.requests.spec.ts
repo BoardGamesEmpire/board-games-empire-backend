@@ -149,7 +149,7 @@ describe('GameRequests', () => {
     });
 
     it('resolves with the data array from the response', async () => {
-      const games: IgdbGame[] = [{ id: 9001, name: 'DLC', category: 1, parent_game: { id: 1942 } }];
+      const games: IgdbGame[] = [{ id: 9001, name: 'DLC', game_type: 1, parent_game: { id: 1942 } }];
       const client = buildMockClient(games);
       const result = await fetchExpansionsRequest('1942')(client);
       expect(result).toEqual(games);
