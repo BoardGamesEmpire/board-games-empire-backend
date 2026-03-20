@@ -8,7 +8,7 @@ import "grpc/health/v1/health.proto";
 // Consumed by the main NestJS application only. Extends the existing lifecycle
 // RPCs with search and import-oriented RPCs. The coordinator fans out to
 // requested gateways concurrently and merges their streams, enriching each
-// result with deduplication metadata resolved against GameGatewayLink.
+// result with deduplication metadata resolved against GameSource.
 service CoordinatorService {
   // Liveness
   rpc Ping(PingRequest) returns (PingResponse);
@@ -29,7 +29,7 @@ service CoordinatorService {
   rpc FetchGame(CoordinatorFetchGameRequest) returns (CoordinatorFetchGameResponse);
 
   // Fetch expansions for a base game. Coordinator resolves relevant gateways
-  // from GameGatewayLink and merges their streams.
+  // from GameSource and merges their streams.
   rpc FetchExpansions(CoordinatorFetchExpansionsRequest) returns (stream SearchGameResult);
 }
 
@@ -70,8 +70,11 @@ message SearchGamesRequest {
   string query = 2;
   // Empty = fan out to all active gateways
   repeated string gateway_ids = 3;
-  optional int32 limit = 4;
-  optional int32 offset = 5;
+  // e.g. "en", "de", used for locale-specific search optimizations in gateways
+  // that support it;
+  optional string locale = 4;
+  optional int32 limit = 5;
+  optional int32 offset = 6;
 }
 
 message SearchGameResult {
@@ -82,7 +85,7 @@ message SearchGameResult {
   // Populated on RESULT
   optional bge.gateway.v1.GameSearchData game = 4;
 
-  // Deduplication metadata resolved by coordinator against GameGatewayLink
+  // Deduplication metadata resolved by coordinator against GameSource
   optional bool in_system = 5; // true = game already exists in local DB
   optional string game_id = 6; // local DB Game.id when in_system = true
 
@@ -109,4 +112,5 @@ message CoordinatorFetchExpansionsRequest {
   string correlation_id = 1;
   // Local DB Game.id — coordinator resolves gateway links internally
   string game_id = 2;
+  optional string locale = 3;
 }

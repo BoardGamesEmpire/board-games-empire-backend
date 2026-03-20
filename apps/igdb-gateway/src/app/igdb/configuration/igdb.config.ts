@@ -3,19 +3,19 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface IGDBConfig {
-  client_id: string;
-  client_secret: string;
+  clientId: string;
+  clientSecret: string;
 }
 
 export default registerAs('igdb', () =>
   env.provideMany<IGDBConfig>([
     {
       key: 'IGDB_CLIENT_ID',
-      keyTo: 'client_id',
+      keyTo: 'clientId',
     },
     {
       key: 'IGDB_CLIENT_SECRET',
-      keyTo: 'client_secret',
+      keyTo: 'clientSecret',
     },
   ]),
 );

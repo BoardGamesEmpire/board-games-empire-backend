@@ -13,8 +13,9 @@ model GameSource {
   platformType String?      @map("platform_type") // 'bgg' | 'steam' | 'igdb' | ...
   sourceUrl    String?      @map("source_url")
 
-  // Sync management
   metadata     Json?     @map("metadata")
+
+  // Sync management
   lastSynced   DateTime? @map("last_synced") @db.Timestamptz(3)
   syncEnabled  Boolean   @default(true) @map("sync_enabled")
   syncInterval Int?      @map("sync_interval") // hours

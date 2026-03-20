@@ -3,110 +3,245 @@ syntax = "proto3";
 package bge.gateway.v1;
 
 enum ContentType {
-  CONTENT_TYPE_UNSPECIFIED = 0;
-  CONTENT_TYPE_BASE_GAME = 1;
-  CONTENT_TYPE_EXPANSION = 2;
-  CONTENT_TYPE_DLC = 3;
+  CONTENT_TYPE_UNSPECIFIED          = 0;
+  CONTENT_TYPE_BASE_GAME            = 1;
+  CONTENT_TYPE_EXPANSION            = 2;
+  CONTENT_TYPE_DLC                  = 3;
   CONTENT_TYPE_STANDALONE_EXPANSION = 4;
-  CONTENT_TYPE_ACCESSORY = 5;
+  CONTENT_TYPE_ACCESSORY            = 5;
+  CONTENT_TYPE_BUNDLE               = 6;
+  CONTENT_TYPE_REMAKE               = 7;
+  CONTENT_TYPE_REMASTER             = 8;
 }
 
 enum ResultStatus {
-  RESULT_STATUS_UNSPECIFIED = 0;
-  RESULT_STATUS_RESULT = 1;
-  RESULT_STATUS_SOURCE_DONE = 2;
-  RESULT_STATUS_ERROR = 3;
+  RESULT_STATUS_UNSPECIFIED  = 0;
+  RESULT_STATUS_RESULT       = 1;
+  RESULT_STATUS_SOURCE_DONE  = 2;
+  RESULT_STATUS_ERROR        = 3;
   RESULT_STATUS_RATE_LIMITED = 4;
-  RESULT_STATUS_UNAVAILABLE = 5;
+  RESULT_STATUS_UNAVAILABLE  = 5;
 }
+
+// Broad classification of a platform — used by clients to render
+// platform-type icons and by the import wizard to group options.
+enum PlatformType {
+  PLATFORM_TYPE_UNSPECIFIED = 0;
+  PLATFORM_TYPE_CONSOLE     = 1;
+  PLATFORM_TYPE_PC          = 2;
+  PLATFORM_TYPE_PORTABLE    = 3;
+  PLATFORM_TYPE_MOBILE      = 4;
+  PLATFORM_TYPE_ARCADE      = 5;
+  PLATFORM_TYPE_OTHER       = 6;
+}
+
+// Age-rating authority.
+enum AgeRatingAuthority {
+  AGE_RATING_AUTHORITY_UNSPECIFIED = 0;
+  AGE_RATING_AUTHORITY_ESRB        = 1;
+  AGE_RATING_AUTHORITY_PEGI        = 2;
+  AGE_RATING_AUTHORITY_CERO        = 3;
+  AGE_RATING_AUTHORITY_USK         = 4;
+  AGE_RATING_AUTHORITY_ACB         = 5; // Australia
+}
+
+// Status of a specific platform release.
+enum ReleaseStatus {
+  RELEASE_STATUS_UNSPECIFIED   = 0;
+  RELEASE_STATUS_RELEASED      = 1;
+  RELEASE_STATUS_ALPHA         = 2;
+  RELEASE_STATUS_BETA          = 3;
+  RELEASE_STATUS_EARLY_ACCESS  = 4;
+  RELEASE_STATUS_OFFLINE       = 5;
+  RELEASE_STATUS_CANCELLED     = 6;
+  RELEASE_STATUS_RUMOURED      = 7;
+  RELEASE_STATUS_ANNOUNCED     = 8;
+  RELEASE_STATUS_POSTPONED     = 9;
+  RELEASE_STATUS_PRERELEASE    = 10;
+  RELEASE_STATUS_DELISTED      = 11;
+}
+
 
 message PersonData {
   string external_id = 1;
-  string name = 2;
+  string name        = 2;
 }
 
 message PublisherData {
-  string external_id = 1;
-  string name = 2;
-  optional string website = 3;
+  string          external_id = 1;
+  string          name        = 2;
+  optional string website     = 3;
 }
 
 message MechanicData {
   string external_id = 1;
-  string name = 2;
+  string name        = 2;
 }
 
 message CategoryData {
   string external_id = 1;
-  string name = 2;
+  string name        = 2;
 }
 
+// BGG family or IGDB collection/franchise. family_type distinguishes them:
+// BGG encodes type in the name prefix e.g. "Game: Catan Series" → type="Game".
+// IGDB uses separate collection/franchise resources; use family_type="franchise"
+// or family_type="collection" accordingly.
 message FamilyData {
+  string          external_id  = 1;
+  string          name         = 2;
+  optional string family_type  = 3;
+}
+
+// A platform a game was released on (Xbox One, PC Windows, Nintendo Switch …).
+// Populated by any gateway that surfaces platform-specific releases (IGDB, Steam).
+message PlatformData {
+  string       external_id   = 1;
+  string       name          = 2;
+  // Short identifier used in UI chips: "XONE", "PS5", "NSW". Optional — not all
+  // sources provide a canonical abbreviation.
+  optional string abbreviation  = 3;
+  PlatformType platform_type = 4;
+}
+
+// A region a game was localized for. region_code follows ISO 3166-1 alpha-2 for
+// country-level regions ("us", "jp", "de") or a compound code for multi-country
+// regions ("eu", "as", "ww" for worldwide).
+message RegionData {
+  string external_id  = 1;
+  string name         = 2;
+  string region_code  = 3;
+}
+
+// Localization data for a specific release within a region — title overrides
+// and a region-specific release date if it differs from the global date.
+message LocalizationData {
+  RegionData      region          = 1;
+  optional string localized_title = 2;
+  // ISO 8601 date string ("2007-09-25"). Using string avoids timezone issues
+  // with google.protobuf.Timestamp for date-only values.
+  optional string release_date    = 3;
+}
+
+// A platform-specific release of a game. One GameData may have many releases
+// (one per platform). Each release carries its own regional localizations so
+// the importer can show: "Xbox One — NA (en) / EU (de/en/fr) / JP".
+message GameReleaseData {
+  string                   external_id    = 1;
+  PlatformData             platform       = 2;
+  ReleaseStatus            status         = 3;
+  // Primary/worldwide release date, if available.
+  optional string          release_date   = 4;
+  repeated LocalizationData localizations = 5;
+}
+
+// IGDB distinguishes genres (Action, RPG, Strategy …) from themes
+// (Science Fiction, Horror, Fantasy …). These are separate from BGG categories
+// — the import worker is responsible for mapping or merging them into the
+// canonical Category table.
+message GenreData {
   string external_id = 1;
-  string name = 2;
-  // e.g. "Game: Catan Series", "Theme: Space" — BGG families are typed
-  optional string family_type = 3;
+  string name        = 2;
+}
+
+message ThemeData {
+  string external_id = 1;
+  string name        = 2;
+}
+
+// Different in nature from BGG's min_age (a simple integer). An AgeRatingData
+// carries the certifying authority and its rating string so the UI can render
+// the correct badge (PEGI 16, ESRB Teen, etc.).
+message AgeRatingData {
+  AgeRatingAuthority authority = 1;
+  string             rating    = 2; // "Teen", "PEGI 16", "CERO B" …
+  optional string    synopsis  = 3; // content descriptor summary
 }
 
 // Returned by streaming search RPCs. Contains only enough data to render a
-// search result row client-side. Full game data is fetched separately via
+// search result card client-side. Full game data is fetched separately via
 // FetchGame when the user selects a game to view or import.
-message GameSearchData {
-  string external_id = 1;
-  string title = 2;
-  ContentType content_type = 3;
-  optional int32 year_published = 4;
-  optional string thumbnail_url = 5;
-  optional string source_url = 6; // link to the game on the source platform
-  optional float average_rating = 7;
-  optional int32 min_players = 8;
-  optional int32 max_players = 9;
+//
+// available_platforms is included here so the client can render platform chips
+// on the search card (e.g. "Xbox One · PC · PS4") enabling an informed import
+// decision before the user initiates a FetchGame call.
 
-  // Populated when content_type != BASE_GAME
+message GameSearchData {
+  string          external_id  = 1;
+  string          title        = 2;
+  ContentType     content_type = 3;
+  optional int32  year_published        = 4;
+  optional string thumbnail_url         = 5;
+  optional string source_url            = 6;
+  optional float  average_rating        = 7;
+  optional int32  min_players           = 8;
+  optional int32  max_players           = 9;
   optional string base_game_external_id = 10;
+  optional string summary               = 11;
+  // Platform chips — populated by gateways that expose platform data.
+  // BGG gateways leave this empty; IGDB / Steam gateways populate it.
+  repeated PlatformData available_platforms = 12;
 }
 
-// Returned only by FetchGame. Carries all relational data needed for the
-// import worker to upsert the full game record and its associations in
-// one pass.
+// Returned by FetchGame. Carries all relational data the import worker
+// needs to upsert the full game record and its associations in one pass.
 message GameData {
   // Identity
-  string external_id = 1;
-  string title = 2;
+  string      external_id  = 1;
+  string      title        = 2;
   ContentType content_type = 3;
 
   // Descriptive
-  optional string description = 4;
-  optional int32 year_published = 5;
-  optional string thumbnail_url = 6;
-  optional string image_url = 7;
-  optional string source_url = 8;
+  optional string description    = 4;
+  optional int32  year_published = 5;
+  optional string thumbnail_url  = 6;
+  optional string image_url      = 7;
+  optional string source_url     = 8;
 
-  // Relational
-  repeated PersonData designers = 9;
-  repeated PersonData artists = 10;
-  repeated PublisherData publishers = 11;
-  repeated MechanicData mechanics = 12;
-  repeated CategoryData categories = 13;
-  repeated FamilyData families = 14;
+  // Relational — board-game centric
+  repeated PersonData    designers   = 9;
+  repeated PersonData    artists     = 10;
+  repeated PublisherData publishers  = 11;
+  repeated MechanicData  mechanics   = 12;
+  repeated CategoryData  categories  = 13;
+  repeated FamilyData    families    = 14;
 
   // Stats
-  optional float average_rating = 15;
-  optional float bayes_rating = 16;
-  optional int32 ratings_count = 17;
-  optional int32 min_players = 18;
-  optional int32 max_players = 19;
-  optional int32 min_playtime = 20;
-  optional int32 max_playtime = 21;
-  optional int32 min_age = 22;
-  // Scaled by 1000 to avoid float precision issues e.g. 3.5 → 3500
+  optional float average_rating    = 15;
+  optional float bayes_rating      = 16;
+  optional int32 ratings_count     = 17;
+  optional int32 min_players       = 18;
+  optional int32 max_players       = 19;
+  optional int32 min_playtime      = 20;
+  optional int32 max_playtime      = 21;
+  optional int32 min_age           = 22;
+  // Complexity weight scaled by 1000 to avoid float precision issues (3.5 → 3500).
   optional int32 complexity_weight = 23;
 
-  // Populated when content_type != BASE_GAME
   optional string base_game_external_id = 24;
 
-  // Escape hatch for platform-specific metadata (stored as JSON column).
-  // Gateways must provide matching-length parallel arrays.
-  repeated string extra_keys = 25;
-  repeated string extra_values = 26;
+  // All platforms this title exists on
+  repeated PlatformData    platforms   = 25;
+  // Platform-specific releases with regional localization data.
+  // Selected release is persisted as JSON in GameSource.metadata until
+  // dedicated Prisma platform/release models are introduced.
+  repeated GameReleaseData releases    = 26;
+
+  // IGDB genres (Action, RPG …) — distinct from BGG categories.
+  // Import worker maps these to the canonical Category table.
+  repeated GenreData       genres      = 27;
+
+  // IGDB themes (Science Fiction, Horror …).
+  // Import worker maps these to the canonical Category table.
+  repeated ThemeData       themes      = 28;
+
+  // ESRB / PEGI / CERO ratings. Different from min_age (field 22).
+  repeated AgeRatingData   age_ratings = 29;
+
+  optional string summary = 30;
+
+  // Escape hatch for gateway-specific metadata not modelled above.
+  // Stored as a JSON column. Gateways must provide matching-length parallel arrays.
+  repeated string metadata_keys   = 31;
+  repeated string metadata_values = 32;
 }

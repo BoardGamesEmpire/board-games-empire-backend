@@ -29,7 +29,10 @@ import { SearchCancelDto, SearchStartDto } from './dto/search-start.dto';
 
 interface WsClientData {
   // userId: string;
-  /** correlationId → active gRPC stream subscription */
+
+  /**
+   * correlationId → active gRPC stream subscription
+   */
   activeSearches: Map<string, Subscription>;
 }
 
@@ -210,6 +213,7 @@ export class SearchGateway implements OnGatewayDisconnect {
 
   private runGatewaySearch(client: Socket, dto: SearchStartDto): Promise<void> {
     const search = this.getClientData(client);
+
     return new Promise<void>((resolve) => {
       const stream$ = this.coordinator.searchGames({
         correlationId: dto.correlationId,
@@ -222,6 +226,10 @@ export class SearchGateway implements OnGatewayDisconnect {
       const sub = stream$.subscribe({
         next: (result) => {
           const source = result.gatewayId;
+
+          this.logger.debug(
+            `Received search result: correlationId=${dto.correlationId} source=${source} status=${result.status}`,
+          );
 
           switch (result.status) {
             case ResultStatus.RESULT_STATUS_RESULT: {
@@ -303,6 +311,8 @@ export class SearchGateway implements OnGatewayDisconnect {
         },
 
         complete: () => {
+          this.logger.debug(`Search stream completed for correlationId=${dto.correlationId}`);
+
           this.emit<WsSearchDonePayload>(dto.correlationId, SearchEvents.SearchDone, {
             correlationId: dto.correlationId,
           });
