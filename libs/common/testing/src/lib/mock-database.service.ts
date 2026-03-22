@@ -95,7 +95,9 @@ function mockDelegate() {
 export function createMockDatabaseService(): MockDatabaseService {
   return {
     // --- Prisma $ utilities ---
+    // @ts-expect-error -- mocked as jest.MockedFunction
     $connect: jest.fn().mockResolvedValue(undefined),
+    // @ts-expect-error -- mocked as jest.MockedFunction
     $disconnect: jest.fn().mockResolvedValue(undefined),
     $transaction: jest.fn(),
     $executeRaw: jest.fn(),
