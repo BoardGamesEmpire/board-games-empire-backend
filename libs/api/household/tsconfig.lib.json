@@ -22,10 +22,13 @@
       "path": "../../common/shared/tsconfig.lib.json"
     },
     {
-      "path": "../../common/permissions/tsconfig.lib.json"
+      "path": "../../database/tsconfig.lib.json"
     },
     {
-      "path": "../../database/tsconfig.lib.json"
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/permissions/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

@@ -1,14 +1,18 @@
-import { Test } from '@nestjs/testing';
+import { PoliciesGuard } from '@bge/permissions';
+import { createTestingModuleWithDb } from '@bge/testing';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { SystemSettingsController } from './system-settings.controller';
+import { SystemSettingsService } from './system-settings.service';
 
 describe('SystemSettingsController', () => {
   let controller: SystemSettingsController;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
-      providers: [],
+    const { module } = await createTestingModuleWithDb({
+      providers: [SystemSettingsService],
       controllers: [SystemSettingsController],
-    }).compile();
+      overrideGuards: [AuthGuard, PoliciesGuard],
+    });
 
     controller = module.get(SystemSettingsController);
   });

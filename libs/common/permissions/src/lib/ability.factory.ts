@@ -54,9 +54,9 @@ export class AbilityFactory {
       const { action, subject } = scope.permission;
 
       if (scope.resourceId) {
-        access(action, subject as ExtractSubjectType<Subjects>, { id: scope.resourceId });
+        access.call(this, action, subject as ExtractSubjectType<Subjects>, { id: scope.resourceId });
       } else {
-        access(action, subject as ExtractSubjectType<Subjects>);
+        access.call(this, action, subject as ExtractSubjectType<Subjects>);
       }
     }
 
@@ -79,7 +79,7 @@ export class AbilityFactory {
 
       const conditions = [permission.fields?.length ? permission.fields : undefined, parsedConditions].filter(Boolean);
       const access = permission.inverted ? ability.cannot : ability.can;
-      access(permission.action, permission.subject as ExtractSubjectType<Subjects>, ...conditions);
+      access.call(this, permission.action, permission.subject as ExtractSubjectType<Subjects>, ...conditions);
     }
   }
 }

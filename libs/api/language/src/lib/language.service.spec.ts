@@ -1,13 +1,13 @@
-import { Test } from '@nestjs/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { LanguageService } from './language.service';
 
 describe('LanguageService', () => {
   let service: LanguageService;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
       providers: [LanguageService],
-    }).compile();
+    });
 
     service = module.get(LanguageService);
   });

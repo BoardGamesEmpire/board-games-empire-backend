@@ -1,4 +1,6 @@
-import { Test } from '@nestjs/testing';
+import { PoliciesGuard } from '@bge/permissions';
+import { createTestingModuleWithDb } from '@bge/testing';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { UserController } from './user.controller';
 import { UserService } from './user.service';
 
@@ -6,10 +8,11 @@ describe('UserController', () => {
   let controller: UserController;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
+      overrideGuards: [AuthGuard, PoliciesGuard],
       providers: [UserService],
       controllers: [UserController],
-    }).compile();
+    });
 
     controller = module.get(UserController);
   });

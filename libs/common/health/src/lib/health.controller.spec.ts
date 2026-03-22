@@ -1,4 +1,9 @@
+import { PassThroughGuard } from '@bge/testing';
+import { HttpModule } from '@nestjs/axios';
+import { ConfigModule } from '@nestjs/config';
+import { TerminusModule } from '@nestjs/terminus';
 import { Test } from '@nestjs/testing';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { HealthController } from './health.controller';
 
 describe('HealthController', () => {
@@ -6,7 +11,13 @@ describe('HealthController', () => {
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
-      providers: [],
+      imports: [ConfigModule.forRoot(), TerminusModule, HttpModule],
+      providers: [
+        {
+          provide: AuthGuard,
+          useClass: PassThroughGuard,
+        },
+      ],
       controllers: [HealthController],
     }).compile();
 

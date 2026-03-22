@@ -11,7 +11,10 @@ import { GatewayRegistryService } from '../gateway-registry/gateway-registry.ser
 export class GameSearchService {
   private readonly logger = new Logger(GameSearchService.name);
   private readonly searchCachePrefix = 'bge:search';
-  /** TTL for cached search results per (gatewayId, query, limit, offset) — 5 minutes */
+
+  /**
+   * TTL for cached search results per (gatewayId, query, limit, offset) — 5 minutes
+   */
   private readonly searchCacheTTL = 5 * 60 * 1000;
 
   constructor(
