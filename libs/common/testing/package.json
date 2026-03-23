@@ -14,7 +14,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@bge/test",
+    "name": "@bge/testing",
     "tags": [
       "test"
     ]

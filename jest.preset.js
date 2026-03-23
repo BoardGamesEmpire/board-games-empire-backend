@@ -10,15 +10,15 @@ const nxPreset = require('@nx/jest/preset').default;
  * P.S. - this is fucking stupid
  */
 const ESM_PACKAGES = [
-  '@thallesp/nestjs-better-auth',
   '@better-auth',
   '@noble',
+  '@thallesp/nestjs-better-auth',
   'apicalypse',
   'axios',
   'better-auth',
   'better-call',
   'jose',
-  "rou3"
+  'rou3'
 ];
 
 const esmPattern = ESM_PACKAGES.join('|');
