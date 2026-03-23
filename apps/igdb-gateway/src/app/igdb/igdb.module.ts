@@ -3,8 +3,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import igdb from 'igdb-api-node';
 import { configuration } from './configuration';
 import { IGDB_CLIENT } from './constants';
+import { IgdbAuthService } from './igdb-auth.service';
 import { IGDBService } from './igdb.service';
-import { fetchAccessToken } from './lib/fetch-access-token';
 
 @Global()
 @Module({
@@ -12,16 +12,17 @@ import { fetchAccessToken } from './lib/fetch-access-token';
   providers: [
     {
       provide: IGDB_CLIENT,
-      useFactory: async (configService: ConfigService) => {
+      useFactory: async (configService: ConfigService, authService: IgdbAuthService) => {
         const clientId = configService.getOrThrow<string>('igdb.clientId');
         const clientSecret = configService.getOrThrow<string>('igdb.clientSecret');
-        const accessToken = await fetchAccessToken({ client_id: clientId, client_secret: clientSecret });
+        const accessToken = await authService.fetchAccessToken({ client_id: clientId, client_secret: clientSecret });
 
         return igdb(clientId, accessToken.access_token);
       },
-      inject: [ConfigService],
+      inject: [ConfigService, IgdbAuthService],
     },
     IGDBService,
+    IgdbAuthService,
   ],
   exports: [IGDBService, IGDB_CLIENT],
 })

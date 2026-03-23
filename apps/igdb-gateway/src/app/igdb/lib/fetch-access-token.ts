@@ -1,11 +1,11 @@
 const TOKEN_URI = 'https://id.twitch.tv/oauth2/token';
 
-interface Credentials {
+export interface Credentials {
   client_id: string;
   client_secret: string;
 }
 
-interface TokenResponse {
+export interface TokenResponse {
   access_token: string;
   expires_in: number;
   token_type: string;

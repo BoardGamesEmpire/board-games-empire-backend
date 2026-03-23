@@ -6,8 +6,8 @@ import { from, Observable, throwError } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import type { IGDBConfig } from './configuration/igdb.config';
 import { IGDB_CLIENT } from './constants';
+import { IgdbAuthService } from './igdb-auth.service';
 import type { IGDBClient } from './interfaces';
-import { fetchAccessToken } from './lib/fetch-access-token';
 
 export type IgdbRequest<T> = (igdb: IGDBClient) => Promise<T>;
 
@@ -22,7 +22,11 @@ export class IGDBService {
    */
   private refreshPromise: Promise<void> | null = null;
 
-  constructor(@Inject(IGDB_CLIENT) private igdbClient: IGDBClient, private readonly configService: ConfigService) {}
+  constructor(
+    @Inject(IGDB_CLIENT) private igdbClient: IGDBClient,
+    private readonly authService: IgdbAuthService,
+    private readonly configService: ConfigService,
+  ) {}
 
   /**
    * Execute a request against the IGDB API. On a 401 response the access
@@ -67,7 +71,7 @@ export class IGDBService {
    */
   private async performRefresh() {
     const credentials = this.configService.getOrThrow<IGDBConfig>('igdb');
-    const accessTokenResponse = await fetchAccessToken({
+    const accessTokenResponse = await this.authService.fetchAccessToken({
       client_id: credentials.clientId,
       client_secret: credentials.clientSecret,
     });

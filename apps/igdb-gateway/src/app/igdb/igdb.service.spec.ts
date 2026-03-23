@@ -5,24 +5,33 @@ import { AxiosError, AxiosHeaders } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import type { IgdbGame } from '../types';
 import { IGDB_CLIENT } from './constants';
+import { IgdbAuthService } from './igdb-auth.service';
 import { IGDBService, type IgdbRequest } from './igdb.service';
 import type { IGDBClient } from './interfaces/';
-import * as fetchAccessTokenModule from './lib/fetch-access-token';
 
 describe('IGDBService', () => {
   let service: IGDBService;
   let mockClient: jest.Mocked<Pick<IGDBClient, 'request'>>;
-  let fetchAccessTokenSpy: jest.SpyInstance;
+  let mockAuthService: jest.Mocked<IgdbAuthService>;
 
   const MOCK_GAMES: IgdbGame[] = [{ id: 1, name: 'Hades' }];
 
   beforeEach(async () => {
     mockClient = { request: jest.fn() };
 
+    mockAuthService = {
+      fetchAccessToken: jest.fn().mockResolvedValue({
+        access_token: 'new-token',
+        expires_in: 3600,
+        token_type: 'bearer',
+      }),
+    } as jest.Mocked<IgdbAuthService>;
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IGDBService,
         { provide: IGDB_CLIENT, useValue: mockClient },
+        { provide: IgdbAuthService, useValue: mockAuthService },
         {
           provide: ConfigService,
           useValue: {
@@ -36,15 +45,9 @@ describe('IGDBService', () => {
     }).compile();
 
     service = module.get<IGDBService>(IGDBService);
-
-    fetchAccessTokenSpy = jest
-      .spyOn(fetchAccessTokenModule, 'fetchAccessToken')
-      .mockResolvedValue({ access_token: 'new-token', expires_in: 3600, token_type: 'bearer' });
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
+  afterEach(() => jest.clearAllMocks());
 
   describe('call', () => {
     it('executes the provided request function with the current client', async () => {
@@ -61,7 +64,7 @@ describe('IGDBService', () => {
     it('propagates non-401 errors without refreshing the token', async () => {
       const networkError = new Error('ECONNREFUSED');
       await expect(firstValueFrom(service.call(makeFailingRequest(networkError)))).rejects.toThrow('ECONNREFUSED');
-      expect(fetchAccessTokenSpy).not.toHaveBeenCalled();
+      expect(mockAuthService.fetchAccessToken).not.toHaveBeenCalled();
     });
   });
 
@@ -70,7 +73,7 @@ describe('IGDBService', () => {
       const request = makeRequest401ThenSuccess(MOCK_GAMES);
       const result = await firstValueFrom(service.call(request));
 
-      expect(fetchAccessTokenSpy).toHaveBeenCalledTimes(1);
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledTimes(1);
       expect(request).toHaveBeenCalledTimes(2);
       expect(result).toEqual(MOCK_GAMES);
     });
@@ -79,7 +82,7 @@ describe('IGDBService', () => {
       const request: IgdbRequest<IgdbGame[]> = jest.fn().mockRejectedValue(make401Error());
 
       await expect(firstValueFrom(service.call(request))).rejects.toThrow();
-      expect(fetchAccessTokenSpy).toHaveBeenCalledTimes(1);
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledTimes(1);
       expect(request).toHaveBeenCalledTimes(2);
     });
 
@@ -87,16 +90,15 @@ describe('IGDBService', () => {
       const request = makeRequest401ThenSuccess(MOCK_GAMES);
       await firstValueFrom(service.call(request));
 
-      expect(fetchAccessTokenSpy).toHaveBeenCalledWith({
-        clientId: 'test-client-id',
-        clientSecret: 'test-client-secret',
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledWith({
+        client_id: 'test-client-id',
+        client_secret: 'test-client-secret',
       });
     });
   });
 
   describe('call — concurrent 401 race condition', () => {
     it('issues only one token refresh when concurrent calls both receive 401', async () => {
-      // Both requests fail with 401 on first attempt, succeed on second.
       const requestA = makeRequest401ThenSuccess<string>('result-a');
       const requestB = makeRequest401ThenSuccess<string>('result-b');
 
@@ -105,21 +107,19 @@ describe('IGDBService', () => {
         firstValueFrom(service.call(requestB)),
       ]);
 
-      expect(fetchAccessTokenSpy).toHaveBeenCalledTimes(1);
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledTimes(1);
       expect(a).toBe('result-a');
       expect(b).toBe('result-b');
     });
 
     it('clears the refresh mutex after the refresh completes', async () => {
-      // First wave: one 401.
       const requestA = makeRequest401ThenSuccess(MOCK_GAMES);
       await firstValueFrom(service.call(requestA));
-      expect(fetchAccessTokenSpy).toHaveBeenCalledTimes(1);
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledTimes(1);
 
-      // Second wave: another 401 should trigger a fresh refresh.
       const requestB = makeRequest401ThenSuccess(MOCK_GAMES);
       await firstValueFrom(service.call(requestB));
-      expect(fetchAccessTokenSpy).toHaveBeenCalledTimes(2);
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledTimes(2);
     });
   });
 });

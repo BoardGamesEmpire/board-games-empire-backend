@@ -15,8 +15,6 @@ describe('AbilityFactory.createForApiKey', () => {
     factory = module.get(AbilityFactory);
   });
 
-  // ── Empty / guard-rail ────────────────────────────────────────────────────
-
   describe('empty scopes', () => {
     it('produces no rules when the scopes array is empty', () => {
       const ability = factory.createForApiKey(makeApiKey([]));
@@ -25,65 +23,61 @@ describe('AbilityFactory.createForApiKey', () => {
 
     it('denies all actions when scopes are empty', () => {
       const ability = factory.createForApiKey(makeApiKey([]));
-      expect(ability.can(Action.Read, 'Household')).toBe(false);
+      expect(ability.can(Action.read, 'Household')).toBe(false);
     });
   });
 
-  // ── Unpinned scopes (resourceId = null) ───────────────────────────────────
-
   describe('unpinned scope (resourceId = null)', () => {
     it('grants the action on the full subject type', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household')]));
-      expect(ability.can(Action.Read, 'Household')).toBe(true);
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
+      expect(ability.can(Action.read, 'Household')).toBe(true);
     });
 
     it('does not add a condition — row filtering is delegated to userAbility', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household')]));
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
       expect(ability.rules[0].conditions).toBeUndefined();
     });
 
     it('does not grant actions on other subjects', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household')]));
-      expect(ability.can(Action.Read, 'Event')).toBe(false);
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household')]));
+      expect(ability.can(Action.read, 'Event')).toBe(false);
     });
 
     it('adds a cannot rule for an inverted unpinned scope', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Delete, 'Household', null, true)]));
-      expect(ability.cannot(Action.Delete, 'Household')).toBe(true);
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.delete, 'Household', null, true)]));
+      expect(ability.cannot(Action.delete, 'Household')).toBe(true);
     });
   });
 
-  // ── Pinned scopes (resourceId = string) ───────────────────────────────────
-
   describe('pinned scope (resourceId is set)', () => {
     it('generates a rule with an { id } condition matching the pinned resourceId', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household', 'hh-alpha')]));
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
       expect(ability.rules[0].conditions).toEqual({ id: 'hh-alpha' });
     });
 
     it('allows access to the pinned resource', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household', 'hh-alpha')]));
-      expect(ability.can(Action.Read, subject('Household', { id: 'hh-alpha' }))).toBe(true);
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
+      expect(ability.can(Action.read, subject('Household', { id: 'hh-alpha' }))).toBe(true);
     });
 
     it('denies access to a different resource of the same type', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Read, 'Household', 'hh-alpha')]));
-      expect(ability.can(Action.Read, subject('Household', { id: 'hh-beta' }))).toBe(false);
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Household', 'hh-alpha')]));
+      expect(ability.can(Action.read, subject('Household', { id: 'hh-beta' }))).toBe(false);
     });
 
     it('adds a cannot rule with an { id } condition for an inverted pinned scope', () => {
-      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.Delete, 'Household', 'hh-alpha', true)]));
+      const ability = factory.createForApiKey(makeApiKey([makeScope(Action.delete, 'Household', 'hh-alpha', true)]));
       expect(ability.rules[0].conditions).toEqual({ id: 'hh-alpha' });
-      expect(ability.cannot(Action.Delete, subject('Household', { id: 'hh-alpha' }))).toBe(true);
+      expect(ability.cannot(Action.delete, subject('Household', { id: 'hh-alpha' }))).toBe(true);
     });
   });
 
   describe('multiple scopes', () => {
     it('emits one rule per scope', () => {
       const scopes = [
-        makeScope(Action.Read, 'Household'),
-        makeScope(Action.Update, 'Household', 'hh-1'),
-        makeScope(Action.Read, 'Event'),
+        makeScope(Action.read, 'Household'),
+        makeScope(Action.update, 'Household', 'hh-1'),
+        makeScope(Action.read, 'Event'),
       ];
       const ability = factory.createForApiKey(makeApiKey(scopes));
       expect(ability.rules).toHaveLength(3);
@@ -91,38 +85,36 @@ describe('AbilityFactory.createForApiKey', () => {
 
     it('correctly mixes unpinned and pinned scopes for the same subject', () => {
       // Unpinned read + pinned update on a specific household
-      const scopes = [makeScope(Action.Read, 'Household'), makeScope(Action.Update, 'Household', 'hh-1')];
+      const scopes = [makeScope(Action.read, 'Household'), makeScope(Action.update, 'Household', 'hh-1')];
       const ability = factory.createForApiKey(makeApiKey(scopes));
 
-      expect(ability.can(Action.Read, 'Household')).toBe(true);
-      expect(ability.can(Action.Update, subject('Household', { id: 'hh-1' }))).toBe(true);
-      expect(ability.can(Action.Update, subject('Household', { id: 'hh-2' }))).toBe(false);
+      expect(ability.can(Action.read, 'Household')).toBe(true);
+      expect(ability.can(Action.update, subject('Household', { id: 'hh-1' }))).toBe(true);
+      expect(ability.can(Action.update, subject('Household', { id: 'hh-2' }))).toBe(false);
     });
 
     it('scopes for different subjects are independent', () => {
-      const scopes = [makeScope(Action.Read, 'Household', 'hh-1'), makeScope(Action.Read, 'Event', 'ev-1')];
+      const scopes = [makeScope(Action.read, 'Household', 'hh-1'), makeScope(Action.read, 'Event', 'ev-1')];
       const ability = factory.createForApiKey(makeApiKey(scopes));
 
-      expect(ability.can(Action.Read, subject('Household', { id: 'hh-1' }))).toBe(true);
-      expect(ability.can(Action.Read, subject('Event', { id: 'ev-1' }))).toBe(true);
+      expect(ability.can(Action.read, subject('Household', { id: 'hh-1' }))).toBe(true);
+      expect(ability.can(Action.read, subject('Event', { id: 'ev-1' }))).toBe(true);
       // Cross-subject: Household scope does not bleed into Event
-      expect(ability.can(Action.Read, subject('Event', { id: 'hh-1' }))).toBe(false);
+      expect(ability.can(Action.read, subject('Event', { id: 'hh-1' }))).toBe(false);
     });
 
     it('a cannot rule from one scope does not affect a can rule from another', () => {
       const scopes = [
-        makeScope(Action.Read, 'Household'),
-        makeScope(Action.Delete, 'Household', null, true), // inverted
+        makeScope(Action.read, 'Household'),
+        makeScope(Action.delete, 'Household', null, true), // inverted
       ];
       const ability = factory.createForApiKey(makeApiKey(scopes));
 
-      expect(ability.can(Action.Read, 'Household')).toBe(true);
-      expect(ability.cannot(Action.Delete, 'Household')).toBe(true);
+      expect(ability.can(Action.read, 'Household')).toBe(true);
+      expect(ability.cannot(Action.delete, 'Household')).toBe(true);
     });
   });
 });
-
-// ─── Test factories ───────────────────────────────────────────────────────────
 
 function makePermissionStub(
   action: Action,

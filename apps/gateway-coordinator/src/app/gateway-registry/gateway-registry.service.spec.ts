@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayRegistryService } from './gateway-registry.service';
 
 describe('GatewayRegistryService', () => {
@@ -6,7 +7,7 @@ describe('GatewayRegistryService', () => {
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [GatewayRegistryService],
+      providers: [GatewayRegistryService, GatewayCredentialsFactory],
     }).compile();
 
     service = module.get<GatewayRegistryService>(GatewayRegistryService);

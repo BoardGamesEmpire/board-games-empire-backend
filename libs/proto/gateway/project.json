@@ -11,7 +11,23 @@
       "options": {
         "command": "buf generate",
         "cwd": "libs/proto/gateway"
-      }
+      },
+      "inputs": [
+        "{projectRoot}/src/proto/**/*.proto",
+        "{projectRoot}/buf.gen.yaml",
+        "{projectRoot}/buf.yaml",
+        "{projectRoot}/buf.lock"
+      ],
+      "outputs": ["{projectRoot}/src/gen"]
+    },
+    "build": {
+      "dependsOn": ["generate"]
+    },
+    "typecheck": {
+      "dependsOn": ["generate"]
+    },
+    "test": {
+      "dependsOn": ["generate"]
     },
     "buf-lint": {
       "executor": "nx:run-commands",

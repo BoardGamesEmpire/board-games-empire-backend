@@ -1,4 +1,5 @@
-import { Test } from '@nestjs/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { LanguageController } from './language.controller';
 import { LanguageService } from './language.service';
 
@@ -6,10 +7,11 @@ describe('LanguageController', () => {
   let controller: LanguageController;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
+      overrideGuards: [AuthGuard],
       providers: [LanguageService],
       controllers: [LanguageController],
-    }).compile();
+    });
 
     controller = module.get(LanguageController);
   });

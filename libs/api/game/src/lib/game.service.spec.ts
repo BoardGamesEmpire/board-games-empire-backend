@@ -1,13 +1,13 @@
-import { Test } from '@nestjs/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { GameService } from './game.service';
 
 describe('GameService', () => {
   let service: GameService;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
       providers: [GameService],
-    }).compile();
+    });
 
     service = module.get(GameService);
   });

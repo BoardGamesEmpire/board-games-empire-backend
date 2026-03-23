@@ -1,13 +1,13 @@
-import { Test } from '@nestjs/testing';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { SystemSettingsService } from './system-settings.service';
 
 describe('SystemSettingsService', () => {
   let service: SystemSettingsService;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
       providers: [SystemSettingsService],
-    }).compile();
+    });
 
     service = module.get(SystemSettingsService);
   });
