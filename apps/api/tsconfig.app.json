@@ -35,6 +35,9 @@
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/notifications/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/metrics/tsconfig.lib.json"
     },
     {

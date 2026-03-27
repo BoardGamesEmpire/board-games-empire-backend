@@ -1,0 +1,37 @@
+model Notification {
+  id     String           @id @default(cuid(2))
+
+  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String           @map("user_id")
+
+  type   NotificationType
+
+  read   Boolean          @default(false)
+  readAt DateTime?        @map("read_at") @db.Timestamptz(3)
+
+  /**
+   * Denormalized display data — enough to render a notification row
+   * without joins. Shape varies by type:
+   *   GameImported / ExpansionImported:
+   *     { gameId, gameTitle, thumbnail, jobId, batchId }
+   *   WatchedExpansionImported:
+   *     { gameId, gameTitle, thumbnail, baseGameId, baseGameTitle }
+   */
+  payload Json
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // Ordered unread fetch is the dominant read pattern
+  @@index([userId, read, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  GameImported
+  ExpansionImported
+  WatchedExpansionImported
+  // HouseholdInviteReceived  ← reserved
+  // EventInviteReceived      ← reserved
+
+  @@map("notification_types")
+}
