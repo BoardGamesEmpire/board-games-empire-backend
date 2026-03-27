@@ -42,6 +42,8 @@ model User {
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")
 
+  notifications Notification[]
+
   eventsCreated  Event[]
   eventGameVotes EventGameVote[]
   eventsAttended EventAttendee[]

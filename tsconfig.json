@@ -80,6 +80,12 @@
     },
     {
       "path": "./libs/common/testing"
+    },
+    {
+      "path": "./libs/common/notifications"
+    },
+    {
+      "path": "./libs/api/notifications"
     }
   ]
 }
