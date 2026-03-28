@@ -20,7 +20,7 @@ export default registerAs('redis', () =>
       {
         keyTo: 'database',
         key: 'REDIS_DATABASE',
-        defaultValue: 1,
+        defaultValue: 0,
         mutators: parseInt,
       },
       {

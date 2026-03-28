@@ -1,0 +1,31 @@
+/**
+ * Denormalized read-optimized table for the public imports feed.
+ * Written by the import processor when a Game row is created for the first
+ * time (created = true). Never written on re-imports or enrichment updates.
+ */
+model ImportActivity {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  importedBy   User?   @relation(fields: [importedById], references: [id], onDelete: SetNull)
+  importedById String? @map("imported_by_id")
+
+  gateway   GameGateway @relation(fields: [gatewayId], references: [id])
+  gatewayId String      @map("gateway_id")
+
+  isExpansion Boolean @default(false) @map("is_expansion")
+
+  /**
+   * Denormalized for feed rendering without joins
+   */
+  gameTitle String  @map("game_title")
+  thumbnail String? @map("thumbnail")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([createdAt(sort: Desc)])
+  @@index([importedById])
+  @@map("import_activities")
+}

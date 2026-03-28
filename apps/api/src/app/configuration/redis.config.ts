@@ -1,10 +1,9 @@
 import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import type { RedisClientOptions } from 'redis';
 
 export default registerAs('redis', () =>
-  env.provideMany<RedisClientOptions>(
+  env.provideMany<RedisOptions>(
     [
       {
         keyTo: 'host',
@@ -95,3 +94,18 @@ export const redisConfigValidationSchema = {
   REDIS_TLS_KEY: Joi.string().optional().allow('').default(''),
   REDIS_TLS_CERT: Joi.string().optional().allow('').default(''),
 };
+
+export interface RedisOptions {
+  username?: string;
+  password?: string;
+  database?: number;
+  socket: {
+    host: string;
+    port: number;
+    tls: boolean;
+    rejectUnauthorized?: boolean;
+    ca?: string;
+    key?: string;
+    cert?: string;
+  };
+}

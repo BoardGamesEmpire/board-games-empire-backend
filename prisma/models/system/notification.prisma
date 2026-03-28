@@ -1,21 +1,21 @@
 model Notification {
-  id     String           @id @default(cuid(2))
+  id String @id @default(cuid(2))
 
-  user   User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  userId String           @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
 
-  type   NotificationType
+  type NotificationType
 
-  read   Boolean          @default(false)
-  readAt DateTime?        @map("read_at") @db.Timestamptz(3)
+  read   Boolean   @default(false)
+  readAt DateTime? @map("read_at") @db.Timestamptz(3)
 
   /**
    * Denormalized display data — enough to render a notification row
    * without joins. Shape varies by type:
-   *   GameImported / ExpansionImported:
-   *     { gameId, gameTitle, thumbnail, jobId, batchId }
-   *   WatchedExpansionImported:
-   *     { gameId, gameTitle, thumbnail, baseGameId, baseGameTitle }
+   * GameImported / ExpansionImported:
+   * { gameId, gameTitle, thumbnail, jobId, batchId }
+   * WatchedExpansionImported:
+   * { gameId, gameTitle, thumbnail, baseGameId, baseGameTitle }
    */
   payload Json
 

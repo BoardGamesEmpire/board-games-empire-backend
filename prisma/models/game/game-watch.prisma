@@ -1,0 +1,28 @@
+/**
+ * A user's watch on a base game. Triggers a notification when any expansion
+ * of that game is imported into the system.
+ * autoImport is inert until enrichment job infrastructure is in place — stored
+ * now to avoid a future migration.
+ */
+model GameWatch {
+  id String @id @default(cuid(2))
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  /**
+   * When true and enrichment jobs are active: auto-import newly detected
+   * expansions without user intervention. Inert until enrichment jobs exist.
+   */
+  autoImport Boolean @default(false) @map("auto_import")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([userId, gameId])
+  // Processor queries by gameId to fan out to watchers — keep this index
+  @@index([gameId])
+  @@map("game_watches")
+}

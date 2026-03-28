@@ -1,14 +1,15 @@
-import { Test } from '@nestjs/testing';
+import { NotificationsServiceModule } from '@bge/notifications-service';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { NotificationsController } from './notifications.controller';
 
 describe('NotificationsController', () => {
   let controller: NotificationsController;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
-      providers: [],
+    const { module } = await createTestingModuleWithDb({
+      imports: [NotificationsServiceModule],
       controllers: [NotificationsController],
-    }).compile();
+    });
 
     controller = module.get(NotificationsController);
   });

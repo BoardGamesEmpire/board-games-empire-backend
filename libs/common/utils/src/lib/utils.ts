@@ -15,33 +15,38 @@ export function walkDir(dir: string, pattern: RegExp | string, exclusions: (RegE
 
   const isExcluded = (filePath: string): boolean => excludePatterns.some((p) => p.test(filePath));
 
-  const results: string[] = [];
+  const paths = new Set<string>();
 
   const walk = (currentDir: string): void => {
     const absDir = path.resolve(currentDir);
 
-    if (isExcluded(absDir)) return;
+    if (isExcluded(absDir)) {
+      return;
+    }
 
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(absDir, { withFileTypes: true });
     } catch {
-      return; // Skip unreadable directories
+      // Skip unreadable directories
+      return;
     }
 
     for (const entry of entries) {
       const absPath = path.join(absDir, entry.name);
 
-      if (isExcluded(absPath)) continue;
+      if (isExcluded(absPath)) {
+        continue;
+      }
 
       if (entry.isDirectory()) {
         walk(absPath);
       } else if (entry.isFile() && matchPattern.test(absPath)) {
-        results.push(absPath);
+        paths.add(absPath);
       }
     }
   };
 
   walk(dir);
-  return results;
+  return Array.from(paths);
 }

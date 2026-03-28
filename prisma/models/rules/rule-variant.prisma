@@ -14,8 +14,7 @@ model RuleVariant {
   household   Household? @relation(fields: [householdId], references: [id])
   householdId String?    @map("household_id")
 
-  gameExpansions GameExpansionRuleVariant[]
-  gameVersions   GameVersionRuleVariant[]
+  gameVersions GameVersionRuleVariant[]
 
   category RuleCategory @default(General)
   ruleType RuleType     @default(Addition) @map("rule_type")

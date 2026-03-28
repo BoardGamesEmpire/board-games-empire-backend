@@ -82,10 +82,13 @@
       "path": "./libs/common/testing"
     },
     {
-      "path": "./libs/common/notifications"
+      "path": "./libs/api/notifications"
     },
     {
-      "path": "./libs/api/notifications"
+      "path": "./libs/api/games-import"
+    },
+    {
+      "path": "./libs/common/notifications"
     }
   ]
 }

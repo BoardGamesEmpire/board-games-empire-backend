@@ -42,8 +42,6 @@ model User {
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")
 
-  notifications Notification[]
-
   eventsCreated  Event[]
   eventGameVotes EventGameVote[]
   eventsAttended EventAttendee[]
@@ -52,6 +50,7 @@ model User {
   loansReceived GameLoan[] @relation("LoansReceived")
 
   gameCollections    GameCollection[]
+  watchedGames       GameWatch[]
   gameTags           GameTag[]
   gamesCreated       Game[]                  @relation("GamesCreated")
   gameCustomizations UserGameCustomization[]
@@ -71,7 +70,9 @@ model User {
   permissions        UserPermission[]
   roles              UserRole[]
 
-  jobs Job[]
+  jobs             Job[]
+  notifications    Notification[]
+  importActivities ImportActivity[]
 
   @@unique([email])
   @@unique([username])

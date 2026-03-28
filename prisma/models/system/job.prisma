@@ -24,10 +24,9 @@ model Job {
   error   String?
   note    String?
 
-  parentJob   Job?   @relation("JobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
+  parentJob   Job?    @relation("JobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
   parentJobId String? @map("parent_job_id")
-  childJobs   Job[]  @relation("JobHierarchy")
-
+  childJobs   Job[]   @relation("JobHierarchy")
 
   scheduledAt DateTime? @map("scheduled_at") @db.Timestamptz(3)
   startedAt   DateTime? @map("started_at") @db.Timestamptz(3)
