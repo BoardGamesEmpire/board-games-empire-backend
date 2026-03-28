@@ -4,9 +4,9 @@ model GamePlaySessionExpansion {
   session   GamePlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId String          @map("session_id")
 
-  expansion   GameExpansion @relation(fields: [expansionId], references: [id], onDelete: Cascade)
-  expansionId String        @map("expansion_id")
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
 
-  @@unique([sessionId, expansionId])
+  @@unique([sessionId, gameId])
   @@map("game_play_session_expansions")
 }

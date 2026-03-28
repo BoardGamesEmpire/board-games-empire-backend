@@ -43,23 +43,29 @@ model Game {
   gameVideos    GameVideo[]
   gameDocuments GameDocument[]
 
-  versions             GameVersion[]
-  expansions           GameExpansion[]          @relation("BaseGame")
-  compatibleExpansions ExpansionCompatibility[]
+  versions    GameVersion[]
+  contentType ContentType     @default(BaseGame) @map("content_type")
+  expansions  GameExpansion[] @relation("BaseGame")
+
+  // keeping many to many to allow for expansions that are compatible with multiple base games
+  expansionEntries GameExpansion[] @relation("ExpansionGame")
 
   userCollections GameCollection[]
 
   gameLists GameList[]
+  watched   GameWatch[]
   tags      GameTag[]
 
-  gameSources GameSource[]
-  jobs        Job[]
+  importActivities ImportActivity[]
+  gameSources      GameSource[]
+  jobs             Job[]
 
-  eventGames   EventGame[]
+  eventGames            EventGame[]
   // campaigns    Campaign[]
-  ruleVariants RuleVariant[]
-  playSessions GamePlaySession[]
-  loans        GameLoan[]
+  ruleVariants          RuleVariant[]
+  playSessions          GamePlaySession[]
+  expansionPlaySessions GamePlaySessionExpansion[]
+  loans                 GameLoan[]
 
   // Access control
   visibility  Visibility @default(Public)

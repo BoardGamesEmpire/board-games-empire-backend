@@ -10,12 +10,6 @@ export enum SearchEvents {
   SearchError = 'search:error',
   SearchRateLimited = 'search:rate_limited',
   SearchUnavailable = 'search:unavailable',
-
-  // Import job progress — emitted from the WS gateway once import jobs are wired
-  ImportQueued = 'import:queued',
-  ImportJobProgress = 'import:job_progress',
-  ImportJobFailed = 'import:job_failed',
-  ImportBatchComplete = 'import:batch_complete',
 }
 
 export type SearchEventKey = keyof typeof SearchEvents;

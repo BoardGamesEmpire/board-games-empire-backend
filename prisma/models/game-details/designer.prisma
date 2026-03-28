@@ -13,7 +13,6 @@ model Designer {
   totalCollaborators         Int?    @map("total_collaborators")
   mostFrequentCollaboratorId String? @map("most_frequent_collaborator_id")
 
-  // Enrichment control
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
@@ -34,11 +33,9 @@ model DesignerGatewayLink {
 
   gatewayId    String  @map("gateway_id")
   externalId   String  @map("external_id")
-  platformType String  @map("platform_type")
   externalName String? @map("external_name")
 
   @@unique([gatewayId, externalId])
-  @@unique([platformType, externalId])
   @@index([designerId])
   @@map("designer_gateway_links")
 }

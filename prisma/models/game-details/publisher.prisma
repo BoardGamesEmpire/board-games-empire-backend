@@ -14,7 +14,6 @@ model Publisher {
   isActive Boolean @default(true) @map("is_active")
   logoUrl  String? @map("logo_url")
 
-  // Enrichment control
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
@@ -37,11 +36,9 @@ model PublisherGatewayLink {
 
   gatewayId    String  @map("gateway_id")
   externalId   String  @map("external_id")
-  platformType String  @map("platform_type")
   externalName String? @map("external_name")
 
   @@unique([gatewayId, externalId])
-  @@unique([platformType, externalId])
   @@index([publisherId])
   @@map("publisher_gateway_links")
 }

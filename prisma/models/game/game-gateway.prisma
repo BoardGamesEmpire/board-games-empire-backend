@@ -25,6 +25,7 @@ model GameGateway {
   lastUsed   DateTime? @map("last_used") @db.Timestamptz(3)
 
   gameSources            GameSource[]
+  importActivities       ImportActivity[]
   userGatewayConnections UserGatewayConnection[]
 
   createdBy   User?   @relation("GameGatewayCreator", fields: [createdById], references: [id])

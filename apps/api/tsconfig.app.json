@@ -50,6 +50,9 @@
       "path": "../../libs/common/health/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/games-import/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/game-gateway/tsconfig.lib.json"
     },
     {

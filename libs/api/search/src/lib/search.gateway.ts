@@ -26,15 +26,7 @@ import type {
   WsSourceUnavailablePayload,
 } from './dto/search-outbound.dto';
 import { SearchCancelDto, SearchStartDto } from './dto/search-start.dto';
-
-interface WsClientData {
-  // userId: string;
-
-  /**
-   * correlationId → active gRPC stream subscription
-   */
-  activeSearches: Map<string, Subscription>;
-}
+import type { WsClientData } from './interfaces';
 
 @UseGuards(AuthGuard)
 @WebSocketGateway({

@@ -1,29 +1,57 @@
+/**
+ * Join table representing the relationship between a base game and its expansions.
+ * Each record indicates that a particular Game (the expansion) is an expansion of another Game (the base game).
+ * This allows for many-to-many relationships, as some games have multiple expansions and some expansions are compatible with multiple base games.
+ * Replaces the previous GameExpansion table - Expansions are now first-class Game records with their own GameSources, mechanics, etc., and this join table
+ * captures the relationship and any adjustments (e.g. player count changes) that come with the expansion.
+ */
 model GameExpansion {
-  id   String @id @default(cuid(2))
-  name String
+  id String @id @default(cuid(2))
 
+  /**
+   * The game this expansion belongs to.
+   * Cascade — deleting a base game removes all its expansion relationships.
+   */
   baseGame   Game   @relation("BaseGame", fields: [baseGameId], references: [id], onDelete: Cascade)
   baseGameId String @map("base_game_id")
 
-  description  String?
-  releaseYear  Int?    @map("release_year")
-  isStandalone Boolean @default(false) @map("is_standalone")
+  /**
+   * The expansion's own Game record.
+   * Cascade — deleting the expansion game removes the relationship record.
+   * Every importable expansion is a first-class Game with its own GameSource,
+   * mechanics, designers, etc.
+   */
 
-  // Hierarchy for expansions of expansions
-  parentExpansion   GameExpansion?  @relation("ExpansionHierarchy", fields: [parentExpansionId], references: [id])
-  parentExpansionId String?         @map("parent_expansion_id")
-  childExpansions   GameExpansion[] @relation("ExpansionHierarchy")
+  expansionGame   Game   @relation("ExpansionGame", fields: [expansionGameId], references: [id], onDelete: Cascade)
+  expansionGameId String @map("expansion_game_id")
 
-  compatibleWith ExpansionCompatibility[]
-  ruleVariants   GameExpansionRuleVariant[]
+  expansionType ExpansionType @default(Expansion) @map("expansion_type")
+  isStandalone  Boolean       @default(false) @map("is_standalone")
 
-  playSessionsUsed  GamePlaySessionExpansion[]
-  ruleVariantUsages RuleVariantUsageExpansion[]
+  // ─── Player count adjustments ──────────────────────────────────────────────
+  // Use modifier for simple additive changes (+1 player slot).
+  // Use overrides when the expansion changes the valid range non-linearly.
+  playerCountModifier Int? @map("player_count_modifier")
+  minPlayersOverride  Int? @map("min_players_override")
+  maxPlayersOverride  Int? @map("max_players_override")
+
+  // ─── Play time adjustment (additive minutes) ───────────────────────────────
+  playTimeModifier Int? @map("play_time_modifier")
+
+  // ─── Dependencies ──────────────────────────────────────────────────────────
+  // Other expansion Game IDs required alongside this one and the base game.
+  // e.g. some Pandemic expansions require On the Brink to be present.
+  // String[] for now — migrate to a join table if querying becomes necessary.
+  requiredExpansionIds String[] @map("required_expansion_ids")
+
+  // ─── Ordering & notes ──────────────────────────────────────────────────────
+  recommendedPlayOrder Int?    @map("recommended_play_order")
+  notes                String?
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@index([baseGameId])
-  @@index([parentExpansionId])
+  @@unique([baseGameId, expansionGameId])
+  @@index([expansionGameId])
   @@map("game_expansions")
 }

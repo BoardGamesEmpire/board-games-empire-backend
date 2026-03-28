@@ -1,0 +1,31 @@
+/**
+ * Describes what a Game record represents.
+ * Mirrors the proto ContentType enum but uses PascalCase values
+ * consistent with all other DB enums.
+ */
+enum ContentType {
+  Accessory
+  BaseGame
+  Bundle
+  DLC
+  Expansion
+  Remake
+  Remaster
+  StandaloneExpansion
+
+  @@map("content_types")
+}
+
+/**
+ * Describes the nature of the relationship between a base game and an
+ * expansion in the GameExpansion join table.
+ */
+enum ExpansionType {
+  Accessory
+  DLC
+  Expansion
+  MiniExpansion
+  StandaloneExpansion
+
+  @@map("expansion_types")
+}

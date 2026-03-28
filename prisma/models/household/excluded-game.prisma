@@ -1,4 +1,6 @@
-// Allows for household members to exclude certain games
+/**
+ * Allows for household members to exclude certain games
+ */
 model ExcludedGame {
   id String @id @default(cuid(2))
 
