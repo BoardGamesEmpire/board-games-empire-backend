@@ -23,16 +23,11 @@
   - Made the column `external_id` on table `game_sources` required. This step will fail if there are existing NULL values in that column.
 */
 
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_mechanics_name_trgm ON mechanics USING gin(name gin_trgm_ops);
-CREATE INDEX idx_categories_name_trgm ON categories USING gin(name gin_trgm_ops);
-CREATE INDEX idx_families_name_trgm ON families USING gin(name gin_trgm_ops);
-
 -- AlterTable
 ALTER TABLE "households" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
 
 -- CreateEnum
-CREATE TYPE "content_types" AS ENUM ('Accessory', 'BaseGame', 'Bundle', 'DLC', 'Expansion', 'Remake', 'Remaster', 'StandaloneExpansion');
+CREATE TYPE "content_types" AS ENUM ('Accessory', 'BaseGame', 'Bundle', 'DLC', 'Expansion', 'Remake', 'Remaster', 'StandaloneExpansion', 'Unknown');
 
 -- CreateEnum
 CREATE TYPE "expansion_types" AS ENUM ('Accessory', 'DLC', 'Expansion', 'MiniExpansion', 'StandaloneExpansion');
@@ -203,6 +198,15 @@ CREATE UNIQUE INDEX "game_expansions_base_game_id_expansion_game_id_key" ON "gam
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_play_session_expansions_session_id_game_id_key" ON "game_play_session_expansions"("session_id", "game_id");
+
+-- CreateIndex
+CREATE INDEX "idx_categories_name_trgm" ON "categories" USING GIN ("name" gin_trgm_ops);
+
+-- CreateIndex
+CREATE INDEX "idx_families_name_trgm" ON "families" USING GIN ("name" gin_trgm_ops);
+
+-- CreateIndex
+CREATE INDEX "idx_mechanics_name_trgm" ON "mechanics" USING GIN ("name" gin_trgm_ops);
 
 -- AddForeignKey
 ALTER TABLE "game_expansions" ADD CONSTRAINT "game_expansions_expansion_game_id_fkey" FOREIGN KEY ("expansion_game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;

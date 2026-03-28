@@ -27,6 +27,7 @@ model Family {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "idx_families_name_trgm")
   @@map("families")
 }
 

@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- CreateTable
 CREATE TABLE "accounts" (
     "id" TEXT NOT NULL,

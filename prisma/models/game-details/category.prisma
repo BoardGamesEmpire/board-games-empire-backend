@@ -1,3 +1,7 @@
+/**
+* Enabled pg_trgm extension for efficient text search on category names.
+* @see https://github.com/prisma/prisma/issues/26856
+*/
 model Category {
   id String @id @default(cuid(2))
 
@@ -22,6 +26,7 @@ model Category {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, name: "idx_categories_name_trgm")
   @@map("categories")
 }
 
