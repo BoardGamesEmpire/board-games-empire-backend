@@ -31,6 +31,8 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
             port: redisConfig.socket.port,
             username: redisConfig.username,
             password: redisConfig.password,
+            // TODO: Make this configurable
+            database: 4,
           },
         };
       },

@@ -1,4 +1,4 @@
-import { DatabaseService } from '@bge/database';
+import { DatabaseService, isPrismaUniqueConstraintError } from '@bge/database';
 import type { CategoryData, FamilyData, MechanicData } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toSlug } from '../utils/slug';
@@ -42,18 +42,38 @@ export class TaxonomyUpsertService {
       return fuzzy;
     }
 
-    const created = await this.db.mechanic.create({
-      data: {
-        name: data.name,
-        slug,
-        gatewayAliases: {
-          create: { gatewayId, externalId: data.externalId, externalName: data.name },
+    try {
+      const created = await this.db.mechanic.create({
+        data: {
+          name: data.name,
+          slug,
+          gatewayAliases: {
+            create: {
+              gatewayId,
+              externalId: data.externalId,
+              externalName: data.name,
+            },
+          },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
 
-    return created.id;
+      return created.id;
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        // Another worker won the race — fetch the winner
+        const existing = await this.db.mechanic.findUnique({
+          where: { slug },
+          select: { id: true },
+        });
+
+        if (existing) {
+          return existing.id;
+        }
+      }
+
+      throw error;
+    }
   }
 
   private async fuzzyFindMechanic(name: string): Promise<string | undefined> {
@@ -68,19 +88,26 @@ export class TaxonomyUpsertService {
   }
 
   private createMechanicAlias(mechanicId: string, data: MechanicData, gatewayId: string) {
-    return this.db.mechanicGatewayAlias.create({
-      data: {
+    return this.db.mechanicGatewayAlias.upsert({
+      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+      create: {
         mechanicId,
         gatewayId,
         externalId: data.externalId,
         externalName: data.name,
       },
+      update: {},
     });
   }
 
   async upsertCategory(data: CategoryData, gatewayId: string): Promise<string> {
     const existing = await this.db.categoryGatewayAlias.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+      where: {
+        gatewayId_externalId: {
+          gatewayId,
+          externalId: data.externalId,
+        },
+      },
       select: { categoryId: true },
     });
 
@@ -102,22 +129,37 @@ export class TaxonomyUpsertService {
       return fuzzy;
     }
 
-    const created = await this.db.category.create({
-      data: {
-        name: data.name,
-        slug,
-        gatewayAliases: {
-          create: {
-            gatewayId,
-            externalId: data.externalId,
-            externalName: data.name,
+    try {
+      const created = await this.db.category.create({
+        data: {
+          name: data.name,
+          slug,
+          gatewayAliases: {
+            create: {
+              gatewayId,
+              externalId: data.externalId,
+              externalName: data.name,
+            },
           },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
 
-    return created.id;
+      return created.id;
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        const existing = await this.db.category.findUnique({
+          where: { slug },
+          select: { id: true },
+        });
+
+        if (existing) {
+          return existing.id;
+        }
+      }
+
+      throw error;
+    }
   }
 
   private async fuzzyFindCategory(name: string): Promise<string | undefined> {
@@ -132,13 +174,15 @@ export class TaxonomyUpsertService {
   }
 
   private createCategoryAlias(categoryId: string, data: CategoryData, gatewayId: string) {
-    return this.db.categoryGatewayAlias.create({
-      data: {
+    return this.db.categoryGatewayAlias.upsert({
+      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+      create: {
         categoryId,
         gatewayId,
         externalId: data.externalId,
         externalName: data.name,
       },
+      update: {},
     });
   }
 
@@ -147,6 +191,7 @@ export class TaxonomyUpsertService {
       where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
       select: { familyId: true },
     });
+
     if (existing) {
       return existing.familyId;
     }
@@ -164,22 +209,37 @@ export class TaxonomyUpsertService {
       await this.createFamilyAlias(fuzzy, data, gatewayId);
       return fuzzy;
     }
-
-    const created = await this.db.family.create({
-      data: {
-        name: data.name,
-        slug,
-        gatewayAliases: {
-          create: {
-            gatewayId,
-            externalId: data.externalId,
-            externalName: data.name,
+    try {
+      const created = await this.db.family.create({
+        data: {
+          name: data.name,
+          slug,
+          gatewayAliases: {
+            create: {
+              gatewayId,
+              externalId: data.externalId,
+              externalName: data.name,
+            },
           },
         },
-      },
-      select: { id: true },
-    });
-    return created.id;
+        select: { id: true },
+      });
+
+      return created.id;
+    } catch (error) {
+      if (isPrismaUniqueConstraintError(error)) {
+        const existing = await this.db.family.findUnique({
+          where: { slug },
+          select: { id: true },
+        });
+
+        if (existing) {
+          return existing.id;
+        }
+      }
+
+      throw error;
+    }
   }
 
   private async fuzzyFindFamily(name: string): Promise<string | undefined> {
@@ -194,13 +254,15 @@ export class TaxonomyUpsertService {
   }
 
   private createFamilyAlias(familyId: string, data: FamilyData, gatewayId: string) {
-    return this.db.familyGatewayAlias.create({
-      data: {
+    return this.db.familyGatewayAlias.upsert({
+      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+      create: {
         familyId,
         gatewayId,
         externalId: data.externalId,
         externalName: data.name,
       },
+      update: {},
     });
   }
 }

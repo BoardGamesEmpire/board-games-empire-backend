@@ -1,5 +1,5 @@
 import { ContentType, DatabaseService, ExpansionType, Prisma, Visibility } from '@bge/database';
-import type { GameData } from '@board-games-empire/proto-gateway';
+import { type GameData, ContentType as ProtoContentType } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult } from '../interfaces/import-job.interface';
 import { PersonUpsertService } from './person.service';
@@ -231,18 +231,20 @@ export class GameUpsertService {
 }
 
 const PROTO_TO_DB_CONTENT_TYPE: Record<string, ContentType> = {
-  CONTENT_TYPE_BASE_GAME: ContentType.BaseGame,
-  CONTENT_TYPE_EXPANSION: ContentType.Expansion,
-  CONTENT_TYPE_STANDALONE_EXPANSION: ContentType.StandaloneExpansion,
-  CONTENT_TYPE_DLC: ContentType.DLC,
-  CONTENT_TYPE_ACCESSORY: ContentType.Accessory,
-  CONTENT_TYPE_BUNDLE: ContentType.Bundle,
-  CONTENT_TYPE_REMAKE: ContentType.Remake,
-  CONTENT_TYPE_REMASTER: ContentType.Remaster,
+  [ProtoContentType.CONTENT_TYPE_BASE_GAME]: ContentType.BaseGame,
+  [ProtoContentType.CONTENT_TYPE_EXPANSION]: ContentType.Expansion,
+  [ProtoContentType.CONTENT_TYPE_STANDALONE_EXPANSION]: ContentType.StandaloneExpansion,
+  [ProtoContentType.CONTENT_TYPE_DLC]: ContentType.DLC,
+  [ProtoContentType.CONTENT_TYPE_ACCESSORY]: ContentType.Accessory,
+  [ProtoContentType.CONTENT_TYPE_BUNDLE]: ContentType.Bundle,
+  [ProtoContentType.CONTENT_TYPE_REMAKE]: ContentType.Remake,
+  [ProtoContentType.CONTENT_TYPE_REMASTER]: ContentType.Remaster,
+  [ProtoContentType.UNRECOGNIZED]: ContentType.Unknown,
+  [ProtoContentType.CONTENT_TYPE_UNSPECIFIED]: ContentType.Unknown,
 };
 
 function toDbContentType(protoType: string | undefined): ContentType {
-  return (protoType && PROTO_TO_DB_CONTENT_TYPE[protoType]) || ContentType.BaseGame;
+  return (protoType && PROTO_TO_DB_CONTENT_TYPE[protoType]) || ContentType.Unknown;
 }
 
 /**

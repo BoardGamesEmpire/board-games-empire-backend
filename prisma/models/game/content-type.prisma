@@ -12,6 +12,7 @@ enum ContentType {
   Remake
   Remaster
   StandaloneExpansion
+  Unknown
 
   @@map("content_types")
 }

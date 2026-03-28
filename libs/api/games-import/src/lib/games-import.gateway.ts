@@ -1,4 +1,3 @@
-import { NotificationsService, type UnreadNotificationDto } from '@bge/notifications-service';
 import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
@@ -17,33 +16,6 @@ import { ImportStartDto } from './dto/import-start.dto';
 import type { ImportJobCompletedEvent, ImportJobFailedEvent } from './interfaces/import-job.interface';
 import { GamesImportProducerService } from './services/game-import-producer.service';
 
-interface WsClientData {
-  userId: string | null;
-}
-
-interface WsImportQueuedPayload {
-  batchId: string;
-  baseJobId: string;
-  expansionJobIds: string[];
-  correlationId: string;
-}
-
-interface WsImportJobProgressPayload {
-  batchId: string;
-  jobId: string;
-  gameId: string;
-}
-
-interface WsImportJobFailedPayload {
-  batchId: string;
-  jobId: string;
-  error: string;
-}
-
-interface WsUnreadNotificationsPayload {
-  notifications: UnreadNotificationDto[];
-}
-
 @WebSocketGateway({
   namespace: 'games/import',
   cors: { origin: '*', credentials: true },
@@ -54,31 +26,13 @@ export class GamesImportGateway implements OnGatewayConnection, OnGatewayDisconn
   @WebSocketServer()
   private readonly server!: Server;
 
-  constructor(
-    private readonly producer: GamesImportProducerService,
-    private readonly notifications: NotificationsService,
-  ) {}
+  constructor(private readonly producer: GamesImportProducerService) {}
 
   /**
-   * On connection, push any unread notifications
+   * TODO: Authentication + authorization. Set client.data.userId here for later use in event handlers.
    */
   async handleConnection(client: Socket): Promise<void> {
-    const userId = (client.data as WsClientData)?.userId;
-    if (!userId) return;
-
-    try {
-      const unread = await this.notifications.getUnread(userId);
-      if (unread.length) {
-        client.emit(ClientImportEvents.UnreadNotifications, {
-          notifications: unread,
-        } satisfies WsUnreadNotificationsPayload);
-      }
-    } catch (err) {
-      this.logger.warn(
-        `Failed to push unread notifications for userId=${userId}`,
-        err instanceof Error ? err.stack : String(err),
-      );
-    }
+    this.logger.debug(`Client connected: socketId=${client.id}`);
   }
 
   handleDisconnect(client: Socket): void {
@@ -125,4 +79,27 @@ export class GamesImportGateway implements OnGatewayConnection, OnGatewayDisconn
       error: event.error,
     } satisfies WsImportJobFailedPayload);
   }
+}
+
+interface WsClientData {
+  userId: string | null;
+}
+
+interface WsImportQueuedPayload {
+  batchId: string;
+  baseJobId: string;
+  expansionJobIds: string[];
+  correlationId: string;
+}
+
+interface WsImportJobProgressPayload {
+  batchId: string;
+  jobId: string;
+  gameId: string;
+}
+
+interface WsImportJobFailedPayload {
+  batchId: string;
+  jobId: string;
+  error: string;
 }

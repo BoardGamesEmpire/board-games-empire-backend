@@ -29,9 +29,7 @@ export class PersonUpsertService {
     const artist = await this.db.artist.create({
       data: {
         name: data.name,
-        gatewayLinks: {
-          create: { gatewayId, externalId: data.externalId },
-        },
+        gatewayLinks: this.gatewayLinkConnectOrCreate(gatewayId, data.externalId),
       },
       select: { id: true },
     });
@@ -40,21 +38,15 @@ export class PersonUpsertService {
   }
 
   async upsertDesigner(data: PersonData, gatewayId: string): Promise<string> {
-    const link = await this.db.designerGatewayLink.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      select: { designerId: true },
-    });
-
-    if (link) {
-      return link.designerId;
-    }
-
-    const designer = await this.db.designer.create({
-      data: {
+    const gatewayLinkConnect = this.gatewayLinkConnectOrCreate(gatewayId, data.externalId);
+    const designer = await this.db.designer.upsert({
+      where: { name: data.name },
+      create: {
         name: data.name,
-        gatewayLinks: {
-          create: { gatewayId: data.externalId, externalId: data.externalId },
-        },
+        gatewayLinks: gatewayLinkConnect,
+      },
+      update: {
+        gatewayLinks: gatewayLinkConnect,
       },
       select: { id: true },
     });
@@ -63,26 +55,29 @@ export class PersonUpsertService {
   }
 
   async upsertPublisher(data: PublisherData, gatewayId: string): Promise<string> {
-    const link = await this.db.publisherGatewayLink.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      select: { publisherId: true },
-    });
-
-    if (link) {
-      return link.publisherId;
-    }
-
-    const publisher = await this.db.publisher.create({
-      data: {
+    const gatewayLinkConnect = this.gatewayLinkConnectOrCreate(gatewayId, data.externalId);
+    const publisher = await this.db.publisher.upsert({
+      where: { name: data.name },
+      create: {
         name: data.name,
         website: data.website ?? undefined,
-        gatewayLinks: {
-          create: { gatewayId: data.externalId, externalId: data.externalId },
-        },
+        gatewayLinks: gatewayLinkConnect,
+      },
+      update: {
+        gatewayLinks: gatewayLinkConnect,
       },
       select: { id: true },
     });
 
     return publisher.id;
+  }
+
+  private gatewayLinkConnectOrCreate(gatewayId: string, externalId: string) {
+    return {
+      connectOrCreate: {
+        where: { gatewayId_externalId: { gatewayId, externalId } },
+        create: { gatewayId, externalId },
+      },
+    };
   }
 }

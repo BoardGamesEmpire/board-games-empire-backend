@@ -119,7 +119,7 @@ export class GamesImportProducerService {
             ),
         ),
       ),
-      filter((result) => result !== null),
+      filter((result): result is ExpansionContent => result !== null),
       toArray(),
     );
   }

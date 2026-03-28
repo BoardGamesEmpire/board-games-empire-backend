@@ -9,7 +9,11 @@ export class RedisIoAdapter extends IoAdapter {
 
   async connectToRedis(configService: ConfigService): Promise<void> {
     const options = configService.getOrThrow<RedisClientOptions>('redis');
-    const redisClient = createClient(options);
+    const redisClient = createClient({
+      ...options,
+      // TODO: Make this configurable
+      database: 1,
+    });
     await redisClient.connect();
 
     this.adapterConstructor = createAdapter(redisClient);
