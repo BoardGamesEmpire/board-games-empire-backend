@@ -1,8 +1,19 @@
-import { type AuthType, AUTH_INSTANCE } from '@bge/auth';
+import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { DatabaseService } from '@bge/database';
+import type {
+  WsClientData,
+  WsGameSearchResult,
+  WsRateLimitedPayload,
+  WsSearchDonePayload,
+  WsSearchErrorPayload,
+  WsSearchResultPayload,
+  WsSourceDonePayload,
+  WsSourceUnavailablePayload,
+} from '@bge/game-search';
+import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { ResultStatus } from '@board-games-empire/proto-gateway';
-import { Inject, Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -15,29 +26,17 @@ import { wrapDefaults } from '@status/defaults';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
-import { SearchEvents } from './constants';
-import type {
-  WsGameSearchResult,
-  WsRateLimitedPayload,
-  WsSearchDonePayload,
-  WsSearchErrorPayload,
-  WsSearchResultPayload,
-  WsSourceDonePayload,
-  WsSourceUnavailablePayload,
-} from './dto/search-outbound.dto';
-import { SearchCancelDto, SearchStartDto } from './dto/search-start.dto';
-import type { WsClientData } from './interfaces';
 
 @UseGuards(AuthGuard)
 @WebSocketGateway({
   namespace: 'games/search',
   cors: { origin: '*', credentials: true },
 })
-export class SearchGateway implements OnGatewayDisconnect {
+export class GameSearchGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   private readonly server!: Server;
 
-  private readonly logger = new Logger(SearchGateway.name);
+  private readonly logger = new Logger(GameSearchGateway.name);
   private readonly userQueryMap = wrapDefaults<WeakMap<Socket, WsClientData>, WsClientData>({
     wrap: new WeakMap(),
     defaultValue: (): WsClientData => ({
@@ -49,8 +48,8 @@ export class SearchGateway implements OnGatewayDisconnect {
 
   constructor(
     private readonly coordinator: GatewayCoordinatorClientService,
+    private readonly authService: AuthService,
     private readonly db: DatabaseService,
-    @Inject(AUTH_INSTANCE) private readonly auth: AuthType,
   ) {}
 
   async handleConnection(client: Socket): Promise<void> {
@@ -63,22 +62,9 @@ export class SearchGateway implements OnGatewayDisconnect {
       return;
     }
 
-    // TODO: helper service in auth module to validate WS tokens and fetch session info, instead of
-    // calling the full auth API here or injecting auth context
-    const session = await this.auth.api.getSession({
-      headers: new Headers({
-        Authorization: `Bearer ${token}`,
-      }),
-    });
-
-    if (!session?.user) {
+    const session = await this.authService.getSessionFromToken(token);
+    if (this.authService.validateSession(session)) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    if (session.session.expiresAt < new Date()) {
-      this.logger.warn(`Expired session for WS connection: socketId=${client.id}`);
       client.disconnect(true);
       return;
     }

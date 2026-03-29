@@ -1,5 +1,5 @@
 {
-  "name": "@bge/search",
+  "name": "@bge/game-search",
   "version": "0.0.1",
   "private": true,
   "main": "./src/index.ts",
@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/search",
+    "name": "@board-games-empire/game-search",
     "tags": [
       "api",
       "search",

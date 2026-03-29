@@ -1,67 +1,66 @@
 import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import type { RedisClientOptions } from 'redis';
 
-export default registerAs('redis.cache', () =>
-  env.provideMany<RedisClientOptions>(
+export default registerAs('redis.websocket', () =>
+  env.provideMany<RedisOptions>(
     [
       {
         keyTo: 'host',
-        key: 'REDIS_HOST',
+        key: 'REDIS_WEBSOCKET_HOST',
         defaultValue: 'localhost',
       },
       {
         keyTo: 'port',
-        key: 'REDIS_PORT',
+        key: 'REDIS_WEBSOCKET_PORT',
         defaultValue: 6379,
         mutators: parseInt,
       },
       {
         keyTo: 'database',
-        key: 'REDIS_DATABASE',
+        key: 'REDIS_WEBSOCKET_DATABASE',
         defaultValue: 1,
         mutators: parseInt,
       },
       {
         keyTo: 'username',
-        key: 'REDIS_USERNAME',
+        key: 'REDIS_WEBSOCKET_USERNAME',
         defaultValue: '',
         allowEmptyString: true,
       },
       {
         keyTo: 'password',
-        key: 'REDIS_PASSWORD',
+        key: 'REDIS_WEBSOCKET_PASSWORD',
         defaultValue: '',
         allowEmptyString: true,
       },
       {
         keyTo: 'tlsEnabled',
-        key: 'REDIS_TLS_ENABLED',
+        key: 'REDIS_WEBSOCKET_TLS_ENABLED',
         defaultValue: false,
         mutators: isTrue,
       },
       {
         keyTo: 'rejectUnauthorized',
-        key: 'REDIS_REJECT_UNAUTHORIZED',
+        key: 'REDIS_WEBSOCKET_REJECT_UNAUTHORIZED',
         defaultValue: true,
         mutators: isTrue,
       },
       {
         keyTo: 'ca',
-        key: 'REDIS_TLS_CA',
+        key: 'REDIS_WEBSOCKET_TLS_CA',
         defaultValue: '',
         allowEmptyString: true,
       },
       {
         keyTo: 'key',
-        key: 'REDIS_TLS_KEY',
+        key: 'REDIS_WEBSOCKET_TLS_KEY',
         defaultValue: '',
         allowEmptyString: true,
       },
       {
         keyTo: 'cert',
-        key: 'REDIS_TLS_CERT',
+        key: 'REDIS_WEBSOCKET_TLS_CERT',
         defaultValue: '',
         allowEmptyString: true,
       },
@@ -83,15 +82,30 @@ export default registerAs('redis.cache', () =>
   ),
 );
 
-export const redisConfigValidationSchema = {
-  REDIS_HOST: Joi.string().default('localhost'),
-  REDIS_PORT: Joi.number().default(6379),
-  REDIS_DATABASE: Joi.number().default(1),
-  REDIS_USERNAME: Joi.string().optional().allow('').default(''),
-  REDIS_PASSWORD: Joi.string().optional().allow('').default(''),
-  REDIS_TLS_ENABLED: Joi.boolean().default(false),
-  REDIS_REJECT_UNAUTHORIZED: Joi.boolean().default(true),
-  REDIS_TLS_CA: Joi.string().optional().allow('').default(''),
-  REDIS_TLS_KEY: Joi.string().optional().allow('').default(''),
-  REDIS_TLS_CERT: Joi.string().optional().allow('').default(''),
+export const redisWebsocketConfigValidationSchema = {
+  REDIS_WEBSOCKET_HOST: Joi.string().default('localhost'),
+  REDIS_WEBSOCKET_PORT: Joi.number().default(6379),
+  REDIS_WEBSOCKET_DATABASE: Joi.number().default(1),
+  REDIS_WEBSOCKET_USERNAME: Joi.string().optional().allow('').default(''),
+  REDIS_WEBSOCKET_PASSWORD: Joi.string().optional().allow('').default(''),
+  REDIS_WEBSOCKET_TLS_ENABLED: Joi.boolean().default(false),
+  REDIS_WEBSOCKET_REJECT_UNAUTHORIZED: Joi.boolean().default(true),
+  REDIS_WEBSOCKET_TLS_CA: Joi.string().optional().allow('').default(''),
+  REDIS_WEBSOCKET_TLS_KEY: Joi.string().optional().allow('').default(''),
+  REDIS_WEBSOCKET_TLS_CERT: Joi.string().optional().allow('').default(''),
 };
+
+export interface RedisOptions {
+  username?: string;
+  password?: string;
+  database?: number;
+  socket: {
+    host: string;
+    port: number;
+    tls: boolean;
+    rejectUnauthorized?: boolean;
+    ca?: string;
+    key?: string;
+    cert?: string;
+  };
+}

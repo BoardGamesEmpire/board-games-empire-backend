@@ -1,4 +1,13 @@
+import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
+import type {
+  WsClientData,
+  WsRateLimitedPayload,
+  WsSearchErrorPayload,
+  WsSearchResultPayload,
+  WsSourceDonePayload,
+} from '@bge/game-search';
+import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { createTestingModuleWithDb, makeGame, MockDatabaseService } from '@bge/testing';
 import {
   ContentType,
@@ -12,19 +21,10 @@ import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Subscription } from 'rxjs';
 import { of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
-import { SearchEvents } from './constants';
-import type {
-  WsRateLimitedPayload,
-  WsSearchErrorPayload,
-  WsSearchResultPayload,
-  WsSourceDonePayload,
-} from './dto/search-outbound.dto';
-import { SearchCancelDto, SearchStartDto } from './dto/search-start.dto';
-import type { WsClientData } from './interfaces';
-import { SearchGateway } from './search.gateway';
+import { GameSearchGateway } from './search.gateway';
 
-describe('SearchGateway', () => {
-  let gateway: SearchGateway;
+describe('GameSearchGateway', () => {
+  let gateway: GameSearchGateway;
   let db: MockDatabaseService;
   let coordinator: jest.Mocked<GatewayCoordinatorClientService>;
   let mockEmit: jest.Mock;
@@ -43,16 +43,20 @@ describe('SearchGateway', () => {
     const { module, db: mockDb } = await createTestingModuleWithDb({
       overrideGuards: [AuthGuard],
       providers: [
-        SearchGateway,
+        GameSearchGateway,
         {
           provide: GatewayCoordinatorClientService,
           useValue: coordinator,
+        },
+        {
+          provide: AuthService,
+          useValue: { verifyToken: jest.fn() },
         },
       ],
     });
 
     db = mockDb;
-    gateway = module.get(SearchGateway);
+    gateway = module.get(GameSearchGateway);
 
     // Wire a mock server so gateway emissions can be asserted.
     // server.to(room) is a fluent interface; mockTo captures the room arg,
@@ -555,7 +559,7 @@ function makeSourceDone(correlationId = 'corr-1', gatewayId = 'bgg-gw-1'): Searc
 /**
  * Creates a minimal socket.io Socket double.
  * `as unknown as Socket` is intentional — we only need the subset of the
- * socket surface that SearchGateway actually touches.
+ * socket surface that GameSearchGateway actually touches.
  */
 function makeSocket(dataOverrides: Partial<WsClientData> = {}): Socket {
   return {

@@ -1,5 +1,6 @@
 import {
   Action,
+  ContentType,
   EventStatus,
   EventType,
   Game,
@@ -225,6 +226,7 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     id: 'game-fixture-1',
     title: 'Gloomhaven',
     subtitle: null,
+    contentType: ContentType.BaseGame,
     description: null,
     image: null,
     thumbnail: null,

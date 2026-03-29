@@ -18,8 +18,8 @@ export interface EnqueueResult {
 }
 
 @Injectable()
-export class GamesImportProducerService {
-  private readonly logger = new Logger(GamesImportProducerService.name);
+export class GameImportProducerService {
+  private readonly logger = new Logger(GameImportProducerService.name);
 
   constructor(
     private readonly db: DatabaseService,

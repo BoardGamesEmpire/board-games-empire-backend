@@ -1,5 +1,5 @@
 {
-  "name": "@bge/games-import",
+  "name": "@bge/game-import",
   "version": "0.0.1",
   "private": true,
   "main": "./src/index.ts",
@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/games-import",
+    "name": "@board-games-empire/game-import",
     "tags": [
       "games",
       "import"

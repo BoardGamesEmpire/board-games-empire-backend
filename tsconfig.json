@@ -70,9 +70,6 @@
       "path": "./libs/api/game"
     },
     {
-      "path": "./libs/api/search"
-    },
-    {
       "path": "./apps/igdb-gateway-e2e"
     },
     {
@@ -85,10 +82,13 @@
       "path": "./libs/api/notifications"
     },
     {
-      "path": "./libs/api/games-import"
+      "path": "./libs/api/game-import"
     },
     {
       "path": "./libs/common/notifications"
+    },
+    {
+      "path": "./libs/api/game-search"
     }
   ]
 }
