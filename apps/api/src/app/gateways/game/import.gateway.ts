@@ -14,6 +14,7 @@ import {
 } from '@nestjs/websockets';
 import { firstValueFrom } from 'rxjs';
 import { Server, Socket } from 'socket.io';
+import type { WsClientData } from './interfaces';
 
 @WebSocketGateway({
   namespace: 'games/import',
@@ -38,11 +39,15 @@ export class GameImportGateway implements OnGatewayConnection, OnGatewayDisconne
     }
 
     const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.validateSession(session) === false) {
+    if (this.authService.isValidSession(session) === false) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
       client.disconnect(true);
       return;
     }
+
+    client.data = {
+      userId: session.user?.id,
+    } satisfies WsClientData;
 
     this.logger.log(`WS connected: socketId=${client.id}`);
   }
@@ -91,10 +96,6 @@ export class GameImportGateway implements OnGatewayConnection, OnGatewayDisconne
       error: event.error,
     } satisfies WsImportJobFailedPayload);
   }
-}
-
-interface WsClientData {
-  userId: string | null;
 }
 
 interface WsImportQueuedPayload {

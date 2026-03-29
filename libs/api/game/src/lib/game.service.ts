@@ -137,7 +137,8 @@ export class GameService {
           expansions: {
             select: {
               id: true,
-              description: true,
+              baseGameId: true,
+              expansionGameId: true,
             },
           },
         },

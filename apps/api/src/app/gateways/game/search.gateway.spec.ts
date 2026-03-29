@@ -8,7 +8,7 @@ import type {
   WsSourceDonePayload,
 } from '@bge/game-search';
 import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import { createTestingModuleWithDb, makeGame, MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb, makeGame, makeGameWithSource, MockDatabaseService } from '@bge/testing';
 import {
   ContentType,
   GameSearchData,
@@ -199,7 +199,10 @@ describe('GameSearchGateway', () => {
       it('emits search:result for each local game with source="local"', async () => {
         const client = makeSocket();
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
-        db.game.findMany.mockResolvedValue([makeGame(), makeGame({ id: 'game-2', title: 'Wingspan' })]);
+        db.game.findMany.mockResolvedValue([
+          makeGameWithSource(),
+          makeGameWithSource({ id: 'game-2', title: 'Wingspan' }),
+        ]);
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true }));
 

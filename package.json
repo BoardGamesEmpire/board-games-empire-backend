@@ -42,6 +42,7 @@
     "start": "nf start",
     "pretest": "npm run nx:sync",
     "test": "nx run-many -t test --parallel=5 --passWithNoTests",
+    "typecheck": "nx run-many -t typecheck --parallel",
     "update": "nx migrate latest",
     "workspace-schematic": "nx workspace-schematic"
   },

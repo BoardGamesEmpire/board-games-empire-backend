@@ -63,7 +63,7 @@ export class GameSearchGateway implements OnGatewayDisconnect {
     }
 
     const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.validateSession(session) === false) {
+    if (this.authService.isValidSession(session) === false) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
       client.disconnect(true);
       return;

@@ -255,3 +255,16 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     ...overrides,
   };
 }
+
+export function makeGameWithSource(overrides: Partial<GameWithSource> = {}): GameWithSource {
+  const game = makeGame(overrides);
+  return {
+    ...game,
+    gameSources: [{ sourceUrl: 'https://example.com/game' }],
+    ...overrides,
+  };
+}
+
+interface GameWithSource extends Game {
+  gameSources: { sourceUrl: string }[];
+}

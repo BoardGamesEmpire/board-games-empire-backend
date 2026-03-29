@@ -27,7 +27,7 @@ export class AuthService {
    * @param session
    * @returns boolean indicating whether the session is valid or not
    */
-  validateSession(session: UserSession | null): boolean {
+  isValidSession(session: UserSession | null): session is UserSession {
     if (!session?.session) {
       return false;
     }
