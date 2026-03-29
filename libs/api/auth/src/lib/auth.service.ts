@@ -32,6 +32,6 @@ export class AuthService {
       return false;
     }
 
-    return session.session.expiresAt < new Date();
+    return session.session.expiresAt > new Date();
   }
 }
