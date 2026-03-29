@@ -38,7 +38,7 @@ export class GameImportGateway implements OnGatewayConnection, OnGatewayDisconne
     }
 
     const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.validateSession(session)) {
+    if (this.authService.validateSession(session) === false) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
       client.disconnect(true);
       return;
