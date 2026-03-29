@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { authFactory } from './auth-factory';
+import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
 import { AUTH_INSTANCE } from './constants';
 import type { AuthType } from './interfaces';
@@ -32,9 +33,10 @@ import { StrategyController, StrategyService } from './strategy';
       ) => authFactory(databaseClient, configService, cache, userProvisioningService),
       inject: [DatabaseService, ConfigService, CACHE_MANAGER, UserProvisioningService],
     },
+    AuthService,
     StrategyService,
     UserProvisioningService,
   ],
-  exports: [StrategyService, UserProvisioningService, AUTH_INSTANCE],
+  exports: [AuthService, AUTH_INSTANCE],
 })
 export class AuthModule {}

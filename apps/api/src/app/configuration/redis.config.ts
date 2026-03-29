@@ -2,7 +2,7 @@ import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
-export default registerAs('redis', () =>
+export default registerAs('redis.cache', () =>
   env.provideMany<RedisOptions>(
     [
       {

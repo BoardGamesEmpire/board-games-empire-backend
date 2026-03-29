@@ -23,13 +23,16 @@
   ],
   "references": [
     {
+      "path": "../../libs/proto/gateway/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/user/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/api/search/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
@@ -50,7 +53,10 @@
       "path": "../../libs/common/health/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/games-import/tsconfig.lib.json"
+      "path": "../../libs/api/game-search/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/game-gateway/tsconfig.lib.json"
@@ -63,6 +69,9 @@
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/auth/tsconfig.lib.json"

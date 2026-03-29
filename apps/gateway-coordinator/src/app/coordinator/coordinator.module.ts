@@ -16,7 +16,7 @@ import { GameSearchService } from './game-search.service';
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        stores: [new KeyvRedis(config.getOrThrow('redis'))],
+        stores: [new KeyvRedis(config.getOrThrow('redis.cache'))],
         ttl: config.get<number>('cache.ttl'),
       }),
     }),

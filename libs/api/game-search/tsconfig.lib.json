@@ -8,7 +8,7 @@
     "emitDeclarationOnly": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "target": "esnext",
+    "target": "es2021",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "strictNullChecks": true,
@@ -19,16 +19,7 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../../proto/gateway/tsconfig.lib.json"
-    },
-    {
       "path": "../../database/tsconfig.lib.json"
-    },
-    {
-      "path": "../gateway-coordinator-client/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/notifications/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

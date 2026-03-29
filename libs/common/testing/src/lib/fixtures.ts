@@ -1,5 +1,6 @@
 import {
   Action,
+  ContentType,
   EventStatus,
   EventType,
   Game,
@@ -225,6 +226,7 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     id: 'game-fixture-1',
     title: 'Gloomhaven',
     subtitle: null,
+    contentType: ContentType.BaseGame,
     description: null,
     image: null,
     thumbnail: null,
@@ -252,4 +254,17 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     updatedAt: new Date('2024-01-01T00:00:00.000Z'),
     ...overrides,
   };
+}
+
+export function makeGameWithSource(overrides: Partial<GameWithSource> = {}): GameWithSource {
+  const game = makeGame(overrides);
+  return {
+    ...game,
+    gameSources: [{ sourceUrl: 'https://example.com/game' }],
+    ...overrides,
+  };
+}
+
+interface GameWithSource extends Game {
+  gameSources: { sourceUrl: string }[];
 }

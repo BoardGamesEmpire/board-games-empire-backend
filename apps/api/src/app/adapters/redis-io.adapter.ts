@@ -8,7 +8,7 @@ export class RedisIoAdapter extends IoAdapter {
   private adapterConstructor!: ReturnType<typeof createAdapter>;
 
   async connectToRedis(configService: ConfigService): Promise<void> {
-    const options = configService.getOrThrow<RedisClientOptions>('redis');
+    const options = configService.getOrThrow<RedisClientOptions>('redis.websocket');
     const redisClient = createClient({
       ...options,
       // TODO: Make this configurable

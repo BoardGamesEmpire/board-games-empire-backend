@@ -1,8 +1,23 @@
 import { DatabaseService } from '@bge/database';
 import * as jest from 'jest-mock';
 
-type MockedMethods<T> = {
+/**
+ * Wraps each function-valued property of T as a jest.MockedFunction,
+ * preserving non-function properties as-is.
+ */
+type MockedFunctions<T> = {
   [K in keyof T]: T[K] extends (...args: infer A) => infer R ? jest.MockedFunction<(...args: A) => R> : T[K];
+};
+
+/**
+ * Top-level mapped type for DatabaseService:
+ *  - Functions ($connect, $disconnect, etc.) → jest.MockedFunction
+ *  - Objects (model delegates like game, user, etc.) → each method mocked
+ */
+type MockedMethods<T> = {
+  [K in keyof T]: T[K] extends (...args: infer A) => infer R
+    ? jest.MockedFunction<(...args: A) => R>
+    : MockedFunctions<T[K]>;
 };
 
 /**

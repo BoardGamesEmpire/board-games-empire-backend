@@ -1,16 +1,17 @@
 import { AuthModule } from '@bge/auth';
+import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
-import { GamesImportModule } from '@bge/games-import';
+import { GameImportModule } from '@bge/game-import';
+import { GameSearchModule } from '@bge/game-search';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
-import { SearchGatewayModule } from '@bge/search';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
@@ -25,6 +26,8 @@ import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
+import { GameImportGateway } from './gateways/game/import.gateway';
+import { GameSearchGateway } from './gateways/game/search.gateway';
 
 @Module({
   imports: [
@@ -61,7 +64,7 @@ import { configuration, configurationValidationSchema } from './configuration';
       isGlobal: true,
       inject: [ConfigService],
       async useFactory(configService: ConfigService) {
-        const options = configService.getOrThrow<RedisClientOptions>('redis');
+        const options = configService.getOrThrow<RedisClientOptions>('redis.cache');
         return {
           stores: [new KeyvRedis(options)],
           ttl: configService.get<number>('cache.ttl'),
@@ -87,15 +90,16 @@ import { configuration, configurationValidationSchema } from './configuration';
     // Feature modules
     AuthModule,
     GameGatewayModule,
-    GamesImportModule,
+    GameImportModule,
     GameModule,
+    GatewayCoordinatorClientModule,
     HealthModule,
     HouseholdModule,
     LanguageModule,
     MetricsModule,
     NotificationsModule,
     PermissionsModule,
-    SearchGatewayModule,
+    GameSearchModule,
     SystemSettingsModule,
     UserModule,
   ],
@@ -119,6 +123,10 @@ import { configuration, configurationValidationSchema } from './configuration';
       provide: APP_INTERCEPTOR,
       useClass: CacheInterceptor,
     },
+
+    // Gateways
+    GameImportGateway,
+    GameSearchGateway,
   ],
 })
 export class AppModule {}

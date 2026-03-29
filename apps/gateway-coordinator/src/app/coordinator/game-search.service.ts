@@ -80,7 +80,7 @@ export class GameSearchService {
   fetchExpansions(request: proto.CoordinatorFetchExpansionsRequest): Observable<proto.SearchGameResult> {
     const sources$ = from(
       this.db.gameSource.findMany({
-        where: { gameId: request.gameId, gatewayId: { not: null } },
+        where: { gameId: request.gameId },
         select: { gatewayId: true, externalId: true },
       }),
     );
