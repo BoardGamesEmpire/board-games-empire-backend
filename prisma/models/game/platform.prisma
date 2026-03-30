@@ -1,0 +1,47 @@
+model Platform {
+  id           String       @id @default(cuid(2))
+  name         String       @unique
+  slug         String       @unique
+  abbreviation String?
+  platformType PlatformType @map("platform_type")
+
+  /// True for system-seeded singletons (Tabletop). These are never
+  /// created or deleted by import pipelines.
+  isSystem Boolean @default(false) @map("is_system")
+
+  logoUrl String? @map("logo_url")
+
+  gatewayLinks PlatformGatewayLink[]
+  releases     GameRelease[]
+  dlcReleases  GameDlcRelease[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platforms")
+}
+
+model PlatformGatewayLink {
+  id String @id @default(cuid(2))
+
+  platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  platformId String   @map("platform_id")
+
+  /// The gateway that sourced this platform record (IGDB, Steam, etc.)
+  gatewayId  String @map("gateway_id")
+  externalId String @map("external_id")
+
+  @@unique([gatewayId, externalId])
+  @@index([platformId])
+  @@map("platform_gateway_links")
+}
+
+enum PlatformType {
+  Tabletop
+  Console
+  PC
+  Mobile
+  Other
+
+  @@map("platform_types")
+}

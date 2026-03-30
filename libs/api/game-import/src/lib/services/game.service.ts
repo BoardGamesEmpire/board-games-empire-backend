@@ -1,8 +1,10 @@
 import { ContentType, DatabaseService, ExpansionType, Prisma, Visibility } from '@bge/database';
-import { type GameData, ContentType as ProtoContentType } from '@board-games-empire/proto-gateway';
+import { DlcData, type GameData, ContentType as ProtoContentType } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult } from '../interfaces/import-job.interface';
+import { toReleaseDate, toReleaseRegion } from './helpers';
 import { PersonUpsertService } from './person.service';
+import { PlatformUpsertService } from './platform.service';
 import { TaxonomyUpsertService } from './taxonomy.service';
 
 @Injectable()
@@ -13,6 +15,7 @@ export class GameUpsertService {
     private readonly db: DatabaseService,
     private readonly taxonomy: TaxonomyUpsertService,
     private readonly persons: PersonUpsertService,
+    private readonly platform: PlatformUpsertService,
   ) {}
 
   async upsert(gameData: GameData, gatewayId: string): Promise<ImportJobResult> {
@@ -118,7 +121,9 @@ export class GameUpsertService {
       this.upsertFamilies(gameId, gameData.families ?? [], gatewayId),
       this.upsertDesigners(gameId, gameData.designers ?? [], gatewayId),
       this.upsertArtists(gameId, gameData.artists ?? [], gatewayId),
+      this.platform.upsertReleases(gameId, gameData.releases ?? [], gatewayId),
       this.upsertPublishers(gameId, gameData.publishers ?? [], gatewayId),
+      this.upsertDlc(gameId, gameData.dlc ?? [], gatewayId),
     ]);
   }
 
@@ -185,6 +190,51 @@ export class GameUpsertService {
         create: { gameId, publisherId },
         update: {},
       });
+    }
+  }
+
+  private async upsertDlc(gameId: string, dlcList: DlcData[], gatewayId: string): Promise<void> {
+    for (const dlc of dlcList) {
+      const existing = await this.db.gameDlcGatewayLink.findUnique({
+        where: { gatewayId_externalId: { gatewayId, externalId: dlc.externalId } },
+        select: { dlcId: true },
+      });
+
+      let dlcId: string;
+
+      if (existing) {
+        dlcId = existing.dlcId;
+        await this.db.gameDlc.update({
+          where: { id: dlcId },
+          data: { name: dlc.name, description: dlc.description, thumbnail: dlc.thumbnailUrl },
+        });
+      } else {
+        const created = await this.db.gameDlc.create({
+          data: {
+            gameId,
+            name: dlc.name,
+            description: dlc.description,
+            thumbnail: dlc.thumbnailUrl,
+            gatewayLinks: {
+              create: { gatewayId, externalId: dlc.externalId },
+            },
+          },
+          select: { id: true },
+        });
+        dlcId = created.id;
+      }
+
+      // Upsert DLC releases — same platform resolution as game releases
+      for (const release of dlc.releases ?? []) {
+        const platformId = await this.platform.upsertPlatform(release.platform!, gatewayId);
+        const region = toReleaseRegion(release.localizations);
+
+        await this.db.gameDlcRelease.upsert({
+          where: { dlcId_platformId_region: { dlcId, platformId, region } },
+          create: { dlcId, platformId, region, releaseDate: toReleaseDate(release.releaseDate) },
+          update: { releaseDate: toReleaseDate(release.releaseDate) },
+        });
+      }
     }
   }
 

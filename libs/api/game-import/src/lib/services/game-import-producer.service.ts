@@ -2,7 +2,7 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { DatabaseService, InitiatorType, JobStatus, JobType } from '@bge/database';
 import type { GameData } from '@board-games-empire/proto-gateway';
 import { InjectFlowProducer } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { FlowChildJob, FlowProducer } from 'bullmq';
 import * as crypto from 'node:crypto';
 import { from, Observable, of, throwError } from 'rxjs';
@@ -45,7 +45,7 @@ export class GameImportProducerService {
 
           return throwError(
             () =>
-              new Error(
+              new NotFoundException(
                 `FetchGame returned no game data for gatewayId=${dto.gatewayId} externalId=${dto.externalId}. ` +
                   `Status: ${fetchResponse.status}`,
               ),
@@ -187,7 +187,11 @@ export class GameImportProducerService {
           userId,
           batchId,
           parentJobId: baseJobId,
-          payload: { gatewayId: dto.gatewayId, externalId },
+          payload: {
+            correlationId: dto.correlationId,
+            gatewayId: dto.gatewayId,
+            externalId,
+          },
         },
         select: { id: true },
       }),

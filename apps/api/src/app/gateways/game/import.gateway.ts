@@ -1,55 +1,37 @@
 import { AuthService } from '@bge/auth';
 import type { ImportJobCompletedEvent, ImportJobFailedEvent } from '@bge/game-import';
 import { ClientImportEvents, GameImportProducerService, ImportEvents, ImportStartDto } from '@bge/game-import';
-import { Logger, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
   ConnectedSocket,
   MessageBody,
-  OnGatewayConnection,
   OnGatewayDisconnect,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import { Server, Socket } from 'socket.io';
+import { AuthenticatedGateway } from '../base/authenticated.gateway';
+import { WsAuthFilter, WsValidationFilter } from '../filters';
 import type { WsClientData } from './interfaces';
 
+@UseGuards(AuthGuard)
+@UseFilters(WsValidationFilter, WsAuthFilter)
 @WebSocketGateway({
   namespace: 'games/import',
   cors: { origin: '*', credentials: true },
 })
-export class GameImportGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  private readonly logger = new Logger(GameImportGateway.name);
+export class GameImportGateway extends AuthenticatedGateway implements OnGatewayDisconnect {
+  protected readonly logger = new Logger(GameImportGateway.name);
 
   @WebSocketServer()
   private readonly server!: Server;
 
-  constructor(private readonly producer: GameImportProducerService, private readonly authService: AuthService) {}
-
-  async handleConnection(client: Socket): Promise<void> {
-    const token = client.handshake?.auth?.token;
-    this.logger.log(`WS connection attempt: socketId=${client.id} token=${token ? 'present' : 'absent'}`);
-
-    if (!token) {
-      this.logger.warn(`Unauthorized WS connection attempt: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.isValidSession(session) === false) {
-      this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    client.data = {
-      userId: session.user?.id,
-    } satisfies WsClientData;
-
-    this.logger.log(`WS connected: socketId=${client.id}`);
+  constructor(private readonly producer: GameImportProducerService, override readonly authService: AuthService) {
+    super(authService);
   }
 
   handleDisconnect(client: Socket): void {
@@ -66,7 +48,9 @@ export class GameImportGateway implements OnGatewayConnection, OnGatewayDisconne
   @SubscribeMessage(ClientImportEvents.ImportStart)
   async handleImportStart(@ConnectedSocket() client: Socket, @MessageBody() dto: ImportStartDto): Promise<void> {
     const userId = (client.data as WsClientData).userId;
-    this.logger.log(`Import start: socketId=${client.id} gatewayId=${dto.gatewayId} externalId=${dto.externalId}`);
+    this.logger.log(
+      `Import start: socketId=${client.id} gatewayId=${dto.gatewayId} externalId=${dto.externalId} userId=${userId}`,
+    );
 
     const result = await firstValueFrom(this.producer.enqueue(dto, userId));
     await client.join(`batch:${result.batchId}`);

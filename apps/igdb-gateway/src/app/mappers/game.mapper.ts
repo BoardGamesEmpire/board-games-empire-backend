@@ -5,10 +5,12 @@ import type {
   IgdbAgeRatingOrganization,
   IgdbGame,
   IgdbGameType,
+  IgdbLanguageEntry,
   IgdbNamedEntity,
   IgdbPlatform,
   IgdbReleaseDate,
 } from '../types';
+import { toLanguageData } from './language.mapper';
 
 /**
  * IGDB returns protocol-relative URLs (//images.igdb.com/...).
@@ -128,6 +130,7 @@ function toRegionData(igdbRegion: number): proto.RegionData {
 function toGameReleaseDataList(
   releaseDates: IgdbReleaseDate[],
   gameStatus: number | undefined,
+  languages: proto.LanguageData[],
 ): proto.GameReleaseData[] {
   const byPlatform = new Map<number, { platform: IgdbPlatform; entries: IgdbReleaseDate[] }>();
 
@@ -162,6 +165,7 @@ function toGameReleaseDataList(
       status,
       releaseDate,
       localizations,
+      languages,
     } satisfies proto.GameReleaseData;
   });
 }
@@ -261,6 +265,20 @@ function toYearPublished(unixSeconds: number | undefined): number | undefined {
  * search card without a subsequent FetchGame round-trip.
  */
 export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
+  const languages = toLanguageDataList((game.language_supports ?? []).map((ls) => ls.language));
+  const availableReleases = toGameReleaseDataList(
+    // Search data doesn't have release_dates — produce one release per
+    // platform using platform-level data only, no localization detail.
+    (game.platforms ?? []).map((p) => ({
+      id: p.id,
+      platform: p,
+      region: undefined,
+      date: game.first_release_date,
+    })),
+    game.game_status,
+    languages,
+  );
+
   return {
     externalId: String(game.id),
     title: game.name,
@@ -271,6 +289,7 @@ export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
     averageRating: game.total_rating,
     summary: game.summary,
     availablePlatforms: (game.platforms ?? []).map(toPlatformData),
+    availableReleases,
     baseGameExternalId: toBaseGameExternalId(game),
   };
 }
@@ -308,45 +327,67 @@ export function toGameData(game: IgdbGame): proto.GameData {
     })),
   ];
 
+  const categories: proto.CategoryData[] = (game.genres ?? []).map(toCategoryData);
+  const languages = toLanguageDataList((game.language_supports ?? []).map((ls) => ls.language));
   const platforms = (game.platforms ?? []).map(toPlatformData);
-  const releases = toGameReleaseDataList(game.release_dates ?? [], game.game_status);
-  const genres = (game.genres ?? []).map(toGenreData);
+  const releases = toGameReleaseDataList(game.release_dates ?? [], game.game_status, languages);
+
   const themes = (game.themes ?? []).map(toThemeData);
   const ageRatings: proto.AgeRatingData[] = (game.age_ratings ?? [])
     .map(toAgeRatingData)
     .filter((r): r is proto.AgeRatingData => r !== null);
 
   return {
-    externalId: String(game.id),
-    title: game.name,
-    contentType: toContentType(game.game_type),
-    description: game.summary,
-    summary: game.summary,
-    yearPublished: toYearPublished(game.first_release_date),
-    thumbnailUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_cover_big') : undefined,
-    imageUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_cover_big_2x') : undefined,
-    sourceUrl: game.url,
-    designers,
-    publishers,
-
-    // IGDB has no mechanics in the board game sense.
-    mechanics: [],
-    // IGDB has no separate artist role
-    artists: [],
-    // IGDB has no board-game category concept; genres/themes go to dedicated fields.
-    categories: [],
-
-    families,
-    platforms,
-    releases,
-    genres,
-    themes,
     ageRatings,
+    artists: [],
     averageRating: game.total_rating,
-    ratingsCount: game.total_rating_count,
     baseGameExternalId: toBaseGameExternalId(game),
 
+    categories,
+    contentType: toContentType(game.game_type),
+    description: game.summary,
+    designers,
+    dlc: [],
+
+    externalId: String(game.id),
+    families,
+    imageUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_screenshot_big') : undefined,
+
+    mechanics: [],
     metadataKeys: [],
     metadataValues: [],
+
+    platforms,
+    publishers,
+    ratingsCount: game.total_rating_count,
+    releases,
+
+    sourceUrl: game.url,
+    summary: game.summary,
+
+    themes,
+    thumbnailUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_cover_big') : undefined,
+    title: game.name,
+
+    yearPublished: toYearPublished(game.first_release_date),
   };
+}
+
+/**
+ * Deduplicates LanguageData by iso639_3 so en-US and en-GB don't both appear.
+ * The first encountered entry wins — for display purposes they're equivalent.
+ */
+function toLanguageDataList(languageEntries: IgdbLanguageEntry[]): proto.LanguageData[] {
+  const seen = new Set<string>();
+  const result: proto.LanguageData[] = [];
+
+  for (const entry of languageEntries) {
+    const mapped = toLanguageData(entry);
+    if (mapped && !seen.has(mapped.iso6393)) {
+      seen.add(mapped.iso6393);
+      result.push(mapped);
+    }
+  }
+
+  return result;
 }

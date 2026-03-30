@@ -92,6 +92,31 @@ export interface IgdbReleaseDate {
 }
 
 /**
+ * IGDB language object nested inside language_supports.
+ * id corresponds to the stable IDs in the IGDB_LANGUAGES registry.
+ */
+export interface IgdbLanguageEntry {
+  id: number;
+  name: string;
+  native_name?: string;
+  locale?: string;
+}
+
+/**
+ * language_support_type enum:
+ *   1 = audio
+ *   2 = subtitles
+ *   3 = interface
+ */
+export type IgdbLanguageSupportType = 1 | 2 | 3 | number;
+
+export interface IgdbLanguageSupport {
+  id: number;
+  language: IgdbLanguageEntry;
+  language_support_type?: IgdbLanguageSupportType;
+}
+
+/**
  * IGDB age_rating organization (the certifying authority):
  *   1=ESRB  2=PEGI  3=CERO  5=USK  6=GRAC  7=CLASS_IND  8=ACB
  */
@@ -166,19 +191,20 @@ export interface IgdbGame {
    */
   first_release_date?: number;
 
-  cover?: IgdbCover;
-  url?: string;
-  summary?: string;
-  total_rating?: number;
-  total_rating_count?: number;
-  involved_companies?: IgdbInvolvedCompany[];
-  genres?: IgdbNamedEntity[];
-  themes?: IgdbNamedEntity[];
-  franchises?: IgdbNamedEntity[];
+  age_ratings?: IgdbAgeRating[];
   collections?: IgdbNamedEntity[];
+  cover?: IgdbCover;
+  franchises?: IgdbNamedEntity[];
+  genres?: IgdbNamedEntity[];
+  involved_companies?: IgdbInvolvedCompany[];
+  language_supports?: IgdbLanguageSupport[];
   platforms?: IgdbPlatform[];
   release_dates?: IgdbReleaseDate[];
-  age_ratings?: IgdbAgeRating[];
+  summary?: string;
+  themes?: IgdbNamedEntity[];
+  total_rating_count?: number;
+  total_rating?: number;
+  url?: string;
 
   /**
    * Populated on DLC (category 1) and expansion (category 2).

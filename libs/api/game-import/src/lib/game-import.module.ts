@@ -8,10 +8,14 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import redisConfiguration from './configuration/redis.config';
 import { FlowProducerNames, QueueNames } from './constants/queue.constants';
 import type { RedisOptions } from './interfaces/redis.interface';
+import { GameWatchListener } from './listeners/game-watch.listener';
+import { ImportActivityListener } from './listeners/import-activity.listener';
+import { NotificationListener } from './listeners/notification.listener';
 import { GameImportProcessor } from './processors/game-import.processor';
 import { GameImportProducerService } from './services/game-import-producer.service';
 import { GameUpsertService } from './services/game.service';
 import { PersonUpsertService } from './services/person.service';
+import { PlatformUpsertService } from './services/platform.service';
 import { TaxonomyUpsertService } from './services/taxonomy.service';
 
 @Module({
@@ -44,9 +48,13 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
   providers: [
     TaxonomyUpsertService,
     PersonUpsertService,
+    PlatformUpsertService,
     GameUpsertService,
     GameImportProcessor,
     GameImportProducerService,
+    GameWatchListener,
+    NotificationListener,
+    ImportActivityListener,
   ],
   exports: [GameImportProducerService],
 })

@@ -1,0 +1,55 @@
+model GameDlc {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  name        String
+  description String?
+  thumbnail   String?
+
+  gatewayLinks GameDlcGatewayLink[]
+  releases     GameDlcRelease[]
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([gameId])
+  @@map("game_dlc")
+}
+
+model GameDlcGatewayLink {
+  id String @id @default(cuid(2))
+
+  dlc   GameDlc @relation(fields: [dlcId], references: [id], onDelete: Cascade)
+  dlcId String  @map("dlc_id")
+
+  gatewayId  String  @map("gateway_id")
+  externalId String  @map("external_id")
+  sourceUrl  String? @map("source_url")
+
+  @@unique([gatewayId, externalId])
+  @@index([dlcId])
+  @@map("game_dlc_gateway_links")
+}
+
+model GameDlcRelease {
+  id String @id @default(cuid(2))
+
+  dlc   GameDlc @relation(fields: [dlcId], references: [id], onDelete: Cascade)
+  dlcId String  @map("dlc_id")
+
+  platform   Platform @relation(fields: [platformId], references: [id])
+  platformId String   @map("platform_id")
+
+  region      ReleaseRegion @default(Worldwide)
+  releaseDate DateTime?     @map("release_date") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([dlcId, platformId, region])
+  @@index([dlcId])
+  @@map("game_dlc_releases")
+}

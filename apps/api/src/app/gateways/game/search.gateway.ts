@@ -13,7 +13,7 @@ import type {
 } from '@bge/game-search';
 import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { ResultStatus } from '@board-games-empire/proto-gateway';
-import { Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -26,17 +26,20 @@ import { wrapDefaults } from '@status/defaults';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
+import { AuthenticatedGateway } from '../base/authenticated.gateway';
+import { WsAuthFilter, WsValidationFilter } from '../filters';
 
 @UseGuards(AuthGuard)
+@UseFilters(WsValidationFilter, WsAuthFilter)
 @WebSocketGateway({
   namespace: 'games/search',
   cors: { origin: '*', credentials: true },
 })
-export class GameSearchGateway implements OnGatewayDisconnect {
+export class GameSearchGateway extends AuthenticatedGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   private readonly server!: Server;
 
-  private readonly logger = new Logger(GameSearchGateway.name);
+  protected readonly logger = new Logger(GameSearchGateway.name);
   private readonly userQueryMap = wrapDefaults<WeakMap<Socket, WsClientData>, WsClientData>({
     wrap: new WeakMap(),
     defaultValue: (): WsClientData => ({
@@ -48,28 +51,22 @@ export class GameSearchGateway implements OnGatewayDisconnect {
 
   constructor(
     private readonly coordinator: GatewayCoordinatorClientService,
-    private readonly authService: AuthService,
+    override readonly authService: AuthService,
     private readonly db: DatabaseService,
-  ) {}
+  ) {
+    super(authService);
+  }
 
-  async handleConnection(client: Socket): Promise<void> {
-    const token = client.handshake?.auth?.token;
-    this.logger.log(`WS connection attempt: socketId=${client.id} token=${token ? 'present' : 'absent'}`);
-
-    if (!token) {
-      this.logger.warn(`Unauthorized WS connection attempt: socketId=${client.id}`);
-      client.disconnect(true);
+  override async handleConnection(client: Socket): Promise<void> {
+    const session = await super.handleConnection(client);
+    if (!session) {
       return;
     }
 
-    const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.isValidSession(session) === false) {
-      this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    this.logger.log(`WS connected: socketId=${client.id}`);
+    client.data = {
+      ...client.data,
+      activeSearches: new Map<string, Subscription>(),
+    } satisfies WsClientData;
   }
 
   handleDisconnect(client: Socket): void {
@@ -152,6 +149,31 @@ export class GameSearchGateway implements OnGatewayDisconnect {
             select: { sourceUrl: true },
             take: 1,
           },
+          releases: {
+            select: {
+              region: true,
+              releaseDate: true,
+              platform: {
+                select: {
+                  id: true,
+                  name: true,
+                  abbreviation: true,
+                  platformType: true,
+                },
+              },
+              languages: {
+                select: {
+                  language: {
+                    select: {
+                      code: true,
+                      abbreviation: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       });
 
@@ -167,6 +189,31 @@ export class GameSearchGateway implements OnGatewayDisconnect {
         maxPlayers: g.maxPlayers ?? undefined,
         inSystem: true,
         gameId: g.id,
+
+        platforms: g.releases.map((r) => ({
+          externalId: r.platform.id,
+          name: r.platform.name,
+          abbreviation: r.platform.abbreviation ?? undefined,
+          platformType: r.platform.platformType.toString(),
+        })),
+
+        availableReleases: g.releases.map((r) => ({
+          externalId: r.platform.id,
+          platform: {
+            externalId: r.platform.id,
+            name: r.platform.name,
+            abbreviation: r.platform.abbreviation ?? undefined,
+            platformType: r.platform.platformType.toString(),
+          },
+
+          status: 'RELEASE_STATUS_RELEASED',
+          releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+          languages: r.languages.map((l) => ({
+            iso6393: l.language.code,
+            iso6391: l.language.abbreviation ?? undefined,
+            name: l.language.name,
+          })),
+        })),
       }));
 
       this.emit<WsSearchResultPayload>(options.correlationId, SearchEvents.SearchResult, {
@@ -197,8 +244,9 @@ export class GameSearchGateway implements OnGatewayDisconnect {
         correlationId: dto.correlationId,
         query: dto.query,
         gatewayIds: dto.gatewayIds || [],
-        limit: dto.limit ?? undefined,
-        offset: dto.offset ?? undefined,
+        limit: dto.limit,
+        offset: dto.offset,
+        locale: dto.locale,
       });
 
       const sub = stream$.subscribe({
@@ -219,15 +267,36 @@ export class GameSearchGateway implements OnGatewayDisconnect {
                 externalId: result.game.externalId,
                 title: result.game.title,
                 contentType: result.game.contentType.toString(),
-                yearPublished: result.game.yearPublished ?? undefined,
-                thumbnailUrl: result.game.thumbnailUrl ?? undefined,
-                sourceUrl: result.game.sourceUrl ?? undefined,
-                averageRating: result.game.averageRating ?? undefined,
-                minPlayers: result.game.minPlayers ?? undefined,
-                maxPlayers: result.game.maxPlayers ?? undefined,
-                baseGameExternalId: result.game.baseGameExternalId ?? undefined,
+                yearPublished: result.game.yearPublished,
+                thumbnailUrl: result.game.thumbnailUrl,
+                sourceUrl: result.game.sourceUrl,
+                averageRating: result.game.averageRating,
+                minPlayers: result.game.minPlayers,
+                maxPlayers: result.game.maxPlayers,
+                baseGameExternalId: result.game.baseGameExternalId,
                 inSystem: result.inSystem ?? false,
-                gameId: result.gameId ?? undefined,
+                gameId: result.gameId,
+
+                platforms: (result.game.availablePlatforms ?? []).map((p) => ({
+                  externalId: p.externalId,
+                  name: p.name,
+                  abbreviation: p.abbreviation,
+                  platformType: p.platformType.toString(),
+                })),
+
+                availableReleases: (result.game.availableReleases ?? []).map((r) => ({
+                  externalId: r.externalId,
+                  platform: {
+                    ...r.platform!,
+                  },
+                  status: r.status.toString(),
+                  releaseDate: r.releaseDate,
+                  languages: (r.languages ?? []).map((l) => ({
+                    iso6393: l.iso6393,
+                    iso6391: l.iso6391,
+                    name: l.name,
+                  })),
+                })),
               };
 
               this.emit<WsSearchResultPayload>(dto.correlationId, SearchEvents.SearchResult, {

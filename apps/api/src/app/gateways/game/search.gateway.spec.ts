@@ -81,6 +81,7 @@ describe('GameSearchGateway', () => {
     if (partialPayload) {
       expect(payload).toMatchObject(partialPayload);
     }
+
     return payload;
   }
 

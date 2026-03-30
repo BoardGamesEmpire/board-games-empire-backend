@@ -1,0 +1,49 @@
+model GameRelease {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  platform   Platform @relation(fields: [platformId], references: [id])
+  platformId String   @map("platform_id")
+
+  region      ReleaseRegion @default(Worldwide)
+  releaseDate DateTime?     @map("release_date") @db.Timestamptz(3)
+
+  languages GameReleaseLanguage[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, platformId, region])
+  @@index([gameId])
+  @@index([platformId])
+  @@map("game_releases")
+}
+
+model GameReleaseLanguage {
+  id String @id @default(cuid(2))
+
+  release   GameRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  releaseId String      @map("release_id")
+
+  language   Language @relation(fields: [languageId], references: [id])
+  languageId String   @map("language_id")
+
+  @@unique([releaseId, languageId])
+  @@index([releaseId])
+  @@map("game_release_languages")
+}
+
+enum ReleaseRegion {
+  Worldwide
+  NorthAmerica
+  Europe
+  Japan
+  Australia
+  Asia
+  Brazil
+  Korea
+
+  @@map("release_regions")
+}

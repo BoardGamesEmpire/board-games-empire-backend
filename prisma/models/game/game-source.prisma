@@ -23,7 +23,6 @@ model GameSource {
   publisher   Publisher? @relation(fields: [publisherId], references: [id])
   publisherId String?    @map("publisher_id")
 
-  releaseDate DateTime? @map("release_date") @db.Timestamptz(3)
   version     String?
   lastUpdated DateTime? @map("last_updated") @db.Timestamptz(3)
 

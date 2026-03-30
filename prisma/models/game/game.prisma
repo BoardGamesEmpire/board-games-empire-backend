@@ -49,6 +49,8 @@ model Game {
 
   // keeping many to many to allow for expansions that are compatible with multiple base games
   expansionEntries GameExpansion[] @relation("ExpansionGame")
+  releases         GameRelease[]
+  dlc              GameDlc[]
 
   userCollections GameCollection[]
 

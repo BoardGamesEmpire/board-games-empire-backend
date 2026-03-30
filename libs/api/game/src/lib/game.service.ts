@@ -1,4 +1,4 @@
-import { DatabaseService, Game, Prisma } from '@bge/database';
+import { DatabaseService, Game, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
 import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -145,10 +145,8 @@ export class GameService {
       });
     } catch (error) {
       this.logger.error(`Error updating game with id ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new ForbiddenException("You don't have permission to update this resource.");
-        }
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this resource.");
       }
 
       throw error;
