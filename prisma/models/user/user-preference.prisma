@@ -19,11 +19,11 @@ model UserPreferences {
   emailNotifications Json? @map("email_notifications") // Structured notification preferences
   pushNotifications  Json? @map("push_notifications")
 
-  language                Language?  @relation(fields: [languageId], references: [id])
-  languageId              String?    @map("language_id")
+  language   Language? @relation(fields: [languageId], references: [id])
+  languageId String?   @map("language_id")
 
   // option for automatically including chosen language for game searches and recommendations
-  filterSearchByLanguage  Boolean @default(false) @map("filter_search_by_language")
+  filterSearchByLanguage Boolean @default(false) @map("filter_search_by_language")
 
   defaultReviewVisibility Visibility @default(Private) @map("default_review_visibility")
 

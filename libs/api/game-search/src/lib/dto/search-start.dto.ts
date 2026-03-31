@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class SearchStartDto {
   @IsUUID()
@@ -20,7 +20,18 @@ export class SearchStartDto {
    * Defaults to true — local results are always fast-pathed in parallel.
    */
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   includeLocal?: boolean = true;
+
+  /**
+   * Whether to include external sources in the search.
+   * Defaults to true — external results are always fast-pathed in parallel.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  includeExternal?: boolean = true;
 
   @IsOptional()
   @IsString()

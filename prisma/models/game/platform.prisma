@@ -1,5 +1,6 @@
 model Platform {
-  id           String       @id @default(cuid(2))
+  id String @id @default(cuid(2))
+
   name         String       @unique
   slug         String       @unique
   abbreviation String?
@@ -12,8 +13,8 @@ model Platform {
   logoUrl String? @map("logo_url")
 
   gatewayLinks PlatformGatewayLink[]
-  releases     GameRelease[]
   dlcReleases  GameDlcRelease[]
+  releases     GameRelease[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

@@ -8,6 +8,9 @@
 CREATE TYPE "release_regions" AS ENUM ('Worldwide', 'NorthAmerica', 'Europe', 'Japan', 'Australia', 'Asia', 'Brazil', 'Korea');
 
 -- CreateEnum
+CREATE TYPE "release_statuses" AS ENUM ('Unspecified', 'Released', 'Alpha', 'Beta', 'EarlyAccess', 'Offline', 'Cancelled', 'Rumoured', 'Announced', 'Postponed', 'Prerelease', 'Delisted');
+
+-- CreateEnum
 CREATE TYPE "platform_types" AS ENUM ('Tabletop', 'Console', 'PC', 'Mobile', 'Other');
 
 -- AlterTable
@@ -65,6 +68,7 @@ CREATE TABLE "game_releases" (
     "game_id" TEXT NOT NULL,
     "platform_id" TEXT NOT NULL,
     "region" "release_regions" NOT NULL DEFAULT 'Worldwide',
+    "status" "release_statuses" NOT NULL DEFAULT 'Released',
     "release_date" TIMESTAMPTZ(3),
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,

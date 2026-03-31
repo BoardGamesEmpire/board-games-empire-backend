@@ -238,10 +238,6 @@ function toAgeRatingData(rating: IgdbAgeRating): proto.AgeRatingData | null {
   };
 }
 
-function toGenreData(entity: IgdbNamedEntity): proto.GenreData {
-  return { externalId: String(entity.id), name: entity.name };
-}
-
 function toThemeData(entity: IgdbNamedEntity): proto.ThemeData {
   return { externalId: String(entity.id), name: entity.name };
 }
@@ -351,7 +347,7 @@ export function toGameData(game: IgdbGame): proto.GameData {
 
     externalId: String(game.id),
     families,
-    imageUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_screenshot_big') : undefined,
+    imageUrl: game.cover ? resizeCoverUrl(game.cover.url, 't_cover_big_2x') : undefined,
 
     mechanics: [],
     metadataKeys: [],

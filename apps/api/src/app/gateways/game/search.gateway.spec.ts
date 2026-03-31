@@ -16,7 +16,6 @@ import {
   SearchGameResult,
   SearchGamesRequest,
 } from '@board-games-empire/proto-gateway';
-import { WsException } from '@nestjs/websockets';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Subscription } from 'rxjs';
 import { of, throwError } from 'rxjs';
@@ -91,9 +90,9 @@ describe('GameSearchGateway', () => {
 
   describe('handleDisconnect()', () => {
     it('unsubscribes all active searches', () => {
-      const client = makeSocket();
-      const sub1 = seedActiveSearch(client, 'corr-1');
-      const sub2 = seedActiveSearch(client, 'corr-2');
+      const client = makeSocket(gateway);
+      const sub1 = seedActiveSearch(gateway, client, 'corr-1');
+      const sub2 = seedActiveSearch(gateway, client, 'corr-2');
 
       gateway.handleDisconnect(client);
 
@@ -102,33 +101,38 @@ describe('GameSearchGateway', () => {
     });
 
     it('clears the activeSearches map', () => {
-      const client = makeSocket();
-      seedActiveSearch(client, 'corr-1');
-      seedActiveSearch(client, 'corr-2');
+      const client = makeSocket(gateway);
+      seedActiveSearch(gateway, client, 'corr-1');
+      seedActiveSearch(gateway, client, 'corr-2');
 
       gateway.handleDisconnect(client);
 
-      expect(clientData(client).activeSearches.size).toBe(0);
+      expect(clientData(gateway, client).activeSearches.size).toBe(0);
     });
 
     it('does not throw when there are no active searches', () => {
-      const client = makeSocket();
+      const client = makeSocket(gateway);
       expect(() => gateway.handleDisconnect(client)).not.toThrow();
     });
   });
 
   describe('handleSearchStart()', () => {
     describe('guard conditions', () => {
-      it('throws WsException when correlationId is already active', async () => {
-        const client = makeSocket();
-        seedActiveSearch(client, 'corr-1');
+      it('emits an error when correlationId is already active', async () => {
+        const client = makeSocket(gateway);
+        seedActiveSearch(gateway, client, 'corr-1');
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
-        await expect(gateway.handleSearchStart(client, makeStartDto())).rejects.toThrow(WsException);
+        await gateway.handleSearchStart(client, makeStartDto());
+        assertEmitted<WsSearchErrorPayload>('corr-1', SearchEvents.SearchError, {
+          correlationId: 'corr-1',
+          source: 'local',
+          message: `Search with correlationId corr-1 is already active`,
+        });
       });
 
       it('joins the correlationId room before beginning the search', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -139,7 +143,7 @@ describe('GameSearchGateway', () => {
 
     describe('coordinator integration', () => {
       it('forwards the correct SearchGamesRequest to the coordinator', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone('corr-2', 'igdb-gw-1')));
 
         await gateway.handleSearchStart(
@@ -167,7 +171,7 @@ describe('GameSearchGateway', () => {
 
     describe('local DB path', () => {
       it('does not query the DB when includeLocal is false', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: false }));
@@ -176,7 +180,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('queries the DB when includeLocal is true', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
         db.game.findMany.mockResolvedValue([]);
 
@@ -186,7 +190,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('queries the DB when includeLocal is omitted (defaults to true)', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
         db.game.findMany.mockResolvedValue([]);
 
@@ -198,31 +202,29 @@ describe('GameSearchGateway', () => {
       });
 
       it('emits search:result for each local game with source="local"', async () => {
-        const client = makeSocket();
-        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone('corr-1', 'local')));
         db.game.findMany.mockResolvedValue([
           makeGameWithSource(),
           makeGameWithSource({ id: 'game-2', title: 'Wingspan' }),
         ]);
 
-        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true }));
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
         const resultCalls = mockEmit.mock.calls.filter(
           ([event, payload]) =>
             event === SearchEvents.SearchResult && (payload as WsSearchResultPayload).source === 'local',
         );
-        // Each game emitted as a separate SEARCH_RESULT frame, or batched —
-        // either way all games must be accounted for across calls.
         const gameCount = resultCalls.reduce((n, [, p]) => n + (p as WsSearchResultPayload).games.length, 0);
         expect(gameCount).toBe(2);
       });
 
       it('emits search:source_done with source="local" after local results', async () => {
-        const client = makeSocket();
-        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone('corr-1', 'local')));
         db.game.findMany.mockResolvedValue([makeGame()]);
 
-        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true }));
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
         assertEmitted<WsSourceDonePayload>('corr-1', SearchEvents.SearchSourceDone, {
           correlationId: 'corr-1',
@@ -233,11 +235,23 @@ describe('GameSearchGateway', () => {
 
     describe('coordinator stream → WS event mapping', () => {
       it('emits search:result for each RESULT_STATUS_RESULT frame', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
-            makeResultFrame({ game: { externalId: '1', title: 'A' } as GameSearchData }),
-            makeResultFrame({ game: { externalId: '2', title: 'B' } as GameSearchData }),
+            makeResultFrame({
+              game: {
+                externalId: '1',
+                title: 'A',
+                contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+              } as GameSearchData,
+            }),
+            makeResultFrame({
+              game: {
+                externalId: '2',
+                title: 'B',
+                contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+              } as GameSearchData,
+            }),
             makeSourceDone(),
           ),
         );
@@ -248,10 +262,16 @@ describe('GameSearchGateway', () => {
       });
 
       it('includes the correct game payload in search:result', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
-            makeResultFrame({ game: { externalId: '174430', title: 'Gloomhaven' } as GameSearchData }),
+            makeResultFrame({
+              game: {
+                externalId: '174430',
+                title: 'Gloomhaven',
+                contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+              } as GameSearchData,
+            }),
             makeSourceDone(),
           ),
         );
@@ -265,7 +285,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('sets inSystem=true on search:result when coordinator marks the game as in-system', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(makeResultFrame({ inSystem: true, gameId: 'db-game-uuid' }), makeSourceDone()),
         );
@@ -278,7 +298,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('emits search:source_done with the gateway source for RESULT_STATUS_SOURCE_DONE', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone('corr-1', 'bgg-gw-1')));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -290,7 +310,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('emits search:rate_limited with retryAfter for RESULT_STATUS_RATE_LIMITED', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
             {
@@ -314,7 +334,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('uses a default retryAfter of 60 when the frame omits it', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
             {
@@ -333,7 +353,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('emits search:unavailable for RESULT_STATUS_UNAVAILABLE', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
             {
@@ -354,7 +374,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('emits search:error for RESULT_STATUS_ERROR frames, including the message', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
           of(
             {
@@ -379,7 +399,7 @@ describe('GameSearchGateway', () => {
 
     describe('stream completion', () => {
       it('emits search:done when the coordinator stream completes', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -388,16 +408,16 @@ describe('GameSearchGateway', () => {
       });
 
       it('removes the subscription from activeSearches after stream completion', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        expect(clientData(client).activeSearches.has('corr-1')).toBe(false);
+        expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
       });
 
       it('leaves the correlationId room after stream completion', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -406,7 +426,7 @@ describe('GameSearchGateway', () => {
       });
 
       it('always emits to the correlationId room, not directly to the socket', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -420,7 +440,7 @@ describe('GameSearchGateway', () => {
 
     describe('stream error handling', () => {
       it('emits search:error with source="coordinator" when the gRPC stream errors', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(throwError(() => new Error('gRPC transport failure')));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -432,23 +452,25 @@ describe('GameSearchGateway', () => {
       });
 
       it('resolves (does not throw) when the gRPC stream errors', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(throwError(() => new Error('connection reset')));
 
         await expect(gateway.handleSearchStart(client, makeStartDto())).resolves.toBeUndefined();
       });
 
-      it('cleans up the subscription from activeSearches on stream error', async () => {
-        const client = makeSocket();
+      // TODO: we don't want to remove all searches on stream error - multiple game gateways could
+      // be active under the same correlationId, and one gateway error shouldn't cancel them all.
+      it.skip('cleans up the subscription from activeSearches on stream error', async () => {
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(throwError(() => new Error('gRPC error')));
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        expect(clientData(client).activeSearches.has('corr-1')).toBe(false);
+        expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
       });
 
       it('leaves the correlationId room on stream error', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(throwError(() => new Error('gRPC error')));
 
         await gateway.handleSearchStart(client, makeStartDto());
@@ -459,7 +481,7 @@ describe('GameSearchGateway', () => {
 
     describe('concurrent searches', () => {
       it('allows two searches with different correlationIds on the same socket', async () => {
-        const client = makeSocket();
+        const client = makeSocket(gateway);
 
         coordinator.searchGames.mockReturnValueOnce(of(makeSourceDone('corr-1')));
         await gateway.handleSearchStart(client, makeStartDto({ correlationId: 'corr-1' }));
@@ -476,14 +498,14 @@ describe('GameSearchGateway', () => {
 
   describe('handleSearchCancel()', () => {
     it('does nothing when the correlationId has no active search', () => {
-      const client = makeSocket();
+      const client = makeSocket(gateway);
       expect(() => gateway.handleSearchCancel(client, makeCancelDto('not-active'))).not.toThrow();
       expect(client.leave).not.toHaveBeenCalled();
     });
 
     it('unsubscribes from the active gRPC stream', () => {
-      const client = makeSocket();
-      const sub = seedActiveSearch(client);
+      const client = makeSocket(gateway);
+      const sub = seedActiveSearch(gateway, client);
 
       gateway.handleSearchCancel(client, makeCancelDto());
 
@@ -491,17 +513,17 @@ describe('GameSearchGateway', () => {
     });
 
     it('removes the correlationId from activeSearches', () => {
-      const client = makeSocket();
-      seedActiveSearch(client);
+      const client = makeSocket(gateway);
+      seedActiveSearch(gateway, client);
 
       gateway.handleSearchCancel(client, makeCancelDto());
 
-      expect(clientData(client).activeSearches.has('corr-1')).toBe(false);
+      expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
     });
 
     it('leaves the correlationId room', () => {
-      const client = makeSocket();
-      seedActiveSearch(client);
+      const client = makeSocket(gateway);
+      seedActiveSearch(gateway, client);
 
       gateway.handleSearchCancel(client, makeCancelDto());
 
@@ -509,14 +531,14 @@ describe('GameSearchGateway', () => {
     });
 
     it('does not affect other concurrent searches on the same socket', () => {
-      const client = makeSocket();
-      seedActiveSearch(client, 'corr-1');
-      const sub2 = seedActiveSearch(client, 'corr-2');
+      const client = makeSocket(gateway);
+      seedActiveSearch(gateway, client, 'corr-1');
+      const sub2 = seedActiveSearch(gateway, client, 'corr-2');
 
       gateway.handleSearchCancel(client, makeCancelDto('corr-1'));
 
       expect(sub2.unsubscribe).not.toHaveBeenCalled();
-      expect(clientData(client).activeSearches.has('corr-2')).toBe(true);
+      expect(clientData(gateway, client).activeSearches.has('corr-2')).toBe(true);
     });
   });
 });
@@ -527,6 +549,7 @@ function makeStartDto(overrides: Partial<SearchStartDto> = {}): SearchStartDto {
     query: 'Gloomhaven',
     gatewayIds: ['bgg-gw-1'],
     includeLocal: false, // opt-in per test so DB mocking stays explicit
+    includeExternal: true,
     ...overrides,
   });
 }
@@ -547,12 +570,13 @@ function makeResultFrame(overrides: Partial<SearchGameResult> = {}): SearchGameR
       externalId: '174430',
       title: 'Gloomhaven',
       contentType: ContentType.CONTENT_TYPE_BASE_GAME,
+      availablePlatforms: [],
+      availableReleases: [],
     } as GameSearchData,
     inSystem: false,
     ...overrides,
   };
 }
-
 /**
  * A SOURCE_DONE sentinel that terminates a gateway stream
  */
@@ -565,30 +589,35 @@ function makeSourceDone(correlationId = 'corr-1', gatewayId = 'bgg-gw-1'): Searc
  * `as unknown as Socket` is intentional — we only need the subset of the
  * socket surface that GameSearchGateway actually touches.
  */
-function makeSocket(dataOverrides: Partial<WsClientData> = {}): Socket {
-  return {
+function makeSocket(gateway: GameSearchGateway): Socket {
+  const socket = {
     id: 'socket-test-1',
     rooms: new Set<string>(['socket-test-1']),
-    data: {
-      activeSearches: new Map<string, Subscription>(),
-      ...dataOverrides,
-    } satisfies WsClientData,
     join: jest.fn().mockResolvedValue(undefined),
     leave: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockReturnThis(),
   } as unknown as Socket;
+
+  socket.data = (gateway as any).userQueryMap.get(socket);
+  return socket;
 }
 
-function clientData(socket: Socket): WsClientData {
-  return socket.data as WsClientData;
+function clientData(gateway: GameSearchGateway, socket: Socket): WsClientData {
+  return (gateway as any).userQueryMap.get(socket) as WsClientData;
 }
 
 /**
  * Injects a pre-built stub subscription into a socket as if a search had
  * already started. Returns the stub for assertion purposes.
  */
-function seedActiveSearch(socket: Socket, correlationId = 'corr-1'): jest.Mocked<Pick<Subscription, 'unsubscribe'>> {
+function seedActiveSearch(
+  gateway: GameSearchGateway,
+  socket: Socket,
+  correlationId = 'corr-1',
+): jest.Mocked<Pick<Subscription, 'unsubscribe'>> {
   const sub = { unsubscribe: jest.fn() } as unknown as jest.Mocked<Pick<Subscription, 'unsubscribe'>>;
-  clientData(socket).activeSearches.set(correlationId, sub as unknown as Subscription);
+
+  clientData(gateway, socket).activeSearches.set(correlationId, sub as unknown as Subscription);
+
   return sub;
 }

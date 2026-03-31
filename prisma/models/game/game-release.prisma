@@ -8,6 +8,7 @@ model GameRelease {
   platformId String   @map("platform_id")
 
   region      ReleaseRegion @default(Worldwide)
+  status      ReleaseStatus @default(Released)
   releaseDate DateTime?     @map("release_date") @db.Timestamptz(3)
 
   languages GameReleaseLanguage[]
@@ -46,4 +47,21 @@ enum ReleaseRegion {
   Korea
 
   @@map("release_regions")
+}
+
+enum ReleaseStatus {
+  Unspecified
+  Released
+  Alpha
+  Beta
+  EarlyAccess
+  Offline
+  Cancelled
+  Rumoured
+  Announced
+  Postponed
+  Prerelease
+  Delisted
+
+  @@map("release_statuses")
 }

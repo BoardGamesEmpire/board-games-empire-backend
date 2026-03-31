@@ -4,11 +4,10 @@ model Language {
   // ISO 639-1 two-letter code, if it exists. Not all languages have this.
   abbreviation String? @unique @db.VarChar(2)
 
-  // ISO 639-2 three-letter code. Every language has this.
-  code         String  @unique @db.VarChar(3)
-  name         String  @unique
-  nativeName   String? @map("native_name")
-
+  // ISO 639-3 three-letter code. Every language has this.
+  code       String  @unique @db.VarChar(3)
+  name       String  @unique
+  nativeName String? @map("native_name")
 
   // Whether the application has i18n support for this language.
   systemSupported Boolean @default(false) @map("system_supported")

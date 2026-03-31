@@ -5,6 +5,7 @@ import {
   EventType,
   Game,
   GameCollection,
+  GameRelease,
   Household,
   HouseholdMember,
   InitiatorType,
@@ -15,6 +16,7 @@ import {
   JobStatus,
   JobType,
   Permission,
+  Platform,
   Role,
   Session,
   TimeMeasure,
@@ -223,35 +225,35 @@ export function makeEvent(
 
 export function makeGame(overrides: Partial<Game> = {}): Game {
   return {
-    id: 'game-fixture-1',
-    title: 'Gloomhaven',
-    subtitle: null,
+    averageRating: 8.6,
+    bayesRating: null,
+    complexity: 3.86,
     contentType: ContentType.BaseGame,
+    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    createdById: null,
+    deletedAt: null,
     description: null,
+    enrichmentSource: null,
+    frozenAt: null,
+    id: 'game-fixture-1',
     image: null,
-    thumbnail: null,
-    publishYear: 2017,
-    minPlayers: 1,
     maxPlayers: 4,
-    playingTime: 120,
-    minPlayTime: 60,
-    minPlayTimeMeasure: TimeMeasure.Minutes,
     maxPlayTime: 120,
     maxPlayTimeMeasure: TimeMeasure.Minutes,
     minAge: 14,
-    complexity: 3.86,
-    totalPlayCount: 0,
-    averageRating: 8.6,
-    bayesRating: null,
-    ratingsCount: null,
+    minPlayers: 1,
+    minPlayTime: 60,
+    minPlayTimeMeasure: TimeMeasure.Minutes,
     ownedByCount: 0,
-    enrichmentSource: null,
-    frozenAt: null,
-    visibility: Visibility.Public,
-    createdById: null,
-    deletedAt: null,
-    createdAt: new Date('2024-01-01T00:00:00.000Z'),
+    playingTime: 120,
+    publishYear: 2017,
+    ratingsCount: null,
+    subtitle: null,
+    thumbnail: null,
+    title: 'Gloomhaven',
+    totalPlayCount: 0,
     updatedAt: new Date('2024-01-01T00:00:00.000Z'),
+    visibility: Visibility.Public,
     ...overrides,
   };
 }
@@ -261,10 +263,14 @@ export function makeGameWithSource(overrides: Partial<GameWithSource> = {}): Gam
   return {
     ...game,
     gameSources: [{ sourceUrl: 'https://example.com/game' }],
+    releases: [],
+    platforms: [],
     ...overrides,
   };
 }
 
 interface GameWithSource extends Game {
   gameSources: { sourceUrl: string }[];
+  releases: GameRelease[];
+  platforms: Partial<Platform>[];
 }

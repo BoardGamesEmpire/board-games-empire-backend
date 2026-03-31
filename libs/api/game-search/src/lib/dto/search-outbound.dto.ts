@@ -9,7 +9,7 @@ export interface WsSearchResultPayload {
 }
 
 export interface WsPlatformData {
-  externalId: string;
+  externalId: string | undefined;
   name: string;
   abbreviation?: string;
   platformType: string;

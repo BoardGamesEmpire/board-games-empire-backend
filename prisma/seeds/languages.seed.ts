@@ -15,7 +15,7 @@ export async function languagesSeed(prisma: PrismaClient) {
       const language: LanguageCreateInput = {
         code: lang.iso6393,
         name: ISO6391.getName(iso6391) || lang.name,
-        abbreviation: iso6391,
+        abbreviation: iso6391 || null,
         nativeName: ISO6391.getNativeName(iso6391) || null,
         systemSupported: systemSupportedCodes.includes(iso6391),
       };

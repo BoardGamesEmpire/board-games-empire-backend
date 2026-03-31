@@ -1,7 +1,7 @@
 import { DatabaseService } from '@bge/database';
 import type { GameReleaseData, LanguageData, PlatformData } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
-import { toPlatformType, toReleaseDate, toReleaseRegion } from './helpers';
+import { toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
 
 @Injectable()
 export class PlatformUpsertService {
@@ -25,6 +25,7 @@ export class PlatformUpsertService {
     }
 
     const slug = this.toSlug(data.name);
+    this.logger.debug(`Upserting platform ${data.name} (${gatewayId}:${data.externalId})`);
 
     // Platform may already exist under a different gateway link (e.g. Steam PC
     // and IGDB PC are the same platform — first-importer-wins on slug).
@@ -85,15 +86,19 @@ export class PlatformUpsertService {
       const platformId = await this.upsertPlatform(release.platform!, gatewayId);
       const region = toReleaseRegion(release.localizations);
 
-      await this.db.gameRelease.upsert({
+      const { id: releaseId } = await this.db.gameRelease.upsert({
         where: { gameId_platformId_region: { gameId, platformId, region } },
-        create: { gameId, platformId, region, releaseDate: toReleaseDate(release.releaseDate) },
-        update: { releaseDate: toReleaseDate(release.releaseDate) },
-        select: { id: true },
-      });
-
-      const { id: releaseId } = await this.db.gameRelease.findUniqueOrThrow({
-        where: { gameId_platformId_region: { gameId, platformId, region } },
+        create: {
+          gameId,
+          platformId,
+          region,
+          status: toReleaseStatus(release.status),
+          releaseDate: toReleaseDate(release.releaseDate),
+        },
+        update: {
+          status: toReleaseStatus(release.status),
+          releaseDate: toReleaseDate(release.releaseDate),
+        },
         select: { id: true },
       });
 
