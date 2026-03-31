@@ -22,8 +22,16 @@ export class NotificationListener {
   @OnEvent(ImportEvents.JobCompleted, { async: true })
   async handle(event: ImportJobCompletedEvent): Promise<void> {
     if (!event.sourceCreated || !event.userId) {
-      return;
+      return this.logger.debug(
+        `NotificationListener skipping jobId=${event.jobId} gameId=${event.gameId} ` +
+          `created=${event.sourceCreated} userId=${event.userId}`,
+      );
     }
+
+    this.logger.debug(
+      `NotificationListener creating notification for jobId=${event.jobId} gameId=${event.gameId} ` +
+        `userId=${event.userId} isExpansion=${event.isExpansion}`,
+    );
 
     try {
       await this.notifications.create({

@@ -51,6 +51,14 @@ export const GAME_FETCH_FIELDS = [
   'involved_companies.publisher',
   'themes.id',
   'themes.name',
+  'release_dates.id',
+  'release_dates.date',
+  'release_dates.human',
+  'release_dates.region',
+  'release_dates.platform.id',
+  'release_dates.platform.name',
+  'release_dates.platform.abbreviation',
+  'release_dates.platform.platform_type',
   'total_rating_count',
 ] as const;
 

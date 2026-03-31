@@ -1,7 +1,7 @@
 /**
-* Enabled pg_trgm extension for efficient text search on category names.
-* @see https://github.com/prisma/prisma/issues/26856
-*/
+ * Enabled pg_trgm extension for efficient text search on category names.
+ * @see https://github.com/prisma/prisma/issues/26856
+ */
 model Category {
   id String @id @default(cuid(2))
 

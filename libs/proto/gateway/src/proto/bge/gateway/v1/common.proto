@@ -33,6 +33,8 @@ enum PlatformType {
   PLATFORM_TYPE_MOBILE      = 4;
   PLATFORM_TYPE_ARCADE      = 5;
   PLATFORM_TYPE_OTHER       = 6;
+  // Added for board games and similar non-digital platforms
+  PLATFORM_TYPE_TABLETOP    = 7;
 }
 
 // Age-rating authority.
@@ -60,7 +62,6 @@ enum ReleaseStatus {
   RELEASE_STATUS_PRERELEASE    = 10;
   RELEASE_STATUS_DELISTED      = 11;
 }
-
 
 message PersonData {
   string external_id = 1;
@@ -104,6 +105,20 @@ message PlatformData {
   PlatformType platform_type = 4;
 }
 
+// ISO 639-3 (3-char code) is the stable identifier — not all languages have
+// an ISO 639-1 (2-char) code, so iso639_1 is optional.
+message LanguageData {
+  // "eng", "fra", "zho"
+  string          iso639_3 = 1;
+
+  // "en",  "fr",  "zh"  — absent for minority languages
+  optional string iso639_1 = 2;
+
+  // "English", "French", "Chinese"
+  string          name     = 3;
+}
+
+
 // A region a game was localized for. region_code follows ISO 3166-1 alpha-2 for
 // country-level regions ("us", "jp", "de") or a compound code for multi-country
 // regions ("eu", "as", "ww" for worldwide).
@@ -133,6 +148,7 @@ message GameReleaseData {
   // Primary/worldwide release date, if available.
   optional string          release_date   = 4;
   repeated LocalizationData localizations = 5;
+  repeated LanguageData     languages     = 6;
 }
 
 // IGDB distinguishes genres (Action, RPG, Strategy …) from themes
@@ -158,6 +174,16 @@ message AgeRatingData {
   optional string    synopsis  = 3; // content descriptor summary
 }
 
+// Lightweight DLC record — no player counts, ratings, or taxonomy.
+// Releases carry platform + region availability identical to GameReleaseData.
+message DlcData {
+  string          external_id   = 1;
+  string          name          = 2;
+  optional string description   = 3;
+  optional string thumbnail_url = 4;
+  repeated GameReleaseData releases = 5;
+}
+
 // Returned by streaming search RPCs. Contains only enough data to render a
 // search result card client-side. Full game data is fetched separately via
 // FetchGame when the user selects a game to view or import.
@@ -181,6 +207,7 @@ message GameSearchData {
   // Platform chips — populated by gateways that expose platform data.
   // BGG gateways leave this empty; IGDB / Steam gateways populate it.
   repeated PlatformData available_platforms = 12;
+  repeated GameReleaseData available_releases  = 13;
 }
 
 // Returned by FetchGame. Carries all relational data the import worker
@@ -227,21 +254,20 @@ message GameData {
   // dedicated Prisma platform/release models are introduced.
   repeated GameReleaseData releases    = 26;
 
-  // IGDB genres (Action, RPG …) — distinct from BGG categories.
-  // Import worker maps these to the canonical Category table.
-  repeated GenreData       genres      = 27;
-
   // IGDB themes (Science Fiction, Horror …).
   // Import worker maps these to the canonical Category table.
-  repeated ThemeData       themes      = 28;
+  repeated ThemeData       themes      = 27;
 
   // ESRB / PEGI / CERO ratings. Different from min_age (field 22).
-  repeated AgeRatingData   age_ratings = 29;
+  repeated AgeRatingData   age_ratings = 28;
 
-  optional string summary = 30;
+  optional string summary = 29;
 
   // Escape hatch for gateway-specific metadata not modelled above.
   // Stored as a JSON column. Gateways must provide matching-length parallel arrays.
-  repeated string metadata_keys   = 31;
-  repeated string metadata_values = 32;
+  repeated string metadata_keys   = 30;
+  repeated string metadata_values = 31;
+
+    // DLC associated with this game. Lightweight records — not full Game imports.
+  repeated DlcData dlc = 32;
 }

@@ -8,7 +8,29 @@ export interface WsSearchResultPayload {
   source: string;
 }
 
+export interface WsPlatformData {
+  externalId: string | undefined;
+  name: string;
+  abbreviation?: string;
+  platformType: string;
+}
+
+export interface WsLanguageData {
+  iso6393: string;
+  iso6391?: string;
+  name: string;
+}
+
+export interface WsReleaseData {
+  externalId: string;
+  platform: WsPlatformData;
+  status: string;
+  releaseDate?: string;
+  languages: WsLanguageData[];
+}
+
 export interface WsGameSearchResult {
+  availableReleases: WsReleaseData[];
   averageRating?: number;
   baseGameExternalId?: string;
   contentType: string;
@@ -26,6 +48,7 @@ export interface WsGameSearchResult {
 
   maxPlayers?: number;
   minPlayers?: number;
+  platforms: WsPlatformData[];
   sourceUrl?: string;
   thumbnailUrl?: string;
   title: string;

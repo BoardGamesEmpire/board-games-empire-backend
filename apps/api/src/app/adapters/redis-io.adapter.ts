@@ -11,8 +11,6 @@ export class RedisIoAdapter extends IoAdapter {
     const options = configService.getOrThrow<RedisClientOptions>('redis.websocket');
     const redisClient = createClient({
       ...options,
-      // TODO: Make this configurable
-      database: 1,
     });
     await redisClient.connect();
 

@@ -13,7 +13,7 @@ import type {
 } from '@bge/game-search';
 import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { ResultStatus } from '@board-games-empire/proto-gateway';
-import { Logger, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -26,17 +26,20 @@ import { wrapDefaults } from '@status/defaults';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
+import { AuthenticatedGateway } from '../base/authenticated.gateway';
+import { WsAuthFilter, WsValidationFilter } from '../filters';
 
 @UseGuards(AuthGuard)
+@UseFilters(WsValidationFilter, WsAuthFilter)
 @WebSocketGateway({
   namespace: 'games/search',
   cors: { origin: '*', credentials: true },
 })
-export class GameSearchGateway implements OnGatewayDisconnect {
+export class GameSearchGateway extends AuthenticatedGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   private readonly server!: Server;
 
-  private readonly logger = new Logger(GameSearchGateway.name);
+  protected readonly logger = new Logger(GameSearchGateway.name);
   private readonly userQueryMap = wrapDefaults<WeakMap<Socket, WsClientData>, WsClientData>({
     wrap: new WeakMap(),
     defaultValue: (): WsClientData => ({
@@ -48,28 +51,10 @@ export class GameSearchGateway implements OnGatewayDisconnect {
 
   constructor(
     private readonly coordinator: GatewayCoordinatorClientService,
-    private readonly authService: AuthService,
+    override readonly authService: AuthService,
     private readonly db: DatabaseService,
-  ) {}
-
-  async handleConnection(client: Socket): Promise<void> {
-    const token = client.handshake?.auth?.token;
-    this.logger.log(`WS connection attempt: socketId=${client.id} token=${token ? 'present' : 'absent'}`);
-
-    if (!token) {
-      this.logger.warn(`Unauthorized WS connection attempt: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    const session = await this.authService.getSessionFromToken(token);
-    if (this.authService.isValidSession(session) === false) {
-      this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
-      client.disconnect(true);
-      return;
-    }
-
-    this.logger.log(`WS connected: socketId=${client.id}`);
+  ) {
+    super(authService);
   }
 
   handleDisconnect(client: Socket): void {
@@ -99,6 +84,14 @@ export class GameSearchGateway implements OnGatewayDisconnect {
       }" gateways=[${dto.gatewayIds.join(',')}]`,
     );
 
+    if (!dto.includeLocal && !dto.includeExternal) {
+      return this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+        correlationId: dto.correlationId,
+        source: 'local',
+        message: 'At least one of includeLocal or includeExternal must be true',
+      });
+    }
+
     if (this.getClientData(client).activeSearches.has(dto.correlationId)) {
       return this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
         correlationId: dto.correlationId,
@@ -110,7 +103,16 @@ export class GameSearchGateway implements OnGatewayDisconnect {
     await client.join(dto.correlationId);
 
     // TODO: return observables and merge -- error killing one source shouldn't kill the whole search
-    await Promise.all([this.runLocalSearch(dto), this.runGatewaySearch(client, dto)]);
+    await Promise.all([this.runLocalSearch(dto), this.runGatewaySearch(client, dto)]).finally(() => {
+      this.completeSearch(client, dto.correlationId);
+    });
+  }
+
+  private completeSearch(client: Socket, correlationId: string): void {
+    const search = this.getClientData(client);
+    search.activeSearches.delete(correlationId);
+    client.leave(correlationId);
+    this.logger.debug(`Search completed: correlationId=${correlationId}`);
   }
 
   @UsePipes(new ValidationPipe({ whitelist: true }))
@@ -118,6 +120,10 @@ export class GameSearchGateway implements OnGatewayDisconnect {
   handleSearchCancel(@ConnectedSocket() client: Socket, @MessageBody() dto: SearchCancelDto): void {
     const search = this.getClientData(client);
     const sub = search.activeSearches.get(dto.correlationId);
+
+    if (!sub) {
+      return this.logger.debug(`No active search to cancel: correlationId=${dto.correlationId}`);
+    }
 
     sub?.unsubscribe();
     search.activeSearches.delete(dto.correlationId);
@@ -138,19 +144,59 @@ export class GameSearchGateway implements OnGatewayDisconnect {
           deletedAt: null,
           title: { contains: options.query, mode: 'insensitive' },
         },
+
         take: options.limit ?? 20,
         skip: options.offset ?? 0,
+
         select: {
           id: true,
           title: true,
+          contentType: true,
           publishYear: true,
           thumbnail: true,
           averageRating: true,
           minPlayers: true,
           maxPlayers: true,
+
           gameSources: {
             select: { sourceUrl: true },
             take: 1,
+          },
+
+          releases: {
+            select: {
+              region: true,
+              releaseDate: true,
+              status: true,
+
+              platform: {
+                select: {
+                  id: true,
+                  name: true,
+                  abbreviation: true,
+                  platformType: true,
+
+                  gatewayLinks: {
+                    select: {
+                      gatewayId: true,
+                      externalId: true,
+                    },
+                  },
+                },
+              },
+
+              languages: {
+                select: {
+                  language: {
+                    select: {
+                      code: true,
+                      abbreviation: true,
+                      name: true,
+                    },
+                  },
+                },
+              },
+            },
           },
         },
       });
@@ -158,15 +204,40 @@ export class GameSearchGateway implements OnGatewayDisconnect {
       const results: WsGameSearchResult[] = games.map((g) => ({
         externalId: g.id,
         title: g.title,
-        contentType: 'BASE_GAME',
+        contentType: g.contentType,
         yearPublished: g.publishYear ?? undefined,
         thumbnailUrl: g.thumbnail || undefined,
-        sourceUrl: g.gameSources[0]?.sourceUrl || undefined,
+        sourceUrl: g.gameSources?.[0]?.sourceUrl || undefined,
         averageRating: g.averageRating ?? undefined,
         minPlayers: g.minPlayers ?? undefined,
         maxPlayers: g.maxPlayers ?? undefined,
         inSystem: true,
         gameId: g.id,
+
+        platforms: g.releases.map((r) => ({
+          externalId: r.platform.id,
+          name: r.platform.name,
+          abbreviation: r.platform.abbreviation ?? undefined,
+          platformType: r.platform.platformType.toString(),
+        })),
+
+        availableReleases: g.releases.map((r) => ({
+          externalId: r.platform.id,
+          platform: {
+            externalId: r.platform.gatewayLinks[0]?.externalId || undefined,
+            name: r.platform.name,
+            abbreviation: r.platform.abbreviation ?? undefined,
+            platformType: r.platform.platformType.toString(),
+          },
+
+          status: r.status,
+          releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+          languages: r.languages.map((l) => ({
+            iso6393: l.language.code,
+            iso6391: l.language.abbreviation ?? undefined,
+            name: l.language.name,
+          })),
+        })),
       }));
 
       this.emit<WsSearchResultPayload>(options.correlationId, SearchEvents.SearchResult, {
@@ -178,8 +249,8 @@ export class GameSearchGateway implements OnGatewayDisconnect {
       this.logger.error(`Local search failed for correlationId=${options.correlationId}`, err);
       this.emit<WsSearchErrorPayload>(options.correlationId, SearchEvents.SearchError, {
         correlationId: options.correlationId,
-        source,
         message: 'Local search failed',
+        source,
       });
     } finally {
       this.emit<WsSourceDonePayload>(options.correlationId, SearchEvents.SearchSourceDone, {
@@ -190,6 +261,10 @@ export class GameSearchGateway implements OnGatewayDisconnect {
   }
 
   private runGatewaySearch(client: Socket, dto: SearchStartDto): Promise<void> {
+    if (dto.includeExternal === false) {
+      return Promise.resolve();
+    }
+
     const search = this.getClientData(client);
 
     return new Promise<void>((resolve) => {
@@ -197,8 +272,9 @@ export class GameSearchGateway implements OnGatewayDisconnect {
         correlationId: dto.correlationId,
         query: dto.query,
         gatewayIds: dto.gatewayIds || [],
-        limit: dto.limit ?? undefined,
-        offset: dto.offset ?? undefined,
+        limit: dto.limit,
+        offset: dto.offset,
+        locale: dto.locale,
       });
 
       const sub = stream$.subscribe({
@@ -219,15 +295,36 @@ export class GameSearchGateway implements OnGatewayDisconnect {
                 externalId: result.game.externalId,
                 title: result.game.title,
                 contentType: result.game.contentType.toString(),
-                yearPublished: result.game.yearPublished ?? undefined,
-                thumbnailUrl: result.game.thumbnailUrl ?? undefined,
-                sourceUrl: result.game.sourceUrl ?? undefined,
-                averageRating: result.game.averageRating ?? undefined,
-                minPlayers: result.game.minPlayers ?? undefined,
-                maxPlayers: result.game.maxPlayers ?? undefined,
-                baseGameExternalId: result.game.baseGameExternalId ?? undefined,
+                yearPublished: result.game.yearPublished,
+                thumbnailUrl: result.game.thumbnailUrl,
+                sourceUrl: result.game.sourceUrl,
+                averageRating: result.game.averageRating,
+                minPlayers: result.game.minPlayers,
+                maxPlayers: result.game.maxPlayers,
+                baseGameExternalId: result.game.baseGameExternalId,
                 inSystem: result.inSystem ?? false,
-                gameId: result.gameId ?? undefined,
+                gameId: result.gameId,
+
+                platforms: (result.game.availablePlatforms ?? []).map((p) => ({
+                  externalId: p.externalId,
+                  name: p.name,
+                  abbreviation: p.abbreviation,
+                  platformType: p.platformType.toString(),
+                })),
+
+                availableReleases: (result.game.availableReleases ?? []).map((r) => ({
+                  externalId: r.externalId,
+                  platform: {
+                    ...r.platform!,
+                  },
+                  status: r.status.toString(),
+                  releaseDate: r.releaseDate,
+                  languages: (r.languages ?? []).map((l) => ({
+                    iso6393: l.iso6393,
+                    iso6391: l.iso6391,
+                    name: l.name,
+                  })),
+                })),
               };
 
               this.emit<WsSearchResultPayload>(dto.correlationId, SearchEvents.SearchResult, {
@@ -283,8 +380,6 @@ export class GameSearchGateway implements OnGatewayDisconnect {
             message: 'Search stream failed',
           });
 
-          search.activeSearches.delete(dto.correlationId);
-          client.leave(dto.correlationId);
           resolve();
         },
 
@@ -295,8 +390,6 @@ export class GameSearchGateway implements OnGatewayDisconnect {
             correlationId: dto.correlationId,
           });
 
-          search.activeSearches.delete(dto.correlationId);
-          client.leave(dto.correlationId);
           resolve();
         },
       });

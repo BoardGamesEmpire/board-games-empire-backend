@@ -19,8 +19,16 @@ export class ImportActivityListener {
   @OnEvent(ImportEvents.JobCompleted, { async: true })
   async handle(event: ImportJobCompletedEvent): Promise<void> {
     if (!event.sourceCreated) {
-      return;
+      return this.logger.debug(
+        `ImportActivityListener skipping jobId=${event.jobId} gameId=${event.gameId} ` +
+          `created=${event.sourceCreated} isExpansion=${event.isExpansion}`,
+      );
     }
+
+    this.logger.debug(
+      `ImportActivityListener recording activity for jobId=${event.jobId} gameId=${event.gameId} ` +
+        `isExpansion=${event.isExpansion}`,
+    );
 
     try {
       await this.db.importActivity.create({

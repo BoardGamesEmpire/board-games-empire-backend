@@ -17,7 +17,7 @@ async function main() {
   const client = igdb(clientId, accessToken.access_token);
   const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);
 
-  // console.log(JSON.stringify(gameData, null, 2));
+  console.log(JSON.stringify(gameData, null, 2));
 
   const gameSearchData = gameData.map(toGameSearchData);
   console.log('Mapped game search data:', JSON.stringify(gameSearchData, null, 2));

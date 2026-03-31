@@ -102,6 +102,7 @@ describe('GameGatewayController', () => {
         status: proto.ResultStatus.RESULT_STATUS_RESULT,
         game: {
           availablePlatforms: [],
+          availableReleases: [],
           externalId: '1942',
           title: 'Hades',
           contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
@@ -185,6 +186,7 @@ describe('GameGatewayController', () => {
         status: proto.ResultStatus.RESULT_STATUS_RESULT,
         game: {
           availablePlatforms: [],
+          availableReleases: [],
           externalId: '9001',
           title: 'Hades - Extra Weapons Pack',
           contentType: proto.ContentType.CONTENT_TYPE_DLC,
@@ -225,21 +227,21 @@ describe('GameGatewayController', () => {
  */
 function minimalGameData(): proto.GameData {
   return {
-    externalId: '1942',
-    title: 'Hades',
+    ageRatings: [],
+    artists: [],
+    categories: [],
     contentType: proto.ContentType.CONTENT_TYPE_BASE_GAME,
     designers: [],
-    artists: [],
-    publishers: [],
-    platforms: [],
-    releases: [],
-    genres: [],
-    themes: [],
-    mechanics: [],
-    categories: [],
+    dlc: [],
+    externalId: '1942',
     families: [],
-    ageRatings: [],
+    mechanics: [],
     metadataKeys: [],
     metadataValues: [],
+    platforms: [],
+    publishers: [],
+    releases: [],
+    themes: [],
+    title: 'Hades',
   };
 }

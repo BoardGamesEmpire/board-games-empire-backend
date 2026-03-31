@@ -60,23 +60,28 @@ export interface ImportJobResult {
 }
 
 export interface ImportJobCompletedEvent {
-  jobId: string;
+  /**
+   * Expansion imports will include the baseGameId
+   */
+  baseGameId?: string;
+
   batchId: string;
+  correlationId: string;
+  externalId: string;
+  gameCreated: boolean;
   gameId: string;
   gameTitle: string;
-  thumbnail: string | null;
-  gameCreated: boolean;
-  sourceCreated: boolean;
-  isExpansion: boolean;
-  baseGameId?: string;
-  userId: string | null;
   gatewayId: string;
-  correlationId: string;
+  isExpansion: boolean;
+  jobId: string;
+  sourceCreated: boolean;
+  thumbnail: string | null;
+  userId: string | null;
 }
 
 export interface ImportJobFailedEvent {
-  jobId: string;
   batchId: string;
-  error: string;
   correlationId: string;
+  error: string;
+  jobId: string;
 }

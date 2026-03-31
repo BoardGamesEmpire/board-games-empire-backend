@@ -45,7 +45,7 @@ export class GameImportProcessor extends WorkerHost {
     const { jobId, batchId, correlationId, gameData, gatewayId, userId } = job.data;
     this.logger.log(`Base game import: jobId=${jobId} externalId=${gameData.externalId}`);
 
-    await this.markRunning(jobId);
+    await this.markRunning(jobId, job.id!.toString());
 
     const result = await this.gameUpsert.upsert(gameData, gatewayId);
     await this.markCompleted(jobId, result.gameId);
@@ -55,6 +55,7 @@ export class GameImportProcessor extends WorkerHost {
       batchId,
       gameId: result.gameId,
       gameTitle: gameData.title,
+      externalId: gameData.externalId,
       thumbnail: gameData.thumbnailUrl ?? null,
       gameCreated: result.gameCreated,
       sourceCreated: result.sourceCreated,
@@ -71,7 +72,7 @@ export class GameImportProcessor extends WorkerHost {
     const { jobId, batchId, correlationId, gameData, gatewayId, userId, baseGameExternalId } = job.data;
     this.logger.log(`Expansion import: jobId=${jobId} externalId=${gameData.externalId}`);
 
-    await this.markRunning(jobId);
+    await this.markRunning(jobId, job.id!.toString());
 
     const result = await this.gameUpsert.upsertExpansion(gameData, baseGameExternalId, gatewayId);
     await this.markCompleted(jobId, result.gameId);
@@ -86,6 +87,7 @@ export class GameImportProcessor extends WorkerHost {
       sourceCreated: result.sourceCreated,
       isExpansion: true,
       baseGameId: result.baseGameId,
+      externalId: gameData.externalId,
       userId,
       gatewayId,
       correlationId,
@@ -112,12 +114,13 @@ export class GameImportProcessor extends WorkerHost {
     } satisfies ImportJobFailedEvent);
   }
 
-  private markRunning(jobId: string) {
+  private markRunning(jobId: string, bullmqJobId: string) {
     return this.db.job.update({
       where: { id: jobId },
       data: {
         status: JobStatus.Running,
         startedAt: new Date(),
+        bullmqJobId,
       },
     });
   }
@@ -129,6 +132,7 @@ export class GameImportProcessor extends WorkerHost {
         status: JobStatus.Completed,
         completedAt: new Date(),
         result: { gameId },
+        gameId,
       },
     });
   }

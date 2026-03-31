@@ -23,9 +23,20 @@ export class GameWatchListener {
 
   @OnEvent(ImportEvents.JobCompleted, { async: true })
   async handle(event: ImportJobCompletedEvent): Promise<void> {
-    if (!event.sourceCreated || !event.isExpansion || !event.baseGameId) {
-      return;
+    if (!event.sourceCreated) {
+      return this.logger.debug(
+        `GameWatchListener skipping: re-import, no new source for jobId=${event.jobId} gameId=${event.gameId}`,
+      );
     }
+
+    if (event.isExpansion && !event.baseGameId) {
+      return this.logger.warn(`GameWatchListener skipping: expansion jobId=${event.jobId} has no baseGameId`);
+    }
+
+    this.logger.debug(
+      `GameWatchListener processing expansion import jobId=${event.jobId} gameId=${event.gameId} ` +
+        `baseGameId=${event.baseGameId} for notification`,
+    );
 
     try {
       const watchers = await this.db.gameWatch.findMany({
@@ -42,7 +53,9 @@ export class GameWatchListener {
 
       // no watchers, nothing to do
       if (watchers.length === 0) {
-        return;
+        return this.logger.debug(
+          `GameWatchListener no watchers to notify for expansionId=${event.gameId} baseGameId=${event.baseGameId}`,
+        );
       }
 
       // Fetch base game title once — shared by all watcher notifications
