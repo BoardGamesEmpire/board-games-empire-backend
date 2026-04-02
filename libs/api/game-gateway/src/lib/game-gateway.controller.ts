@@ -19,7 +19,7 @@ export class GameGatewayController {
   private readonly logger = new Logger(GameGatewayController.name);
 
   constructor(
-    private gameGatewayService: GameGatewayService,
+    private readonly gameGatewayService: GameGatewayService,
     private readonly cls: ClsService,
     private readonly coordinator: GatewayCoordinatorClientService,
   ) {}

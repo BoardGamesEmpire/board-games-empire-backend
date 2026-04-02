@@ -3,17 +3,19 @@ import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import type { Cache } from 'cache-manager';
 import { ClsService } from 'nestjs-cls';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
-import { CreateGameDto, UpdateGameDto } from './dto';
+import { CreateGameDto, GameListResponseDto, UpdateGameDto } from './dto';
 import { GameService } from './game.service';
 
-@UseGuards(PoliciesGuard)
+@ApiBearerAuth()
+@ApiSecurity('api_key')
 @ApiTags('games')
+@UseGuards(PoliciesGuard)
 @Controller('games')
 export class GameController {
   private readonly logger = new Logger(GameController.name);
@@ -24,6 +26,10 @@ export class GameController {
     @Inject(CACHE_MANAGER) private cache: Cache,
   ) {}
 
+  @ApiOperation({ summary: 'List games' })
+  @ApiResponse({ status: 200, type: GameListResponseDto })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
   getGames(@Query() paginationQuery: PaginationQueryDto) {
@@ -31,6 +37,9 @@ export class GameController {
     return from(this.gameService.getGames(paginationQuery, abilities)).pipe(map((games) => ({ games })));
   }
 
+  @ApiParam({ name: 'id', type: String })
+  @ApiResponse({ status: 200, type: GameListResponseDto })
+  @ApiResponse({ status: 404, description: 'Game not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get(':id')
   getGameById(@Param('id') id: string) {

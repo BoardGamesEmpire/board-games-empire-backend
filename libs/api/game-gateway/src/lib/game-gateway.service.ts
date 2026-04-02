@@ -11,7 +11,7 @@ import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 export class GameGatewayService {
   private readonly logger = new Logger(GameGatewayService.name);
 
-  constructor(private db: DatabaseService) {}
+  constructor(private readonly db: DatabaseService) {}
 
   async getAll(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
     return this.db.gameGateway.findMany({
@@ -19,7 +19,7 @@ export class GameGatewayService {
         AND: [...this.createGameGatewayWhereAnd(userAbility, apiKeyAbility), { deletedAt: null }],
       },
       skip: pagination.offset,
-      take: pagination.limit,
+      take: pagination.limit || 20,
     });
   }
 

@@ -26,7 +26,10 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: 'npm'
+          cache: "npm"
+
+      - name: Set up environment
+        run: cp .env.example .env
 
       - run: npm ci
       - uses: nrwl/nx-set-shas@v4

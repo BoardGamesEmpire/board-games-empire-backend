@@ -19,7 +19,7 @@ export class GameService {
         AND: this.createGameWhereAnd(abilities),
       },
       skip: pagination.offset,
-      take: pagination.limit,
+      take: pagination.limit || 20,
     });
   }
 
