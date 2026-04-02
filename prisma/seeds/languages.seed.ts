@@ -1,8 +1,11 @@
 import type { LanguageCreateInput, PrismaClient } from '@bge/database';
+import type { Logger } from '@nestjs/common';
 import ISO6391 from 'iso-639-1';
 import { iso6393 } from 'iso-639-3';
 
-export async function languagesSeed(prisma: PrismaClient) {
+export async function languagesSeed(prisma: PrismaClient, logger: Logger) {
+  logger.log('Starting languages seed...');
+
   // TODO: Expand language support
   const systemSupportedCodes = ['en'];
 
@@ -32,4 +35,6 @@ export async function languagesSeed(prisma: PrismaClient) {
       },
     });
   }
+
+  logger.log(`Seeded ${languages.length} languages.`);
 }

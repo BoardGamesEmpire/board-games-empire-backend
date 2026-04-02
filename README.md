@@ -1,81 +1,177 @@
-# BoardGamesEmpireBackend
+# Board Games Empire — Backend -
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+Board Games Empire (BGE) is a self-hosted platform for managing board game and video game collections, coordinating game nights, and tracking play sessions. It integrates with external data sources (BoardGameGeek, IGDB) to enrich game records automatically, while keeping your data in a database you control.
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is almost ready ✨.
+The backend is a NestJS Nx monorepo exposing a REST + WebSocket API, with game data fetched through a microservice gateway layer that normalizes external platform differences into a shared domain model.
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/nx-api/node?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
+This project is in early development. The API is not stable and may change without warning. Features likely do not fully function
+as intended.
 
-## Finish your CI setup
+---
 
-[Click here to finish setting up your workspace!](https://cloud.nx.app/connect/7J17W2h0OP)
+## Architecture overview
 
-## Run tasks
+```
+apps/
+  api/                     — Main NestJS API (REST, WebSocket)
+  gateway-coordinator/     — gRPC microservice coordinating gateway fan-out
+  igdb-gateway/            — IGDB data adapter (gRPC) - (search and import)
+  boardgamegeek-gateway/   — BoardGameGeek data adapter (gRPC) - (WIP)
 
-To run the dev server for your app, use:
-
-```sh
-npx nx serve api
+libs/
+  proto/gateway/           — Shared protobuf definitions (source of truth)
+  api/*/                   — Feature libraries (game, auth, households, …)
+  database/*/              — Prisma schema generation and database access utilities
+  common/*/                — Cross-cutting concerns (permissions, utilities, …)
 ```
 
-To create a production bundle:
+The main application, the coordinator and at least one game gateway must be running for the full import and search pipeline to work. The gateways communicate with the coordinator over gRPC; the API communicates with the coordinator over gRPC and exposes results to clients over HTTP and WebSocket.
 
-```sh
-npx nx build api
+---
+
+## Prerequisites
+
+- Node.js 20+
+- PostgreSQL 16+
+- Redis 7+
+- [buf CLI](https://buf.build/docs/installation) (for proto generation)
+- [foreman](https://github.com/ddollar/foreman) or [nf](https://www.npmjs.com/package/nf) (to run the Procfile)
+- IGDB API credentials (Twitch developer account — free)
+- BoardGameGeek API key (The application review process will likely take a week or more)
+
+---
+
+## Getting started
+
+### 1. Install dependencies
+
+```bash
+npm install
 ```
 
-To see all available targets to run for a project, run:
+### 2. Configure environment
 
-```sh
-npx nx show project api
+```bash
+cp .env.example .env
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+Open `.env` and fill in at minimum: (one or both gateways)
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Add new projects
-
-While you could add new projects to your workspace manually, you might want to leverage [Nx plugins](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) and their [code generation](https://nx.dev/features/generate-code?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) feature.
-
-Use the plugin's generator to create new projects.
-
-To generate a new application, use:
-
-```sh
-npx nx g @nx/node:app demo
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/boardgamesempire
+IGDB_CLIENT_ID=your_twitch_client_id
+IGDB_CLIENT_SECRET=your_twitch_client_secret
+BOARDGAMEGEEK_API_KEY=you_bgg_api_key
 ```
 
-To generate a new library, use:
+Most environment variables have sane development defaults.
 
-```sh
-npx nx g @nx/node:lib mylib
+### 3. Generate the Prisma client and protobuf types
+
+```bash
+npm run db:generate
+npm run proto:generate
 ```
 
-You can use `npx nx list` to get a list of installed plugins. Then, run `npx nx list <plugin-name>` to learn about more specific capabilities of a particular plugin. Alternatively, [install Nx Console](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) to browse plugins and generators in your IDE.
+These must be run once before the first build and again any time the schema or `.proto` files change.
 
-[Learn more about Nx plugins &raquo;](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) | [Browse the plugin registry &raquo;](https://nx.dev/plugin-registry?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+### 4. Run database migrations and seed
 
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+```bash
+npm run db:migrate
+npm run db:seed
+```
 
-## Install Nx Console
+The seed populates a number of tables including roles, permissions, system settings and more.
 
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
+### 5. Start all services
 
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+```bash
+npm start
+```
 
-## Useful links
+This runs `nf start`, which launches all four processes defined in `Procfile` concurrently:
 
-Learn more:
+| Process        | Default port | Description                       |
+| -------------- | ------------ | --------------------------------- |
+| `api`          | 33333        | Main REST + WebSocket API         |
+| `coordinator`  | 50052        | Gateway coordinator (gRPC)        |
+| `bgg-gateway`  | 50053        | BoardGameGeek data gateway (gRPC) |
+| `igdb-gateway` | 50054        | IGDB data gateway (gRPC)          |
 
-- [Learn more about this workspace setup](https://nx.dev/nx-api/node?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+To run a single service in isolation:
 
-And join the Nx community:
+```bash
+npm start api
+npm start coordinator
+npm start igdb-gateway
+npm start bgg-gateway
+```
 
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+or several using comma separated values
+
+```bash
+npm start api,coordinator
+npm start bgg-gateway,igdb-gateway
+```
+
+---
+
+## Development workflows
+
+### Running tests
+
+```bash
+npm test                          # all projects in parallel
+npx nx test api                   # single project
+npx nx affected -t test           # only affected projects
+```
+
+### Type checking
+
+```bash
+npm run typecheck
+```
+
+### Linting
+
+```bash
+npm run lint
+```
+
+### Database
+
+```bash
+npm run db:migrate <migration-name>   # create and run a new migration
+npm run db:seed                       # re-run all seeds (idempotent)
+npm run db:reset                      # drop, recreate, migrate, and seed
+npm run db:generate                   # regenerate Prisma client after schema changes
+```
+
+### Protobuf
+
+```bash
+npm run proto:generate    # export .proto files and regenerate TypeScript types
+npm run proto:check       # lint and format check
+npm run proto:format      # auto-format .proto files
+```
+
+---
+
+## External API credentials
+
+[**IGDB**](https://www.igdb.com/) — Register a Twitch application at [dev.twitch.tv](https://dev.twitch.tv/console/apps) to obtain a `client_id` and `client_secret`. IGDB access is granted automatically through the Twitch OAuth client credentials flow; no separate IGDB account is needed.
+
+[**BoardGameGeek**](https://boardgamegeek.com/) — BGG no longer allows open access. API access must be requested after reading the requirements and filling out the application linked on their [API page](https://boardgamegeek.com/using_the_xml_api). The application review process will likely take a week or more.
+
+## Frontend
+
+The frontend clients are being developed (so very slowly) [here](https://github.com/BoardGamesEmpire/board-games-empire-client). They currently have no capabilities
+to interact with the backend systems. Use Postman or Insomnia to send test data to endpoints or
+[swagger](http://localhost:33333/api) on your local instance.
+
+---
+
+<a href="https://boardgamegeek.com/">
+  <img src="apps/boardgamegeek-gateway/src/assets//powered-bgg.webp" width="160" alt="Powered by BGG">
+</a>
