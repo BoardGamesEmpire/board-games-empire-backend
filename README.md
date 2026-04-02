@@ -1,4 +1,4 @@
-# Board Games Empire — Backend -
+# Board Games Empire — Backend
 
 Board Games Empire (BGE) is a self-hosted platform for managing board game and video game collections, coordinating game nights, and tracking play sessions. It integrates with external data sources (BoardGameGeek, IGDB) to enrich game records automatically, while keeping your data in a database you control.
 
@@ -19,7 +19,7 @@ apps/
   boardgamegeek-gateway/   — BoardGameGeek data adapter (gRPC) - (WIP)
 
 libs/
-  proto/gateway/           — Shared protobuf definitions (source of truth)
+  proto/gateway/           — Shared protobuf definitions for gateway communication
   api/*/                   — Feature libraries (game, auth, households, …)
   database/*/              — Prisma schema generation and database access utilities
   common/*/                — Cross-cutting concerns (permissions, utilities, …)
@@ -31,7 +31,7 @@ The main application, the coordinator and at least one game gateway must be runn
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL 16+
 - Redis 7+
 - [buf CLI](https://buf.build/docs/installation) (for proto generation)
@@ -61,7 +61,7 @@ Open `.env` and fill in at minimum: (one or both gateways)
 DATABASE_URL=postgresql://user:password@localhost:5432/boardgamesempire
 IGDB_CLIENT_ID=your_twitch_client_id
 IGDB_CLIENT_SECRET=your_twitch_client_secret
-BOARDGAMEGEEK_API_KEY=you_bgg_api_key
+BOARDGAMEGEEK_API_KEY=your_bgg_api_key
 ```
 
 Most environment variables have sane development defaults.
@@ -142,10 +142,10 @@ npm run lint
 ### Database
 
 ```bash
-npm run db:migrate <migration-name>   # create and run a new migration
-npm run db:seed                       # re-run all seeds (idempotent)
-npm run db:reset                      # drop, recreate, migrate, and seed
-npm run db:generate                   # regenerate Prisma client after schema changes
+npm run db:migrate:new <migration-name>   # create and run a new migration
+npm run db:seed                           # re-run all seeds (idempotent)
+npm run db:reset                          # drop, recreate, migrate, and seed
+npm run db:generate                       # regenerate Prisma client after schema changes
 ```
 
 ### Protobuf
@@ -173,5 +173,5 @@ to interact with the backend systems. Use Postman or Insomnia to send test data 
 ---
 
 <a href="https://boardgamegeek.com/">
-  <img src="apps/boardgamegeek-gateway/src/assets//powered-bgg.webp" width="160" alt="Powered by BGG">
+  <img src="apps/boardgamegeek-gateway/src/assets/powered-bgg.webp" width="160" alt="Powered by BGG">
 </a>

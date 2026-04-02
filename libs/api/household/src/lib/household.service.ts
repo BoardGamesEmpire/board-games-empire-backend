@@ -266,7 +266,7 @@ export class HouseholdService {
       },
 
       skip: pagination.offset,
-      take: pagination.limit,
+      take: pagination.limit || 10,
     });
   }
 
