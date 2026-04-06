@@ -17,11 +17,12 @@ model Category {
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
-  games           GameCategory[]
-  favorites       FavoriteCategory[]
-  disliked        DislikedCategory[]
-  eventCategories EventCategory[]
-  gatewayAliases  CategoryGatewayAlias[]
+  games                GameCategory[]
+  favorites            FavoriteCategory[]
+  disliked             DislikedCategory[]
+  eventCategories      EventCategory[]
+  gatewayAliases       CategoryGatewayAlias[]
+  occurrenceCategories OccurrenceCategory[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

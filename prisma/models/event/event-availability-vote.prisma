@@ -1,0 +1,32 @@
+/**
+ * This model is used during the event occurrence scheduling process, where attendees can vote on
+ * their availability for proposed time slots. Each vote is tied to a specific occurrence and user,
+ * and indicates whether the user is available, maybe available, or unavailable for that time slot.
+ * This helps event organizers determine the best time for the event based on attendee availability.
+ */
+model EventAvailabilityVote {
+  id String @id @default(cuid(2))
+
+  occurrence   EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrenceId String          @map("occurrence_id")
+
+  user   User   @relation(fields: [userId], references: [id])
+  userId String @map("user_id")
+
+  response AvailabilityResponse
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([occurrenceId, userId])
+  @@index([userId])
+  @@map("event_availability_votes")
+}
+
+enum AvailabilityResponse {
+  Available
+  Maybe
+  Unavailable
+
+  @@map("availability_responses")
+}

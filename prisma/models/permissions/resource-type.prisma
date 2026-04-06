@@ -9,6 +9,7 @@ enum ResourceType {
   GamePlaySession
   GameSharing
   Household
+  Notification
   RuleVariant
   System
   User

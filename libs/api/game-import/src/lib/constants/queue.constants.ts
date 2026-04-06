@@ -1,14 +1,14 @@
 export enum QueueNames {
-  GamesImport = 'bge-games-import',
+  GamesImport = 'bge.games.import',
 }
 
 export const JobNames = {
-  GameImport: 'game-import',
-  ExpansionImport: 'expansion-import',
+  GameImport: 'game.import',
+  ExpansionImport: 'expansion.import',
 } as const;
 
 export enum FlowProducerNames {
-  GamesImport = 'bge:games-import:flow',
+  GamesImport = 'bge.games.import.flow',
 }
 
 export enum ImportEvents {
@@ -21,13 +21,13 @@ export enum ImportEvents {
 /**
  * Client event names for the import gateway namespace ('games/import').
  */
-export enum ClientImportEvents {
+export enum ClientGameImportEvents {
   // Inbound (client → server)
-  ImportStart = 'import:start',
+  ImportStart = 'import.start',
 
   // Outbound (server → client)
-  ImportQueued = 'import:queued',
-  ImportJobProgress = 'import:job_progress',
-  ImportJobFailed = 'import:job_failed',
-  ImportBatchComplete = 'import:batch_complete',
+  ImportQueued = 'import.queued',
+  ImportJobProgress = 'import.job_progress',
+  ImportJobFailed = 'import.job_failed',
+  ImportBatchComplete = 'import.batch_complete',
 }

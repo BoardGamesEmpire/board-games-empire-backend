@@ -1,20 +1,20 @@
 model EventGameVote {
   id String @id @default(cuid(2))
 
-  eventGame   EventGame @relation(fields: [eventGameId], references: [id])
-  eventGameId String    @map("event_game_id")
+  nomination            EventGameNomination @relation(fields: [eventGameNominationId], references: [id])
+  eventGameNominationId String              @map("event_game_nomination_id")
 
   user   User   @relation(fields: [userId], references: [id])
   userId String @map("user_id")
 
-  event   Event?  @relation(fields: [eventId], references: [id])
-  eventId String? @map("event_id")
+  occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrenceId String?          @map("occurrence_id")
 
   voteType VoteType @map("vote_type")
   priority Int? // Optional: rank preferences (1=highest)
   comment  String?
 
-  @@unique([eventGameId, userId])
+  @@unique([eventGameNominationId, userId])
   @@index([userId])
   @@map("event_game_votes")
 }
@@ -25,4 +25,37 @@ enum VoteType {
   Interested
 
   @@map("vote_types")
+}
+
+enum VoteThresholdType {
+  SimpleMajority // >50% of votes cast are For
+  Supermajority // configurable percentage, e.g. 66%, 75%
+  Unanimous // all eligible voters must vote For
+  FixedCount // a specific number of For votes regardless of pool size
+
+  @@map("vote_threshold_types")
+}
+
+enum VoteQuorumType {
+  None // no minimum, any vote count is binding
+  PercentOfAttendees // e.g. 50% of confirmed attendees must vote
+  FixedCount // N attendees must vote
+
+  @@map("vote_quorum_types")
+}
+
+enum VoteEligibility {
+  AllAttendees // everyone on the attendee list
+  ConfirmedOnly // only those with status Attending
+  PoolParticipants // only attendees who have added games to their list
+
+  @@map("vote_eligibilities")
+}
+
+enum InterestedWeight {
+  AsFor // counts as a positive vote
+  AsAbstain // excluded from the denominator
+  AsAgainst // counts as opposition
+
+  @@map("interested_weights")
 }

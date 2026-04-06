@@ -16,8 +16,30 @@ model EventPolicy {
   // Participation controls
   requireHostApprovalToJoin Boolean @default(false) @map("require_host_approval")
   allowSpectators           Boolean @default(true) @map("allow_spectators")
-  maxTotalParticipants      Int?    @map("max_total_participants")
+  maxTotalParticipants      Int?    @map("max_total_participants") // includes both attendees and spectators
   strictCapacity            Boolean @default(false) @map("strict_capacity")
+
+  gameAdditionMode       GameAdditionMode @default(Direct) @map("game_addition_mode")
+  restrictToAttendeePool Boolean          @default(true) @map("restrict_to_attendee_pool")
+
+  fillerMaxPlayTime Int? @map("filler_max_play_time") // minutes; null = no fillers permitted
+
+  // Game voting controls — only relevant when gameAdditionMode = RequiresVote
+  voteThresholdType  VoteThresholdType @default(SimpleMajority) @map("vote_threshold_type")
+  voteThresholdValue Int?              @map("vote_threshold_value")
+  // ^ used by Supermajority (e.g. 66 = 66%) and FixedCount (e.g. 3 = need 3 For votes)
+  // null for SimpleMajority and Unanimous
+
+  voteQuorumType  VoteQuorumType @default(None) @map("vote_quorum_type")
+  voteQuorumValue Int?           @map("vote_quorum_value")
+  // ^ used by PercentOfAttendees and FixedCount quorum types
+
+  voteEligibility  VoteEligibility  @default(ConfirmedOnly) @map("vote_eligibility")
+  interestedWeight InterestedWeight @default(AsAbstain) @map("interested_weight")
+
+  // How long a nomination stays open for votes before being resolved.
+  // Null = host closes manually.
+  votingWindowHours Int? @map("voting_window_hours")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
