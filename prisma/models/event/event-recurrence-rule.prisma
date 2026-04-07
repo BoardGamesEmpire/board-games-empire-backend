@@ -8,7 +8,7 @@ model EventRecurrenceRule {
 
   // The template event — attendees, default policy, default game lineup are copied from here
   templateEvent   Event  @relation(fields: [templateEventId], references: [id])
-  templateEventId String @unique @map("template_event_id")
+  templateEventId String @map("template_event_id")
 
   frequency       RecurrenceFrequency
   interval        Int                 @default(1) // every N weeks/months
@@ -24,7 +24,7 @@ model EventRecurrenceRule {
 
   generatesInAdvanceDays Int @default(14) @map("generates_in_advance_days")
 
-  endsAt   DateTime? @map("ends_at") // null = indefinite
+  endsAt   DateTime? @map("ends_at") @db.Timestamptz(3)// null = indefinite
   isActive Boolean   @default(true) @map("is_active")
 
   generatedEvents Event[] @relation("RecurringEventInstances")

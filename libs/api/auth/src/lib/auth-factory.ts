@@ -124,6 +124,7 @@ export function authFactory(
               throw new Error('EventEmitter2 not provided to authFactory');
             }
 
+            // TODO: emit { userId } instead of full user object and let listeners fetch what they need
             eventEmitter.emit(AuthEvent.UserCreated, user);
           },
         },

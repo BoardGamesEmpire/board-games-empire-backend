@@ -46,7 +46,6 @@ model User {
   eventGameVotes         EventGameVote[]
   eventsAttended         EventAttendee[]
   eventAvailabilityVotes EventAvailabilityVote[]
-  eventGamesAdded        EventGame[]
 
   loansGiven    GameLoan[] @relation("LoansGiven")
   loansReceived GameLoan[] @relation("LoansReceived")

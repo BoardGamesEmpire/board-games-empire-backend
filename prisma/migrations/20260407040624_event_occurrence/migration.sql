@@ -101,7 +101,6 @@ ADD COLUMN     "role" "scheduled_game_roles" NOT NULL DEFAULT 'Primary',
 ADD COLUMN     "sort_order" INTEGER NOT NULL DEFAULT 0,
 ADD COLUMN     "supplied_by_id" TEXT NOT NULL,
 ADD COLUMN     "updated_at" TIMESTAMPTZ(3) NOT NULL,
-ADD COLUMN     "userId" TEXT,
 ALTER COLUMN "event_id" DROP NOT NULL;
 
 -- AlterTable
@@ -226,7 +225,7 @@ CREATE TABLE "event_recurrence_rules" (
     "notify_attendees_on_schedule" BOOLEAN NOT NULL DEFAULT true,
     "notify_attendees_on_rejection" BOOLEAN NOT NULL DEFAULT true,
     "generates_in_advance_days" INTEGER NOT NULL DEFAULT 14,
-    "ends_at" TIMESTAMP(3),
+    "ends_at" TIMESTAMPTZ(3),
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
@@ -260,9 +259,6 @@ CREATE INDEX "event_occurrences_event_id_idx" ON "event_occurrences"("event_id")
 
 -- CreateIndex
 CREATE INDEX "event_occurrences_event_id_status_idx" ON "event_occurrences"("event_id", "status");
-
--- CreateIndex
-CREATE UNIQUE INDEX "event_recurrence_rules_template_event_id_key" ON "event_recurrence_rules"("template_event_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "event_game_votes_event_game_nomination_id_user_id_key" ON "event_game_votes"("event_game_nomination_id", "user_id");
@@ -332,9 +328,6 @@ ALTER TABLE "event_games" ADD CONSTRAINT "event_games_nomination_id_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "event_games" ADD CONSTRAINT "event_games_added_by_id_fkey" FOREIGN KEY ("added_by_id") REFERENCES "event_attendees"("id") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "event_games" ADD CONSTRAINT "event_games_userId_fkey" FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "event_occurrence_policies" ADD CONSTRAINT "event_occurrence_policies_occurrence_id_fkey" FOREIGN KEY ("occurrence_id") REFERENCES "event_occurrences"("id") ON DELETE CASCADE ON UPDATE CASCADE;

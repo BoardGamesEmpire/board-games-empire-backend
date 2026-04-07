@@ -41,8 +41,6 @@ model EventGame {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
-  user      User?    @relation(fields: [userId], references: [id])
-  userId    String?
 
   @@index([eventId])
   @@index([occurrenceId])

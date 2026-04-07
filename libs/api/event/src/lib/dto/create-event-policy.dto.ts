@@ -1,6 +1,6 @@
 import { GameAdditionMode, InterestedWeight, VoteEligibility, VoteQuorumType, VoteThresholdType } from '@bge/database';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, ValidateIf } from 'class-validator';
 
 export class CreateEventPolicyDto {
   // --- Invite controls ---
@@ -83,7 +83,6 @@ export class CreateEventPolicyDto {
   @ApiPropertyOptional({ description: 'Required for Supermajority (e.g. 66) and FixedCount (e.g. 3)' })
   @IsInt()
   @Min(1)
-  @Max(100)
   @ValidateIf(
     (o: CreateEventPolicyDto) =>
       o.voteThresholdType === VoteThresholdType.Supermajority || o.voteThresholdType === VoteThresholdType.FixedCount,
