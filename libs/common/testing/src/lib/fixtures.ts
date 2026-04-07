@@ -1,6 +1,7 @@
 import {
   Action,
   ContentType,
+  Event,
   EventSchedulingMode,
   EventStatus,
   EventType,
@@ -197,11 +198,7 @@ export function makeInvite(inviterId: string, overrides: Partial<Invite> = {}): 
   };
 }
 
-export function makeEvent(
-  householdId: string,
-  createdById: string,
-  overrides: Partial<import('@bge/database').Event> = {},
-): import('@bge/database').Event {
+export function makeEvent(householdId: string, createdById: string, overrides: Partial<Event> = {}): Event {
   const n = seq();
   return {
     id: `event-${n}`,
