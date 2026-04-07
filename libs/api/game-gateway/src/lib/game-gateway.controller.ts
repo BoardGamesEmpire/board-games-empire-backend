@@ -4,7 +4,7 @@ import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@board-games-empire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { ClsService } from 'nestjs-cls';
 import { from, of } from 'rxjs';
@@ -12,6 +12,8 @@ import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 import { GameGatewayService } from './game-gateway.service';
 
+@ApiBearerAuth()
+@ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
 @ApiTags('game-gateways')
 @Controller('game-gateways')
@@ -24,6 +26,8 @@ export class GameGatewayController {
     private readonly coordinator: GatewayCoordinatorClientService,
   ) {}
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get()
   getAll(@Query() pagination: PaginationQueryDto) {
@@ -33,6 +37,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get(':id')
   getById(@Param('id') id: string) {
@@ -42,6 +48,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.GameGateway))
   @Post()
   create(@Session() session: UserSession, @Body() createGameGatewayDto: CreateGameGatewayDto) {
@@ -59,6 +67,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateGameGatewayDto: UpdateGameGatewayDto) {
@@ -81,6 +91,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.GameGateway))
   @Delete(':id')
   delete(@Param('id') id: string) {
@@ -99,6 +111,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Post(':id/connect')
   connect(@Param('id') id: string) {
@@ -135,6 +149,8 @@ export class GameGatewayController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Post(':id/disconnect')
   disconnect(@Param('id') id: string) {

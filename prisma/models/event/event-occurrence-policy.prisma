@@ -1,0 +1,60 @@
+// Event-level policy = defaults. OccurrencePolicy = explicit override for that day.
+// Resolution order: occurrence policy fields ?? event policy fields ?? hardcoded defaults.
+model EventOccurrencePolicy {
+  id           String          @id @default(cuid(2))
+  occurrence   EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  occurrenceId String          @unique @map("occurrence_id")
+
+  // Game restrictions — null means inherit from event policy
+  restrictToGameCategories Boolean?             @map("restrict_to_game_categories")
+  allowedCategories        OccurrenceCategory[]
+
+  // Capacity — null means inherit
+  maxAttendees         Int?     @map("max_attendees")
+  maxTotalParticipants Int?     @map("max_total_participants")
+  strictCapacity       Boolean? @map("strict_capacity")
+
+  // Participation — null means inherit
+  requireHostApprovalToJoin Boolean? @map("require_host_approval")
+  allowSpectators           Boolean? @map("allow_spectators")
+
+  gameAdditionMode       GameAdditionMode? @map("game_addition_mode")
+  restrictToAttendeePool Boolean?          @map("restrict_to_attendee_pool")
+
+  fillerMaxPlayTime Int? @map("filler_max_play_time")
+
+  // Game voting controls — only relevant when gameAdditionMode = RequiresVote
+  voteThresholdType  VoteThresholdType? @map("vote_threshold_type")
+  voteThresholdValue Int?               @map("vote_threshold_value")
+  // ^ used by Supermajority (e.g. 66 = 66%) and FixedCount (e.g. 3 = need 3 For votes)
+  // null for SimpleMajority and Unanimous
+
+  voteQuorumType  VoteQuorumType? @map("vote_quorum_type")
+  voteQuorumValue Int?            @map("vote_quorum_value")
+  // ^ used by PercentOfAttendees and FixedCount quorum types
+
+  voteEligibility  VoteEligibility?  @map("vote_eligibility")
+  interestedWeight InterestedWeight? @map("interested_weight")
+
+  // How long a nomination stays open for votes before being resolved.
+  // Null = host closes manually.
+  votingWindowHours Int? @map("voting_window_hours")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("event_occurrence_policies")
+}
+
+model OccurrenceCategory {
+  id String @id @default(cuid(2))
+
+  occurrencePolicy   EventOccurrencePolicy @relation(fields: [occurrencePolicyId], references: [id], onDelete: Cascade)
+  occurrencePolicyId String                @map("occurrence_policy_id")
+
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId String   @map("category_id")
+
+  @@unique([occurrencePolicyId, categoryId])
+  @@map("occurrence_categories")
+}

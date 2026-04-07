@@ -11,7 +11,23 @@
           "args": [
             "--node-env=production"
           ],
-          "cwd": "apps/api"
+          "cwd": "apps/api",
+          "tsPlugins": [
+            {
+              "name": "@nestjs/swagger/plugin",
+              "options": {
+                "dtoFileNameSuffix": [
+                  ".dto.ts"
+                ],
+                "controllerFileNameSuffix": [
+                  ".controller.ts",
+                  ".gateway.ts"
+                ],
+                "classValidatorShim": true,
+                "introspectComments": true
+              }
+            }
+          ]
         },
         "configurations": {
           "development": {

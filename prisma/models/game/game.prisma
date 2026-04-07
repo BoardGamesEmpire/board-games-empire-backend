@@ -63,6 +63,7 @@ model Game {
   jobs             Job[]
 
   eventGames            EventGame[]
+  eventGameNominations  EventGameNomination[]
   // campaigns    Campaign[]
   ruleVariants          RuleVariant[]
   playSessions          GamePlaySession[]

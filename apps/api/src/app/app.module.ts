@@ -15,10 +15,12 @@ import { ContextGuard, PermissionsModule } from '@bge/permissions';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
+import { BullModule } from '@nestjs/bullmq';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
@@ -26,6 +28,7 @@ import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
+import type { RedisOptions } from './configuration/redis.config';
 import { GameImportGateway } from './gateways/game/import.gateway';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 
@@ -42,6 +45,29 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
         cache: !env.isProduction,
         debug: !env.isProduction,
         stack: !env.isProduction,
+      },
+    }),
+
+    EventEmitterModule.forRoot({
+      global: true,
+      wildcard: false,
+      delimiter: '.',
+      verboseMemoryLeak: true,
+    }),
+
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redisConfig = config.getOrThrow<RedisOptions>('redis.queue');
+        return {
+          connection: {
+            host: redisConfig.socket.host,
+            port: redisConfig.socket.port,
+            username: redisConfig.username,
+            password: redisConfig.password,
+            database: redisConfig.database,
+          },
+        };
       },
     }),
 

@@ -1,0 +1,54 @@
+model EventGameNomination {
+  id String @id @default(cuid(2))
+
+  event        Event            @relation(fields: [eventId], references: [id])
+  eventId      String           @map("event_id")
+  occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id])
+  occurrenceId String?          @map("occurrence_id")
+
+  game   Game   @relation(fields: [gameId], references: [id])
+  gameId String @map("game_id")
+
+  votingDeadline DateTime? @map("voting_deadline") @db.Timestamptz(3)
+
+  // Who made the nomination — does not have to own the game
+  nominatedBy   EventAttendee @relation("Nominations", fields: [nominatedById], references: [id])
+  nominatedById String        @map("nominated_by_id")
+
+  // Whose list this game is coming from — required, not nullable
+  // Game must exist in an attendee's list before nomination is valid
+  suppliedFrom   EventAttendeeGameList @relation(fields: [suppliedFromId], references: [id])
+  suppliedFromId String                @map("supplied_from_id")
+
+  status NominationStatus @default(Open)
+
+  votes      EventGameVote[]
+  elevatedTo EventGame? // set when vote succeeds, null while pending
+
+  @@index([eventId])
+  @@index([occurrenceId])
+  @@index([suppliedFromId])
+  @@map("event_game_nominations")
+}
+
+enum GameAdditionMode {
+  Direct // attendees add straight to EventGame, no process required
+  RequiresVote // nomination must pass a vote before elevation
+  HostApproval // nomination goes to host before becoming an EventGame
+  HostOnly // only host/co-host can add games
+
+  @@map("game_addition_modes")
+}
+
+enum NominationStatus {
+  Open // accepting votes (RequiresVote mode)
+  AwaitingApproval // pending host decision (HostApproval mode)
+  Approved // host approved, elevated to EventGame
+  Passed // vote succeeded, elevated to EventGame
+  Failed // vote did not succeed
+  QuorumNotMet // voting ended without reaching quorum (RequiresVote mode)
+  Rejected // host rejected (HostApproval mode)
+  Withdrawn // nominator pulled before resolution
+
+  @@map("nomination_statuses")
+}

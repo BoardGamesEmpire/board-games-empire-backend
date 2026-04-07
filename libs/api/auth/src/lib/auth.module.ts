@@ -2,12 +2,14 @@ import { DatabaseModule, DatabaseService } from '@bge/database';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { authFactory } from './auth-factory';
 import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
 import { AUTH_INSTANCE } from './constants';
 import type { AuthType } from './interfaces';
+import { UserProvisioningListener } from './provisioning/user-provisioning.listener';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
 import { StrategyController, StrategyService } from './strategy';
 
@@ -29,13 +31,14 @@ import { StrategyController, StrategyService } from './strategy';
         databaseClient: DatabaseService,
         configService: ConfigService,
         cache: Cache,
-        userProvisioningService: UserProvisioningService,
-      ) => authFactory(databaseClient, configService, cache, userProvisioningService),
-      inject: [DatabaseService, ConfigService, CACHE_MANAGER, UserProvisioningService],
+        eventEmitter: EventEmitter2,
+      ) => authFactory(databaseClient, configService, cache, eventEmitter),
+      inject: [DatabaseService, ConfigService, CACHE_MANAGER, EventEmitter2],
     },
     AuthService,
     StrategyService,
     UserProvisioningService,
+    UserProvisioningListener,
   ],
   exports: [AuthService, AUTH_INSTANCE],
 })

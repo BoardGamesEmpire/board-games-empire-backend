@@ -1,0 +1,52 @@
+/**
+ * This model defines the rules for recurring events. It captures the pattern of recurrence (e.g., weekly, biweekly, monthly),
+ * the template event from which instances are generated, and various settings related to host approval and notifications.
+ * The system will generate individual Event instances based on these rules, which can then be managed like any other event.
+ */
+model EventRecurrenceRule {
+  id String @id @default(cuid(2))
+
+  // The template event — attendees, default policy, default game lineup are copied from here
+  templateEvent   Event  @relation(fields: [templateEventId], references: [id])
+  templateEventId String @map("template_event_id")
+
+  frequency       RecurrenceFrequency
+  interval        Int                 @default(1) // every N weeks/months
+  dayOfWeek       Int?                @map("day_of_week") // 0-6, used with Weekly
+  weekOfMonth     Int?                @map("week_of_month") // 1-5, "first Friday" = dayOfWeek:5, weekOfMonth:1
+  startTime       String              @map("start_time") // "19:00" — time-of-day, timezone on Event
+  defaultDuration Int?                @map("default_duration") // minutes
+
+  // host must approve each generated occurrence before it is created and becomes visible to attendees
+  requiresHostApproval       Boolean @default(true) @map("requires_host_approval")
+  notifyAttendeesOnSchedule  Boolean @default(true) @map("notify_attendees_on_schedule")
+  notifyAttendeesOnRejection Boolean @default(true) @map("notify_attendees_on_rejection")
+
+  generatesInAdvanceDays Int @default(14) @map("generates_in_advance_days")
+
+  endsAt   DateTime? @map("ends_at") @db.Timestamptz(3)// null = indefinite
+  isActive Boolean   @default(true) @map("is_active")
+
+  generatedEvents Event[] @relation("RecurringEventInstances")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("event_recurrence_rules")
+}
+
+enum RecurrenceFrequency {
+  Weekly
+  BiWeekly
+  Monthly // "first Friday of the month" via dayOfWeek + weekOfMonth
+
+  @@map("recurrence_frequencies")
+}
+
+enum RecurrenceInstanceStatus {
+  PendingApproval
+  Approved
+  Rejected
+
+  @@map("recurrence_instance_statuses")
+}

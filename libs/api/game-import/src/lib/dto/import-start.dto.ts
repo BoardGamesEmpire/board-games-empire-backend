@@ -1,18 +1,16 @@
+import { ApiProperty } from '@nestjs/swagger';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class ImportStartDto {
-  /**
-   * Links WS events back to the originating search session
-   */
+  @ApiProperty({ description: 'Links WS events back to the originating search session', format: 'uuid' })
   @IsUUID()
   correlationId!: string;
 
+  @ApiProperty({ description: 'Gateway that owns the external game record' })
   @IsString()
   gatewayId!: string;
 
-  /**
-   * External ID of the base game on the gateway
-   */
+  @ApiProperty({ description: 'External ID of the base game on the gateway' })
   @IsString()
   externalId!: string;
 
@@ -20,6 +18,7 @@ export class ImportStartDto {
    * External IDs of specific expansions to import alongside the base game.
    * Empty array = base game only. Expansions must belong to the same gateway.
    */
+  @ApiProperty({ type: [String], description: 'External IDs of expansions to co-import. Empty = base game only.' })
   @IsArray()
   @IsString({ each: true })
   @IsOptional()

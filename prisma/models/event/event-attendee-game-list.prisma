@@ -1,3 +1,9 @@
+/**
+ * This model represents the list of games associated with a specific attendee
+ * of an event. It allows attendees to curate a selection of games they are
+ * willing to bring to the event, which can then be used for nomination and
+ * scheduling purposes.
+ */
 model EventAttendeeGameList {
   id String @id @default(cuid(2))
 
@@ -6,6 +12,12 @@ model EventAttendeeGameList {
 
   collection   GameCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   collectionId String         @map("collection_id")
+
+  nominations EventGameNomination[]
+
+  // Games from this list that the user is responsible for bringing to the
+  // event — either as nominations or direct adds.
+  suppliedGames EventGame[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 

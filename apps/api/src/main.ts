@@ -81,7 +81,10 @@ async function bootstrap() {
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup(globalPrefix, app, document);
+    SwaggerModule.setup(globalPrefix, app, document, {
+      jsonDocumentUrl: `${globalPrefix}/swagger/json`,
+      yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
+    });
   }
 
   const redisAdapter = new RedisIoAdapter(app);

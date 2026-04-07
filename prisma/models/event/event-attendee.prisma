@@ -1,11 +1,14 @@
 model EventAttendee {
-  id      String @id @default(cuid(2))
+  id String @id @default(cuid(2))
+
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
   eventId String @map("event_id")
 
+  // nullable to allow for guest attendees who don't have a user account
   user   User?   @relation(fields: [userId], references: [id])
   userId String? @map("user_id")
 
+  // For guests without a user account, we still want to capture their name and email for communication purposes.
   guestName  String? @map("guest_name")
   guestEmail String? @map("guest_email")
 
@@ -17,8 +20,16 @@ model EventAttendee {
   invitedById String?         @map("invited_by_id")
   invitees    EventAttendee[] @relation("InvitedAttendees")
 
-  gamesContributing EventGame[]
-  bringingGames     EventAttendeeGameList[]
+  // Games this attendee is willing to physically bring to the event.
+  // Forms the eligible pool from which nominations must be sourced.
+  availableGames EventAttendeeGameList[]
+
+  // Nominations this attendee has put forward for voting.
+  // The nominated game does not have to come from their own availableGames list.
+  nominations EventGameNomination[] @relation("Nominations")
+
+  // Games this attendee added directly to the event lineup.
+  scheduledGames EventGame[] @relation("ScheduledBy")
 
   notes    String?
   rsvpDate DateTime? @map("rsvp_date") @db.Timestamptz(3)

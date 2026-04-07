@@ -21,9 +21,9 @@ export class GameController {
   private readonly logger = new Logger(GameController.name);
 
   constructor(
-    private gameService: GameService,
+    private readonly gameService: GameService,
     private readonly cls: ClsService,
-    @Inject(CACHE_MANAGER) private cache: Cache,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
   @ApiOperation({ summary: 'List games' })
@@ -47,6 +47,8 @@ export class GameController {
     return from(this.gameService.getGame(id, abilities)).pipe(map((game) => ({ game })));
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Game))
   @Post()
   createGame(@Session() session: UserSession, @Body() createGameDto: CreateGameDto) {
@@ -57,6 +59,8 @@ export class GameController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Game))
   @Patch(':id')
   updateGame(@Param('id') id: string, @Session() session: UserSession, @Body() updateGameDto: UpdateGameDto) {
@@ -67,6 +71,8 @@ export class GameController {
     );
   }
 
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Game))
   @Delete(':id')
   deleteGame(@Param('id') id: string) {

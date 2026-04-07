@@ -1,4 +1,8 @@
-// TODO: event [category] game restrictions?
+/**
+ * The event model represents a planned gathering of players, which may consist of one or more
+ * occurrences (scheduled dates/times). Events can be in various stages of planning and may have
+ * associated games, attendees, and other details.
+ */
 model Event {
   id String @id @default(cuid(2))
 
@@ -8,39 +12,49 @@ model Event {
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String @map("created_by_id")
 
-  title       String
-  status      EventStatus @default(Planning)
+  title          String
+  status         EventStatus         @default(Planning)
+  schedulingMode EventSchedulingMode @default(Fixed) @map("scheduling_mode")
+
   image       String?
   description String?
-  location    String?
+  location    String? // event-level default; occurrences may override
   url         String?
-  type        EventType   @default(CasualGathering)
 
+  type       EventType  @default(CasualGathering)
   visibility Visibility @default(Friends)
 
-  startDate DateTime  @map("start_date") @db.Timestamptz(3)
-  endDate   DateTime? @map("end_date") @db.Timestamptz(3)
+  recurrenceRule   EventRecurrenceRule?      @relation("RecurringEventInstances", fields: [recurrenceRuleId], references: [id])
+  recurrenceRuleId String?                   @map("recurrence_rule_id")
+  recurrenceStatus RecurrenceInstanceStatus? @map("recurrence_status")
 
-  eventPolicy EventPolicy?
-
+  eventRecurrences EventRecurrenceRule[]
+  nominations      EventGameNomination[]
+  occurrences      EventOccurrence[]
+  attendees        EventAttendee[]
+  eventDocuments   EventDocument[]
   eventImages      EventImage[]
   eventVideos      EventVideo[]
-  eventDocuments   EventDocument[]
-  gamePlaySessions GamePlaySession[]
-  attendees        EventAttendee[]
-  votedGames       EventGameVote[]
   suggestedGames   EventGame[]
   invites          Invite[]
 
-  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  eventPolicy EventPolicy?
 
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([householdId])
   @@index([createdById])
-  @@index([startDate])
   @@map("events")
+}
+
+enum EventSchedulingMode {
+  Fixed // single known date — one confirmed occurrence
+  Poll // availability poll in progress — occurrences are proposals
+  MultiDay // multiple confirmed occurrences, each with own schedule
+
+  @@map("event_scheduling_modes")
 }
 
 enum EventStatus {

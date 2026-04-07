@@ -1,6 +1,8 @@
 import {
   Action,
   ContentType,
+  Event,
+  EventSchedulingMode,
   EventStatus,
   EventType,
   Game,
@@ -196,11 +198,7 @@ export function makeInvite(inviterId: string, overrides: Partial<Invite> = {}): 
   };
 }
 
-export function makeEvent(
-  householdId: string,
-  createdById: string,
-  overrides: Partial<import('@bge/database').Event> = {},
-): import('@bge/database').Event {
+export function makeEvent(householdId: string, createdById: string, overrides: Partial<Event> = {}): Event {
   const n = seq();
   return {
     id: `event-${n}`,
@@ -210,12 +208,13 @@ export function makeEvent(
     status: EventStatus.Planning,
     image: null,
     description: null,
+    recurrenceRuleId: null,
+    recurrenceStatus: null,
+    schedulingMode: EventSchedulingMode.Fixed,
     location: null,
     url: null,
     type: EventType.CasualGathering,
     visibility: Visibility.Friends,
-    startDate: new Date('2025-01-01T18:00:00Z'),
-    endDate: null,
     deletedAt: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),

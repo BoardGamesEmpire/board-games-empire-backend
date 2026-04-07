@@ -1,8 +1,9 @@
 import { passkey } from '@better-auth/passkey';
-import type { PrismaClient, User } from '@bge/database';
+import type { PrismaClient } from '@bge/database';
 import { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth, BetterAuthPlugin } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import {
@@ -17,14 +18,15 @@ import {
   openAPI,
   twoFactor,
 } from 'better-auth/plugins';
+import { User } from 'better-auth/types';
 import process from 'node:process';
-import { UserProvisioningService } from './provisioning/user-provisioning.service';
+import { AuthEvent } from './constants';
 
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
   cache?: Cache,
-  userProvisioningService?: UserProvisioningService,
+  eventEmitter?: EventEmitter2,
 ) {
   const logger = new Logger('AuthFactory');
   logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
@@ -117,12 +119,13 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          async after(user: any) {
-            if (!userProvisioningService) {
-              throw new Error('UserProvisioningService not provided to authFactory');
+          async after(user: User) {
+            if (!eventEmitter) {
+              throw new Error('EventEmitter2 not provided to authFactory');
             }
 
-            await userProvisioningService.provisionNewUser(user as User);
+            // TODO: emit { userId } instead of full user object and let listeners fetch what they need
+            eventEmitter.emit(AuthEvent.UserCreated, user);
           },
         },
       },
@@ -132,7 +135,7 @@ export function authFactory(
           get(key: string) {
             return cache.get(`auth_${key}`);
           },
-          set(key: string, ...params: [value: any, ttl?: number]) {
+          set(key: string, ...params: [value: unknown, ttl?: number]) {
             return cache.set(`auth_${key}`, ...params);
           },
           async delete(key: string) {

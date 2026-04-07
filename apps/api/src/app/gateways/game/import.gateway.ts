@@ -1,6 +1,6 @@
 import { AuthService } from '@bge/auth';
 import type { ImportJobCompletedEvent, ImportJobFailedEvent } from '@bge/game-import';
-import { ClientImportEvents, GameImportProducerService, ImportEvents, ImportStartDto } from '@bge/game-import';
+import { ClientGameImportEvents, GameImportProducerService, ImportEvents, ImportStartDto } from '@bge/game-import';
 import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import {
@@ -45,7 +45,7 @@ export class GameImportGateway extends AuthenticatedGateway implements OnGateway
       transform: true,
     }),
   )
-  @SubscribeMessage(ClientImportEvents.ImportStart)
+  @SubscribeMessage(ClientGameImportEvents.ImportStart)
   async handleImportStart(@ConnectedSocket() client: Socket, @MessageBody() dto: ImportStartDto): Promise<void> {
     const userId = (client.data as WsClientData).userId;
     this.logger.log(
@@ -55,7 +55,7 @@ export class GameImportGateway extends AuthenticatedGateway implements OnGateway
     const result = await firstValueFrom(this.producer.enqueue(dto, userId));
     await client.join(`batch:${result.batchId}`);
 
-    client.emit(ClientImportEvents.ImportQueued, {
+    client.emit(ClientGameImportEvents.ImportQueued, {
       batchId: result.batchId,
       baseJobId: result.baseJobId,
       expansionJobIds: result.expansionJobIds,
@@ -65,7 +65,7 @@ export class GameImportGateway extends AuthenticatedGateway implements OnGateway
 
   @OnEvent(ImportEvents.JobCompleted, { async: true })
   onJobCompleted(event: ImportJobCompletedEvent): void {
-    this.server.to(`batch:${event.batchId}`).emit(ClientImportEvents.ImportJobProgress, {
+    this.server.to(`batch:${event.batchId}`).emit(ClientGameImportEvents.ImportJobProgress, {
       batchId: event.batchId,
       jobId: event.jobId,
       gameId: event.gameId,
@@ -74,7 +74,7 @@ export class GameImportGateway extends AuthenticatedGateway implements OnGateway
 
   @OnEvent(ImportEvents.JobFailed, { async: true })
   onJobFailed(event: ImportJobFailedEvent): void {
-    this.server.to(`batch:${event.batchId}`).emit(ClientImportEvents.ImportJobFailed, {
+    this.server.to(`batch:${event.batchId}`).emit(ClientGameImportEvents.ImportJobFailed, {
       batchId: event.batchId,
       jobId: event.jobId,
       error: event.error,

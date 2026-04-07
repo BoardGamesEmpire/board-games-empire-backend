@@ -89,6 +89,9 @@
     },
     {
       "path": "./libs/api/game-search"
+    },
+    {
+      "path": "./libs/api/event"
     }
   ]
 }

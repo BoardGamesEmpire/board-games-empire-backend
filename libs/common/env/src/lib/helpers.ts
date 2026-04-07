@@ -1,4 +1,4 @@
-export function isTrue(value: any) {
+export function isTrue(value: unknown): boolean {
   return value?.toString().toLowerCase() === 'true';
 }
 
