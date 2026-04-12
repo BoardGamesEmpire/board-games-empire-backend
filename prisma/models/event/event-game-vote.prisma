@@ -4,8 +4,8 @@ model EventGameVote {
   nomination            EventGameNomination @relation(fields: [eventGameNominationId], references: [id])
   eventGameNominationId String              @map("event_game_nomination_id")
 
-  user   User   @relation(fields: [userId], references: [id])
-  userId String @map("user_id")
+  attendee   EventAttendee   @relation(fields: [attendeeId], references: [id])
+  attendeeId String @map("attendee_id")
 
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
   occurrenceId String?          @map("occurrence_id")
@@ -14,8 +14,8 @@ model EventGameVote {
   priority Int? // Optional: rank preferences (1=highest)
   comment  String?
 
-  @@unique([eventGameNominationId, userId])
-  @@index([userId])
+  @@unique([eventGameNominationId, attendeeId])
+  @@index([attendeeId])
   @@map("event_game_votes")
 }
 

@@ -1,11 +1,11 @@
 import 'dotenv/config';
 
+import { authFactory } from '@bge/auth';
+import { PrismaClient } from '@bge/database';
 import { PrismaPg } from '@prisma/adapter-pg';
 import assert from 'node:assert';
 import console from 'node:console';
 import process from 'node:process';
-import { authFactory } from '../libs/api/auth/src/lib/auth-factory';
-import { PrismaClient } from '../libs/database/src';
 
 assert(process.env.BETTER_AUTH_SECRET, 'BETTER_AUTH_SECRET is not set');
 assert(process.env.BETTER_AUTH_URL, 'BETTER_AUTH_URL is not set');

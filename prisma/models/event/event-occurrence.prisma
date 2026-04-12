@@ -22,7 +22,7 @@ model EventOccurrence {
   sortOrder Int              @default(0) @map("sort_order")
 
   // Per-occurrence policy override — null means inherit from event-level EventPolicy
-  occurrencePolicy EventOccurrencePolicy?
+  policy EventOccurrencePolicy?
 
   availabilityVotes EventAvailabilityVote[]
   gameNominations   EventGameNomination[]

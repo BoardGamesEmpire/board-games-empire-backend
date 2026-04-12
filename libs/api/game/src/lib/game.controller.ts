@@ -86,6 +86,6 @@ export class GameController {
   private getAbilities() {
     const userAbility = this.cls.get<AppAbility>('userAbility');
     const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter((a) => a);
+    return [userAbility, apiAbility].filter(Boolean);
   }
 }

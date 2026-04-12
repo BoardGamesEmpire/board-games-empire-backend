@@ -2,6 +2,7 @@ import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
+import { EventModule } from '@bge/event';
 import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportModule } from '@bge/game-import';
@@ -115,6 +116,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
 
     // Feature modules
     AuthModule,
+    EventModule,
     GameGatewayModule,
     GameImportModule,
     GameModule,

@@ -2,13 +2,18 @@ import { EventSchedulingMode, EventType, Visibility } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsArray, IsEnum, IsOptional, IsString, IsUrl, ValidateNested } from 'class-validator';
-import { CreateEventOccurrenceDto } from './create-event-occurrence.dto';
+import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurrence.dto';
 import { CreateEventPolicyDto } from './create-event-policy.dto';
 
 export class CreateEventDto {
   @ApiProperty()
   @IsString()
   title!: string;
+
+  @ApiPropertyOptional({ description: 'Optional household this event is associated with' })
+  @IsString()
+  @IsOptional()
+  householdId?: string;
 
   @ApiPropertyOptional()
   @IsString()
@@ -44,6 +49,17 @@ export class CreateEventDto {
   @IsEnum(EventSchedulingMode)
   @IsOptional()
   schedulingMode?: EventSchedulingMode;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'User IDs to invite to the event at creation time. ' +
+      'Each user is added as an EventParticipant with Invited status.',
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  inviteUserIds?: string[];
 
   // Fixed mode — single occurrence with an optional start date.
   // Modelled as an array of one for API consistency with Poll/MultiDay;

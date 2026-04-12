@@ -31,6 +31,9 @@ model EventAttendee {
   // Games this attendee added directly to the event lineup.
   scheduledGames EventGame[] @relation("ScheduledBy")
 
+  gameVotes EventGameVote[]
+  availabilityVotes EventAvailabilityVote[]
+
   notes    String?
   rsvpDate DateTime? @map("rsvp_date") @db.Timestamptz(3)
 

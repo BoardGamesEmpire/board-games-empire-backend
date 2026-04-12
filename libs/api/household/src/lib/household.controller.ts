@@ -2,7 +2,20 @@ import { Action, ResourceType } from '@bge/database';
 import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
-import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpStatus,
+  Inject,
+  Logger,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { ClsService } from 'nestjs-cls';
@@ -25,8 +38,8 @@ export class HouseholdController {
     @Inject(CACHE_MANAGER) private cache: Cache,
   ) {}
 
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get()
   getHouseholdsForUser(@Query() pagination: PaginationQueryDto) {
@@ -36,8 +49,8 @@ export class HouseholdController {
     ).pipe(map((households) => ({ households })));
   }
 
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Household))
   @Post()
   create(@Session() session: UserSession, @Body() createHouseholdDto: CreateHouseholdDto) {
@@ -47,8 +60,8 @@ export class HouseholdController {
     );
   }
 
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get(':id')
   getById(@Param('id') id: string) {
@@ -60,8 +73,8 @@ export class HouseholdController {
     );
   }
 
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Household))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateHouseholdDto: UpdateHouseholdDto) {
@@ -71,8 +84,8 @@ export class HouseholdController {
     ).pipe(map((household) => ({ message: `Household with ID ${id} updated successfully`, household })));
   }
 
-  @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: HttpStatus.UNAUTHORIZED, description: 'Authentication required' })
+  @ApiResponse({ status: HttpStatus.FORBIDDEN, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Household))
   @Delete(':id')
   delete(@Param('id') id: string) {

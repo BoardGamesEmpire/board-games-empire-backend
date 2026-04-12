@@ -4,7 +4,8 @@ import { CanActivate, ModuleMetadata, Type } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as jest from 'jest-mock';
 import { ClsService } from 'nestjs-cls';
-import { createMockDatabaseService, MockDatabaseService } from './mock-database.service.js';
+import type { MockDatabaseService } from './mock-database.service.js';
+import { createMockDatabaseService } from './mock-database.service.js';
 
 // ---------------------------------------------------------------------------
 // PassThroughGuard — canActivate always returns true.
@@ -81,6 +82,7 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
 export async function createTestingModuleWithDb(options: CreateTestingModuleOptions): Promise<TestingModuleWithDb> {
   const { overrideGuards = [], ...metadata } = options;
 
+  const cache = createMockCacheManager();
   const db = createMockDatabaseService();
   const cls = createMockClsService();
 
@@ -90,7 +92,7 @@ export async function createTestingModuleWithDb(options: CreateTestingModuleOpti
       ...(metadata.providers ?? []),
       { provide: DatabaseService, useValue: db },
       { provide: ClsService, useValue: cls },
-      { provide: CACHE_MANAGER, useValue: createMockCacheManager() },
+      { provide: CACHE_MANAGER, useValue: cache },
     ],
   });
 
