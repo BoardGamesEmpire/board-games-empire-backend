@@ -65,6 +65,9 @@
       "path": "../../libs/api/game/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/event/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {

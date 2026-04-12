@@ -14,9 +14,10 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@bge/testing",
+    "name": "@board-games-empire/testing",
     "tags": [
-      "test"
+      "test",
+      "testing"
     ]
   },
   "dependencies": {}

@@ -14,7 +14,7 @@ export class NotificationsService {
       data: {
         userId: input.userId,
         type: input.type,
-        payload: (input.payload ?? {}) as InputJsonValue,
+        payload: input.payload ?? {},
       },
     });
   }

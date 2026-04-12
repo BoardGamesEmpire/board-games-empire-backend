@@ -6,8 +6,8 @@
 model Event {
   id String @id @default(cuid(2))
 
-  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  householdId String    @map("household_id")
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String?    @map("household_id")
 
   createdBy   User   @relation(fields: [createdById], references: [id])
   createdById String @map("created_by_id")
@@ -38,7 +38,7 @@ model Event {
   suggestedGames   EventGame[]
   invites          Invite[]
 
-  eventPolicy EventPolicy?
+  policy EventPolicy?
 
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)

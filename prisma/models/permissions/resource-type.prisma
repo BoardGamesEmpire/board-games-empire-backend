@@ -1,20 +1,43 @@
 enum ResourceType {
+  // ─── System ─────────────────────────────────────────────
+  System
+  Notification
+  Media
+
+  // ─── User ───────────────────────────────────────────────
+  User
+  UserProfile
+  UserGameCustomization
+
+  // ─── Game ───────────────────────────────────────────────
   Campaign
-  Event
   Game
   GameCollection
   GameCreationRequest
   GameCustomization
   GameGateway
+  GamePlayResult          
   GamePlaySession
   GameSharing
-  Household
-  Notification
   RuleVariant
-  System
-  User
-  UserGameCustomization
-  UserProfile
+  SessionPlayer           
+
+  // ─── Household ──────────────────────────────────────────
+  Household
+  HouseholdMember         
+  HouseholdRole           
+  Invite                  
+
+  // ─── Event ──────────────────────────────────────────────
+  Event
+  EventAttendee           
+  EventAttendeeGameList   
+  EventAvailabilityVote   
+  EventGame               
+  EventGameNomination     
+  EventGameVote           
+  EventOccurrence         
+  EventPolicy             
 
   @@map("resource_types")
 }

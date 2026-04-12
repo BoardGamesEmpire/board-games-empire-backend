@@ -1,4 +1,4 @@
-import { NotificationType } from '@bge/database';
+import type { NotificationType } from '@bge/database';
 
 export interface NotificationPayload {
   baseGameId?: string;
@@ -10,8 +10,8 @@ export interface NotificationPayload {
   thumbnail?: string | null;
 }
 
-export interface CreateNotificationInput {
-  payload: NotificationPayload;
+export interface CreateNotificationInput<Payload extends Record<string, any> = Record<string, any>> {
+  payload: Payload;
   type: NotificationType;
   userId: string;
 }

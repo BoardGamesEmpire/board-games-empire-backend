@@ -19,6 +19,12 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/notifications/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {

@@ -25,54 +25,16 @@ type MockedMethods<T> = {
  * on both the Prisma delegate shape and the jest mock API:
  *   db.user.findMany.mockResolvedValue([makeUser()])
  *   db.user.create.mockRejectedValue(new Error('conflict'))
+ *
+ * $transaction is re-typed so tests can pass a callback that receives
+ * MockDatabaseService directly, avoiding the structural mismatch with the
+ * full PrismaClient type:
+ *   db.$transaction.mockImplementation((cb) => cb(db))
  */
-export type MockDatabaseService = MockedMethods<
-  Pick<
-    DatabaseService,
-    | '$connect'
-    | '$disconnect'
-    | '$transaction'
-    | '$executeRaw'
-    | '$executeRawUnsafe'
-    | '$queryRaw'
-    | '$queryRawUnsafe'
-    | 'account'
-    | 'apikey'
-    | 'category'
-    | 'designer'
-    | 'event'
-    | 'eventAttendee'
-    | 'eventAttendeeRole'
-    | 'excludedGame'
-    | 'family'
-    | 'game'
-    | 'gameCollection'
-    | 'gameGateway'
-    | 'gamePlaySession'
-    | 'gameSource'
-    | 'household'
-    | 'householdMember'
-    | 'householdRole'
-    | 'invite'
-    | 'job'
-    | 'language'
-    | 'mechanic'
-    | 'passkey'
-    | 'permission'
-    | 'publisher'
-    | 'role'
-    | 'rolePermission'
-    | 'ruleVariant'
-    | 'session'
-    | 'sessionPlayer'
-    | 'systemSetting'
-    | 'user'
-    | 'userPermission'
-    | 'userRole'
-    | 'userPreferences'
-    | 'userProfile'
-  >
->;
+type _MockDatabaseBase = MockedMethods<Pick<DatabaseService, keyof DatabaseService>>;
+export type MockDatabaseService = Omit<_MockDatabaseBase, '$transaction'> & {
+  $transaction: jest.MockedFunction<(fn: (tx: MockDatabaseService) => Promise<unknown>) => Promise<unknown>>;
+};
 
 /**
  * A jest.fn() delegate factory for a single Prisma model.
@@ -127,7 +89,16 @@ export function createMockDatabaseService(): MockDatabaseService {
     designer: mockDelegate(),
     event: mockDelegate(),
     eventAttendee: mockDelegate(),
+    eventAttendeeGameList: mockDelegate(),
     eventAttendeeRole: mockDelegate(),
+    eventAvailabilityVote: mockDelegate(),
+    eventCategory: mockDelegate(),
+    eventGame: mockDelegate(),
+    eventGameNomination: mockDelegate(),
+    eventGameVote: mockDelegate(),
+    eventOccurrence: mockDelegate(),
+    eventOccurrencePolicy: mockDelegate(),
+    eventPolicy: mockDelegate(),
     excludedGame: mockDelegate(),
     family: mockDelegate(),
     game: mockDelegate(),
@@ -153,8 +124,8 @@ export function createMockDatabaseService(): MockDatabaseService {
     systemSetting: mockDelegate(),
     user: mockDelegate(),
     userPermission: mockDelegate(),
-    userRole: mockDelegate(),
     userPreferences: mockDelegate(),
     userProfile: mockDelegate(),
+    userRole: mockDelegate(),
   } as unknown as MockDatabaseService;
 }
