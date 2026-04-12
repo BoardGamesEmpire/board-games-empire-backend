@@ -160,7 +160,7 @@ export class EventGameNominationController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Event))
   @Post('direct-add')
   directAdd(@Param('eventId') eventId: string, @Session() session: UserSession, @Body() dto: DirectAddGameDto) {
-    this.resolveAttendeeId(eventId, session.user.id).pipe(
+    return this.resolveAttendeeId(eventId, session.user.id).pipe(
       concatMap((attendeeId) => this.nominationService.directAddGame(eventId, attendeeId, dto)),
       tap((eventGame) =>
         this.logger.log(`Game ${eventGame.gameId} directly added to event ${eventId} by ${session.user.id}`),

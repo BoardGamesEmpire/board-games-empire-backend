@@ -161,7 +161,7 @@ export class EventOccurrenceService {
 
   async cancelOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
-      declinedAt: new Date(),
+      cancelledAt: new Date(),
     });
   }
 
@@ -374,7 +374,7 @@ const OCCURRENCE_INCLUDE = {
       },
     },
   },
-  occurrencePolicy: true,
+  policy: true,
   games: {
     select: {
       id: true,

@@ -318,8 +318,10 @@ export class EventGameNominationService {
       include: NOMINATION_INCLUDE,
     });
 
+    let elevatedGameId: string | null = null;
     if (decision === NominationStatus.Approved) {
-      await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
+      const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
+      elevatedGameId = eventGame.id;
     }
 
     this.eventEmitter.emit(NominationEvent.NominationResolved, {
@@ -327,7 +329,7 @@ export class EventGameNominationService {
       nominationId,
       gameId: nomination.gameId,
       status: decision,
-      elevatedToEventGameId: decision === NominationStatus.Approved ? nominationId : null,
+      elevatedToEventGameId: elevatedGameId,
     } satisfies NominationResolvedEvent);
 
     return updated;
@@ -371,7 +373,7 @@ export class EventGameNominationService {
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
       where: { id: nominationId },
-      select: { gameId: true, suppliedFromId: true },
+      select: { gameId: true, suppliedFromId: true, nominatedById: true },
     });
 
     const eventGame = await this.db.eventGame.create({
@@ -389,7 +391,7 @@ export class EventGameNominationService {
       eventId,
       eventGameId: eventGame.id,
       gameId: nomination.gameId,
-      addedByAttendeeId: '',
+      addedByAttendeeId: nomination.nominatedById,
     } satisfies GameAddedToEventPayload);
 
     return eventGame;
@@ -456,7 +458,7 @@ const NOMINATION_INCLUDE = {
   nominatedBy: {
     select: {
       id: true,
-      userId: true,
+      attendeeId: true,
       user: { select: { id: true, username: true } },
     },
   },
@@ -473,7 +475,7 @@ const NOMINATION_INCLUDE = {
   votes: {
     select: {
       id: true,
-      userId: true,
+      attendeeId: true,
       voteType: true,
       priority: true,
       comment: true,

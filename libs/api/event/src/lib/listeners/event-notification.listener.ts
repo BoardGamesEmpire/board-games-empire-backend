@@ -317,6 +317,11 @@ export class EventNotificationListener {
     await this.notifyAttendeesOfOccurrenceChange(event, NotificationType.EventOccurrenceDeclined);
   }
 
+  @OnEvent(OccurrenceEvents.OccurrenceCancelled, { async: true })
+  async onOccurrenceCancelled(event: OccurrenceStatusChangedEvent): Promise<void> {
+    await this.notifyAttendeesOfOccurrenceChange(event, NotificationType.EventOccurrenceCanceled);
+  }
+
   private async notifyAttendeesOfOccurrenceChange(
     event: OccurrenceStatusChangedEvent,
     type: NotificationType,
@@ -351,6 +356,8 @@ export class EventNotificationListener {
       });
 
       const inputs: CreateNotificationInput[] = voters
+        // filters guest attendees and any weird edge cases where userId is null
+        .filter((v) => v.attendee.userId)
         .filter((v) => v.attendee.userId !== eventRecord.createdById)
         .map((v) => ({
           userId: v.attendee.userId!,

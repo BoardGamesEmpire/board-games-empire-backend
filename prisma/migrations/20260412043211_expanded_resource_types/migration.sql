@@ -88,6 +88,9 @@ ALTER TABLE "event_game_votes" DROP COLUMN "user_id",
 ADD COLUMN     "attendee_id" TEXT NOT NULL;
 
 -- AlterTable
+ALTER TABLE "event_occurrences" ADD COLUMN     "cancelled_at" TIMESTAMPTZ(3);
+
+-- AlterTable
 ALTER TABLE "events" ALTER COLUMN "household_id" DROP NOT NULL;
 
 -- CreateIndex
