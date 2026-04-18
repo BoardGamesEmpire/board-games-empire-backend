@@ -106,16 +106,16 @@ message PlatformData {
 }
 
 // ISO 639-3 (3-char code) is the stable identifier — not all languages have
-// an ISO 639-1 (2-char) code, so iso639_1 is optional.
+// an ISO 639-1 (2-char) code, so iso6391 is optional.
 message LanguageData {
   // "eng", "fra", "zho"
-  string          iso639_3 = 1;
+  string          iso6393 = 1;
 
   // "en",  "fr",  "zh"  — absent for minority languages
-  optional string iso639_1 = 2;
+  optional string iso6391 = 2;
 
   // "English", "French", "Chinese"
-  string          name     = 3;
+  string          name    = 3;
 }
 
 

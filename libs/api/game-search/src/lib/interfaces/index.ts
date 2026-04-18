@@ -1,3 +1,4 @@
+import type { SearchGameResult } from '@board-games-empire/proto-gateway';
 import type { Subscription } from 'rxjs';
 
 export interface WsClientData {
@@ -7,4 +8,9 @@ export interface WsClientData {
    * correlationId → active gRPC stream subscription
    */
   activeSearches: Map<string, Subscription>;
+}
+
+export interface SearchGamesResponse {
+  correlationId: string;
+  results: SearchGameResult[];
 }

@@ -1,3 +1,4 @@
+import { env } from '@bge/env';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -10,14 +11,19 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
   constructor(private readonly configService: ConfigService) {
     Logger.log('Initializing DatabaseService', DatabaseService.name);
 
+    const connectionString = configService.getOrThrow<string>('database.url');
+    const schema = new URL(connectionString).searchParams.get('schema') ?? configService.get<string>('database.schema');
+
     super({
-      adapter: new PrismaPg({
-        connectionString: configService.getOrThrow<string>('database.url'),
-      }),
-      log:
-        process.env.NODE_ENV === 'development' || !process.env.NODE_ENV
-          ? ['query', 'info', 'warn', 'error']
-          : ['error'],
+      adapter: new PrismaPg(
+        {
+          connectionString,
+        },
+        {
+          schema,
+        },
+      ),
+      log: env.isDevelopment ? ['query', 'info', 'warn', 'error'] : ['error'],
     });
   }
 

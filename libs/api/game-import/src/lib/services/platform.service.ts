@@ -55,7 +55,7 @@ export class PlatformUpsertService {
   }
 
   /**
-   * Upserts a Language record on iso639_3 (the stable key).
+   * Upserts a Language record on iso6393 (the stable key).
    * Does not overwrite systemSupported — seeds own that flag.
    */
   async upsertLanguage(data: LanguageData): Promise<string> {
@@ -67,10 +67,7 @@ export class PlatformUpsertService {
         name: data.name,
         systemSupported: false,
       },
-      update: {
-        // Never overwrite abbreviation or systemSupported — seeds own those.
-        name: data.name,
-      },
+      update: {},
       select: { id: true },
     });
 
@@ -103,6 +100,13 @@ export class PlatformUpsertService {
       });
 
       for (const lang of release.languages ?? []) {
+        if (!lang.iso6393) {
+          this.logger.warn(
+            `Release ${releaseId} has language with missing iso6393 code, skipping: ${JSON.stringify(lang)}`,
+          );
+          continue;
+        }
+
         const languageId = await this.upsertLanguage(lang);
         await this.db.gameReleaseLanguage.upsert({
           where: { releaseId_languageId: { releaseId, languageId } },

@@ -124,7 +124,6 @@ export function resolveLanguageIds(locale: string | undefined): number[] {
   }
 
   const normalized = locale.trim().toLowerCase();
-
   if (normalized.includes('-')) {
     const match = EXACT_MAP.get(normalized);
     return match ? [match.id] : [];

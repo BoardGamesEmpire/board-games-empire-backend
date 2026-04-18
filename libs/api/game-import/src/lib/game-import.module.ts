@@ -4,6 +4,7 @@ import { NotificationsServiceModule } from '@bge/notifications-service';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { FlowProducerNames, QueueNames } from './constants/queue.constants';
+import { GameImportController } from './game-import.controller';
 import { GameWatchListener } from './listeners/game-watch.listener';
 import { ImportActivityListener } from './listeners/import-activity.listener';
 import { NotificationListener } from './listeners/notification.listener';
@@ -34,6 +35,7 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     NotificationListener,
     ImportActivityListener,
   ],
+  controllers: [GameImportController],
   exports: [GameImportProducerService],
 })
 export class GameImportModule {}

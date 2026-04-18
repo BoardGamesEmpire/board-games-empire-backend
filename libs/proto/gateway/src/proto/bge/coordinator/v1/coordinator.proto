@@ -98,6 +98,7 @@ message CoordinatorFetchGameRequest {
   string correlation_id = 1;
   string gateway_id = 2;
   string external_id = 3;
+  optional string locale = 4;
 }
 
 message CoordinatorFetchGameResponse {

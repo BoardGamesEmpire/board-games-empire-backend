@@ -77,10 +77,13 @@ export class GameGatewayService {
           } satisfies proto.FetchGameResponse;
         }
 
+        const game = toGameData(games[0]);
+        this.logger.debug(`fetchGame mapped IGDB game to GameData: ${game.title} (externalId: ${game.externalId})`);
+
         return {
           correlationId: request.correlationId,
           status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game: toGameData(games[0]),
+          game,
         } satisfies proto.FetchGameResponse;
       }),
 

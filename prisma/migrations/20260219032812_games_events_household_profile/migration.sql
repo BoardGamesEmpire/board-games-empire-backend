@@ -1243,7 +1243,7 @@ CREATE UNIQUE INDEX "categories_name_key" ON "categories"("name");
 CREATE UNIQUE INDEX "game_categories_game_id_category_id_key" ON "game_categories"("game_id", "category_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "unique_primary_category_per_game" ON "game_categories"("game_id", "is_primary");
+CREATE UNIQUE INDEX "unique_primary_category_per_game" ON "game_categories" ("game_id") WHERE "is_primary" = true;
 
 -- CreateIndex
 CREATE UNIQUE INDEX "designers_name_key" ON "designers"("name");

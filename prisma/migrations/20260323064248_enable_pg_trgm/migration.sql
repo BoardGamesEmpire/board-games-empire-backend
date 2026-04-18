@@ -23,6 +23,9 @@
   - Made the column `external_id` on table `game_sources` required. This step will fail if there are existing NULL values in that column.
 */
 
+-- Might not apply from the init migration
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- AlterTable
 ALTER TABLE "households" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
 
