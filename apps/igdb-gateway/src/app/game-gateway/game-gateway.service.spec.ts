@@ -10,7 +10,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
 import { IGDBService } from '../igdb/igdb.service';
-import { IgdbGame } from '../types';
+import { IgdbGame, IgdbGameRef } from '../types';
 import { GameGatewayService } from './game-gateway.service';
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ describe('GameGatewayService', () => {
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
       const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBe(String(DLC_GAME.parent_game?.id));
+      expect(result?.game?.baseGameExternalId).toBe(String((<IgdbGameRef>DLC_GAME.parent_game)?.id));
     });
 
     it('sets baseGameExternalId from version_parent for standalone expansions', async () => {
@@ -155,7 +155,7 @@ describe('GameGatewayService', () => {
       );
       const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
 
-      expect(result?.game?.baseGameExternalId).toBe(String(STANDALONE_EXPANSION.version_parent?.id));
+      expect(result?.game?.baseGameExternalId).toBe(String((<IgdbGameRef>STANDALONE_EXPANSION.version_parent)?.id));
     });
 
     it('does not set baseGameExternalId for base games', async () => {
