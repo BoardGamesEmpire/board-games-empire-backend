@@ -8,7 +8,7 @@ import { GameSearchService } from './game-search.service';
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-@ApiTags('game-search')
+@ApiTags('games/search')
 @UseGuards(PoliciesGuard)
 @Controller('games/search')
 export class GameSearchController {

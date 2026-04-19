@@ -53,7 +53,13 @@ export class GameSearchService {
       tap(() =>
         this.logger.debug(`Fetching game from gateway ${request.gatewayId} with externalId ${request.externalId}`),
       ),
-      concatMap((client) => client.fetchGame({ correlationId: request.correlationId, externalId: request.externalId })),
+      concatMap((client) =>
+        client.fetchGame({
+          correlationId: request.correlationId,
+          externalId: request.externalId,
+          locale: request.locale,
+        }),
+      ),
       tap((response) =>
         this.logger.debug(
           `Received fetchGame response from gateway ${request.gatewayId} with status ${

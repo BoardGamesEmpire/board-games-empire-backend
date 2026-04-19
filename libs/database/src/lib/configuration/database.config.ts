@@ -3,14 +3,8 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface DatabaseConfig {
-  adaptor: string;
-  port: number;
-  host: string;
-  database: string;
   logQueries: boolean;
-  schema: string;
-  user: string;
-  password: string;
+  url: string;
 }
 
 // TODO: support building the database URL from individual components if DATABASE_URL is not provided

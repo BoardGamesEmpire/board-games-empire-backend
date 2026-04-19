@@ -65,7 +65,7 @@ export class GameGatewayService {
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
-    return this.igdbService.call(fetchGameRequest(request.externalId)).pipe(
+    return this.igdbService.call(fetchGameRequest(request.externalId, request.locale)).pipe(
       map((games) => {
         this.logger.log(`fetchGame found ${games.length} results for externalId '${request.externalId}'`);
 
@@ -103,7 +103,7 @@ export class GameGatewayService {
   }
 
   fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
-    return this.igdbService.call(fetchExpansionsRequest(request.baseExternalId)).pipe(
+    return this.igdbService.call(fetchExpansionsRequest(request.baseExternalId, request.locale)).pipe(
       mergeMap((games) => from(games)),
       map((game) => ({
         correlationId: request.correlationId,

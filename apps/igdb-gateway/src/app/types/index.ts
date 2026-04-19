@@ -209,10 +209,10 @@ export interface IgdbGame {
   /**
    * Populated on DLC (category 1) and expansion (category 2).
    */
-  parent_game?: IgdbGameRef;
+  parent_game?: IgdbGameRef | number;
 
   /**
    * Populated on standalone expansion (category 4) and version entries.
    */
-  version_parent?: IgdbGameRef;
+  version_parent?: IgdbGameRef | number;
 }

@@ -248,7 +248,11 @@ function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
 
 function toBaseGameExternalId(game: IgdbGame): string | undefined {
   const ref = game.parent_game ?? game.version_parent;
-  return ref?.id != null ? String(ref.id) : undefined;
+  if (typeof ref === 'number') {
+    return String(ref);
+  }
+
+  return ref?.id ? String(ref.id) : undefined;
 }
 
 function toYearPublished(unixSeconds: number | undefined): number | undefined {

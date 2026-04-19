@@ -9,9 +9,9 @@ import { GameImportProducerService, type EnqueueResult } from './services/game-i
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-@ApiTags('game-import')
+@ApiTags('games/import')
 @UseGuards(PoliciesGuard)
-@Controller('game-import')
+@Controller('games/import')
 export class GameImportController {
   private readonly logger = new Logger(GameImportController.name);
 

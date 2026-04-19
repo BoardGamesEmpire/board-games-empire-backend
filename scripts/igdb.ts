@@ -31,12 +31,13 @@ async function main() {
   //   });
 
   client
-    .limit(10)
-    .offset(0)
+    .limit(1)
+    // .offset(0)
     .fields([...GAME_FETCH_FIELDS])
-    .where('version_parent = null')
-    .where(`language_supports.language = 7`) // English
-    .search('half-life')
+    // .where('version_parent = null')
+    .where(`id = '121503'`)
+    // .where(`language_supports.language = 7`) // English
+    // .search('half-life')
     .request('/games')
     .then((response) => {
       console.log(JSON.stringify(response.data, null, 2));
