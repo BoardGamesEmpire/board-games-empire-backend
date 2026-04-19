@@ -53,7 +53,20 @@ export class GameSearchService {
       tap(() =>
         this.logger.debug(`Fetching game from gateway ${request.gatewayId} with externalId ${request.externalId}`),
       ),
-      concatMap((client) => client.fetchGame({ correlationId: request.correlationId, externalId: request.externalId })),
+      concatMap((client) =>
+        client.fetchGame({
+          correlationId: request.correlationId,
+          externalId: request.externalId,
+          locale: request.locale,
+        }),
+      ),
+      tap((response) =>
+        this.logger.debug(
+          `Received fetchGame response from gateway ${request.gatewayId} with status ${
+            response.status
+          } : ${JSON.stringify(response.game, null, 2)}`,
+        ),
+      ),
       map((response: proto.FetchGameResponse) => ({
         ...response,
         gatewayId: request.gatewayId,
@@ -97,13 +110,11 @@ export class GameSearchService {
       ),
 
       mergeMap((sources) => sources),
-      filter(
-        (source) => Boolean(source.gatewayId && source.externalId) && this.registry.isConnected(source.gatewayId!),
-      ),
+      filter((source) => Boolean(source.gatewayId && source.externalId) && this.registry.isConnected(source.gatewayId)),
       mergeMap((source) =>
         this.fetchExpansionsFromGateway(
-          source.gatewayId!,
-          source.externalId!,
+          source.gatewayId,
+          source.externalId,
           request.correlationId,
           request.locale,
         ).pipe(
@@ -113,7 +124,7 @@ export class GameSearchService {
               `FetchExpansions failed for gateway ${source.gatewayId} and game ${source.externalId}: ${message}`,
             );
 
-            return this.errorGameSearchResult(source.gatewayId!, request.correlationId, message);
+            return this.errorGameSearchResult(source.gatewayId, request.correlationId, message);
           }),
         ),
       ),

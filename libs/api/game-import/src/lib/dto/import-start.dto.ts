@@ -14,6 +14,13 @@ export class ImportStartDto {
   @IsString()
   externalId!: string;
 
+  @ApiProperty({
+    description: 'Locale to use when fetching game data from the gateway. Optional, as not all gateways support this.',
+  })
+  @IsString()
+  @IsOptional()
+  locale?: string;
+
   /**
    * External IDs of specific expansions to import alongside the base game.
    * Empty array = base game only. Expansions must belong to the same gateway.

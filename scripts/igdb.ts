@@ -1,8 +1,8 @@
 /* eslint-disable @nx/enforce-module-boundaries */
 import igdb from 'igdb-api-node';
-import { searchGamesRequest } from '../apps/igdb-gateway/src/app/igdb-requests/game.requests';
+import process from 'node:process';
+import { GAME_FETCH_FIELDS } from '../apps/igdb-gateway/src/app/igdb-requests/game.requests';
 import { fetchAccessToken } from '../apps/igdb-gateway/src/app/igdb/lib/fetch-access-token';
-import { toGameSearchData } from '../apps/igdb-gateway/src/app/mappers/game.mapper';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes
 
@@ -15,41 +15,33 @@ async function main() {
   }
   const accessToken = await fetchAccessToken({ client_id: clientId!, client_secret: clientSecret! });
   const client = igdb(clientId, accessToken.access_token);
-  const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);
+  // const gameData = await searchGamesRequest('catan', 10, 0, 'en-US')(client);
 
-  console.log(JSON.stringify(gameData, null, 2));
+  // console.log(JSON.stringify(gameData, null, 2));
 
-  const gameSearchData = gameData.map(toGameSearchData);
-  console.log('Mapped game search data:', JSON.stringify(gameSearchData, null, 2));
+  // const gameSearchData = gameData.map(toGameSearchData);
+  // console.log('Mapped game search data:', JSON.stringify(gameSearchData, null, 2));
 
   // client
   //   .fields(['*'])
-  //   .limit(50)
+  //   .limit(5)
   //   .request('/languages')
   //   .then((response) => {
   //     console.log(JSON.stringify(response.data, null, 2));
   //   });
 
-  // client
-  //   .limit(10)
-  //   .offset(0)
-  //   .fields([
-  //     'name',
-  //     'url',
-  //     'genres.name',
-  //     'platforms.*',
-  //     'platforms.platform_type.*',
-  //     'cover.url',
-  //     'themes.name',
-  //     'language_supports.language.*',
-  //   ])
-  //   .where('version_parent = null')
-  //   .where(`language_supports.language = 7`) // English
-  //   .search('zelda')
-  //   .request('/games')
-  //   .then((response) => {
-  //     console.log(JSON.stringify(response.data, null, 2));
-  //   });
+  client
+    .limit(1)
+    // .offset(0)
+    .fields([...GAME_FETCH_FIELDS])
+    // .where('version_parent = null')
+    .where(`id = '121503'`)
+    // .where(`language_supports.language = 7`) // English
+    // .search('half-life')
+    .request('/games')
+    .then((response) => {
+      console.log(JSON.stringify(response.data, null, 2));
+    });
 }
 
 main().catch((error) => {

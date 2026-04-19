@@ -4,7 +4,7 @@ import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
@@ -67,7 +67,12 @@ async function bootstrap() {
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     });
 
-  if (configService.get<boolean>('swagger.enabled')) {
+  const authInstance = app.get(AUTH_INSTANCE);
+  const swagger = configService.get<boolean>('swagger.enabled');
+
+  Logger.debug(`Swagger enabled: ${swagger}`);
+
+  if (swagger) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle(configService.getOrThrow('swagger.title'))
       .setDescription(configService.getOrThrow('swagger.description'))
@@ -80,8 +85,25 @@ async function bootstrap() {
       })
       .build();
 
+    const openAPISchema: OpenAPIObject = await authInstance.api.generateOpenAPISchema();
+    const paths = Object.entries(openAPISchema.paths).reduce(
+      (acc, [path, methods]) => ({
+        ...acc,
+        [path.startsWith(`/${globalPrefix}/auth`) ? path : `/${globalPrefix}/auth${path}`]: methods,
+      }),
+      {} as OpenAPIObject['paths'],
+    );
+
     const document = SwaggerModule.createDocument(app, swaggerConfig);
-    SwaggerModule.setup(globalPrefix, app, document, {
+    const merged = {
+      ...document,
+      paths: { ...document.paths, ...paths },
+      components: {
+        ...document.components,
+        schemas: { ...document.components?.schemas, ...openAPISchema.components?.schemas },
+      },
+    };
+    SwaggerModule.setup(globalPrefix, app, merged, {
       jsonDocumentUrl: `${globalPrefix}/swagger/json`,
       yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
     });
@@ -89,9 +111,9 @@ async function bootstrap() {
 
   const redisAdapter = new RedisIoAdapter(app);
   await redisAdapter.connectToRedis(configService);
+
   app.useWebSocketAdapter(redisAdapter);
 
-  const authInstance = app.get(AUTH_INSTANCE);
   const server = app.getHttpAdapter().getInstance();
   server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
 

@@ -61,6 +61,5 @@ model GameCategory {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([gameId, categoryId])
-  @@unique([gameId, isPrimary], name: "uniquePrimaryCategoryPerGame", map: "unique_primary_category_per_game")
   @@map("game_categories")
 }

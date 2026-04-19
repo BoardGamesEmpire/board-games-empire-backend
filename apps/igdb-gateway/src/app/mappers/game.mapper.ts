@@ -248,7 +248,11 @@ function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
 
 function toBaseGameExternalId(game: IgdbGame): string | undefined {
   const ref = game.parent_game ?? game.version_parent;
-  return ref ? String(ref.id) : undefined;
+  if (typeof ref === 'number') {
+    return String(ref);
+  }
+
+  return ref?.id ? String(ref.id) : undefined;
 }
 
 function toYearPublished(unixSeconds: number | undefined): number | undefined {
@@ -325,6 +329,7 @@ export function toGameData(game: IgdbGame): proto.GameData {
 
   const categories: proto.CategoryData[] = (game.genres ?? []).map(toCategoryData);
   const languages = toLanguageDataList((game.language_supports ?? []).map((ls) => ls.language));
+
   const platforms = (game.platforms ?? []).map(toPlatformData);
   const releases = toGameReleaseDataList(game.release_dates ?? [], game.game_status, languages);
 

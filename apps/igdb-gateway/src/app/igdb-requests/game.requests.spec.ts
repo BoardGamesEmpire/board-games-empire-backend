@@ -125,13 +125,13 @@ describe('GameRequests', () => {
     it('includes parent_game filter with the baseExternalId', async () => {
       const client = buildMockClient();
       await fetchExpansionsRequest('1942')(client);
-      expect(client.where).toHaveBeenCalledWith(expect.stringContaining('parent_game = 1942'));
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining(`parent_game = '1942'`));
     });
 
     it('includes version_parent filter with the baseExternalId', async () => {
       const client = buildMockClient();
       await fetchExpansionsRequest('1942')(client);
-      expect(client.where).toHaveBeenCalledWith(expect.stringContaining('version_parent = 1942'));
+      expect(client.where).toHaveBeenCalledWith(expect.stringContaining(`version_parent = '1942'`));
     });
 
     it('uses an OR combinator between the two filters', async () => {

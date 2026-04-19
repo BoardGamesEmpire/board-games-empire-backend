@@ -36,6 +36,7 @@ export class GameImportProducerService {
         correlationId: dto.correlationId,
         gatewayId: dto.gatewayId,
         externalId: dto.externalId,
+        locale: dto.locale,
       })
       .pipe(
         mergeMap((fetchResponse) => {
@@ -104,6 +105,7 @@ export class GameImportProducerService {
               correlationId: dto.correlationId,
               gatewayId: dto.gatewayId,
               externalId: expansionExternalId,
+              locale: dto.locale,
             })
             .pipe(
               mergeMap((expResponse) => {

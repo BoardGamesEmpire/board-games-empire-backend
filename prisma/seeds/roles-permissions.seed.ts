@@ -654,6 +654,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:user:profile',
     'read:game_collection',
     'read:game_play_session',
+    'read:game',
+    'update:game',
     'read:event',
     'read:household',
     'read:households',
@@ -669,6 +671,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:user:profile',
     'update:user:profile:own',
     'create:game',
+    'read:game',
     'create:event',
     'create:household',
     'read:households',
@@ -685,8 +688,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:session_player:join',
   ]);
 
-  // HOUSEHOLD OWNER
-  await assignPermissions(SystemRole.HouseholdOwner, [
+  const householdOwnerPermissions = [
     'create:event_game',
     'create:event_invite',
     'create:event_occurrence',
@@ -720,40 +722,23 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event_occurrence:confirm',
     'update:event_occurrence:decline',
     'update:event_occurrence',
+    // this should only apply when the event is associated with the household -- maybe? perhaps not at all
     'update:event_policy',
     'update:event',
     'update:game_play_session',
     'update:household',
     'update:rule_variant',
-  ]);
+  ];
 
+  // HOUSEHOLD OWNER
+  await assignPermissions(SystemRole.HouseholdOwner, householdOwnerPermissions);
+
+  const disallowedHouseholdAdminPermissions = ['delete:household'];
+  const householdAdminPermissions = householdOwnerPermissions.filter(
+    (perm) => !disallowedHouseholdAdminPermissions.includes(perm),
+  );
   // HOUSEHOLD ADMIN
-  await assignPermissions(SystemRole.HouseholdAdmin, [
-    'create:event_invite',
-    'create:event_occurrence',
-    'create:event',
-    'create:game_play_session',
-    'create:household_invite',
-    'create:household_role',
-    'create:play_record',
-    'create:rule_variant',
-    'manage:event_attendee',
-    'manage:household_member',
-    'read:attendee_game_list',
-    'read:event_availability_vote',
-    'read:event_game_nomination',
-    'read:event_game_vote',
-    'read:event_game',
-    'read:event_occurrence',
-    'read:event_policy',
-    'read:household',
-    'read:households',
-    'update:event_occurrence',
-    'update:event',
-    'update:game_play_session',
-    'update:household',
-    'update:rule_variant',
-  ]);
+  await assignPermissions(SystemRole.HouseholdAdmin, householdAdminPermissions);
 
   // HOUSEHOLD MEMBER
   await assignPermissions(SystemRole.HouseholdMember, [
@@ -784,8 +769,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:session_player:join',
   ]);
 
-  // EVENT HOST
-  await assignPermissions(SystemRole.EventHost, [
+  const eventHostPermissions = [
     'read:event',
     'update:event',
     'delete:event',
@@ -832,46 +816,16 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // Policy
     'read:event_policy',
     'update:event_policy',
-  ]);
+  ];
+
+  // EVENT HOST
+  await assignPermissions(SystemRole.EventHost, eventHostPermissions);
+
+  const disallowedCoHostPermissions = ['delete:event'];
+  const eventCohostPermissions = eventHostPermissions.filter((perm) => !disallowedCoHostPermissions.includes(perm));
 
   // EVENT CO-HOST
-  await assignPermissions(SystemRole.EventCoHost, [
-    'create:attendee_game_list',
-    'create:event_availability_vote',
-    'create:event_game_nomination',
-    'create:event_game_vote',
-    'create:event_game',
-    'create:event_invite',
-    'create:event_occurrence',
-    'create:game_play_session',
-    'create:play_record',
-    'delete:attendee_game_list',
-    'delete:event_game',
-    'delete:event_occurrence',
-    'delete:game_play_session',
-    'manage:attendee_game_list',
-    'manage:event_attendee',
-    'read:attendee_game_list',
-    'read:event_availability_vote',
-    'read:event_game_nomination',
-    'read:event_game_vote',
-    'read:event_game',
-    'read:event_occurrence',
-    'read:event_policy',
-    'read:event',
-    'read:game_play_session',
-    'update:event_game_nomination:approve',
-    'update:event_game_nomination:reject',
-    'update:event_game_nomination:resolve',
-    'update:event_game_nomination:withdraw',
-    'update:event_occurrence:cancel',
-    'update:event_occurrence:confirm',
-    'update:event_occurrence:decline',
-    'update:event_occurrence',
-    'update:event:status:cancel-event',
-    'update:event',
-    'update:game_play_session',
-  ]);
+  await assignPermissions(SystemRole.EventCoHost, eventCohostPermissions);
 
   // EVENT ORGANIZER
   await assignPermissions(SystemRole.EventOrganizer, [

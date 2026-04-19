@@ -1,16 +1,4 @@
-import {
-  ConnectGatewayRequest,
-  ConnectGatewayResponse,
-  CoordinatorFetchExpansionsRequest,
-  CoordinatorFetchGameRequest,
-  CoordinatorFetchGameResponse,
-  CoordinatorServiceClient,
-  DisconnectGatewayRequest,
-  DisconnectGatewayResponse,
-  PingResponse,
-  SearchGameResult,
-  SearchGamesRequest,
-} from '@board-games-empire/proto-gateway';
+import * as proto from '@board-games-empire/proto-gateway';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import * as crypto from 'node:crypto';
@@ -21,7 +9,7 @@ import { COORDINATOR_SERVICE_TOKEN } from './constants';
 @Injectable()
 export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(GatewayCoordinatorClientService.name);
-  private coordinatorService!: CoordinatorServiceClient;
+  private coordinatorService!: proto.CoordinatorServiceClient;
   private pingSubscription!: Subscription;
 
   constructor(
@@ -30,7 +18,7 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
   ) {}
 
   onModuleInit(): void {
-    this.coordinatorService = this.client.getService<CoordinatorServiceClient>('CoordinatorService');
+    this.coordinatorService = this.client.getService<proto.CoordinatorServiceClient>('CoordinatorService');
 
     // TODO: more robust health check with retries and backoff
     const PING_INTERVAL_MS = 1000 * 60;
@@ -50,27 +38,27 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
     this.pingSubscription?.unsubscribe();
   }
 
-  ping(correlationId?: string): Observable<PingResponse> {
+  ping(correlationId?: string): Observable<proto.PingResponse> {
     return this.coordinatorService.ping({ correlationId });
   }
 
-  connectGateway(request: ConnectGatewayRequest): Observable<ConnectGatewayResponse> {
+  connectGateway(request: proto.ConnectGatewayRequest): Observable<proto.ConnectGatewayResponse> {
     return this.coordinatorService.connectGateway(request);
   }
 
-  disconnectGateway(request: DisconnectGatewayRequest): Observable<DisconnectGatewayResponse> {
+  disconnectGateway(request: proto.DisconnectGatewayRequest): Observable<proto.DisconnectGatewayResponse> {
     return this.coordinatorService.disconnectGateway(request);
   }
 
-  searchGames(request: SearchGamesRequest): Observable<SearchGameResult> {
+  searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     return this.coordinatorService.searchGames(request);
   }
 
-  fetchGame(request: CoordinatorFetchGameRequest): Observable<CoordinatorFetchGameResponse> {
+  fetchGame(request: proto.CoordinatorFetchGameRequest): Observable<proto.CoordinatorFetchGameResponse> {
     return this.coordinatorService.fetchGame(request);
   }
 
-  fetchExpansions(request: CoordinatorFetchExpansionsRequest): Observable<SearchGameResult> {
+  fetchExpansions(request: proto.CoordinatorFetchExpansionsRequest): Observable<proto.SearchGameResult> {
     return this.coordinatorService.fetchExpansions(request);
   }
 }
