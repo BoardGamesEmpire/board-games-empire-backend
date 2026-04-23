@@ -12,6 +12,9 @@ enum ContentType {
   CONTENT_TYPE_BUNDLE               = 6;
   CONTENT_TYPE_REMAKE               = 7;
   CONTENT_TYPE_REMASTER             = 8;
+  CONTENT_TYPE_EXPANDED_EDITION        = 9;
+  CONTENT_TYPE_PORT                 = 10;
+  CONTENT_TYPE_MOD                  = 11;
 }
 
 enum ResultStatus {

@@ -24,7 +24,7 @@ model EventRecurrenceRule {
 
   generatesInAdvanceDays Int @default(14) @map("generates_in_advance_days")
 
-  endsAt   DateTime? @map("ends_at") @db.Timestamptz(3)// null = indefinite
+  endsAt   DateTime? @map("ends_at") @db.Timestamptz(3) // null = indefinite
   isActive Boolean   @default(true) @map("is_active")
 
   generatedEvents Event[] @relation("RecurringEventInstances")

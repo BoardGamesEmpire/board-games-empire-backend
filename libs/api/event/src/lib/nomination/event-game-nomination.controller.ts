@@ -163,7 +163,7 @@ export class EventGameNominationController {
     return this.resolveAttendeeId(eventId, session.user.id).pipe(
       concatMap((attendeeId) => this.nominationService.directAddGame(eventId, attendeeId, dto)),
       tap((eventGame) =>
-        this.logger.log(`Game ${eventGame.gameId} directly added to event ${eventId} by ${session.user.id}`),
+        this.logger.log(`Game ${eventGame.platformGameId} directly added to event ${eventId} by ${session.user.id}`),
       ),
       map((eventGame) => ({
         message: 'Game added to event',

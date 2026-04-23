@@ -8,7 +8,10 @@ enum ContentType {
   BaseGame
   Bundle
   DLC
+  ExpandedEdition
   Expansion
+  Mod
+  Port
   Remake
   Remaster
   StandaloneExpansion
@@ -24,8 +27,11 @@ enum ContentType {
 enum ExpansionType {
   Accessory
   DLC
+  ExpandedEdition
   Expansion
   MiniExpansion
+  Mod
+  Port
   StandaloneExpansion
 
   @@map("expansion_types")

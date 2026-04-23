@@ -88,10 +88,6 @@ export class GameUpsertService {
       };
     }
 
-    // Entirely new game
-    // Cross-gateway dedup (same real-world game imported from BGG and IGDB) is
-    // deferred — external IDs are gateway-specific and title matching is
-    // unreliable. A future admin merge tool will handle this duplication cleanup.
     const game = await this.db.game.create({
       data: {
         ...this.buildCreateInput(gameData),
@@ -114,17 +110,30 @@ export class GameUpsertService {
     };
   }
 
+  /**
+   * Upserts all relational data for a game.
+   *
+   * PlatformGame records are created first (from gameData.platforms) so that
+   * downstream upsertReleases can associate GameRelease records with the
+   * correct PlatformGame parent. Taxonomy, persons, and DLC are platform-
+   * independent and run in parallel with PlatformGame creation.
+   */
   private async upsertRelations(gameId: string, gameData: GameData, gatewayId: string): Promise<void> {
-    await Promise.all([
+    // PlatformGame must resolve before releases can be associated.
+    // Taxonomy, persons, and DLC are independent and can run in parallel.
+    const [platformGameMap] = await Promise.all([
+      this.platform.upsertPlatformGames(gameId, gameData.platforms ?? [], gameData, gatewayId),
       this.upsertMechanics(gameId, gameData.mechanics ?? [], gatewayId),
       this.upsertCategories(gameId, gameData.categories ?? [], gatewayId),
       this.upsertFamilies(gameId, gameData.families ?? [], gatewayId),
       this.upsertDesigners(gameId, gameData.designers ?? [], gatewayId),
       this.upsertArtists(gameId, gameData.artists ?? [], gatewayId),
-      this.platform.upsertReleases(gameId, gameData.releases ?? [], gatewayId),
       this.upsertPublishers(gameId, gameData.publishers ?? [], gatewayId),
       this.upsertDlc(gameId, gameData.dlc ?? [], gatewayId),
     ]);
+
+    // Releases depend on PlatformGame resolution — run after the parallel batch.
+    await this.platform.upsertReleases(platformGameMap, gameData.releases ?? [], gatewayId);
   }
 
   private async upsertMechanics(gameId: string, mechanics: GameData['mechanics'], gatewayId: string) {
@@ -289,6 +298,9 @@ const PROTO_TO_DB_CONTENT_TYPE: Record<string, ContentType> = {
   [ProtoContentType.CONTENT_TYPE_BUNDLE]: ContentType.Bundle,
   [ProtoContentType.CONTENT_TYPE_REMAKE]: ContentType.Remake,
   [ProtoContentType.CONTENT_TYPE_REMASTER]: ContentType.Remaster,
+  [ProtoContentType.CONTENT_TYPE_EXPANDED_EDITION]: ContentType.ExpandedEdition,
+  [ProtoContentType.CONTENT_TYPE_PORT]: ContentType.Port,
+  [ProtoContentType.CONTENT_TYPE_MOD]: ContentType.Mod,
   [ProtoContentType.UNRECOGNIZED]: ContentType.Unknown,
   [ProtoContentType.CONTENT_TYPE_UNSPECIFIED]: ContentType.Unknown,
 };
@@ -313,6 +325,18 @@ function toExpansionType(contentType: ContentType): ExpansionType {
 
     case ContentType.Accessory: {
       return ExpansionType.Accessory;
+    }
+
+    case ContentType.ExpandedEdition: {
+      return ExpansionType.ExpandedEdition;
+    }
+
+    case ContentType.Port: {
+      return ExpansionType.Port;
+    }
+
+    case ContentType.Mod: {
+      return ExpansionType.Mod;
     }
 
     default: {

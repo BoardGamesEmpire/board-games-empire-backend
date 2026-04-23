@@ -1,12 +1,12 @@
-import { EventAvailabilityVote, NotificationType } from '@bge/database';
+import { EventAvailabilityVote, Game, NotificationType, PlatformGame } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import {
   createTestingModuleWithDb,
   makeEvent,
   makeEventAttendee,
   makeEventOccurrence,
-  makeGame,
   makeHouseholdMember,
+  makePlatformGame,
   MockDatabaseService,
 } from '@bge/testing';
 import type { AttendeeAddedEvent } from '../attendee/interfaces';
@@ -210,7 +210,11 @@ describe('EventNotificationListener', () => {
   describe('onNominationCreated', () => {
     it('notifies all attendees except the nominator', async () => {
       db.event.findUnique.mockResolvedValue(makeEvent({ title: 'Game Night', createdById: 'user-host', id: 'ev-1' }));
-      db.game.findUnique.mockResolvedValue(makeGame({ title: 'Wingspan' }));
+      db.platformGame.findUnique.mockResolvedValue(
+        stubPlatformGameWithGame({
+          id: 'plat-game-1',
+        }),
+      );
       db.eventAttendee.findMany.mockResolvedValue([
         makeEventAttendee({ id: 'att-nominator', userId: 'user-a', eventId: 'ev-1' }),
         makeEventAttendee({ id: 'att-other', userId: 'user-b', eventId: 'ev-1' }),
@@ -220,7 +224,7 @@ describe('EventNotificationListener', () => {
       const event: NominationCreatedEvent = {
         eventId: 'ev-1',
         nominationId: 'nom-1',
-        gameId: 'game-1',
+        platformGameId: 'plat-game-1',
         nominatedByAttendeeId: 'att-nominator',
       };
 
@@ -249,7 +253,7 @@ describe('EventNotificationListener', () => {
     const baseEvent: NominationResolvedEvent = {
       eventId: 'ev-1',
       nominationId: 'nom-1',
-      gameId: 'game-1',
+      platformGameId: 'plat-game-1',
       status: 'Approved',
       elevatedToEventGameId: 'eg-1',
     };
@@ -257,8 +261,11 @@ describe('EventNotificationListener', () => {
     beforeEach(() => {
       db.eventGameNomination.findUnique.mockResolvedValue({
         nominatedById: 'att-1',
-        ...(<any>{ nominatedBy: { userId: 'user-nominator' } }),
-        game: { title: 'Wingspan' },
+        ...(<any>{
+          nominatedBy: { userId: 'user-nominator' },
+          platformGame: { game: { title: 'Wingspan' } },
+        }),
+        platformGameId: 'plat-game-1',
       });
     });
 
@@ -401,5 +408,21 @@ function makeAvailabilityVote(overrides: Partial<EventAvailabilityVote> = {}): E
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
+  };
+}
+
+function stubPlatformGameWithGame(
+  options: Partial<PlatformGame> = {},
+  game: Partial<Game> = {
+    id: 'game-1',
+    title: 'Wingspan',
+  },
+): PlatformGame & { game: Partial<Game> } {
+  const platformGame = makePlatformGame('game-1', 'plat-1', options);
+  return {
+    ...platformGame,
+    game: {
+      ...game,
+    },
   };
 }

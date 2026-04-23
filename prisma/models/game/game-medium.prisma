@@ -1,0 +1,6 @@
+enum GameMedium {
+  Physical
+  Digital
+
+  @@map("game_mediums")
+}

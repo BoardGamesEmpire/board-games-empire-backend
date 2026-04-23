@@ -49,26 +49,18 @@ model Game {
 
   // keeping many to many to allow for expansions that are compatible with multiple base games
   expansionEntries GameExpansion[] @relation("ExpansionGame")
-  releases         GameRelease[]
   dlc              GameDlc[]
 
-  userCollections GameCollection[]
-
-  gameLists GameList[]
-  watched   GameWatch[]
-  tags      GameTag[]
+  watched GameWatch[]
+  tags    GameTag[]
 
   importActivities ImportActivity[]
   gameSources      GameSource[]
   jobs             Job[]
 
-  eventGames            EventGame[]
-  eventGameNominations  EventGameNomination[]
   // campaigns    Campaign[]
-  ruleVariants          RuleVariant[]
-  playSessions          GamePlaySession[]
-  expansionPlaySessions GamePlaySessionExpansion[]
-  loans                 GameLoan[]
+  ruleVariants  RuleVariant[]
+  platformGames PlatformGame[]
 
   // Access control
   visibility  Visibility @default(Public)

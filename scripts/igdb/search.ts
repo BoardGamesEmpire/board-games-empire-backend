@@ -1,8 +1,10 @@
 /* eslint-disable @nx/enforce-module-boundaries */
 import igdb from 'igdb-api-node';
 import process from 'node:process';
-import { GAME_FETCH_FIELDS } from '../apps/igdb-gateway/src/app/igdb-requests/game.requests';
-import { fetchAccessToken } from '../apps/igdb-gateway/src/app/igdb/lib/fetch-access-token';
+import { GAME_FETCH_FIELDS } from '../../apps/igdb-gateway/src/app/igdb-requests/game.requests';
+import { IGDBClient } from '../../apps/igdb-gateway/src/app/igdb/interfaces';
+import { fetchAccessToken } from '../../apps/igdb-gateway/src/app/igdb/lib/fetch-access-token';
+import { resolveLanguageIds } from '../../apps/igdb-gateway/src/app/mappers/language.mapper';
 
 // This script is for ad-hoc testing and exploration of the IGDB API and related codes
 
@@ -30,18 +32,40 @@ async function main() {
   //     console.log(JSON.stringify(response.data, null, 2));
   //   });
 
-  client
+  let builder = client
     .limit(1)
     // .offset(0)
-    .fields([...GAME_FETCH_FIELDS])
-    // .where('version_parent = null')
-    .where(`id = '121503'`)
-    // .where(`language_supports.language = 7`) // English
-    // .search('half-life')
+    .fields([...GAME_FETCH_FIELDS]);
+  builder = includeLanguageFilter(builder);
+
+  builder
+    .where(`language_supports.language = 7`) // English
+    .search('half-life')
     .request('/games')
     .then((response) => {
       console.log(JSON.stringify(response.data, null, 2));
     });
+}
+
+function includeLanguageFilter(builder: IGDBClient, locale?: string, whereQuery?: string): IGDBClient {
+  if (!locale) {
+    if (whereQuery) {
+      return builder.where(whereQuery);
+    }
+
+    return builder;
+  }
+
+  const languageIds = resolveLanguageIds(locale);
+  if (languageIds.length === 0) {
+    return builder;
+  }
+
+  return builder.where(
+    `${whereQuery ? `${whereQuery} & ` : ''}(language_supports.language = (${languageIds.join(
+      ',',
+    )}) | language_supports.language = null)`,
+  );
 }
 
 main().catch((error) => {

@@ -8,6 +8,7 @@
   "targets": {
     "generate": {
       "executor": "nx:run-commands",
+      "cache": true,
       "options": {
         "command": "buf generate",
         "cwd": "libs/proto/gateway"

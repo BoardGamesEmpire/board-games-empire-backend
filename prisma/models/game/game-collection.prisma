@@ -4,8 +4,10 @@ model GameCollection {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
 
-  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  gameId String @map("game_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
+  platformGameId String       @map("platform_game_id")
+
+  medium GameMedium
 
   quantity Int @default(1)
 
@@ -25,7 +27,7 @@ model GameCollection {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([userId, gameId])
-  @@index([userId])
+  @@unique([userId, platformGameId, medium])
+  @@index([platformGameId])
   @@map("game_collections")
 }

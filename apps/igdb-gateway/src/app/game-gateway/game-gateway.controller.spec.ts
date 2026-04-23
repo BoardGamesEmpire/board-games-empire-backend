@@ -2,7 +2,6 @@ import * as proto from '@board-games-empire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of } from 'rxjs';
 import { toArray } from 'rxjs/operators';
-import { IgdbModule } from '../igdb/igdb.module';
 import { GameGatewayController } from './game-gateway.controller';
 import { GameGatewayService } from './game-gateway.service';
 
@@ -22,7 +21,6 @@ describe('GameGatewayController', () => {
     >;
 
     const module: TestingModule = await Test.createTestingModule({
-      imports: [IgdbModule],
       controllers: [GameGatewayController],
       providers: [{ provide: GameGatewayService, useValue: mockService }],
     }).compile();

@@ -10,8 +10,8 @@ model EventGame {
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
   occurrenceId String?          @map("occurrence_id")
 
-  game   Game   @relation(fields: [gameId], references: [id])
-  gameId String @map("game_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
+  platformGameId String       @map("platform_game_id")
 
   role      ScheduledGameRole @default(Primary)
   sortOrder Int               @default(0) @map("sort_order")

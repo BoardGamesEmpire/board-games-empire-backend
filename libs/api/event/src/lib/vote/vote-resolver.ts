@@ -153,7 +153,7 @@ export class VoteResolver {
   }
 }
 
-interface AttendeeStub {
+export interface AttendeeStub {
   status: EventParticipationStatus;
   availableGames: { id: string }[];
 }

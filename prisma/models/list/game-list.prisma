@@ -4,8 +4,8 @@ model GameList {
   list   List   @relation(fields: [listId], references: [id])
   listId String @map("list_id")
 
-  game   Game   @relation(fields: [gameId], references: [id])
-  gameId String @map("game_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
+  platformGameId String       @map("platform_game_id")
 
   priority Int @default(0)
 

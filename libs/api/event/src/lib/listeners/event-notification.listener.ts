@@ -157,20 +157,20 @@ export class EventNotificationListener {
   @OnEvent(NominationEvent.NominationCreated, { async: true })
   async onNominationCreated(event: NominationCreatedEvent): Promise<void> {
     try {
-      const [eventRecord, game] = await Promise.all([
+      const [eventRecord, platformGame] = await Promise.all([
         this.db.event.findUnique({
           where: { id: event.eventId },
           select: { title: true },
         }),
-        this.db.game.findUnique({
-          where: { id: event.gameId },
-          select: { title: true },
+        this.db.platformGame.findUnique({
+          where: { id: event.platformGameId },
+          select: { id: true, game: { select: { title: true } } },
         }),
       ]);
 
-      if (!eventRecord || !game) {
+      if (!eventRecord || !platformGame) {
         return this.logger.warn(
-          `Event or game not found for NominationCreated notification, eventId=${event.eventId}, gameId=${event.gameId}`,
+          `Event or game not found for NominationCreated notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
         );
       }
 
@@ -189,7 +189,7 @@ export class EventNotificationListener {
             eventId: event.eventId,
             eventTitle: eventRecord.title,
             nominationId: event.nominationId,
-            nominatedGameTitle: game.title,
+            nominatedGameTitle: platformGame.game.title,
           },
         }));
 
@@ -212,7 +212,13 @@ export class EventNotificationListener {
         select: {
           nominatedById: true,
           nominatedBy: { select: { userId: true } },
-          game: { select: { title: true } },
+          platformGame: {
+            select: {
+              id: true,
+
+              game: { select: { title: true } },
+            },
+          },
         },
       });
 
@@ -248,7 +254,7 @@ export class EventNotificationListener {
         payload: {
           eventId: event.eventId,
           nominationId: event.nominationId,
-          nominatedGameTitle: nomination.game.title,
+          nominatedGameTitle: nomination.platformGame.game.title,
         },
       });
     } catch (err) {
@@ -262,20 +268,20 @@ export class EventNotificationListener {
   @OnEvent(NominationEvent.GameAddedToEvent, { async: true })
   async onGameAdded(event: GameAddedToEventPayload): Promise<void> {
     try {
-      const [eventRecord, game] = await Promise.all([
+      const [eventRecord, platformGame] = await Promise.all([
         this.db.event.findUnique({
           where: { id: event.eventId },
           select: { title: true },
         }),
-        this.db.game.findUnique({
-          where: { id: event.gameId },
-          select: { title: true },
+        this.db.platformGame.findUnique({
+          where: { id: event.platformGameId },
+          select: { id: true, game: { select: { title: true } } },
         }),
       ]);
 
-      if (!eventRecord || !game) {
+      if (!eventRecord || !platformGame) {
         return this.logger.warn(
-          `Event or game not found for GameAddedToEvent notification, eventId=${event.eventId}, gameId=${event.gameId}`,
+          `Event or game not found for GameAddedToEvent notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
         );
       }
 
@@ -292,7 +298,7 @@ export class EventNotificationListener {
           payload: {
             eventId: event.eventId,
             eventTitle: eventRecord.title,
-            nominatedGameTitle: game.title,
+            nominatedGameTitle: platformGame.game.title,
           },
         }));
 

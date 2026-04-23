@@ -1,0 +1,58 @@
+/**
+ * Represents a specific platform incarnation of a Game.
+ * "Catan on Tabletop", "Catan on Steam", "Catan on PS5" are each distinct
+ * PlatformGame records sharing the same parent Game.
+ * This is the entity that downstream models reference when platform specificity
+ * matters: GameCollection, EventGame, EventGameNomination, GamePlaySession, etc.
+ * Nullable override fields (minPlayers, maxPlayers, image, etc.)
+ */
+model PlatformGame {
+  id String @id @default(cuid(2))
+
+  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  gameId String @map("game_id")
+
+  platform   Platform @relation(fields: [platformId], references: [id])
+  platformId String   @map("platform_id")
+
+  // ─── Platform-specific overrides ─────────────────────────
+  // Nullable — when null, consumers fall back to parent Game values.
+  minPlayers         Int?         @map("min_players")
+  maxPlayers         Int?         @map("max_players")
+  minPlayTime        Int?         @map("min_play_time")
+  minPlayTimeMeasure TimeMeasure? @map("min_play_time_measure")
+  maxPlayTime        Int?         @map("max_play_time")
+  maxPlayTimeMeasure TimeMeasure? @map("max_play_time_measure")
+  image              String?
+  thumbnail          String?
+
+  supportsSolo   Boolean @default(false) @map("supports_solo")
+  supportsLocal  Boolean @default(false) @map("supports_local")
+  supportsOnline Boolean @default(false) @map("supports_online")
+  hasAsyncPlay   Boolean @default(false) @map("has_async_play")
+  hasRealtime    Boolean @default(false) @map("has_realtime")
+  hasTutorial    Boolean @default(false) @map("has_tutorial")
+
+  enrichmentSource String?   @map("enrichment_source")
+  frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
+
+  releases    GameRelease[]
+  collections GameCollection[]
+  gameLists   GameList[]
+
+  // Event chain
+  eventGames       EventGame[]
+  eventNominations EventGameNomination[]
+
+  // Play tracking
+  playSessions          GamePlaySession[]
+  expansionPlaySessions GamePlaySessionExpansion[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gameId, platformId])
+  @@index([gameId])
+  @@index([platformId])
+  @@map("platform_games")
+}

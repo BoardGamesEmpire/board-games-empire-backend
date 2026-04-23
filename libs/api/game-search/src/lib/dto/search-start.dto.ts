@@ -13,7 +13,8 @@ export class SearchStartDto {
    */
   @IsArray()
   @IsString({ each: true })
-  gatewayIds!: string[];
+  @IsOptional()
+  gatewayIds?: string[];
 
   /**
    * Whether to include the local DB in the search.

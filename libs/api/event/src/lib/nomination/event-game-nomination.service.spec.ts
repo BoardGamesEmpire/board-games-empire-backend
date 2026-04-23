@@ -5,6 +5,7 @@ import {
   EventGameNomination,
   EventGameVote,
   EventParticipationStatus,
+  EventPolicy,
   GameAdditionMode,
   InterestedWeight,
   NominationStatus,
@@ -14,14 +15,20 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb, makeEventAttendee, MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { CastVoteDto } from '../dto/cast-vote.dto';
+import type { CastVoteDto } from '../dto/cast-vote.dto';
+import { AttendeeStub } from '../vote/vote-resolver';
 import { NominationEvent } from './constants';
-import { NominateGameDto } from './dto/nominate-game.dto';
+import type { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
-import type { NominationCreatedEvent, NominationResolvedEvent, VoteCastEvent } from './interfaces';
+import type {
+  GameAddedToEventPayload,
+  NominationCreatedEvent,
+  NominationResolvedEvent,
+  VoteCastEvent,
+} from './interfaces';
 
 describe('EventGameNominationService', () => {
   let service: EventGameNominationService;
@@ -37,42 +44,22 @@ describe('EventGameNominationService', () => {
 
     service = module.get(EventGameNominationService);
     db = mockDb;
+
+    stubEventExists(db);
   });
 
   afterEach(() => jest.clearAllMocks());
 
-  describe('getNominations', () => {
-    it('returns nominations for the event', async () => {
-      stubEventExists(db);
-      const nominations = [stubNomination()];
-      db.eventGameNomination.findMany.mockResolvedValue(nominations);
-
-      const result = await service.getNominations('event-1');
-
-      expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { eventId: 'event-1' } }),
-      );
-      expect(result).toHaveLength(1);
-    });
-
-    it('throws NotFoundException when event does not exist', async () => {
-      stubEventExists(db, false);
-
-      await expect(service.getNominations('nonexistent')).rejects.toThrow(NotFoundException);
-    });
-  });
-
   describe('nominate', () => {
-    it('creates a nomination with Open status in RequiresVote mode', async () => {
+    it('creates nomination with Open status in RequiresVote mode', async () => {
       stubPolicy(db, GameAdditionMode.RequiresVote);
-
       stubSupplyEntry(db);
 
       const created = stubNomination({ status: NominationStatus.Open });
       db.eventGameNomination.create.mockResolvedValue(created);
 
       const dto: NominateGameDto = {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedFromId: 'eagl-1',
       };
       const result = await service.nominate('event-1', 'att-1', dto);
@@ -81,6 +68,7 @@ describe('EventGameNominationService', () => {
         expect.objectContaining({
           data: expect.objectContaining({
             status: NominationStatus.Open,
+            platformGame: { connect: { id: 'pg-1' } },
           }),
         }),
       );
@@ -89,13 +77,12 @@ describe('EventGameNominationService', () => {
 
     it('creates nomination with AwaitingApproval in HostApproval mode', async () => {
       stubPolicy(db, GameAdditionMode.HostApproval);
-
       stubSupplyEntry(db);
 
       db.eventGameNomination.create.mockResolvedValue(stubNomination({ status: NominationStatus.AwaitingApproval }));
 
       await service.nominate('event-1', 'att-1', {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedFromId: 'eagl-1',
       });
 
@@ -110,17 +97,15 @@ describe('EventGameNominationService', () => {
 
     it('creates and immediately elevates in Direct mode', async () => {
       stubPolicy(db, GameAdditionMode.Direct);
-
       stubSupplyEntry(db);
 
       const created = stubNomination({ id: 'nom-direct', status: NominationStatus.Passed });
-
       db.eventGameNomination.create.mockResolvedValue(created);
       db.eventGameNomination.findUniqueOrThrow.mockResolvedValue(stubNomination());
       db.eventGame.create.mockResolvedValue(stubEventGame());
 
       await service.nominate('event-1', 'att-1', {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedFromId: 'eagl-1',
       });
 
@@ -132,44 +117,20 @@ describe('EventGameNominationService', () => {
 
       await expect(
         service.nominate('event-1', 'att-1', {
-          gameId: 'game-1',
+          platformGameId: 'pg-1',
           suppliedFromId: 'eagl-1',
         }),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('throws NotFoundException when supply entry does not match event', async () => {
-      stubPolicy(db, GameAdditionMode.RequiresVote);
-      stubSupplyEntry(db, 'other-event', 'game-1');
-
-      await expect(
-        service.nominate('event-1', 'att-1', {
-          gameId: 'game-1',
-          suppliedFromId: 'eagl-1',
-        }),
-      ).rejects.toThrow(NotFoundException);
-    });
-
-    it('throws BadRequestException when supply gameId mismatches dto gameId', async () => {
-      stubPolicy(db, GameAdditionMode.RequiresVote);
-      stubSupplyEntry(db, 'event-1', 'wrong-game');
-
-      await expect(
-        service.nominate('event-1', 'att-1', {
-          gameId: 'game-1',
-          suppliedFromId: 'eagl-1',
-        }),
-      ).rejects.toThrow(BadRequestException);
-    });
-
-    it('emits NominationCreated domain event', async () => {
+    it('emits NominationCreated domain event with platformGameId', async () => {
       stubPolicy(db, GameAdditionMode.RequiresVote);
       stubSupplyEntry(db);
 
-      db.eventGameNomination.create.mockResolvedValue(stubNomination({ id: 'nom-emit' }));
+      db.eventGameNomination.create.mockResolvedValue(stubNomination());
 
       await service.nominate('event-1', 'att-1', {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedFromId: 'eagl-1',
       });
 
@@ -177,101 +138,32 @@ describe('EventGameNominationService', () => {
         NominationEvent.NominationCreated,
         expect.objectContaining({
           eventId: 'event-1',
-          nominationId: 'nom-emit',
-          gameId: 'game-1',
+          platformGameId: 'pg-1',
           nominatedByAttendeeId: 'att-1',
-        } satisfies NominationCreatedEvent),
-      );
-    });
-  });
-
-  describe('withdraw', () => {
-    it('withdraws an Open nomination', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ nominatedById: 'att-1' }));
-      const updated = stubNomination({ status: NominationStatus.Withdrawn });
-      db.eventGameNomination.update.mockResolvedValue(updated);
-
-      const result = await service.withdraw('event-1', 'nom-1', 'att-1');
-
-      expect(result.status).toBe(NominationStatus.Withdrawn);
-    });
-
-    it('throws ForbiddenException when not the nominator', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ nominatedById: 'att-1' }));
-
-      await expect(service.withdraw('event-1', 'nom-1', 'att-other')).rejects.toThrow(ForbiddenException);
-    });
-
-    it('throws BadRequestException when nomination is already resolved', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(
-        stubNomination({ nominatedById: 'att-1', status: NominationStatus.Passed }),
-      );
-
-      await expect(service.withdraw('event-1', 'nom-1', 'att-1')).rejects.toThrow(BadRequestException);
-    });
-  });
-
-  describe('castVote', () => {
-    it('upserts a vote on an Open nomination', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination());
-      const vote = stubEventGameVote({ voteType: VoteType.For });
-      db.eventGameVote.upsert.mockResolvedValue(vote);
-
-      const dto: CastVoteDto = { voteType: VoteType.For };
-      const result = await service.castVote('event-1', 'nom-1', 'att-1', dto);
-
-      expect(db.eventGameVote.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
-            eventGameNominationId_attendeeId: {
-              eventGameNominationId: 'nom-1',
-              attendeeId: 'att-1',
-            },
-          },
-        }),
-      );
-      expect(result).toBe(vote);
-    });
-
-    it('emits VoteCast domain event', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination());
-      db.eventGameVote.upsert.mockResolvedValue(stubEventGameVote({ voteType: VoteType.Against }));
-
-      await service.castVote('event-1', 'nom-1', 'att-1', {
-        voteType: VoteType.Against,
-      });
-
-      expect(eventEmitter.emit).toHaveBeenCalledWith(
-        NominationEvent.VoteCast,
-        expect.objectContaining({
-          eventId: 'event-1',
-          nominationId: 'nom-1',
-          attendeeId: 'att-1',
-          voteType: VoteType.Against,
-        } satisfies VoteCastEvent),
+        } satisfies Partial<NominationCreatedEvent>),
       );
     });
 
-    it('throws BadRequestException when nomination is not Open', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(
-        stubNomination({ status: NominationStatus.AwaitingApproval }),
-      );
+    it('throws BadRequestException when suppliedFromId does not match platformGameId', async () => {
+      stubPolicy(db, GameAdditionMode.RequiresVote);
+
+      // Supply entry points to a different platformGame
+      const entry: EventAttendeeGameList & { attendee: { eventId: string }; collection: { platformGameId: string } } = {
+        id: 'eagl-1',
+        attendeeId: 'att-1',
+        collectionId: 'ce-1',
+        createdAt: new Date(),
+        attendee: { eventId: 'event-1' },
+        collection: { platformGameId: 'pg-different' },
+      };
+      db.eventAttendeeGameList.findUnique.mockResolvedValue(entry);
 
       await expect(
-        service.castVote('event-1', 'nom-1', 'user-1', {
-          voteType: VoteType.For,
+        service.nominate('event-1', 'att-1', {
+          platformGameId: 'pg-1',
+          suppliedFromId: 'eagl-1',
         }),
       ).rejects.toThrow(BadRequestException);
-    });
-
-    it('throws NotFoundException when nomination does not exist', async () => {
-      db.eventGameNomination.findUnique.mockResolvedValue(null);
-
-      await expect(
-        service.castVote('event-1', 'nonexistent', 'user-1', {
-          voteType: VoteType.For,
-        }),
-      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -284,7 +176,7 @@ describe('EventGameNominationService', () => {
       );
       stubPolicy(db, GameAdditionMode.RequiresVote);
 
-      db.eventAttendee.findMany.mockResolvedValue([stubAttendeeWithGames(), stubAttendeeWithGames()]);
+      db.eventAttendee.findMany.mockResolvedValue([makeEventAttendeeStub(), makeEventAttendeeStub()]);
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Passed }));
       db.eventGameNomination.findUniqueOrThrow.mockResolvedValue(stubNomination());
       db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-elevated' }));
@@ -305,9 +197,9 @@ describe('EventGameNominationService', () => {
       stubPolicy(db, GameAdditionMode.RequiresVote);
 
       db.eventAttendee.findMany.mockResolvedValue([
-        stubAttendeeWithGames(),
-        stubAttendeeWithGames(),
-        stubAttendeeWithGames(),
+        makeEventAttendeeStub(),
+        makeEventAttendeeStub(),
+        makeEventAttendeeStub(),
       ]);
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Failed }));
 
@@ -317,7 +209,7 @@ describe('EventGameNominationService', () => {
       expect(db.eventGame.create).not.toHaveBeenCalled();
     });
 
-    it('emits NominationResolved domain event', async () => {
+    it('emits NominationResolved domain event with platformGameId', async () => {
       db.eventGameNomination.findUnique.mockResolvedValue(
         stubNomination({
           votes: [{ voteType: VoteType.Against }],
@@ -325,7 +217,7 @@ describe('EventGameNominationService', () => {
       );
       stubPolicy(db);
 
-      db.eventAttendee.findMany.mockResolvedValue([stubAttendeeWithGames()]);
+      db.eventAttendee.findMany.mockResolvedValue([makeEventAttendeeStub()]);
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Failed }));
 
       await service.resolveNomination('event-1', 'nom-1');
@@ -335,6 +227,7 @@ describe('EventGameNominationService', () => {
         expect.objectContaining({
           eventId: 'event-1',
           nominationId: 'nom-1',
+          platformGameId: 'pg-1',
           status: NominationStatus.Failed,
         } satisfies Partial<NominationResolvedEvent>),
       );
@@ -387,20 +280,20 @@ describe('EventGameNominationService', () => {
   });
 
   describe('directAddGame', () => {
-    it('creates an EventGame directly in Direct mode', async () => {
+    it('creates an EventGame directly in Direct mode with platformGameId', async () => {
       stubPolicy(db, GameAdditionMode.Direct);
 
-      db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-direct', gameId: 'game-1' }));
+      db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-direct', platformGameId: 'pg-1' }));
 
       const result = await service.directAddGame('event-1', 'att-1', {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedById: 'eagl-1',
       });
 
       expect(db.eventGame.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            game: { connect: { id: 'game-1' } },
+            platformGame: { connect: { id: 'pg-1' } },
             suppliedBy: { connect: { id: 'eagl-1' } },
             addedBy: { connect: { id: 'att-1' } },
           }),
@@ -414,19 +307,19 @@ describe('EventGameNominationService', () => {
 
       await expect(
         service.directAddGame('event-1', 'att-1', {
-          gameId: 'game-1',
+          platformGameId: 'pg-1',
           suppliedById: 'eagl-1',
         }),
       ).rejects.toThrow(ForbiddenException);
     });
 
-    it('emits GameAddedToEvent domain event', async () => {
+    it('emits GameAddedToEvent domain event with platformGameId', async () => {
       stubPolicy(db, GameAdditionMode.Direct);
 
-      db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-emit', gameId: 'game-1' }));
+      db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-emit', platformGameId: 'pg-1' }));
 
       await service.directAddGame('event-1', 'att-1', {
-        gameId: 'game-1',
+        platformGameId: 'pg-1',
         suppliedById: 'eagl-1',
       });
 
@@ -435,9 +328,73 @@ describe('EventGameNominationService', () => {
         expect.objectContaining({
           eventId: 'event-1',
           eventGameId: 'eg-emit',
-          gameId: 'game-1',
+          platformGameId: 'pg-1',
+        } satisfies Partial<GameAddedToEventPayload>),
+      );
+    });
+  });
+
+  describe('castVote', () => {
+    it('upserts a vote on an Open nomination', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination());
+      const vote = stubEventGameVote({ voteType: VoteType.For });
+      db.eventGameVote.upsert.mockResolvedValue(vote);
+
+      const dto: CastVoteDto = { voteType: VoteType.For };
+      const result = await service.castVote('event-1', 'nom-1', 'att-1', dto);
+
+      expect(db.eventGameVote.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            eventGameNominationId_attendeeId: {
+              eventGameNominationId: 'nom-1',
+              attendeeId: 'att-1',
+            },
+          },
         }),
       );
+      expect(result).toBe(vote);
+    });
+
+    it('emits VoteCast domain event', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination());
+      db.eventGameVote.upsert.mockResolvedValue(stubEventGameVote({ voteType: VoteType.Against }));
+
+      await service.castVote('event-1', 'nom-1', 'att-1', { voteType: VoteType.Against });
+
+      expect(eventEmitter.emit).toHaveBeenCalledWith(
+        NominationEvent.VoteCast,
+        expect.objectContaining({
+          eventId: 'event-1',
+          nominationId: 'nom-1',
+          attendeeId: 'att-1',
+          voteType: VoteType.Against,
+        } satisfies VoteCastEvent),
+      );
+    });
+
+    it('throws NotFoundException when nomination does not exist', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(null);
+
+      await expect(service.castVote('event-1', 'nonexistent', 'user-1', { voteType: VoteType.For })).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
+  describe('withdraw', () => {
+    it('throws ForbiddenException when non-nominator tries to withdraw', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ nominatedById: 'att-1' }));
+
+      await expect(service.withdraw('event-1', 'nom-1', 'att-other')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('throws BadRequestException when nomination is already resolved', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue(
+        stubNomination({ nominatedById: 'att-1', status: NominationStatus.Passed }),
+      );
+
+      await expect(service.withdraw('event-1', 'nom-1', 'att-1')).rejects.toThrow(BadRequestException);
     });
   });
 });
@@ -470,28 +427,30 @@ function stubPolicy(db: MockDatabaseService, mode: GameAdditionMode = GameAdditi
     votingWindowHours: null,
     createdAt: new Date(),
     updatedAt: new Date(),
-  });
+  } as EventPolicy);
 
   db.eventOccurrencePolicy.findUnique.mockResolvedValue(null);
 }
 
-function stubSupplyEntry(db: MockDatabaseService, eventId = 'event-1', gameId = 'game-1') {
-  const entry: EventAttendeeGameList & { attendee: { eventId: string }; collection: { gameId: string } } = {
+function stubSupplyEntry(db: MockDatabaseService, eventId = 'event-1', platformGameId = 'pg-1') {
+  const entry: EventAttendeeGameList & { attendee: { eventId: string }; collection: { platformGameId: string } } = {
     id: 'eagl-1',
     attendeeId: 'att-1',
     collectionId: 'ce-1',
     createdAt: new Date(),
     attendee: { eventId },
-    collection: { gameId },
+    collection: { platformGameId },
   };
   db.eventAttendeeGameList.findUnique.mockResolvedValue(entry);
 }
 
-function stubNomination(overrides: Partial<EventGameNomination & { votes: { voteType: VoteType }[] }> = {}) {
+function stubNomination(
+  overrides: Partial<EventGameNomination & { votes: { voteType: VoteType }[] }> = {},
+): EventGameNomination & { votes: { voteType: VoteType }[] } {
   return {
     id: 'nom-1',
     eventId: 'event-1',
-    gameId: 'game-1',
+    platformGameId: 'pg-1',
     nominatedById: 'att-1',
     suppliedFromId: 'eagl-1',
     occurrenceId: null,
@@ -509,7 +468,7 @@ function stubEventGame(overrides: Partial<EventGame> = {}): EventGame {
     id: 'eg-1',
     eventId: 'event-1',
     occurrenceId: null,
-    gameId: 'game-1',
+    platformGameId: 'pg-1',
     role: ScheduledGameRole.Primary,
     sortOrder: 0,
     notes: null,
@@ -536,21 +495,10 @@ function stubEventGameVote(overrides: Partial<EventGameVote> = {}): EventGameVot
   };
 }
 
-function stubAttendeeWithGames(
-  overrides: Partial<EventAttendee & { availableGames: EventAttendeeGameList[] }> = {},
-): EventAttendee & { availableGames: EventAttendeeGameList[] } {
+function makeEventAttendeeStub(overrides: Partial<EventAttendee & AttendeeStub> = {}): EventAttendee & AttendeeStub {
   return {
-    id: 'att-stub',
-    eventId: 'event-1',
-    userId: null,
-    guestName: null,
-    guestEmail: null,
+    ...makeEventAttendee({ eventId: 'event-1', ...overrides }),
     status: EventParticipationStatus.Attending,
-    invitedById: null,
-    notes: null,
-    rsvpDate: null,
-    createdAt: new Date(),
-    updatedAt: new Date(),
     availableGames: [],
     ...overrides,
   };

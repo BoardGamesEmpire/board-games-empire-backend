@@ -72,6 +72,10 @@
     }
   ],
   "targetDefaults": {
+    "typecheck": {
+      "dependsOn": ["^generate"],
+      "cache": true
+    },
     "test": {
       "dependsOn": ["^build"]
     },

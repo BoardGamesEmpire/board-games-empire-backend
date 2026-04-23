@@ -57,11 +57,9 @@ export class GameSearchService {
             take: 1,
           },
 
-          releases: {
+          platformGames: {
             select: {
-              region: true,
-              releaseDate: true,
-              status: true,
+              id: true,
 
               platform: {
                 select: {
@@ -79,13 +77,21 @@ export class GameSearchService {
                 },
               },
 
-              languages: {
+              releases: {
                 select: {
-                  language: {
+                  region: true,
+                  releaseDate: true,
+                  status: true,
+
+                  languages: {
                     select: {
-                      code: true,
-                      abbreviation: true,
-                      name: true,
+                      language: {
+                        select: {
+                          code: true,
+                          abbreviation: true,
+                          name: true,
+                        },
+                      },
                     },
                   },
                 },
@@ -110,30 +116,32 @@ export class GameSearchService {
             inSystem: true,
             gameId: game.id,
 
-            platforms: game.releases.map((r) => ({
-              externalId: r.platform.id,
-              name: r.platform.name,
-              abbreviation: r.platform.abbreviation ?? undefined,
-              platformType: r.platform.platformType.toString(),
+            platforms: game.platformGames.map((pg) => ({
+              externalId: pg.platform.id,
+              name: pg.platform.name,
+              abbreviation: pg.platform.abbreviation ?? undefined,
+              platformType: pg.platform.platformType.toString(),
             })),
 
-            availableReleases: game.releases.map((r) => ({
-              externalId: r.platform.id,
-              platform: {
-                externalId: r.platform.gatewayLinks[0]?.externalId || undefined,
-                name: r.platform.name,
-                abbreviation: r.platform.abbreviation ?? undefined,
-                platformType: r.platform.platformType.toString(),
-              },
+            availableReleases: game.platformGames.flatMap((pg) =>
+              pg.releases.map((r) => ({
+                externalId: pg.platform.id,
+                platform: {
+                  externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
+                  name: pg.platform.name,
+                  abbreviation: pg.platform.abbreviation ?? undefined,
+                  platformType: pg.platform.platformType.toString(),
+                },
 
-              status: r.status,
-              releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
-              languages: r.languages.map((l) => ({
-                iso6393: l.language.code,
-                iso6391: l.language.abbreviation ?? undefined,
-                name: l.language.name,
+                status: r.status,
+                releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+                languages: r.languages.map((l) => ({
+                  iso6393: l.language.code,
+                  iso6391: l.language.abbreviation ?? undefined,
+                  name: l.language.name,
+                })),
               })),
-            })),
+            ),
           }),
         ),
       ),
@@ -178,19 +186,76 @@ export class GameSearchService {
     const rateLimitedSources: string[] = [];
     const unavailableSources: string[] = [];
 
-    this.logger.debug(
-      `Building search response for correlationId=${correlationId} with ${
-        localResults?.length ?? 0
-      } local results and ${externalResponse?.results.length ?? 0} external frames`,
-    );
-
     if (localResults.length > 0) {
       resultsBySource['local'] = localResults;
     }
 
     if (externalResponse) {
-      for (const frame of externalResponse.results) {
-        this.classifyFrame(frame, resultsBySource, errors, rateLimitedSources, unavailableSources);
+      for (const result of externalResponse.results) {
+        const source = result.gatewayId;
+        if (!source) continue;
+
+        switch (result.status) {
+          case ResultStatus.RESULT_STATUS_RESULT: {
+            if (!result.game) break;
+
+            if (!resultsBySource[source]) {
+              resultsBySource[source] = [];
+            }
+
+            resultsBySource[source].push({
+              externalId: result.game.externalId,
+              title: result.game.title,
+              contentType: result.game.contentType.toString(),
+              yearPublished: result.game.yearPublished,
+              thumbnailUrl: result.game.thumbnailUrl,
+              sourceUrl: result.game.sourceUrl,
+              averageRating: result.game.averageRating,
+              minPlayers: result.game.minPlayers,
+              maxPlayers: result.game.maxPlayers,
+              baseGameExternalId: result.game.baseGameExternalId,
+              inSystem: result.inSystem ?? false,
+              gameId: result.gameId,
+
+              platforms: (result.game.availablePlatforms ?? []).map((p) => ({
+                externalId: p.externalId,
+                name: p.name,
+                abbreviation: p.abbreviation,
+                platformType: p.platformType.toString(),
+              })),
+
+              availableReleases: (result.game.availableReleases ?? []).map((r) => ({
+                externalId: r.externalId,
+                platform: {
+                  ...r.platform!,
+                },
+                status: r.status.toString(),
+                releaseDate: r.releaseDate,
+                languages: (r.languages ?? []).map((l) => ({
+                  iso6393: l.iso6393,
+                  iso6391: l.iso6391,
+                  name: l.name,
+                })),
+              })),
+            });
+            break;
+          }
+
+          case ResultStatus.RESULT_STATUS_ERROR: {
+            errors[source] = { message: result.message ?? 'Unknown error' };
+            break;
+          }
+
+          case ResultStatus.RESULT_STATUS_RATE_LIMITED: {
+            rateLimitedSources.push(source);
+            break;
+          }
+
+          case ResultStatus.RESULT_STATUS_UNAVAILABLE: {
+            unavailableSources.push(source);
+            break;
+          }
+        }
       }
     }
 
@@ -201,79 +266,5 @@ export class GameSearchService {
       ...(rateLimitedSources.length > 0 && { rateLimitedSources }),
       ...(unavailableSources.length > 0 && { unavailableSources }),
     };
-  }
-
-  private classifyFrame(
-    frame: SearchGameResult,
-    resultsBySource: Record<string, WsGameSearchResult[]>,
-    errors: Record<string, { message: string }>,
-    rateLimitedSources: string[],
-    unavailableSources: string[],
-  ): void {
-    const source = frame.gatewayId;
-
-    switch (frame.status) {
-      case ResultStatus.RESULT_STATUS_RESULT: {
-        if (!frame.game) break;
-
-        const bucket = (resultsBySource[source] ??= []);
-        bucket.push({
-          externalId: frame.game.externalId,
-          title: frame.game.title,
-          contentType: frame.game.contentType.toString(),
-          yearPublished: frame.game.yearPublished,
-          thumbnailUrl: frame.game.thumbnailUrl,
-          sourceUrl: frame.game.sourceUrl,
-          averageRating: frame.game.averageRating,
-          minPlayers: frame.game.minPlayers,
-          maxPlayers: frame.game.maxPlayers,
-          baseGameExternalId: frame.game.baseGameExternalId,
-          inSystem: frame.inSystem ?? false,
-          gameId: frame.gameId,
-          platforms: (frame.game.availablePlatforms ?? []).map((p) => ({
-            externalId: p.externalId,
-            name: p.name,
-            abbreviation: p.abbreviation,
-            platformType: p.platformType.toString(),
-          })),
-          availableReleases: (frame.game.availableReleases ?? []).map((r) => ({
-            externalId: r.externalId,
-            platform: {
-              externalId: r.platform?.externalId,
-              name: r.platform?.name ?? '',
-              abbreviation: r.platform?.abbreviation,
-              platformType: r.platform?.platformType?.toString() ?? '',
-            },
-            status: r.status?.toString() ?? '',
-            releaseDate: r.releaseDate,
-            languages: (r.languages ?? []).map((l) => ({
-              iso6393: l.iso6393,
-              iso6391: l.iso6391,
-              name: l.name,
-            })),
-          })),
-        });
-        break;
-      }
-
-      case ResultStatus.RESULT_STATUS_ERROR:
-        errors[source] = { message: frame.message ?? 'Unknown error' };
-        break;
-
-      case ResultStatus.RESULT_STATUS_RATE_LIMITED:
-        rateLimitedSources.push(source);
-        break;
-
-      case ResultStatus.RESULT_STATUS_UNAVAILABLE:
-        unavailableSources.push(source);
-        break;
-
-      case ResultStatus.RESULT_STATUS_SOURCE_DONE:
-        // No-op for REST — SOURCE_DONE is a streaming protocol concern
-        break;
-
-      default:
-        this.logger.warn(`Unhandled frame status ${frame.status} from ${source}`);
-    }
   }
 }

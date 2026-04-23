@@ -17,6 +17,7 @@ import {
   SearchGamesRequest,
 } from '@board-games-empire/proto-gateway';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
@@ -209,7 +210,14 @@ describe('GameSearchGateway', () => {
           makeGameWithSource({ id: 'game-2', title: 'Wingspan' }),
         ]);
 
-        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+        await gateway.handleSearchStart(
+          client,
+          makeStartDto({
+            correlationId: crypto.randomUUID(),
+            includeLocal: true,
+            includeExternal: false,
+          }),
+        );
 
         const resultCalls = mockEmit.mock.calls.filter(
           ([event, payload]) =>

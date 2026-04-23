@@ -5,6 +5,7 @@ export * from './household.fixture.js';
 export * from './invite.fixture.js';
 export * from './job.fixture.js';
 export * from './permission.fixture.js';
+export * from './platform.fixture.js';
 export * from './role.fixture.js';
 export * from './session.fixture.js';
 export * from './user.fixture.js';

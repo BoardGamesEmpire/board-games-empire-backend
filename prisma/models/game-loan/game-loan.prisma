@@ -1,9 +1,6 @@
 model GameLoan {
   id String @id @default(cuid(2))
 
-  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  gameId String @map("game_id")
-
   collection   GameCollection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
   collectionId String         @map("collection_id")
 

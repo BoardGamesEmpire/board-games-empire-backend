@@ -44,7 +44,7 @@ describe('GameRequests', () => {
     it('excludes alternate versions via version_parent = null filter', async () => {
       const client = buildMockClient();
       await searchGamesRequest('Hades')(client);
-      expect(client.where).toHaveBeenCalledWith('version_parent = null');
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
     });
 
     it('requests all GAME_SEARCH_FIELDS', async () => {
@@ -149,7 +149,7 @@ describe('GameRequests', () => {
     });
 
     it('resolves with the data array from the response', async () => {
-      const games: IgdbGame[] = [{ id: 9001, name: 'DLC', game_type: 1, parent_game: { id: 1942 } }];
+      const games: IgdbGame[] = [{ id: 9001, name: 'DLC', game_type: 1, parent_game: 1942 }];
       const client = buildMockClient(games);
       const result = await fetchExpansionsRequest('1942')(client);
       expect(result).toEqual(games);

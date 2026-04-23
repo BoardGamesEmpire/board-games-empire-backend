@@ -4,8 +4,8 @@ model GamePlaySession {
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id])
   occurrenceId String?          @map("occurrence_id")
 
-  game   Game   @relation(fields: [gameId], references: [id])
-  gameId String @map("game_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
+  platformGameId String       @map("platform_game_id")
 
   // campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   // campaignId String?   @map("campaign_id")
@@ -20,12 +20,6 @@ model GamePlaySession {
   tableNumber   Int?    @map("table_number") // For multi-table events
   chapter       String?
   milestone     String?
-
-  // characterSessions  CharacterSession[]
-  // campaignLocation   CampaignLocation?       @relation(fields: [campaignLocationId], references: [id])
-  // campaignLocationId String?                 @map("campaign_location_id")
-  // npcAppearances     CampaignNPCAppearance[]
-  // sessionOutcome     CampaignSessionOutcome?
 
   playDate DateTime @default(now()) @map("play_date") @db.Timestamptz(3)
   duration Int?     @map("duration")
@@ -58,7 +52,7 @@ model GamePlaySession {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([occurrenceId])
-  @@index([gameId])
+  @@index([platformGameId])
   @@index([playDate])
   @@map("game_play_sessions")
 }

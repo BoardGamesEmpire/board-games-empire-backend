@@ -1,11 +1,12 @@
 import * as proto from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import { Observable, from } from 'rxjs';
-import { catchError, endWith, map, mergeMap, tap } from 'rxjs/operators';
+import { Observable, from, merge, of } from 'rxjs';
+import { catchError, endWith, filter, map, mergeMap, shareReplay, tap } from 'rxjs/operators';
 import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
 import { IGDBService } from '../igdb/igdb.service';
 import { toGameData, toGameSearchData } from '../mappers/game.mapper';
+import { IgdbGame } from '../types';
 
 @Injectable()
 export class GameGatewayService {
@@ -65,39 +66,47 @@ export class GameGatewayService {
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
-    return this.igdbService.call(fetchGameRequest(request.externalId, request.locale)).pipe(
-      map((games) => {
-        this.logger.log(`fetchGame found ${games.length} results for externalId '${request.externalId}'`);
+    const gameRequest$ = this.igdbService.call(fetchGameRequest(request.externalId, request.locale)).pipe(
+      tap((games) => this.logger.log(`fetchGame found ${games.length} results for externalId '${request.externalId}'`)),
+      shareReplay(1),
+    );
 
-        if (games.length === 0) {
-          return {
-            correlationId: request.correlationId,
-            status: proto.ResultStatus.RESULT_STATUS_ERROR,
-            message: `No game found for externalId ${request.externalId}`,
-          } satisfies proto.FetchGameResponse;
-        }
+    const noGames$ = gameRequest$.pipe(
+      filter((games) => games.length === 0),
+      map<IgdbGame[], proto.FetchGameResponse>(() => ({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_ERROR,
+        message: `No game found for externalId '${request.externalId}'`,
+      })),
+    );
 
-        const game = toGameData(games[0]);
-        this.logger.debug(`fetchGame mapped IGDB game to GameData: ${game.title} (externalId: ${game.externalId})`);
+    const game$ = gameRequest$.pipe(
+      filter((games) => games.length > 0),
+      map((games) => games[0]),
+      map((game) => {
+        const gameData = toGameData(game);
+        this.logger.debug(
+          `fetchGame mapped IGDB game to GameData: ${gameData.title} (externalId: ${gameData.externalId})`,
+        );
 
         return {
           correlationId: request.correlationId,
           status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game,
+          game: gameData,
         } satisfies proto.FetchGameResponse;
       }),
+    );
 
+    return merge(noGames$, game$).pipe(
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`fetchGame failed for externalId '${request.externalId}': ${message}`);
 
-        return [
-          {
-            correlationId: request.correlationId,
-            status: proto.ResultStatus.RESULT_STATUS_ERROR,
-            message,
-          } satisfies proto.FetchGameResponse,
-        ];
+        return of({
+          correlationId: request.correlationId,
+          status: proto.ResultStatus.RESULT_STATUS_ERROR,
+          message,
+        } satisfies proto.FetchGameResponse);
       }),
     );
   }

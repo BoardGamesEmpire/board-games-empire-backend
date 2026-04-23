@@ -29,7 +29,13 @@ export class GameWatchListener {
       );
     }
 
-    if (event.isExpansion && !event.baseGameId) {
+    if (!event.isExpansion) {
+      return this.logger.debug(
+        `GameWatchListener skipping: not an expansion, no watchers to notify for jobId=${event.jobId} gameId=${event.gameId}`,
+      );
+    }
+
+    if (!event.baseGameId) {
       return this.logger.warn(`GameWatchListener skipping: expansion jobId=${event.jobId} has no baseGameId`);
     }
 

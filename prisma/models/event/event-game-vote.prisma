@@ -4,8 +4,8 @@ model EventGameVote {
   nomination            EventGameNomination @relation(fields: [eventGameNominationId], references: [id])
   eventGameNominationId String              @map("event_game_nomination_id")
 
-  attendee   EventAttendee   @relation(fields: [attendeeId], references: [id])
-  attendeeId String @map("attendee_id")
+  attendee   EventAttendee @relation(fields: [attendeeId], references: [id])
+  attendeeId String        @map("attendee_id")
 
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
   occurrenceId String?          @map("occurrence_id")

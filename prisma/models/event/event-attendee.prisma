@@ -31,7 +31,7 @@ model EventAttendee {
   // Games this attendee added directly to the event lineup.
   scheduledGames EventGame[] @relation("ScheduledBy")
 
-  gameVotes EventGameVote[]
+  gameVotes         EventGameVote[]
   availabilityVotes EventAvailabilityVote[]
 
   notes    String?

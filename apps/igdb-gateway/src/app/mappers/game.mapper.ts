@@ -1,8 +1,8 @@
 import * as proto from '@board-games-empire/proto-gateway';
 import { DateTime } from 'luxon';
+import { AgeRatingOrganization, GameStatus, GameType, OrganizationRating, PlatformType, Region } from '../constants';
 import type {
   IgdbAgeRating,
-  IgdbAgeRatingOrganization,
   IgdbGame,
   IgdbGameType,
   IgdbLanguageEntry,
@@ -10,7 +10,7 @@ import type {
   IgdbPlatform,
   IgdbReleaseDate,
 } from '../types';
-import { toLanguageData } from './language.mapper';
+import { resolveLanguageIds, toLanguageData } from './language.mapper';
 
 /**
  * IGDB returns protocol-relative URLs (//images.igdb.com/...).
@@ -36,13 +36,21 @@ function toIsoDate(unixSeconds: number): string {
  * CONTENT_TYPE_UNSPECIFIED.
  */
 const IGDB_CONTENT_TYPE_MAP: Readonly<Partial<Record<IgdbGameType, proto.ContentType>>> = {
-  0: proto.ContentType.CONTENT_TYPE_BASE_GAME,
-  1: proto.ContentType.CONTENT_TYPE_DLC,
-  2: proto.ContentType.CONTENT_TYPE_EXPANSION,
-  3: proto.ContentType.CONTENT_TYPE_BUNDLE,
-  4: proto.ContentType.CONTENT_TYPE_STANDALONE_EXPANSION,
-  8: proto.ContentType.CONTENT_TYPE_REMAKE,
-  9: proto.ContentType.CONTENT_TYPE_REMASTER,
+  [GameType.MainGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
+  [GameType.DLC]: proto.ContentType.CONTENT_TYPE_DLC,
+  [GameType.Expansion]: proto.ContentType.CONTENT_TYPE_EXPANSION,
+  [GameType.Bundle]: proto.ContentType.CONTENT_TYPE_BUNDLE,
+  [GameType.StandaloneExpansion]: proto.ContentType.CONTENT_TYPE_STANDALONE_EXPANSION,
+  [GameType.Remake]: proto.ContentType.CONTENT_TYPE_REMAKE,
+  [GameType.Remaster]: proto.ContentType.CONTENT_TYPE_REMASTER,
+
+  [GameType.Episode]: proto.ContentType.CONTENT_TYPE_DLC,
+  [GameType.Season]: proto.ContentType.CONTENT_TYPE_BUNDLE,
+  [GameType.ExpandedEdition]: proto.ContentType.CONTENT_TYPE_EXPANDED_EDITION,
+  [GameType.Port]: proto.ContentType.CONTENT_TYPE_PORT,
+  [GameType.Fork]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
+  [GameType.PackAddon]: proto.ContentType.CONTENT_TYPE_DLC,
+  [GameType.Mod]: proto.ContentType.CONTENT_TYPE_MOD,
 };
 
 function toContentType(category: IgdbGameType | undefined): proto.ContentType {
@@ -50,27 +58,33 @@ function toContentType(category: IgdbGameType | undefined): proto.ContentType {
 }
 
 /**
- * IGDB platform_category → proto PlatformType.
+ * IGDB platform_type → proto PlatformType.
  * Values 4 (operating_system) and 6 (computer) both map to PC.
+ *
+ * @see https://api-docs.igdb.com/#platform
  */
 const IGDB_PLATFORM_TYPE_MAP: Readonly<Record<number, proto.PlatformType>> = {
-  1: proto.PlatformType.PLATFORM_TYPE_CONSOLE,
-  2: proto.PlatformType.PLATFORM_TYPE_ARCADE,
-  3: proto.PlatformType.PLATFORM_TYPE_OTHER,
-  4: proto.PlatformType.PLATFORM_TYPE_PC,
-  5: proto.PlatformType.PLATFORM_TYPE_PORTABLE,
-  6: proto.PlatformType.PLATFORM_TYPE_PC,
-  7: proto.PlatformType.PLATFORM_TYPE_MOBILE,
+  [PlatformType.Console]: proto.PlatformType.PLATFORM_TYPE_CONSOLE,
+  [PlatformType.Arcade]: proto.PlatformType.PLATFORM_TYPE_ARCADE,
+  [PlatformType.Platform]: proto.PlatformType.PLATFORM_TYPE_OTHER,
+  [PlatformType.OperatingSystem]: proto.PlatformType.PLATFORM_TYPE_PC,
+  [PlatformType.PortableConsole]: proto.PlatformType.PLATFORM_TYPE_PORTABLE,
+  [PlatformType.Computer]: proto.PlatformType.PLATFORM_TYPE_PC,
 };
 
 function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
+  const pcTypes: number[] = [PlatformType.OperatingSystem, PlatformType.Computer];
+  const mobile = ['iOS', 'Android'];
+  const platformType =
+    pcTypes.includes(platform.platform_type ?? 0) && mobile.includes(platform.name)
+      ? proto.PlatformType.PLATFORM_TYPE_MOBILE
+      : IGDB_PLATFORM_TYPE_MAP[platform.platform_type ?? 0] || proto.PlatformType.PLATFORM_TYPE_OTHER;
+
   return {
     externalId: String(platform.id),
     name: platform.name,
     abbreviation: platform.abbreviation,
-    platformType:
-      (platform.platform_type !== undefined && IGDB_PLATFORM_TYPE_MAP[platform.platform_type]) ||
-      proto.PlatformType.PLATFORM_TYPE_OTHER,
+    platformType,
   };
 }
 
@@ -79,14 +93,14 @@ function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
  * Applied uniformly to all release entries for that game.
  */
 const IGDB_RELEASE_STATUS_MAP: Readonly<Record<number, proto.ReleaseStatus>> = {
-  0: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
-  2: proto.ReleaseStatus.RELEASE_STATUS_ALPHA,
-  3: proto.ReleaseStatus.RELEASE_STATUS_BETA,
-  4: proto.ReleaseStatus.RELEASE_STATUS_EARLY_ACCESS,
-  5: proto.ReleaseStatus.RELEASE_STATUS_OFFLINE,
-  6: proto.ReleaseStatus.RELEASE_STATUS_CANCELLED,
-  7: proto.ReleaseStatus.RELEASE_STATUS_RUMOURED,
-  8: proto.ReleaseStatus.RELEASE_STATUS_DELISTED,
+  [GameStatus.Released]: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
+  [GameStatus.Alpha]: proto.ReleaseStatus.RELEASE_STATUS_ALPHA,
+  [GameStatus.Beta]: proto.ReleaseStatus.RELEASE_STATUS_BETA,
+  [GameStatus.EarlyAccess]: proto.ReleaseStatus.RELEASE_STATUS_EARLY_ACCESS,
+  [GameStatus.Offline]: proto.ReleaseStatus.RELEASE_STATUS_OFFLINE,
+  [GameStatus.Cancelled]: proto.ReleaseStatus.RELEASE_STATUS_CANCELLED,
+  [GameStatus.Rumored]: proto.ReleaseStatus.RELEASE_STATUS_RUMOURED,
+  [GameStatus.Delisted]: proto.ReleaseStatus.RELEASE_STATUS_DELISTED,
 };
 
 function toReleaseStatus(igdbStatus: number | undefined): proto.ReleaseStatus {
@@ -100,16 +114,16 @@ function toReleaseStatus(igdbStatus: number | undefined): proto.ReleaseStatus {
  * externalId is the string representation of the IGDB region enum value.
  */
 const IGDB_REGION_MAP: Readonly<Record<number, Omit<proto.RegionData, 'externalId'>>> = {
-  1: { name: 'Europe', regionCode: 'eu' },
-  2: { name: 'North America', regionCode: 'us' },
-  3: { name: 'Australia', regionCode: 'au' },
-  4: { name: 'New Zealand', regionCode: 'nz' },
-  5: { name: 'Japan', regionCode: 'jp' },
-  6: { name: 'China', regionCode: 'cn' },
-  7: { name: 'Asia', regionCode: 'as' },
-  8: { name: 'Worldwide', regionCode: 'ww' },
-  9: { name: 'Korea', regionCode: 'kr' },
-  10: { name: 'Brazil', regionCode: 'br' },
+  [Region.Europe]: { name: 'Europe', regionCode: 'eu' },
+  [Region.NorthAmerica]: { name: 'North America', regionCode: 'us' },
+  [Region.Australia]: { name: 'Australia', regionCode: 'au' },
+  [Region.NewZealand]: { name: 'New Zealand', regionCode: 'nz' },
+  [Region.Japan]: { name: 'Japan', regionCode: 'jp' },
+  [Region.China]: { name: 'China', regionCode: 'cn' },
+  [Region.Asia]: { name: 'Asia', regionCode: 'as' },
+  [Region.Worldwide]: { name: 'Worldwide', regionCode: 'ww' },
+  [Region.Korea]: { name: 'Korea', regionCode: 'kr' },
+  [Region.Brazil]: { name: 'Brazil', regionCode: 'br' },
 };
 
 function toRegionData(igdbRegion: number): proto.RegionData {
@@ -148,7 +162,7 @@ function toGameReleaseDataList(
   return Array.from(byPlatform.values()).map(({ platform, entries }) => {
     // Use the Worldwide entry date as the canonical release date when present;
     // otherwise take the earliest available date.
-    const worldwide = entries.find((e) => e.region === 8);
+    const worldwide = entries.find((e) => e.region === Region.Worldwide);
     const primaryEntry = worldwide ?? entries.reduce((a, b) => ((a.date ?? Infinity) < (b.date ?? Infinity) ? a : b));
     const releaseDate = primaryEntry.date ? toIsoDate(primaryEntry.date) : primaryEntry.human;
 
@@ -162,7 +176,7 @@ function toGameReleaseDataList(
     return {
       externalId: String(primaryEntry.id),
       platform: toPlatformData(platform),
-      status,
+      status: releaseStatusFromDate(status, releaseDate),
       releaseDate,
       localizations,
       languages,
@@ -170,17 +184,28 @@ function toGameReleaseDataList(
   });
 }
 
+function releaseStatusFromDate(
+  currentStatus: proto.ReleaseStatus,
+  releaseDate: string | undefined,
+): proto.ReleaseStatus {
+  if (!releaseDate || currentStatus !== proto.ReleaseStatus.RELEASE_STATUS_UNSPECIFIED) {
+    return currentStatus;
+  }
+
+  const now = DateTime.now();
+  const release = DateTime.fromISO(releaseDate);
+  return release < now ? proto.ReleaseStatus.RELEASE_STATUS_RELEASED : currentStatus;
+}
+
 /**
  * IGDB age_rating `category` field (the authority) → proto AgeRatingAuthority.
- *   1=ESRB  2=PEGI  3=CERO  5=USK  8=ACB
- * IGDB values 6 (GRAC) and 7 (CLASS_IND) have no BGE equivalent.
  */
-const IGDB_AGE_RATING_AUTHORITY_MAP: Readonly<Partial<Record<IgdbAgeRatingOrganization, proto.AgeRatingAuthority>>> = {
-  1: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_ESRB,
-  2: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_PEGI,
-  3: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_CERO,
-  5: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_USK,
-  8: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_ACB,
+const IGDB_AGE_RATING_AUTHORITY_MAP: Readonly<Partial<Record<AgeRatingOrganization, proto.AgeRatingAuthority>>> = {
+  [AgeRatingOrganization.ESRB]: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_ESRB,
+  [AgeRatingOrganization.PEGI]: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_PEGI,
+  [AgeRatingOrganization.CERO]: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_CERO,
+  [AgeRatingOrganization.USK]: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_USK,
+  [AgeRatingOrganization.ACB]: proto.AgeRatingAuthority.AGE_RATING_AUTHORITY_ACB,
 };
 
 /**
@@ -189,70 +214,88 @@ const IGDB_AGE_RATING_AUTHORITY_MAP: Readonly<Partial<Record<IgdbAgeRatingOrgani
  */
 const IGDB_RATING_LABEL_MAP: Readonly<Record<number, string>> = {
   // PEGI
-  1: 'PEGI 3',
-  2: 'PEGI 7',
-  3: 'PEGI 12',
-  4: 'PEGI 16',
-  5: 'PEGI 18',
+  [OrganizationRating.PEGI_3]: 'PEGI 3',
+  [OrganizationRating.PEGI_7]: 'PEGI 7',
+  [OrganizationRating.PEGI_12]: 'PEGI 12',
+  [OrganizationRating.PEGI_16]: 'PEGI 16',
+  [OrganizationRating.PEGI_18]: 'PEGI 18',
 
   // ESRB
-  6: 'RP',
-  7: 'EC',
-  8: 'E',
-  9: 'E10+',
-  10: 'T',
-  11: 'M',
-  12: 'AO',
+  [OrganizationRating.ESRB_RP]: 'RP',
+  [OrganizationRating.ESRB_EC]: 'EC',
+  [OrganizationRating.ESRB_E]: 'E',
+  [OrganizationRating.ESRB_E10]: 'E10+',
+  [OrganizationRating.ESRB_T]: 'T',
+  [OrganizationRating.ESRB_M]: 'M',
+  [OrganizationRating.ESRB_AO]: 'AO',
 
   // CERO
-  13: 'A',
-  14: 'B',
-  15: 'C',
-  16: 'D',
-  17: 'Z',
+  [OrganizationRating.CERO_A]: 'A',
+  [OrganizationRating.CERO_B]: 'B',
+  [OrganizationRating.CERO_C]: 'C',
+  [OrganizationRating.CERO_D]: 'D',
+  [OrganizationRating.CERO_Z]: 'Z',
 
   // USK
-  18: 'USK 0',
-  19: 'USK 6',
-  20: 'USK 12',
-  21: 'USK 16',
-  22: 'USK 18',
+  [OrganizationRating.USK_0]: 'USK 0',
+  [OrganizationRating.USK_6]: 'USK 6',
+  [OrganizationRating.USK_12]: 'USK 12',
+  [OrganizationRating.USK_16]: 'USK 16',
+  [OrganizationRating.USK_18]: 'USK 18',
+
+  [OrganizationRating.GRAC_ALL]: 'GRAC ALL',
+  [OrganizationRating.GRAC_12]: 'GRAC 12',
+  [OrganizationRating.GRAC_15]: 'GRAC 15',
+  [OrganizationRating.GRAC_18]: 'GRAC 18',
+  [OrganizationRating.GRAC_19]: 'GRAC 19',
+
+  // CLASS IND (Brazil)
+  [OrganizationRating.CLASS_IND_L]: 'L',
+  [OrganizationRating.CLASS_IND_10]: '10',
+  [OrganizationRating.CLASS_IND_12]: '12',
+  [OrganizationRating.CLASS_IND_14]: '14',
+  [OrganizationRating.CLASS_IND_16]: '16',
+  [OrganizationRating.CLASS_IND_18]: '18',
 
   // ACB (Australia)
-  34: 'G',
-  35: 'PG',
-  36: 'M',
-  37: 'MA15+',
-  38: 'R18+',
-  39: 'RC',
+  [OrganizationRating.ACB_G]: 'G',
+  [OrganizationRating.ACB_PG]: 'PG',
+  [OrganizationRating.ACB_M]: 'M',
+  [OrganizationRating.ACB_MA15]: 'MA15+',
+  [OrganizationRating.ACB_R18]: 'R18+',
+  [OrganizationRating.ACB_RC]: 'RC',
 };
 
 function toAgeRatingData(rating: IgdbAgeRating): proto.AgeRatingData | null {
   const authority = IGDB_AGE_RATING_AUTHORITY_MAP[rating.organization];
-  if (!authority) return null; // GRAC, CLASS_IND — not in proto
+  if (!authority) {
+    return null;
+  }
 
   return {
     authority,
     rating: IGDB_RATING_LABEL_MAP[rating.rating_category] ?? String(rating.rating_category),
     synopsis: rating.synopsis,
-  };
+  } satisfies proto.AgeRatingData;
 }
 
 function toThemeData(entity: IgdbNamedEntity): proto.ThemeData {
-  return { externalId: String(entity.id), name: entity.name };
+  return {
+    externalId: String(entity.id),
+    name: entity.name,
+  } satisfies proto.ThemeData;
 }
 
 function toCategoryData(entity: IgdbNamedEntity): proto.CategoryData {
-  return { externalId: String(entity.id), name: entity.name };
+  return {
+    externalId: String(entity.id),
+    name: entity.name,
+  } satisfies proto.CategoryData;
 }
 
 function toBaseGameExternalId(game: IgdbGame): string | undefined {
   const ref = game.parent_game ?? game.version_parent;
-  if (typeof ref === 'number') {
-    return String(ref);
-  }
-
-  return ref?.id ? String(ref.id) : undefined;
+  return typeof ref === 'number' ? String(ref) : undefined;
 }
 
 function toYearPublished(unixSeconds: number | undefined): number | undefined {
@@ -303,7 +346,7 @@ export function toGameSearchData(game: IgdbGame): proto.GameSearchData {
  * - `bayesRating`, `minPlayers`, `maxPlayers`, `minPlaytime`, `maxPlaytime`,
  *   `minAge`, `complexityWeight` are board-game fields with no IGDB equivalent.
  */
-export function toGameData(game: IgdbGame): proto.GameData {
+export function toGameData(game: IgdbGame, locale?: string): proto.GameData {
   const designers: proto.PersonData[] = (game.involved_companies ?? [])
     .filter((ic) => ic.developer)
     .map((ic) => ({ externalId: String(ic.company.id), name: ic.company.name }));
@@ -327,8 +370,11 @@ export function toGameData(game: IgdbGame): proto.GameData {
     })),
   ];
 
+  const allowedLanguageIds = resolveLanguageIds(locale);
   const categories: proto.CategoryData[] = (game.genres ?? []).map(toCategoryData);
-  const languages = toLanguageDataList((game.language_supports ?? []).map((ls) => ls.language));
+  const languages = toLanguageDataList(
+    (game.language_supports ?? []).map((ls) => ls.language).filter((lang) => filterLocale(lang, allowedLanguageIds)),
+  );
 
   const platforms = (game.platforms ?? []).map(toPlatformData);
   const releases = toGameReleaseDataList(game.release_dates ?? [], game.game_status, languages);
@@ -372,6 +418,14 @@ export function toGameData(game: IgdbGame): proto.GameData {
 
     yearPublished: toYearPublished(game.first_release_date),
   };
+}
+
+function filterLocale(lang: IgdbLanguageEntry, languageIds: number[]): boolean {
+  if (languageIds.length === 0) {
+    return true;
+  }
+
+  return languageIds.includes(lang.id);
 }
 
 /**

@@ -42,8 +42,8 @@ model User {
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")
 
-  eventsCreated          Event[]
-  eventsAttended         EventAttendee[]
+  eventsCreated  Event[]
+  eventsAttended EventAttendee[]
 
   loansGiven    GameLoan[] @relation("LoansGiven")
   loansReceived GameLoan[] @relation("LoansReceived")

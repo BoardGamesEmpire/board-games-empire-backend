@@ -2,9 +2,9 @@ import type { NominationStatus } from '@bge/database';
 
 export interface NominationCreatedEvent {
   eventId: string;
-  gameId: string;
   nominatedByAttendeeId: string;
   nominationId: string;
+  platformGameId: string;
 }
 
 export interface VoteCastEvent {
@@ -17,8 +17,8 @@ export interface VoteCastEvent {
 export interface NominationResolvedEvent {
   elevatedToEventGameId: string | null;
   eventId: string;
-  gameId: string;
   nominationId: string;
+  platformGameId: string;
   status: NominationStatus;
 }
 
@@ -26,5 +26,5 @@ export interface GameAddedToEventPayload {
   addedByAttendeeId: string;
   eventGameId: string;
   eventId: string;
-  gameId: string;
+  platformGameId: string;
 }
