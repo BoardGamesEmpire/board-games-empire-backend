@@ -16,7 +16,10 @@
     "tags": [
       "env"
     ],
-    "name": "env"
+    "name": "env",
+    "targets": {
+      "build": {}
+    }
   },
   "dependencies": {}
 }
