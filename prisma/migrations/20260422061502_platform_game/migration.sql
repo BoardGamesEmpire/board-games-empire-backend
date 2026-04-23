@@ -140,8 +140,7 @@ DROP COLUMN "platform_id",
 ADD COLUMN     "platform_game_id" TEXT NOT NULL;
 
 -- AlterTable
-ALTER TABLE "loaned_games" DROP COLUMN "game_id",
-ADD COLUMN     "platformGameId" TEXT;
+ALTER TABLE "loaned_games" DROP COLUMN "game_id";
 
 -- CreateTable
 CREATE TABLE "occurrence_policy_platform_types" (
@@ -280,9 +279,6 @@ ALTER TABLE "platform_games" ADD CONSTRAINT "platform_games_game_id_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "platform_games" ADD CONSTRAINT "platform_games_platform_id_fkey" FOREIGN KEY ("platform_id") REFERENCES "platforms"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "loaned_games" ADD CONSTRAINT "loaned_games_platformGameId_fkey" FOREIGN KEY ("platformGameId") REFERENCES "platform_games"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_play_session_expansions" ADD CONSTRAINT "game_play_session_expansions_platform_game_id_fkey" FOREIGN KEY ("platform_game_id") REFERENCES "platform_games"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

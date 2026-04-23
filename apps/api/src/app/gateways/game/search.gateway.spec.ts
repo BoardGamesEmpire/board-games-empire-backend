@@ -218,7 +218,6 @@ describe('GameSearchGateway', () => {
             includeExternal: false,
           }),
         );
-        console.log(mockEmit.mock.calls, mockEmit.mock.calls);
 
         const resultCalls = mockEmit.mock.calls.filter(
           ([event, payload]) =>

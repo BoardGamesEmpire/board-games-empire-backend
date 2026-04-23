@@ -22,10 +22,8 @@ model GameLoan {
   conditionAtReturn GameCondition? @map("condition_at_return")
   notes             String?
 
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
-  platformGame   PlatformGame? @relation(fields: [platformGameId], references: [id])
-  platformGameId String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([lenderId])
   @@index([borrowerId])

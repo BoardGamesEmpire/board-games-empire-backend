@@ -81,6 +81,17 @@ export class PlatformUpsertService {
       const platformType = toPlatformType(platformData.platformType);
       const capabilities = this.inferCapabilities(platformType, gameData);
 
+      const existingPlatformGame = await this.db.platformGame.findUnique({
+        where: { gameId_platformId: { gameId, platformId } },
+        select: { id: true, frozenAt: true },
+      });
+
+      if (existingPlatformGame?.frozenAt) {
+        this.logger.debug(`Skipped capability update for frozen PlatformGame id=${existingPlatformGame.id}`);
+        map.set(platformId, existingPlatformGame.id);
+        continue;
+      }
+
       const platformGame = await this.db.platformGame.upsert({
         where: { gameId_platformId: { gameId, platformId } },
         create: {
@@ -94,10 +105,6 @@ export class PlatformUpsertService {
         },
         select: { id: true, frozenAt: true },
       });
-
-      if (platformGame.frozenAt) {
-        this.logger.debug(`Skipped capability update for frozen PlatformGame id=${platformGame.id}`);
-      }
 
       map.set(platformId, platformGame.id);
     }

@@ -111,6 +111,8 @@ export class EventGameNominationService {
       }
     }
 
+    this.logger.debug(`Creating nomination for event ${eventId} with initial status ${initialStatus}`);
+
     const nomination = await this.db.eventGameNomination.create({
       data: {
         event: { connect: { id: eventId } },
@@ -213,7 +215,11 @@ export class EventGameNominationService {
       } satisfies VoteCastEvent);
 
       return vote;
-    } catch {
+    } catch (error: unknown) {
+      this.logger.error(`Failed to cast vote for nomination ${nominationId} in event ${eventId}: ${error}`, {
+        error,
+      });
+
       throw new BadRequestException('Failed to cast vote.');
     }
   }
