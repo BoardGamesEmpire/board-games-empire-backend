@@ -2,9 +2,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 
 export class NominateGameDto {
-  @ApiProperty({ description: 'The game to nominate' })
+  @ApiProperty({ description: 'The PlatformGame to nominate (specific game + platform combination)' })
   @IsString()
-  gameId!: string;
+  platformGameId!: string;
 
   @ApiProperty({
     description:

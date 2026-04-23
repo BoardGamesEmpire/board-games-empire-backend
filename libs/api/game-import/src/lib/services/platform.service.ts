@@ -1,7 +1,9 @@
-import { DatabaseService } from '@bge/database';
-import type { GameReleaseData, LanguageData, PlatformData } from '@board-games-empire/proto-gateway';
+import { DatabaseService, PlatformType } from '@bge/database';
+import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
+
+export type PlatformGameMap = Map<string, string>;
 
 @Injectable()
 export class PlatformUpsertService {
@@ -55,6 +57,55 @@ export class PlatformUpsertService {
   }
 
   /**
+   * Creates or updates PlatformGame records for each platform in the list.
+   * Returns a map of Platform.id → PlatformGame.id for use by downstream
+   * methods (e.g. upsertReleases).
+   *
+   * Capabilities are inferred from platform type and game data:
+   *   - Tabletop: supportsLocal=true, hasRealtime=true
+   *   - All: supportsSolo derived from minPlayers <= 1
+   *   - Digital platforms: conservative defaults (false) until enrichment
+   *
+   * Respects frozenAt — skips updates for frozen PlatformGame records.
+   */
+  async upsertPlatformGames(
+    gameId: string,
+    platforms: PlatformData[],
+    gameData: GameData,
+    gatewayId: string,
+  ): Promise<PlatformGameMap> {
+    const map: PlatformGameMap = new Map();
+
+    for (const platformData of platforms) {
+      const platformId = await this.upsertPlatform(platformData, gatewayId);
+      const platformType = toPlatformType(platformData.platformType);
+      const capabilities = this.inferCapabilities(platformType, gameData);
+
+      const platformGame = await this.db.platformGame.upsert({
+        where: { gameId_platformId: { gameId, platformId } },
+        create: {
+          gameId,
+          platformId,
+          ...capabilities,
+        },
+        update: {
+          // Only update capabilities if not frozen
+          ...capabilities,
+        },
+        select: { id: true, frozenAt: true },
+      });
+
+      if (platformGame.frozenAt) {
+        this.logger.debug(`Skipped capability update for frozen PlatformGame id=${platformGame.id}`);
+      }
+
+      map.set(platformId, platformGame.id);
+    }
+
+    return map;
+  }
+
+  /**
    * Upserts a Language record on iso6393 (the stable key).
    * Does not overwrite systemSupported — seeds own that flag.
    */
@@ -75,19 +126,30 @@ export class PlatformUpsertService {
   }
 
   /**
-   * Upserts all GameRelease rows for a game from the proto releases list,
-   * including per-release language associations.
+   * Upserts all GameRelease rows from the proto releases list.
+   * Releases are now children of PlatformGame (not Game directly).
+   * The platformGameMap provides the resolved PlatformGame.id for each Platform.id.
    */
-  async upsertReleases(gameId: string, releases: GameReleaseData[], gatewayId: string): Promise<void> {
+  async upsertReleases(
+    platformGameMap: PlatformGameMap,
+    releases: GameReleaseData[],
+    gatewayId: string,
+  ): Promise<void> {
     for (const release of releases) {
       const platformId = await this.upsertPlatform(release.platform!, gatewayId);
+      const platformGameId = platformGameMap.get(platformId);
+
+      if (!platformGameId) {
+        this.logger.warn(`No PlatformGame found for platformId=${platformId} during release upsert — skipping release`);
+        continue;
+      }
+
       const region = toReleaseRegion(release.localizations);
 
       const { id: releaseId } = await this.db.gameRelease.upsert({
-        where: { gameId_platformId_region: { gameId, platformId, region } },
+        where: { platformGameId_region: { platformGameId, region } },
         create: {
-          gameId,
-          platformId,
+          platformGameId,
           region,
           status: toReleaseStatus(release.status),
           releaseDate: toReleaseDate(release.releaseDate),
@@ -115,6 +177,46 @@ export class PlatformUpsertService {
         });
       }
     }
+  }
+
+  /**
+   * Infers PlatformGame capability defaults based on platform type and game data.
+   * Tabletop games get sensible physical-game defaults.
+   * Digital platforms get conservative defaults until enrichment provides data.
+   */
+  inferCapabilities(
+    platformType: PlatformType,
+    gameData: GameData,
+  ): {
+    supportsSolo: boolean;
+    supportsLocal: boolean;
+    supportsOnline: boolean;
+    hasAsyncPlay: boolean;
+    hasRealtime: boolean;
+    hasTutorial: boolean;
+  } {
+    const supportsSolo = gameData.minPlayers != null && gameData.minPlayers <= 1;
+
+    if (platformType === PlatformType.Tabletop) {
+      return {
+        supportsSolo,
+        supportsLocal: true,
+        supportsOnline: false,
+        hasAsyncPlay: false,
+        hasRealtime: true,
+        hasTutorial: false,
+      };
+    }
+
+    // Digital platforms — conservative defaults
+    return {
+      supportsSolo,
+      supportsLocal: false,
+      supportsOnline: false,
+      hasAsyncPlay: false,
+      hasRealtime: false,
+      hasTutorial: false,
+    };
   }
 
   private toSlug(name: string): string {

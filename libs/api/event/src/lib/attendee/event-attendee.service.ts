@@ -192,16 +192,29 @@ export class EventAttendeeService {
       include: {
         collection: {
           include: {
-            game: {
+            platformGame: {
               select: {
                 id: true,
-                title: true,
-                thumbnail: true,
-                minPlayers: true,
-                maxPlayers: true,
-                minPlayTime: true,
-                maxPlayTime: true,
-                complexity: true,
+
+                game: {
+                  select: {
+                    id: true,
+                    title: true,
+                    thumbnail: true,
+                    minPlayers: true,
+                    maxPlayers: true,
+                    minPlayTime: true,
+                    maxPlayTime: true,
+                    complexity: true,
+                  },
+                },
+
+                platform: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -238,11 +251,24 @@ export class EventAttendeeService {
         include: {
           collection: {
             include: {
-              game: {
+              platformGame: {
                 select: {
                   id: true,
-                  title: true,
-                  thumbnail: true,
+
+                  game: {
+                    select: {
+                      id: true,
+                      title: true,
+                      thumbnail: true,
+                    },
+                  },
+
+                  platform: {
+                    select: {
+                      id: true,
+                      name: true,
+                    },
+                  },
                 },
               },
             },
@@ -344,15 +370,28 @@ const ATTENDEE_INCLUDE = {
     include: {
       collection: {
         include: {
-          game: {
+          platformGame: {
             select: {
               id: true,
-              title: true,
-              thumbnail: true,
-              minPlayers: true,
-              maxPlayers: true,
-              minPlayTime: true,
-              maxPlayTime: true,
+
+              game: {
+                select: {
+                  id: true,
+                  title: true,
+                  thumbnail: true,
+                  minPlayers: true,
+                  maxPlayers: true,
+                  minPlayTime: true,
+                  maxPlayTime: true,
+                },
+              },
+
+              platform: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
             },
           },
         },

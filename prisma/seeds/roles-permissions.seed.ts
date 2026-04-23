@@ -29,8 +29,63 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Update own profile',
     },
 
+    // --- Games ---
     { action: Action.read, subject: 'Game', slug: 'read:game', reason: 'View games' },
     { action: Action.create, subject: 'Game', slug: 'create:game', reason: 'Create games' },
+    { action: Action.update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
+    { action: Action.delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
+
+    // --- PlatformGame ---
+    {
+      action: Action.read,
+      subject: 'PlatformGame',
+      slug: 'read:platform_game',
+      reason: 'View platform-specific game entries',
+    },
+    {
+      action: Action.create,
+      subject: 'PlatformGame',
+      slug: 'create:platform_game',
+      reason: 'Create a platform-specific game entry (import pipelines)',
+    },
+    {
+      action: Action.update,
+      subject: 'PlatformGame',
+      slug: 'update:platform_game',
+      reason: 'Update platform-specific game capabilities or overrides',
+    },
+    {
+      action: Action.delete,
+      subject: 'PlatformGame',
+      slug: 'delete:platform_game',
+      reason: 'Remove a platform-specific game entry',
+    },
+
+    // --- Platform ---
+    {
+      action: Action.read,
+      subject: 'Platform',
+      slug: 'read:platform',
+      reason: 'View platforms',
+    },
+    {
+      action: Action.create,
+      subject: 'Platform',
+      slug: 'create:platform',
+      reason: 'Create platforms',
+    },
+    {
+      action: Action.update,
+      subject: 'Platform',
+      slug: 'update:platform',
+      reason: 'Update platforms',
+    },
+    {
+      action: Action.delete,
+      subject: 'Platform',
+      slug: 'delete:platform',
+      reason: 'Delete platforms',
+    },
 
     // TODO: We should probably have conditions here to only allow updating/deleting games you created or that are in your collection, etc. Otherwise users could mess with each other's games.
     { action: Action.update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
@@ -672,6 +727,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:user:profile:own',
     'create:game',
     'read:game',
+    'read:platform_game',
+    'read:platform',
     'create:event',
     'create:household',
     'read:households',

@@ -1,3 +1,5 @@
+import { AgeRatingOrganization, PlatformType } from '../constants';
+
 /**
  * Shapes returned by the IGDB API
  *
@@ -44,16 +46,14 @@ export interface IgdbInvolvedCompany {
 }
 
 /**
- * IGDB platform_category enum values:
+ * IGDB platform_type enum values:
  *   1 = console
  *   2 = arcade
  *   3 = platform (generic)
  *   4 = operating_system  → maps to PC
  *   5 = portable_console
- *   6 = computer          → maps to PC
- *   7 = mobile
  */
-export type IgdbPlatformType = 1 | 2 | 3 | 4 | 5 | 6 | 7 | number;
+export type IgdbPlatformType = PlatformType;
 
 export interface IgdbPlatform {
   id: number;
@@ -64,6 +64,14 @@ export interface IgdbPlatform {
    * See IgdbPlatformType for values.
    */
   platform_type?: IgdbPlatformType;
+}
+
+export enum PlatformFamily {
+  Playstation = 1,
+  Xbox = 2,
+  Sega = 3,
+  Linux = 4,
+  Nintendo = 5,
 }
 
 /**
@@ -117,10 +125,9 @@ export interface IgdbLanguageSupport {
 }
 
 /**
- * IGDB age_rating organization (the certifying authority):
- *   1=ESRB  2=PEGI  3=CERO  5=USK  6=GRAC  7=CLASS_IND  8=ACB
+ * IGDB age_rating organization (the certifying authority)
  */
-export type IgdbAgeRatingOrganization = 1 | 2 | 3 | 5 | 6 | 7 | 8 | number;
+export type IgdbAgeRatingOrganization = `${AgeRatingOrganization}`;
 
 /**
  * IGDB age_rating rating (globally-unique numeric enum across all authorities):
@@ -183,6 +190,7 @@ export type IgdbGameStatus = 0 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | number;
 export interface IgdbGame {
   id: number;
   name: string;
+
   game_type?: IgdbGameType;
   game_status?: IgdbGameStatus;
 
@@ -194,12 +202,14 @@ export interface IgdbGame {
   age_ratings?: IgdbAgeRating[];
   collections?: IgdbNamedEntity[];
   cover?: IgdbCover;
+  expansions?: number[];
   franchises?: IgdbNamedEntity[];
   genres?: IgdbNamedEntity[];
   involved_companies?: IgdbInvolvedCompany[];
   language_supports?: IgdbLanguageSupport[];
   platforms?: IgdbPlatform[];
   release_dates?: IgdbReleaseDate[];
+  standalone_expansions?: number[];
   summary?: string;
   themes?: IgdbNamedEntity[];
   total_rating_count?: number;
@@ -209,10 +219,10 @@ export interface IgdbGame {
   /**
    * Populated on DLC (category 1) and expansion (category 2).
    */
-  parent_game?: IgdbGameRef | number;
+  parent_game?: number;
 
   /**
    * Populated on standalone expansion (category 4) and version entries.
    */
-  version_parent?: IgdbGameRef | number;
+  version_parent?: number;
 }

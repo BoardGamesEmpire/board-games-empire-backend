@@ -220,7 +220,7 @@ describe('EventNotificationListener', () => {
       const event: NominationCreatedEvent = {
         eventId: 'ev-1',
         nominationId: 'nom-1',
-        gameId: 'game-1',
+        platformGameId: 'plat-game-1',
         nominatedByAttendeeId: 'att-nominator',
       };
 
@@ -249,7 +249,7 @@ describe('EventNotificationListener', () => {
     const baseEvent: NominationResolvedEvent = {
       eventId: 'ev-1',
       nominationId: 'nom-1',
-      gameId: 'game-1',
+      platformGameId: 'plat-game-1',
       status: 'Approved',
       elevatedToEventGameId: 'eg-1',
     };
@@ -257,8 +257,11 @@ describe('EventNotificationListener', () => {
     beforeEach(() => {
       db.eventGameNomination.findUnique.mockResolvedValue({
         nominatedById: 'att-1',
-        ...(<any>{ nominatedBy: { userId: 'user-nominator' } }),
-        game: { title: 'Wingspan' },
+        ...(<any>{
+          nominatedBy: { userId: 'user-nominator' },
+          platformGame: { game: { title: 'Wingspan' } },
+        }),
+        platformGameId: 'plat-game-1',
       });
     });
 

@@ -6,8 +6,13 @@ model EventOccurrencePolicy {
   occurrenceId String          @unique @map("occurrence_id")
 
   // Game restrictions — null means inherit from event policy
-  restrictToGameCategories Boolean?             @map("restrict_to_game_categories")
-  allowedCategories        OccurrenceCategory[]
+  restrictToGameCategories Boolean?                   @map("restrict_to_game_categories")
+  allowedCategories        OccurrencePolicyCategory[]
+
+  // Game restrictions — platforms (override event-level when non-empty)
+  // Empty = inherit from event policy. Non-empty = override entirely.
+  allowedPlatformTypes OccurrencePolicyPlatformType[]
+  allowedPlatforms     OccurrencePolicyPlatform[]
 
   // Capacity — null means inherit
   maxAttendees         Int?     @map("max_attendees")
@@ -26,18 +31,13 @@ model EventOccurrencePolicy {
   // Game voting controls — only relevant when gameAdditionMode = RequiresVote
   voteThresholdType  VoteThresholdType? @map("vote_threshold_type")
   voteThresholdValue Int?               @map("vote_threshold_value")
-  // ^ used by Supermajority (e.g. 66 = 66%) and FixedCount (e.g. 3 = need 3 For votes)
-  // null for SimpleMajority and Unanimous
 
   voteQuorumType  VoteQuorumType? @map("vote_quorum_type")
   voteQuorumValue Int?            @map("vote_quorum_value")
-  // ^ used by PercentOfAttendees and FixedCount quorum types
 
   voteEligibility  VoteEligibility?  @map("vote_eligibility")
   interestedWeight InterestedWeight? @map("interested_weight")
 
-  // How long a nomination stays open for votes before being resolved.
-  // Null = host closes manually.
   votingWindowHours Int? @map("voting_window_hours")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -46,7 +46,7 @@ model EventOccurrencePolicy {
   @@map("event_occurrence_policies")
 }
 
-model OccurrenceCategory {
+model OccurrencePolicyCategory {
   id String @id @default(cuid(2))
 
   occurrencePolicy   EventOccurrencePolicy @relation(fields: [occurrencePolicyId], references: [id], onDelete: Cascade)
@@ -57,4 +57,29 @@ model OccurrenceCategory {
 
   @@unique([occurrencePolicyId, categoryId])
   @@map("occurrence_categories")
+}
+
+model OccurrencePolicyPlatformType {
+  id String @id @default(cuid(2))
+
+  occurrencePolicy   EventOccurrencePolicy @relation(fields: [occurrencePolicyId], references: [id], onDelete: Cascade)
+  occurrencePolicyId String                @map("occurrence_policy_id")
+
+  platformType PlatformType @map("platform_type")
+
+  @@unique([occurrencePolicyId, platformType])
+  @@map("occurrence_policy_platform_types")
+}
+
+model OccurrencePolicyPlatform {
+  id String @id @default(cuid(2))
+
+  occurrencePolicy   EventOccurrencePolicy @relation(fields: [occurrencePolicyId], references: [id], onDelete: Cascade)
+  occurrencePolicyId String                @map("occurrence_policy_id")
+
+  platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  platformId String   @map("platform_id")
+
+  @@unique([occurrencePolicyId, platformId])
+  @@map("occurrence_policy_platforms")
 }

@@ -46,10 +46,10 @@ model EventOccurrence {
 }
 
 enum OccurrenceStatus {
-  Proposed   // poll candidate, open for availability votes
-  Confirmed  // locked in — has or will have a concrete startDate
-  Declined   // proposed date that was not selected by the host
-  Cancelled  // confirmed occurrence that was subsequently cancelled
+  Proposed // poll candidate, open for availability votes
+  Confirmed // locked in — has or will have a concrete startDate
+  Declined // proposed date that was not selected by the host
+  Cancelled // confirmed occurrence that was subsequently cancelled
 
   @@map("occurrence_statuses")
 }

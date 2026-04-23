@@ -210,8 +210,8 @@ export class GameService {
 
       const collectionsCount = await this.db.gameCollection.count({
         where: {
-          game: {
-            id,
+          platformGame: {
+            gameId: id,
           },
         },
       });

@@ -1,4 +1,4 @@
-import type { Game, GameRelease, Platform } from '@bge/database';
+import type { Game } from '@bge/database';
 import { ContentType, TimeMeasure, Visibility } from '@bge/database';
 
 export function makeGame(overrides: Partial<Game> = {}): Game {
@@ -36,19 +36,18 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
   };
 }
 
+/**
+ * Game with its source relations included.
+ */
 export function makeGameWithSource(overrides: Partial<GameWithSource> = {}): GameWithSource {
   const game = makeGame(overrides);
   return {
     ...game,
     gameSources: [{ sourceUrl: 'https://example.com/game' }],
-    releases: [],
-    platforms: [],
     ...overrides,
   };
 }
 
 interface GameWithSource extends Game {
   gameSources: { sourceUrl: string }[];
-  releases: GameRelease[];
-  platforms: Partial<Platform>[];
 }

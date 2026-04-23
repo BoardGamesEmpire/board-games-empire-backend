@@ -1,3 +1,4 @@
+import { GameType } from '../constants';
 import type { IgdbRequest } from '../igdb/igdb.service';
 import type { IGDBClient } from '../igdb/interfaces';
 import { resolveLanguageIds } from '../mappers/language.mapper';
@@ -11,17 +12,19 @@ const GAMES_ENDPOINT = '/games';
  * round-trip during search streaming.
  */
 export const GAME_SEARCH_FIELDS = [
-  'id',
   'cover.url',
+  'expansions',
   'first_release_date',
   'game_status',
   'game_type',
+  'id',
   'language_supports.language.*',
   'name',
   'parent_game',
-  'platforms.name',
   'platforms.abbreviation',
+  'platforms.name',
   'platforms.platform_type',
+  'standalone_expansions',
   'summary',
   'total_rating',
   'url',
@@ -71,8 +74,8 @@ export const GAME_FETCH_FIELDS = [
  */
 export function searchGamesRequest(query: string, limit = 20, offset = 0, locale?: string): IgdbRequest<IgdbGame[]> {
   return (client: IGDBClient) => {
-    const builder = client.fields(GAME_SEARCH_FIELDS).search(query).where(`version_parent = null`);
-    return includeLanguageFilter(builder, locale)
+    const builder = client.fields(GAME_SEARCH_FIELDS).search(query);
+    return includeLanguageFilter(builder, locale, `version_parent = null & game_type != ${GameType.Update}`)
       .limit(limit)
       .offset(offset)
       .request<IgdbGame>(GAMES_ENDPOINT)
@@ -80,8 +83,12 @@ export function searchGamesRequest(query: string, limit = 20, offset = 0, locale
   };
 }
 
-function includeLanguageFilter(builder: IGDBClient, locale?: string): IGDBClient {
+function includeLanguageFilter(builder: IGDBClient, locale?: string, whereQuery?: string): IGDBClient {
   if (!locale) {
+    if (whereQuery) {
+      return builder.where(whereQuery);
+    }
+
     return builder;
   }
 
@@ -90,7 +97,11 @@ function includeLanguageFilter(builder: IGDBClient, locale?: string): IGDBClient
     return builder;
   }
 
-  return builder.where(`language_supports.language = (${languageIds.join(',')}) | language_supports.language = null`);
+  return builder.where(
+    `${whereQuery ? `${whereQuery} & ` : ''}(language_supports.language = (${languageIds.join(
+      ',',
+    )}) | language_supports.language = null)`,
+  );
 }
 
 /**
@@ -98,8 +109,8 @@ function includeLanguageFilter(builder: IGDBClient, locale?: string): IGDBClient
  */
 export function fetchGameRequest(externalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
   return (client: IGDBClient) => {
-    const builder = client.fields(GAME_FETCH_FIELDS).where(`id = '${externalId}'`);
-    return includeLanguageFilter(builder, locale)
+    const builder = client.fields(GAME_FETCH_FIELDS);
+    return includeLanguageFilter(builder, locale, `id = '${externalId}'`)
       .limit(1)
       .request<IgdbGame>(GAMES_ENDPOINT)
       .then((response) => response.data);
@@ -116,11 +127,13 @@ export function fetchGameRequest(externalId: string, locale?: string): IgdbReque
  */
 export function fetchExpansionsRequest(baseExternalId: string, locale?: string): IgdbRequest<IgdbGame[]> {
   return (client: IGDBClient) => {
-    const builder = client
-      .fields(GAME_SEARCH_FIELDS)
-      .where(`parent_game = '${baseExternalId}' | version_parent = '${baseExternalId}'`);
+    const builder = client.fields(GAME_SEARCH_FIELDS);
 
-    return includeLanguageFilter(builder, locale)
+    return includeLanguageFilter(
+      builder,
+      locale,
+      `(parent_game = '${baseExternalId}' | version_parent = '${baseExternalId}')`,
+    )
       .limit(50)
       .request<IgdbGame>(GAMES_ENDPOINT)
       .then((response) => response.data);

@@ -16,7 +16,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
-import { VoteResolver } from '../vote/vote-resolver';
+import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { NominationEvent } from './constants';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
 import { NominateGameDto } from './dto/nominate-game.dto';
@@ -68,7 +68,7 @@ export class EventGameNominationService {
       select: {
         id: true,
         attendee: { select: { eventId: true } },
-        collection: { select: { gameId: true } },
+        collection: { select: { platformGameId: true } },
       },
     });
 
@@ -76,8 +76,8 @@ export class EventGameNominationService {
       throw new NotFoundException(`Game list entry ${dto.suppliedFromId} not found for this event.`);
     }
 
-    if (supplyEntry.collection.gameId !== dto.gameId) {
-      throw new BadRequestException('The suppliedFromId does not correspond to the nominated gameId.');
+    if (supplyEntry.collection.platformGameId !== dto.platformGameId) {
+      throw new BadRequestException('The suppliedFromId does not correspond to the nominated platformGameId.');
     }
 
     // Determine initial status based on policy mode
@@ -115,7 +115,7 @@ export class EventGameNominationService {
       data: {
         event: { connect: { id: eventId } },
         occurrence: dto.occurrenceId ? { connect: { id: dto.occurrenceId } } : undefined,
-        game: { connect: { id: dto.gameId } },
+        platformGame: { connect: { id: dto.platformGameId } },
         nominatedBy: { connect: { id: attendeeId } },
         suppliedFrom: { connect: { id: dto.suppliedFromId } },
         status: initialStatus,
@@ -127,7 +127,7 @@ export class EventGameNominationService {
     this.eventEmitter.emit(NominationEvent.NominationCreated, {
       eventId,
       nominationId: nomination.id,
-      gameId: dto.gameId,
+      platformGameId: dto.platformGameId,
       nominatedByAttendeeId: attendeeId,
     } satisfies NominationCreatedEvent);
 
@@ -184,7 +184,6 @@ export class EventGameNominationService {
     );
 
     try {
-      // Upsert the vote to allow changing an existing vote or creating a new one
       const vote = await this.db.eventGameVote.upsert({
         where: {
           eventGameNominationId_attendeeId: {
@@ -214,9 +213,8 @@ export class EventGameNominationService {
       } satisfies VoteCastEvent);
 
       return vote;
-    } catch (error) {
-      this.logger.error(`Error casting vote on nomination ${nominationId}`, error);
-      throw error;
+    } catch {
+      throw new BadRequestException('Failed to cast vote.');
     }
   }
 
@@ -229,7 +227,7 @@ export class EventGameNominationService {
       select: {
         id: true,
         status: true,
-        gameId: true,
+        platformGameId: true,
         occurrenceId: true,
         votes: { select: { voteType: true } },
       },
@@ -242,25 +240,19 @@ export class EventGameNominationService {
     );
 
     const policy = await this.getEffectivePolicy(eventId, nomination.occurrenceId ?? undefined);
-    const attendees = await this.db.eventAttendee.findMany({
-      where: { eventId },
-      select: {
-        status: true,
-        availableGames: { select: { id: true } },
-      },
-    });
+    const attendees = await this.getEventAttendees(eventId);
 
     const resolution = VoteResolver.resolve(nomination.votes, policy, attendees);
+    const resolvedStatus = resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed;
 
     const updated = await this.db.eventGameNomination.update({
       where: { id: nominationId },
-      data: { status: resolution.status },
+      data: { status: resolvedStatus },
       include: NOMINATION_INCLUDE,
     });
 
     let elevatedGameId: string | null = null;
-
-    if (resolution.status === NominationStatus.Passed) {
+    if (resolution.thresholdMet) {
       const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
       elevatedGameId = eventGame.id;
     }
@@ -268,29 +260,29 @@ export class EventGameNominationService {
     this.eventEmitter.emit(NominationEvent.NominationResolved, {
       eventId,
       nominationId,
-      gameId: nomination.gameId,
-      status: resolution.status,
+      platformGameId: nomination.platformGameId,
+      status: resolvedStatus,
       elevatedToEventGameId: elevatedGameId,
     } satisfies NominationResolvedEvent);
 
-    return { nomination: updated, resolution };
+    return { nomination: updated, resolution: { ...resolution, status: resolvedStatus } };
   }
 
   async hostApprove(eventId: string, nominationId: string): Promise<EventGameNomination> {
-    return this.hostDecision(eventId, nominationId, NominationStatus.Approved);
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved);
   }
 
   async hostReject(eventId: string, nominationId: string): Promise<EventGameNomination> {
-    return this.hostDecision(eventId, nominationId, NominationStatus.Rejected);
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected);
   }
 
-  private async hostDecision(
+  private async handleHostDecision(
     eventId: string,
     nominationId: string,
     decision: NominationStatus,
   ): Promise<EventGameNomination> {
     if (decision !== NominationStatus.Approved && decision !== NominationStatus.Rejected) {
-      throw new BadRequestException('Invalid decision for host approval. Must be "Approved" or "Rejected".');
+      throw new BadRequestException('Must be "Approved" or "Rejected".');
     }
 
     const nomination = await this.db.eventGameNomination.findUnique({
@@ -298,7 +290,7 @@ export class EventGameNominationService {
       select: {
         id: true,
         status: true,
-        gameId: true,
+        platformGameId: true,
         occurrenceId: true,
       },
     });
@@ -327,7 +319,7 @@ export class EventGameNominationService {
     this.eventEmitter.emit(NominationEvent.NominationResolved, {
       eventId,
       nominationId,
-      gameId: nomination.gameId,
+      platformGameId: nomination.platformGameId,
       status: decision,
       elevatedToEventGameId: elevatedGameId,
     } satisfies NominationResolvedEvent);
@@ -342,12 +334,11 @@ export class EventGameNominationService {
       throw new ForbiddenException(`Direct game addition is not permitted in "${policy.gameAdditionMode}" mode.`);
     }
 
-    // Validate exactly one of eventId or occurrenceId is used
     const eventGame = await this.db.eventGame.create({
       data: {
         event: dto.occurrenceId ? undefined : { connect: { id: eventId } },
         occurrence: dto.occurrenceId ? { connect: { id: dto.occurrenceId } } : undefined,
-        game: { connect: { id: dto.gameId } },
+        platformGame: { connect: { id: dto.platformGameId } },
         suppliedBy: { connect: { id: dto.suppliedById } },
         addedBy: { connect: { id: attendeeId } },
         role: dto.role ?? ScheduledGameRole.Primary,
@@ -360,7 +351,7 @@ export class EventGameNominationService {
     this.eventEmitter.emit(NominationEvent.GameAddedToEvent, {
       eventId,
       eventGameId: eventGame.id,
-      gameId: dto.gameId,
+      platformGameId: dto.platformGameId,
       addedByAttendeeId: attendeeId,
     } satisfies GameAddedToEventPayload);
 
@@ -373,14 +364,14 @@ export class EventGameNominationService {
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
       where: { id: nominationId },
-      select: { gameId: true, suppliedFromId: true, nominatedById: true },
+      select: { platformGameId: true, suppliedFromId: true, nominatedById: true },
     });
 
     const eventGame = await this.db.eventGame.create({
       data: {
         event: occurrenceId ? undefined : { connect: { id: eventId } },
         occurrence: occurrenceId ? { connect: { id: occurrenceId } } : undefined,
-        game: { connect: { id: nomination.gameId } },
+        platformGame: { connect: { id: nomination.platformGameId } },
         suppliedBy: { connect: { id: nomination.suppliedFromId } },
         nomination: { connect: { id: nominationId } },
         role: ScheduledGameRole.Primary,
@@ -390,7 +381,7 @@ export class EventGameNominationService {
     this.eventEmitter.emit(NominationEvent.GameAddedToEvent, {
       eventId,
       eventGameId: eventGame.id,
-      gameId: nomination.gameId,
+      platformGameId: nomination.platformGameId,
       addedByAttendeeId: nomination.nominatedById,
     } satisfies GameAddedToEventPayload);
 
@@ -409,7 +400,6 @@ export class EventGameNominationService {
       where: { eventId },
     });
 
-    // Default policy if none exists
     const base = {
       gameAdditionMode: eventPolicy?.gameAdditionMode ?? GameAdditionMode.Direct,
       voteThresholdType: eventPolicy?.voteThresholdType ?? VoteThresholdType.SimpleMajority,
@@ -445,6 +435,16 @@ export class EventGameNominationService {
     };
   }
 
+  private async getEventAttendees(eventId: string): Promise<AttendeeStub[]> {
+    return this.db.eventAttendee.findMany({
+      where: { eventId },
+      select: {
+        status: true,
+        availableGames: { select: { id: true } },
+      },
+    });
+  }
+
   private async assertEventExists(eventId: string): Promise<void> {
     const count = await this.db.event.count({
       where: { id: eventId, deletedAt: null },
@@ -454,11 +454,16 @@ export class EventGameNominationService {
 }
 
 const NOMINATION_INCLUDE = {
-  game: { select: { id: true, title: true, thumbnail: true } },
+  platformGame: {
+    select: {
+      id: true,
+      game: { select: { id: true, title: true, thumbnail: true } },
+      platform: { select: { id: true, name: true, platformType: true } },
+    },
+  },
   nominatedBy: {
     select: {
       id: true,
-      attendeeId: true,
       user: { select: { id: true, username: true } },
     },
   },
@@ -467,7 +472,13 @@ const NOMINATION_INCLUDE = {
       id: true,
       collection: {
         select: {
-          game: { select: { id: true, title: true } },
+          platformGame: {
+            select: {
+              id: true,
+              game: { select: { id: true, title: true } },
+              platform: { select: { id: true, name: true } },
+            },
+          },
         },
       },
     },

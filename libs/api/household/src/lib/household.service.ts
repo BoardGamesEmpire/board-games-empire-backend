@@ -60,6 +60,7 @@ export class HouseholdService {
                 },
               },
             },
+
             excludedFromHouseholds: {
               select: {
                 gameCollectionId: true,
@@ -87,7 +88,7 @@ export class HouseholdService {
         ...acc,
         [memberId]: gameCollections,
       }),
-      {} as Record<string, { id: string; game: { id: string; title: string } }[]>,
+      {} as Record<string, { id: string; platformGame: { id: string; game: { id: string; title: string } } }[]>,
     );
 
     const members = household.members.map((member) => ({
@@ -119,12 +120,18 @@ export class HouseholdService {
       },
       select: {
         id: true,
-        game: {
+        platformGame: {
           select: {
             id: true,
-            title: true,
-            thumbnail: true,
-            description: true,
+
+            game: {
+              select: {
+                id: true,
+                title: true,
+                thumbnail: true,
+                description: true,
+              },
+            },
           },
         },
       },

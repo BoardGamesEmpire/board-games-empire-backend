@@ -9,9 +9,19 @@ model EventPolicy {
   allowGuestInvites  Boolean @default(true) @map("allow_guest_invites")
   maxAttendees       Int?    @map("max_attendees")
 
-  // Game restrictions
-  restrictToGameCategories Boolean         @default(false) @map("restrict_to_game_categories")
-  allowedCategories        EventCategory[]
+  // Game restrictions — categories
+  restrictToGameCategories Boolean               @default(false) @map("restrict_to_game_categories")
+  allowedCategories        EventPolicyCategory[]
+
+  // Game restrictions — platforms
+  // Coarse filter: restrict by PlatformType (Tabletop, Console, PC, etc.)
+  // Empty = no platform type restriction.
+  allowedPlatformTypes EventPolicyPlatformType[]
+
+  // Narrow filter: restrict to specific Platform records (e.g. PS5 only for
+  // cross-play-restricted digital multiplayer). Empty = no specific restriction.
+  // When both are set, a nominated game must satisfy both filters.
+  allowedPlatforms EventPolicyPlatform[]
 
   // Participation controls
   requireHostApprovalToJoin Boolean @default(false) @map("require_host_approval")
@@ -47,7 +57,7 @@ model EventPolicy {
   @@map("event_policies")
 }
 
-model EventCategory {
+model EventPolicyCategory {
   id String @id @default(cuid(2))
 
   eventPolicy   EventPolicy @relation(fields: [eventPolicyId], references: [id], onDelete: Cascade)
@@ -58,4 +68,33 @@ model EventCategory {
 
   @@unique([eventPolicyId, categoryId])
   @@map("event_categories")
+}
+
+/// Coarse platform type filter for event policies.
+/// E.g. "board game night" = [Tabletop], "LAN party" = [PC].
+model EventPolicyPlatformType {
+  id String @id @default(cuid(2))
+
+  eventPolicy   EventPolicy @relation(fields: [eventPolicyId], references: [id], onDelete: Cascade)
+  eventPolicyId String      @map("event_policy_id")
+
+  platformType PlatformType @map("platform_type")
+
+  @@unique([eventPolicyId, platformType])
+  @@map("event_policy_platform_types")
+}
+
+/// Narrow platform filter for event policies.
+/// E.g. "everyone needs Xbox One" for cross-play-restricted sessions.
+model EventPolicyPlatform {
+  id String @id @default(cuid(2))
+
+  eventPolicy   EventPolicy @relation(fields: [eventPolicyId], references: [id], onDelete: Cascade)
+  eventPolicyId String      @map("event_policy_id")
+
+  platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  platformId String   @map("platform_id")
+
+  @@unique([eventPolicyId, platformId])
+  @@map("event_policy_platforms")
 }

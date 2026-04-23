@@ -163,14 +163,14 @@ export class EventNotificationListener {
           select: { title: true },
         }),
         this.db.game.findUnique({
-          where: { id: event.gameId },
+          where: { id: event.platformGameId },
           select: { title: true },
         }),
       ]);
 
       if (!eventRecord || !game) {
         return this.logger.warn(
-          `Event or game not found for NominationCreated notification, eventId=${event.eventId}, gameId=${event.gameId}`,
+          `Event or game not found for NominationCreated notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
         );
       }
 
@@ -212,7 +212,13 @@ export class EventNotificationListener {
         select: {
           nominatedById: true,
           nominatedBy: { select: { userId: true } },
-          game: { select: { title: true } },
+          platformGame: {
+            select: {
+              id: true,
+
+              game: { select: { title: true } },
+            },
+          },
         },
       });
 
@@ -248,7 +254,7 @@ export class EventNotificationListener {
         payload: {
           eventId: event.eventId,
           nominationId: event.nominationId,
-          nominatedGameTitle: nomination.game.title,
+          nominatedGameTitle: nomination.platformGame.game.title,
         },
       });
     } catch (err) {
@@ -268,14 +274,14 @@ export class EventNotificationListener {
           select: { title: true },
         }),
         this.db.game.findUnique({
-          where: { id: event.gameId },
+          where: { id: event.platformGameId },
           select: { title: true },
         }),
       ]);
 
       if (!eventRecord || !game) {
         return this.logger.warn(
-          `Event or game not found for GameAddedToEvent notification, eventId=${event.eventId}, gameId=${event.gameId}`,
+          `Event or game not found for GameAddedToEvent notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
         );
       }
 

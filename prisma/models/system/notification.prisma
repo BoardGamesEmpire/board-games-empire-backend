@@ -35,9 +35,9 @@ enum NotificationType {
   EventInviteReceived
 
   /**
-    * Event occurrence notifications are sent to attendees when an occurrence they're attending changes status, and to hosts when an occurrence is proposed.
-    * The same notification is sent for all status changes, with the type indicating the new status.
-    */
+   * Event occurrence notifications are sent to attendees when an occurrence they're attending changes status, and to hosts when an occurrence is proposed.
+   * The same notification is sent for all status changes, with the type indicating the new status.
+   */
   EventOccurrenceProposed
   EventOccurrenceConfirmed
   EventOccurrenceCanceled
@@ -47,9 +47,9 @@ enum NotificationType {
   EventCreated
 
   /**
-    * Nominations are created when a user nominates a game for an event, and resolved when a host approves/rejects it or it fails/passes a vote.
-    * The same notification is sent to the nominator for all resolution outcomes, with the type indicating the outcome.
-    */
+   * Nominations are created when a user nominates a game for an event, and resolved when a host approves/rejects it or it fails/passes a vote.
+   * The same notification is sent to the nominator for all resolution outcomes, with the type indicating the outcome.
+   */
   GameNominated
   GameNominationApproved // by (co)host
   GameNominationRejected

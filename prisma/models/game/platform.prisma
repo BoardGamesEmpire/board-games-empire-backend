@@ -12,9 +12,13 @@ model Platform {
 
   logoUrl String? @map("logo_url")
 
-  gatewayLinks PlatformGatewayLink[]
-  dlcReleases  GameDlcRelease[]
-  releases     GameRelease[]
+  gatewayLinks  PlatformGatewayLink[]
+  dlcReleases   GameDlcRelease[]
+  platformGames PlatformGame[]
+
+  // Event policy platform restrictions
+  eventPolicies      EventPolicyPlatform[]
+  occurrencePolicies OccurrencePolicyPlatform[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -28,7 +32,7 @@ model PlatformGatewayLink {
   platform   Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
   platformId String   @map("platform_id")
 
-  /// The gateway that sourced this platform record (IGDB, Steam, etc.)
+  // The gateway that sourced this platform record (IGDB, Steam, etc.)
   gatewayId  String @map("gateway_id")
   externalId String @map("external_id")
 

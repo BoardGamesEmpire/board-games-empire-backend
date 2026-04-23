@@ -6,8 +6,8 @@ model EventGameNomination {
   occurrence   EventOccurrence? @relation(fields: [occurrenceId], references: [id])
   occurrenceId String?          @map("occurrence_id")
 
-  game   Game   @relation(fields: [gameId], references: [id])
-  gameId String @map("game_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
+  platformGameId String       @map("platform_game_id")
 
   votingDeadline DateTime? @map("voting_deadline") @db.Timestamptz(3)
 

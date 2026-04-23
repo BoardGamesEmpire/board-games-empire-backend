@@ -81,7 +81,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.log(
       `Search start: socketId=${client.id} correlationId=${dto.correlationId} query="${
         dto.query
-      }" gateways=[${dto.gatewayIds.join(',')}]`,
+      }" gateways=[${dto.gatewayIds?.join(',')}]`,
     );
 
     if (!dto.includeLocal && !dto.includeExternal) {
@@ -163,11 +163,9 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
             take: 1,
           },
 
-          releases: {
+          platformGames: {
             select: {
-              region: true,
-              releaseDate: true,
-              status: true,
+              id: true,
 
               platform: {
                 select: {
@@ -185,13 +183,21 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
                 },
               },
 
-              languages: {
+              releases: {
                 select: {
-                  language: {
+                  region: true,
+                  releaseDate: true,
+                  status: true,
+
+                  languages: {
                     select: {
-                      code: true,
-                      abbreviation: true,
-                      name: true,
+                      language: {
+                        select: {
+                          code: true,
+                          abbreviation: true,
+                          name: true,
+                        },
+                      },
                     },
                   },
                 },
@@ -214,30 +220,32 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
         inSystem: true,
         gameId: g.id,
 
-        platforms: g.releases.map((r) => ({
-          externalId: r.platform.id,
-          name: r.platform.name,
-          abbreviation: r.platform.abbreviation ?? undefined,
-          platformType: r.platform.platformType.toString(),
+        platforms: g.platformGames?.map((pg) => ({
+          externalId: pg.platform.id,
+          name: pg.platform.name,
+          abbreviation: pg.platform.abbreviation ?? undefined,
+          platformType: pg.platform.platformType.toString(),
         })),
 
-        availableReleases: g.releases.map((r) => ({
-          externalId: r.platform.id,
-          platform: {
-            externalId: r.platform.gatewayLinks[0]?.externalId || undefined,
-            name: r.platform.name,
-            abbreviation: r.platform.abbreviation ?? undefined,
-            platformType: r.platform.platformType.toString(),
-          },
+        availableReleases: g.platformGames?.flatMap((pg) =>
+          pg.releases.map((r) => ({
+            externalId: pg.platform.id,
+            platform: {
+              externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
+              name: pg.platform.name,
+              abbreviation: pg.platform.abbreviation ?? undefined,
+              platformType: pg.platform.platformType.toString(),
+            },
 
-          status: r.status,
-          releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
-          languages: r.languages.map((l) => ({
-            iso6393: l.language.code,
-            iso6391: l.language.abbreviation ?? undefined,
-            name: l.language.name,
+            status: r.status,
+            releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+            languages: r.languages.map((l) => ({
+              iso6393: l.language.code,
+              iso6391: l.language.abbreviation ?? undefined,
+              name: l.language.name,
+            })),
           })),
-        })),
+        ),
       }));
 
       this.emit<WsSearchResultPayload>(options.correlationId, SearchEvents.SearchResult, {
@@ -365,31 +373,28 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
               this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
                 correlationId: dto.correlationId,
                 source,
-                message: result.message ?? 'An error occurred',
+                message: result.message ?? 'Search error',
               });
               break;
             }
           }
         },
 
-        error: (err) => {
-          this.logger.error(`gRPC stream error for correlationId=${dto.correlationId}`, err);
-          this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
-            correlationId: dto.correlationId,
-            source: 'coordinator',
-            message: 'Search stream failed',
-          });
-
-          resolve();
-        },
-
         complete: () => {
-          this.logger.debug(`Search stream completed for correlationId=${dto.correlationId}`);
-
           this.emit<WsSearchDonePayload>(dto.correlationId, SearchEvents.SearchDone, {
             correlationId: dto.correlationId,
           });
+          resolve();
+        },
 
+        error: (err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Gateway search stream error: correlationId=${dto.correlationId}: ${message}`);
+          this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+            correlationId: dto.correlationId,
+            source: 'coordinator',
+            message,
+          });
           resolve();
         },
       });
@@ -398,21 +403,22 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     });
   }
 
-  private emit<T>(room: string, event: string, payload: T): void {
-    this.server.to(room).emit(event, payload);
-  }
-
   private getClientData(client: Socket): WsClientData {
-    return this.userQueryMap.get(client);
+    return this.userQueryMap.get(client) as WsClientData;
   }
 
   private cancelAllSearches(client: Socket): void {
-    const search = this.getClientData(client);
-    for (const [correlationId, sub] of search.activeSearches) {
-      sub.unsubscribe();
-      this.logger.log(`Cancelled search on disconnect: correlationId=${correlationId}`);
-    }
+    const data = this.userQueryMap.get(client) as WsClientData | undefined;
+    if (!data) return;
 
-    search.activeSearches.clear();
+    for (const [correlationId, sub] of data.activeSearches) {
+      sub.unsubscribe();
+      client.leave(correlationId);
+    }
+    data.activeSearches.clear();
+  }
+
+  private emit<T>(correlationId: string, event: string, payload: T): void {
+    this.server.to(correlationId).emit(event, payload);
   }
 }

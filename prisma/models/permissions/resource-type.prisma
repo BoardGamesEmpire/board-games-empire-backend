@@ -16,28 +16,30 @@ enum ResourceType {
   GameCreationRequest
   GameCustomization
   GameGateway
-  GamePlayResult          
+  GamePlayResult
   GamePlaySession
   GameSharing
+  Platform
+  PlatformGame
   RuleVariant
-  SessionPlayer           
+  SessionPlayer
 
   // ─── Household ──────────────────────────────────────────
   Household
-  HouseholdMember         
-  HouseholdRole           
-  Invite                  
+  HouseholdMember
+  HouseholdRole
+  Invite
 
   // ─── Event ──────────────────────────────────────────────
   Event
-  EventAttendee           
-  EventAttendeeGameList   
-  EventAvailabilityVote   
-  EventGame               
-  EventGameNomination     
-  EventGameVote           
-  EventOccurrence         
-  EventPolicy             
+  EventAttendee
+  EventAttendeeGameList
+  EventAvailabilityVote
+  EventGame
+  EventGameNomination
+  EventGameVote
+  EventOccurrence
+  EventPolicy
 
   @@map("resource_types")
 }

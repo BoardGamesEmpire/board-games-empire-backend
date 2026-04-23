@@ -10,8 +10,8 @@ model EventAvailabilityVote {
   occurrence   EventOccurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
   occurrenceId String          @map("occurrence_id")
 
-  attendee   EventAttendee   @relation(fields: [attendeeId], references: [id])
-  attendeeId String @map("attendee_id")
+  attendee   EventAttendee @relation(fields: [attendeeId], references: [id])
+  attendeeId String        @map("attendee_id")
 
   response AvailabilityResponse
 

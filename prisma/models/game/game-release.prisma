@@ -1,11 +1,8 @@
 model GameRelease {
   id String @id @default(cuid(2))
 
-  game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
-  gameId String @map("game_id")
-
-  platform   Platform @relation(fields: [platformId], references: [id])
-  platformId String   @map("platform_id")
+  platformGame   PlatformGame @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
+  platformGameId String       @map("platform_game_id")
 
   region      ReleaseRegion @default(Worldwide)
   status      ReleaseStatus @default(Released)
@@ -16,9 +13,8 @@ model GameRelease {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([gameId, platformId, region])
-  @@index([gameId])
-  @@index([platformId])
+  @@unique([platformGameId, region])
+  @@index([platformGameId])
   @@map("game_releases")
 }
 

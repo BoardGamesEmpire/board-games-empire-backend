@@ -3,9 +3,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
 export class DirectAddGameDto {
-  @ApiProperty({ description: 'The game to add to the lineup' })
+  @ApiProperty({ description: 'The PlatformGame to add to the lineup (specific game + platform combination)' })
   @IsString()
-  gameId!: string;
+  platformGameId!: string;
 
   @ApiProperty({
     description:
