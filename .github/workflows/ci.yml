@@ -24,12 +24,10 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
-      - run: npx nx start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
-
       - uses: actions/setup-node@v6
         with:
           node-version: 24
-          cache: "npm"
+          cache: 'npm'
 
       - name: Set up environment
         run: cp .env.example .env
@@ -39,8 +37,18 @@ jobs:
         with:
           main-branch-name: master
 
-      - run: npm run db:generate
-      - run: npm run proto:generate
+      - name: Generate Prisma client
+        run: npx nx run database:generate
+
+      - name: Generate protobuf types
+        run: |
+          npm run proto:clean
+          npm run proto:deps
+          npx nx run proto-gateway:buf-export
+          npx nx run proto-gateway:generate
+
+      - name: Clean stale dist directories
+        run: find libs apps -name "dist" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
       - run: npx nx run-many -t typecheck
       - run: npx nx affected -t test --parallel --maxParallel=3 --passWithNoTests
