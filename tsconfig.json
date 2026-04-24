@@ -92,6 +92,9 @@
     },
     {
       "path": "./libs/api/event"
+    },
+    {
+      "path": "./libs/api/well-known"
     }
   ]
 }

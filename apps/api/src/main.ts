@@ -57,6 +57,14 @@ async function bootstrap() {
           path: 'health',
           method: RequestMethod.GET,
         },
+        {
+          path: '.well-known/(.*)',
+          method: RequestMethod.GET,
+        },
+        {
+          path: '.well-known/(.*)',
+          method: RequestMethod.OPTIONS,
+        },
       ],
     })
     .enableShutdownHooks()
