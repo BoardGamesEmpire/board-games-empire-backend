@@ -11,7 +11,6 @@ import { AUTH_INSTANCE } from './constants';
 import type { AuthType } from './interfaces';
 import { UserProvisioningListener } from './provisioning/user-provisioning.listener';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
-import { StrategyController, StrategyService } from './strategy';
 
 @Module({
   imports: [
@@ -23,7 +22,6 @@ import { StrategyController, StrategyService } from './strategy';
       inject: [AUTH_INSTANCE],
     }),
   ],
-  controllers: [StrategyController],
   providers: [
     {
       provide: AUTH_INSTANCE,
@@ -36,7 +34,6 @@ import { StrategyController, StrategyService } from './strategy';
       inject: [DatabaseService, ConfigService, CACHE_MANAGER, EventEmitter2],
     },
     AuthService,
-    StrategyService,
     UserProvisioningService,
     UserProvisioningListener,
   ],

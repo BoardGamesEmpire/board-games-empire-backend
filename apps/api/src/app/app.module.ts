@@ -15,6 +15,7 @@ import { NotificationsModule } from '@bge/notifications';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
+import { WellKnownModule } from '@bge/well-known';
 import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
 import { BullModule } from '@nestjs/bullmq';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
@@ -130,6 +131,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
     PermissionsModule,
     SystemSettingsModule,
     UserModule,
+    WellKnownModule,
   ],
   controllers: [],
   providers: [

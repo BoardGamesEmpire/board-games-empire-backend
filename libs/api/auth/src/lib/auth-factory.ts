@@ -20,7 +20,7 @@ import {
 } from 'better-auth/plugins';
 import { User } from 'better-auth/types';
 import process from 'node:process';
-import { AuthEvent } from './constants';
+import { AUTH_BASE_PATH, AuthEvent } from './constants';
 
 export function authFactory(
   prisma: PrismaClient,
@@ -87,9 +87,9 @@ export function authFactory(
       cookiePrefix: 'bge_auth_',
       disableOriginCheck: options.disableOriginCheck,
     },
-    basePath: '/api/auth',
+    basePath: AUTH_BASE_PATH,
     appName: 'BoardGamesEmpire',
-    baseURL: `${options.hostUrl}/api/auth`,
+    baseURL: `${options.hostUrl}${AUTH_BASE_PATH}`,
     user: {
       fields: {
         name: 'username',
@@ -112,7 +112,7 @@ export function authFactory(
     url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(prisma, {
-      debugLogs: configService?.get<boolean>('server.is_production') === false,
+      debugLogs: configService?.get<boolean>('server.is_production') !== true,
       transaction: false,
       provider: 'postgresql',
     }),

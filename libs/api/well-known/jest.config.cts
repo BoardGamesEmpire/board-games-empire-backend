@@ -1,3 +1,4 @@
+/* eslint-disable */
 const { readFileSync } = require('fs');
 
 // Reading the SWC compilation config for the spec files
@@ -7,11 +8,11 @@ const swcJestConfig = JSON.parse(readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8
 swcJestConfig.swcrc = false;
 
 module.exports = {
-  displayName: '@board-games-empire/database',
-  preset: '../../jest.preset.js',
+  displayName: '@board-games-empire/well-known',
+  preset: '../../../jest.preset.js',
   testEnvironment: 'node',
   transform: {
-    '^.+\\.(t|j|mj)s$': ['@swc/jest', swcJestConfig],
+    '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],
   },
   moduleFileExtensions: ['ts', 'js', 'html'],
   coverageDirectory: 'test-output/jest/coverage',

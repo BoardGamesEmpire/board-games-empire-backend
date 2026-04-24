@@ -14,7 +14,7 @@
       "inputs": ["{workspaceRoot}/prisma/**/*.prisma", "{workspaceRoot}/prisma.config.ts"],
       "outputs": ["{projectRoot}/src/lib/generated"]
     },
-    "build": {
+    "prepare": {
       "dependsOn": ["generate"]
     },
     "typecheck": {
