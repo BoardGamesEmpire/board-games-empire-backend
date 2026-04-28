@@ -8,7 +8,6 @@ import { gameLengthsSeed } from './seeds/game-lengths.seed';
 import { languagesSeed } from './seeds/languages.seed';
 import { platformsSeed } from './seeds/platforms.seed';
 import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
-import { systemSettingsSeed } from './seeds/system-settings.seed';
 
 const envFilePath = path.resolve(process.cwd(), '.env');
 type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
@@ -48,7 +47,7 @@ async function bootstrap() {
   const prisma = new DatabaseService(configService);
   await prisma.$connect();
 
-  const seeds: Seeder[] = [systemSettingsSeed, languagesSeed, platformsSeed, rolesAndPermissionsSeed, gameLengthsSeed];
+  const seeds: Seeder[] = [languagesSeed, platformsSeed, rolesAndPermissionsSeed, gameLengthsSeed];
 
   logger.log(`Starting database seeding...${seeds.length} seeds to run.`);
 

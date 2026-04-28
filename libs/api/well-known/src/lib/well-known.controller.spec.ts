@@ -3,6 +3,7 @@ import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import * as crypto from 'node:crypto';
 import { AuthStrategyType } from './constants';
 import { BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
@@ -17,6 +18,7 @@ function makeFullDiscovery(overrides: Partial<BgeDiscoveryDto> = {}): BgeDiscove
   const dto = new BgeDiscoveryDto();
   dto.issuer = ISSUER;
   dto.deviceAuthorizationEndpoint = `${AUTH_BASE}/device`;
+  dto.bgeServerId = crypto.randomUUID();
   dto.bgeAuthBaseUrl = AUTH_BASE;
   dto.bgeSessionEndpoint = `${AUTH_BASE}/get-session`;
   dto.bgeSignOutEndpoint = `${AUTH_BASE}/sign-out`;
@@ -78,20 +80,20 @@ describe('WellKnownController', () => {
   });
 
   describe('getDiscovery()', () => {
-    it('delegates to StrategyService.getDiscovery()', () => {
+    it('delegates to StrategyService.getDiscovery()', async () => {
       const discovery = makeFullDiscovery();
-      strategyService.getDiscovery.mockReturnValue(discovery);
+      strategyService.getDiscovery.mockResolvedValue(discovery);
 
-      const result = controller.getDiscovery();
+      const result = await controller.getDiscovery();
 
       expect(strategyService.getDiscovery).toHaveBeenCalledTimes(1);
       expect(result).toBe(discovery);
     });
 
-    it('returns the full discovery document', () => {
-      strategyService.getDiscovery.mockReturnValue(makeFullDiscovery());
+    it('returns the full discovery document', async () => {
+      strategyService.getDiscovery.mockResolvedValue(makeFullDiscovery());
 
-      const result = controller.getDiscovery();
+      const result = await controller.getDiscovery();
 
       expect(result.issuer).toBe(ISSUER);
       expect(result.bgePasskeySupported).toBe(true);
@@ -99,20 +101,22 @@ describe('WellKnownController', () => {
       expect(result.bgeAnonymousAuthSupported).toBe(true);
     });
 
-    it('returns an empty strategies array when no strategies are configured', () => {
-      strategyService.getDiscovery.mockReturnValue(makeFullDiscovery({ strategies: [] }));
+    it('returns an empty strategies array when no strategies are configured', async () => {
+      strategyService.getDiscovery.mockResolvedValue(makeFullDiscovery({ strategies: [] }));
 
-      expect(controller.getDiscovery().strategies).toEqual([]);
+      const result = await controller.getDiscovery();
+
+      expect(result.strategies).toEqual([]);
     });
 
-    it('returns the discovery document with a configured strategy', () => {
+    it('returns the discovery document with a configured strategy', async () => {
       const emailStrategy = new EmailAndPasswordStrategyDto();
       emailStrategy.signUpDisabled = false;
       emailStrategy.signInEndpoint = `${AUTH_BASE}/sign-in/email`;
 
-      strategyService.getDiscovery.mockReturnValue(makeFullDiscovery({ strategies: [emailStrategy] }));
+      strategyService.getDiscovery.mockResolvedValue(makeFullDiscovery({ strategies: [emailStrategy] }));
 
-      const { strategies } = controller.getDiscovery();
+      const { strategies } = await controller.getDiscovery();
 
       expect(strategies).toHaveLength(1);
       expect(strategies[0].type).toBe(AuthStrategyType.EmailAndPassword);
@@ -132,56 +136,52 @@ describe('WellKnownController', () => {
 
   describe('getSecurityTxt()', () => {
     beforeEach(() => {
-      strategyService.getDiscovery.mockReturnValue(makeFullDiscovery());
+      strategyService.getDiscovery.mockResolvedValue(makeFullDiscovery());
     });
 
-    it('delegates to SecurityTxtService.build() with the issuer', () => {
+    it('delegates to SecurityTxtService.build() with the issuer', async () => {
       securityTxtService.build.mockReturnValue(MINIMAL_SECURITY_TXT);
 
-      controller.getSecurityTxt();
+      await controller.getSecurityTxt();
 
       expect(securityTxtService.build).toHaveBeenCalledWith(ISSUER);
     });
 
-    it('returns the security.txt body when contact is configured', () => {
+    it('returns the security.txt body when contact is configured', async () => {
       securityTxtService.build.mockReturnValue(MINIMAL_SECURITY_TXT);
 
-      const result = controller.getSecurityTxt();
+      const result = await controller.getSecurityTxt();
 
       expect(result).toBe(MINIMAL_SECURITY_TXT);
     });
 
-    it('throws NotFoundException when SecurityTxtService returns null', () => {
+    it('throws NotFoundException when SecurityTxtService returns null', async () => {
       securityTxtService.build.mockReturnValue(null);
 
-      expect(() => controller.getSecurityTxt()).toThrow(NotFoundException);
+      await expect(controller.getSecurityTxt()).rejects.toThrow(NotFoundException);
     });
 
-    it('throws NotFoundException with a descriptive message', () => {
+    it('throws NotFoundException with a descriptive message', async () => {
       securityTxtService.build.mockReturnValue(null);
 
-      expect(() => controller.getSecurityTxt()).toThrow(
-        expect.objectContaining({
-          message: expect.stringContaining('SECURITY_CONTACT'),
-        }),
-      );
+      await expect(controller.getSecurityTxt()).rejects.toThrow('SECURITY_CONTACT');
     });
 
-    it('returns a plain string, not an object (no JSON serialisation)', () => {
+    it('returns a plain string, not an object (no JSON serialization)', async () => {
       securityTxtService.build.mockReturnValue(MINIMAL_SECURITY_TXT);
 
-      const result = controller.getSecurityTxt();
+      const result = await controller.getSecurityTxt();
 
       expect(typeof result).toBe('string');
     });
 
-    it('retrieves the issuer from the discovery document, not independently', () => {
+    it('retrieves the issuer from the discovery document, not independently', async () => {
       const customDiscovery = makeFullDiscovery();
       customDiscovery.issuer = 'https://bge.custom.io';
-      strategyService.getDiscovery.mockReturnValue(customDiscovery);
+      strategyService.getDiscovery.mockResolvedValue(customDiscovery);
       securityTxtService.build.mockReturnValue(MINIMAL_SECURITY_TXT);
 
-      controller.getSecurityTxt();
+      await controller.getSecurityTxt();
 
       expect(securityTxtService.build).toHaveBeenCalledWith('https://bge.custom.io');
     });
