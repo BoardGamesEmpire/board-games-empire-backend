@@ -1,5 +1,7 @@
+import { DatabaseService } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import assert from 'node:assert';
 import { AUTH_BASE_PATH } from './constants';
 import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
@@ -7,13 +9,18 @@ import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 
 @Injectable()
 export class StrategyService {
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService, private readonly db: DatabaseService) {}
 
-  getDiscovery(): BgeDiscoveryDto {
+  async getDiscovery(): Promise<BgeDiscoveryDto> {
     const issuer = this.configService.getOrThrow<string>('auth.url');
     const authBase = `${issuer}${AUTH_BASE_PATH}`;
 
     const dto = new BgeDiscoveryDto();
+
+    const settings = await this.db.systemSetting.findFirst();
+    assert(settings, 'System settings not found in database');
+
+    dto.bgeServerId = settings.identifier;
 
     // RFC 8414-aligned fields
     dto.issuer = issuer;

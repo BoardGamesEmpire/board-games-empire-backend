@@ -25,6 +25,9 @@
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
+      "path": "../../database/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/env/tsconfig.lib.json"
     }
   ],

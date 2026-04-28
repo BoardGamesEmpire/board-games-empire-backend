@@ -22,6 +22,12 @@ export class BgeDiscoveryDto {
   @ApiProperty({ description: 'Canonical base URL of this BGE server', example: 'https://api.example.com' })
   issuer!: string;
 
+  @ApiProperty({
+    description: 'Stable unique identifier for this BGE server instance',
+    example: '550e8400-e29b-41d4-a716-446655440000',
+  })
+  bgeServerId!: string;
+
   /**
    * Device authorization endpoint per RFC 8628
    */
