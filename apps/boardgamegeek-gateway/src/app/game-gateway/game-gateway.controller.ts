@@ -22,14 +22,17 @@ export class GameGatewayController implements proto.GatewayServiceController {
   }
 
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
-    throw new Error('Method not implemented.');
+    this.logger.log(`SearchGames request received with query: '${request.query}'`);
+    return this.gameGatewayService.searchGames(request);
   }
 
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
-    throw new Error('Method not implemented.');
+    this.logger.log(`FetchGame request received for externalId: '${request.externalId}'`);
+    return this.gameGatewayService.fetchGame(request);
   }
 
   fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult> {
-    throw new Error('Method not implemented.');
+    this.logger.log(`FetchExpansions request received for baseExternalId: '${request.baseExternalId}'`);
+    return this.gameGatewayService.fetchExpansions(request);
   }
 }

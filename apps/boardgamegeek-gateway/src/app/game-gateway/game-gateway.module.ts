@@ -1,22 +1,11 @@
 import { Module } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { BggClient } from 'bgg-ts-client';
-import type { BoardGameGeekConfig } from '../configuration/boardgamegeek.config';
+import { BggModule } from '../bgg/bgg.module';
 import { GameGatewayController } from './game-gateway.controller';
 import { GameGatewayService } from './game-gateway.service';
 
 @Module({
+  imports: [BggModule],
   controllers: [GameGatewayController],
-  providers: [
-    {
-      provide: BggClient,
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const bggConfig = configService.getOrThrow<BoardGameGeekConfig>('boardgamegeek');
-        return BggClient.Create(bggConfig);
-      },
-    },
-    GameGatewayService,
-  ],
+  providers: [GameGatewayService],
 })
 export class GameGatewayModule {}

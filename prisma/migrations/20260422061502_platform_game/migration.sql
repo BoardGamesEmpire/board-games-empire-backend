@@ -13,6 +13,7 @@
   - A unique constraint covering the columns `[user_id,platform_game_id,medium]` on the table `game_collections` will be added. If there are existing duplicate values, this will fail.
   - A unique constraint covering the columns `[session_id,platform_game_id]` on the table `game_play_session_expansions` will be added. If there are existing duplicate values, this will fail.
   - A unique constraint covering the columns `[platform_game_id,region]` on the table `game_releases` will be added. If there are existing duplicate values, this will fail.
+  - A unique constraint covering the columns `[identifier]` on the table `system_settings` will be added. If there are existing duplicate values, this will fail.
   - Added the required column `platform_game_id` to the `event_game_nominations` table without a default value. This is not possible if the table is not empty.
   - Added the required column `platform_game_id` to the `event_games` table without a default value. This is not possible if the table is not empty.
   - Added the required column `medium` to the `game_collections` table without a default value. This is not possible if the table is not empty.
@@ -21,6 +22,7 @@
   - Added the required column `platform_game_id` to the `game_play_session_expansions` table without a default value. This is not possible if the table is not empty.
   - Added the required column `platform_game_id` to the `game_play_sessions` table without a default value. This is not possible if the table is not empty.
   - Added the required column `platform_game_id` to the `game_releases` table without a default value. This is not possible if the table is not empty.
+  - Added the required column `identifier` to the `system_settings` table without a default value. This is not possible if the table is not empty.
 
 */
 -- CreateEnum
@@ -142,6 +144,9 @@ ADD COLUMN     "platform_game_id" TEXT NOT NULL;
 -- AlterTable
 ALTER TABLE "loaned_games" DROP COLUMN "game_id";
 
+-- AlterTable
+ALTER TABLE "system_settings" ADD COLUMN     "identifier" TEXT NOT NULL;
+
 -- CreateTable
 CREATE TABLE "occurrence_policy_platform_types" (
     "id" TEXT NOT NULL,
@@ -243,6 +248,9 @@ CREATE INDEX "game_releases_platform_game_id_idx" ON "game_releases"("platform_g
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_releases_platform_game_id_region_key" ON "game_releases"("platform_game_id", "region");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "system_settings_identifier_key" ON "system_settings"("identifier");
 
 -- AddForeignKey
 ALTER TABLE "event_game_nominations" ADD CONSTRAINT "event_game_nominations_platform_game_id_fkey" FOREIGN KEY ("platform_game_id") REFERENCES "platform_games"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

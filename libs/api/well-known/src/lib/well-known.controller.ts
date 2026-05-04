@@ -28,7 +28,7 @@ export class WellKnownController {
   @UseInterceptors(SnakeCaseInterceptor)
   @Header('Cache-Control', 'public, max-age=3600')
   @ApiOkResponse({ type: BgeDiscoveryDto, description: 'BGE server identity and available auth strategies' })
-  getDiscovery(): BgeDiscoveryDto {
+  getDiscovery(): Promise<BgeDiscoveryDto> {
     return this.strategyService.getDiscovery();
   }
 
@@ -55,8 +55,9 @@ export class WellKnownController {
   @Header('Content-Type', 'text/plain; charset=utf-8')
   @Header('Cache-Control', 'public, max-age=86400')
   @ApiOkResponse({ description: 'RFC 9116 security contact document' })
-  getSecurityTxt(): string {
-    const issuer = this.strategyService.getDiscovery().issuer;
+  async getSecurityTxt(): Promise<string> {
+    const discovery = await this.strategyService.getDiscovery();
+    const issuer = discovery.issuer;
     const body = this.securityTxtService.build(issuer);
 
     if (body === null) {

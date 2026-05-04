@@ -1,10 +1,14 @@
 import { DatabaseService, SystemSetting } from '@bge/database';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import * as crypto from 'node:crypto';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
 
 @Injectable()
-export class SystemSettingsService {
-  constructor(private readonly db: DatabaseService) {}
+export class SystemSettingsService implements OnModuleInit {
+  private readonly logger = new Logger(SystemSettingsService.name);
+
+  constructor(private readonly db: DatabaseService, private readonly configService: ConfigService) {}
 
   /**
    * There can be only one!
@@ -31,5 +35,23 @@ export class SystemSettingsService {
         ...updateSettingsDTO,
       },
     });
+  }
+
+  async onModuleInit() {
+    this.logger.log('Checking for existing system settings...');
+    const settings = await this.db.systemSetting.findFirst();
+    if (!settings) {
+      this.logger.log('No system settings found, creating default settings...');
+      await this.db.systemSetting.create({
+        data: {
+          allowPasswordResets: this.configService.get('systemSettings.allowPasswordResets', true),
+          allowUserRegistration: this.configService.get('systemSettings.allowUserRegistration', true),
+          allowUsernameChange: this.configService.get('systemSettings.allowUsernameChange', true),
+          identifier: this.configService.get('systemSettings.identifier', crypto.randomUUID()),
+        },
+      });
+
+      this.logger.log('Default system settings created.');
+    }
   }
 }
