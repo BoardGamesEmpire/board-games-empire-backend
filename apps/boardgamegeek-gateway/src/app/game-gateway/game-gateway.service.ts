@@ -36,6 +36,16 @@ export class GameGatewayService {
       gatewayName: 'BoardGameGeekGateway',
       gatewayVersion: '1.0.0',
       supportedServices: ['GatewayService'],
+
+      /**
+       * Language preferences advertised on Ping. BGG accepts and emits English
+       * language display names ("English", "Afrikaans"); not BCP 47 or ISO codes.
+       */
+      languagePreferences: {
+        acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+        passthroughRawLocale: false,
+      },
     } satisfies proto.GatewayPingResponse;
   }
 
@@ -47,15 +57,6 @@ export class GameGatewayService {
     } satisfies proto.HealthCheckResponse;
   }
 
-  /**
-   * Streams BGG search results as proto frames. Each result becomes a
-   * RESULT frame; the stream always terminates with SOURCE_DONE on
-   * success or a single ERROR frame on failure.
-   *
-   * Search results are intentionally lean — `thumbnailUrl`, ratings,
-   * and player counts are not populated until a follow-up FetchGame is
-   * issued.
-   */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;
     const offset = request.offset ?? undefined;
@@ -91,21 +92,16 @@ export class GameGatewayService {
     );
   }
 
-  /**
-   * Fetches full GameData for a single BGG thing. Returns:
-   *  - RESULT with populated `game` when found.
-   *  - ERROR when the thing is not found, the externalId is malformed,
-   *    or the underlying call fails (after its 429 retry is exhausted).
-   *
-   * The `defer` wrapper ensures a synchronous `parseExternalId` throw
-   * surfaces through the catchError below as an ERROR frame rather than
-   * an unhandled exception.
-   */
   fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse> {
     return defer(() => {
       const externalId = parseExternalId(request.externalId);
-
-      return this.bggService.call(fetchThingRequest(externalId, { stats: 1, types: FETCH_GAME_TYPES }));
+      return this.bggService.call(
+        fetchThingRequest(externalId, {
+          stats: 1,
+          versions: 1,
+          types: FETCH_GAME_TYPES,
+        }),
+      );
     }).pipe(
       tap((thing) =>
         this.logger.log(
@@ -122,9 +118,9 @@ export class GameGatewayService {
           };
         }
 
-        const gameData = thingToGameData(thing);
+        const gameData = thingToGameData(thing, request.locale);
         this.logger.debug(
-          `fetchGame mapped BGG thing to GameData: ${gameData.title} (externalId: ${gameData.externalId})`,
+          `fetchGame mapped BGG thing to GameData: ${gameData.title} (externalId: ${gameData.externalId}, releases: ${gameData.releases.length})`,
         );
 
         return {
@@ -170,7 +166,12 @@ export class GameGatewayService {
       const baseId = parseExternalId(request.baseExternalId);
 
       return this.bggService
-        .call(fetchThingRequest(baseId, { types: FETCH_GAME_TYPES }))
+        .call(
+          fetchThingRequest(baseId, {
+            types: FETCH_GAME_TYPES,
+            versions: 0,
+          }),
+        )
         .pipe(mergeMap((base) => this.streamExpansionsFromBase(base, request.baseExternalId)));
     }).pipe(
       map(
@@ -230,7 +231,15 @@ export class GameGatewayService {
     // mergeMap fans the batches out concurrently. Each batch is a
     // separate bggService.call() — independent retry boundary.
     return from(batches).pipe(
-      mergeMap((batch) => this.bggService.call(fetchThingsRequest(batch, { types: EXPANSION_BATCH_TYPES }))),
+      mergeMap((batch) =>
+        this.bggService.call(
+          fetchThingsRequest(batch, {
+            stats: 0,
+            versions: 0,
+            types: EXPANSION_BATCH_TYPES,
+          }),
+        ),
+      ),
       mergeMap((things) => from(things)),
     );
   }

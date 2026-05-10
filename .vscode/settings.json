@@ -1,0 +1,6 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "nx": true
+  },
+  "protobuf.buf.path": "buf"
+}

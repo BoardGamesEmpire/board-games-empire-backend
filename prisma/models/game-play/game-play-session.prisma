@@ -10,8 +10,8 @@ model GamePlaySession {
   // campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   // campaignId String?   @map("campaign_id")
 
-  gameVersion   GameVersion? @relation(fields: [gameVersionId], references: [id], onDelete: SetNull)
-  gameVersionId String?      @map("game_version_id")
+  release   GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId String?      @map("release_id")
 
   expansionsUsed GamePlaySessionExpansion[]
   rulesUsed      RuleVariantUsage[]
@@ -30,7 +30,7 @@ model GamePlaySession {
   players SessionPlayer[]
   results GamePlayResult[]
 
-  household   Household? @relation(fields: [householdId], references: [id])
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: SetNull)
   householdId String?    @map("household_id")
 
   venue String?
@@ -53,6 +53,8 @@ model GamePlaySession {
 
   @@index([occurrenceId])
   @@index([platformGameId])
+  @@index([releaseId])
+  @@index([householdId])
   @@index([playDate])
   @@map("game_play_sessions")
 }

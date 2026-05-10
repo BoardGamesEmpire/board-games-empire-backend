@@ -5,32 +5,38 @@ package bge.gateway.v1;
 import "bge/gateway/v1/common.proto";
 import "grpc/health/v1/health.proto";
 
-// Contract all external gateway implementations must satisfy.
-// Normalization to GameSearchData/GameData happens at the gateway — the
-// coordinator and main application are intentionally ignorant of
-// source-specific schemas.
 service GatewayService {
-  // Liveness + capability advertisement
   rpc Ping(GatewayPingRequest) returns (GatewayPingResponse);
-
-  // Standard gRPC health check
   rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
-
-  // Stream lean search results as they resolve. Gateways that do not support
-  // pagination may silently ignore limit/offset. Must always terminate with
-  // SOURCE_DONE or ERROR.
   rpc SearchGames(GatewaySearchRequest) returns (stream GatewaySearchResult);
-
-  // Fetch full GameData for a single game — used by the import worker.
   rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
-
-  // Fetch expansions/DLC for a base game. Streams lean GameSearchData frames,
-  // terminated by SOURCE_DONE.
   rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
 }
 
 message GatewayPingRequest {
   optional string correlation_id = 1;
+}
+
+// Declares a gateway's language-code preferences. The coordinator uses
+// `accepted_request_formats` to translate the user's locale into a format
+// the gateway accepts before forwarding requests, and uses `response_format`
+// to translate gateway-emitted LanguageData into the canonical format.
+//
+// `passthrough_raw_locale = true` opts out of coordinator translation on
+// the request path — the user's raw locale string is forwarded unchanged.
+// Useful for gateways with locale-aware behavior beyond simple language
+// filtering (region-specific ranking, localized result content).
+message GatewayLanguagePreferences {
+  // Formats the gateway can accept on inbound requests, in order of
+  // preference. Coordinator picks the first one it can satisfy.
+  repeated LanguageCodeFormat accepted_request_formats = 1;
+
+  // Format the gateway emits in LanguageData on responses.
+  LanguageCodeFormat response_format = 2;
+
+  // When true, coordinator forwards the user's raw locale string on
+  // requests without translation. `accepted_request_formats` is ignored.
+  bool passthrough_raw_locale = 3;
 }
 
 message GatewayPingResponse {
@@ -39,13 +45,16 @@ message GatewayPingResponse {
   string gateway_name = 3;
   string gateway_version = 4;
   repeated string supported_services = 5;
+
+  // Language-code preferences. Coordinator-side translation may be deferred;
+  // gateways should still declare accurate values so existing clients
+  // continue to work without changes when translation lands.
+  GatewayLanguagePreferences language_preferences = 6;
 }
 
 message GatewaySearchRequest {
   string correlation_id = 1;
   string query = 2;
-  // e.g. "en", "de", used for locale-specific search optimizations in gateways
-  // that support it;
   optional string locale = 3;
   optional int32 limit = 4;
   optional int32 offset = 5;
@@ -54,9 +63,9 @@ message GatewaySearchRequest {
 message GatewaySearchResult {
   string correlation_id = 1;
   ResultStatus status = 2;
-  optional GameSearchData game = 3; // populated on RESULT
-  optional string message = 4; // populated on ERROR / RATE_LIMITED
-  optional int32 retry_after = 5; // seconds; populated on RATE_LIMITED only
+  optional GameSearchData game = 3;
+  optional string message = 4;
+  optional int32 retry_after = 5;
 }
 
 message FetchGameRequest {

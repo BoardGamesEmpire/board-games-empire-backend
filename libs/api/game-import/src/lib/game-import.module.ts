@@ -13,6 +13,7 @@ import { GameImportProducerService } from './services/game-import-producer.servi
 import { GameUpsertService } from './services/game.service';
 import { PersonUpsertService } from './services/person.service';
 import { PlatformUpsertService } from './services/platform.service';
+import { ReleaseGraphResolver } from './services/release-graph.resolver';
 import { TaxonomyUpsertService } from './services/taxonomy.service';
 
 @Module({
@@ -25,15 +26,16 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     BullModule.registerFlowProducer({ name: FlowProducerNames.GamesImport }),
   ],
   providers: [
-    TaxonomyUpsertService,
-    PersonUpsertService,
-    PlatformUpsertService,
-    GameUpsertService,
     GameImportProcessor,
     GameImportProducerService,
+    GameUpsertService,
     GameWatchListener,
-    NotificationListener,
     ImportActivityListener,
+    NotificationListener,
+    PersonUpsertService,
+    PlatformUpsertService,
+    ReleaseGraphResolver,
+    TaxonomyUpsertService,
   ],
   controllers: [GameImportController],
   exports: [GameImportProducerService],

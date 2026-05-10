@@ -43,7 +43,6 @@ model Game {
   gameVideos    GameVideo[]
   gameDocuments GameDocument[]
 
-  versions    GameVersion[]
   contentType ContentType     @default(BaseGame) @map("content_type")
   expansions  GameExpansion[] @relation("BaseGame")
 

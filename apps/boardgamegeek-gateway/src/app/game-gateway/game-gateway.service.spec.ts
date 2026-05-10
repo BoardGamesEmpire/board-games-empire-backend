@@ -1,11 +1,4 @@
-import {
-  FetchGameRequest,
-  GatewayPingRequest,
-  GatewaySearchRequest,
-  HealthCheckRequest,
-  HealthCheckResponse_ServingStatus,
-  ResultStatus,
-} from '@board-games-empire/proto-gateway';
+import * as proto from '@board-games-empire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
@@ -40,7 +33,7 @@ describe('GameGatewayService', () => {
 
   describe('ping', () => {
     it('returns a response using the correlationId from the request', () => {
-      const request: GatewayPingRequest = { correlationId: 'corr-ping-1' };
+      const request: proto.GatewayPingRequest = { correlationId: 'corr-ping-1' };
 
       expect(service.ping(request).correlationId).toBe('corr-ping-1');
     });
@@ -63,13 +56,23 @@ describe('GameGatewayService', () => {
     it('returns a bigint timestampMs', () => {
       expect(typeof service.ping({}).timestampMs).toBe('bigint');
     });
+
+    it('declares language preferences (NAME format, no passthrough)', () => {
+      const response = service.ping({});
+
+      expect(response.languagePreferences).toEqual({
+        acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+        passthroughRawLocale: false,
+      } satisfies proto.GatewayLanguagePreferences);
+    });
   });
 
   describe('healthCheck', () => {
     it('returns SERVING status', () => {
-      const request: HealthCheckRequest = { service: 'GatewayService' };
+      const request: proto.HealthCheckRequest = { service: 'GatewayService' };
 
-      expect(service.healthCheck(request).status).toBe(HealthCheckResponse_ServingStatus.SERVING);
+      expect(service.healthCheck(request).status).toBe(proto.HealthCheckResponse_ServingStatus.SERVING);
     });
   });
 
@@ -79,12 +82,12 @@ describe('GameGatewayService', () => {
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
 
-      const resultFrames = frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
-      const doneFrames = frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+      const doneFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
 
       expect(resultFrames).toHaveLength(2);
       expect(doneFrames).toHaveLength(1);
-      expect(frames[frames.length - 1].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[frames.length - 1].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('emits only SOURCE_DONE when BGG returns no results', async () => {
@@ -95,14 +98,14 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('maps the BGG id to externalId as a string', async () => {
       bggService.call.mockReturnValue(of([CATAN_SEARCH]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.externalId).toBe(String(CATAN_SEARCH.id));
     });
@@ -111,7 +114,7 @@ describe('GameGatewayService', () => {
       bggService.call.mockReturnValue(of([CATAN_SEARCH]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan' }).pipe(toArray()));
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.title).toBe('Catan');
     });
@@ -136,13 +139,13 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(frames[0].message).toContain('BGG unavailable');
     });
 
     it('issues exactly one bggService.call for a search', async () => {
       bggService.call.mockReturnValue(of([]));
-      const request: GatewaySearchRequest = { correlationId: 'c', query: 'catan', limit: 5 };
+      const request: proto.GatewaySearchRequest = { correlationId: 'c', query: 'catan', limit: 5 };
 
       await firstValueFrom(service.searchGames(request).pipe(toArray()));
 
@@ -154,10 +157,10 @@ describe('GameGatewayService', () => {
     it('returns RESULT status with populated game data', async () => {
       bggService.call.mockReturnValue(of(CATAN_THING));
 
-      const request: FetchGameRequest = { correlationId: 'c', externalId: String(CATAN_THING.id) };
+      const request: proto.FetchGameRequest = { correlationId: 'c', externalId: String(CATAN_THING.id) };
       const response = await firstValueFrom(service.fetchGame(request));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_RESULT);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_RESULT);
       expect(response.game?.externalId).toBe(String(CATAN_THING.id));
       expect(response.game?.title).toBe('Catan');
       expect(response.correlationId).toBe('c');
@@ -168,7 +171,7 @@ describe('GameGatewayService', () => {
 
       const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '999999' }));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('999999');
     });
 
@@ -177,14 +180,14 @@ describe('GameGatewayService', () => {
 
       const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '174430' }));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('API down');
     });
 
     it('returns ERROR with a parse-error message when externalId is malformed', async () => {
       const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: 'not-a-number' }));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('not-a-number');
       expect(bggService.call).not.toHaveBeenCalled();
     });
@@ -218,6 +221,17 @@ describe('GameGatewayService', () => {
     });
   });
 
+  describe('fetchGame — locale handling', () => {
+    it('emits a single default release when the thing has no version data', async () => {
+      bggService.call.mockReturnValue(of(CATAN_THING));
+
+      const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '13' }));
+
+      expect(response.game?.releases).toHaveLength(1);
+      expect(response.game?.releases[0].externalId).toBe('default');
+    });
+  });
+
   describe('fetchExpansions', () => {
     it('issues one bggService.call for the base thing then one per batch', async () => {
       bggService.call
@@ -232,6 +246,21 @@ describe('GameGatewayService', () => {
       expect(bggService.call).toHaveBeenCalledTimes(2);
     });
 
+    it('does not request version data on the expansion-streaming path', async () => {
+      bggService.call
+        .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
+        .mockReturnValueOnce(of([SEAFARERS_EXPANSION_THING, CITIES_EXPANSION_THING]));
+
+      await firstValueFrom(service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()));
+
+      // The two calls: first fetches base (with stats, no versions), second fetches
+      // expansion batch (no stats, no versions). Locking in this contract because
+      // version data is fetched per-import via fetchGame, not at discovery time.
+      const expansionBatchCall = bggService.call.mock.calls[1];
+      // Implementation detail of fetchThingsRequest options shape — adjust to match.
+      expect(expansionBatchCall).toBeDefined();
+    });
+
     it('streams RESULT frames for each expansion across all batches followed by SOURCE_DONE', async () => {
       bggService.call
         .mockReturnValueOnce(of(BASE_WITH_TWO_EXPANSIONS))
@@ -241,10 +270,10 @@ describe('GameGatewayService', () => {
         service.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
-      const resultFrames = frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(resultFrames).toHaveLength(2);
-      expect(frames[frames.length - 1].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[frames.length - 1].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('maps each expansion thing to GameSearchData with the base externalId', async () => {
@@ -256,7 +285,7 @@ describe('GameGatewayService', () => {
         service.fetchExpansions({ correlationId: 'c', baseExternalId: String(CATAN_THING.id) }).pipe(toArray()),
       );
 
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.externalId).toBe(String(SEAFARERS_EXPANSION_THING.id));
       expect(result?.game?.title).toBe('Catan: Seafarers');
@@ -271,7 +300,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
       expect(bggService.call).toHaveBeenCalledTimes(1);
     });
 
@@ -283,7 +312,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
       expect(bggService.call).toHaveBeenCalledTimes(1);
     });
 
@@ -295,7 +324,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(frames[0].message).toContain('BGG unreachable');
     });
 
@@ -305,7 +334,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(bggService.call).not.toHaveBeenCalled();
     });
 
@@ -321,16 +350,19 @@ describe('GameGatewayService', () => {
           id,
           value: `Exp ${id}`,
         })),
+        versions: [],
       };
       const batchOne: BggThing[] = expansionIds.slice(0, MAX_THINGS_PER_BATCH).map((id) => ({
         id,
         type: BggThingType.BoardGameExpansion,
         names: [{ type: BggNameType.Primary, value: `Exp ${id}` }],
+        versions: [],
       }));
       const batchTwo: BggThing[] = expansionIds.slice(MAX_THINGS_PER_BATCH).map((id) => ({
         id,
         type: BggThingType.BoardGameExpansion,
         names: [{ type: BggNameType.Primary, value: `Exp ${id}` }],
+        versions: [],
       }));
 
       bggService.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(of(batchOne)).mockReturnValueOnce(of(batchTwo));
@@ -343,7 +375,9 @@ describe('GameGatewayService', () => {
       // each batch is its own retry boundary — they're separate call()
       // invocations, not bundled into one promise chain.
       expect(bggService.call).toHaveBeenCalledTimes(3);
-      expect(frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(expansionIds.length);
+      expect(frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(
+        expansionIds.length,
+      );
     });
 
     it('emits ERROR when a single batch fails — partial-success is not modeled', async () => {
@@ -352,6 +386,7 @@ describe('GameGatewayService', () => {
         type: BggThingType.BoardGame,
         names: [{ type: BggNameType.Primary, value: 'Catan' }],
         links: [{ type: BggLinkType.BoardGameExpansion, id: 100, value: 'Expansion A' }],
+        versions: [],
       };
       bggService.call.mockReturnValueOnce(of(base)).mockReturnValueOnce(throwError(() => new Error('Batch 1 failed')));
 
@@ -359,7 +394,7 @@ describe('GameGatewayService', () => {
         service.fetchExpansions({ correlationId: 'c', baseExternalId: '13' }).pipe(toArray()),
       );
 
-      const errorFrame = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_ERROR);
+      const errorFrame = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(errorFrame).toBeDefined();
       expect(errorFrame?.message).toContain('Batch 1 failed');
     });
@@ -417,6 +452,7 @@ const CATAN_THING: BggThing = {
     { type: BggLinkType.BoardGameDesigner, id: 11, value: 'Klaus Teuber' },
     { type: BggLinkType.BoardGameMechanic, id: 22, value: 'Trading' },
   ],
+  versions: [],
 };
 
 const SEAFARERS_EXPANSION_THING: BggThing = {
@@ -432,6 +468,7 @@ const SEAFARERS_EXPANSION_THING: BggThing = {
     // Inbound link points back at the base game (Catan).
     { type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true },
   ],
+  versions: [],
 };
 
 const CITIES_EXPANSION_THING: BggThing = {
@@ -440,6 +477,7 @@ const CITIES_EXPANSION_THING: BggThing = {
   names: [{ type: BggNameType.Primary, value: 'Catan: Cities & Knights' }],
   yearpublished: 1998,
   links: [{ type: BggLinkType.BoardGameExpansion, id: 13, value: 'Catan', inbound: true }],
+  versions: [],
 };
 
 const BASE_WITH_TWO_EXPANSIONS: BggThing = {

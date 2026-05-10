@@ -36,9 +36,10 @@ model PlatformGame {
   enrichmentSource String?   @map("enrichment_source")
   frozenAt         DateTime? @map("frozen_at") @db.Timestamptz(3)
 
-  releases    GameRelease[]
-  collections GameCollection[]
-  gameLists   GameList[]
+  releases     GameRelease[]
+  collections  GameCollection[]
+  gameLists    GameList[]
+  ruleVariants RuleVariant[]
 
   // Event chain
   eventGames       EventGame[]

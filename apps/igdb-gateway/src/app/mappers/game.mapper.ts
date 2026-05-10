@@ -160,8 +160,6 @@ function toGameReleaseDataList(
   const status = toReleaseStatus(gameStatus);
 
   return Array.from(byPlatform.values()).map(({ platform, entries }) => {
-    // Use the Worldwide entry date as the canonical release date when present;
-    // otherwise take the earliest available date.
     const worldwide = entries.find((e) => e.region === Region.Worldwide);
     const primaryEntry = worldwide ?? entries.reduce((a, b) => ((a.date ?? Infinity) < (b.date ?? Infinity) ? a : b));
     const releaseDate = primaryEntry.date ? toIsoDate(primaryEntry.date) : primaryEntry.human;
@@ -178,6 +176,22 @@ function toGameReleaseDataList(
       platform: toPlatformData(platform),
       status: releaseStatusFromDate(status, releaseDate),
       releaseDate,
+      // IGDB structures edition variants differently from BGG: deluxe / GOTY /
+      // anniversary editions are separate Game records linked via version_parent
+      // and surface in our model as separate Games with content_type=ExpandedEdition,
+      // connected via GameExpansion. release_dates carry only availability metadata
+      // (platform, region, date) — which is the right shape for IGDB's data because
+      // edition-level metadata (description, image, bundled content) lives at the
+      // parent Game record, not at the release.
+      //
+      // Steam, PSN, and Xbox follow the same pattern (separate product IDs per
+      // edition). BGG is the outlier — its version block carries printing-level
+      // edition data inline because BGG's "version" concept is closer to a
+      // physical SKU/printing than a digital product variant.
+      //
+      // The only release-level field IGDB gives us is the year, derived from the
+      // canonical date.
+      releaseYear: primaryEntry.date ? toYearPublished(primaryEntry.date) : undefined,
       localizations,
       languages,
     } satisfies proto.GameReleaseData;

@@ -8,6 +8,8 @@ model EventGameNomination {
 
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
   platformGameId String       @map("platform_game_id")
+  release        GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId      String?      @map("release_id")
 
   votingDeadline DateTime? @map("voting_deadline") @db.Timestamptz(3)
 
@@ -30,6 +32,8 @@ model EventGameNomination {
 
   @@index([eventId])
   @@index([occurrenceId])
+  @@index([releaseId])
+  @@index([platformGameId])
   @@index([suppliedFromId])
   @@map("event_game_nominations")
 }

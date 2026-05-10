@@ -1,12 +1,10 @@
 import * as proto from '@board-games-empire/proto-gateway';
-import { BggLinkType, BggNameType, BggThingType } from '../constants';
-import type { BggLink, BggName, BggSearchItem, BggThing } from '../types';
+import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
+import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
+import { toLanguageDataList } from './language.mapper';
 
 /**
- * BGG `type` → proto ContentType.
- *
- * BGE imports board games and their expansions through this gateway;
- * accessories are out of scope and fall through to UNSPECIFIED.
+ * BGG `type` → proto ContentType. Accessories fall through to UNSPECIFIED.
  */
 const BGG_CONTENT_TYPE_MAP: Readonly<Record<string, proto.ContentType>> = {
   [BggThingType.BoardGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
@@ -14,12 +12,14 @@ const BGG_CONTENT_TYPE_MAP: Readonly<Record<string, proto.ContentType>> = {
   [BggThingType.BoardGameAccessory]: proto.ContentType.CONTENT_TYPE_ACCESSORY,
 };
 
-/**
- * Complexity weight is stored on `Game.complexityWeight` as an integer
- * scaled by 1000 to avoid float-precision issues. BGG returns a float
- * in [1.0, 5.0] — multiply and round.
- */
 const COMPLEXITY_WEIGHT_SCALE = 1000;
+
+const TABLETOP_PLATFORM: proto.PlatformData = {
+  externalId: 'bgg-tabletop',
+  name: 'Tabletop',
+  abbreviation: 'TT',
+  platformType: proto.PlatformType.PLATFORM_TYPE_TABLETOP,
+};
 
 /**
  * Picks the primary display name from a thing's `names` array, falling
@@ -51,11 +51,7 @@ export function isInbound(value: boolean | string | undefined): boolean {
 
 /**
  * Extracts the BGG ids of every outbound expansion link on a thing.
- *
- * Inbound links are excluded — those represent the inverse relationship
- * (the thing IS an expansion of the linked id) and would otherwise be
- * mistaken for the thing's own expansions during a `fetchExpansions`
- * orchestration in the gateway service.
+ * Inbound links are excluded.
  */
 export function getOutboundExpansionIds(thing: Pick<BggThing, 'links'>): number[] {
   return (thing.links ?? [])
@@ -67,11 +63,6 @@ function toContentType(thing: Pick<BggThing, 'type'>): proto.ContentType {
   return BGG_CONTENT_TYPE_MAP[thing.type] ?? proto.ContentType.CONTENT_TYPE_UNSPECIFIED;
 }
 
-/**
- * Resolves the base-game external id when this thing is itself an
- * expansion. BGG records this with an inbound `boardgameexpansion`
- * link pointing at the base game.
- */
 function toBaseGameExternalId(thing: Pick<BggThing, 'links'>): string | undefined {
   const inboundExpansion = (thing.links ?? []).find(
     (link) => link.type === BggLinkType.BoardGameExpansion && isInbound(link.inbound),
@@ -79,11 +70,6 @@ function toBaseGameExternalId(thing: Pick<BggThing, 'links'>): string | undefine
   return inboundExpansion ? String(inboundExpansion.id) : undefined;
 }
 
-/**
- * Builds the canonical BGG source URL for a thing. BGG URLs differ by
- * type (`/boardgame/`, `/boardgameexpansion/`, …) so we route through
- * the type field.
- */
 function toSourceUrl(thing: Pick<BggThing, 'id' | 'type'>): string {
   const segment = thing.type === BggThingType.BoardGameExpansion ? 'boardgameexpansion' : 'boardgame';
   return `https://boardgamegeek.com/${segment}/${thing.id}`;
@@ -122,10 +108,8 @@ function toCategoryData(link: BggLink): proto.CategoryData {
 }
 
 /**
- * Maps a BGG family link to proto `FamilyData`. BGG encodes a
- * sub-classification in the value's `"<Type>: <n>"` prefix
- * (e.g. `"Game: Catan Series"`); the prefix is parsed into
- * `familyType` so downstream callers can group families consistently.
+ * Maps a BGG family link to proto FamilyData. BGG encodes a sub-classification
+ * in the value's "<Type>: <name>" prefix; the prefix is parsed into familyType.
  */
 function toFamilyData(link: BggLink): proto.FamilyData {
   const colonIndex = link.value.indexOf(':');
@@ -140,39 +124,76 @@ function toFamilyData(link: BggLink): proto.FamilyData {
 }
 
 /**
- * Builds a synthetic Tabletop release for a BGG game. BGG models
- * board games as platform-less things, but BGE's data model expects
- * every imported game to carry at least one release record. Emitting
- * a single Tabletop release with the year-published as the release
- * date keeps the import worker's release-upsert path uniform across
- * gateways.
+ * Coerces the BGG "0 means unknown" sentinel into undefined.
  */
-function toTabletopRelease(thing: Pick<BggThing, 'id' | 'yearpublished'>): proto.GameReleaseData {
-  const releaseDate = thing.yearpublished ? `${thing.yearpublished}-01-01` : undefined;
+function coerceYear(year: number | undefined): number | undefined {
+  return typeof year === 'number' && year > 0 ? year : undefined;
+}
 
+function toReleaseDate(year: number | undefined): string | undefined {
+  const valid = coerceYear(year);
+  return valid !== undefined ? `${valid}-01-01` : undefined;
+}
+
+/**
+ * Builds the synthetic Tabletop release used for search-context (and as
+ * the fallback when no version data is available). Carries identity and
+ * availability fields only — no edition data.
+ */
+function toSyntheticTabletopRelease(thing: Pick<BggThing, 'yearpublished'>): proto.GameReleaseData {
   return {
-    externalId: `bgg-${thing.id}-tabletop`,
+    externalId: DEFAULT_EDITION_KEY,
     platform: TABLETOP_PLATFORM,
     status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
-    releaseDate,
+    releaseDate: toReleaseDate(thing.yearpublished),
     localizations: [],
     languages: [],
   } satisfies proto.GameReleaseData;
 }
 
-const TABLETOP_PLATFORM: proto.PlatformData = {
-  externalId: 'bgg-tabletop',
-  name: 'Tabletop',
-  abbreviation: 'TT',
-  platformType: proto.PlatformType.PLATFORM_TYPE_TABLETOP,
-};
+/**
+ * Maps a single BGG version to a release. Edition-level overrides are
+ * intentionally not populated — BGG versions don't expose differing
+ * gameplay parameters.
+ *
+ * @todo utilize locale to filter language links
+ */
+function toVersionRelease(version: BggVersion): proto.GameReleaseData {
+  return {
+    externalId: String(version.id),
+    platform: TABLETOP_PLATFORM,
+    status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
+    editionName: version.name || undefined,
+    releaseYear: coerceYear(version.yearpublished),
+    releaseDate: toReleaseDate(version.yearpublished),
+    // BGG versions are flat — no edition hierarchy.
+    parentEditionExternalId: undefined,
+    languages: toLanguageDataList(version.links),
+    localizations: [],
+  } satisfies proto.GameReleaseData;
+}
 
 /**
- * Maps a BGG search-result item to the lean proto `GameSearchData`.
+ * Builds the GameReleaseData[] payload for a thing. When BGG returns
+ * version data, emits one release per version. Otherwise emits a single synthetic "default" release.
+ */
+function toReleases(thing: BggThing): proto.GameReleaseData[] {
+  const versions = thing.versions ?? [];
+
+  if (versions.length === 0) {
+    return [toSyntheticTabletopRelease(thing)];
+  }
+
+  return versions.map(toVersionRelease).filter((r) => r);
+}
+
+/**
+ * Maps a BGG search-result item to the lean proto GameSearchData.
  *
  * Search responses do not carry thumbnails, ratings, player counts, or
  * description — those fields stay undefined here and are populated by
- * a follow-up `FetchGame` call.
+ * a follow-up FetchGame call. `availableReleases` is intentionally
+ * empty: search items have no platform/release data.
  */
 export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearchData {
   const title = item.name ?? selectPrimaryName(item.names) ?? '';
@@ -189,10 +210,9 @@ export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearc
 }
 
 /**
- * Maps a fully-detailed BGG `thing` (used for expansion streaming) to
- * the lean proto `GameSearchData`. Richer than the search-item mapper
- * because the thing endpoint carries thumbnails, ratings, and player
- * counts.
+ * Maps a fully-detailed BGG thing (used for expansion streaming) to lean
+ * GameSearchData. Edition fields stay absent in search context — a
+ * synthetic Tabletop release with identity and availability data only.
  */
 export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
   const title = selectPrimaryName(thing.names) ?? '';
@@ -210,23 +230,22 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
     baseGameExternalId: toBaseGameExternalId(thing),
     summary: thing.description,
     availablePlatforms: [TABLETOP_PLATFORM],
-    availableReleases: [toTabletopRelease(thing)],
+    availableReleases: [toSyntheticTabletopRelease(thing)],
   } satisfies proto.GameSearchData;
 }
 
 /**
- * Maps a fully-detailed BGG `thing` to the proto `GameData` consumed by
- * the import worker.
+ * Maps a fully-detailed BGG thing to the proto GameData consumed by the
+ * import worker.
  *
  * BGG-specific notes:
- *  - `themes`, `ageRatings`, `dlc` are always empty (BGG has no
- *    equivalent concepts for board games).
- *  - `complexityWeight` is scaled by 1000 to fit the proto's int32
- *    contract.
- *  - Releases collapse to a single synthetic Tabletop entry — BGG does
- *    not differentiate platforms within the board-game domain.
+ *  - `themes`, `ageRatings`, `dlc` are always empty.
+ *  - `complexityWeight` is scaled by 1000 to fit the proto's int32 contract.
+ *  - When BGG returns `versions` (thing endpoint called with versions=1),
+ *    each becomes a GameReleaseData; otherwise a single synthetic "default"
+ *    release is emitted.
  */
-export function thingToGameData(thing: BggThing): proto.GameData {
+export function thingToGameData(thing: BggThing, locale?: string): proto.GameData {
   const title = selectPrimaryName(thing.names) ?? '';
   const ratings = thing.statistics?.ratings;
 
@@ -273,7 +292,7 @@ export function thingToGameData(thing: BggThing): proto.GameData {
     baseGameExternalId: toBaseGameExternalId(thing),
 
     platforms: [TABLETOP_PLATFORM],
-    releases: [toTabletopRelease(thing)],
+    releases: toReleases(thing),
 
     themes: [],
     ageRatings: [],

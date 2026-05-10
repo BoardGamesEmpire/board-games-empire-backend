@@ -58,11 +58,11 @@ async function bootstrap() {
           method: RequestMethod.GET,
         },
         {
-          path: '.well-known/(.*)',
+          path: '.well-known/*path',
           method: RequestMethod.GET,
         },
         {
-          path: '.well-known/(.*)',
+          path: '.well-known/*path',
           method: RequestMethod.OPTIONS,
         },
       ],
@@ -115,6 +115,8 @@ async function bootstrap() {
       jsonDocumentUrl: `${globalPrefix}/swagger/json`,
       yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
     });
+
+    Logger.debug('Swagger document created and setup completed');
   }
 
   const redisAdapter = new RedisIoAdapter(app);

@@ -21,6 +21,14 @@ export class GameGatewayService {
       gatewayName: 'IgdbGateway',
       gatewayVersion: '1.0.0',
       supportedServices: ['GatewayService'],
+      languagePreferences: {
+        acceptedRequestFormats: [
+          proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+          proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
+        ],
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_3,
+        passthroughRawLocale: false,
+      },
     };
   }
 

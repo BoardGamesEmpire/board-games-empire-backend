@@ -13,6 +13,10 @@ model EventGame {
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
   platformGameId String       @map("platform_game_id")
 
+  // Optional link to a specific release of the game for this event.
+  release   GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId String?      @map("release_id")
+
   role      ScheduledGameRole @default(Primary)
   sortOrder Int               @default(0) @map("sort_order")
   notes     String?
@@ -46,6 +50,8 @@ model EventGame {
   @@index([occurrenceId])
   @@index([eventId, role])
   @@index([occurrenceId, role])
+  @@index([releaseId])
+  @@index([platformGameId])
   @@index([suppliedById])
   @@map("event_games")
 }

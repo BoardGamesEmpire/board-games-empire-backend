@@ -17,10 +17,24 @@ export function toPlatformType(proto: string | undefined): PlatformType {
 }
 
 /**
- * Derives the canonical ReleaseRegion from the localizations list.
- * Prefers Worldwide; falls back to the first listed region; defaults to
- * Worldwide when no localization data is present.
+ * Sentinel value used as `editionKey` for releases emitted by gateways that
+ * don't surface edition data (BGG without versions=1 fallback, IGDB without
+ * release-entity granularity). The import worker treats "default" as a
+ * synthetic baseline that should never be overwritten by a non-default
+ * edition with the same region — see GameRelease unique constraint
+ * (platformGameId, editionKey, region).
  */
+export const DEFAULT_EDITION_KEY = 'default';
+
+/**
+ * Coerces a possibly-empty externalId into a usable editionKey. Falls
+ * back to the synthetic default when the gateway emits an empty string —
+ * which would otherwise produce an unusable unique-constraint key.
+ */
+export function toEditionKey(externalId: string | undefined): string {
+  return externalId && externalId.toString().trim().length > 0 ? externalId.toString() : DEFAULT_EDITION_KEY;
+}
+
 export function toReleaseRegion(localizations: LocalizationData[]): ReleaseRegion {
   if (!localizations.length) return ReleaseRegion.Worldwide;
 

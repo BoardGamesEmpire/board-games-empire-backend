@@ -20,6 +20,11 @@ export interface ThingFetchOptions {
    * to disambiguate ids that exist across multiple domains.
    */
   types: readonly BggThingType[];
+
+  /**
+   * Request edition/version data (BGG `versions=1`).
+   */
+  versions?: 0 | 1;
 }
 
 /**
@@ -45,13 +50,8 @@ export function searchGamesRequest(
         type: normalizeTypes(types),
       }),
     ).pipe(
-      map((result) => result.flatMap((result) => result.items)),
-      mergeMap((items) => {
-        const kindaOffset = offset ?? 0;
-        const actualOffset = kindaOffset > items.length ? kindaOffset - items.length : kindaOffset;
-
-        return from(items).pipe(skip(actualOffset));
-      }),
+      mergeMap((result) => from(result.flatMap((result) => result.items))),
+      skip(offset),
       take(limit),
       toArray(),
     );
@@ -68,6 +68,7 @@ export function fetchThingRequest(id: number, options: ThingFetchOptions): BggRe
         id,
         type: normalizeTypes(options.types),
         stats: options.stats,
+        versions: options.versions,
       }),
     ).pipe(map((results) => results[0]));
 }
@@ -87,6 +88,7 @@ export function fetchThingsRequest(ids: readonly number[], options: ThingFetchOp
         id: [...ids],
         type: normalizeTypes(options.types),
         stats: options.stats,
+        versions: options.versions,
       }),
     );
 }

@@ -1,9 +1,12 @@
-import { PlatformGatewayLink, PlatformType } from '@bge/database';
+import type { GameRelease, PlatformGatewayLink } from '@bge/database';
+import { PlatformType } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData, PlatformData } from '@board-games-empire/proto-gateway';
 import * as proto from '@board-games-empire/proto-gateway';
+import { Logger } from '@nestjs/common';
 import type { PlatformGameMap } from './platform.service';
 import { PlatformUpsertService } from './platform.service';
+import { ReleaseGraphResolver } from './release-graph.resolver';
 
 describe('PlatformUpsertService', () => {
   let service: PlatformUpsertService;
@@ -11,11 +14,15 @@ describe('PlatformUpsertService', () => {
 
   beforeEach(async () => {
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      providers: [PlatformUpsertService],
+      providers: [PlatformUpsertService, ReleaseGraphResolver],
     });
 
     service = module.get(PlatformUpsertService);
     db = mockDb;
+  });
+
+  beforeEach(() => {
+    db.gameRelease.findFirst.mockResolvedValue(null);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -74,7 +81,7 @@ describe('PlatformUpsertService', () => {
   }
 
   /**
-   * Stubs the platform resolution chain for an already-known platform.
+   * Stubs the platform resolution chain for an already-known platform
    */
   function stubExistingPlatformLink(platformId: string): void {
     db.platformGatewayLink.findUnique.mockResolvedValue({ platformId } as PlatformGatewayLink);
@@ -225,7 +232,7 @@ describe('PlatformUpsertService', () => {
       const platformGameMap: PlatformGameMap = new Map([['platform-ps5', 'pg-ps5']]);
 
       stubExistingPlatformLink('platform-ps5');
-      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as GameRelease);
 
       await service.upsertReleases(
         platformGameMap,
@@ -244,7 +251,13 @@ describe('PlatformUpsertService', () => {
 
       expect(db.gameRelease.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { platformGameId_region: { platformGameId: 'pg-ps5', region: expect.any(String) } },
+          where: {
+            platformGameId_editionKey_region: {
+              platformGameId: 'pg-ps5',
+              editionKey: 'rd-1',
+              region: expect.any(String),
+            },
+          },
           create: expect.objectContaining({
             platformGameId: 'pg-ps5',
           }),
@@ -388,6 +401,256 @@ describe('PlatformUpsertService', () => {
       await service.upsertReleases(platformGameMap, [], GATEWAY_ID);
 
       expect(db.gameRelease.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('upsertReleases — duplicate edition keys', () => {
+    function bggReleaseData(overrides: Partial<proto.GameReleaseData> = {}): proto.GameReleaseData {
+      return {
+        externalId: 'rel-1',
+        platform: tabletopPlatformData(),
+        status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
+        localizations: [],
+        languages: [],
+        ...overrides,
+      } as proto.GameReleaseData;
+    }
+
+    it('warns when the same (editionKey, region) appears twice in a batch', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await service.upsertReleases(
+        map,
+        [bggReleaseData({ externalId: 'dup-key' }), bggReleaseData({ externalId: 'dup-key' })],
+        GATEWAY_ID,
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Duplicate (editionKey=dup-key'));
+    });
+
+    it('does not warn when the same editionKey appears in different regions', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await service.upsertReleases(
+        map,
+        [
+          bggReleaseData({
+            externalId: 'shared-key',
+            localizations: [{ region: { externalId: 'us', name: 'NA', regionCode: 'us' } }],
+          }),
+          bggReleaseData({
+            externalId: 'shared-key',
+            localizations: [{ region: { externalId: 'eu', name: 'EU', regionCode: 'eu' } }],
+          }),
+        ],
+        GATEWAY_ID,
+      );
+
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Duplicate'));
+    });
+
+    it('does not warn when the same editionKey appears across different PlatformGames', async () => {
+      const map: PlatformGameMap = new Map([
+        ['platform-ps5', 'pg-ps5'],
+        ['platform-pc', 'pg-pc'],
+      ]);
+      db.platformGatewayLink.findUnique
+        .mockResolvedValueOnce({ platformId: 'platform-ps5' } as PlatformGatewayLink)
+        .mockResolvedValueOnce({ platformId: 'platform-pc' } as PlatformGatewayLink);
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await service.upsertReleases(
+        map,
+        [
+          bggReleaseData({ externalId: 'shared-key', platform: consolePlatformData() }),
+          bggReleaseData({ externalId: 'shared-key', platform: pcPlatformData() }),
+        ],
+        'gw-igdb',
+      );
+
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining('Duplicate'));
+    });
+
+    it('still upserts both occurrences (the second overwrites on the unique row)', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(
+        map,
+        [
+          bggReleaseData({ externalId: 'dup-key', editionName: 'First Occurrence' }),
+          bggReleaseData({ externalId: 'dup-key', editionName: 'Second Occurrence' }),
+        ],
+        GATEWAY_ID,
+      );
+
+      expect(db.gameRelease.upsert).toHaveBeenCalledTimes(2);
+      const lastCall = db.gameRelease.upsert.mock.calls[1][0];
+      expect(lastCall.create).toEqual(expect.objectContaining({ editionName: 'Second Occurrence' }));
+    });
+  });
+
+  describe('upsertReleases — edition fields', () => {
+    function bggReleaseData(overrides: Partial<proto.GameReleaseData> = {}): proto.GameReleaseData {
+      return {
+        externalId: '416798',
+        platform: tabletopPlatformData(),
+        status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
+        editionName: 'Afrikaans edition',
+        releaseYear: 2020,
+
+        localizations: [],
+        languages: [],
+        ...overrides,
+      } as proto.GameReleaseData;
+    }
+
+    it('persists edition fields on create', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(
+        map,
+        [bggReleaseData({ externalId: '416798', editionName: '5th Edition', releaseYear: 2015 })],
+        GATEWAY_ID,
+      );
+
+      expect(db.gameRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            platformGameId_editionKey_region: {
+              platformGameId: 'pg-1',
+              editionKey: '416798',
+              region: 'Worldwide',
+            },
+          },
+          create: expect.objectContaining({
+            editionKey: '416798',
+            editionName: '5th Edition',
+            releaseYear: 2015,
+          }),
+        }),
+      );
+    });
+
+    it('coerces empty externalId to the default edition key sentinel', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(map, [bggReleaseData({ externalId: '' })], GATEWAY_ID);
+
+      expect(db.gameRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            platformGameId_editionKey_region: expect.objectContaining({ editionKey: 'default' }),
+          }),
+        }),
+      );
+    });
+
+    it('persists edition-level gameplay overrides when present', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(
+        map,
+        [
+          bggReleaseData({
+            externalId: '999',
+            minPlayers: 2,
+            maxPlayers: 6,
+            minPlaytime: 90,
+            maxPlaytime: 150,
+          }),
+        ],
+        GATEWAY_ID,
+      );
+
+      expect(db.gameRelease.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            minPlayers: 2,
+            maxPlayers: 6,
+            minPlayTime: 90,
+            maxPlayTime: 150,
+          }),
+        }),
+      );
+    });
+  });
+
+  describe('upsertReleases — parent hierarchy', () => {
+    function bggReleaseData(overrides: Partial<proto.GameReleaseData> = {}): proto.GameReleaseData {
+      return {
+        externalId: 'rel-1',
+        platform: tabletopPlatformData(),
+        status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
+
+        localizations: [],
+        languages: [],
+        ...overrides,
+      } as proto.GameReleaseData;
+    }
+
+    it('applies parentReleaseId in a second pass for in-batch parent references', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.findFirst.mockResolvedValue(null);
+      db.gameRelease.upsert
+        .mockResolvedValueOnce({ id: 'release-parent' } as never)
+        .mockResolvedValueOnce({ id: 'release-child' } as never);
+      db.gameRelease.update.mockResolvedValue({} as never);
+
+      await service.upsertReleases(
+        map,
+        [
+          bggReleaseData({ externalId: 'parent-edition' }),
+          bggReleaseData({ externalId: 'child-edition', parentEditionExternalId: 'parent-edition' }),
+        ],
+        GATEWAY_ID,
+      );
+
+      expect(db.gameRelease.update).toHaveBeenCalledWith({
+        where: { id: 'release-child' },
+        data: { parentReleaseId: 'release-parent' },
+      });
+    });
+
+    it('does not call update when no parent references are present', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.findFirst.mockResolvedValue(null);
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(map, [bggReleaseData({ externalId: 'lonely' })], GATEWAY_ID);
+
+      expect(db.gameRelease.update).not.toHaveBeenCalled();
+    });
+
+    it('does not call update for unresolved parent references', async () => {
+      const map: PlatformGameMap = new Map([['platform-tabletop', 'pg-1']]);
+      stubExistingPlatformLink('platform-tabletop');
+      db.gameRelease.findFirst.mockResolvedValue(null);
+      db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+
+      await service.upsertReleases(
+        map,
+        [bggReleaseData({ externalId: 'orphan', parentEditionExternalId: 'missing' })],
+        GATEWAY_ID,
+      );
+
+      expect(db.gameRelease.update).not.toHaveBeenCalled();
     });
   });
 

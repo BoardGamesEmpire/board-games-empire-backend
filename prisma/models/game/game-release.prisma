@@ -4,16 +4,41 @@ model GameRelease {
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
   platformGameId String       @map("platform_game_id")
 
-  region      ReleaseRegion @default(Worldwide)
-  status      ReleaseStatus @default(Released)
-  releaseDate DateTime?     @map("release_date") @db.Timestamptz(3)
+  // Edition identity (absorbed from GameVersion)
+  editionKey  String  @map("edition_key") // gateway externalId — BGG version id, IGDB release_date id, etc.
+  editionName String? @map("edition_name") // "5th Edition Deluxe", "Legacy Season 1"
+  releaseYear Int?    @map("release_year")
 
-  languages GameReleaseLanguage[]
+  // Edition hierarchy (absorbed from GameVersion)
+  parentRelease   GameRelease?  @relation("ReleaseHierarchy", fields: [parentReleaseId], references: [id])
+  parentReleaseId String?       @map("parent_release_id")
+  childReleases   GameRelease[] @relation("ReleaseHierarchy")
+
+  // Regional availability (existing)
+  region      ReleaseRegion         @default(Worldwide)
+  status      ReleaseStatus         @default(Released)
+  releaseDate DateTime?             @map("release_date") @db.Timestamptz(3)
+  languages   GameReleaseLanguage[]
+
+  // Optional edition-level overrides (rules-affecting variants)
+  minPlayers  Int? @map("min_players")
+  maxPlayers  Int? @map("max_players")
+  minPlayTime Int? @map("min_play_time")
+  maxPlayTime Int? @map("max_play_time")
+
+  // Downstream opt-in references
+  collections GameCollection[]
+  gameLists   GameList[]
+
+  eventGames       EventGame[]
+  eventNominations EventGameNomination[]
+  playSessions     GamePlaySession[]
+  ruleVariants     RuleVariant[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([platformGameId, region])
+  @@unique([platformGameId, editionKey, region])
   @@index([platformGameId])
   @@map("game_releases")
 }
