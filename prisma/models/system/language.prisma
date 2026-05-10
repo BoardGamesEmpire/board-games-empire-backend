@@ -12,8 +12,9 @@ model Language {
   // Whether the application has i18n support for this language.
   systemSupported Boolean @default(false) @map("system_supported")
 
-  households      Household[]
+  dlcReleases     GameReleaseDlcLanguage[]
   gameReleases    GameReleaseLanguage[]
+  households      Household[]
   userPreferences UserPreferences[]
 
   @@map("languages")

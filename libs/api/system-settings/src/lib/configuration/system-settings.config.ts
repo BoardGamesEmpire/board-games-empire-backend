@@ -6,13 +6,13 @@ export interface SystemSettingsConfig {
   allowPasswordResets: boolean;
   allowUsernameChange: boolean;
   allowUserRegistration: boolean;
-  serverIdentifier: string | null;
+  identifier: string | null;
 }
 
 export default registerAs('systemSettings', () =>
   env.provideMany<SystemSettingsConfig>([
     {
-      keyTo: 'serverIdentifier',
+      keyTo: 'identifier',
       key: 'SERVER_IDENTIFIER',
       defaultValue: null,
       allowEmptyString: true,

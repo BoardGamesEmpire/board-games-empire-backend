@@ -7,8 +7,6 @@ model RuleVariantUsage {
   session   GamePlaySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   sessionId String          @map("session_id")
 
-  gameVersions GameVersionRuleVariant[]
-
   // Voting support
   wasVotedOn   Boolean? @map("was_voted_on")
   votesFor     Int?     @map("votes_for")
@@ -17,8 +15,10 @@ model RuleVariantUsage {
   wasEffective Boolean? @map("was_effective")
   notes        String?
 
-  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
-  ruleVariantUsageVersions RuleVariantUsageVersion[]
+  requiresErrata Boolean @default(false) @map("requires_errata")
+  errataDetails  String? @map("errata_details")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@unique([ruleVariantId, sessionId])
   @@index([sessionId])

@@ -14,11 +14,13 @@ import type { BggLinkType, BggNameType, BggThingType } from '../constants';
  */
 export interface BggName {
   type: BggNameType | string;
+
   /**
    * Sort index used by BGG to alphabetize titles (ignoring leading articles).
    * Optional because BGG does not always populate it on alternate names.
    */
   sortindex?: number;
+
   value: string;
 }
 
@@ -30,6 +32,7 @@ export interface BggLink {
   type: BggLinkType | string;
   id: number;
   value: string;
+
   /**
    * BGG returns `inbound="true"` when the link points back at this thing
    * from the related thing — used to distinguish "this game IS an expansion
@@ -51,18 +54,22 @@ export interface BggRatings {
    * Raw average rating (1.0–10.0).
    */
   average?: number;
+
   /**
    * Bayesian-adjusted rating used for the BGG ranking.
    */
   bayesaverage?: number;
+
   /**
    * Total number of user ratings on file.
    */
   usersrated?: number;
+
   /**
    * Community-voted complexity (1.0–5.0).
    */
   averageweight?: number;
+
   /**
    * Number of users who voted on complexity.
    */
@@ -97,6 +104,7 @@ export interface BggThing {
    * and `maxplaytime` are sometimes populated for variable-length games.
    */
   playingtime?: number;
+
   minplaytime?: number;
   maxplaytime?: number;
 
@@ -118,6 +126,13 @@ export interface BggThing {
    * `stats=1`.
    */
   statistics?: BggStatistics;
+
+  /**
+   * Populated when the thing endpoint is called with `versions=1`.
+   * Absent or empty when the request did not request versions or when
+   * the underlying thing has no published versions on BGG.
+   */
+  versions?: BggVersion[];
 }
 
 /**
@@ -148,4 +163,26 @@ export interface BggSearchItem {
 export interface BggSearchResult {
   total: number;
   items: BggSearchItem[];
+}
+
+/**
+ * `version` element returned when the thing endpoint is called with
+ * `versions=1`. Each version represents a published edition of the
+ * underlying boardgame thing.
+ *
+ * The `links` array carries language and publisher associations specific
+ * to this edition. BGG returns `0` as the sentinel for unknown numeric
+ * fields (yearpublished, dimensions) — consumers must coerce.
+ */
+export interface BggVersion {
+  depth: number;
+  id: number;
+  length: number;
+  links: BggLink[];
+  name: string;
+  productcode: string;
+  type: BggThingType | string;
+  weight: number;
+  width: number;
+  yearpublished: number;
 }

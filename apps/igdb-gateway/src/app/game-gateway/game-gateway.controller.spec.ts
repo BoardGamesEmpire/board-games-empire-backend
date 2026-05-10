@@ -38,6 +38,14 @@ describe('GameGatewayController', () => {
         gatewayName: 'IgdbGateway',
         gatewayVersion: '1.0.0',
         supportedServices: ['GatewayService'],
+        languagePreferences: {
+          acceptedRequestFormats: [
+            proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+            proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
+          ],
+          passthroughRawLocale: false,
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+        },
       };
       service.ping.mockReturnValue(expected);
 
@@ -55,6 +63,14 @@ describe('GameGatewayController', () => {
         gatewayName: 'IgdbGateway',
         gatewayVersion: '1.0.0',
         supportedServices: ['GatewayService'],
+        languagePreferences: {
+          acceptedRequestFormats: [
+            proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+            proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
+          ],
+          passthroughRawLocale: false,
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+        },
       };
       service.ping.mockReturnValue(expected);
 

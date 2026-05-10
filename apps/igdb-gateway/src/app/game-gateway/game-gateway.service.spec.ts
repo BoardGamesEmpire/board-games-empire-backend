@@ -1,11 +1,4 @@
-import {
-  FetchExpansionsRequest,
-  FetchGameRequest,
-  GatewayPingRequest,
-  HealthCheckRequest,
-  HealthCheckResponse_ServingStatus,
-  ResultStatus,
-} from '@board-games-empire/proto-gateway';
+import * as proto from '@board-games-empire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
@@ -39,7 +32,7 @@ describe('GameGatewayService', () => {
 
   describe('ping', () => {
     it('returns a response using the correlationId from the request', () => {
-      const request: GatewayPingRequest = { correlationId: 'corr-ping-1' };
+      const request: proto.GatewayPingRequest = { correlationId: 'corr-ping-1' };
       const response = service.ping(request);
       expect(response.correlationId).toBe('corr-ping-1');
     });
@@ -61,12 +54,29 @@ describe('GameGatewayService', () => {
     it('returns a bigint timestampMs', () => {
       expect(typeof service.ping({}).timestampMs).toBe('bigint');
     });
+
+    it('declares language preferences (IETF BCP 47 + ISO 639-1 accepted, ISO 639-3 emitted)', () => {
+      const response = service.ping({});
+
+      expect(response.languagePreferences).toEqual({
+        acceptedRequestFormats: [
+          proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+          proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
+        ],
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_3,
+        passthroughRawLocale: false,
+      } satisfies proto.GatewayLanguagePreferences);
+    });
+
+    it('does not request raw locale passthrough', () => {
+      expect(service.ping({}).languagePreferences?.passthroughRawLocale).toBe(false);
+    });
   });
 
   describe('healthCheck', () => {
     it('returns SERVING status', () => {
-      const request: HealthCheckRequest = { service: 'GatewayService' };
-      expect(service.healthCheck(request).status).toBe(HealthCheckResponse_ServingStatus.SERVING);
+      const request: proto.HealthCheckRequest = { service: 'GatewayService' };
+      expect(service.healthCheck(request).status).toBe(proto.HealthCheckResponse_ServingStatus.SERVING);
     });
   });
 
@@ -76,12 +86,12 @@ describe('GameGatewayService', () => {
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
 
-      const resultFrames = frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
-      const doneFrames = frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      const resultFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
+      const doneFrames = frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
 
       expect(resultFrames).toHaveLength(2);
       expect(doneFrames).toHaveLength(1);
-      expect(frames[frames.length - 1].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[frames.length - 1].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('emits only SOURCE_DONE when IGDB returns no results', async () => {
@@ -92,14 +102,14 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('maps the IGDB id to externalId as a string', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
-      const resultFrame = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const resultFrame = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(resultFrame?.game?.externalId).toBe(String(BASE_GAME.id));
     });
@@ -124,7 +134,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(frames[0].message).toContain('IGDB unavailable');
     });
 
@@ -132,7 +142,7 @@ describe('GameGatewayService', () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.thumbnailUrl).toMatch(/^https:/);
       expect(result?.game?.thumbnailUrl).not.toMatch(/^\/\//);
@@ -142,7 +152,7 @@ describe('GameGatewayService', () => {
       igdbService.call.mockReturnValue(of([DLC_GAME]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'dlc' }).pipe(toArray()));
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.baseGameExternalId).toBe(String(DLC_GAME.parent_game));
     });
@@ -153,7 +163,7 @@ describe('GameGatewayService', () => {
       const frames = await firstValueFrom(
         service.searchGames({ correlationId: 'c', query: 'standalone' }).pipe(toArray()),
       );
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.baseGameExternalId).toBe(String(STANDALONE_EXPANSION.version_parent));
     });
@@ -162,7 +172,7 @@ describe('GameGatewayService', () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
       const frames = await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'Hades' }).pipe(toArray()));
-      const result = frames.find((f) => f.status === ResultStatus.RESULT_STATUS_RESULT);
+      const result = frames.find((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT);
 
       expect(result?.game?.baseGameExternalId).toBeUndefined();
     });
@@ -172,10 +182,10 @@ describe('GameGatewayService', () => {
     it('returns RESULT status with populated game data', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME]));
 
-      const request: FetchGameRequest = { correlationId: 'c', externalId: String(BASE_GAME.id) };
+      const request: proto.FetchGameRequest = { correlationId: 'c', externalId: String(BASE_GAME.id) };
       const response = await firstValueFrom(service.fetchGame(request));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_RESULT);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_RESULT);
       expect(response.game?.externalId).toBe(String(BASE_GAME.id));
       expect(response.correlationId).toBe('c');
     });
@@ -185,7 +195,7 @@ describe('GameGatewayService', () => {
 
       const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '9999' }));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
     });
 
     it('returns ERROR status when IGDBService throws', async () => {
@@ -193,7 +203,7 @@ describe('GameGatewayService', () => {
 
       const response = await firstValueFrom(service.fetchGame({ correlationId: 'c', externalId: '9999' }));
 
-      expect(response.status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(response.status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(response.message).toContain('API down');
     });
   });
@@ -202,11 +212,11 @@ describe('GameGatewayService', () => {
     it('streams RESULT frames for each expansion followed by SOURCE_DONE', async () => {
       igdbService.call.mockReturnValue(of([DLC_GAME]));
 
-      const request: FetchExpansionsRequest = { correlationId: 'c', baseExternalId: String(BASE_GAME.id) };
+      const request: proto.FetchExpansionsRequest = { correlationId: 'c', baseExternalId: String(BASE_GAME.id) };
       const frames = await firstValueFrom(service.fetchExpansions(request).pipe(toArray()));
 
-      expect(frames.filter((f) => f.status === ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(1);
-      expect(frames[frames.length - 1].status).toBe(ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(frames.filter((f) => f.status === proto.ResultStatus.RESULT_STATUS_RESULT)).toHaveLength(1);
+      expect(frames[frames.length - 1].status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
     });
 
     it('emits an ERROR frame when IGDBService throws', async () => {
@@ -217,7 +227,7 @@ describe('GameGatewayService', () => {
       );
 
       expect(frames).toHaveLength(1);
-      expect(frames[0].status).toBe(ResultStatus.RESULT_STATUS_ERROR);
+      expect(frames[0].status).toBe(proto.ResultStatus.RESULT_STATUS_ERROR);
       expect(frames[0].message).toContain('IGDB unreachable');
     });
   });

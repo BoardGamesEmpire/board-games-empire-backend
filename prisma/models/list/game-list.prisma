@@ -6,8 +6,12 @@ model GameList {
 
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id])
   platformGameId String       @map("platform_game_id")
+  release        GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId      String?      @map("release_id")
 
   priority Int @default(0)
 
+  @@index([platformGameId])
+  @@index([releaseId])
   @@map("game_lists")
 }

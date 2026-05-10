@@ -32,7 +32,16 @@ export enum BggLinkType {
   BoardGameDesigner = 'boardgamedesigner',
   BoardGameArtist = 'boardgameartist',
   BoardGamePublisher = 'boardgamepublisher',
+  BoardGameVersion = 'boardgameversion',
+  Language = 'language',
 }
+
+/**
+ * Synthetic edition key emitted by the BGG mapper when the thing endpoint
+ * returns no version data. The import worker treats this as a sentinel —
+ * see GameRelease.editionKey resolution rules.
+ */
+export const DEFAULT_EDITION_KEY = 'default';
 
 /**
  * BGG `name` types. A thing typically has one primary and zero or more

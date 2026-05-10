@@ -6,6 +6,8 @@ model GameCollection {
 
   platformGame   PlatformGame @relation(fields: [platformGameId], references: [id], onDelete: Cascade)
   platformGameId String       @map("platform_game_id")
+  release        GameRelease? @relation(fields: [releaseId], references: [id], onDelete: SetNull)
+  releaseId      String?      @map("release_id")
 
   medium GameMedium
 
@@ -29,5 +31,6 @@ model GameCollection {
 
   @@unique([userId, platformGameId, medium])
   @@index([platformGameId])
+  @@index([releaseId])
   @@map("game_collections")
 }

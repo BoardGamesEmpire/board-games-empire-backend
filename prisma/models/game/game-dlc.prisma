@@ -46,10 +46,26 @@ model GameDlcRelease {
   region      ReleaseRegion @default(Worldwide)
   releaseDate DateTime?     @map("release_date") @db.Timestamptz(3)
 
+  languages GameReleaseDlcLanguage[]
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@unique([dlcId, platformId, region])
   @@index([dlcId])
   @@map("game_dlc_releases")
+}
+
+model GameReleaseDlcLanguage {
+  id String @id @default(cuid(2))
+
+  release   GameDlcRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  releaseId String         @map("release_id")
+
+  language   Language @relation(fields: [languageId], references: [id])
+  languageId String   @map("language_id")
+
+  @@unique([releaseId, languageId])
+  @@index([releaseId])
+  @@map("game_release_dlc_languages")
 }

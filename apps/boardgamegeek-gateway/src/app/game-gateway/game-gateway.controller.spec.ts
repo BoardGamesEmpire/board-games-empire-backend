@@ -46,6 +46,11 @@ describe('GameGatewayController', () => {
         gatewayName: 'BoardGameGeekGateway',
         gatewayVersion: '1.0.0',
         supportedServices: ['GatewayService'],
+        languagePreferences: {
+          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
+          passthroughRawLocale: false,
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+        },
       };
       service.ping.mockReturnValue(expected);
 
@@ -63,6 +68,11 @@ describe('GameGatewayController', () => {
         gatewayName: 'BoardGameGeekGateway',
         gatewayVersion: '1.0.0',
         supportedServices: ['GatewayService'],
+        languagePreferences: {
+          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
+          passthroughRawLocale: false,
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+        },
       };
       service.ping.mockReturnValue(expected);
 

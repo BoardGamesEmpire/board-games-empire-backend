@@ -12,6 +12,7 @@ export interface BggThingQueryParams {
   id: number | number[];
   type?: string | string[];
   stats?: 0 | 1;
+  versions?: 0 | 1;
 }
 
 /**
