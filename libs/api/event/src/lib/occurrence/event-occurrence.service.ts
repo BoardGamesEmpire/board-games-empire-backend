@@ -6,8 +6,11 @@ import {
   EventParticipationStatus,
   EventSchedulingMode,
   OccurrenceStatus,
+  isPrismaDependentRecordNotFoundError,
 } from '@bge/database';
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import type { AppAbility } from '@bge/permissions';
+import { accessibleBy, WhereInput } from '@casl/prisma';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { OccurrenceEvents } from './constants';
@@ -28,21 +31,28 @@ export class EventOccurrenceService {
 
   constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
 
-  async getOccurrences(eventId: string): Promise<EventOccurrence[]> {
+  async getOccurrences(eventId: string, abilities: AppAbility[]): Promise<EventOccurrence[]> {
     await this.assertEventExists(eventId);
 
     return this.db.eventOccurrence.findMany({
-      where: { eventId },
+      where: {
+        eventId,
+        AND: this.createOccurrenceWhereAnd(abilities),
+      },
       include: OCCURRENCE_INCLUDE,
       orderBy: { sortOrder: 'asc' },
     });
   }
 
-  async getOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async getOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
     await this.assertEventExists(eventId);
 
     const occurrence = await this.db.eventOccurrence.findUnique({
-      where: { id: occurrenceId, eventId },
+      where: {
+        id: occurrenceId,
+        eventId,
+        AND: this.createOccurrenceWhereAnd(abilities),
+      },
       include: OCCURRENCE_INCLUDE,
     });
 
@@ -101,6 +111,7 @@ export class EventOccurrenceService {
     eventId: string,
     occurrenceId: string,
     dto: UpdateEventOccurrenceDto,
+    abilities: AppAbility[],
   ): Promise<EventOccurrence> {
     assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
 
@@ -111,27 +122,38 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
 
-    const updated = await this.db.eventOccurrence.update({
-      where: { id: occurrenceId },
-      data: {
-        label: dto.label,
-        startDate: dto.startDate,
-        endDate: dto.endDate,
-        location: dto.location,
-        sortOrder: dto.sortOrder,
-      },
-      include: OCCURRENCE_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventOccurrence.update({
+        where: {
+          id: occurrenceId,
+          AND: this.createOccurrenceWhereAnd(abilities),
+        },
+        data: {
+          label: dto.label,
+          startDate: dto.startDate,
+          endDate: dto.endDate,
+          location: dto.location,
+          sortOrder: dto.sortOrder,
+        },
+        include: OCCURRENCE_INCLUDE,
+      });
 
-    this.eventEmitter.emit(OccurrenceEvents.OccurrenceUpdated, {
-      eventId,
-      occurrenceId,
-    });
+      this.eventEmitter.emit(OccurrenceEvents.OccurrenceUpdated, {
+        eventId,
+        occurrenceId,
+      });
 
-    return updated;
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this resource.");
+      }
+      throw error;
+    }
   }
 
-  async removeOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async removeOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
     this.logger.debug(`Attempting to remove occurrence ${occurrenceId} from event ${eventId}`);
 
     const existing = await this.db.eventOccurrence.findUnique({
@@ -141,28 +163,39 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
 
-    return this.db.eventOccurrence.delete({
-      where: { id: occurrenceId },
-      include: OCCURRENCE_INCLUDE,
-    });
+    try {
+      return this.db.eventOccurrence.delete({
+        where: {
+          id: occurrenceId,
+          AND: this.createOccurrenceWhereAnd(abilities),
+        },
+        include: OCCURRENCE_INCLUDE,
+      });
+    } catch (error) {
+      this.logger.error(`Error removing occurrence ${occurrenceId} from event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to remove this resource.");
+      }
+      throw error;
+    }
   }
 
-  async confirmOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async confirmOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
       confirmedAt: new Date(),
-    });
+    }, abilities);
   }
 
-  async declineOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async declineOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
       declinedAt: new Date(),
-    });
+    }, abilities);
   }
 
-  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async cancelOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
       cancelledAt: new Date(),
-    });
+    }, abilities);
   }
 
   private async transitionStatus(
@@ -171,6 +204,7 @@ export class EventOccurrenceService {
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
+    abilities: AppAbility[],
   ): Promise<EventOccurrence> {
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
@@ -186,27 +220,38 @@ export class EventOccurrenceService {
       );
     }
 
-    const updated = await this.db.eventOccurrence.update({
-      where: { id: occurrenceId },
-      data: { status: newStatus, ...extraData },
-      include: OCCURRENCE_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventOccurrence.update({
+        where: {
+          id: occurrenceId,
+          AND: this.createOccurrenceWhereAnd(abilities),
+        },
+        data: { status: newStatus, ...extraData },
+        include: OCCURRENCE_INCLUDE,
+      });
 
-    const domainEvent =
-      newStatus === OccurrenceStatus.Confirmed
-        ? OccurrenceEvents.OccurrenceConfirmed
-        : newStatus === OccurrenceStatus.Declined
-        ? OccurrenceEvents.OccurrenceDeclined
-        : OccurrenceEvents.OccurrenceCancelled;
+      const domainEvent =
+        newStatus === OccurrenceStatus.Confirmed
+          ? OccurrenceEvents.OccurrenceConfirmed
+          : newStatus === OccurrenceStatus.Declined
+          ? OccurrenceEvents.OccurrenceDeclined
+          : OccurrenceEvents.OccurrenceCancelled;
 
-    this.eventEmitter.emit(domainEvent, {
-      eventId,
-      occurrenceId,
-      previousStatus: existing.status,
-      newStatus,
-    } satisfies OccurrenceStatusChangedEvent);
+      this.eventEmitter.emit(domainEvent, {
+        eventId,
+        occurrenceId,
+        previousStatus: existing.status,
+        newStatus,
+      } satisfies OccurrenceStatusChangedEvent);
 
-    return updated;
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this resource.");
+      }
+      throw error;
+    }
   }
 
   async submitAvailability(
@@ -252,7 +297,7 @@ export class EventOccurrenceService {
     return vote;
   }
 
-  async getAvailabilitySummary(eventId: string): Promise<AvailabilitySummary> {
+  async getAvailabilitySummary(eventId: string, abilities: AppAbility[]): Promise<AvailabilitySummary> {
     await this.assertEventExists(eventId);
 
     const [attendees, occurrences] = await Promise.all([
@@ -261,7 +306,10 @@ export class EventOccurrenceService {
         select: { userId: true, status: true },
       }),
       this.db.eventOccurrence.findMany({
-        where: { eventId },
+        where: {
+          eventId,
+          AND: this.createOccurrenceWhereAnd(abilities),
+        },
         include: {
           availabilityVotes: {
             select: {
@@ -352,6 +400,25 @@ export class EventOccurrenceService {
       eligibleVoters,
       occurrences: occurrenceEntries,
     } satisfies AvailabilitySummary;
+  }
+
+  private createOccurrenceWhereAnd(abilities: AppAbility[]): WhereInput<EventOccurrence>[] {
+    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
+
+    const whereAnd: WhereInput<EventOccurrence>[] = [];
+
+    try {
+      for (const ability of abilities) {
+        if (ability) {
+          whereAnd.push(accessibleBy(ability).EventOccurrence);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error creating where conditions for occurrence access control', error);
+      throw new ForbiddenException("You don't have permission to access this resource.");
+    }
+
+    return whereAnd;
   }
 
   private async assertEventExists(eventId: string): Promise<void> {

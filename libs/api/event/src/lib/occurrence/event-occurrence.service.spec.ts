@@ -1,4 +1,5 @@
 import {
+  Action,
   AvailabilityResponse,
   EventAvailabilityVote,
   EventOccurrence,
@@ -6,6 +7,7 @@ import {
   EventSchedulingMode,
   OccurrenceStatus,
 } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
 import {
   createTestingModuleWithDb,
   makeEvent,
@@ -13,6 +15,7 @@ import {
   makeEventOccurrence,
   MockDatabaseService,
 } from '@bge/testing';
+import { createPrismaAbility } from '@casl/prisma';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
@@ -25,6 +28,10 @@ describe('EventOccurrenceService', () => {
   let service: EventOccurrenceService;
   let db: MockDatabaseService;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
+
+  // Allow-all ability so accessibleBy() produces a valid WHERE clause without throwing.
+  const userAbility = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
+  const abilities = [userAbility];
 
   beforeEach(async () => {
     eventEmitter = { emit: jest.fn() };
@@ -46,11 +53,11 @@ describe('EventOccurrenceService', () => {
       const occurrences = [stubOccurrence({ sortOrder: 0 }), stubOccurrence({ sortOrder: 1 })];
       db.eventOccurrence.findMany.mockResolvedValue(occurrences);
 
-      const result = await service.getOccurrences('event-1');
+      const result = await service.getOccurrences('event-1', abilities);
 
       expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { eventId: 'event-1' },
+          where: expect.objectContaining({ eventId: 'event-1' }),
           orderBy: { sortOrder: 'asc' },
         }),
       );
@@ -60,7 +67,7 @@ describe('EventOccurrenceService', () => {
     it('throws NotFoundException when event does not exist', async () => {
       stubEventExists(db, false);
 
-      await expect(service.getOccurrences('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.getOccurrences('nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -71,7 +78,7 @@ describe('EventOccurrenceService', () => {
       const occ = stubOccurrence({ id: 'occ-1' });
       db.eventOccurrence.findUnique.mockResolvedValue(occ);
 
-      const result = await service.getOccurrence('event-1', 'occ-1');
+      const result = await service.getOccurrence('event-1', 'occ-1', abilities);
       expect(result).toBe(occ);
     });
 
@@ -80,7 +87,7 @@ describe('EventOccurrenceService', () => {
 
       db.eventOccurrence.findUnique.mockResolvedValue(null);
 
-      await expect(service.getOccurrence('event-1', 'nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.getOccurrence('event-1', 'nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -212,7 +219,7 @@ describe('EventOccurrenceService', () => {
 
       const result = await service.updateOccurrence('event-1', 'occ-1', {
         label: 'Updated Label',
-      });
+      }, abilities);
 
       expect(db.eventOccurrence.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -223,13 +230,13 @@ describe('EventOccurrenceService', () => {
     });
 
     it('throws BadRequestException when DTO is empty', async () => {
-      await expect(service.updateOccurrence('event-1', 'occ-1', {})).rejects.toThrow(BadRequestException);
+      await expect(service.updateOccurrence('event-1', 'occ-1', {}, abilities)).rejects.toThrow(BadRequestException);
     });
 
     it('throws NotFoundException when occurrence does not exist', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue(null);
 
-      await expect(service.updateOccurrence('event-1', 'nonexistent', { label: 'X' })).rejects.toThrow(
+      await expect(service.updateOccurrence('event-1', 'nonexistent', { label: 'X' }, abilities)).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -242,16 +249,16 @@ describe('EventOccurrenceService', () => {
       const deleted = stubOccurrence({ id: 'occ-1' });
       db.eventOccurrence.delete.mockResolvedValue(deleted);
 
-      const result = await service.removeOccurrence('event-1', 'occ-1');
+      const result = await service.removeOccurrence('event-1', 'occ-1', abilities);
 
-      expect(db.eventOccurrence.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'occ-1' } }));
+      expect(db.eventOccurrence.delete).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'occ-1' }) }));
       expect(result).toBe(deleted);
     });
 
     it('throws NotFoundException when not found', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue(null);
 
-      await expect(service.removeOccurrence('event-1', 'nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.removeOccurrence('event-1', 'nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -264,7 +271,7 @@ describe('EventOccurrenceService', () => {
       const confirmed = stubOccurrence({ status: OccurrenceStatus.Confirmed });
       db.eventOccurrence.update.mockResolvedValue(confirmed);
 
-      const result = await service.confirmOccurrence('event-1', 'occ-1');
+      const result = await service.confirmOccurrence('event-1', 'occ-1', abilities);
 
       expect(db.eventOccurrence.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -283,7 +290,7 @@ describe('EventOccurrenceService', () => {
       );
       db.eventOccurrence.update.mockResolvedValue(stubOccurrence());
 
-      await service.confirmOccurrence('event-1', 'occ-1');
+      await service.confirmOccurrence('event-1', 'occ-1', abilities);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OccurrenceEvents.OccurrenceConfirmed,
@@ -301,13 +308,13 @@ describe('EventOccurrenceService', () => {
         stubOccurrence({ id: 'occ-1', status: OccurrenceStatus.Confirmed }),
       );
 
-      await expect(service.confirmOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+      await expect(service.confirmOccurrence('event-1', 'occ-1', abilities)).rejects.toThrow(BadRequestException);
     });
 
     it('throws NotFoundException when not found', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue(null);
 
-      await expect(service.confirmOccurrence('event-1', 'nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.confirmOccurrence('event-1', 'nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -318,7 +325,7 @@ describe('EventOccurrenceService', () => {
       );
       db.eventOccurrence.update.mockResolvedValue(stubOccurrence({ status: OccurrenceStatus.Declined }));
 
-      await service.declineOccurrence('event-1', 'occ-1');
+      await service.declineOccurrence('event-1', 'occ-1', abilities);
 
       expect(db.eventOccurrence.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -338,7 +345,7 @@ describe('EventOccurrenceService', () => {
         }),
       );
 
-      await expect(service.declineOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+      await expect(service.declineOccurrence('event-1', 'occ-1', abilities)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -352,7 +359,7 @@ describe('EventOccurrenceService', () => {
       );
       db.eventOccurrence.update.mockResolvedValue(stubOccurrence({ status: OccurrenceStatus.Cancelled }));
 
-      await service.cancelOccurrence('event-1', 'occ-1');
+      await service.cancelOccurrence('event-1', 'occ-1', abilities);
 
       expect(db.eventOccurrence.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -371,7 +378,7 @@ describe('EventOccurrenceService', () => {
         }),
       );
 
-      await expect(service.cancelOccurrence('event-1', 'occ-1')).rejects.toThrow(BadRequestException);
+      await expect(service.cancelOccurrence('event-1', 'occ-1', abilities)).rejects.toThrow(BadRequestException);
     });
 
     it('emits OccurrenceCancelled domain event', async () => {
@@ -383,7 +390,7 @@ describe('EventOccurrenceService', () => {
       );
       db.eventOccurrence.update.mockResolvedValue(stubOccurrence());
 
-      await service.cancelOccurrence('event-1', 'occ-1');
+      await service.cancelOccurrence('event-1', 'occ-1', abilities);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         OccurrenceEvents.OccurrenceCancelled,
@@ -532,7 +539,7 @@ describe('EventOccurrenceService', () => {
         },
       ]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       // Event-level attendee context
       expect(summary.attendees).toEqual({
@@ -591,7 +598,7 @@ describe('EventOccurrenceService', () => {
         },
       ]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       expect(summary.occurrences[0].voters).toEqual([{ attendeeId: 'u1', response: AvailabilityResponse.Available }]);
     });
@@ -602,7 +609,7 @@ describe('EventOccurrenceService', () => {
 
       db.eventOccurrence.findMany.mockResolvedValue([]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       expect(summary.attendees.total).toBe(0);
       expect(summary.eligibleVoters).toBe(0);
@@ -627,7 +634,7 @@ describe('EventOccurrenceService', () => {
         },
       ]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       expect(summary.occurrences[0]).toEqual(
         expect.objectContaining({
@@ -658,7 +665,7 @@ describe('EventOccurrenceService', () => {
         },
       ]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       expect(summary.eligibleVoters).toBe(0);
       expect(summary.occurrences[0].participationRate).toBe(0);
@@ -678,7 +685,7 @@ describe('EventOccurrenceService', () => {
 
       db.eventOccurrence.findMany.mockResolvedValue([]);
 
-      const summary = await service.getAvailabilitySummary('event-1');
+      const summary = await service.getAvailabilitySummary('event-1', abilities);
 
       expect(summary.attendees.byStatus).toEqual({
         attending: 2,

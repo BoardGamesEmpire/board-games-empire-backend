@@ -1,8 +1,9 @@
 import { EventAttendee, EventAttendeeGameList, EventParticipationStatus } from '@bge/database';
-import { PoliciesGuard } from '@bge/permissions';
+import { AppAbility, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard, UserSession } from '@thallesp/nestjs-better-auth';
+import type { ClsService } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -24,6 +25,11 @@ describe('EventAttendeeController', () => {
       | 'removeGameFromList'
     >
   >;
+  let cls: jest.Mocked<ClsService>;
+
+  const mockUserAbility = { rules: [] } as unknown as AppAbility;
+  const mockApiKeyAbility = { rules: [] } as unknown as AppAbility;
+  const expectedAbilities = [mockUserAbility, mockApiKeyAbility];
 
   beforeEach(async () => {
     service = {
@@ -37,7 +43,7 @@ describe('EventAttendeeController', () => {
       removeGameFromList: jest.fn(),
     } satisfies Partial<jest.Mocked<EventAttendeeService>> as typeof service;
 
-    const { module } = await createTestingModuleWithDb({
+    const { module, cls: mockCls } = await createTestingModuleWithDb({
       controllers: [EventAttendeeController],
       providers: [
         { provide: EventAttendeeService, useValue: service },
@@ -47,30 +53,37 @@ describe('EventAttendeeController', () => {
     });
 
     controller = module.get(EventAttendeeController);
+    cls = mockCls;
+
+    cls.get.mockImplementation((key: unknown) => {
+      if (key === 'userAbility') return mockUserAbility;
+      if (key === 'apiKeyAbility') return mockApiKeyAbility;
+      return undefined;
+    });
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('getAttendees', () => {
-    it('delegates to service and wraps in { attendees }', async () => {
+    it('delegates to service with abilities and wraps in { attendees }', async () => {
       const attendees = [stubAttendee(), stubAttendee()];
       service.getAttendees.mockResolvedValue(attendees);
 
       const result = await firstValueFrom(controller.getAttendees('event-1'));
 
-      expect(service.getAttendees).toHaveBeenCalledWith('event-1');
+      expect(service.getAttendees).toHaveBeenCalledWith('event-1', expectedAbilities);
       expect(result).toEqual({ attendees });
     });
   });
 
   describe('getAttendee', () => {
-    it('delegates to service and wraps in { attendee }', async () => {
+    it('delegates to service with abilities and wraps in { attendee }', async () => {
       const attendee = stubAttendee({ id: 'att-42' });
       service.getAttendee.mockResolvedValue(attendee);
 
       const result = await firstValueFrom(controller.getAttendee('event-1', 'att-42'));
 
-      expect(service.getAttendee).toHaveBeenCalledWith('event-1', 'att-42');
+      expect(service.getAttendee).toHaveBeenCalledWith('event-1', 'att-42', expectedAbilities);
       expect(result).toEqual({ attendee });
     });
   });
@@ -92,13 +105,13 @@ describe('EventAttendeeController', () => {
   });
 
   describe('removeAttendee', () => {
-    it('delegates with session userId as removedBy', async () => {
+    it('delegates with session userId as removedBy and abilities', async () => {
       const removed = stubAttendee({ id: 'att-del' });
       service.removeAttendee.mockResolvedValue(removed);
 
       const result = await firstValueFrom(controller.removeAttendee('event-1', 'att-del', makeSession('user-host')));
 
-      expect(service.removeAttendee).toHaveBeenCalledWith('event-1', 'att-del', 'user-host');
+      expect(service.removeAttendee).toHaveBeenCalledWith('event-1', 'att-del', 'user-host', expectedAbilities);
       expect(result).toEqual({
         message: 'Attendee removed successfully',
         attendee: removed,
@@ -107,7 +120,7 @@ describe('EventAttendeeController', () => {
   });
 
   describe('updateStatus', () => {
-    it('delegates and returns updated attendee', async () => {
+    it('delegates with abilities and returns updated attendee', async () => {
       const updated = stubAttendee({
         status: EventParticipationStatus.Attending,
       });
@@ -118,7 +131,7 @@ describe('EventAttendeeController', () => {
       };
       const result = await firstValueFrom(controller.updateStatus('event-1', 'att-1', dto));
 
-      expect(service.updateStatus).toHaveBeenCalledWith('event-1', 'att-1', dto);
+      expect(service.updateStatus).toHaveBeenCalledWith('event-1', 'att-1', dto, expectedAbilities);
       expect(result).toEqual({
         message: 'Attendee status updated',
         attendee: updated,
@@ -127,13 +140,13 @@ describe('EventAttendeeController', () => {
   });
 
   describe('getGameList', () => {
-    it('delegates and returns { games }', async () => {
+    it('delegates with abilities and returns { games }', async () => {
       const games = [{ id: 'gl-1' }] as EventAttendeeGameList[];
       service.getGameList.mockResolvedValue(games);
 
       const result = await firstValueFrom(controller.getGameList('event-1', 'att-1'));
 
-      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1');
+      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1', expectedAbilities);
       expect(result).toEqual({ games });
     });
   });
@@ -153,13 +166,13 @@ describe('EventAttendeeController', () => {
   });
 
   describe('removeGameFromList', () => {
-    it('delegates and returns { entry }', async () => {
+    it('delegates with abilities and returns { entry }', async () => {
       const entry = { id: 'gl-del' } as EventAttendeeGameList;
       service.removeGameFromList.mockResolvedValue(entry);
 
       const result = await firstValueFrom(controller.removeGameFromList('event-1', 'att-1', 'gl-del'));
 
-      expect(service.removeGameFromList).toHaveBeenCalledWith('event-1', 'att-1', 'gl-del');
+      expect(service.removeGameFromList).toHaveBeenCalledWith('event-1', 'att-1', 'gl-del', expectedAbilities);
       expect(result).toEqual({ message: 'Game removed from list', entry });
     });
   });

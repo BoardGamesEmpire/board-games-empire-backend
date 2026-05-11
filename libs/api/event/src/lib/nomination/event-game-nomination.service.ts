@@ -10,7 +10,10 @@ import {
   VoteEligibility,
   VoteQuorumType,
   VoteThresholdType,
+  isPrismaDependentRecordNotFoundError,
 } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
+import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
@@ -33,21 +36,28 @@ export class EventGameNominationService {
 
   constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
 
-  async getNominations(eventId: string): Promise<EventGameNomination[]> {
+  async getNominations(eventId: string, abilities: AppAbility[]): Promise<EventGameNomination[]> {
     await this.assertEventExists(eventId);
 
     return this.db.eventGameNomination.findMany({
-      where: { eventId },
+      where: {
+        eventId,
+        AND: this.createNominationWhereAnd(abilities),
+      },
       include: NOMINATION_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getNomination(eventId: string, nominationId: string): Promise<EventGameNomination> {
+  async getNomination(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
     await this.assertEventExists(eventId);
 
     const nomination = await this.db.eventGameNomination.findUnique({
-      where: { id: nominationId, eventId },
+      where: {
+        id: nominationId,
+        eventId,
+        AND: this.createNominationWhereAnd(abilities),
+      },
       include: NOMINATION_INCLUDE,
     });
 
@@ -62,7 +72,6 @@ export class EventGameNominationService {
       throw new ForbiddenException('Only hosts can add games in HostOnly mode.');
     }
 
-    // Validate the supplied-from game list entry exists and matches
     const supplyEntry = await this.db.eventAttendeeGameList.findUnique({
       where: { id: dto.suppliedFromId },
       select: {
@@ -80,7 +89,6 @@ export class EventGameNominationService {
       throw new BadRequestException('The suppliedFromId does not correspond to the nominated platformGameId.');
     }
 
-    // Determine initial status based on policy mode
     let initialStatus: NominationStatus;
     let votingDeadline: Date | undefined;
 
@@ -101,7 +109,6 @@ export class EventGameNominationService {
       }
 
       case GameAdditionMode.Direct: {
-        // For Direct mode, nomination is created and immediately elevated
         initialStatus = NominationStatus.Passed;
         break;
       }
@@ -133,7 +140,6 @@ export class EventGameNominationService {
       nominatedByAttendeeId: attendeeId,
     } satisfies NominationCreatedEvent);
 
-    // In Direct mode, immediately elevate to EventGame
     if (policy.gameAdditionMode === GameAdditionMode.Direct) {
       await this.elevateToEventGame(nomination.id, eventId, dto.occurrenceId);
     }
@@ -141,7 +147,12 @@ export class EventGameNominationService {
     return nomination;
   }
 
-  async withdraw(eventId: string, nominationId: string, attendeeId: string): Promise<EventGameNomination> {
+  async withdraw(
+    eventId: string,
+    nominationId: string,
+    attendeeId: string,
+    abilities: AppAbility[],
+  ): Promise<EventGameNomination> {
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
       select: { id: true, nominatedById: true, status: true },
@@ -159,18 +170,29 @@ export class EventGameNominationService {
       new BadRequestException(`Cannot withdraw a nomination with status "${nomination.status}".`),
     );
 
-    const updated = await this.db.eventGameNomination.update({
-      where: { id: nominationId },
-      data: { status: NominationStatus.Withdrawn },
-      include: NOMINATION_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventGameNomination.update({
+        where: {
+          id: nominationId,
+          AND: this.createNominationWhereAnd(abilities),
+        },
+        data: { status: NominationStatus.Withdrawn },
+        include: NOMINATION_INCLUDE,
+      });
 
-    this.eventEmitter.emit(NominationEvent.NominationWithdrawn, {
-      eventId,
-      nominationId,
-    });
+      this.eventEmitter.emit(NominationEvent.NominationWithdrawn, {
+        eventId,
+        nominationId,
+      });
 
-    return updated;
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error withdrawing nomination ${nominationId} for event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to withdraw this nomination.");
+      }
+      throw error;
+    }
   }
 
   async castVote(eventId: string, nominationId: string, attendeeId: string, dto: CastVoteDto): Promise<EventGameVote> {
@@ -227,6 +249,7 @@ export class EventGameNominationService {
   async resolveNomination(
     eventId: string,
     nominationId: string,
+    abilities: AppAbility[],
   ): Promise<{ nomination: EventGameNomination; resolution: ResolutionResult }> {
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
@@ -251,41 +274,53 @@ export class EventGameNominationService {
     const resolution = VoteResolver.resolve(nomination.votes, policy, attendees);
     const resolvedStatus = resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed;
 
-    const updated = await this.db.eventGameNomination.update({
-      where: { id: nominationId },
-      data: { status: resolvedStatus },
-      include: NOMINATION_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventGameNomination.update({
+        where: {
+          id: nominationId,
+          AND: this.createNominationWhereAnd(abilities),
+        },
+        data: { status: resolvedStatus },
+        include: NOMINATION_INCLUDE,
+      });
 
-    let elevatedGameId: string | null = null;
-    if (resolution.thresholdMet) {
-      const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
-      elevatedGameId = eventGame.id;
+      let elevatedGameId: string | null = null;
+      if (resolution.thresholdMet) {
+        const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
+        elevatedGameId = eventGame.id;
+      }
+
+      this.eventEmitter.emit(NominationEvent.NominationResolved, {
+        eventId,
+        nominationId,
+        platformGameId: nomination.platformGameId,
+        status: resolvedStatus,
+        elevatedToEventGameId: elevatedGameId,
+      } satisfies NominationResolvedEvent);
+
+      return { nomination: updated, resolution: { ...resolution, status: resolvedStatus } };
+    } catch (error) {
+      this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to resolve this nomination.");
+      }
+      throw error;
     }
-
-    this.eventEmitter.emit(NominationEvent.NominationResolved, {
-      eventId,
-      nominationId,
-      platformGameId: nomination.platformGameId,
-      status: resolvedStatus,
-      elevatedToEventGameId: elevatedGameId,
-    } satisfies NominationResolvedEvent);
-
-    return { nomination: updated, resolution: { ...resolution, status: resolvedStatus } };
   }
 
-  async hostApprove(eventId: string, nominationId: string): Promise<EventGameNomination> {
-    return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved);
+  async hostApprove(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved, abilities);
   }
 
-  async hostReject(eventId: string, nominationId: string): Promise<EventGameNomination> {
-    return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected);
+  async hostReject(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected, abilities);
   }
 
   private async handleHostDecision(
     eventId: string,
     nominationId: string,
     decision: NominationStatus,
+    abilities: AppAbility[],
   ): Promise<EventGameNomination> {
     if (decision !== NominationStatus.Approved && decision !== NominationStatus.Rejected) {
       throw new BadRequestException('Must be "Approved" or "Rejected".');
@@ -310,27 +345,38 @@ export class EventGameNominationService {
       ),
     );
 
-    const updated = await this.db.eventGameNomination.update({
-      where: { id: nominationId },
-      data: { status: decision },
-      include: NOMINATION_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventGameNomination.update({
+        where: {
+          id: nominationId,
+          AND: this.createNominationWhereAnd(abilities),
+        },
+        data: { status: decision },
+        include: NOMINATION_INCLUDE,
+      });
 
-    let elevatedGameId: string | null = null;
-    if (decision === NominationStatus.Approved) {
-      const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
-      elevatedGameId = eventGame.id;
+      let elevatedGameId: string | null = null;
+      if (decision === NominationStatus.Approved) {
+        const eventGame = await this.elevateToEventGame(nominationId, eventId, nomination.occurrenceId ?? undefined);
+        elevatedGameId = eventGame.id;
+      }
+
+      this.eventEmitter.emit(NominationEvent.NominationResolved, {
+        eventId,
+        nominationId,
+        platformGameId: nomination.platformGameId,
+        status: decision,
+        elevatedToEventGameId: elevatedGameId,
+      } satisfies NominationResolvedEvent);
+
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error applying host decision ${decision} for nomination ${nominationId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to decide on this nomination.");
+      }
+      throw error;
     }
-
-    this.eventEmitter.emit(NominationEvent.NominationResolved, {
-      eventId,
-      nominationId,
-      platformGameId: nomination.platformGameId,
-      status: decision,
-      elevatedToEventGameId: elevatedGameId,
-    } satisfies NominationResolvedEvent);
-
-    return updated;
   }
 
   async directAddGame(eventId: string, attendeeId: string, dto: DirectAddGameDto): Promise<EventGame> {
@@ -364,9 +410,6 @@ export class EventGameNominationService {
     return eventGame;
   }
 
-  /**
-   * Create an EventGame record from a successful nomination.
-   */
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
       where: { id: nominationId },
@@ -394,10 +437,6 @@ export class EventGameNominationService {
     return eventGame;
   }
 
-  /**
-   * Resolve the effective voting policy for a given context.
-   * Occurrence-level policy fields override event-level when non-null.
-   */
   private async getEffectivePolicy(
     eventId: string,
     occurrenceId?: string,
@@ -449,6 +488,25 @@ export class EventGameNominationService {
         availableGames: { select: { id: true } },
       },
     });
+  }
+
+  private createNominationWhereAnd(abilities: AppAbility[]): WhereInput<EventGameNomination>[] {
+    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
+
+    const whereAnd: WhereInput<EventGameNomination>[] = [];
+
+    try {
+      for (const ability of abilities) {
+        if (ability) {
+          whereAnd.push(accessibleBy(ability).EventGameNomination);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error creating where conditions for nomination access control', error);
+      throw new ForbiddenException("You don't have permission to access this resource.");
+    }
+
+    return whereAnd;
   }
 
   private async assertEventExists(eventId: string): Promise<void> {

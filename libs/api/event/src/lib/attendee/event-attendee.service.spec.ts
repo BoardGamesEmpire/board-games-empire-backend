@@ -1,4 +1,5 @@
 import {
+  Action,
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
@@ -6,7 +7,9 @@ import {
   Prisma,
   SystemRole,
 } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee, MockDatabaseService } from '@bge/testing';
+import { createPrismaAbility } from '@casl/prisma';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaError } from '@status/codes';
@@ -25,6 +28,10 @@ describe('EventAttendeeService', () => {
   let service: EventAttendeeService;
   let db: MockDatabaseService;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
+
+  // Allow-all ability so accessibleBy() produces a valid WHERE clause without throwing.
+  const userAbility = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
+  const abilities = [userAbility];
 
   beforeEach(async () => {
     eventEmitter = { emit: jest.fn() };
@@ -45,11 +52,11 @@ describe('EventAttendeeService', () => {
       const attendees = [stubAttendee(), stubAttendee({ userId: 'user-2' })];
       db.eventAttendee.findMany.mockResolvedValue(attendees);
 
-      const result = await service.getAttendees('event-1');
+      const result = await service.getAttendees('event-1', abilities);
 
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { eventId: 'event-1' },
+          where: expect.objectContaining({ eventId: 'event-1' }),
           orderBy: { createdAt: 'asc' },
         }),
       );
@@ -60,7 +67,7 @@ describe('EventAttendeeService', () => {
     it('throws NotFoundException when event does not exist', async () => {
       stubEventExists(db, false);
 
-      await expect(service.getAttendees('nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.getAttendees('nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -70,11 +77,11 @@ describe('EventAttendeeService', () => {
       const attendee = stubAttendee({ id: 'att-1' });
       db.eventAttendee.findUnique.mockResolvedValue(attendee);
 
-      const result = await service.getAttendee('event-1', 'att-1');
+      const result = await service.getAttendee('event-1', 'att-1', abilities);
 
       expect(db.eventAttendee.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'att-1', eventId: 'event-1' },
+          where: expect.objectContaining({ id: 'att-1', eventId: 'event-1' }),
         }),
       );
 
@@ -85,7 +92,7 @@ describe('EventAttendeeService', () => {
       stubEventExists(db);
       db.eventAttendee.findUnique.mockResolvedValue(null);
 
-      await expect(service.getAttendee('event-1', 'nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.getAttendee('event-1', 'nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -223,9 +230,9 @@ describe('EventAttendeeService', () => {
       } as EventAttendee);
       db.eventAttendee.delete.mockResolvedValue(attendee);
 
-      const result = await service.removeAttendee('event-1', 'att-del', 'user-1');
+      const result = await service.removeAttendee('event-1', 'att-del', 'user-1', abilities);
 
-      expect(db.eventAttendee.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'att-del' } }));
+      expect(db.eventAttendee.delete).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'att-del' }) }));
       expect(result).toBe(attendee);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -242,7 +249,9 @@ describe('EventAttendeeService', () => {
     it('throws NotFoundException when attendee does not exist', async () => {
       db.eventAttendee.findUnique.mockResolvedValue(null);
 
-      await expect(service.removeAttendee('event-1', 'nonexistent', 'user-1')).rejects.toThrow(NotFoundException);
+      await expect(service.removeAttendee('event-1', 'nonexistent', 'user-1', abilities)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -260,7 +269,7 @@ describe('EventAttendeeService', () => {
         status: EventParticipationStatus.Attending,
       };
 
-      const result = await service.updateStatus('event-1', 'att-1', dto);
+      const result = await service.updateStatus('event-1', 'att-1', dto, abilities);
       expect(db.eventAttendee.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
@@ -284,7 +293,7 @@ describe('EventAttendeeService', () => {
       const dto: UpdateAttendeeStatusDto = {
         status: EventParticipationStatus.Maybe,
       };
-      await service.updateStatus('event-1', 'att-1', dto);
+      await service.updateStatus('event-1', 'att-1', dto, abilities);
 
       expect(db.eventAttendee.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -305,7 +314,7 @@ describe('EventAttendeeService', () => {
 
       await service.updateStatus('event-1', 'att-1', {
         status: EventParticipationStatus.Attending,
-      });
+      }, abilities);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         AttendeeEvents.AttendeeStatusUpdated,
@@ -325,7 +334,7 @@ describe('EventAttendeeService', () => {
       await expect(
         service.updateStatus('event-1', 'nonexistent', {
           status: EventParticipationStatus.Attending,
-        }),
+        }, abilities),
       ).rejects.toThrow(NotFoundException);
     });
   });
@@ -336,10 +345,10 @@ describe('EventAttendeeService', () => {
       const entries = [{ id: 'gl-1' }, { id: 'gl-2' }] as EventAttendeeGameList[];
       db.eventAttendeeGameList.findMany.mockResolvedValue(entries);
 
-      const result = await service.getGameList('event-1', 'att-1');
+      const result = await service.getGameList('event-1', 'att-1', abilities);
 
       expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { attendeeId: 'att-1' } }),
+        expect.objectContaining({ where: expect.objectContaining({ attendeeId: 'att-1' }) }),
       );
 
       expect(result).toHaveLength(2);
@@ -348,7 +357,7 @@ describe('EventAttendeeService', () => {
     it('throws NotFoundException when attendee does not exist', async () => {
       db.eventAttendee.findUnique.mockResolvedValue(null);
 
-      await expect(service.getGameList('event-1', 'nonexistent')).rejects.toThrow(NotFoundException);
+      await expect(service.getGameList('event-1', 'nonexistent', abilities)).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -431,9 +440,9 @@ describe('EventAttendeeService', () => {
       const deleted = { id: 'gl-1' } as EventAttendeeGameList;
       db.eventAttendeeGameList.delete.mockResolvedValue(deleted);
 
-      const result = await service.removeGameFromList('event-1', 'att-1', 'gl-1');
+      const result = await service.removeGameFromList('event-1', 'att-1', 'gl-1', abilities);
 
-      expect(db.eventAttendeeGameList.delete).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'gl-1' } }));
+      expect(db.eventAttendeeGameList.delete).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ id: 'gl-1' }) }));
       expect(result).toBe(deleted);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
@@ -449,7 +458,9 @@ describe('EventAttendeeService', () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendeeGameList.findUnique.mockResolvedValue(null);
 
-      await expect(service.removeGameFromList('event-1', 'att-1', 'gl-missing')).rejects.toThrow(NotFoundException);
+      await expect(service.removeGameFromList('event-1', 'att-1', 'gl-missing', abilities)).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 });

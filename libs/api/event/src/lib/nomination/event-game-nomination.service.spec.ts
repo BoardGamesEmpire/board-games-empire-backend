@@ -1,4 +1,5 @@
 import {
+  Action,
   EventAttendee,
   EventAttendeeGameList,
   EventGame,
@@ -15,7 +16,9 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee, MockDatabaseService } from '@bge/testing';
+import { createPrismaAbility } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CastVoteDto } from '../dto/cast-vote.dto';
@@ -34,6 +37,10 @@ describe('EventGameNominationService', () => {
   let service: EventGameNominationService;
   let db: MockDatabaseService;
   let eventEmitter: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
+
+  // Allow-all ability so accessibleBy() produces a valid WHERE clause without throwing.
+  const userAbility = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
+  const abilities = [userAbility];
 
   beforeEach(async () => {
     eventEmitter = { emit: jest.fn() };
@@ -181,7 +188,7 @@ describe('EventGameNominationService', () => {
       db.eventGameNomination.findUniqueOrThrow.mockResolvedValue(stubNomination());
       db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-elevated' }));
 
-      const { resolution } = await service.resolveNomination('event-1', 'nom-1');
+      const { resolution } = await service.resolveNomination('event-1', 'nom-1', abilities);
 
       expect(resolution.status).toBe(NominationStatus.Passed);
       expect(resolution.thresholdMet).toBe(true);
@@ -203,7 +210,7 @@ describe('EventGameNominationService', () => {
       ]);
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Failed }));
 
-      const { resolution } = await service.resolveNomination('event-1', 'nom-1');
+      const { resolution } = await service.resolveNomination('event-1', 'nom-1', abilities);
 
       expect(resolution.status).toBe(NominationStatus.Failed);
       expect(db.eventGame.create).not.toHaveBeenCalled();
@@ -220,7 +227,7 @@ describe('EventGameNominationService', () => {
       db.eventAttendee.findMany.mockResolvedValue([makeEventAttendeeStub()]);
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Failed }));
 
-      await service.resolveNomination('event-1', 'nom-1');
+      await service.resolveNomination('event-1', 'nom-1', abilities);
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         NominationEvent.NominationResolved,
@@ -236,7 +243,7 @@ describe('EventGameNominationService', () => {
     it('throws BadRequestException when nomination is not Open', async () => {
       db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ status: NominationStatus.Passed }));
 
-      await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+      await expect(service.resolveNomination('event-1', 'nom-1', abilities)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -249,7 +256,7 @@ describe('EventGameNominationService', () => {
       db.eventGameNomination.findUniqueOrThrow.mockResolvedValue(stubNomination());
       db.eventGame.create.mockResolvedValue(stubEventGame({ id: 'eg-approved' }));
 
-      await service.hostApprove('event-1', 'nom-1');
+      await service.hostApprove('event-1', 'nom-1', abilities);
 
       expect(db.eventGameNomination.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -262,7 +269,7 @@ describe('EventGameNominationService', () => {
     it('throws BadRequestException when not AwaitingApproval', async () => {
       db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ status: NominationStatus.Open }));
 
-      await expect(service.hostApprove('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+      await expect(service.hostApprove('event-1', 'nom-1', abilities)).rejects.toThrow(BadRequestException);
     });
   });
 
@@ -273,7 +280,7 @@ describe('EventGameNominationService', () => {
       );
       db.eventGameNomination.update.mockResolvedValue(stubNomination({ status: NominationStatus.Rejected }));
 
-      await service.hostReject('event-1', 'nom-1');
+      await service.hostReject('event-1', 'nom-1', abilities);
 
       expect(db.eventGame.create).not.toHaveBeenCalled();
     });
@@ -386,7 +393,7 @@ describe('EventGameNominationService', () => {
     it('throws ForbiddenException when non-nominator tries to withdraw', async () => {
       db.eventGameNomination.findUnique.mockResolvedValue(stubNomination({ nominatedById: 'att-1' }));
 
-      await expect(service.withdraw('event-1', 'nom-1', 'att-other')).rejects.toThrow(ForbiddenException);
+      await expect(service.withdraw('event-1', 'nom-1', 'att-other', abilities)).rejects.toThrow(ForbiddenException);
     });
 
     it('throws BadRequestException when nomination is already resolved', async () => {
@@ -394,7 +401,7 @@ describe('EventGameNominationService', () => {
         stubNomination({ nominatedById: 'att-1', status: NominationStatus.Passed }),
       );
 
-      await expect(service.withdraw('event-1', 'nom-1', 'att-1')).rejects.toThrow(BadRequestException);
+      await expect(service.withdraw('event-1', 'nom-1', 'att-1', abilities)).rejects.toThrow(BadRequestException);
     });
   });
 });
