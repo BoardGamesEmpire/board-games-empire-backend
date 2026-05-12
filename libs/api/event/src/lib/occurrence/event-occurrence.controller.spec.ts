@@ -1,9 +1,10 @@
 import { AvailabilityResponse, EventAvailabilityVote, EventOccurrence, OccurrenceStatus } from '@bge/database';
-import { PoliciesGuard } from '@bge/permissions';
+import { AppAbility, PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee, makeEventOccurrence } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import type { ClsService } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventAttendeeService } from '../attendee/event-attendee.service';
 import { EventOccurrenceController } from './event-occurrence.controller';
@@ -28,6 +29,11 @@ describe('EventOccurrenceController', () => {
       | 'getAvailabilitySummary'
     >
   >;
+  let cls: jest.Mocked<ClsService>;
+
+  const mockUserAbility = { rules: [] } as unknown as AppAbility;
+  const mockApiKeyAbility = { rules: [] } as unknown as AppAbility;
+  const expectedAbilities = [mockUserAbility, mockApiKeyAbility];
 
   beforeEach(async () => {
     service = {
@@ -47,7 +53,7 @@ describe('EventOccurrenceController', () => {
       getAttendeeByUserId: jest.fn(),
     } satisfies Partial<jest.Mocked<EventAttendeeService>> as typeof attendeeService;
 
-    const { module } = await createTestingModuleWithDb({
+    const { module, cls: mockCls } = await createTestingModuleWithDb({
       controllers: [EventOccurrenceController],
       providers: [
         { provide: EventOccurrenceService, useValue: service },
@@ -58,30 +64,37 @@ describe('EventOccurrenceController', () => {
     });
 
     controller = module.get(EventOccurrenceController);
+    cls = mockCls;
+
+    cls.get.mockImplementation((key: unknown) => {
+      if (key === 'userAbility') return mockUserAbility;
+      if (key === 'apiKeyAbility') return mockApiKeyAbility;
+      return undefined;
+    });
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('getOccurrences', () => {
-    it('delegates and wraps in { occurrences }', async () => {
+    it('delegates with abilities and wraps in { occurrences }', async () => {
       const occurrences = [stubOcc(), stubOcc()];
       service.getOccurrences.mockResolvedValue(occurrences);
 
       const result = await firstValueFrom(controller.getOccurrences('event-1'));
 
-      expect(service.getOccurrences).toHaveBeenCalledWith('event-1');
+      expect(service.getOccurrences).toHaveBeenCalledWith('event-1', expectedAbilities);
       expect(result).toEqual({ occurrences });
     });
   });
 
   describe('getOccurrence', () => {
-    it('delegates and wraps in { occurrence }', async () => {
+    it('delegates with abilities and wraps in { occurrence }', async () => {
       const occ = stubOcc({ id: 'occ-42' });
       service.getOccurrence.mockResolvedValue(occ);
 
       const result = await firstValueFrom(controller.getOccurrence('event-1', 'occ-42'));
 
-      expect(service.getOccurrence).toHaveBeenCalledWith('event-1', 'occ-42');
+      expect(service.getOccurrence).toHaveBeenCalledWith('event-1', 'occ-42', expectedAbilities);
       expect(result).toEqual({ occurrence: occ });
     });
   });
@@ -103,13 +116,13 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('updateOccurrence', () => {
-    it('delegates and returns updated occurrence', async () => {
+    it('delegates with abilities and returns updated occurrence', async () => {
       const updated = stubOcc({ label: 'Updated' });
       service.updateOccurrence.mockResolvedValue(updated);
 
       const result = await firstValueFrom(controller.updateOccurrence('event-1', 'occ-1', { label: 'Updated' }));
 
-      expect(service.updateOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', { label: 'Updated' });
+      expect(service.updateOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', { label: 'Updated' }, expectedAbilities);
       expect(result).toEqual({
         message: 'Occurrence updated',
         occurrence: updated,
@@ -118,13 +131,13 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('removeOccurrence', () => {
-    it('delegates and returns removed occurrence', async () => {
+    it('delegates with abilities and returns removed occurrence', async () => {
       const removed = stubOcc({ id: 'occ-del' });
       service.removeOccurrence.mockResolvedValue(removed);
 
       const result = await firstValueFrom(controller.removeOccurrence('event-1', 'occ-del'));
 
-      expect(service.removeOccurrence).toHaveBeenCalledWith('event-1', 'occ-del');
+      expect(service.removeOccurrence).toHaveBeenCalledWith('event-1', 'occ-del', expectedAbilities);
       expect(result).toEqual({
         message: 'Occurrence removed',
         occurrence: removed,
@@ -133,13 +146,13 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('confirm', () => {
-    it('delegates to confirmOccurrence', async () => {
+    it('delegates with abilities to confirmOccurrence', async () => {
       const confirmed = stubOcc({ status: OccurrenceStatus.Confirmed });
       service.confirmOccurrence.mockResolvedValue(confirmed);
 
       const result = await firstValueFrom(controller.confirm('event-1', 'occ-1'));
 
-      expect(service.confirmOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
+      expect(service.confirmOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', expectedAbilities);
       expect(result).toEqual({
         message: 'Occurrence confirmed',
         occurrence: confirmed,
@@ -148,13 +161,13 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('decline', () => {
-    it('delegates to declineOccurrence', async () => {
+    it('delegates with abilities to declineOccurrence', async () => {
       const declined = stubOcc({ status: OccurrenceStatus.Declined });
       service.declineOccurrence.mockResolvedValue(declined);
 
       const result = await firstValueFrom(controller.decline('event-1', 'occ-1'));
 
-      expect(service.declineOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
+      expect(service.declineOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', expectedAbilities);
       expect(result).toEqual({
         message: 'Occurrence declined',
         occurrence: declined,
@@ -163,13 +176,13 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('cancel', () => {
-    it('delegates to cancelOccurrence', async () => {
+    it('delegates with abilities to cancelOccurrence', async () => {
       const cancelled = stubOcc({ status: OccurrenceStatus.Cancelled });
       service.cancelOccurrence.mockResolvedValue(cancelled);
 
       const result = await firstValueFrom(controller.cancel('event-1', 'occ-1'));
 
-      expect(service.cancelOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
+      expect(service.cancelOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', expectedAbilities);
       expect(result).toEqual({
         message: 'Occurrence cancelled',
         occurrence: cancelled,
@@ -178,7 +191,7 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('submitAvailability', () => {
-    it('delegates with session userId', async () => {
+    it('resolves attendee via abilities and delegates', async () => {
       const vote = {
         id: 'av-1',
         response: AvailabilityResponse.Available,
@@ -197,6 +210,7 @@ describe('EventOccurrenceController', () => {
         }),
       );
 
+      expect(attendeeService.getAttendeeByUserId).toHaveBeenCalledWith('event-1', 'user-42', expectedAbilities);
       expect(service.submitAvailability).toHaveBeenCalledWith('event-1', 'occ-1', 'att-42', {
         response: AvailabilityResponse.Available,
       });
@@ -208,7 +222,7 @@ describe('EventOccurrenceController', () => {
   });
 
   describe('getAvailabilitySummary', () => {
-    it('delegates and wraps in { summary }', async () => {
+    it('delegates with abilities and wraps in { summary }', async () => {
       const summary: AvailabilitySummary = {
         attendees: {
           total: 4,
@@ -238,7 +252,7 @@ describe('EventOccurrenceController', () => {
 
       const result = await firstValueFrom(controller.getAvailabilitySummary('event-1'));
 
-      expect(service.getAvailabilitySummary).toHaveBeenCalledWith('event-1');
+      expect(service.getAvailabilitySummary).toHaveBeenCalledWith('event-1', expectedAbilities);
       expect(result).toEqual({ summary });
     });
   });

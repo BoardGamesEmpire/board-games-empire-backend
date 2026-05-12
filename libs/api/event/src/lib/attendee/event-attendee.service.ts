@@ -3,9 +3,12 @@ import {
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
-  SystemRole,
+  isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
+  SystemRole,
 } from '@bge/database';
+import type { AppAbility } from '@bge/permissions';
+import { accessibleBy, WhereInput } from '@casl/prisma';
 import {
   BadRequestException,
   ConflictException,
@@ -33,21 +36,28 @@ export class EventAttendeeService {
 
   constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
 
-  async getAttendees(eventId: string): Promise<EventAttendee[]> {
+  async getAttendees(eventId: string, abilities: AppAbility[]): Promise<EventAttendee[]> {
     await this.assertEventExists(eventId);
 
     return this.db.eventAttendee.findMany({
-      where: { eventId },
+      where: {
+        eventId,
+        AND: this.createAttendeeWhereAnd(abilities),
+      },
       include: ATTENDEE_INCLUDE,
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  async getAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+  async getAttendee(eventId: string, attendeeId: string, abilities: AppAbility[]): Promise<EventAttendee> {
     await this.assertEventExists(eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
-      where: { id: attendeeId, eventId },
+      where: {
+        id: attendeeId,
+        eventId,
+        AND: this.createAttendeeWhereAnd(abilities),
+      },
       include: ATTENDEE_INCLUDE,
     });
 
@@ -58,11 +68,14 @@ export class EventAttendeeService {
     return attendee;
   }
 
-  async getAttendeeByUserId(eventId: string, userId: string): Promise<EventAttendee> {
+  async getAttendeeByUserId(eventId: string, userId: string, abilities: AppAbility[]): Promise<EventAttendee> {
     await this.assertEventExists(eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
-      where: { eventId_userId: { eventId, userId } },
+      where: {
+        eventId_userId: { eventId, userId },
+        AND: this.createAttendeeWhereAnd(abilities),
+      },
       include: ATTENDEE_INCLUDE,
     });
 
@@ -77,7 +90,6 @@ export class EventAttendeeService {
       throw new BadRequestException('Either userId or guestName must be provided.');
     }
 
-    // Resolve the inviter's attendee record (they must be an attendee themselves)
     const inviter = await this.db.eventAttendee.findUnique({
       where: { eventId_userId: { eventId, userId: invitedByUserId } },
       select: { id: true },
@@ -125,7 +137,12 @@ export class EventAttendeeService {
     }
   }
 
-  async removeAttendee(eventId: string, attendeeId: string, removedByUserId: string): Promise<EventAttendee> {
+  async removeAttendee(
+    eventId: string,
+    attendeeId: string,
+    removedByUserId: string,
+    abilities: AppAbility[],
+  ): Promise<EventAttendee> {
     const attendee = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId },
       select: { id: true, userId: true },
@@ -133,22 +150,38 @@ export class EventAttendeeService {
 
     assert(attendee, new NotFoundException(`Attendee ${attendeeId} not found for event ${eventId}`));
 
-    const deleted = await this.db.eventAttendee.delete({
-      where: { id: attendeeId },
-      include: ATTENDEE_INCLUDE,
-    });
+    try {
+      const deleted = await this.db.eventAttendee.delete({
+        where: {
+          id: attendeeId,
+          AND: this.createAttendeeWhereAnd(abilities),
+        },
+        include: ATTENDEE_INCLUDE,
+      });
 
-    this.eventEmitter.emit(AttendeeEvents.AttendeeRemoved, {
-      eventId,
-      attendeeId,
-      userId: attendee.userId,
-      removedById: removedByUserId,
-    } satisfies AttendeeRemovedEvent);
+      this.eventEmitter.emit(AttendeeEvents.AttendeeRemoved, {
+        eventId,
+        attendeeId,
+        userId: attendee.userId,
+        removedById: removedByUserId,
+      } satisfies AttendeeRemovedEvent);
 
-    return deleted;
+      return deleted;
+    } catch (error) {
+      this.logger.error(`Error removing attendee ${attendeeId} from event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to remove this attendee.");
+      }
+      throw error;
+    }
   }
 
-  async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
+  async updateStatus(
+    eventId: string,
+    attendeeId: string,
+    dto: UpdateAttendeeStatusDto,
+    abilities: AppAbility[],
+  ): Promise<EventAttendee> {
     const existing = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId },
       select: { id: true, userId: true, status: true },
@@ -163,32 +196,46 @@ export class EventAttendeeService {
         ? new Date()
         : undefined;
 
-    const updated = await this.db.eventAttendee.update({
-      where: { id: attendeeId },
-      data: {
-        status: dto.status,
-        notes: dto.notes ?? undefined,
-        rsvpDate,
-      },
-      include: ATTENDEE_INCLUDE,
-    });
+    try {
+      const updated = await this.db.eventAttendee.update({
+        where: {
+          id: attendeeId,
+          AND: this.createAttendeeWhereAnd(abilities),
+        },
+        data: {
+          status: dto.status,
+          notes: dto.notes ?? undefined,
+          rsvpDate,
+        },
+        include: ATTENDEE_INCLUDE,
+      });
 
-    this.eventEmitter.emit(AttendeeEvents.AttendeeStatusUpdated, {
-      eventId,
-      attendeeId,
-      userId: existing.userId,
-      previousStatus: existing.status,
-      newStatus: dto.status,
-    } satisfies AttendeeStatusUpdatedEvent);
+      this.eventEmitter.emit(AttendeeEvents.AttendeeStatusUpdated, {
+        eventId,
+        attendeeId,
+        userId: existing.userId,
+        previousStatus: existing.status,
+        newStatus: dto.status,
+      } satisfies AttendeeStatusUpdatedEvent);
 
-    return updated;
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error updating status for attendee ${attendeeId} in event ${eventId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this attendee.");
+      }
+      throw error;
+    }
   }
 
-  async getGameList(eventId: string, attendeeId: string): Promise<EventAttendeeGameList[]> {
+  async getGameList(eventId: string, attendeeId: string, abilities: AppAbility[]): Promise<EventAttendeeGameList[]> {
     await this.assertAttendeeExists(eventId, attendeeId);
 
     return this.db.eventAttendeeGameList.findMany({
-      where: { attendeeId },
+      where: {
+        attendeeId,
+        AND: this.createGameListWhereAnd(abilities),
+      },
       include: {
         collection: {
           include: {
@@ -226,20 +273,17 @@ export class EventAttendeeService {
   async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<EventAttendeeGameList> {
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
 
-    // Validate that the collection entry belongs to the attendee's user
     if (attendee.userId) {
       const collection = await this.db.gameCollection.findUnique({
         where: { id: dto.collectionId },
         select: { userId: true },
       });
 
-      if (!collection) {
-        throw new NotFoundException(`Game collection entry ${dto.collectionId} not found.`);
-      }
-
-      if (collection.userId !== attendee.userId) {
-        throw new ForbiddenException("Cannot add a game from another user's collection.");
-      }
+      assert(collection, new NotFoundException(`Game collection entry ${dto.collectionId} not found.`));
+      assert(
+        collection.userId === attendee.userId,
+        new ForbiddenException("Cannot add a game from another user's collection."),
+      );
     }
 
     try {
@@ -295,7 +339,12 @@ export class EventAttendeeService {
     }
   }
 
-  async removeGameFromList(eventId: string, attendeeId: string, gameListId: string): Promise<EventAttendeeGameList> {
+  async removeGameFromList(
+    eventId: string,
+    attendeeId: string,
+    gameListId: string,
+    abilities: AppAbility[],
+  ): Promise<EventAttendeeGameList> {
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
 
     const entry = await this.db.eventAttendeeGameList.findUnique({
@@ -306,19 +355,66 @@ export class EventAttendeeService {
       throw new NotFoundException(`Game list entry ${gameListId} not found for attendee ${attendeeId}.`);
     }
 
-    const deleted = await this.db.eventAttendeeGameList.delete({
-      where: { id: gameListId },
-    });
+    try {
+      const deleted = await this.db.eventAttendeeGameList.delete({
+        where: {
+          id: gameListId,
+          AND: this.createGameListWhereAnd(abilities),
+        },
+      });
 
-    this.eventEmitter.emit(AttendeeEvents.GameListUpdated, {
-      eventId,
-      attendeeId,
-      userId: attendee.userId,
-      action: 'removed',
-      collectionId: entry.collectionId,
-    } satisfies GameListUpdatedEvent);
+      this.eventEmitter.emit(AttendeeEvents.GameListUpdated, {
+        eventId,
+        attendeeId,
+        userId: attendee.userId,
+        action: 'removed',
+        collectionId: entry.collectionId,
+      } satisfies GameListUpdatedEvent);
 
-    return deleted;
+      return deleted;
+    } catch (error) {
+      this.logger.error(`Error removing game ${gameListId} from attendee ${attendeeId} list`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to remove this game.");
+      }
+      throw error;
+    }
+  }
+
+  private createAttendeeWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendee>[] {
+    const whereAnd: WhereInput<EventAttendee>[] = [];
+
+    try {
+      for (const ability of abilities) {
+        if (ability) {
+          whereAnd.push(accessibleBy(ability).EventAttendee);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error creating where conditions for attendee access control', error);
+      throw new ForbiddenException("You don't have permission to access this resource.");
+    }
+
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
+    return whereAnd;
+  }
+
+  private createGameListWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendeeGameList>[] {
+    const whereAnd: WhereInput<EventAttendeeGameList>[] = [];
+
+    try {
+      for (const ability of abilities) {
+        if (ability) {
+          whereAnd.push(accessibleBy(ability).EventAttendeeGameList);
+        }
+      }
+    } catch (error) {
+      this.logger.error('Error creating where conditions for game list access control', error);
+      throw new ForbiddenException("You don't have permission to access this resource.");
+    }
+
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
+    return whereAnd;
   }
 
   private async assertEventExists(eventId: string): Promise<void> {

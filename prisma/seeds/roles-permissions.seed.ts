@@ -150,6 +150,31 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'Submit or update your availability vote on a proposed occurrence',
     },
 
+    // ─── EventAttendee ──────────────────────────────────
+    {
+      action: Action.read,
+      subject: 'EventAttendee',
+      conditions: { event: { id: '{{ eventId }}' } },
+      slug: 'read:event_attendee',
+      reason: 'View event attendees',
+    },
+    {
+      action: Action.update,
+      subject: 'EventAttendee',
+      fields: ['status', 'notes'],
+      conditions: { userId: '{{ user.id }}' },
+      slug: 'update:event_attendee:status:self',
+      reason: 'Update own RSVP status',
+    },
+    {
+      action: Action.update,
+      subject: 'EventAttendee',
+      fields: ['status', 'notes'],
+      conditions: { event: { id: '{{ eventId }}' } },
+      slug: 'update:event_attendee:status',
+      reason: 'Update any attendee status within an event (host-managed)',
+    },
+
     // ─── EventGameNomination ────────────────────────────
     {
       action: Action.read,
@@ -805,6 +830,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:rule_variant',
     'create:session_player:join',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',
@@ -833,6 +859,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event:status:cancel-event',
     'update:event:status:archive-event',
     'manage:event_attendee',
+    'read:event_attendee',
+    'update:event_attendee:status',
     'create:event_invite',
     'create:game_play_session',
     'create:play_record',
@@ -893,6 +921,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:attendee_game_list',
     'manage:event_attendee',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',
@@ -900,6 +929,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_occurrence',
     'read:event_policy',
     'read:event',
+    'update:event_attendee:status',
     'update:event_occurrence',
     'update:event',
   ]);
@@ -912,12 +942,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'manage:attendee_game_list',
     'manage:event_attendee',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
     'read:event_policy',
     'read:event',
+    'update:event_attendee:status',
     'update:event_game_nomination:resolve',
     'update:event_occurrence:cancel',
     'update:event_occurrence',
@@ -939,6 +971,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:session_player:join',
     'delete:attendee_game_list',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',
@@ -948,6 +981,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event',
     'read:game_collection',
     'read:game_play_session',
+    'update:event_attendee:status:self',
     'update:event_game_nomination:withdraw',
     'update:game_play_session',
   ]);
@@ -959,6 +993,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:session_player:join',
     'delete:attendee_game_list',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',
@@ -967,12 +1002,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_policy',
     'read:event',
     'read:game_play_session',
+    'update:event_attendee:status:self',
   ]);
 
   // EVENT SPECTATOR
   await assignPermissions(SystemRole.EventSpectator, [
     'create:session_player:observer:join',
     'read:attendee_game_list',
+    'read:event_attendee',
     'read:event_availability_vote',
     'read:event_game_nomination',
     'read:event_game_vote',

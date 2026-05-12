@@ -293,8 +293,6 @@ export class EventService {
   }
 
   private createEventWhereAnd(abilities: AppAbility[]): WhereInput<Event>[] {
-    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-
     const whereAnd: WhereInput<Event>[] = [];
 
     try {
@@ -308,6 +306,7 @@ export class EventService {
       throw new ForbiddenException("You don't have permission to access this resource.");
     }
 
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
     return whereAnd;
   }
 }
