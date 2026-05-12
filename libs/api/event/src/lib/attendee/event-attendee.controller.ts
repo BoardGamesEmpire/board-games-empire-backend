@@ -21,10 +21,7 @@ import { EventAttendeeService } from './event-attendee.service';
 export class EventAttendeeController {
   private readonly logger = new Logger(EventAttendeeController.name);
 
-  constructor(
-    private readonly attendeeService: EventAttendeeService,
-    private readonly cls: ClsService,
-  ) {}
+  constructor(private readonly attendeeService: EventAttendeeService, private readonly cls: ClsService) {}
 
   @ApiOperation({ summary: 'List attendees for an event' })
   @ApiParam({ name: 'eventId', type: String })
@@ -46,7 +43,9 @@ export class EventAttendeeController {
   @Get(':attendeeId')
   getAttendee(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
     const abilities = this.getAbilities();
-    return from(this.attendeeService.getAttendee(eventId, attendeeId, abilities)).pipe(map((attendee) => ({ attendee })));
+    return from(this.attendeeService.getAttendee(eventId, attendeeId, abilities)).pipe(
+      map((attendee) => ({ attendee })),
+    );
   }
 
   @ApiOperation({ summary: 'Add an attendee to an event' })
@@ -155,6 +154,6 @@ export class EventAttendeeController {
   private getAbilities(): AppAbility[] {
     const userAbility = this.cls.get<AppAbility>('userAbility');
     const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean) as AppAbility[];
+    return [userAbility, apiAbility].filter(Boolean);
   }
 }

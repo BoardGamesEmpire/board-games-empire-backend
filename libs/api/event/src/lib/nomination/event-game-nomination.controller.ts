@@ -35,7 +35,9 @@ export class EventGameNominationController {
   @Get()
   getNominations(@Param('eventId') eventId: string) {
     const abilities = this.getAbilities();
-    return from(this.nominationService.getNominations(eventId, abilities)).pipe(map((nominations) => ({ nominations })));
+    return from(this.nominationService.getNominations(eventId, abilities)).pipe(
+      map((nominations) => ({ nominations })),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single nomination' })
@@ -190,6 +192,6 @@ export class EventGameNominationController {
   private getAbilities(): AppAbility[] {
     const userAbility = this.cls.get<AppAbility>('userAbility');
     const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean) as AppAbility[];
+    return [userAbility, apiAbility].filter(Boolean);
   }
 }

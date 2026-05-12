@@ -35,7 +35,9 @@ export class EventOccurrenceController {
   @Get()
   getOccurrences(@Param('eventId') eventId: string) {
     const abilities = this.getAbilities();
-    return from(this.occurrenceService.getOccurrences(eventId, abilities)).pipe(map((occurrences) => ({ occurrences })));
+    return from(this.occurrenceService.getOccurrences(eventId, abilities)).pipe(
+      map((occurrences) => ({ occurrences })),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single occurrence' })
@@ -158,12 +160,14 @@ export class EventOccurrenceController {
   @Get('summary/availability')
   getAvailabilitySummary(@Param('eventId') eventId: string) {
     const abilities = this.getAbilities();
-    return from(this.occurrenceService.getAvailabilitySummary(eventId, abilities)).pipe(map((summary) => ({ summary })));
+    return from(this.occurrenceService.getAvailabilitySummary(eventId, abilities)).pipe(
+      map((summary) => ({ summary })),
+    );
   }
 
   private getAbilities(): AppAbility[] {
     const userAbility = this.cls.get<AppAbility>('userAbility');
     const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean) as AppAbility[];
+    return [userAbility, apiAbility].filter(Boolean);
   }
 }

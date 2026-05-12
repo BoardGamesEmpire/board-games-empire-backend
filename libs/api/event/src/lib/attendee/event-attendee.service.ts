@@ -3,9 +3,9 @@ import {
   EventAttendee,
   EventAttendeeGameList,
   EventParticipationStatus,
-  SystemRole,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
+  SystemRole,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -279,13 +279,11 @@ export class EventAttendeeService {
         select: { userId: true },
       });
 
-      if (!collection) {
-        throw new NotFoundException(`Game collection entry ${dto.collectionId} not found.`);
-      }
-
-      if (collection.userId !== attendee.userId) {
-        throw new ForbiddenException("Cannot add a game from another user's collection.");
-      }
+      assert(collection, new NotFoundException(`Game collection entry ${dto.collectionId} not found.`));
+      assert(
+        collection.userId === attendee.userId,
+        new ForbiddenException("Cannot add a game from another user's collection."),
+      );
     }
 
     try {
@@ -384,8 +382,6 @@ export class EventAttendeeService {
   }
 
   private createAttendeeWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendee>[] {
-    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-
     const whereAnd: WhereInput<EventAttendee>[] = [];
 
     try {
@@ -399,12 +395,11 @@ export class EventAttendeeService {
       throw new ForbiddenException("You don't have permission to access this resource.");
     }
 
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
     return whereAnd;
   }
 
   private createGameListWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendeeGameList>[] {
-    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-
     const whereAnd: WhereInput<EventAttendeeGameList>[] = [];
 
     try {
@@ -418,6 +413,7 @@ export class EventAttendeeService {
       throw new ForbiddenException("You don't have permission to access this resource.");
     }
 
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
     return whereAnd;
   }
 

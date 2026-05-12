@@ -5,8 +5,8 @@ import {
   EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
-  OccurrenceStatus,
   isPrismaDependentRecordNotFoundError,
+  OccurrenceStatus,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -181,21 +181,42 @@ export class EventOccurrenceService {
   }
 
   async confirmOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
-      confirmedAt: new Date(),
-    }, abilities);
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Confirmed,
+      {
+        confirmedAt: new Date(),
+      },
+      abilities,
+    );
   }
 
   async declineOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
-      declinedAt: new Date(),
-    }, abilities);
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Proposed],
+      OccurrenceStatus.Declined,
+      {
+        declinedAt: new Date(),
+      },
+      abilities,
+    );
   }
 
   async cancelOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
-      cancelledAt: new Date(),
-    }, abilities);
+    return this.transitionStatus(
+      eventId,
+      occurrenceId,
+      [OccurrenceStatus.Confirmed],
+      OccurrenceStatus.Cancelled,
+      {
+        cancelledAt: new Date(),
+      },
+      abilities,
+    );
   }
 
   private async transitionStatus(
@@ -403,8 +424,6 @@ export class EventOccurrenceService {
   }
 
   private createOccurrenceWhereAnd(abilities: AppAbility[]): WhereInput<EventOccurrence>[] {
-    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-
     const whereAnd: WhereInput<EventOccurrence>[] = [];
 
     try {
@@ -418,6 +437,7 @@ export class EventOccurrenceService {
       throw new ForbiddenException("You don't have permission to access this resource.");
     }
 
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
     return whereAnd;
   }
 

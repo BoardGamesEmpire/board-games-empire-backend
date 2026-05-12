@@ -5,12 +5,12 @@ import {
   EventGameVote,
   GameAdditionMode,
   InterestedWeight,
+  isPrismaDependentRecordNotFoundError,
   NominationStatus,
   ScheduledGameRole,
   VoteEligibility,
   VoteQuorumType,
   VoteThresholdType,
-  isPrismaDependentRecordNotFoundError,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -308,11 +308,11 @@ export class EventGameNominationService {
     }
   }
 
-  async hostApprove(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
+  hostApprove(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
     return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved, abilities);
   }
 
-  async hostReject(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
+  hostReject(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
     return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected, abilities);
   }
 
@@ -491,8 +491,6 @@ export class EventGameNominationService {
   }
 
   private createNominationWhereAnd(abilities: AppAbility[]): WhereInput<EventGameNomination>[] {
-    assert(abilities.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-
     const whereAnd: WhereInput<EventGameNomination>[] = [];
 
     try {
@@ -506,6 +504,7 @@ export class EventGameNominationService {
       throw new ForbiddenException("You don't have permission to access this resource.");
     }
 
+    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
     return whereAnd;
   }
 

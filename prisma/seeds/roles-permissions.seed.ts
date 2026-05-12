@@ -154,6 +154,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     {
       action: Action.read,
       subject: 'EventAttendee',
+      conditions: { event: { id: '{{ eventId }}' } },
       slug: 'read:event_attendee',
       reason: 'View event attendees',
     },
