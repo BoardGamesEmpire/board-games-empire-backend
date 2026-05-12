@@ -51,6 +51,8 @@ export function authFactory(
 
     deviceAuthorization({
       verificationUri: '/device',
+      // temporary workaround: https://github.com/better-auth/better-auth/issues/9422
+      schema: {},
     }),
   ];
 
