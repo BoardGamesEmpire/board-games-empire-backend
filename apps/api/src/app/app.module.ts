@@ -5,7 +5,7 @@ import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
 import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
-import { GameImportModule } from '@bge/game-import';
+import { GameImportProducerModule } from '@bge/game-import';
 import { GameSearchModule } from '@bge/game-search';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
@@ -68,6 +68,15 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
             username: redisConfig.username,
             password: redisConfig.password,
             database: redisConfig.database,
+            ...(redisConfig.socket.tls
+              ? {
+                  tls: {
+                    ca: redisConfig.socket.ca,
+                    cert: redisConfig.socket.cert,
+                    key: redisConfig.socket.key,
+                  },
+                }
+              : {}),
           },
         };
       },
@@ -119,7 +128,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
     AuthModule,
     EventModule,
     GameGatewayModule,
-    GameImportModule,
+    GameImportProducerModule,
     GameSearchModule,
     GameModule,
     GatewayCoordinatorClientModule,
