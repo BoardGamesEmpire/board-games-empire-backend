@@ -95,6 +95,12 @@
     },
     {
       "path": "./libs/api/well-known"
+    },
+    {
+      "path": "./apps/worker-e2e"
+    },
+    {
+      "path": "./apps/worker"
     }
   ]
 }

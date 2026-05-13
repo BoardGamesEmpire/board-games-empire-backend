@@ -96,13 +96,15 @@ This runs `nf start`, which launches all four processes defined in `Procfile` co
 | -------------- | ------------ | --------------------------------- |
 | `api`          | 33333        | Main REST + WebSocket API         |
 | `coordinator`  | 50052        | Gateway coordinator (gRPC)        |
-| `bgg-gateway`  | 50053        | BoardGameGeek data gateway (gRPC) |
-| `igdb-gateway` | 50054        | IGDB data gateway (gRPC)          |
+| `worker`       | 50053        | Worker service (gRPC)             |
+| `bgg-gateway`  | 50054        | BoardGameGeek data gateway (gRPC) |
+| `igdb-gateway` | 50055        | IGDB data gateway (gRPC)          |
 
 To run a single service in isolation:
 
 ```bash
 npm start api
+npm start worker
 npm start coordinator
 npm start igdb-gateway
 npm start bgg-gateway
@@ -111,7 +113,7 @@ npm start bgg-gateway
 or several using comma separated values
 
 ```bash
-npm start api,coordinator
+npm start api,coordinator,worker
 npm start bgg-gateway,igdb-gateway
 ```
 
