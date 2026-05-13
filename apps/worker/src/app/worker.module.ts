@@ -45,6 +45,15 @@ import type { RedisOptions } from './configuration/redis-queue.config';
             username: redisConfig.username,
             password: redisConfig.password,
             database: redisConfig.database,
+            ...(redisConfig.socket.tls
+              ? {
+                  tls: {
+                    ca: redisConfig.socket.ca,
+                    cert: redisConfig.socket.cert,
+                    key: redisConfig.socket.key,
+                  },
+                }
+              : {}),
           },
         };
       },

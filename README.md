@@ -90,15 +90,15 @@ The seed populates a number of tables including roles, permissions, system setti
 npm start
 ```
 
-This runs `nf start`, which launches all four processes defined in `Procfile` concurrently:
+This runs `nf start`, which launches all processes defined in `Procfile` concurrently:
 
 | Process        | Default port | Description                       |
 | -------------- | ------------ | --------------------------------- |
 | `api`          | 33333        | Main REST + WebSocket API         |
 | `coordinator`  | 50052        | Gateway coordinator (gRPC)        |
-| `worker`       | 50053        | Worker service (gRPC)             |
-| `bgg-gateway`  | 50054        | BoardGameGeek data gateway (gRPC) |
-| `igdb-gateway` | 50055        | IGDB data gateway (gRPC)          |
+| `worker`       |              | Worker service (Queue consumer)   |
+| `bgg-gateway`  | 50053        | BoardGameGeek data gateway (gRPC) |
+| `igdb-gateway` | 50054        | IGDB data gateway (gRPC)          |
 
 To run a single service in isolation:
 
