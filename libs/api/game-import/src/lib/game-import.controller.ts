@@ -51,7 +51,7 @@ export class GameImportController {
           batchId: result.batchId,
           baseJobId: result.baseJobId,
           expansionJobIds: result.expansionJobIds,
-          correlationId: dto.correlationId,
+          correlationId: result.correlationId,
         })),
       );
   }

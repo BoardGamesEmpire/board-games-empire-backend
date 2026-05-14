@@ -110,8 +110,11 @@ export class GameImportProcessor extends WorkerHost {
   async onFailed(job: Job<GameImportJobPayload | ExpansionImportJobPayload>, error: Error): Promise<void> {
     const { jobId, batchId, correlationId } = job.data;
 
-    if (job.attemptsMade < (job.opts.attempts ?? 1)) {
-      return; // not final attempt
+    const attempts = job.opts.attempts ?? 1;
+    if (attempts > 1 && job.attemptsMade < attempts) {
+      return this.logger.warn(
+        `Import job failed but will retry: jobId=${jobId} attemptsMade=${job.attemptsMade} attempts=${attempts} error=${error.message}`,
+      );
     }
 
     this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);

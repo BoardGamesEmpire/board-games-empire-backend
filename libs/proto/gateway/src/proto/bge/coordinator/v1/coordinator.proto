@@ -39,9 +39,6 @@ service CoordinatorService {
   rpc StartGameImport(StartGameImportRequest) returns (StartGameImportResponse);
 }
 
-
-
-
 message PingRequest {
   optional string correlation_id = 1;
 }

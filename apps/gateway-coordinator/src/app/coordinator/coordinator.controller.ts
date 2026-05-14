@@ -1,7 +1,9 @@
 import type * as proto from '@board-games-empire/proto-gateway';
 import { CoordinatorServiceController, CoordinatorServiceControllerMethods } from '@board-games-empire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
-import { type Observable } from 'rxjs';
+import type { Observable } from 'rxjs';
+import { from } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
 import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
@@ -49,21 +51,26 @@ export class CoordinatorController implements CoordinatorServiceController {
   /**
    * Creates a new import job for a base game and optional expansions.
    */
-  async startGameImport(request: proto.StartGameImportRequest): Promise<proto.StartGameImportResponse> {
-    const result = await this.gameImportEnqueuer.enqueue({
-      correlationId: request.correlationId,
-      gatewayId: request.gatewayId,
-      externalId: request.externalId,
-      expansionExternalIds: request.expansionExternalIds ?? [],
-      locale: request.locale,
-      userId: request.userId ?? null,
-    });
-
-    return {
-      correlationId: request.correlationId,
-      batchId: result.batchId,
-      baseJobId: result.baseJobId,
-      expansionJobIds: result.expansionJobIds,
-    };
+  startGameImport(request: proto.StartGameImportRequest): Observable<proto.StartGameImportResponse> {
+    return from(
+      this.gameImportEnqueuer.enqueue({
+        correlationId: request.correlationId,
+        gatewayId: request.gatewayId,
+        externalId: request.externalId,
+        expansionExternalIds: request.expansionExternalIds ?? [],
+        locale: request.locale ?? undefined,
+        userId: request.userId ?? null,
+      }),
+    ).pipe(
+      map(
+        (result) =>
+          ({
+            correlationId: request.correlationId,
+            batchId: result.batchId,
+            baseJobId: result.baseJobId,
+            expansionJobIds: result.expansionJobIds,
+          }) satisfies proto.StartGameImportResponse,
+      ),
+    );
   }
 }
