@@ -31,6 +31,12 @@ service CoordinatorService {
   // Fetch expansions for a base game. Coordinator resolves relevant gateways
   // from GameSource and merges their streams.
   rpc FetchExpansions(CoordinatorFetchExpansionsRequest) returns (stream SearchGameResult);
+
+  // Enqueues an import flow for a base game and optional expansions.
+  // Returns immediately with job IDs — actual gateway fetches and DB
+  // upserts happen asynchronously in worker processes (gateway-worker
+  // for fetches, worker for upserts).
+  rpc StartGameImport(StartGameImportRequest) returns (StartGameImportResponse);
 }
 
 message PingRequest {
@@ -114,4 +120,21 @@ message CoordinatorFetchExpansionsRequest {
   // Local DB Game.id — coordinator resolves gateway links internally
   string game_id = 2;
   optional string locale = 3;
+}
+
+message StartGameImportRequest {
+  string correlation_id = 1;
+  string gateway_id = 2;
+  string external_id = 3;
+  repeated string expansion_external_ids = 4;
+  optional string locale = 5;
+  // null when triggered by system processes (e.g., scheduled enrichment)
+  optional string user_id = 6;
+}
+
+message StartGameImportResponse {
+  string correlation_id = 1;
+  string batch_id = 2;
+  string base_job_id = 3;
+  repeated string expansion_job_ids = 4;
 }

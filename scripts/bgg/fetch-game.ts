@@ -16,7 +16,7 @@ async function main() {
 
   const client = BggClient.Create({ apiKey });
   const fetchResults = await client.thing.query({
-    id: 13,
+    id: 421282,
     stats: 1,
     versions: 1,
     type: ['boardgame'],

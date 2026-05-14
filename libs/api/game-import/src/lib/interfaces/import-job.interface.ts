@@ -1,35 +1,53 @@
 import type { InitiatorType } from '@bge/database';
-import type { GameData } from '@board-games-empire/proto-gateway';
 
 /**
- * Payload stored in BullMQ for a base game import.
- * GameData is JSON-safe (no int64 fields in the proto).
+ * Common fields shared by every job in the import flow. The DB Job row
+ * is the user-facing tracking entity; one row per game-being-imported
+ * (base + each expansion).
  */
-export interface GameImportJobPayload {
+interface JobContext {
   /**
-   * Groups base + all its expansion children
+   * Groups base + all expansion children
    */
   batchId: string;
 
   /**
-   * Socket.io room to route WS progress events
+   * Socket.io room and tracing correlation
    */
   correlationId: string;
 
   /**
-   * BGE Job.id — used to update status and drive WS events
+   * BGE Job.id — drives status updates and WS events
    */
   jobId: string;
 
   initiatorType: InitiatorType;
   gatewayId: string;
-
-  /**
-   * Full GameData proto payload, serialized as plain JSON
-   */
-  gameData: GameData;
-
   userId: string | null;
+}
+
+/**
+ * Payload for GameFetch / ExpansionFetch jobs. Carries only what the
+ * fetch processor needs to make the gateway call. The processor's
+ * return value (GameData) is read by the parent import job via
+ * getChildrenValues().
+ */
+export interface GameFetchJobPayload extends JobContext {
+  externalId: string;
+  locale?: string;
+}
+
+export interface ExpansionFetchJobPayload extends GameFetchJobPayload {
+  baseGameExternalId: string;
+}
+
+/**
+ * Payload for GameImport / ExpansionImport jobs. Notably does NOT
+ * carry GameData — the import processor reads it from its fetch
+ * child's return value.
+ */
+export interface GameImportJobPayload extends JobContext {
+  externalId: string;
 }
 
 export interface ExpansionImportJobPayload extends GameImportJobPayload {

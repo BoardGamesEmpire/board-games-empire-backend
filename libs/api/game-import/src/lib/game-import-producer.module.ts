@@ -1,20 +1,13 @@
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
-import { DatabaseModule } from '@bge/database';
-import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
-import { FlowProducerNames, QueueNames } from './constants/queue.constants';
 import { GameImportController } from './game-import.controller';
-import { GameImportProducerService } from './services/game-import-producer.service';
 
+/**
+ * API-side module for the game-import domain. Owns the HTTP controller
+ * that translates REST requests into coordinator RPC calls.
+ */
 @Module({
-  imports: [
-    DatabaseModule,
-    GatewayCoordinatorClientModule,
-    BullModule.registerQueue({ name: QueueNames.GamesImport }),
-    BullModule.registerFlowProducer({ name: FlowProducerNames.GamesImport }),
-  ],
+  imports: [GatewayCoordinatorClientModule],
   controllers: [GameImportController],
-  providers: [GameImportProducerService],
-  exports: [GameImportProducerService],
 })
 export class GameImportProducerModule {}

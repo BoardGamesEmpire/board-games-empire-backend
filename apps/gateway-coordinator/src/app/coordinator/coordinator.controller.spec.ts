@@ -1,9 +1,8 @@
-import { GatewayRegistryService } from '@bge/gateway-registry';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { ConfigService } from '@nestjs/config';
 import { CoordinatorController } from './coordinator.controller';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
+import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 
 describe('CoordinatorController', () => {
   let controller: CoordinatorController;
@@ -12,21 +11,28 @@ describe('CoordinatorController', () => {
     const { module } = await createTestingModuleWithDb({
       controllers: [CoordinatorController],
       providers: [
-        CoordinatorService,
-        GameSearchService,
-        ConfigService,
         {
-          provide: GatewayRegistryService,
+          provide: CoordinatorService,
           useValue: {
-            connect: jest.fn(),
-            disconnect: jest.fn(),
-            get: jest.fn(),
-            getServiceClient: jest.fn(),
-            isConnected: jest.fn(),
-            connectedGatewayIds: jest.fn().mockReturnValue([]),
-            reportSuccess: jest.fn(),
-            reportFailure: jest.fn(),
-          } satisfies Partial<jest.Mocked<GatewayRegistryService>>,
+            ping: jest.fn(),
+            healthCheck: jest.fn(),
+            connectGateway: jest.fn(),
+            disconnectGateway: jest.fn(),
+          } satisfies Partial<jest.Mocked<CoordinatorService>>,
+        },
+        {
+          provide: GameSearchService,
+          useValue: {
+            searchGames: jest.fn(),
+            fetchGame: jest.fn(),
+            fetchExpansions: jest.fn(),
+          } satisfies Partial<jest.Mocked<GameSearchService>>,
+        },
+        {
+          provide: GameImportEnqueuerService,
+          useValue: {
+            enqueue: jest.fn(),
+          } satisfies Partial<jest.Mocked<GameImportEnqueuerService>>,
         },
       ],
     });

@@ -1,5 +1,6 @@
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
+import { GameImportFetchModule } from '@bge/game-import';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
@@ -95,8 +96,7 @@ import type { RedisOptions } from './configuration/redis.config';
       },
     }),
 
-    // Domain consumer modules go here as the worker gains capabilities.
-    // Next step: GameImportFetcherModule (registers the GameFetch processor).
+    GameImportFetchModule,
   ],
 })
 export class GatewayWorkerModule {}
