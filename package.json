@@ -48,7 +48,7 @@
     "typecheck": "nx run-many -t typecheck --parallel",
     "update": "nx migrate latest",
     "workspace-schematic": "nx workspace-schematic",
-    "validate": "npm run typecheck && npm test && npm run lint && npm run compile"
+    "validate": "npm i && npm run typecheck && npm test && npm run lint && npm run compile"
   },
   "private": true,
   "dependencies": {

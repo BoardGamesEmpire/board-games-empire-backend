@@ -54,7 +54,6 @@ import { CoordinatorModule } from './coordinator/coordinator.module';
 
     DatabaseModule,
     CoordinatorModule,
-    GatewayRegistryModule,
   ],
 })
 export class AppModule {}
