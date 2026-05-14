@@ -37,6 +37,9 @@
       "path": "../../libs/common/testing/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/gateway-registry/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {

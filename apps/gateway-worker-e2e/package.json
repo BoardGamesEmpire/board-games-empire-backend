@@ -1,0 +1,26 @@
+{
+  "name": "@board-games-empire/gateway-worker-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "implicitDependencies": [
+      "@board-games-empire/gateway-worker"
+    ],
+    "targets": {
+      "e2e": {
+        "executor": "@nx/jest:jest",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "options": {
+          "jestConfig": "apps/gateway-worker-e2e/jest.config.cts",
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "@board-games-empire/gateway-worker:build",
+          "@board-games-empire/gateway-worker:serve"
+        ]
+      }
+    }
+  }
+}

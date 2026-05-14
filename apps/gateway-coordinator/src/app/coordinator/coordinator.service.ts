@@ -1,15 +1,18 @@
 import { AuthType, Prisma } from '@bge/database';
+import { GatewayRegistryService } from '@bge/gateway-registry';
 import * as proto from '@board-games-empire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
-import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
 @Injectable()
 export class CoordinatorService {
   private readonly logger = new Logger(CoordinatorService.name);
 
-  constructor(private readonly configService: ConfigService, private readonly registry: GatewayRegistryService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly registry: GatewayRegistryService,
+  ) {}
 
   async connectGateway(request: proto.ConnectGatewayRequest): Promise<proto.ConnectGatewayResponse> {
     const authType = request.authType as AuthType;

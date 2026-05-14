@@ -1,10 +1,9 @@
 import { env, isTrue } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
-import type { RedisClientOptions } from 'redis';
 
 export default registerAs('redis.cache', () =>
-  env.provideMany<RedisClientOptions>(
+  env.provideMany<RedisOptions>(
     [
       {
         keyTo: 'host',
@@ -66,20 +65,21 @@ export default registerAs('redis.cache', () =>
         allowEmptyString: true,
       },
     ],
-    (config) => ({
-      username: config.username,
-      password: config.password || undefined,
-      database: config.database || undefined,
-      socket: {
-        host: config.host,
-        port: config.port,
-        tls: config.tlsEnabled,
-        ca: config.tlsEnabled ? config.ca : undefined,
-        key: config.tlsEnabled ? config.key : undefined,
-        cert: config.tlsEnabled ? config.cert : undefined,
-        rejectUnauthorized: config.tlsEnabled ? config.rejectUnauthorized : undefined,
-      },
-    }),
+    (config) =>
+      ({
+        username: config.username,
+        password: config.password || undefined,
+        database: config.database || undefined,
+        socket: {
+          host: config.host,
+          port: config.port,
+          tls: config.tlsEnabled,
+          ca: config.tlsEnabled ? config.ca : undefined,
+          key: config.tlsEnabled ? config.key : undefined,
+          cert: config.tlsEnabled ? config.cert : undefined,
+          rejectUnauthorized: config.tlsEnabled ? config.rejectUnauthorized : undefined,
+        },
+      }) satisfies RedisOptions,
   ),
 );
 
@@ -95,3 +95,18 @@ export const redisConfigValidationSchema = {
   REDIS_TLS_KEY: Joi.string().optional().allow('').default(''),
   REDIS_TLS_CERT: Joi.string().optional().allow('').default(''),
 };
+
+export interface RedisOptions {
+  username?: string;
+  password?: string;
+  database?: number;
+  socket: {
+    host: string;
+    port: number;
+    tls: boolean;
+    rejectUnauthorized?: boolean;
+    ca?: string;
+    key?: string;
+    cert?: string;
+  };
+}
