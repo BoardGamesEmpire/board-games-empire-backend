@@ -1,11 +1,11 @@
 import { DatabaseService } from '@bge/database';
+import { GatewayRegistryService } from '@bge/gateway-registry';
 import * as proto from '@board-games-empire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
 import { catchError, concatMap, endWith, filter, map, mergeMap, shareReplay, tap, throwIfEmpty } from 'rxjs/operators';
-import { GatewayRegistryService } from '../gateway-registry/gateway-registry.service';
 
 @Injectable()
 export class GameSearchService {

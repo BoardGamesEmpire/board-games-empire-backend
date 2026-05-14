@@ -1,12 +1,7 @@
 enum AuthType {
-  ApiKey
-  Basic
-  Certificate
-  HMAC
-  JWT
+  MutualTls
+  Bearer
   None
-  OAuth
-  PSK
 
   @@map("auth_types")
 }

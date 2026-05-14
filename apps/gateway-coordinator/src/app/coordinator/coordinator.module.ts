@@ -1,9 +1,9 @@
 import { DatabaseModule } from '@bge/database';
+import { GATEWAY_REGISTRY_REDIS, GatewayRegistryModule } from '@bge/gateway-registry';
 import KeyvRedis from '@keyv/redis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import { GatewayRegistryModule } from '../gateway-registry/gateway-registry.module';
+import type { RedisClientType } from 'redis';
 import { CoordinatorController } from './coordinator.controller';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
@@ -11,13 +11,12 @@ import { GameSearchService } from './game-search.service';
 @Module({
   imports: [
     DatabaseModule,
-    GatewayRegistryModule,
     CacheModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        stores: [new KeyvRedis(config.getOrThrow('redis.cache'))],
-        ttl: config.get<number>('cache.ttl'),
+      imports: [GatewayRegistryModule],
+      inject: [GATEWAY_REGISTRY_REDIS],
+      useFactory: (redis: RedisClientType) => ({
+        stores: [new KeyvRedis(redis)],
+        ttl: 300, // default TTL in seconds
       }),
     }),
   ],

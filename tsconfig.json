@@ -101,6 +101,15 @@
     },
     {
       "path": "./apps/worker"
+    },
+    {
+      "path": "./libs/api/gateway-registry"
+    },
+    {
+      "path": "./apps/gateway-worker-e2e"
+    },
+    {
+      "path": "./apps/gateway-worker"
     }
   ]
 }

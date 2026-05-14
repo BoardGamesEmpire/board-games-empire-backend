@@ -7,6 +7,7 @@ import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportProducerModule } from '@bge/game-import';
 import { GameSearchModule } from '@bge/game-search';
+import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
@@ -121,6 +122,29 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
         mount: true,
         generateId: true,
         idGenerator: (req: Request) => <string>req?.headers?.['x-request-id'] || crypto.randomUUID(),
+      },
+    }),
+
+    GatewayConfigEventsModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redis = config.getOrThrow('redis.cache');
+        return {
+          host: redis.socket.host,
+          port: redis.socket.port,
+          username: redis.username,
+          password: redis.password,
+          db: redis.database,
+          tls: redis.socket.tls
+            ? {
+                ca: redis.socket.ca,
+                cert: redis.socket.cert,
+                key: redis.socket.key,
+                rejectUnauthorized: redis.socket.rejectUnauthorized,
+              }
+            : undefined,
+        };
       },
     }),
 
