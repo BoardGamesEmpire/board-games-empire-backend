@@ -18,7 +18,6 @@ import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
-import { BullModule } from '@nestjs/bullmq';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -31,7 +30,6 @@ import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
-import type { RedisOptions } from './configuration/redis.config';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 
 @Module({
@@ -55,31 +53,6 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
       wildcard: false,
       delimiter: '.',
       verboseMemoryLeak: true,
-    }),
-
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redisConfig = config.getOrThrow<RedisOptions>('redis.queue');
-        return {
-          connection: {
-            host: redisConfig.socket.host,
-            port: redisConfig.socket.port,
-            username: redisConfig.username,
-            password: redisConfig.password,
-            database: redisConfig.database,
-            ...(redisConfig.socket.tls
-              ? {
-                  tls: {
-                    ca: redisConfig.socket.ca,
-                    cert: redisConfig.socket.cert,
-                    key: redisConfig.socket.key,
-                  },
-                }
-              : {}),
-          },
-        };
-      },
     }),
 
     // Rate limiting
