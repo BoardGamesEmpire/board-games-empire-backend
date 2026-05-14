@@ -227,6 +227,12 @@ describe('thingToGameSearchData — synthetic release', () => {
     expect(result.availableReleases[0].releaseYear).toBeUndefined();
     expect(result.availableReleases[0].parentEditionExternalId).toBeUndefined();
   });
+
+  it('uses flattened thing.name when names array is absent', () => {
+    const result = thingToGameSearchData(makeBggThing({ names: undefined, name: 'Catan' }));
+
+    expect(result.title).toBe('Catan');
+  });
 });
 
 describe('thingToGameData — synthetic default release (no versions)', () => {
@@ -251,6 +257,24 @@ describe('thingToGameData — synthetic default release (no versions)', () => {
     const result = thingToGameData(makeBggThing({ yearpublished: undefined }));
 
     expect(result.releases[0].releaseDate).toBeUndefined();
+  });
+
+  it('uses flattened thing.name when names array is absent', () => {
+    const result = thingToGameData(makeBggThing({ names: undefined, name: 'Catan' }));
+
+    expect(result.title).toBe('Catan');
+  });
+
+  it('falls back to alternateNames when neither name nor names is present', () => {
+    const result = thingToGameData(
+      makeBggThing({
+        names: undefined,
+        name: undefined,
+        alternateNames: ['Catane', 'Die Siedler von Catan'],
+      }),
+    );
+
+    expect(result.title).toBe('Catane');
   });
 });
 

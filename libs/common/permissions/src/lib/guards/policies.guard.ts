@@ -10,7 +10,10 @@ import type { AppAbility, PolicyHandler } from '../interfaces';
 export class PoliciesGuard implements CanActivate {
   private readonly logger = new Logger(PoliciesGuard.name);
 
-  constructor(private reflector: Reflector, private cls: ClsService) {}
+  constructor(
+    private reflector: Reflector,
+    private cls: ClsService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
@@ -40,11 +43,7 @@ export class PoliciesGuard implements CanActivate {
       assert(keyPasses, new ForbiddenException('This API Key does not have the required permissions for this action.'));
     }
 
-    this.logger.debug(
-      `Access granted by PoliciesGuard: userAbility=${JSON.stringify(
-        userAbility.rules,
-      )}, apiKeyAbility=${JSON.stringify(apiKeyAbility?.rules)}`,
-    );
+    this.logger.debug(`Access granted by PoliciesGuard`);
 
     return true;
   }

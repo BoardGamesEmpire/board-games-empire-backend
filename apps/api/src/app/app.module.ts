@@ -32,7 +32,6 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import type { RedisOptions } from './configuration/redis.config';
-import { GameImportGateway } from './gateways/game/import.gateway';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 
 @Module({
@@ -187,8 +186,7 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
       useClass: CacheInterceptor,
     },
 
-    // Gateways
-    GameImportGateway,
+    // WS Gateways
     GameSearchGateway,
   ],
 })

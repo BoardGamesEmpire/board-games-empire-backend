@@ -117,6 +117,13 @@ export interface BggThing {
   names?: BggName[];
 
   /**
+   * Some BGG client adapters flatten names into a direct title string
+   * with alternates split out separately.
+   */
+  name?: string;
+  alternateNames?: string[];
+
+  /**
    * Relational links — categories, mechanics, designers, expansions, etc.
    */
   links?: BggLink[];

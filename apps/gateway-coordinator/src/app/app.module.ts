@@ -1,6 +1,7 @@
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
+import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -27,6 +28,31 @@ import { CoordinatorModule } from './coordinator/coordinator.module';
     EventEmitterModule.forRoot({
       wildcard: true,
       global: true,
+    }),
+
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => {
+        const redisConfig = config.getOrThrow<RedisOptions>('redis.queue');
+        return {
+          connection: {
+            host: redisConfig.socket.host,
+            port: redisConfig.socket.port,
+            username: redisConfig.username,
+            password: redisConfig.password,
+            database: redisConfig.database,
+            ...(redisConfig.socket.tls
+              ? {
+                  tls: {
+                    ca: redisConfig.socket.ca,
+                    cert: redisConfig.socket.cert,
+                    key: redisConfig.socket.key,
+                  },
+                }
+              : {}),
+          },
+        };
+      },
     }),
 
     GatewayRegistryModule.forRootAsync({

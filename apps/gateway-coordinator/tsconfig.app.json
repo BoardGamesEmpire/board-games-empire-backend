@@ -31,6 +31,9 @@
       "path": "../../libs/common/utils/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/game-import/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {

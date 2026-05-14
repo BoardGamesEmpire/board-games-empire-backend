@@ -4,6 +4,7 @@ import { Controller, Logger } from '@nestjs/common';
 import { type Observable } from 'rxjs';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
+import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 
 @CoordinatorServiceControllerMethods()
 @Controller()
@@ -13,6 +14,7 @@ export class CoordinatorController implements CoordinatorServiceController {
   constructor(
     private readonly coordinatorService: CoordinatorService,
     private readonly gameSearchService: GameSearchService,
+    private readonly gameImportEnqueuer: GameImportEnqueuerService,
   ) {}
 
   ping(request: proto.PingRequest): proto.PingResponse {
@@ -42,5 +44,26 @@ export class CoordinatorController implements CoordinatorServiceController {
 
   fetchExpansions(request: proto.CoordinatorFetchExpansionsRequest): Observable<proto.SearchGameResult> {
     return this.gameSearchService.fetchExpansions(request);
+  }
+
+  /**
+   * Creates a new import job for a base game and optional expansions.
+   */
+  async startGameImport(request: proto.StartGameImportRequest): Promise<proto.StartGameImportResponse> {
+    const result = await this.gameImportEnqueuer.enqueue({
+      correlationId: request.correlationId,
+      gatewayId: request.gatewayId,
+      externalId: request.externalId,
+      expansionExternalIds: request.expansionExternalIds ?? [],
+      locale: request.locale,
+      userId: request.userId ?? null,
+    });
+
+    return {
+      correlationId: request.correlationId,
+      batchId: result.batchId,
+      baseJobId: result.baseJobId,
+      expansionJobIds: result.expansionJobIds,
+    };
   }
 }

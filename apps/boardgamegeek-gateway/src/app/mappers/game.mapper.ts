@@ -34,6 +34,41 @@ export function selectPrimaryName(names: readonly BggName[] | undefined): string
   return (primary ?? names[0]).value;
 }
 
+function normalizeTitle(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Supports both common BGG client shapes:
+ * - canonical `names: [{ type: 'primary', value: '...' }]`
+ * - flattened `name: '...'` with optional `alternateNames: string[]`
+ */
+function selectThingTitle(thing: Pick<BggThing, 'names'> & { name?: string; alternateNames?: string[] }): string {
+  const directName = normalizeTitle(thing.name);
+  if (directName) {
+    return directName;
+  }
+
+  const fromNames = normalizeTitle(selectPrimaryName(thing.names));
+  if (fromNames) {
+    return fromNames;
+  }
+
+  for (const alternateName of thing.alternateNames ?? []) {
+    const normalized = normalizeTitle(alternateName);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return '';
+}
+
 /**
  * BGG link `inbound` may surface as a boolean or the literal string
  * `'true'` depending on client-library JSON conversion. Treat both as
@@ -215,7 +250,7 @@ export function searchItemToGameSearchData(item: BggSearchItem): proto.GameSearc
  * synthetic Tabletop release with identity and availability data only.
  */
 export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
-  const title = selectPrimaryName(thing.names) ?? '';
+  const title = selectThingTitle(thing);
 
   return {
     externalId: String(thing.id),
@@ -246,7 +281,7 @@ export function thingToGameSearchData(thing: BggThing): proto.GameSearchData {
  *    release is emitted.
  */
 export function thingToGameData(thing: BggThing, locale?: string): proto.GameData {
-  const title = selectPrimaryName(thing.names) ?? '';
+  const title = selectThingTitle(thing);
   const ratings = thing.statistics?.ratings;
 
   const complexityWeight =

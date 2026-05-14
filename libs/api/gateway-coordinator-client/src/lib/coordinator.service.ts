@@ -61,4 +61,8 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
   fetchExpansions(request: proto.CoordinatorFetchExpansionsRequest): Observable<proto.SearchGameResult> {
     return this.coordinatorService.fetchExpansions(request);
   }
+
+  startGameImport(request: proto.StartGameImportRequest): Observable<proto.StartGameImportResponse> {
+    return this.coordinatorService.startGameImport(request);
+  }
 }

@@ -12,6 +12,7 @@ import type {
   ImportJobResult,
 } from '../interfaces/import-job.interface';
 import { GameUpsertService } from '../services/game.service';
+import { extractGameDataFromChildren } from '../utils/extract-game-data';
 
 @Processor(QueueNames.GamesImport)
 export class GameImportProcessor extends WorkerHost {
@@ -42,9 +43,16 @@ export class GameImportProcessor extends WorkerHost {
   }
 
   private async processBaseGame(job: Job<GameImportJobPayload>): Promise<ImportJobResult> {
-    const { jobId, batchId, correlationId, gameData, gatewayId, userId } = job.data;
+    const { jobId, batchId, correlationId, gatewayId, userId } = job.data;
+
+    // GameData is the return value of this job's GameFetch child, run
+    // by the gateway-worker. BullMQ stores it under the child's queue:jobId key.
+    const gameData = extractGameDataFromChildren(await job.getChildrenValues());
+
     this.logger.log(`Base game import: jobId=${jobId} externalId=${gameData.externalId}`);
 
+    // Fetch processor already moved status to Running. This call updates
+    // bullmqJobId for the import job specifically.
     await this.markRunning(jobId, job.id!.toString());
 
     const result = await this.gameUpsert.upsert(gameData, gatewayId);
@@ -69,7 +77,9 @@ export class GameImportProcessor extends WorkerHost {
   }
 
   private async processExpansion(job: Job<ExpansionImportJobPayload>): Promise<ImportJobResult> {
-    const { jobId, batchId, correlationId, gameData, gatewayId, userId, baseGameExternalId } = job.data;
+    const { jobId, batchId, correlationId, gatewayId, userId, baseGameExternalId } = job.data;
+    const gameData = extractGameDataFromChildren(await job.getChildrenValues());
+
     this.logger.log(`Expansion import: jobId=${jobId} externalId=${gameData.externalId}`);
 
     await this.markRunning(jobId, job.id!.toString());
@@ -99,6 +109,11 @@ export class GameImportProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameImportJobPayload | ExpansionImportJobPayload>, error: Error): Promise<void> {
     const { jobId, batchId, correlationId } = job.data;
+
+    if (job.attemptsMade < (job.opts.attempts ?? 1)) {
+      return; // not final attempt
+    }
+
     this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);
 
     await this.db.job.update({
@@ -117,11 +132,7 @@ export class GameImportProcessor extends WorkerHost {
   private markRunning(jobId: string, bullmqJobId: string) {
     return this.db.job.update({
       where: { id: jobId },
-      data: {
-        status: JobStatus.Running,
-        startedAt: new Date(),
-        bullmqJobId,
-      },
+      data: { status: JobStatus.Running, startedAt: new Date(), bullmqJobId },
     });
   }
 

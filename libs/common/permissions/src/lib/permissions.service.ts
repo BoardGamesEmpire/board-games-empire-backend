@@ -8,7 +8,10 @@ import type { UserWithRoles } from './interfaces';
 export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
 
-  constructor(private readonly db: DatabaseService, @Inject(CACHE_MANAGER) private readonly cache: Cache) {}
+  constructor(
+    private readonly db: DatabaseService,
+    @Inject(CACHE_MANAGER) private readonly cache: Cache,
+  ) {}
 
   async getUserRoleGraph(userId: string) {
     const cacheKey = `bge:user:permissions:${userId}`;
@@ -79,7 +82,7 @@ export class PermissionsService {
       },
     });
 
-    this.logger.debug(`Fetched user role graph for user ${userId}: ${JSON.stringify(userGraph)}`);
+    this.logger.debug(`Fetched user role graph for user ${userId} from database, caching result`);
 
     const CACHE_TTL_IN_MILLISECONDS = 5 * 60 * 1000;
     await this.cache.set(cacheKey, userGraph, CACHE_TTL_IN_MILLISECONDS);
