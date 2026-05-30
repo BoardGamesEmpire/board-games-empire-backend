@@ -24,6 +24,9 @@
       "path": "../../common/utils/tsconfig.lib.json"
     },
     {
+      "path": "../../common/redis/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     }
   ],

@@ -2,15 +2,16 @@ import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportFetchModule } from '@bge/game-import';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
+import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import type { RedisClient } from 'bullmq';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
-import type { RedisOptions } from './configuration/redis.config';
 
 @Module({
   imports: [
@@ -35,29 +36,25 @@ import type { RedisOptions } from './configuration/redis.config';
       verboseMemoryLeak: true,
     }),
 
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redisConfig = config.getOrThrow<RedisOptions>('redis.queue');
-        return {
-          connection: {
-            host: redisConfig.socket.host,
-            port: redisConfig.socket.port,
-            username: redisConfig.username,
-            password: redisConfig.password,
-            database: redisConfig.database,
-            ...(redisConfig.socket.tls
-              ? {
-                  tls: {
-                    ca: redisConfig.socket.ca,
-                    cert: redisConfig.socket.cert,
-                    key: redisConfig.socket.key,
-                  },
-                }
-              : {}),
-          },
-        };
+    // Shared Redis clients (iovalkey via @bge/redis). Gateway-worker needs
+    // both connections — cache for gateway registry pub/sub, queue for
+    // BullMQ workers consuming import-fetch jobs.
+    RedisModule.forRootAsync({
+      cache: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.cache'),
       },
+      queue: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
+      },
+    }),
+
+    BullModule.forRootAsync({
+      inject: [QUEUE_REDIS_CLIENT],
+      useFactory: (queueClient: RedisClient) => ({
+        connection: queueClient,
+      }),
     }),
 
     LoggerModule.forRoot({}),
@@ -73,28 +70,7 @@ import type { RedisOptions } from './configuration/redis.config';
 
     DatabaseModule,
 
-    GatewayRegistryModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redis = config.getOrThrow<RedisOptions>('redis.cache');
-        return {
-          host: redis.socket.host,
-          port: redis.socket.port,
-          username: redis.username,
-          password: redis.password,
-          db: redis.database,
-          tls: redis.socket.tls
-            ? {
-                ca: redis.socket.ca,
-                cert: redis.socket.cert,
-                key: redis.socket.key,
-                rejectUnauthorized: redis.socket.rejectUnauthorized,
-              }
-            : undefined,
-        };
-      },
-    }),
+    GatewayRegistryModule,
 
     GameImportFetchModule,
   ],

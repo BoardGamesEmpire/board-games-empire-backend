@@ -1,12 +1,13 @@
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
+import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import type { RedisClient } from 'bullmq';
 import { configuration, configurationValidationSchema } from './configuration';
-import type { RedisOptions } from './configuration/redis.config';
 import { CoordinatorModule } from './coordinator/coordinator.module';
 
 @Module({
@@ -30,53 +31,36 @@ import { CoordinatorModule } from './coordinator/coordinator.module';
       global: true,
     }),
 
-    BullModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redisConfig = config.getOrThrow<RedisOptions>('redis.queue');
-        return {
-          connection: {
-            host: redisConfig.socket.host,
-            port: redisConfig.socket.port,
-            username: redisConfig.username,
-            password: redisConfig.password,
-            database: redisConfig.database,
-            ...(redisConfig.socket.tls
-              ? {
-                  tls: {
-                    ca: redisConfig.socket.ca,
-                    cert: redisConfig.socket.cert,
-                    key: redisConfig.socket.key,
-                  },
-                }
-              : {}),
-          },
-        };
+    // Shared Redis clients (iovalkey via @bge/redis). Coordinator needs both:
+    //   - cache: gateway registry pub/sub (config event invalidation)
+    //   - queue: BullMQ producer side for coordinator-owned queues
+    RedisModule.forRootAsync({
+      cache: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.cache'),
+      },
+      queue: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
       },
     }),
 
-    GatewayRegistryModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redis = config.getOrThrow<RedisOptions>('redis.cache');
-        return {
-          host: redis.socket.host,
-          port: redis.socket.port,
-          username: redis.username,
-          password: redis.password,
-          db: redis.database,
-          tls: redis.socket.tls
-            ? {
-                ca: redis.socket.ca,
-                cert: redis.socket.cert,
-                key: redis.socket.key,
-                rejectUnauthorized: redis.socket.rejectUnauthorized,
-              }
-            : undefined,
-        };
-      },
+    // BullMQ uses the shared queue connection. Workers (registered via
+    // BullModule.registerQueue in downstream feature modules) will internally
+    // duplicate this client for their blocking BRPOP — unavoidable, but at
+    // least the producer side is shared.
+    BullModule.forRootAsync({
+      inject: [QUEUE_REDIS_CLIENT],
+      useFactory: (queueClient: RedisClient) => ({
+        connection: queueClient,
+      }),
     }),
+
+    // Gateway registry pub/sub uses the global CACHE_REDIS_CLIENT. The
+    // service internally calls `.duplicate()` to get a dedicated subscriber
+    // connection (ioredis pub/sub requires connection isolation in
+    // subscribe mode).
+    GatewayRegistryModule,
 
     DatabaseModule,
     CoordinatorModule,

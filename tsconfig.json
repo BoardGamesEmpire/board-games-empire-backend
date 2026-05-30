@@ -110,6 +110,9 @@
     },
     {
       "path": "./apps/gateway-worker"
+    },
+    {
+      "path": "./libs/common/redis"
     }
   ]
 }

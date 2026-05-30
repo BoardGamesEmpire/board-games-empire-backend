@@ -24,7 +24,7 @@ function buildMockConfigService(config: MockSecurityConfig): jest.Mocked<Pick<Co
     'security.policy': config.policy ?? '',
     'security.encryption': config.encryption ?? '',
     'security.acknowledgments': config.acknowledgments ?? '',
-    'security.preferredLanguages': config.preferredLanguages ?? 'en',
+    'security.preferredLanguages': config.preferredLanguages ?? '',
     'security.hiring': config.hiring ?? '',
   };
 

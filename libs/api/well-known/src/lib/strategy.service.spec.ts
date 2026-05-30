@@ -267,7 +267,8 @@ describe('StrategyService', () => {
 
         it('does not expose clientId or clientSecret in the serialized response', async () => {
           const service = await createService({ ...OIDC_CONFIG });
-          const serialized = JSON.stringify(service.getDiscovery());
+          const discovery = await service.getDiscovery();
+          const serialized = JSON.stringify(discovery);
 
           expect(serialized).not.toContain('test-client-id');
           expect(serialized).not.toContain('test-client-secret');

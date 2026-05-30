@@ -25,9 +25,3 @@ export const FAILURE_WINDOW_MS = 5 * 60 * 1000;
  * to repeated failures. Listeners should create admin-facing notifications.
  */
 export const GATEWAY_DISABLED_EVENT = 'gateway.disabled';
-
-/**
- * DI token for the ioredis client used to publish/subscribe config events.
- * Apps consuming this module must provide a Redis client under this token.
- */
-export const GATEWAY_REGISTRY_REDIS = 'GATEWAY_REGISTRY_REDIS';
