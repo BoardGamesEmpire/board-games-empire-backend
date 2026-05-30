@@ -21,23 +21,8 @@
       ],
       "outputs": ["{projectRoot}/src/gen"]
     },
-    "clean-build-output": {
-      "executor": "nx:run-commands",
-      "cache": false,
-      "options": {
-        "command": "rimraf ../../../dist/libs/proto/gateway && rimraf dist",
-        "cwd": "libs/proto/gateway"
-      }
-    },
     "build": {
-      "executor": "nx:run-commands",
-      "dependsOn": ["clean-build-output", "generate"],
-      "cache": true,
-      "options": {
-        "command": "tsc --build tsconfig.lib.json --force && mkdir -p ../../../dist/libs/proto/gateway && cp -R dist/. ../../../dist/libs/proto/gateway/",
-        "cwd": "libs/proto/gateway"
-      },
-      "outputs": ["{projectRoot}/dist", "{workspaceRoot}/dist/libs/proto/gateway"]
+      "dependsOn": ["generate"]
     },
     "typecheck": {
       "dependsOn": ["generate"]

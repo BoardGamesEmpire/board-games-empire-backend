@@ -60,7 +60,7 @@
     "@grpc/proto-loader": "^0.8.0",
     "@grpc/reflection": "^1.0.4",
     "@jfrazx/asarray": "^1.0.1",
-    "@keyv/redis": "^5.1.6",
+    "@keyv/valkey": "1.0.11",
     "@nest-lab/throttler-storage-redis": "^1.2.0",
     "@nestjs/axios": "^4.0.1",
     "@nestjs/bullmq": "^11.0.4",
@@ -106,6 +106,7 @@
     "http-terminator": "^3.2.0",
     "igdb-api-node": "^6.0.5",
     "ioredis": "^5.10.1",
+    "iovalkey": "0.3.3",
     "joi": "^18.1.2",
     "keyv": "^5.5.5",
     "lodash": "^4.17.23",
@@ -123,7 +124,7 @@
     "rxjs": "^7.8.0",
     "socket.io": "^4.8.3",
     "socket.io-redis-adapter": "^8.4.6",
-    "surrogate": "^1.9.1"
+    "surrogate": "1.9.2"
   },
   "devDependencies": {
     "@bufbuild/buf": "^1.66.1",

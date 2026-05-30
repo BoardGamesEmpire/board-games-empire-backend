@@ -1,11 +1,10 @@
 import { DatabaseModule } from '@bge/database';
 import { FlowProducerNames, QueueNames } from '@bge/game-import';
-import { GATEWAY_REGISTRY_REDIS, GatewayRegistryModule } from '@bge/gateway-registry';
-import KeyvRedis from '@keyv/redis';
+import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
+import KeyvValkey from '@keyv/valkey';
 import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
-import type { RedisClientType } from 'redis';
 import { CoordinatorController } from './coordinator.controller';
 import { CoordinatorService } from './coordinator.service';
 import { GameSearchService } from './game-search.service';
@@ -15,10 +14,9 @@ import { GameImportEnqueuerService } from './services/game-import-enqueuer.servi
   imports: [
     DatabaseModule,
     CacheModule.registerAsync({
-      imports: [GatewayRegistryModule],
-      inject: [GATEWAY_REGISTRY_REDIS],
-      useFactory: (redis: RedisClientType) => ({
-        stores: [new KeyvRedis(redis)],
+      inject: [CACHE_REDIS_CLIENT],
+      useFactory: (redis: Redis) => ({
+        stores: [new KeyvValkey(redis)],
         ttl: 300, // default TTL in seconds
       }),
     }),

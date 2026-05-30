@@ -14,10 +14,11 @@ import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
+import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import { WellKnownModule } from '@bge/well-known';
-import KeyvRedis, { RedisClientOptions } from '@keyv/redis';
+import KeyvValkey from '@keyv/valkey';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -70,17 +71,24 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
     }),
 
     DatabaseModule,
+
+    // Shared Redis clients (ioredis). Owns the lifecycle of the cache and
+    // queue connections used across the application.
+    RedisModule.forRootAsync({
+      cache: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.cache'),
+      },
+    }),
+
     CacheModule.registerAsync({
       isGlobal: true,
-      inject: [ConfigService],
-      async useFactory(configService: ConfigService) {
-        const options = configService.getOrThrow<RedisClientOptions>('redis.cache');
-        return {
-          stores: [new KeyvRedis(options)],
-          ttl: configService.get<number>('cache.ttl'),
-          max: configService.get<number>('cache.max'),
-        };
-      },
+      inject: [CACHE_REDIS_CLIENT, ConfigService],
+      useFactory: (cacheClient: Redis, configService: ConfigService) => ({
+        stores: [new KeyvValkey(cacheClient)],
+        ttl: configService.get<number>('cache.ttl'),
+        max: configService.get<number>('cache.max'),
+      }),
     }),
 
     // Logging
@@ -97,28 +105,10 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
       },
     }),
 
-    GatewayConfigEventsModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const redis = config.getOrThrow('redis.cache');
-        return {
-          host: redis.socket.host,
-          port: redis.socket.port,
-          username: redis.username,
-          password: redis.password,
-          db: redis.database,
-          tls: redis.socket.tls
-            ? {
-                ca: redis.socket.ca,
-                cert: redis.socket.cert,
-                key: redis.socket.key,
-                rejectUnauthorized: redis.socket.rejectUnauthorized,
-              }
-            : undefined,
-        };
-      },
-    }),
+    // Gateway config events — depends on the global CACHE_REDIS_CLIENT
+    // provided by RedisModule. The service uses the shared cache connection
+    // for publishing and duplicates it internally for the subscriber side.
+    GatewayConfigEventsModule,
 
     // Feature modules
     AuthModule,

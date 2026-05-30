@@ -38,6 +38,9 @@
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/redis/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {

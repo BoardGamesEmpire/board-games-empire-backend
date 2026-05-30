@@ -1,8 +1,8 @@
 import { DatabaseService } from '@bge/database';
+import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
-import type { Redis } from 'ioredis';
-import { GATEWAY_REGISTRY_REDIS } from './constants/gateway-registry.constants';
+import type { Redis } from 'iovalkey';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayRegistryService } from './gateway-registry.service';
@@ -29,7 +29,7 @@ describe('GatewayRegistryService', () => {
         GatewayConfigEventsService,
         EventEmitter2,
         { provide: DatabaseService, useValue: { gameGateway: { updateMany: jest.fn() } } },
-        { provide: GATEWAY_REGISTRY_REDIS, useValue: redisMock },
+        { provide: CACHE_REDIS_CLIENT, useValue: redisMock },
       ],
     }).compile();
 

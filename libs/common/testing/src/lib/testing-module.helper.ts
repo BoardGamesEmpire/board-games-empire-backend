@@ -52,6 +52,26 @@ export interface TestingModuleWithDb {
   cls: jest.Mocked<ClsService>;
 }
 
+/**
+ * DI token accepted by `overrideProvider(...)`. Mirrors NestJS's
+ * `InjectionToken` shape: a class constructor, string token, or symbol.
+ */
+export type ProviderToken = Type<unknown> | string | symbol;
+
+/**
+ * One provider-override entry. Forwarded to
+ * `builder.overrideProvider(provide).useValue(useValue)`.
+ *
+ * Use for providers that come from an imported module and aren't trivially
+ * replaceable by re-listing them in `providers` — most commonly request- or
+ * transient-scoped providers (e.g. `HttpHealthIndicator` from Terminus),
+ * which `module.get()` rejects.
+ */
+export interface ProviderOverride {
+  provide: ProviderToken;
+  useValue: unknown;
+}
+
 export interface CreateTestingModuleOptions extends ModuleMetadata {
   /**
    * Guards to override with PassThroughGuard.
@@ -61,6 +81,22 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
    *   overrideGuards: [AuthGuard, PoliciesGuard]
    */
   overrideGuards?: Type<CanActivate>[];
+
+  /**
+   * Provider overrides applied via `builder.overrideProvider(...).useValue(...)`.
+   *
+   * Necessary for providers that:
+   *   - come from an imported module and can't be shadowed by re-listing
+   *   - are request- or transient-scoped (`module.get()` rejects these;
+   *     `module.resolve()` returns a fresh instance per call, not the one
+   *     injected into the controller under test)
+   *
+   * @example
+   *   overrideProviders: [
+   *     { provide: HttpHealthIndicator, useValue: { pingCheck: jest.fn() } },
+   *   ]
+   */
+  overrideProviders?: ProviderOverride[];
 }
 
 /**
@@ -71,6 +107,8 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
  *   - CACHE_MANAGER     → createMockCacheManager()
  *
  * Guards are optionally overridden with PassThroughGuard via `overrideGuards`.
+ * Module-imported providers (e.g. scoped Terminus indicators) can be
+ * replaced via `overrideProviders`.
  *
  * Usage:
  *   const { module, db, cls } = await createTestingModuleWithDb({
@@ -80,7 +118,7 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
  *   });
  */
 export async function createTestingModuleWithDb(options: CreateTestingModuleOptions): Promise<TestingModuleWithDb> {
-  const { overrideGuards = [], ...metadata } = options;
+  const { overrideGuards = [], overrideProviders = [], ...metadata } = options;
 
   const cache = createMockCacheManager();
   const db = createMockDatabaseService();
@@ -98,6 +136,10 @@ export async function createTestingModuleWithDb(options: CreateTestingModuleOpti
 
   for (const guard of overrideGuards) {
     builder.overrideGuard(guard).useClass(PassThroughGuard);
+  }
+
+  for (const { provide, useValue } of overrideProviders) {
+    builder.overrideProvider(provide).useValue(useValue);
   }
 
   const module = await builder.compile();

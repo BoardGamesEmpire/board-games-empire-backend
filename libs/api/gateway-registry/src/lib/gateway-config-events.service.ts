@@ -1,6 +1,6 @@
+import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import type { Redis } from 'ioredis';
-import { GATEWAY_CONFIG_UPDATE_CHANNEL, GATEWAY_REGISTRY_REDIS } from './constants/gateway-registry.constants';
+import { GATEWAY_CONFIG_UPDATE_CHANNEL } from './constants/gateway-registry.constants';
 import type { GatewayConfigEvent } from './interfaces/gateway-config-event.interface';
 
 type ConfigEventHandler = (event: GatewayConfigEvent) => Promise<void> | void;
@@ -11,16 +11,22 @@ type ConfigEventHandler = (event: GatewayConfigEvent) => Promise<void> | void;
  * reconnects). Every process running GatewayRegistryService subscribes
  * to invalidate cached clients.
  *
- * Uses ioredis pub/sub — the subscribe call requires a dedicated connection
- * (ioredis blocks other commands in subscribe mode), so this service
- * duplicates the injected base client.
+ * Uses the shared cache Redis client (`CACHE_REDIS_CLIENT` from `@bge/redis`).
+ * The cache database is the right home for this pub/sub channel — invalidation
+ * events live alongside the cached state they invalidate, and both can be
+ * `FLUSHDB`'d together without affecting queue or socket state.
+ *
+ * The subscribe path requires connection isolation (ioredis blocks other
+ * commands in subscribe mode), so `subscribe()` calls `client.duplicate()`
+ * to get a dedicated subscriber connection. The duplicate is owned and
+ * closed by this service; the shared cache client is owned elsewhere.
  */
 @Injectable()
 export class GatewayConfigEventsService implements OnModuleDestroy {
   private readonly logger = new Logger(GatewayConfigEventsService.name);
   private subscriberConnection?: Redis;
 
-  constructor(@Inject(GATEWAY_REGISTRY_REDIS) private readonly redis: Redis) {}
+  constructor(@Inject(CACHE_REDIS_CLIENT) private readonly redis: Redis) {}
 
   async onModuleDestroy(): Promise<void> {
     if (this.subscriberConnection) {

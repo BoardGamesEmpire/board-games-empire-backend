@@ -58,6 +58,10 @@ async function bootstrap() {
           method: RequestMethod.GET,
         },
         {
+          path: 'health/*path',
+          method: RequestMethod.GET,
+        },
+        {
           path: '.well-known/*path',
           method: RequestMethod.GET,
         },
