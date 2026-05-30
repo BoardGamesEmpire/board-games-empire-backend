@@ -121,12 +121,12 @@ and `QUEUE_REDIS_CLIENT`) are **independently optional** at the
 both connections are required for full system functionality — but a
 deployment topology mechanism that lets you split work across processes.
 
-| Topology                              | Cache      | Queue       | Sockets |
-| ------------------------------------- | ---------- | ----------- | ------- |
-| Combined: API + worker in one process | ✅         | ✅          | ✅      |
-| Split: API process                    | ✅         | ✅          | ✅      |
-| Split: dedicated worker process       | optional\* | ✅ required | ❌      |
-| Coordinator (BGE gRPC service)        | ❌         | ❌          | ❌      |
+| Topology                              | Cache       | Queue       | Sockets |
+| ------------------------------------- | ----------- | ----------- | ------- |
+| Combined: API + worker in one process | ✅          | ✅          | ✅      |
+| Split: API process                    | ✅          | ✅          | ✅      |
+| Split: dedicated worker process       | optional\*  | ✅ required | ❌      |
+| Coordinator (BGE gRPC service)        | ✅ required | ✅ required | ❌      |
 
 \* Worker processes consume queue jobs. They configure `cache` only if their
 job handlers read or write cached data — e.g. the game-import worker reads
@@ -160,6 +160,22 @@ REDIS_DATABASE=0
 # then not registered, and any code path attempting to inject it will fail
 # fast at module init with a clear "No provider found" error.
 ```
+
+### Coordinator deployment
+
+The coordinator process is the BGE gRPC service that brokers traffic
+between API/worker processes and external game-data gateways. It needs
+**both** Redis connections:
+
+- **Cache** — for gateway registry pub/sub. The coordinator listens for
+  gateway config events (registrations, capability changes) on the cache
+  connection's pub/sub channel.
+- **Queue** — for BullMQ producer-side work. The coordinator enqueues
+  game-import flow jobs via `FlowProducer`, which uses the queue
+  connection.
+
+The coordinator does NOT use the sockets connection — only API processes
+serving WebSocket clients need that one.
 
 ### Workers are not optional
 
@@ -278,10 +294,11 @@ cycles feel slow.
 
 Per-process connection counts depend on which connections are configured:
 
-| Process  | ioredis (cache)              | ioredis (queue) | node-redis (sockets) | BullMQ workers                 |
-| -------- | ---------------------------- | --------------- | -------------------- | ------------------------------ |
-| Main API | 1                            | 1               | 1                    | 0                              |
-| Worker   | 0 (or 1 if cache configured) | 1 producer      | 0                    | 1 blocking per worker instance |
+| Process     | ioredis (cache)              | ioredis (queue) | node-redis (sockets) | BullMQ workers                 |
+| ----------- | ---------------------------- | --------------- | -------------------- | ------------------------------ |
+| Main API    | 1                            | 1               | 1                    | 0                              |
+| Coordinator | 1                            | 1 producer      | 0                    | 0                              |
+| Worker      | 0 (or 1 if cache configured) | 1 producer      | 0                    | 1 blocking per worker instance |
 
 Default Redis `maxclients` is 10000 — well above typical needs even with
 many worker replicas. Check `CLIENT LIST` to see who's connected; the BGE
