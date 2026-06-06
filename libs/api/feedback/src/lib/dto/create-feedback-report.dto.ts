@@ -63,7 +63,9 @@ export class CreateFeedbackReportDto {
     enum: FeedbackSeverity,
     description: 'Severity. Required when category is Crash or Bug.',
   })
-  @ValidateIf((dto: CreateFeedbackReportDto) => SEVERITY_REQUIRED_CATEGORIES.has(dto.category))
+  @ValidateIf(
+    (dto: CreateFeedbackReportDto) => dto.severity !== undefined || SEVERITY_REQUIRED_CATEGORIES.has(dto.category),
+  )
   @IsEnum(FeedbackSeverity)
   severity?: FeedbackSeverity;
 

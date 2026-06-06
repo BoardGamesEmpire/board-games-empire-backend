@@ -16,22 +16,16 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     const schema = new URL(connectionString).searchParams.get('schema') ?? configService.get<string>('database.schema');
 
     super({
-      adapter: new PrismaPg(
-        {
-          connectionString,
-        },
-        {
-          schema,
-        },
-      ),
+      adapter: new PrismaPg({ connectionString }, { schema }),
       log: env.isDevelopment ? ['query', 'info', 'warn', 'error'] : ['error'],
     });
+
+    // https://github.com/prisma/prisma/issues/18628#issuecomment-3213927054
+    Object.assign(this, this.$extends(createCaslExtension()));
   }
 
   public async onModuleInit(): Promise<void> {
     try {
-      this.$extends(createCaslExtension());
-
       await this.$connect();
       this.logger.log('Database connected');
     } catch (error) {

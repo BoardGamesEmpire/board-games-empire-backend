@@ -32,7 +32,7 @@ export class FeedbackController {
   @ApiResponse({ status: Http.Forbidden, description: 'Submission denied (insufficient permissions or feedback ban)' })
   @ApiResponse({ status: Http.TooManyRequests, description: 'Submission rate limit exceeded' })
   @CheckPolicies((ability: AppAbility) => ability.can(Action.create, ResourceType.FeedbackReport))
-  @Throttle({ default: { limit: FEEDBACK_THROTTLE_LIMIT, ttl: FEEDBACK_THROTTLE_TTL_SECONDS * 1000 } })
+  @Throttle({ default: { limit: FEEDBACK_THROTTLE_LIMIT, ttl: FEEDBACK_THROTTLE_TTL_SECONDS } })
   @HttpCode(HttpStatus.CREATED)
   @Post('reports')
   submitReport(
