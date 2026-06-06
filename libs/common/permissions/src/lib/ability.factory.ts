@@ -1,4 +1,4 @@
-import type { Permission } from '@bge/database';
+import type { Action, Permission } from '@bge/database';
 import { AbilityBuilder, ExtractSubjectType } from '@casl/ability';
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable } from '@nestjs/common';
@@ -77,8 +77,13 @@ export class AbilityFactory {
         parsedConditions = JSON.parse(rendered);
       }
 
-      const conditions = [permission.fields?.length ? permission.fields : undefined, parsedConditions].filter(Boolean);
-      const access = permission.inverted ? ability.cannot : ability.can;
+      const fields = permission.fields?.length ? permission.fields : undefined;
+      const conditions = [fields, parsedConditions].filter(Boolean);
+
+      // typescript you whiny cunt
+      const access: (action: Action, subject: Subjects, fields?: any, conditions?: any) => void = permission.inverted
+        ? ability.cannot
+        : ability.can;
       access.call(ability, permission.action, permission.subject as ExtractSubjectType<Subjects>, ...conditions);
     }
   }

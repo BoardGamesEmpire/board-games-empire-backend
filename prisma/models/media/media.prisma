@@ -17,12 +17,14 @@ model Media {
   visibility Visibility @default(Public)
 
   // Child relations
-  gameImages     GameImage[]
-  gameVideos     GameVideo[]
-  gameDocuments  GameDocument[]
-  eventImages    EventImage[]
-  eventVideos    EventVideo[]
-  eventDocuments EventDocument[]
+  gameImages        GameImage[]
+  gameVideos        GameVideo[]
+  gameDocuments     GameDocument[]
+  eventImages       EventImage[]
+  eventVideos       EventVideo[]
+  eventDocuments    EventDocument[]
+  feedbackImages    FeedbackReportImage[]
+  feedbackDocuments FeedbackReportDocument[]
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

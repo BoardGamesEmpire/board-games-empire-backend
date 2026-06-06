@@ -1,4 +1,4 @@
-import { DatabaseService, Household, InviteStatus, Prisma, SystemRole } from '@bge/database';
+import { DatabaseService, Household, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -311,10 +311,10 @@ export class HouseholdService {
 
     try {
       if (userAbility) {
-        whereAnd.push(accessibleBy(userAbility).Household);
+        whereAnd.push(accessibleBy(userAbility).ofType(ResourceType.Household));
       }
       if (apiKeyAbility) {
-        whereAnd.push(accessibleBy(apiKeyAbility).Household);
+        whereAnd.push(accessibleBy(apiKeyAbility).ofType(ResourceType.Household));
       }
     } catch (error) {
       this.logger.error('Error creating where conditions for household access control', error);

@@ -35,3 +35,22 @@ model EventDocument {
   @@index([eventId])
   @@map("event_documents")
 }
+
+model FeedbackReportDocument {
+  id String @id @default(cuid(2))
+
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  feedbackReport   FeedbackReport @relation(fields: [feedbackReportId], references: [id], onDelete: Cascade)
+  feedbackReportId String         @map("feedback_report_id")
+
+  pageCount Int?    @map("page_count")
+  language  String?
+
+  caption   String?
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([feedbackReportId])
+  @@map("feedback_report_documents")
+}

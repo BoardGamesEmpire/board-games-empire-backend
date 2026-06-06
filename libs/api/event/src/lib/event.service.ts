@@ -6,6 +6,7 @@ import {
   EventStatus,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
+  ResourceType,
   SystemRole,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
@@ -23,7 +24,10 @@ import type { EventCreatedEvent, EventDeletedEvent } from './interfaces/event.in
 export class EventService {
   private readonly logger = new Logger(EventService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async getEvents(pagination: PaginationQueryDto, abilities: AppAbility[]): Promise<Event[]> {
     return this.db.event.findMany({
@@ -298,7 +302,7 @@ export class EventService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).Event);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.Event));
         }
       }
     } catch (error) {

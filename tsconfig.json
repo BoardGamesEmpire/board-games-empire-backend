@@ -113,6 +113,12 @@
     },
     {
       "path": "./libs/common/redis"
+    },
+    {
+      "path": "./libs/api/feedback"
+    },
+    {
+      "path": "./libs/common/services"
     }
   ]
 }

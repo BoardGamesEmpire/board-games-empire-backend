@@ -7,6 +7,7 @@ import {
   InterestedWeight,
   isPrismaDependentRecordNotFoundError,
   NominationStatus,
+  ResourceType,
   ScheduledGameRole,
   VoteEligibility,
   VoteQuorumType,
@@ -34,7 +35,10 @@ import type {
 export class EventGameNominationService {
   private readonly logger = new Logger(EventGameNominationService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async getNominations(eventId: string, abilities: AppAbility[]): Promise<EventGameNomination[]> {
     await this.assertEventExists(eventId);
@@ -496,7 +500,7 @@ export class EventGameNominationService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).EventGameNomination);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventGameNomination));
         }
       }
     } catch (error) {

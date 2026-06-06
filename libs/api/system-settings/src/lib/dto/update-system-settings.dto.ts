@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsOptional } from 'class-validator';
+import { IsBoolean, IsNumber, IsOptional } from 'class-validator';
 
 export class UpdateSystemSettingsDto {
   @ApiProperty({
@@ -22,4 +22,20 @@ export class UpdateSystemSettingsDto {
   @IsBoolean()
   @IsOptional()
   allowUsernameChange?: boolean;
+
+  @ApiProperty({
+    description:
+      'How long to keep feedback reports, in days. Feedback reports older than this will be automatically deleted.',
+  })
+  @IsNumber()
+  @IsOptional()
+  feedbackRetentionDays?: number;
+
+  @ApiProperty({
+    description:
+      'Whether the server should apply redaction to feedback reports before storing them. If false, the server will store feedback reports as-is and rely on clients to apply redaction.',
+  })
+  @IsBoolean()
+  @IsOptional()
+  feedbackReportServerRedactionEnabled?: boolean;
 }

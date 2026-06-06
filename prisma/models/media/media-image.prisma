@@ -42,6 +42,28 @@ model EventImage {
   @@map("event_images")
 }
 
+model FeedbackReportImage {
+  id String @id @default(cuid(2))
+
+  media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  mediaId String @map("media_id")
+
+  feedbackReport   FeedbackReport @relation(fields: [feedbackReportId], references: [id], onDelete: Cascade)
+  feedbackReportId String         @map("feedback_report_id")
+
+  // Image-specific fields (mirrors GameImage/EventImage)
+  width  Int
+  height Int
+  format String
+
+  // Context-specific
+  caption   String?
+  sortOrder Int     @default(0) @map("sort_order")
+
+  @@index([feedbackReportId])
+  @@map("feedback_report_images")
+}
+
 // In due time, add models for:
 // Character, NPC, Location, UserProfile, Household, GamePlaySession, RuleVariant, etc.
 
