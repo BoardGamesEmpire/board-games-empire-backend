@@ -1,4 +1,5 @@
 import { env } from '@bge/env';
+import { createCaslExtension } from '@casl/prisma';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
@@ -29,6 +30,8 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
 
   public async onModuleInit(): Promise<void> {
     try {
+      this.$extends(createCaslExtension());
+
       await this.$connect();
       this.logger.log('Database connected');
     } catch (error) {

@@ -1,0 +1,99 @@
+// Feedback report: user-submitted reports for crashes, bugs, and feature requests.
+
+model FeedbackReport {
+  id String @id @default(cuid(2))
+
+  // ─── Payload ────────────────────────────────────────────
+  title    String?
+  message  String
+  category FeedbackCategory
+  context  FeedbackContext   @default(Unknown)
+  severity FeedbackSeverity?
+
+  // ─── Client metadata ────────────────────────────────────
+  appVersion String? @map("app_version")
+  platform   String?
+  locale     String?
+  deviceInfo Json?   @map("device_info")
+
+  // ─── Deployment snapshot at submission ──────────────────
+  deploymentRuntime DeploymentRuntime @default(Unknown) @map("deployment_runtime")
+  deploymentVersion String?           @map("deployment_version")
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String @map("user_id")
+
+  correlationKey String? @map("correlation_key")
+
+  // ─── Redaction ──────────────────────────────────────────
+  userRedactedFields String[] @default([]) @map("user_redacted_fields")
+  redactionApplied   Boolean  @default(false) @map("redaction_applied")
+  serverRedacted     Boolean  @default(false) @map("server_redacted")
+
+  status FeedbackStatus @default(New)
+
+  images    FeedbackReportImage[]
+  documents FeedbackReportDocument[]
+
+  // ─── Sink fan-out (append-only audit history) ───────────
+  feedbackSubmissions FeedbackSubmission[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, correlationKey], map: "feedback_report_user_correlation_key_unique")
+  @@index([status, createdAt])
+  @@index([createdAt])
+  @@index([userId])
+  @@map("feedback_reports")
+}
+
+enum FeedbackStatus {
+  Acknowledged
+  Duplicate
+  InProgress
+  NeedsInfo
+  New
+  Resolved
+  WontFix
+
+  @@map("feedback_statuses")
+}
+
+enum FeedbackCategory {
+  Bug
+  Crash
+  FeatureRequest
+
+  @@map("feedback_categories")
+}
+
+enum FeedbackContext {
+  Client
+  Server
+  Unknown
+
+  @@map("feedback_contexts")
+}
+
+enum FeedbackSeverity {
+  Low
+  Medium
+  High
+  Critical
+
+  @@map("feedback_severities")
+}
+
+// Stamped onto every FeedbackReport at submission time; also surfaced by
+// /.well-known/bge-identity.
+enum DeploymentRuntime {
+  Kubernetes
+  DockerCompose
+  Docker
+  StandaloneNode
+  Serverless
+  Unknown
+
+  @@map("deployment_runtimes")
+}

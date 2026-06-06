@@ -9,7 +9,10 @@ import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 
 @Injectable()
 export class StrategyService {
-  constructor(private readonly configService: ConfigService, private readonly db: DatabaseService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly db: DatabaseService,
+  ) {}
 
   async getDiscovery(): Promise<BgeDiscoveryDto> {
     const issuer = this.configService.getOrThrow<string>('auth.url');

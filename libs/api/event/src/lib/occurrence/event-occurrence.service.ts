@@ -7,6 +7,7 @@ import {
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
+  ResourceType,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -29,7 +30,10 @@ import type {
 export class EventOccurrenceService {
   private readonly logger = new Logger(EventOccurrenceService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async getOccurrences(eventId: string, abilities: AppAbility[]): Promise<EventOccurrence[]> {
     await this.assertEventExists(eventId);
@@ -255,8 +259,8 @@ export class EventOccurrenceService {
         newStatus === OccurrenceStatus.Confirmed
           ? OccurrenceEvents.OccurrenceConfirmed
           : newStatus === OccurrenceStatus.Declined
-          ? OccurrenceEvents.OccurrenceDeclined
-          : OccurrenceEvents.OccurrenceCancelled;
+            ? OccurrenceEvents.OccurrenceDeclined
+            : OccurrenceEvents.OccurrenceCancelled;
 
       this.eventEmitter.emit(domainEvent, {
         eventId,
@@ -429,7 +433,7 @@ export class EventOccurrenceService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).EventOccurrence);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventOccurrence));
         }
       }
     } catch (error) {

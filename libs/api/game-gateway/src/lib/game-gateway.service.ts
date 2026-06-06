@@ -1,4 +1,4 @@
-import { DatabaseService, GameGateway, Prisma } from '@bge/database';
+import { DatabaseService, GameGateway, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
@@ -161,10 +161,10 @@ export class GameGatewayService {
 
     try {
       if (userAbility) {
-        whereAnd.push(accessibleBy(userAbility).GameGateway);
+        whereAnd.push(accessibleBy(userAbility).ofType(ResourceType.GameGateway));
       }
       if (apiKeyAbility) {
-        whereAnd.push(accessibleBy(apiKeyAbility).GameGateway);
+        whereAnd.push(accessibleBy(apiKeyAbility).ofType(ResourceType.GameGateway));
       }
     } catch (error) {
       this.logger.error('Error creating where conditions for game gateway access control', error);

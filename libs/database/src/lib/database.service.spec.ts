@@ -6,6 +6,7 @@ jest.mock('./client', () => {
   class MockPrismaClient {
     $connect = jest.fn().mockResolvedValue(undefined);
     $disconnect = jest.fn().mockResolvedValue(undefined);
+    $extends = jest.fn();
     $on = jest.fn();
   }
   return {

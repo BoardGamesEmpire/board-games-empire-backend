@@ -104,6 +104,8 @@ export function createMockDatabaseService(): MockDatabaseService {
     excludedGame: mockDelegate(),
     family: mockDelegate(),
     familyGatewayAlias: mockDelegate(),
+    feedbackReport: mockDelegate(),
+    feedbackSubmission: mockDelegate(),
     game: mockDelegate(),
     gameArtist: mockDelegate(),
     gameCategory: mockDelegate(),

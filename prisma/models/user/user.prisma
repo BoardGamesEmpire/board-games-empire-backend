@@ -63,7 +63,8 @@ model User {
   // campaignMemberPermissions        CampaignMemberPermission[]
   // campaignMemberPermissionsGranter CampaignMemberPermission[] @relation("CampaignPermissionGranter")
 
-  ruleVariants RuleVariant[]
+  ruleVariants    RuleVariant[]
+  feedbackReports FeedbackReport[]
 
   permissionsGranted UserPermission[] @relation("PermissionGranter")
   permissions        UserPermission[]

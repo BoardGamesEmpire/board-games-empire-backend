@@ -9,6 +9,10 @@ enum ResourceType {
   UserProfile
   UserGameCustomization
 
+  // ─── Feedback ───────────────────────────────────────────
+  FeedbackReport
+  FeedbackSinkDispatch
+
   // ─── Game ───────────────────────────────────────────────
   Campaign
   Game

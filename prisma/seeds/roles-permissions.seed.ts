@@ -628,6 +628,45 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       slug: 'delete:user_game_customization',
       reason: 'Delete customization',
     },
+
+    // ─── Feedback ───────────────────────────────────────────
+    {
+      action: Action.create,
+      subject: 'FeedbackReport',
+      slug: 'create:feedback_report',
+      reason: 'Submit a feedback report',
+    },
+    {
+      action: Action.read,
+      subject: 'FeedbackReport',
+      conditions: { userId: '{{ user.id }}' },
+      slug: 'read:feedback_report:own',
+      reason: 'Read own feedback reports',
+    },
+    {
+      action: Action.read,
+      subject: 'FeedbackReport',
+      slug: 'read:feedback_report',
+      reason: 'Read any feedback report',
+    },
+    {
+      action: Action.delete,
+      subject: 'FeedbackReport',
+      slug: 'delete:feedback_report',
+      reason: 'Hard-delete a feedback report (separate from retention sweep)',
+    },
+    {
+      action: Action.manage,
+      subject: 'FeedbackReport',
+      slug: 'manage:feedback_report',
+      reason: 'Full administrative control over feedback reports',
+    },
+    {
+      action: Action.read,
+      subject: 'FeedbackSinkDispatch',
+      slug: 'read:feedback_sink_dispatch',
+      reason: 'Read sink-dispatch audit trail',
+    },
   ];
 
   const permissionsBySlug: Record<string, any> = {};
@@ -731,43 +770,47 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // MODERATOR
   await assignPermissions(SystemRole.Moderator, [
-    'read:user:profile',
+    'delete:event:moderate',
+    'delete:game_play_session',
+    'manage:content:moderate',
+    'read:event',
+    'read:feedback_report',
+    'read:feedback_sink_dispatch',
     'read:game_collection',
     'read:game_play_session',
     'read:game',
-    'update:game',
-    'read:event',
     'read:household',
     'read:households',
     'read:public_content',
-    'manage:content:moderate',
-    'delete:event:moderate',
-    'delete:game_play_session',
+    'read:user:profile',
     'update:event',
+    'update:game',
   ]);
 
   // STANDARD USER
   await assignPermissions(SystemRole.User, [
-    'read:user:profile',
-    'update:user:profile:own',
+    'create:event',
+    'create:feedback_report',
+    'create:game_collection',
     'create:game',
+    'create:household_member:join',
+    'create:household',
+    'create:rule_variant',
+    'create:session_player:join',
+    'create:user_game_customization',
+    'delete:game_collection',
+    'delete:user_game_customization',
+    'read:feedback_report:own',
+    'read:game_collection',
+    'read:game_play_session',
     'read:game',
+    'read:households',
     'read:platform_game',
     'read:platform',
-    'create:event',
-    'create:household',
-    'read:households',
-    'read:game_play_session',
-    'create:rule_variant',
-    'create:game_collection',
-    'delete:game_collection',
+    'read:user:profile',
     'update:game_collection',
-    'read:game_collection',
-    'create:user_game_customization',
     'update:user_game_customization',
-    'delete:user_game_customization',
-    'create:household_member:join',
-    'create:session_player:join',
+    'update:user:profile:own',
   ]);
 
   const householdOwnerPermissions = [
@@ -824,7 +867,6 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // HOUSEHOLD MEMBER
   await assignPermissions(SystemRole.HouseholdMember, [
-    'read:event_occurrence',
     'create:game_play_session',
     'create:play_record',
     'create:rule_variant',
@@ -835,6 +877,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
+    'read:event_occurrence',
     'read:event_policy',
     'read:event',
     'read:game_collection',
@@ -845,59 +888,65 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // HOUSEHOLD GUEST
   await assignPermissions(SystemRole.HouseholdGuest, [
-    'read:household',
-    'read:households',
+    'create:session_player:join',
     'read:event',
     'read:game_play_session',
-    'create:session_player:join',
+    'read:household',
+    'read:households',
   ]);
 
   const eventHostPermissions = [
-    'read:event',
-    'update:event',
-    'delete:event',
-    'update:event:status:cancel-event',
-    'update:event:status:archive-event',
-    'manage:event_attendee',
-    'read:event_attendee',
-    'update:event_attendee:status',
     'create:event_invite',
     'create:game_play_session',
     'create:play_record',
-    'read:game_play_session',
-    'update:game_play_session',
+    'delete:event',
     'delete:game_play_session',
+    'manage:event_attendee',
+    'read:event_attendee',
+    'read:event',
+    'read:game_play_session',
+    'update:event_attendee:status',
+    'update:event:status:archive-event',
+    'update:event:status:cancel-event',
+    'update:event',
+    'update:game_play_session',
 
     // Occurrences
-    'read:event_occurrence',
     'create:event_occurrence',
-    'update:event_occurrence',
     'delete:event_occurrence',
+    'read:event_occurrence',
+    'update:event_occurrence:cancel',
     'update:event_occurrence:confirm',
     'update:event_occurrence:decline',
-    'update:event_occurrence:cancel',
+    'update:event_occurrence',
+
     // Availability
-    'read:event_availability_vote',
     'create:event_availability_vote',
+    'read:event_availability_vote',
+
     // Nominations
-    'read:event_game_nomination',
     'create:event_game_nomination',
-    'update:event_game_nomination:withdraw',
-    'update:event_game_nomination:resolve',
+    'read:event_game_nomination',
     'update:event_game_nomination:approve',
     'update:event_game_nomination:reject',
+    'update:event_game_nomination:resolve',
+    'update:event_game_nomination:withdraw',
+
     // Game votes
-    'read:event_game_vote',
     'create:event_game_vote',
+    'read:event_game_vote',
+
     // Event games
-    'read:event_game',
     'create:event_game',
     'delete:event_game',
+    'read:event_game',
+
     // Game lists
-    'read:attendee_game_list',
     'create:attendee_game_list',
     'delete:attendee_game_list',
     'manage:attendee_game_list',
+    'read:attendee_game_list',
+
     // Policy
     'read:event_policy',
     'update:event_policy',
@@ -936,7 +985,6 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // EVENT MODERATOR
   await assignPermissions(SystemRole.EventModerator, [
-    'read:event_occurrence',
     'delete:event_game',
     'delete:game_play_session',
     'manage:attendee_game_list',
@@ -947,6 +995,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
+    'read:event_occurrence',
     'read:event_policy',
     'read:event',
     'update:event_attendee:status',

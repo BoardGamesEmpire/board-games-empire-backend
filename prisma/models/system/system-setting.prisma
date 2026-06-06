@@ -8,5 +8,8 @@ model SystemSetting {
   allowUserRegistration Boolean @default(true) @map("allow_user_registration")
   allowUsernameChange   Boolean @default(true) @map("allow_username_change")
 
+  feedbackReportRetentionDays          Int     @default(90) @map("feedback_report_retention_days")
+  feedbackReportServerRedactionEnabled Boolean @default(true) @map("feedback_report_server_redaction_enabled")
+
   @@map("system_settings")
 }

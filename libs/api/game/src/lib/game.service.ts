@@ -1,4 +1,4 @@
-import { DatabaseService, Game, isPrismaDependentRecordNotFoundError, Prisma } from '@bge/database';
+import { DatabaseService, Game, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { AppAbility } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { accessibleBy, WhereInput } from '@casl/prisma';
@@ -242,7 +242,7 @@ export class GameService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).Game);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.Game));
         }
       }
     } catch (error) {

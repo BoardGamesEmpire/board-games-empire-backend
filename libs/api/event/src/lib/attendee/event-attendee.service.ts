@@ -5,6 +5,7 @@ import {
   EventParticipationStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
+  ResourceType,
   SystemRole,
 } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
@@ -34,7 +35,10 @@ import type {
 export class EventAttendeeService {
   private readonly logger = new Logger(EventAttendeeService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly eventEmitter: EventEmitter2) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async getAttendees(eventId: string, abilities: AppAbility[]): Promise<EventAttendee[]> {
     await this.assertEventExists(eventId);
@@ -387,7 +391,7 @@ export class EventAttendeeService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).EventAttendee);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventAttendee));
         }
       }
     } catch (error) {
@@ -405,7 +409,7 @@ export class EventAttendeeService {
     try {
       for (const ability of abilities) {
         if (ability) {
-          whereAnd.push(accessibleBy(ability).EventAttendeeGameList);
+          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventAttendeeGameList));
         }
       }
     } catch (error) {
