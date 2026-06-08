@@ -1,3 +1,6 @@
+// Must be first: installs the Reflect.* metadata polyfill before any
+// decorated class is evaluated (see gateway main.ts for context).
+import 'reflect-metadata';
 import { env } from '@bge/env';
 import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';

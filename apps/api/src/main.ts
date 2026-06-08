@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { AUTH_INSTANCE } from '@bge/auth';
 import { env } from '@bge/env';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';

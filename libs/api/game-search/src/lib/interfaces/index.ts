@@ -1,9 +1,8 @@
+import type { BaseClientData } from '@bge/shared';
 import type { SearchGameResult } from '@board-games-empire/proto-gateway';
 import type { Subscription } from 'rxjs';
 
-export interface WsClientData {
-  userId?: string;
-
+export interface WsClientData extends BaseClientData {
   /**
    * correlationId → active gRPC stream subscription
    */

@@ -1,3 +1,5 @@
+import 'reflect-metadata';
+
 import { env } from '@bge/env';
 import { walkDir } from '@bge/utils';
 import { PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';

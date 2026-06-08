@@ -50,3 +50,11 @@ export function walkDir(dir: string, pattern: RegExp | string, exclusions: (RegE
   walk(dir);
   return Array.from(paths);
 }
+
+export function firstValue<T>(value: T | T[]): T | undefined {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+
+  return value;
+}

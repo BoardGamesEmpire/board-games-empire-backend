@@ -1,6 +1,8 @@
 import 'dotenv/config';
 
-import { authFactory } from '@bge/auth';
+// eslint-disable-next-line @nx/enforce-module-boundaries
+import { authFactory } from '../libs/api/auth/src/lib/auth-factory';
+
 import { PrismaClient } from '@bge/database';
 import { PrismaPg } from '@prisma/adapter-pg';
 import assert from 'node:assert';

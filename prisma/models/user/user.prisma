@@ -24,7 +24,6 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   accounts           Account[]
-  apikeys            Apikey[]
   deviceCodes        DeviceCode[]
   passkeys           Passkey[]
   sessions           Session[]
@@ -71,7 +70,7 @@ model User {
   roles              UserRole[]
 
   jobs             Job[]
-  notifications    Notification[]
+  notifications     Notification[]
   importActivities ImportActivity[]
 
   @@unique([email])

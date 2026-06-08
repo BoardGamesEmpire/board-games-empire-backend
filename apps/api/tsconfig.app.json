@@ -29,6 +29,12 @@
       "path": "../../libs/common/testing/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/utils/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/shared/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/well-known/tsconfig.lib.json"
     },
     {
