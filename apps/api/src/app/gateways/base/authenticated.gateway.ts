@@ -1,4 +1,6 @@
 import { AuthService } from '@bge/auth';
+import type { BaseClientData } from '@bge/shared';
+import { buildWsClientData } from '@bge/utils';
 import { Logger } from '@nestjs/common';
 import { OnGatewayConnection } from '@nestjs/websockets';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -30,19 +32,22 @@ export abstract class AuthenticatedGateway implements OnGatewayConnection {
       return;
     }
 
-    client.data = {
-      userId: session.user?.id,
-    } satisfies BaseClientData;
+    const data = buildWsClientData(session, client.handshake.headers);
+    if (!data) {
+      this.logger.warn(`Anonymous session not permitted over WS: socketId=${client.id}`);
+      client.emit('auth:error', { status: 'FORBIDDEN', message: 'Anonymous access not permitted' });
+      await setTimeout(100);
+      client.disconnect(true);
+      return;
+    }
+
+    client.data = data satisfies BaseClientData;
 
     client.onAny((event, ...args) => {
       this.logger.debug(`[RAW EVENT] event=${event} args=${JSON.stringify(args)}`);
     });
 
-    this.logger.log(`WS connected: socketId=${client.id}`);
+    this.logger.log(`WS connected: socketId=${client.id} userId=${data.userId} correlationId=${data.correlationId}`);
     return session;
   }
-}
-
-export interface BaseClientData {
-  userId: string;
 }

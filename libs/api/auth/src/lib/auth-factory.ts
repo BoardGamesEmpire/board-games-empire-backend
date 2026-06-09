@@ -1,11 +1,12 @@
+import { apiKey } from '@better-auth/api-key';
 import { passkey } from '@better-auth/passkey';
+import { prismaAdapter } from '@better-auth/prisma-adapter';
 import type { PrismaClient } from '@bge/database';
-import { Cache } from '@nestjs/cache-manager';
+import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-import { betterAuth, BetterAuthPlugin } from 'better-auth';
-import { prismaAdapter } from 'better-auth/adapters/prisma';
+import type { EventEmitter2 } from '@nestjs/event-emitter';
+import { betterAuth } from 'better-auth';
 import {
   admin,
   anonymous,
@@ -18,7 +19,7 @@ import {
   openAPI,
   twoFactor,
 } from 'better-auth/plugins';
-import { User } from 'better-auth/types';
+import type { User } from 'better-auth/types';
 import process from 'node:process';
 import { AUTH_BASE_PATH, AuthEvent } from './constants';
 
@@ -38,10 +39,28 @@ export function authFactory(
 
   logger.log(`Trusted origins set to: ${trustedOrigins.join(', ')}`);
 
+  // Only build the OIDC config when it is actually configured. `buildOIDC`
+  // calls `getOrThrow` on the ConfigService path, so calling it
+  // unconditionally would crash startup for deployments without OIDC.
+  const oidcConfig = hasOIDC(configService) ? buildOIDC(configService) : null;
+  if (oidcConfig) {
+    logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`);
+  }
+
+  if (options.useEmailPass) {
+    logger.log('Enabling Email & Password authentication');
+  }
+
+  const usingSwagger = configService?.get<boolean>('swagger.enabled');
+  if (usingSwagger) {
+    logger.log('Enabling OpenAPI plugin for API documentation');
+  }
+
   // TODO: Make plugins configurable
-  const plugins: BetterAuthPlugin[] = [
+  const plugins = [
     admin(),
     anonymous(),
+    apiKey(),
     bearer(),
     lastLoginMethod(),
     oneTap(),
@@ -49,39 +68,26 @@ export function authFactory(
     passkey(),
     twoFactor(),
 
+    ...(oidcConfig
+      ? [
+          genericOAuth({
+            config: [
+              {
+                ...oidcConfig,
+              },
+            ],
+          }),
+        ]
+      : []),
+
+    ...(usingSwagger ? [openAPI()] : []),
+
     deviceAuthorization({
       verificationUri: '/device',
       // temporary workaround: https://github.com/better-auth/better-auth/issues/9422
       schema: {},
     }),
   ];
-
-  if (configService?.get<boolean>('swagger.enabled')) {
-    logger.log('Enabling OpenAPI plugin for API documentation');
-    plugins.push(openAPI());
-  }
-
-  if (hasOIDC(configService)) {
-    const oidcConfig = buildOIDC(configService);
-    logger.log(`Enabling OIDC provider: ${oidcConfig.providerId}`);
-
-    plugins.push(
-      genericOAuth({
-        config: [
-          {
-            providerId: oidcConfig.providerId,
-            discoveryUrl: oidcConfig.wellKnownUrl,
-            clientId: oidcConfig.clientId,
-            clientSecret: oidcConfig.clientSecret,
-          },
-        ],
-      }),
-    );
-  }
-
-  if (options.useEmailPass) {
-    logger.log('Enabling Email & Password authentication');
-  }
 
   return betterAuth({
     telemetry: { enabled: false },
@@ -130,6 +136,11 @@ export function authFactory(
             eventEmitter.emit(AuthEvent.UserCreated, user);
           },
         },
+        // TODO: clean up API keys on user delete. The upstream better-auth
+        // apikey schema dropped the Apikey -> User FK (and its onDelete:
+        // Cascade) in favour of an unconstrained `referenceId`, so deleting a
+        // user no longer removes their keys. Add a `delete.before`/`after` hook
+        // here that runs `prisma.apikey.deleteMany({ where: { referenceId: user.id } })`.
       },
     },
     secondaryStorage: cache
@@ -152,12 +163,6 @@ export function authFactory(
 }
 
 function buildOptions(configService?: ConfigService) {
-  const envUrl = process.env.BETTER_AUTH_URL;
-  const envSecret = process.env.BETTER_AUTH_SECRET;
-  const envOrigins = process.env.TRUSTED_ORIGINS?.split(',') || [];
-  const envEmailPass = process.env.USE_EMAIL_PASSWORD_AUTH === 'true';
-  const disableOriginCheck = process.env.DISABLE_ORIGIN_CHECK === 'true';
-
   if (configService instanceof ConfigService) {
     const hostUrl = configService.getOrThrow<string>('auth.url');
     const secret = configService.getOrThrow<string>('auth.secret');
@@ -167,6 +172,12 @@ function buildOptions(configService?: ConfigService) {
 
     return { hostUrl, secret, trusted, useEmailPass, disableOriginCheck };
   }
+
+  const envUrl = process.env.BETTER_AUTH_URL;
+  const envSecret = process.env.BETTER_AUTH_SECRET;
+  const envOrigins = process.env.TRUSTED_ORIGINS?.split(',') || [];
+  const envEmailPass = process.env.USE_EMAIL_PASSWORD_AUTH === 'true';
+  const disableOriginCheck = process.env.DISABLE_ORIGIN_CHECK === 'true';
 
   return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass, disableOriginCheck };
 }
@@ -189,18 +200,18 @@ function buildOIDC(configService?: ConfigService) {
   const defaultProviderId = 'default-oidc-provider';
 
   if (configService instanceof ConfigService) {
-    const wellKnownUrl = configService.getOrThrow<string>('auth.oidcWellKnownUrl');
+    const discoveryUrl = configService.getOrThrow<string>('auth.oidcWellKnownUrl');
     const clientId = configService.getOrThrow<string>('auth.oidcClientId');
     const clientSecret = configService.getOrThrow<string>('auth.oidcClientSecret');
     const providerId = configService.get<string>('auth.oidcProviderId') || defaultProviderId;
 
-    return { wellKnownUrl, clientId, clientSecret, providerId };
+    return { discoveryUrl, clientId, clientSecret, providerId };
   }
 
-  const wellKnownUrl = process.env.OIDC_WELL_KNOWN_URL;
+  const discoveryUrl = process.env.OIDC_WELL_KNOWN_URL;
   const clientId = process.env.OIDC_CLIENT_ID || '';
   const clientSecret = process.env.OIDC_CLIENT_SECRET;
   const providerId = process.env.OIDC_PROVIDER_ID || defaultProviderId;
 
-  return { wellKnownUrl, clientId, clientSecret, providerId };
+  return { discoveryUrl, clientId, clientSecret, providerId };
 }

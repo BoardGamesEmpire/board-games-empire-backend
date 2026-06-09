@@ -1,0 +1,51 @@
+import { WorkerHost } from '@nestjs/bullmq';
+import type { Job } from 'bullmq';
+import { extractJobMeta } from './job-meta';
+import { AuditContextInternalService } from './services/audit-context-internal.service';
+
+/**
+ * Base class for BullMQ processors that participate in the actor/audit system.
+ *
+ * Subclasses override {@link processJob} instead of `process`. The base method
+ * extracts the meta envelope, opens a CLS scope populated with actor +
+ * correlation, and invokes the subclass.
+ *
+ * Jobs must be enqueued via `wrapJobData(payload, meta)` so the `__meta`
+ * envelope is present. Jobs lacking the envelope are rejected — there is no
+ * fallback actor. Producers are responsible for supplying actor context.
+ *
+ * @example
+ *   @Processor(QUEUE_NAMES.GAME_IMPORT)
+ *   export class GameImportProcessor extends ActorAwareWorkerHost<GameImportJobData> {
+ *     protected processJob(job: Job<GameImportJobData & JobMetaEnvelope>) {
+ *       // CLS is populated; emit events normally.
+ *     }
+ *   }
+ */
+export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName extends string = string> extends WorkerHost {
+  protected constructor(private readonly auditContext: AuditContextInternalService) {
+    super();
+  }
+
+  async process(job: Job<TData, TResult, TName>, token?: string): Promise<TResult> {
+    const meta = extractJobMeta(job.data);
+
+    if (!meta) {
+      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+    }
+
+    return this.auditContext.runWith(
+      {
+        actor: meta.actor,
+        correlationId: meta.correlationId,
+        source: 'queue',
+      },
+      () => this.processJob(job, token),
+    );
+  }
+
+  /**
+   * Subclass entry point. CLS is populated when this is invoked.
+   */
+  protected abstract processJob(job: Job<TData, TResult, TName>, token?: string): Promise<TResult>;
+}

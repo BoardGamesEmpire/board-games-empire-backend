@@ -18,6 +18,7 @@ const ESM_PACKAGES = [
   'better-auth',
   'better-call',
   'jose',
+  'nanostores',
   'rou3'
 ];
 
@@ -53,4 +54,16 @@ module.exports = {
    *   → ignore everything in node_modules EXCEPT the listed packages
    */
   transformIgnorePatterns: [`node_modules/(?!(${esmPattern})/)`],
+
+  /**
+   * Load `reflect-metadata` before any test module is evaluated.
+   *
+   * `@bge/shared`'s barrel re-exports class-validator/class-transformer DTOs,
+   * so importing *anything* from `@bge/shared` (e.g. a header constant) eagerly
+   * evaluates those decorators, which call `Reflect.getMetadata`. At runtime the
+   * Nest app already has reflect-metadata loaded; unit tests do not, so load it
+   * here. Projects that declare their own `setupFiles` (e.g. e2e) override this
+   * and are responsible for loading it themselves.
+   */
+  setupFiles: ['reflect-metadata'],
 };

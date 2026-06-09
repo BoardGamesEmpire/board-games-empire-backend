@@ -119,6 +119,12 @@
     },
     {
       "path": "./libs/common/services"
+    },
+    {
+      "path": "./libs/common/actor-context"
+    },
+    {
+      "path": "./libs/api/actor-context-transport"
     }
   ]
 }

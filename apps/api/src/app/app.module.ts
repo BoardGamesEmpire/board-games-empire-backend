@@ -1,3 +1,4 @@
+import { ActorContextTransportModule, HttpActorMiddleware, WsActorInterceptor } from '@bge/actor-context-transport';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
@@ -20,14 +21,14 @@ import { UserModule } from '@bge/user';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvValkey from '@keyv/valkey';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
-import { ClsModule } from 'nestjs-cls';
+import { ClsInterceptor, ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
@@ -110,6 +111,8 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
     // for publishing and duplicates it internally for the subscriber side.
     GatewayConfigEventsModule,
 
+    ActorContextTransportModule,
+
     // Feature modules
     AuthModule,
     EventModule,
@@ -130,6 +133,8 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
   ],
   controllers: [],
   providers: [
+    { provide: APP_INTERCEPTOR, useClass: ClsInterceptor },
+    { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     // Global guards
     {
       provide: APP_GUARD,
@@ -153,4 +158,8 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
     GameSearchGateway,
   ],
 })
-export class AppModule {}
+export class AppModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(HttpActorMiddleware).forRoutes('*');
+  }
+}

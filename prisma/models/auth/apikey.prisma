@@ -6,8 +6,13 @@ model Apikey {
   prefix String?
   key    String
 
-  userId String @map("user_id")
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  configId            String    @default("default") @map("config_id")
+
+  // user or organization id
+  // NOTE: upstream better-auth dropped the User relation + onDelete: Cascade
+  // here. There is no DB-enforced cleanup, so keys must be removed in app code
+  // on user delete (see databaseHooks TODO in auth-factory.ts).
+  referenceId         String    @map("reference_id")
 
   refillInterval Int?      @map("refill_interval")
   refillAmount   Int?      @map("refill_amount")
@@ -22,7 +27,8 @@ model Apikey {
 
   lastRequest DateTime? @map("last_request") @db.Timestamptz(3)
 
-  metadata String?
+  permissions String?
+  metadata    String?
 
   scopes ApiKeyScope[]
 
@@ -31,6 +37,7 @@ model Apikey {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([key])
-  @@index([userId])
+  @@index([configId])
+  @@index([referenceId])
   @@map("apikeys")
 }
