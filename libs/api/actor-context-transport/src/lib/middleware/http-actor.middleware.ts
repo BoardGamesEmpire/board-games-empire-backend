@@ -2,7 +2,7 @@ import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
-import { resolveCorrelationId } from '@bge/utils';
+import { firstValue, resolveCorrelationId } from '@bge/utils';
 import { Injectable, Logger, UnauthorizedException, type NestMiddleware } from '@nestjs/common';
 import type { NextFunction, Request, Response } from 'express';
 import type { AnonymousUserSession } from '../interfaces';
@@ -64,8 +64,7 @@ export class HttpActorMiddleware implements NestMiddleware {
   }
 
   private async resolveActor(req: Request): Promise<Actor | null> {
-    const apiKey = this.firstHeader(req.headers[API_KEY_HEADER]);
-
+    const apiKey = firstValue(req.headers[API_KEY_HEADER]);
     if (apiKey) {
       if (this.authService.hasSessionCredential(req.headers)) {
         this.logger.warn(`Request carries both '${API_KEY_HEADER}' and a session credential; preferring API key`);
@@ -91,6 +90,10 @@ export class HttpActorMiddleware implements NestMiddleware {
   }
 
   private async actorFromSession(req: Request): Promise<Actor | null> {
+    if (!this.authService.hasSessionCredential(req.headers)) {
+      return null;
+    }
+
     const session = await this.authService.getSessionFromHeaders(req.headers);
 
     if (!session) {
@@ -104,12 +107,5 @@ export class HttpActorMiddleware implements NestMiddleware {
     }
 
     return { kind: 'user', userId: user.id };
-  }
-
-  private firstHeader(value: string | string[] | undefined): string | undefined {
-    if (Array.isArray(value)) {
-      return value[0];
-    }
-    return value;
   }
 }
