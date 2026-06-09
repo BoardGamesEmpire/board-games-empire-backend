@@ -1,11 +1,26 @@
-import type { Actor } from '@bge/actor-context';
-import { AuditContextInternalService } from '@bge/actor-context/internal';
+/**
+ * NOT CURRENTLY WIRED. Retained as a reference implementation.
+ *
+ * Phase 1 of the audit/actor system has no inbound gRPC entry point that
+ * needs an `external/gateway` actor — BGE's only gRPC traffic today is
+ * outbound to the coordinator / gateways, where actor *propagation* (not
+ * gateway identification) is the open problem.
+ *
+ * This file is preserved because the eventual "gateway-into-BGE" case
+ * (IGDB webhook fan-out, ad-hoc enrichment pushes) will revisit this
+ * shape. Specs continue to run so the reference doesn't rot.
+ *
+ * NOT exported from the lib's barrel. NOT registered in any module. Do
+ * not register it as APP_INTERCEPTOR without first revisiting the
+ * actor-propagation design pending in a future PR.
+ */
+import type { Actor, ActorContextInit } from '@bge/actor-context';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { resolveCorrelationId } from '@bge/utils';
 import type { Metadata } from '@grpc/grpc-js';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import type { Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import { ActorInterceptor } from './actor.interceptor';
 
 /**
@@ -21,21 +36,18 @@ export const GATEWAY_ID_METADATA_KEY = 'x-bge-gateway-id' as const;
  * gateway service-to-service calls only — `{ kind: 'external', system:
  * 'gateway', identifier }`.
  *
- * Gateway identity is read from metadata. Authentication itself is performed
- * upstream by the gateway registry layer; this interceptor trusts the
- * metadata.
+ * Opens its own CLS scope per call via `auditContext.runWith`. `ClsMiddleware`
+ * is HTTP-only, so gRPC entry points have no outer scope to inherit from.
+ * The `next.handle().subscribe(subscriber)` call happens *inside* `runWith`
+ * so AsyncLocalStorage context propagates to all async emissions downstream.
  *
  * User API keys are intentionally not supported over gRPC per the locked
- * decision (gateways are the only gRPC consumer in Phase 1).
+ * decision.
  */
 @Injectable()
 export class GrpcActorInterceptor extends ActorInterceptor {
   protected readonly executionContextType = 'rpc';
   protected override readonly auditSource = 'grpc';
-
-  constructor(auditContext: AuditContextInternalService) {
-    super(auditContext);
-  }
 
   intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
     const metadata = executionContext.switchToRpc().getContext<{ metadata?: Metadata } | Metadata>();
@@ -53,33 +65,30 @@ export class GrpcActorInterceptor extends ActorInterceptor {
       identifier: gatewayId,
     };
 
-    this.logger.debug(`Populating gRPC actor context: gatewayId=${gatewayId}`);
-
-    this.auditContext.populate({
+    const init: ActorContextInit = {
       actor,
       correlationId: resolveCorrelationId({
         traceparent: this.firstMetadata(md, TRACEPARENT_HEADER),
         correlationId: this.firstMetadata(md, CORRELATION_ID_HEADER),
       }),
       source: this.source,
-    });
+    };
 
-    return next.handle();
+    return new Observable<unknown>((subscriber) =>
+      this.auditContext.runWith(init, () => next.handle().subscribe(subscriber)),
+    );
   }
 
   private unwrap(value: { metadata?: Metadata } | Metadata | undefined): Metadata | null {
     if (!value) {
       return null;
     }
-
     if ('metadata' in value && value.metadata) {
       return value.metadata;
     }
-
     if ('get' in value && typeof value.get === 'function') {
       return value as Metadata;
     }
-
     return null;
   }
 
@@ -94,11 +103,9 @@ export class GrpcActorInterceptor extends ActorInterceptor {
     if (typeof first === 'string') {
       return first;
     }
-
     if (first instanceof Buffer) {
       return first.toString('utf-8');
     }
-
     return undefined;
   }
 }

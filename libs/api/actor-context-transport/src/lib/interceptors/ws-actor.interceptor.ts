@@ -1,7 +1,7 @@
-import { AuditContextInternalService } from '@bge/actor-context/internal';
+import { type ActorContextInit } from '@bge/actor-context';
 import type { BaseClientData } from '@bge/shared';
 import { type CallHandler, type ExecutionContext, Injectable } from '@nestjs/common';
-import type { Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 import type { Socket } from 'socket.io';
 import { ActorInterceptor } from './actor.interceptor';
 
@@ -11,24 +11,25 @@ import { ActorInterceptor } from './actor.interceptor';
  * Auth and actor resolution happen *at connection time* in
  * `AuthenticatedGateway.handleConnection`, which stashes a `BaseClientData`
  * payload on `Socket.data`. This interceptor reads that payload on every
- * incoming message and opens the per-message CLS scope.
+ * incoming message and opens a per-message CLS scope via `runWith`.
+ *
+ * `ClsMiddleware` is HTTP-only, so WS handlers have no outer scope to
+ * inherit from. Opening the scope here — with `next.handle().subscribe(...)`
+ * called inside `runWith` — ensures AsyncLocalStorage context propagates to
+ * all async emissions during message handling.
  *
  * No-op for non-WS execution contexts so it's safe to register globally
  * alongside `HttpActorInterceptor` and `GrpcActorInterceptor`.
  *
  * Defensive case: if `socket.data` isn't populated (the connection somehow
  * bypassed the gateway base class), the interceptor logs an error and
- * proceeds without populating CLS. Downstream audit emissions will see no
- * actor; Phase 2's audit listener guards against this and treats it as a
- * skip.
+ * passes the call through without opening a scope. Downstream audit
+ * emissions will see no actor; Phase 2's audit listener guards against
+ * this and treats it as a skip.
  */
 @Injectable()
 export class WsActorInterceptor extends ActorInterceptor {
   protected readonly executionContextType = 'ws';
-
-  constructor(auditContext: AuditContextInternalService) {
-    super(auditContext);
-  }
 
   intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
     const client = executionContext.switchToWs().getClient<Socket>();
@@ -37,17 +38,19 @@ export class WsActorInterceptor extends ActorInterceptor {
     if (!data?.actor || !data.correlationId) {
       this.logger.error(
         `WS message handled without populated client.data; socketId=${client.id}. ` +
-          'AuthenticatedGateway must run before this interceptor.',
+          'AuthenticatedGateway must populate client.data before this interceptor runs.',
       );
       return next.handle();
     }
 
-    this.auditContext.populate({
+    const init: ActorContextInit = {
       actor: data.actor,
       correlationId: data.correlationId,
       source: this.source,
-    });
+    };
 
-    return next.handle();
+    return new Observable<unknown>((subscriber) =>
+      this.auditContext.runWith(init, () => next.handle().subscribe(subscriber)),
+    );
   }
 }

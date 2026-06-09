@@ -1,5 +1,4 @@
-import type { Actor } from '@bge/actor-context';
-import { AuditContextInternalService } from '@bge/actor-context/internal';
+import { AuditContextInternalService, type Actor } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId } from '@bge/utils';
@@ -7,9 +6,9 @@ import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { from, type Observable } from 'rxjs';
-import { mergeMap } from 'rxjs/operators';
+import { mergeMap, tap } from 'rxjs/operators';
+import type { AnonymousUserSession } from '../interfaces';
 import { ActorInterceptor } from './actor.interceptor';
-import type { AnonymousUserSession } from './interfaces';
 
 export const API_KEY_HEADER = 'x-api-key' as const;
 
@@ -50,6 +49,7 @@ export class HttpActorInterceptor extends ActorInterceptor {
     const request = executionContext.switchToHttp().getRequest<Request>();
 
     return from(this.resolveActor(request)).pipe(
+      tap((actor) => this.logger.debug(`Resolved actor ${actor?.kind} for HTTP request`)),
       mergeMap((actor) => {
         this.auditContext.populate({
           actor,

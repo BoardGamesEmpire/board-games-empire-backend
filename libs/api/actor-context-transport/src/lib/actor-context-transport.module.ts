@@ -1,11 +1,11 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { AuthModule } from '@bge/auth';
 import { Module } from '@nestjs/common';
-import { GrpcActorInterceptor } from './grpc-actor.interceptor';
-import { HttpActorInterceptor } from './http-actor.interceptor';
-import { WsActorInterceptor } from './ws-actor.interceptor';
+import { WsActorInterceptor } from './interceptors/ws-actor.interceptor';
+import { HttpActorMiddleware } from './middleware/http-actor.middleware';
 
 /**
- * Registers the HTTP, gRPC, and WS actor interceptors.
+ * Registers the WS actor interceptors.
  *
  * Requires the common `AuditContextModule` and `ClsModule.forRoot(...)` to be
  * available in the application module graph.
@@ -17,11 +17,11 @@ import { WsActorInterceptor } from './ws-actor.interceptor';
  * Interceptors are exported as providers — the consumer registers them
  * globally via `APP_INTERCEPTOR` (or per-controller / per-gateway) in the
  * application bootstrap. Each interceptor short-circuits for non-matching
- * transport types, so all three can safely be registered globally.
+ * transport types, so all can safely be registered globally.
  */
 @Module({
-  imports: [AuthModule],
-  providers: [HttpActorInterceptor, GrpcActorInterceptor, WsActorInterceptor],
-  exports: [HttpActorInterceptor, GrpcActorInterceptor, WsActorInterceptor],
+  imports: [AuthModule, AuditContextModule],
+  providers: [HttpActorMiddleware, WsActorInterceptor],
+  exports: [HttpActorMiddleware, WsActorInterceptor],
 })
 export class ActorContextTransportModule {}

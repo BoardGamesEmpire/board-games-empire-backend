@@ -1,20 +1,26 @@
-import { AuditContextService } from '@bge/actor-context';
 import {
   ACTOR_CLS_KEY,
   AuditContextInternalService,
+  AuditContextService,
   CORRELATION_ID_CLS_KEY,
   SOURCE_CLS_KEY,
-} from '@bge/actor-context/internal';
+} from '@bge/actor-context';
 import type { BaseClientData } from '@bge/shared';
-import { ExecutionContext, Logger } from '@nestjs/common';
+import { type CallHandler, ExecutionContext, Logger } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
-import { firstValueFrom, of } from 'rxjs';
+import { Observable, firstValueFrom } from 'rxjs';
 import { WsActorInterceptor } from './ws-actor.interceptor';
 
 interface MockSocket {
   readonly id: string;
   data: unknown;
+}
+
+interface Captured {
+  actor: unknown;
+  correlationId: unknown;
+  source: unknown;
 }
 
 type HttpArgumentsHost = ReturnType<ExecutionContext['switchToHttp']>;
@@ -39,12 +45,6 @@ const buildWsContext = (client: MockSocket, type: 'ws' | 'http' | 'rpc' = 'ws'):
     getType: <T extends string>() => type as T,
   }) satisfies Partial<ExecutionContext> as ExecutionContext;
 
-interface Captured {
-  readonly actor: unknown;
-  readonly correlationId: unknown;
-  readonly source: unknown;
-}
-
 describe('WsActorInterceptor', () => {
   let module: TestingModule;
   let interceptor: WsActorInterceptor;
@@ -67,28 +67,35 @@ describe('WsActorInterceptor', () => {
     await module.close();
   });
 
+  /**
+   * Drives the interceptor with a CallHandler that captures CLS state from
+   * within the runWith scope.
+   */
   const run = async (client: MockSocket, type: 'ws' | 'http' | 'rpc' = 'ws'): Promise<Captured> => {
-    let captured: Captured = {
+    const captured: Captured = {
       actor: undefined,
       correlationId: undefined,
       source: undefined,
     };
 
-    await cls.run(async () => {
-      const result$ = await interceptor.intercept(buildWsContext(client, type), { handle: () => of('next') });
-      await firstValueFrom(result$);
-      captured = {
-        actor: cls.get(ACTOR_CLS_KEY),
-        correlationId: cls.get(CORRELATION_ID_CLS_KEY),
-        source: cls.get(SOURCE_CLS_KEY),
-      };
-    });
+    const handler: CallHandler = {
+      handle: () =>
+        new Observable<string>((subscriber) => {
+          captured.actor = cls.get(ACTOR_CLS_KEY);
+          captured.correlationId = cls.get(CORRELATION_ID_CLS_KEY);
+          captured.source = cls.get(SOURCE_CLS_KEY);
+          subscriber.next('next-result');
+          subscriber.complete();
+        }),
+    };
 
+    const result$ = interceptor.intercept(buildWsContext(client, type), handler);
+    await firstValueFrom(result$);
     return captured;
   };
 
   describe('populated client.data', () => {
-    it('populates CLS from socket.data', async () => {
+    it('opens a CLS scope with the actor from socket.data', async () => {
       const data: BaseClientData = {
         userId: 'user-7',
         actor: { kind: 'user', userId: 'user-7' },
@@ -104,7 +111,7 @@ describe('WsActorInterceptor', () => {
       expect(errorSpy).not.toHaveBeenCalled();
     });
 
-    it('produces an isolated CLS scope per call', async () => {
+    it('produces isolated CLS scopes per call', async () => {
       const a: BaseClientData = {
         userId: 'a',
         actor: { kind: 'user', userId: 'a' },
@@ -120,11 +127,13 @@ describe('WsActorInterceptor', () => {
 
       expect(first.actor).toEqual(a.actor);
       expect(second.actor).toEqual(b.actor);
+      expect(first.correlationId).toBe('c-a');
+      expect(second.correlationId).toBe('c-b');
     });
   });
 
   describe('missing or malformed client.data', () => {
-    it('logs an error and does not populate CLS when data is undefined', async () => {
+    it('logs an error and does not open a scope when data is undefined', async () => {
       const captured = await run({ id: 'socket-x', data: undefined });
 
       expect(captured).toEqual({
@@ -135,7 +144,7 @@ describe('WsActorInterceptor', () => {
       expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/without populated client\.data/));
     });
 
-    it('logs an error when actor is missing from data', async () => {
+    it('logs an error when actor is missing', async () => {
       const partial: Partial<BaseClientData> = {
         userId: 'u',
         correlationId: 'c',
@@ -145,7 +154,7 @@ describe('WsActorInterceptor', () => {
       expect(errorSpy).toHaveBeenCalled();
     });
 
-    it('logs an error when correlationId is missing from data', async () => {
+    it('logs an error when correlationId is missing', async () => {
       const partial: Partial<BaseClientData> = {
         userId: 'u',
         actor: { kind: 'user', userId: 'u' },

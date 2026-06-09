@@ -93,6 +93,9 @@
     },
     {
       "path": "../../libs/api/auth/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/actor-context-transport/tsconfig.lib.json"
     }
   ]
 }

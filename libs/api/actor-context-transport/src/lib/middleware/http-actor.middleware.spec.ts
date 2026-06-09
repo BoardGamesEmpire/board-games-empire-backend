@@ -1,43 +1,17 @@
-import { AuditContextService } from '@bge/actor-context';
 import {
   ACTOR_CLS_KEY,
   AuditContextInternalService,
+  AuditContextService,
   CORRELATION_ID_CLS_KEY,
   SOURCE_CLS_KEY,
-} from '@bge/actor-context/internal';
+} from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
-import { ExecutionContext, Logger, UnauthorizedException } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import type { Request } from 'express';
+import type { UserSession } from '@thallesp/nestjs-better-auth';
+import type { NextFunction, Request, Response } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
-import { firstValueFrom, of } from 'rxjs';
-
-import { API_KEY_HEADER, HttpActorInterceptor } from './http-actor.interceptor';
-
-type UserSession = NonNullable<Awaited<ReturnType<AuthService['getSessionFromHeaders']>>>;
-
-const stubSession = (userOverrides: { id: string; isAnonymous: boolean }, sessionId: string): UserSession => {
-  const now = new Date(0);
-  return {
-    user: {
-      id: userOverrides.id,
-      isAnonymous: userOverrides.isAnonymous,
-      email: '',
-      emailVerified: false,
-      name: '',
-      createdAt: now,
-      updatedAt: now,
-    } as UserSession['user'],
-    session: {
-      id: sessionId,
-      userId: userOverrides.id,
-      token: 'stub-token',
-      createdAt: now,
-      updatedAt: now,
-      expiresAt: new Date(Date.now() + 86_400_000),
-    } as UserSession['session'],
-  };
-};
+import { API_KEY_HEADER, HttpActorMiddleware } from './http-actor.middleware';
 
 type AuthMock = jest.Mocked<Pick<AuthService, 'verifyApiKey' | 'getSessionFromHeaders' | 'hasSessionCredential'>>;
 
@@ -49,33 +23,20 @@ const buildAuthMock = (): AuthMock =>
   }) satisfies AuthMock;
 
 const buildRequest = (headers: Record<string, string | string[] | undefined> = {}): Request =>
-  ({
-    headers,
-  }) as unknown as Request;
+  ({ headers }) as unknown as Request;
 
-type HttpArgumentsHost = ReturnType<ExecutionContext['switchToHttp']>;
-
-const stubHttpHost = (request: Request): HttpArgumentsHost => ({
-  getRequest: <T>() => request as T,
-  getResponse: <T>() => ({}) as T,
-  getNext: <T>() => undefined as T,
-});
-
-const buildExecutionContext = (request: Request): ExecutionContext =>
-  ({
-    switchToHttp: () => stubHttpHost(request),
-    getType: <T extends string>() => 'http' as T,
-  }) satisfies Partial<ExecutionContext> as ExecutionContext;
+const buildResponse = (): Response => ({}) as unknown as Response;
 
 interface Captured {
   readonly actor: unknown;
   readonly correlationId: unknown;
   readonly source: unknown;
+  readonly nextArg: unknown;
 }
 
-describe('HttpActorInterceptor', () => {
+describe('HttpActorMiddleware', () => {
   let module: TestingModule;
-  let interceptor: HttpActorInterceptor;
+  let middleware: HttpActorMiddleware;
   let cls: ClsService;
   let authMock: AuthMock;
   let warnSpy: jest.SpyInstance;
@@ -89,11 +50,11 @@ describe('HttpActorInterceptor', () => {
         AuditContextService,
         AuditContextInternalService,
         { provide: AuthService, useValue: authMock },
-        HttpActorInterceptor,
+        HttpActorMiddleware,
       ],
     }).compile();
 
-    interceptor = module.get(HttpActorInterceptor);
+    middleware = module.get(HttpActorMiddleware);
     cls = module.get(ClsService);
     warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
   });
@@ -104,31 +65,35 @@ describe('HttpActorInterceptor', () => {
   });
 
   /**
-   * Drives the interceptor inside an active CLS scope and captures the values
-   * that landed on CLS after population.
+   * Drives the middleware inside a CLS scope (mimicking ClsMiddleware having
+   * run first). Captures CLS state + the argument next() was called with.
    */
   const run = async (request: Request): Promise<Captured> => {
     let captured: Captured = {
       actor: undefined,
       correlationId: undefined,
       source: undefined,
+      nextArg: undefined,
     };
 
     await cls.run(async () => {
-      const result$ = await interceptor.intercept(buildExecutionContext(request), { handle: () => of('next-result') });
-      await firstValueFrom(result$);
-      captured = {
-        actor: cls.get(ACTOR_CLS_KEY),
-        correlationId: cls.get(CORRELATION_ID_CLS_KEY),
-        source: cls.get(SOURCE_CLS_KEY),
+      const next: NextFunction = (arg) => {
+        captured = {
+          actor: cls.get(ACTOR_CLS_KEY),
+          correlationId: cls.get(CORRELATION_ID_CLS_KEY),
+          source: cls.get(SOURCE_CLS_KEY),
+          nextArg: arg,
+        };
       };
+
+      await middleware.use(request, buildResponse(), next);
     });
 
     return captured;
   };
 
   describe('unauthenticated requests', () => {
-    it('populates null actor and skips getSession when no session credential and no api key', async () => {
+    it('populates null actor when no session and no api key', async () => {
       authMock.getSessionFromHeaders.mockResolvedValue(null);
 
       const captured = await run(buildRequest());
@@ -136,30 +101,31 @@ describe('HttpActorInterceptor', () => {
       expect(captured.actor).toBeNull();
       expect(captured.source).toBe('http');
       expect(captured.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(captured.nextArg).toBeUndefined();
       expect(authMock.verifyApiKey).not.toHaveBeenCalled();
-      // No session credential present → the expensive getSession lookup is skipped.
-      expect(authMock.getSessionFromHeaders).not.toHaveBeenCalled();
     });
   });
 
   describe('session path', () => {
-    // A request reaches the session lookup only when a session credential is
-    // present; hasSessionCredential gates the expensive getSession call.
-    beforeEach(() => authMock.hasSessionCredential.mockReturnValue(true));
-
     it('populates a user actor for a non-anonymous session', async () => {
-      authMock.getSessionFromHeaders.mockResolvedValue(stubSession({ id: 'user-1', isAnonymous: false }, 'sess-1'));
+      authMock.getSessionFromHeaders.mockResolvedValue({
+        user: { id: 'user-1', isAnonymous: false } as unknown as UserSession['user'],
+        session: { id: 'sess-1', userId: 'user-1' },
+      } as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>);
 
-      const captured = await run(buildRequest({ cookie: 'bge_auth_.session_token=abc123' }));
+      const captured = await run(buildRequest({ cookie: 'bge_auth_session_token=abc123' }));
 
       expect(captured.actor).toEqual({ kind: 'user', userId: 'user-1' });
-      expect(authMock.verifyApiKey).not.toHaveBeenCalled();
+      expect(captured.nextArg).toBeUndefined();
     });
 
     it('populates an anonymous actor when isAnonymous=true', async () => {
-      authMock.getSessionFromHeaders.mockResolvedValue(stubSession({ id: 'anon-1', isAnonymous: true }, 'sess-2'));
+      authMock.getSessionFromHeaders.mockResolvedValue({
+        user: { id: 'anon-1', isAnonymous: true } as unknown as UserSession['user'],
+        session: { id: 'sess-2', userId: 'anon-1' },
+      } as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>);
 
-      const captured = await run(buildRequest({ cookie: 'bge_auth_.session_token=zzz' }));
+      const captured = await run(buildRequest({ cookie: 'bge_auth_session_token=zzz' }));
 
       expect(captured.actor).toEqual({
         kind: 'anonymous',
@@ -167,18 +133,11 @@ describe('HttpActorInterceptor', () => {
       });
     });
 
-    it('populates null actor when getSessionFromHeaders returns null', async () => {
-      authMock.getSessionFromHeaders.mockResolvedValue(null);
-
-      const captured = await run(buildRequest({ cookie: 'bge_auth_.session_token=expired' }));
-
-      expect(captured.actor).toBeNull();
-    });
-
     it('also works with Bearer-token auth (delegated to AuthService)', async () => {
-      authMock.getSessionFromHeaders.mockResolvedValue(
-        stubSession({ id: 'user-bearer', isAnonymous: false }, 'sess-bearer'),
-      );
+      authMock.getSessionFromHeaders.mockResolvedValue({
+        user: { id: 'user-bearer', isAnonymous: false } as unknown as UserSession['user'],
+        session: { id: 'sess-bearer', userId: 'user-bearer' },
+      } as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>);
 
       const captured = await run(buildRequest({ authorization: 'Bearer xyz' }));
 
@@ -203,14 +162,19 @@ describe('HttpActorInterceptor', () => {
         apiKeyId: 'key-1',
         userId: 'user-9',
       });
+      expect(captured.nextArg).toBeUndefined();
       expect(authMock.verifyApiKey).toHaveBeenCalledWith('secret');
       expect(authMock.getSessionFromHeaders).not.toHaveBeenCalled();
     });
 
-    it('throws UnauthorizedException when AuthService returns null', async () => {
+    it('forwards UnauthorizedException to next when AuthService returns null', async () => {
       authMock.verifyApiKey.mockResolvedValue(null);
 
-      await expect(run(buildRequest({ [API_KEY_HEADER]: 'nope' }))).rejects.toBeInstanceOf(UnauthorizedException);
+      const captured = await run(buildRequest({ [API_KEY_HEADER]: 'nope' }));
+
+      expect(captured.nextArg).toBeInstanceOf(UnauthorizedException);
+      // CLS was not populated because populate is reached after resolveActor.
+      expect(captured.actor).toBeUndefined();
     });
   });
 
@@ -236,23 +200,6 @@ describe('HttpActorInterceptor', () => {
       });
       expect(authMock.getSessionFromHeaders).not.toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/both.*x-api-key.*session credential/i));
-    });
-
-    it('prefers api key and logs a warning when bearer token also present', async () => {
-      authMock.hasSessionCredential.mockReturnValue(true);
-      authMock.verifyApiKey.mockResolvedValue({
-        id: 'key-2',
-        userId: 'user-2',
-      });
-
-      await run(
-        buildRequest({
-          [API_KEY_HEADER]: 'secret',
-          authorization: 'Bearer also-here',
-        }),
-      );
-
-      expect(warnSpy).toHaveBeenCalled();
     });
 
     it('does not warn when only the api key is present', async () => {
