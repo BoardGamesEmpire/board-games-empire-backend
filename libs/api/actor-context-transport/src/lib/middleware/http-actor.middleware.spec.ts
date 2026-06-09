@@ -107,6 +107,10 @@ describe('HttpActorMiddleware', () => {
   });
 
   describe('session path', () => {
+    // A request reaches the session lookup only when a session credential is
+    // present; hasSessionCredential gates the expensive getSession call.
+    beforeEach(() => authMock.hasSessionCredential.mockReturnValue(true));
+
     it('populates a user actor for a non-anonymous session', async () => {
       authMock.getSessionFromHeaders.mockResolvedValue({
         user: { id: 'user-1', isAnonymous: false } as unknown as UserSession['user'],
