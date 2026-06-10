@@ -1,10 +1,6 @@
 import { DeploymentRuntime } from '@bge/database';
 import { Test, TestingModule } from '@nestjs/testing';
-import {
-  DEPLOYMENT_SIGNALS,
-  DeploymentInfoService,
-  type DeploymentSignals,
-} from './deployment-info.service';
+import { DEPLOYMENT_SIGNALS, DeploymentInfoService, type DeploymentSignals } from './deployment-info.service';
 
 /**
  * Pure-signal detection — every test injects a deterministic `DeploymentSignals`
@@ -112,7 +108,7 @@ describe('DeploymentInfoService', () => {
     });
   });
 
-  describe('caching behaviour', () => {
+  describe('caching behavior', () => {
     it('caches detection on module init and returns the same info thereafter', async () => {
       const signals = makeSignals({ env: { KUBERNETES_SERVICE_HOST: '10.0.0.1' } });
       const service = await buildService(signals);

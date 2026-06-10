@@ -1,4 +1,3 @@
-import { env as environment } from '@bge/env';
 import { context, trace } from '@opentelemetry/api';
 import type { LoggerOptions, TransportTargetOptions } from 'pino';
 
@@ -43,22 +42,30 @@ export function otelTraceMixin(): Record<string, string> {
  *
  * - {@link otelTraceMixin} is always applied so every record carries
  *   trace correlation when a span is active.
- * - When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, `pino-opentelemetry-transport`
- *   is configured as the pino transport target. Logs are forwarded to the
- *   OTel Logs SDK and exported via the OTLP collector alongside spans.
- *   `OTEL_RESOURCE_ATTRIBUTES` is forwarded so log records share the same
- *   Resource as their associated spans.
- * - When `OTEL_EXPORTER_OTLP_ENDPOINT` is unset, no transport is
- *   configured — pino falls back to its default (stdout) behavior.
+ * - The log level is read from `env['LOG_LEVEL']`, defaulting to
+ *   `'info'` when `env['NODE_ENV'] === 'production'` and `'debug'`
+ *   otherwise.
+ * - A `pino-pretty` transport target is always configured.
+ * - When `env['OTEL_EXPORTER_OTLP_ENDPOINT']` is set,
+ *   `pino-opentelemetry-transport` is added as a second target. Logs
+ *   are forwarded to the OTel Logs SDK and exported via the OTLP
+ *   collector alongside spans. `env['OTEL_RESOURCE_ATTRIBUTES']` is
+ *   forwarded so log records share the same Resource as their
+ *   associated spans.
+ *
+ * Every env-derived value is read from the `env` parameter (default:
+ * `process.env`). The function intentionally does not consult
+ * `@bge/env` or `process.env` directly — passing a custom `env` object
+ * fully controls the produced options, which keeps tests deterministic
+ * and matches the parameter contract a caller would reasonably expect.
  *
  * Designed to be merged into `nestjs-pino`'s `LoggerModule` configuration
  * via spread. The caller is responsible for app-specific pino options
- * (log level, serializers, redaction rules).
+ * not derived from env (serializers, redaction rules, custom hooks).
  */
 export function buildOtelPinoOptions(env: NodeJS.ProcessEnv = process.env): LoggerOptions {
-  const level = environment.provide('LOG_LEVEL', {
-    defaultValue: environment.isProduction ? 'info' : 'debug',
-  });
+  const isProduction = env['NODE_ENV'] === 'production';
+  const level = env['LOG_LEVEL'] ?? (isProduction ? 'info' : 'debug');
 
   const transportTargets: TransportTargetOptions[] = [
     {

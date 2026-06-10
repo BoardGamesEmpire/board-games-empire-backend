@@ -1,4 +1,5 @@
 import type { Span, SpanContext } from '@opentelemetry/api';
+import type { TransportTargetOptions } from 'pino';
 
 jest.mock('@opentelemetry/api', () => {
   const actual = jest.requireActual<typeof import('@opentelemetry/api')>('@opentelemetry/api');
@@ -112,5 +113,56 @@ describe('buildOtelPinoOptions', () => {
         process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = originalEndpoint;
       }
     }
+  });
+
+  describe('log level', () => {
+    // Every assertion in this block reads the level from the produced
+    // options. The function under test must derive the level from the
+    // `env` parameter — never from `process.env` or `@bge/env` —
+    // otherwise the test runner's environment would leak into these
+    // results and the parameter contract would be violated.
+
+    it('uses LOG_LEVEL from the passed env when set', () => {
+      const options = buildOtelPinoOptions({ LOG_LEVEL: 'trace' });
+
+      expect(options.level).toBe('trace');
+    });
+
+    it('defaults to "info" when NODE_ENV is "production" and LOG_LEVEL is unset', () => {
+      const options = buildOtelPinoOptions({ NODE_ENV: 'production' });
+
+      expect(options.level).toBe('info');
+    });
+
+    it('defaults to "debug" when NODE_ENV is not "production" and LOG_LEVEL is unset', () => {
+      const options = buildOtelPinoOptions({ NODE_ENV: 'development' });
+
+      expect(options.level).toBe('debug');
+    });
+
+    it('defaults to "debug" when both NODE_ENV and LOG_LEVEL are unset', () => {
+      const options = buildOtelPinoOptions({});
+
+      expect(options.level).toBe('debug');
+    });
+
+    it('LOG_LEVEL takes precedence over the NODE_ENV-derived default', () => {
+      const options = buildOtelPinoOptions({ NODE_ENV: 'production', LOG_LEVEL: 'trace' });
+
+      expect(options.level).toBe('trace');
+    });
+
+    it('applies the resolved level to every transport target', () => {
+      const options = buildOtelPinoOptions({
+        LOG_LEVEL: 'warn',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+      }) as unknown as { transport: { targets: TransportTargetOptions[] } };
+
+      const targets = options.transport.targets as unknown as TransportTargetOptions[];
+      expect(targets).toHaveLength(2);
+      for (const target of targets) {
+        expect(target.level).toBe('warn');
+      }
+    });
   });
 });
