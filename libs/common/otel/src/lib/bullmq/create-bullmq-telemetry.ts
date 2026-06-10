@@ -1,5 +1,5 @@
 import { BullMQOtel } from 'bullmq-otel';
-import { OTEL_EXPORTER_NONE, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
+import { metricsExportEnabled } from '../init/metrics-enabled';
 
 /**
  * Configuration for {@link createBullMQTelemetry}.
@@ -56,23 +56,25 @@ export interface CreateBullMQTelemetryOptions {
  *
  * - **Job-level metrics** (counters for completed/failed/delayed/
  *   retried/waiting/waiting_children; histogram for job duration) when
- *   `OTEL_METRICS_EXPORTER=otlp`. Queue depth gauge values are
- *   recorded via {@link BullMQQueueDepthRecorder}, which calls
+ *   metrics export is enabled. Queue depth gauge values are kept
+ *   fresh by {@link BullMQQueueDepthRecorder}, which calls
  *   `queue.recordJobCountsMetric()` on a timer.
  *
  * ## Activation matrix
  *
- * `enableMetrics` is opted into automatically when
- * `OTEL_METRICS_EXPORTER=otlp`. When the env var is unset or `'none'`
- * (the @bge/otel default — see {@link OTEL_METRICS_EXPORTER_ENV}),
- * the returned telemetry instance still propagates trace context and
- * produces lifecycle spans, but does not register any meter, so all
- * `meter.createCounter(...)` calls become no-ops.
+ * Metrics are enabled when {@link metricsExportEnabled} returns true —
+ * `OTEL_METRICS_EXPORTER=otlp` AND an OTLP endpoint is configured
+ * (general `OTEL_EXPORTER_OTLP_ENDPOINT` or the per-signal
+ * `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`). When the gate is closed
+ * (the default — `@bge/otel`'s `defaultSignalExporters` sets the
+ * exporter to `'none'` when unset), the returned telemetry instance
+ * still propagates trace context and produces lifecycle spans, but
+ * does not register any meter, so all `meter.createCounter(...)`
+ * calls become no-ops.
  *
- * NOTE: this check intentionally duplicates the logic in
- * {@link resolveMetricReader} in `init-otel.ts`. Both must agree on
- * what "metrics enabled" means; consolidate if the activation matrix
- * grows. Today it's a single env-var check.
+ * The activation gate is shared with `resolveMetricReader` in
+ * `init-otel.ts` and with `BullMQQueueDepthRecorder` — all three
+ * consult the same {@link metricsExportEnabled} helper.
  */
 export function createBullMQTelemetry(options: CreateBullMQTelemetryOptions = {}): BullMQOtel {
   return new BullMQOtel({
@@ -81,14 +83,4 @@ export function createBullMQTelemetry(options: CreateBullMQTelemetryOptions = {}
     version: options.version,
     enableMetrics: metricsExportEnabled(),
   });
-}
-
-/**
- * Returns true when the operator has opted into metrics export via
- * `OTEL_METRICS_EXPORTER=otlp`. Mirrors the activation check in
- * `resolveMetricReader`.
- */
-function metricsExportEnabled(): boolean {
-  const exporter = process.env[OTEL_METRICS_EXPORTER_ENV];
-  return exporter !== undefined && exporter !== OTEL_EXPORTER_NONE && exporter !== '';
 }

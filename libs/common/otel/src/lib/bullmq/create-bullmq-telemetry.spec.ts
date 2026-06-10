@@ -1,5 +1,5 @@
 import { BullMQOtel } from 'bullmq-otel';
-import { OTEL_EXPORTER_NONE, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
+import { OTEL_EXPORTER_NONE, OTEL_EXPORTER_OTLP_ENDPOINT_ENV, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
 import { createBullMQTelemetry } from './create-bullmq-telemetry';
 
 const restoreEnvVar = (name: string, original: string | undefined): void => {
@@ -12,13 +12,16 @@ const restoreEnvVar = (name: string, original: string | undefined): void => {
 
 describe('createBullMQTelemetry', () => {
   let originalMetricsExporter: string | undefined;
+  let originalEndpoint: string | undefined;
 
   beforeEach(() => {
     originalMetricsExporter = process.env[OTEL_METRICS_EXPORTER_ENV];
+    originalEndpoint = process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
   });
 
   afterEach(() => {
     restoreEnvVar(OTEL_METRICS_EXPORTER_ENV, originalMetricsExporter);
+    restoreEnvVar(OTEL_EXPORTER_OTLP_ENDPOINT_ENV, originalEndpoint);
   });
 
   describe('return shape', () => {
@@ -30,6 +33,7 @@ describe('createBullMQTelemetry', () => {
 
     it('exposes a tracer regardless of metrics configuration', () => {
       delete process.env[OTEL_METRICS_EXPORTER_ENV];
+      delete process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
       const telemetry = createBullMQTelemetry();
 
       expect(telemetry.tracer).toBeDefined();
@@ -45,6 +49,7 @@ describe('createBullMQTelemetry', () => {
   describe('metrics activation', () => {
     it('does NOT create a meter when OTEL_METRICS_EXPORTER is unset', () => {
       delete process.env[OTEL_METRICS_EXPORTER_ENV];
+      delete process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
 
       const telemetry = createBullMQTelemetry();
 
@@ -53,6 +58,7 @@ describe('createBullMQTelemetry', () => {
 
     it('does NOT create a meter when OTEL_METRICS_EXPORTER is "none"', () => {
       process.env[OTEL_METRICS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
+      process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV] = 'http://localhost:4318';
 
       const telemetry = createBullMQTelemetry();
 
@@ -61,25 +67,42 @@ describe('createBullMQTelemetry', () => {
 
     it('does NOT create a meter when OTEL_METRICS_EXPORTER is empty string', () => {
       process.env[OTEL_METRICS_EXPORTER_ENV] = '';
+      process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV] = 'http://localhost:4318';
 
       const telemetry = createBullMQTelemetry();
 
       expect(telemetry.meter).toBeUndefined();
     });
 
-    it('creates a meter when OTEL_METRICS_EXPORTER is "otlp"', () => {
-      process.env[OTEL_METRICS_EXPORTER_ENV] = 'otlp';
+    it('does NOT create a meter when OTEL_METRICS_EXPORTER is a non-"otlp" value', () => {
+      // Documents that the activation gate requires OTLP specifically —
+      // setting a future exporter value (e.g. 'prometheus') does NOT
+      // implicitly enable bullmq-otel's meter, because `@bge/otel`
+      // deliberately bypasses NodeSDK's auto-configuration of non-OTLP
+      // exporters. Enabling them here would create meters with no
+      // actual exporter behind them.
+      process.env[OTEL_METRICS_EXPORTER_ENV] = 'prometheus';
+      process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV] = 'http://localhost:4318';
 
       const telemetry = createBullMQTelemetry();
 
-      expect(telemetry.meter).toBeDefined();
+      expect(telemetry.meter).toBeUndefined();
     });
 
-    it('creates a meter for any non-"none" exporter value (forward compatible)', () => {
-      // BullMQOtel itself only branches on truthiness of enableMetrics —
-      // future exporter names (e.g. 'prometheus') should not silently
-      // turn off the meter. Verify we don't pin to 'otlp' specifically.
-      process.env[OTEL_METRICS_EXPORTER_ENV] = 'prometheus';
+    it('does NOT create a meter when OTEL_METRICS_EXPORTER is "otlp" but no endpoint is configured', () => {
+      // The gate requires BOTH conditions. Without an endpoint, the
+      // metrics would have nowhere to go.
+      process.env[OTEL_METRICS_EXPORTER_ENV] = 'otlp';
+      delete process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
+
+      const telemetry = createBullMQTelemetry();
+
+      expect(telemetry.meter).toBeUndefined();
+    });
+
+    it('creates a meter when OTEL_METRICS_EXPORTER is "otlp" and an endpoint is set', () => {
+      process.env[OTEL_METRICS_EXPORTER_ENV] = 'otlp';
+      process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV] = 'http://localhost:4318';
 
       const telemetry = createBullMQTelemetry();
 

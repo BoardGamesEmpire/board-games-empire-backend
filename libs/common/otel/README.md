@@ -27,33 +27,42 @@ registerShutdownHandlers(app, otel, bootstrapLogger);
 Each app's NestJS module:
 
 ```ts
-import { BullMQMetricsModule, buildOtelPinoOptions } from '@bge/otel';
+import { BullMQQueueDepthRecorderModule, buildOtelPinoOptions, createBullMQTelemetry } from '@bge/otel';
 
 @Module({
   imports: [
     LoggerModule.forRoot({ pinoHttp: buildOtelPinoOptions() }),
-    BullMQMetricsModule,
+    BullModule.forRoot({
+      connection: queueRedisClient,
+      telemetry: createBullMQTelemetry(),
+    }),
+    BullMQQueueDepthRecorderModule,
     // ...
   ],
 })
 export class AppModule {}
 ```
 
+`createBullMQTelemetry()` wraps `bullmq-otel` and emits the BullMQ metrics + lifecycle spans; `BullMQQueueDepthRecorderModule` keeps the `bullmq.queue.jobs` gauge fresh by calling `Queue#recordJobCountsMetric()` on a timer. Wire both — the recorder by itself emits nothing.
+
 ## Environment variables
 
 All standard OTel vars. The two `*_EXPORTER` vars are forced to `none` if unset to prevent NodeSDK from auto-configuring exporters that would either fail (no collector for metrics) or double-ship (logs via both SDK and pino transport).
 
-| Variable                      | Default         | Purpose                                                                                             |
-| ----------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset           | Collector URL. Unset → instrumentation runs in-process, nothing exported.                           |
-| `OTEL_EXPORTER_OTLP_PROTOCOL` | `http/protobuf` | `grpc` or `http/protobuf`. Applies to all signals.                                                  |
-| `OTEL_METRICS_EXPORTER`       | `none` (forced) | Set to `otlp` to enable BGE + auto-instrumentation metrics.                                         |
-| `OTEL_LOGS_EXPORTER`          | `none` (forced) | Logs flow via `pino-opentelemetry-transport`; SDK-side export is suppressed to prevent double-ship. |
-| `OTEL_RESOURCE_ATTRIBUTES`    | unset           | Additional resource labels.                                                                         |
-| `OTEL_LOG_LEVEL`              | unset           | SDK-internal diagnostic level. Bridged to pino.                                                     |
-| `OTEL_METRIC_EXPORT_INTERVAL` | `60000` ms      | Metric collection cycle.                                                                            |
+| Variable                              | Default         | Purpose                                                                                                   |
+| ------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | unset           | Collector URL. Unset → instrumentation runs in-process, nothing exported.                                 |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | unset           | Per-signal override for metrics. Honored alongside the general endpoint.                                  |
+| `OTEL_EXPORTER_OTLP_PROTOCOL`         | `http/protobuf` | `grpc` or `http/protobuf`. Applies to all signals.                                                        |
+| `OTEL_METRICS_EXPORTER`               | `none` (forced) | Set to `otlp` to enable BGE + auto-instrumentation metrics.                                               |
+| `OTEL_LOGS_EXPORTER`                  | `none` (forced) | Logs flow via `pino-opentelemetry-transport`; SDK-side export is suppressed to prevent double-ship.       |
+| `OTEL_RESOURCE_ATTRIBUTES`            | unset           | Additional resource labels.                                                                               |
+| `OTEL_LOG_LEVEL`                      | unset           | SDK-internal diagnostic level. Parsed (`none` / `error` / `warn` / `info` / `debug` / `verbose` / `all`). |
+| `OTEL_METRIC_EXPORT_INTERVAL`         | `60000` ms      | Metric collection cycle.                                                                                  |
 
 ### Activation matrix
+
+Metrics are enabled when BOTH `OTEL_METRICS_EXPORTER=otlp` AND an OTLP endpoint is configured (general or per-signal). This is the single gate consulted by the SDK metric reader, `createBullMQTelemetry()`, and `BullMQQueueDepthRecorder` — all three agree by construction (see `libs/common/otel/src/lib/init/metrics-enabled.ts`).
 
 | Endpoint set? | `OTEL_METRICS_EXPORTER=otlp`? | Result                                                 |
 | ------------- | ----------------------------- | ------------------------------------------------------ |
@@ -82,13 +91,20 @@ Via `@opentelemetry/auto-instrumentations-node`: HTTP server/client, gRPC server
 
 ## Custom metrics
 
-`BullMQMetricsModule` exposes one metric:
+BullMQ metrics come from two cooperating pieces:
 
-| Metric              | Type             | Attributes                  | Unit     |
-| ------------------- | ---------------- | --------------------------- | -------- |
-| `bullmq.queue.jobs` | observable gauge | `queue.name`, `queue.state` | `{jobs}` |
+- **`createBullMQTelemetry()`** — passed to `BullModule.forRoot({ telemetry: ... })`. Wraps `bullmq-otel`, which registers the meter and emits `bullmq.queue.jobs` (regular gauge) plus lifecycle counters for completed / failed / retried / delayed jobs and a histogram for job duration. Trace context propagation across the queue boundary also rides on this.
+- **`BullMQQueueDepthRecorderModule`** — discovers every `Queue` instance via `DiscoveryService` and calls `queue.recordJobCountsMetric()` on a timer. The gauge is a regular OTel Gauge (not an `ObservableGauge`), so its value only updates when something invokes the recording method. Without this, the gauge would stay stale at whatever it was last set to.
 
-States observed: `waiting`, `active`, `delayed`, `failed`, `completed`, `paused`, `waiting-children`. One Redis round-trip per queue per collection cycle. Per-queue failure isolation — one broken Redis connection does not silence healthy queues.
+Gauge details:
+
+| Metric              | Type  | Attributes                  | Unit     |
+| ------------------- | ----- | --------------------------- | -------- |
+| `bullmq.queue.jobs` | gauge | `queue.name`, `queue.state` | `{jobs}` |
+
+States observed: `waiting`, `active`, `delayed`, `failed`, `completed`, `paused`, `waiting-children`. One Redis round-trip per queue per `OTEL_METRIC_EXPORT_INTERVAL`. Per-queue failure isolation — one broken Redis connection does not silence healthy queues.
+
+Both pieces consult the same activation gate. When the gate is closed (the default), `createBullMQTelemetry()` returns a telemetry instance with no meter and the recorder stays idle — trace propagation still works.
 
 Auto-instrumentations contribute their own metrics (HTTP request duration histograms, gRPC server metrics, Prisma query duration) flowing through the same exporter once metrics are enabled.
 
@@ -159,3 +175,4 @@ Do **not** also call `app.enableShutdownHooks()` — Nest's own signal handlers 
 
 - **#72** — original observability scope
 - **#57** — actor context infrastructure (audit log foundation)
+- **#81** — Prisma client metrics bridge (follow-up)

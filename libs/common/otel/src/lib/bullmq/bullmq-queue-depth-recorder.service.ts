@@ -1,7 +1,7 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnApplicationShutdown } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { Queue } from 'bullmq';
-import { OTEL_EXPORTER_NONE, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
+import { metricsExportEnabled } from '../init/metrics-enabled';
 
 const DEFAULT_INTERVAL_MS = 60_000;
 const METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
@@ -23,9 +23,12 @@ const METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
  * registered via `BullModule.registerQueue(...)` regardless of injection
  * token shape, so adding a new queue requires no changes here.
  *
- * Activation: idles when `OTEL_METRICS_EXPORTER` is unset or `'none'` —
+ * Activation: idles unless {@link metricsExportEnabled} returns true —
  * the bullmq-otel telemetry instance is also idle in that case, so
- * polling Redis just to call into a no-op meter would be wasteful.
+ * polling Redis just to call into a no-op meter would be wasteful. The
+ * same gate is consulted by `resolveMetricReader` and
+ * `createBullMQTelemetry`, so the three pieces always agree on whether
+ * metrics export is active.
  *
  * Failure isolation: per-queue try/catch around `recordJobCountsMetric`,
  * so one broken Redis connection does not stop other queues from being
@@ -41,10 +44,7 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
 
   onApplicationBootstrap(): void {
     if (!metricsExportEnabled()) {
-      this.logger.debug(
-        `Metrics export not enabled (${OTEL_METRICS_EXPORTER_ENV} is unset or "${OTEL_EXPORTER_NONE}"); ` +
-          'queue depth recorder is idle',
-      );
+      this.logger.debug('Metrics export not enabled; queue depth recorder is idle');
       return;
     }
 
@@ -89,11 +89,6 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
       .map((wrapper) => wrapper.instance as unknown)
       .filter((instance): instance is Queue => instance instanceof Queue);
   }
-}
-
-function metricsExportEnabled(): boolean {
-  const exporter = process.env[OTEL_METRICS_EXPORTER_ENV];
-  return exporter !== undefined && exporter !== OTEL_EXPORTER_NONE && exporter !== '';
 }
 
 function readIntervalMs(): number {

@@ -9,6 +9,7 @@ import { PeriodicExportingMetricReader, type MetricReader } from '@opentelemetry
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { BatchSpanProcessor, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
+import { metricsExportEnabled } from './metrics-enabled';
 import {
   DEFAULT_SERVICE_NAMESPACE,
   OTEL_EXPORTER_NONE,
@@ -31,6 +32,21 @@ export interface OtelBootstrapHandle {
 }
 
 /**
+ * Maps OTel-standard `OTEL_LOG_LEVEL` string values to {@link DiagLogLevel}
+ * tokens. Comparison is case-insensitive. Unrecognized values fall
+ * through to {@link DiagLogLevel.INFO} at the call site.
+ */
+const OTEL_DIAG_LEVEL_MAP: Readonly<Record<string, DiagLogLevel>> = {
+  none: DiagLogLevel.NONE,
+  error: DiagLogLevel.ERROR,
+  warn: DiagLogLevel.WARN,
+  info: DiagLogLevel.INFO,
+  debug: DiagLogLevel.DEBUG,
+  verbose: DiagLogLevel.VERBOSE,
+  all: DiagLogLevel.ALL,
+};
+
+/**
  * Resolves the trace exporter based on standard OTel env vars. Returns
  * `undefined` when no endpoint is configured — the SDK then runs the
  * instrumentation pipeline but does not export. Defaults to
@@ -47,23 +63,24 @@ const resolveTraceExporter = (env: NodeJS.ProcessEnv): SpanExporter | undefined 
 /**
  * Resolves the metric reader based on opt-in env-var configuration.
  *
- * Returns `undefined` (no MeterProvider registered) unless BOTH:
- * - `OTEL_METRICS_EXPORTER=otlp` (explicit opt-in; default is `'none'`
- *   via {@link defaultSignalExporters}).
- * - `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
+ * Returns `undefined` (no MeterProvider registered) unless
+ * {@link metricsExportEnabled} returns true — i.e. `OTEL_METRICS_EXPORTER=otlp`
+ * AND at least one OTLP endpoint env (`OTEL_EXPORTER_OTLP_ENDPOINT` or
+ * the per-signal `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`) is set. The
+ * default for `OTEL_METRICS_EXPORTER` is `'none'` per
+ * {@link defaultSignalExporters}, so the operator must opt in
+ * deliberately.
  *
- * When unset, `metrics.getMeter` returns a `NoopMeter` and instruments
- * (including those registered by {@link BullMQMetricsService}) become
- * no-ops. This is safe to call from any code path without coordination.
+ * When the gate is closed, `metrics.getMeter` returns a `NoopMeter` and
+ * every instrument registered by `bullmq-otel` (driven by
+ * `BullMQQueueDepthRecorder`) and the auto-instrumentations becomes a
+ * no-op. Safe to call from any code path without coordination.
  *
  * Export interval respects `OTEL_METRIC_EXPORT_INTERVAL` via the
  * `PeriodicExportingMetricReader` default behaviour (60s when unset).
  */
 const resolveMetricReader = (env: NodeJS.ProcessEnv): MetricReader | undefined => {
-  if (env[OTEL_METRICS_EXPORTER_ENV] !== 'otlp') {
-    return undefined;
-  }
-  if (!env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV]) {
+  if (!metricsExportEnabled(env)) {
     return undefined;
   }
 
@@ -118,22 +135,27 @@ const defaultSignalExporters = (env: NodeJS.ProcessEnv): void => {
  *   `OTEL_EXPORTER_OTLP_ENDPOINT` is set, choosing the gRPC or HTTP
  *   exporter from `OTEL_EXPORTER_OTLP_PROTOCOL`.
  * - A {@link PeriodicExportingMetricReader} is registered ONLY when the
- *   operator explicitly sets `OTEL_METRICS_EXPORTER=otlp` AND endpoint
- *   is set. Default is no reader → metric instruments (including
- *   `bullmq.queue.jobs` from `BullMQMetricsService`) become no-ops.
+ *   gate in {@link metricsExportEnabled} is open — `OTEL_METRICS_EXPORTER=otlp`
+ *   plus an OTLP endpoint configured. Default is no reader → all metric
+ *   instruments (those emitted by `bullmq-otel`, kept fresh by
+ *   `BullMQQueueDepthRecorder`, and those from auto-instrumentations)
+ *   become no-ops.
  * - `OTEL_LOGS_EXPORTER` is defaulted to `'none'` when unset — see
  *   {@link defaultSignalExporters}.
  * - Internal OTel diagnostic logs are forwarded through `diag` to stderr
- *   when `OTEL_LOG_LEVEL` is set, so misconfiguration surfaces during
- *   bootstrap. Apps using `bootstrapObservability` override this with a
- *   pino-backed `DiagLogger` immediately after this call returns.
+ *   when `OTEL_LOG_LEVEL` is set; the value selects verbosity via
+ *   {@link OTEL_DIAG_LEVEL_MAP}. Apps using `bootstrapObservability`
+ *   override this with a pino-backed `DiagLogger` immediately after
+ *   this call returns.
  *
  * The returned handle's `shutdown` should be invoked from a Nest shutdown
  * hook (or a process signal handler) to drain in-flight exports.
  */
 export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
-  if (process.env['OTEL_LOG_LEVEL']) {
-    diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.INFO);
+  const otelLogLevel = process.env['OTEL_LOG_LEVEL'];
+  if (otelLogLevel) {
+    const level = OTEL_DIAG_LEVEL_MAP[otelLogLevel.toLowerCase()] ?? DiagLogLevel.INFO;
+    diag.setLogger(new DiagConsoleLogger(), level);
   }
 
   defaultSignalExporters(process.env);

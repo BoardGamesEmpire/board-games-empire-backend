@@ -1,8 +1,8 @@
-// OpenTelemetry SDK MUST be initialised before any module that should be
+import 'reflect-metadata';
+// OpenTelemetry SDK MUST be initialized before any module that should be
 // auto-instrumented is imported. Keep this block at the very top of main.ts.
 import { env } from '@bge/env';
 import { registerShutdownHandlers } from '@bge/otel';
-import 'reflect-metadata';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.

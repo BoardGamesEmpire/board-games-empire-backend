@@ -2,7 +2,7 @@ import { Logger } from '@nestjs/common';
 import type { Context } from '@opentelemetry/api';
 import type { ReadableSpan, Span, SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { BGE_OTEL_ATTRIBUTES } from '../constants/otel-attributes.constants';
-import type { ActorContextProvider } from './actor-context-provider';
+import type { ActorContextProvider, ActorSpanContext } from './actor-context-provider';
 
 /**
  * OpenTelemetry {@link SpanProcessor} that stamps BGE-specific
@@ -39,12 +39,11 @@ export class ActorSpanProcessor implements SpanProcessor {
   constructor(private readonly provider: ActorContextProvider) {}
 
   onStart(span: Span, _parentContext: Context): void {
-    let snapshot;
+    let snapshot: ActorSpanContext;
     try {
       snapshot = this.provider();
     } catch (error) {
-      this.logger.warn(`Actor context provider threw — span will not be annotated: ${(error as Error).message}`);
-      return;
+      return this.logger.warn(`Actor context provider threw — span will not be annotated: ${(error as Error).message}`);
     }
 
     const { actor, correlationId, householdId } = snapshot;

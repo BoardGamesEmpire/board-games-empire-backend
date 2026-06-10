@@ -17,7 +17,7 @@ jest.mock('bullmq', () => {
 import type { DiscoveryService } from '@nestjs/core';
 import type { InstanceWrapper } from '@nestjs/core/injector/instance-wrapper';
 import { Queue } from 'bullmq';
-import { OTEL_EXPORTER_NONE, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
+import { OTEL_EXPORTER_NONE, OTEL_EXPORTER_OTLP_ENDPOINT_ENV, OTEL_METRICS_EXPORTER_ENV } from '../init/otel.config';
 import { BullMQQueueDepthRecorder } from './bullmq-queue-depth-recorder.service';
 
 const METRIC_EXPORT_INTERVAL_ENV = 'OTEL_METRIC_EXPORT_INTERVAL';
@@ -49,14 +49,18 @@ const buildDiscoveryService = (queues: Queue[]): DiscoveryService => {
 
 describe('BullMQQueueDepthRecorder', () => {
   let originalMetricsExporter: string | undefined;
+  let originalEndpoint: string | undefined;
   let originalInterval: string | undefined;
 
   beforeEach(() => {
     originalMetricsExporter = process.env[OTEL_METRICS_EXPORTER_ENV];
+    originalEndpoint = process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
     originalInterval = process.env[METRIC_EXPORT_INTERVAL_ENV];
 
-    // Default: metrics enabled, so most tests don't need to set this.
+    // Default: metrics enabled (exporter opt-in + endpoint configured),
+    // so most tests don't need to set these.
     process.env[OTEL_METRICS_EXPORTER_ENV] = 'otlp';
+    process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV] = 'http://localhost:4318';
     delete process.env[METRIC_EXPORT_INTERVAL_ENV];
 
     jest.useFakeTimers();
@@ -65,6 +69,7 @@ describe('BullMQQueueDepthRecorder', () => {
   afterEach(() => {
     jest.useRealTimers();
     restoreEnvVar(OTEL_METRICS_EXPORTER_ENV, originalMetricsExporter);
+    restoreEnvVar(OTEL_EXPORTER_OTLP_ENDPOINT_ENV, originalEndpoint);
     restoreEnvVar(METRIC_EXPORT_INTERVAL_ENV, originalInterval);
   });
 
@@ -83,6 +88,20 @@ describe('BullMQQueueDepthRecorder', () => {
 
     it('does not start the timer when OTEL_METRICS_EXPORTER is "none"', () => {
       process.env[OTEL_METRICS_EXPORTER_ENV] = OTEL_EXPORTER_NONE;
+      const queue = new Queue('test-queue') as unknown as MockedQueue;
+      const discovery = buildDiscoveryService([queue as unknown as Queue]);
+      const recorder = new BullMQQueueDepthRecorder(discovery);
+
+      recorder.onApplicationBootstrap();
+      jest.advanceTimersByTime(60_000);
+
+      expect(queue.recordJobCountsMetric).not.toHaveBeenCalled();
+    });
+
+    it('does not start the timer when OTEL_EXPORTER_OTLP_ENDPOINT is unset', () => {
+      // Even with exporter opt-in, no endpoint = nowhere to export to,
+      // so polling Redis is wasted work.
+      delete process.env[OTEL_EXPORTER_OTLP_ENDPOINT_ENV];
       const queue = new Queue('test-queue') as unknown as MockedQueue;
       const discovery = buildDiscoveryService([queue as unknown as Queue]);
       const recorder = new BullMQQueueDepthRecorder(discovery);
