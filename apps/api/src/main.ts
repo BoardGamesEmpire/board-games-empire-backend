@@ -1,7 +1,12 @@
 import 'reflect-metadata';
-
-import { AUTH_INSTANCE } from '@bge/auth';
+// OpenTelemetry SDK MUST be initialized before any module that should be
+// auto-instrumented is imported. Keep this block at the very top of main.ts.
 import { env } from '@bge/env';
+import { registerShutdownHandlers } from '@bge/otel';
+import { bootstrapLogger, otel } from './app/lib/logger';
+
+// Imports below this line are instrumented by the OTel auto-instrumentations.
+import { AUTH_INSTANCE } from '@bge/auth';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -15,17 +20,20 @@ import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
+  const LOGGER_CONTEXT = 'Bootstrap';
   if (!env.isProduction) {
     Error.stackTraceLimit = Infinity;
   }
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
+    // Buffer module-init logs until `useLogger` is called below, so they
+    // flow through nestjs-pino (and therefore through the OTel pipeline)
+    // rather than going to stdout via Nest's default ConsoleLogger.
+    bufferLogs: true,
   });
 
-  if (env.provide('USE_PINO_LOGGER') === 'true') {
-    app.useLogger(app.get(PinoLogger));
-  }
+  app.useLogger(app.get(PinoLogger));
 
   const globalPrefix = 'api';
   const configService = app.get(ConfigService);
@@ -73,7 +81,6 @@ async function bootstrap() {
         },
       ],
     })
-    .enableShutdownHooks()
     .enableCors({
       origin: [env.provide('BETTER_AUTH_URL', { defaultValue: '*' }), '*'],
       credentials: true,
@@ -81,10 +88,15 @@ async function bootstrap() {
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     });
 
+  // NOTE: `enableShutdownHooks()` is intentionally omitted. The manual
+  // signal handlers registered below sequence `app.close()` BEFORE
+  // `otel.shutdown()` so the trailing batch of spans is exported.
+  // `app.close()` still invokes all `OnApplicationShutdown` providers.
+
   const authInstance = app.get(AUTH_INSTANCE);
   const swagger = configService.get<boolean>('swagger.enabled');
 
-  Logger.debug(`Swagger enabled: ${swagger}`);
+  Logger.debug(`Swagger enabled: ${swagger}`, LOGGER_CONTEXT);
 
   if (swagger) {
     const swaggerConfig = new DocumentBuilder()
@@ -122,7 +134,7 @@ async function bootstrap() {
       yamlDocumentUrl: `${globalPrefix}/swagger/yaml`,
     });
 
-    Logger.debug('Swagger document created and setup completed');
+    Logger.debug('Swagger document created and setup completed', LOGGER_CONTEXT);
   }
 
   const redisAdapter = new RedisIoAdapter(app);
@@ -133,9 +145,14 @@ async function bootstrap() {
   const server = app.getHttpAdapter().getInstance();
   server.all(`/${globalPrefix}/auth/*any`, toNodeHandler(authInstance));
 
+  registerShutdownHandlers(app, otel, bootstrapLogger);
+
   const port = configService.get<number>('server.port', 33333);
   await app.listen(port);
-  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`);
+  Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  bootstrapLogger.error({ err: error }, 'bootstrap failed');
+  void otel.shutdown().finally(() => process.exit(1));
+});

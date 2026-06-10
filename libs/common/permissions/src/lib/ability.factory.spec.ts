@@ -145,7 +145,9 @@ function makeApiKey(scopes: ApiKeyScopeWithPermission[] = []): ApikeyWithScopes 
   return {
     id: 'key-1',
     key: 'bge_test_key',
-    userId: 'user-1',
+    referenceId: 'user-1',
+    configId: 'config-1',
+    permissions: 'manage',
     name: 'Test Key',
     start: null,
     prefix: null,

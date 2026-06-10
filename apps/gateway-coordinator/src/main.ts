@@ -1,19 +1,28 @@
 import 'reflect-metadata';
-
+// OpenTelemetry SDK MUST be initialized before any module that should be
+// auto-instrumented is imported. Keep this block at the very top of main.ts.
 import { env } from '@bge/env';
+import { registerShutdownHandlers } from '@bge/otel';
+import { bootstrapLogger, otel } from './app/lib/logger';
+
+// Imports below this line are instrumented by the OTel auto-instrumentations.
 import { walkDir } from '@bge/utils';
-import { Logger } from '@nestjs/common';
+import type { INestMicroservice } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Transport } from '@nestjs/microservices';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])gateway([/\\]|$)/]);
-  Logger.log(`Loading gRPC proto files from: ${protoPaths.join(', ')}`);
+  bootstrapLogger.info({ protoPaths }, 'loading gRPC proto files');
+
   const url = `${env.provide('COORDINATOR_GRPC_HOST')}:${env.provide('COORDINATOR_GRPC_PORT')}`;
-  const app = await NestFactory.createMicroservice(AppModule, {
+
+  const app: INestMicroservice = await NestFactory.createMicroservice(AppModule, {
     transport: Transport.GRPC,
+    bufferLogs: true,
     options: {
       url,
       package: 'bge.coordinator.v1',
@@ -26,8 +35,18 @@ async function bootstrap() {
       },
     },
   });
+
+  app.useLogger(app.get(PinoLogger));
+
+  // `enableShutdownHooks()` is intentionally omitted — manual signal
+  // handlers below sequence `app.close()` before `otel.shutdown()`.
+  registerShutdownHandlers(app, otel, bootstrapLogger);
+
   await app.listen();
-  Logger.log(`🚀 Application is running on: grpc://${url}`);
+  bootstrapLogger.info({ url }, '🚀 application is running on grpc');
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  bootstrapLogger.error({ err: error }, 'coordinator bootstrap failed');
+  void otel.shutdown().finally(() => process.exit(1));
+});

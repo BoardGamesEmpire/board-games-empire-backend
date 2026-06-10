@@ -125,6 +125,9 @@
     },
     {
       "path": "./libs/api/actor-context-transport"
+    },
+    {
+      "path": "./libs/common/otel"
     }
   ]
 }
