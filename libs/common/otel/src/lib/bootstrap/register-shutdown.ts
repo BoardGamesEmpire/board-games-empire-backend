@@ -93,7 +93,9 @@ export const registerShutdownHandlers = (
   const shutdown = createShutdown(app, otelHandle, logger);
 
   const handler = (signal: NodeJS.Signals): void => {
-    void shutdown(signal).then(() => process.exit(0));
+    void shutdown(signal)
+      .catch((err) => logger.error({ err }, 'unexpected shutdown failure'))
+      .finally(() => process.exit(0));
   };
 
   process.once('SIGTERM', handler);

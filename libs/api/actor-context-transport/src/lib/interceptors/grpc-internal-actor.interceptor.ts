@@ -16,7 +16,7 @@
  * `external` actor from a gateway identifier. This interceptor reads a
  * pre-existing Actor from metadata and propagates it unchanged.
  *
- * Behaviour:
+ * Behavior:
  * - Missing `x-bge-actor` → `UnauthorizedException`. On a trusted internal
  *   channel the absence of this header indicates a caller-side bug
  *   (likely a call made outside a CLS scope on the upstream service);
@@ -42,6 +42,27 @@ import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ActorInterceptor } from './actor.interceptor';
+
+/**
+ * Strict standard (non-URL-safe) base64 pattern: zero or more 4-character
+ * groups, optionally followed by either a 2-character group + `==` or a
+ * 3-character group + `=`. Length is therefore always a multiple of 4
+ * with padding present where required.
+ *
+ * Why we validate explicitly: Node's `Buffer.from(str, 'base64')` is
+ * intentionally permissive — invalid characters are silently skipped and
+ * whatever's left is decoded. A `try`/`catch` around the decode call will
+ * never fire on garbage input. Without this pre-check, malformed headers
+ * fall through to `JSON.parse` and surface as a "not valid JSON" error
+ * even though the actual problem is one layer earlier. That's misleading
+ * for diagnosing producer-side bugs on the gRPC outbound interceptor.
+ *
+ * The character set matches what `createOutboundActorMetadataInterceptor`
+ * produces (`Buffer.from(...).toString('base64')` = standard base64). If
+ * the outbound encoding ever switches to URL-safe (`_`/`-`), update this
+ * pattern in tandem.
+ */
+const STANDARD_BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 @Injectable()
 export class GrpcInternalActorInterceptor extends ActorInterceptor {
@@ -75,7 +96,10 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
   /**
    * Extracts and structurally validates the `x-bge-actor` payload.
    * Throws `UnauthorizedException` if the header is missing,
-   * `BadRequestException` if it is malformed.
+   * `BadRequestException` if the base64, JSON, or actor shape is
+   * malformed. Each step emits a distinct error message so the
+   * diagnostic points at the actual broken layer (producer encoding
+   * vs. payload contents vs. shape contract).
    */
   private extractActor(metadata: Metadata): Actor {
     const raw = this.firstMetadata(metadata, BGE_ACTOR_HEADER);
@@ -83,12 +107,11 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
       throw new UnauthorizedException(`gRPC call missing '${BGE_ACTOR_HEADER}' metadata on internal channel`);
     }
 
-    let decoded: string;
-    try {
-      decoded = Buffer.from(raw, 'base64').toString('utf8');
-    } catch (error) {
-      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64: ${(error as Error).message}`);
+    if (!STANDARD_BASE64_PATTERN.test(raw)) {
+      throw new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64`);
     }
+
+    const decoded = Buffer.from(raw, 'base64').toString('utf8');
 
     let parsed: unknown;
     try {

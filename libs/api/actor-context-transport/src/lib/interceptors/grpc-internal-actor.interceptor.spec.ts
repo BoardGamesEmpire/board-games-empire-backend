@@ -121,7 +121,58 @@ describe('GrpcInternalActorInterceptor', () => {
       );
     });
 
-    it('throws BadRequestException when x-bge-actor is not valid JSON', () => {
+    describe('base64 validation', () => {
+      it('throws BadRequestException with a base64-specific message when the value contains non-base64 characters', () => {
+        const auditContext = buildMockAuditContext();
+        const interceptor = buildInterceptor(auditContext);
+        // `!` and `$` are not in the standard base64 character set.
+        const metadata = buildMetadata({ [BGE_ACTOR_HEADER]: 'not!valid$base64' });
+
+        expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
+          new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64`),
+        );
+        expect(auditContext.runWith).not.toHaveBeenCalled();
+      });
+
+      it('throws BadRequestException for URL-safe base64 (the outbound interceptor produces standard base64 only)', () => {
+        const auditContext = buildMockAuditContext();
+        const interceptor = buildInterceptor(auditContext);
+        // URL-safe base64 substitutes `-` for `+` and `_` for `/`. The
+        // standard-only pattern rejects it.
+        const metadata = buildMetadata({ [BGE_ACTOR_HEADER]: 'YWJj_def-' });
+
+        expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
+          new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64`),
+        );
+      });
+
+      it('throws BadRequestException when the length is not a multiple of 4', () => {
+        const auditContext = buildMockAuditContext();
+        const interceptor = buildInterceptor(auditContext);
+        // Three characters, no padding — invalid standard base64.
+        const metadata = buildMetadata({ [BGE_ACTOR_HEADER]: 'abc' });
+
+        expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
+          new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64`),
+        );
+      });
+
+      it('throws BadRequestException when padding is malformed', () => {
+        const auditContext = buildMockAuditContext();
+        const interceptor = buildInterceptor(auditContext);
+        // Padding character `=` in the middle is invalid.
+        const metadata = buildMetadata({ [BGE_ACTOR_HEADER]: 'ab=cdefg' });
+
+        expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
+          new BadRequestException(`'${BGE_ACTOR_HEADER}' is not valid base64`),
+        );
+      });
+    });
+
+    it('throws BadRequestException with a JSON-specific message when x-bge-actor is valid base64 of malformed JSON', () => {
+      // Validates that the base64 path and the JSON path are distinguished
+      // by the error message — useful when diagnosing whether the producer
+      // is encoding incorrectly vs. emitting a non-JSON payload.
       const auditContext = buildMockAuditContext();
       const interceptor = buildInterceptor(auditContext);
       const garbage = Buffer.from('not-valid-json-{', 'utf8').toString('base64');
@@ -129,6 +180,9 @@ describe('GrpcInternalActorInterceptor', () => {
 
       expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
         BadRequestException,
+      );
+      expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
+        /is not valid JSON/,
       );
     });
 

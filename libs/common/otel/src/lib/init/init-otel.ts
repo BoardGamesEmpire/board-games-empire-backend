@@ -63,7 +63,7 @@ const resolveTraceExporter = (env: NodeJS.ProcessEnv): SpanExporter | undefined 
  * no-op. Safe to call from any code path without coordination.
  *
  * Export interval respects `OTEL_METRIC_EXPORT_INTERVAL` via the
- * `PeriodicExportingMetricReader` default behaviour (60s when unset).
+ * `PeriodicExportingMetricReader` default behavior (60s when unset).
  */
 const resolveMetricReader = (env: NodeJS.ProcessEnv): MetricReader | undefined => {
   if (!metricsExportEnabled(env)) {
@@ -168,6 +168,9 @@ export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
     ...(metricReader && { metricReader }),
   });
 
+  // NodeSDK.start() is synchronous and returns void in @opentelemetry/sdk-node 0.46+.
+  // The instrumentation/context/propagator setup it performs is all sync
+  // despite the name suggesting otherwise.
   sdk.start();
 
   return {
