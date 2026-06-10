@@ -1,3 +1,4 @@
+import { SystemActorScope } from '@bge/actor-context';
 import * as proto from '@board-games-empire/proto-gateway';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
@@ -15,6 +16,7 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
   constructor(
     @Inject(COORDINATOR_SERVICE_TOKEN)
     private readonly client: ClientGrpc,
+    private readonly systemActorScope: SystemActorScope,
   ) {}
 
   onModuleInit(): void {
@@ -26,7 +28,15 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
       .pipe(
         map(() => crypto.randomUUID()),
         tap((correlationId) => this.logger.debug(`Pinging coordinator with correlationId=${correlationId}`)),
-        mergeMap((correlationId) => this.ping(correlationId)),
+        // Each ping runs in its own system-actor CLS scope. The outbound
+        // gRPC interceptor reads the actor from CLS and writes `x-bge-actor`
+        // metadata; the coordinator's inbound interceptor accepts the
+        // `system` actor with reason `coordinator-ping` and records it in
+        // the audit log. This is the sanctioned path for service-level
+        // traffic — `mergeMap` would otherwise emit outside any CLS scope.
+        mergeMap((correlationId) =>
+          this.systemActorScope.runObservable('coordinator-ping', () => this.ping(correlationId)),
+        ),
       )
       .subscribe({
         next: (response) => this.logger.log('Coordinator ping:', response),

@@ -1,5 +1,7 @@
+import { AuditContextModule } from '@bge/actor-context';
+import { createTestingModuleWithDb } from '@bge/testing';
 import { ClientGrpcProxy } from '@nestjs/microservices';
-import { Test } from '@nestjs/testing';
+import { ClsModule } from 'nestjs-cls';
 import { COORDINATOR_SERVICE_TOKEN } from './constants';
 import { GatewayCoordinatorClientService } from './coordinator.service';
 
@@ -7,7 +9,8 @@ describe('GatewayCoordinatorClientService', () => {
   let service: GatewayCoordinatorClientService;
 
   beforeEach(async () => {
-    const module = await Test.createTestingModule({
+    const { module } = await createTestingModuleWithDb({
+      imports: [AuditContextModule, ClsModule.forRoot({ global: true })],
       providers: [
         GatewayCoordinatorClientService,
         {
@@ -15,7 +18,7 @@ describe('GatewayCoordinatorClientService', () => {
           useValue: ClientGrpcProxy,
         },
       ],
-    }).compile();
+    });
 
     service = module.get(GatewayCoordinatorClientService);
   });

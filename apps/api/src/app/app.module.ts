@@ -33,6 +33,7 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
+import { bootstrapLogger } from './lib/logger';
 
 @Module({
   imports: [
@@ -92,9 +93,16 @@ import { GameSearchGateway } from './gateways/game/search.gateway';
       }),
     }),
 
-    // Logging
+    // Structured logging via pino, bridged to OpenTelemetry. `pinoHttp`
+    // carries the OTel trace correlation mixin and conditionally
+    // configures `pino-opentelemetry-transport` (active when
+    // `OTEL_EXPORTER_OTLP_ENDPOINT` is set). The transport runs in a pino
+    // worker thread and ships logs to the OTLP collector alongside spans.
     LoggerModule.forRoot({
       forRoutes: ['*'],
+      pinoHttp: {
+        logger: bootstrapLogger,
+      },
     }),
 
     ClsModule.forRoot({

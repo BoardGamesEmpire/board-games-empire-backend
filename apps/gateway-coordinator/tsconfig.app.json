@@ -43,6 +43,9 @@
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/otel/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/gateway-registry/tsconfig.lib.json"
     },
     {
@@ -50,6 +53,12 @@
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/actor-context-transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/actor-context/tsconfig.lib.json"
     }
   ]
 }

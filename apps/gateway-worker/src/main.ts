@@ -1,8 +1,11 @@
-// Must be first: installs the Reflect.* metadata polyfill before any
-// decorated class is evaluated (see gateway main.ts for context).
-import 'reflect-metadata';
+// OpenTelemetry SDK MUST be initialised before any module that should be
+// auto-instrumented is imported. Keep this block at the very top of main.ts.
 import { env } from '@bge/env';
-import { Logger } from '@nestjs/common';
+import { registerShutdownHandlers } from '@bge/otel';
+import 'reflect-metadata';
+import { bootstrapLogger, otel } from './app/lib/logger';
+
+// Imports below this line are instrumented by the OTel auto-instrumentations.
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { GatewayWorkerModule } from './app/gateway-worker.module';
@@ -16,16 +19,16 @@ async function bootstrap() {
     bufferLogs: true,
   });
 
-  if (env.provide('USE_PINO_LOGGER') === 'true') {
-    app.useLogger(app.get(PinoLogger));
-  }
+  app.useLogger(app.get(PinoLogger));
 
-  app.enableShutdownHooks();
+  // `enableShutdownHooks()` is intentionally omitted — manual signal
+  // handlers below sequence `app.close()` before `otel.shutdown()`.
+  registerShutdownHandlers(app, otel, bootstrapLogger);
 
-  Logger.log('🛰️  Gateway worker process started — connected to gateway registry, awaiting BullMQ jobs');
+  bootstrapLogger.info('🛰️  gateway worker process started — awaiting BullMQ jobs');
 }
 
-bootstrap().catch((err) => {
-  Logger.error('Gateway worker bootstrap failed', err);
-  process.exit(1);
+bootstrap().catch((error) => {
+  bootstrapLogger.error({ err: error }, 'gateway worker bootstrap failed');
+  void otel.shutdown().finally(() => process.exit(1));
 });
