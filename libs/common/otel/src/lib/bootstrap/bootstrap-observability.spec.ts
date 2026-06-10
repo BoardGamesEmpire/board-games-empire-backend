@@ -17,7 +17,7 @@ jest.mock('../pino/otel-pino.options', () => ({
   buildOtelPinoOptions: jest.fn(() => ({ level: 'info' })),
 }));
 
-const childLogger = {
+const bootstrapChildLogger = {
   trace: jest.fn(),
   debug: jest.fn(),
   info: jest.fn(),
@@ -25,8 +25,17 @@ const childLogger = {
   error: jest.fn(),
 };
 
+const baseChildLogger = {
+  trace: jest.fn(),
+  debug: jest.fn(),
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  child: jest.fn(() => bootstrapChildLogger),
+};
+
 const rootLogger = {
-  child: jest.fn(() => childLogger),
+  child: jest.fn(() => baseChildLogger),
 };
 
 jest.mock('pino', () => ({
@@ -47,6 +56,7 @@ jest.mock('@opentelemetry/api', () => {
 
 import { diag, DiagLogLevel } from '@opentelemetry/api';
 import pino from 'pino';
+import { OTEL_LOG_LEVEL_ENV } from '../init/diag-log-level';
 import { initOtel } from '../init/init-otel';
 import { buildOtelPinoOptions } from '../pino/otel-pino.options';
 import { bootstrapObservability } from './bootstrap-observability';
@@ -62,13 +72,32 @@ const baseConfig: OtelInitConfig = {
   actorContextProvider: noopActorContextProvider,
 };
 
+const restoreEnvVar = (name: string, original: string | undefined): void => {
+  if (original === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = original;
+  }
+};
+
 describe('bootstrapObservability', () => {
+  let originalLogLevel: string | undefined;
+
   beforeEach(() => {
     jest.clearAllMocks();
-    rootLogger.child.mockReturnValue(childLogger);
+    baseChildLogger.child.mockReturnValue(bootstrapChildLogger);
+    rootLogger.child.mockReturnValue(baseChildLogger);
     pinoMock.mockReturnValue(rootLogger);
     initOtelMock.mockReturnValue(mockOtelHandle);
     buildOptionsMock.mockReturnValue({ level: 'info' });
+
+    // Snapshot OTEL_LOG_LEVEL — diag-bridge tests mutate it.
+    originalLogLevel = process.env[OTEL_LOG_LEVEL_ENV];
+    delete process.env[OTEL_LOG_LEVEL_ENV];
+  });
+
+  afterEach(() => {
+    restoreEnvVar(OTEL_LOG_LEVEL_ENV, originalLogLevel);
   });
 
   describe('initialization order', () => {
@@ -89,35 +118,51 @@ describe('bootstrapObservability', () => {
     });
   });
 
-  describe('pino bootstrap logger', () => {
+  describe('pino loggers', () => {
     it('constructs pino with the result of buildOtelPinoOptions', () => {
       bootstrapObservability(baseConfig);
 
       expect(pinoMock).toHaveBeenCalledWith({ level: 'info' });
     });
 
-    it('creates a child logger with service and component bindings', () => {
+    it('creates the base logger with only the service binding', () => {
       bootstrapObservability({ ...baseConfig, serviceName: 'bge-coordinator' });
 
+      expect(rootLogger.child).toHaveBeenCalledTimes(1);
       expect(rootLogger.child).toHaveBeenCalledWith({
         service: 'bge-coordinator',
+      });
+    });
+
+    it('creates the bootstrap logger as a child of the base with the component binding', () => {
+      bootstrapObservability(baseConfig);
+
+      expect(baseChildLogger.child).toHaveBeenCalledTimes(1);
+      expect(baseChildLogger.child).toHaveBeenCalledWith({
         component: 'bootstrap',
       });
     });
 
-    it('returns the child logger as bootstrapLogger', () => {
-      const { bootstrapLogger } = bootstrapObservability(baseConfig);
+    it('returns the base child as baseLogger', () => {
+      const { baseLogger } = bootstrapObservability(baseConfig);
 
-      expect(bootstrapLogger).toBe(childLogger);
+      expect(baseLogger).toBe(baseChildLogger);
     });
 
-    it('emits a startup info log with service identity', () => {
+    it('returns the bootstrap child as bootstrapLogger', () => {
+      const { bootstrapLogger } = bootstrapObservability(baseConfig);
+
+      expect(bootstrapLogger).toBe(bootstrapChildLogger);
+    });
+
+    it('emits the startup info log through the bootstrap logger (not the base)', () => {
       bootstrapObservability(baseConfig);
 
-      expect(childLogger.info).toHaveBeenCalledWith(
+      expect(bootstrapChildLogger.info).toHaveBeenCalledWith(
         { serviceName: 'bge-test', serviceVersion: '1.2.3' },
         'OpenTelemetry SDK initialized',
       );
+      expect(baseChildLogger.info).not.toHaveBeenCalled();
     });
   });
 
@@ -136,10 +181,46 @@ describe('bootstrapObservability', () => {
   });
 
   describe('diag bridge', () => {
-    it('installs a diag logger at INFO level', () => {
+    it('installs a diag logger at INFO level when OTEL_LOG_LEVEL is unset', () => {
       bootstrapObservability(baseConfig);
 
       expect(diagSetLoggerMock).toHaveBeenCalledTimes(1);
+      const [, level] = diagSetLoggerMock.mock.calls[0];
+      expect(level).toBe(DiagLogLevel.INFO);
+    });
+
+    it('honors OTEL_LOG_LEVEL=debug', () => {
+      process.env[OTEL_LOG_LEVEL_ENV] = 'debug';
+
+      bootstrapObservability(baseConfig);
+
+      const [, level] = diagSetLoggerMock.mock.calls[0];
+      expect(level).toBe(DiagLogLevel.DEBUG);
+    });
+
+    it('honors OTEL_LOG_LEVEL=verbose', () => {
+      process.env[OTEL_LOG_LEVEL_ENV] = 'verbose';
+
+      bootstrapObservability(baseConfig);
+
+      const [, level] = diagSetLoggerMock.mock.calls[0];
+      expect(level).toBe(DiagLogLevel.VERBOSE);
+    });
+
+    it('honors OTEL_LOG_LEVEL=error', () => {
+      process.env[OTEL_LOG_LEVEL_ENV] = 'error';
+
+      bootstrapObservability(baseConfig);
+
+      const [, level] = diagSetLoggerMock.mock.calls[0];
+      expect(level).toBe(DiagLogLevel.ERROR);
+    });
+
+    it('falls back to INFO when OTEL_LOG_LEVEL is an unrecognized value', () => {
+      process.env[OTEL_LOG_LEVEL_ENV] = 'verbsoe';
+
+      bootstrapObservability(baseConfig);
+
       const [, level] = diagSetLoggerMock.mock.calls[0];
       expect(level).toBe(DiagLogLevel.INFO);
     });
@@ -150,7 +231,7 @@ describe('bootstrapObservability', () => {
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.info('sdk message', 'arg1', 'arg2');
 
-      expect(childLogger.info).toHaveBeenCalledWith({ otel: ['arg1', 'arg2'] }, 'sdk message');
+      expect(bootstrapChildLogger.info).toHaveBeenCalledWith({ otel: ['arg1', 'arg2'] }, 'sdk message');
     });
 
     it('routes diag.warn through the bootstrap pino at warn level', () => {
@@ -159,7 +240,7 @@ describe('bootstrapObservability', () => {
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.warn('exporter retry');
 
-      expect(childLogger.warn).toHaveBeenCalledWith({ otel: [] }, 'exporter retry');
+      expect(bootstrapChildLogger.warn).toHaveBeenCalledWith({ otel: [] }, 'exporter retry');
     });
 
     it('routes diag.error through the bootstrap pino at error level', () => {
@@ -168,7 +249,7 @@ describe('bootstrapObservability', () => {
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.error('failed to flush');
 
-      expect(childLogger.error).toHaveBeenCalledWith({ otel: [] }, 'failed to flush');
+      expect(bootstrapChildLogger.error).toHaveBeenCalledWith({ otel: [] }, 'failed to flush');
     });
 
     it('routes diag.verbose through the bootstrap pino at trace level', () => {
@@ -177,7 +258,7 @@ describe('bootstrapObservability', () => {
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.verbose('span queued');
 
-      expect(childLogger.trace).toHaveBeenCalledWith({ otel: [] }, 'span queued');
+      expect(bootstrapChildLogger.trace).toHaveBeenCalledWith({ otel: [] }, 'span queued');
     });
 
     it('routes diag.debug through the bootstrap pino at debug level', () => {
@@ -186,7 +267,7 @@ describe('bootstrapObservability', () => {
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.debug('instrumentation patched');
 
-      expect(childLogger.debug).toHaveBeenCalledWith({ otel: [] }, 'instrumentation patched');
+      expect(bootstrapChildLogger.debug).toHaveBeenCalledWith({ otel: [] }, 'instrumentation patched');
     });
   });
 });

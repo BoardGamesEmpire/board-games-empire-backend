@@ -13,7 +13,7 @@ import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
-import { bootstrapLogger } from './lib/logger';
+import { baseLogger } from './lib/logger';
 
 @Module({
   imports: [
@@ -69,7 +69,7 @@ import { bootstrapLogger } from './lib/logger';
     // `OTEL_EXPORTER_OTLP_ENDPOINT` is set and ships logs alongside spans.
     LoggerModule.forRoot({
       pinoHttp: {
-        logger: bootstrapLogger,
+        logger: baseLogger,
       },
     }),
 

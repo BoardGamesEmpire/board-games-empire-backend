@@ -1,4 +1,4 @@
-import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
+import { diag, DiagConsoleLogger } from '@opentelemetry/api';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import { OTLPMetricExporter as OtlpGrpcMetricExporter } from '@opentelemetry/exporter-metrics-otlp-grpc';
 import { OTLPMetricExporter as OtlpHttpMetricExporter } from '@opentelemetry/exporter-metrics-otlp-http';
@@ -9,6 +9,7 @@ import { PeriodicExportingMetricReader, type MetricReader } from '@opentelemetry
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { BatchSpanProcessor, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { ActorSpanProcessor } from '../processors/actor-span.processor';
+import { OTEL_LOG_LEVEL_ENV, resolveDiagLogLevel } from './diag-log-level';
 import { metricsExportEnabled } from './metrics-enabled';
 import {
   DEFAULT_SERVICE_NAMESPACE,
@@ -30,21 +31,6 @@ export interface OtelBootstrapHandle {
   readonly sdk: NodeSDK;
   shutdown(): Promise<void>;
 }
-
-/**
- * Maps OTel-standard `OTEL_LOG_LEVEL` string values to {@link DiagLogLevel}
- * tokens. Comparison is case-insensitive. Unrecognized values fall
- * through to {@link DiagLogLevel.INFO} at the call site.
- */
-const OTEL_DIAG_LEVEL_MAP: Readonly<Record<string, DiagLogLevel>> = {
-  none: DiagLogLevel.NONE,
-  error: DiagLogLevel.ERROR,
-  warn: DiagLogLevel.WARN,
-  info: DiagLogLevel.INFO,
-  debug: DiagLogLevel.DEBUG,
-  verbose: DiagLogLevel.VERBOSE,
-  all: DiagLogLevel.ALL,
-};
 
 /**
  * Resolves the trace exporter based on standard OTel env vars. Returns
@@ -143,19 +129,19 @@ const defaultSignalExporters = (env: NodeJS.ProcessEnv): void => {
  * - `OTEL_LOGS_EXPORTER` is defaulted to `'none'` when unset — see
  *   {@link defaultSignalExporters}.
  * - Internal OTel diagnostic logs are forwarded through `diag` to stderr
- *   when `OTEL_LOG_LEVEL` is set; the value selects verbosity via
- *   {@link OTEL_DIAG_LEVEL_MAP}. Apps using `bootstrapObservability`
- *   override this with a pino-backed `DiagLogger` immediately after
- *   this call returns.
+ *   when `OTEL_LOG_LEVEL` is set; the level is resolved via
+ *   {@link resolveDiagLogLevel}. Apps using `bootstrapObservability`
+ *   override the diag transport with a pino-backed `DiagLogger`
+ *   immediately after this call returns — that helper consults the
+ *   same {@link resolveDiagLogLevel} so the operator's selection
+ *   survives the upgrade.
  *
  * The returned handle's `shutdown` should be invoked from a Nest shutdown
  * hook (or a process signal handler) to drain in-flight exports.
  */
 export const initOtel = (config: OtelInitConfig): OtelBootstrapHandle => {
-  const otelLogLevel = process.env['OTEL_LOG_LEVEL'];
-  if (otelLogLevel) {
-    const level = OTEL_DIAG_LEVEL_MAP[otelLogLevel.toLowerCase()] ?? DiagLogLevel.INFO;
-    diag.setLogger(new DiagConsoleLogger(), level);
+  if (process.env[OTEL_LOG_LEVEL_ENV]) {
+    diag.setLogger(new DiagConsoleLogger(), resolveDiagLogLevel());
   }
 
   defaultSignalExporters(process.env);

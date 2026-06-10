@@ -33,7 +33,7 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
-import { bootstrapLogger } from './lib/logger';
+import { baseLogger } from './lib/logger';
 
 @Module({
   imports: [
@@ -98,10 +98,15 @@ import { bootstrapLogger } from './lib/logger';
     // configures `pino-opentelemetry-transport` (active when
     // `OTEL_EXPORTER_OTLP_ENDPOINT` is set). The transport runs in a pino
     // worker thread and ships logs to the OTLP collector alongside spans.
+    //
+    // Uses `baseLogger` (not `bootstrapLogger`): the latter carries a
+    // `component: 'bootstrap'` binding intended for pre-Nest log lines,
+    // and passing it here would tag every runtime log as a bootstrap
+    // log.
     LoggerModule.forRoot({
       forRoutes: ['*'],
       pinoHttp: {
-        logger: bootstrapLogger,
+        logger: baseLogger,
       },
     }),
 

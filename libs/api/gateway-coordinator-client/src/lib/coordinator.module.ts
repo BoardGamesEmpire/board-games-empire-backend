@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { createOutboundActorMetadataInterceptor } from '@bge/actor-context-transport';
 import type { ChannelOptions } from '@grpc/grpc-js';
 import { Module } from '@nestjs/common';
@@ -10,6 +11,7 @@ import { GatewayCoordinatorClientService } from './coordinator.service';
 
 @Module({
   imports: [
+    AuditContextModule,
     ConfigModule.forFeature(configuration.coordinator),
     ClientsModule.registerAsync({
       clients: [
