@@ -19,14 +19,12 @@
  */
 export function hostnameMatchesAny(hostname: string, list: readonly string[], allowWildcards: boolean): boolean {
   for (const entry of list) {
-    const lowered = entry.toLowerCase();
-
-    if (lowered.startsWith('*.')) {
+    if (entry.startsWith('*.')) {
       if (!allowWildcards) {
         continue;
       }
 
-      const suffix = lowered.slice(1); // ".example.com"
+      const suffix = entry.slice(1); // ".example.com"
       if (hostname.endsWith(suffix) && hostname.length > suffix.length) {
         return true;
       }
@@ -34,7 +32,7 @@ export function hostnameMatchesAny(hostname: string, list: readonly string[], al
       continue;
     }
 
-    if (lowered === hostname) {
+    if (entry === hostname) {
       return true;
     }
   }

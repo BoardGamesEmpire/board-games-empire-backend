@@ -10,9 +10,11 @@ describe('hostnameMatchesAny', () => {
       expect(hostnameMatchesAny('evil.com', ['example.com', 'other.com'], false)).toBe(false);
     });
 
-    it('is case-insensitive (entries are lowered; hostname assumed already lowered)', () => {
-      // Entry casing — function lowers entries before compare
-      expect(hostnameMatchesAny('example.com', ['EXAMPLE.COM'], false)).toBe(true);
+    it('requires caller-normalized lowercase entries — mixed case does NOT match', () => {
+      // The function contract delegates lowercasing to the caller (see JSDoc).
+      // Production callers (SafeHttpPolicyService, IpPolicyService) normalize
+      // before calling. This test pins that contract.
+      expect(hostnameMatchesAny('example.com', ['EXAMPLE.COM'], false)).toBe(false);
     });
 
     it('matches against an empty list as false', () => {
