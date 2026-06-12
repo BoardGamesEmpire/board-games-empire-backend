@@ -16,6 +16,8 @@ import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
 import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
+import { SafeHttpModule } from '@bge/safe-http';
+import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
 import { WellKnownModule } from '@bge/well-known';
@@ -73,6 +75,7 @@ import { baseLogger } from './lib/logger';
     }),
 
     DatabaseModule,
+    SecureHttpModule,
 
     // Shared Redis clients (ioredis). Owns the lifecycle of the cache and
     // queue connections used across the application.
@@ -131,8 +134,8 @@ import { baseLogger } from './lib/logger';
     EventModule,
     GameGatewayModule,
     GameImportProducerModule,
-    GameSearchModule,
     GameModule,
+    GameSearchModule,
     GatewayCoordinatorClientModule,
     HealthModule,
     HouseholdModule,
@@ -140,6 +143,7 @@ import { baseLogger } from './lib/logger';
     MetricsModule,
     NotificationsModule,
     PermissionsModule,
+    SafeHttpModule,
     SystemSettingsModule,
     UserModule,
     WellKnownModule,

@@ -46,6 +46,7 @@ export class AuditContextService {
     if (!actor) {
       throw new Error('AuditContextService.getActorOrThrow called outside a populated CLS scope');
     }
+
     return actor;
   }
 

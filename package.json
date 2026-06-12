@@ -140,7 +140,8 @@
     "rxjs": "7.8.2",
     "socket.io": "4.8.3",
     "socket.io-redis-adapter": "8.4.6",
-    "surrogate": "1.9.2"
+    "surrogate": "1.9.2",
+    "undici": "8.4.0"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.70.0",
