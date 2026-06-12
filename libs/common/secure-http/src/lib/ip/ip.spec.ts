@@ -81,5 +81,26 @@ describe('parseIp', () => {
       const result = parseIp('::1');
       expect(result?.wasIpv4Mapped).toBe(false);
     });
+
+    it('compresses the longest zero run to :: (RFC 5952)', () => {
+      expect(parseIp('2001:db8:0:0:0:0:0:1')?.canonical).toBe('2001:db8::1');
+    });
+
+    it('canonicalizes all-zeros address to ::', () => {
+      expect(parseIp('::')?.canonical).toBe('::');
+    });
+
+    it('canonicalizes loopback to ::1', () => {
+      expect(parseIp('::1')?.canonical).toBe('::1');
+    });
+
+    it('strips leading zeros within each group', () => {
+      expect(parseIp('2001:0db8::0001')?.canonical).toBe('2001:db8::1');
+    });
+
+    it('picks the leftmost run when zero-run lengths tie', () => {
+      // Two equal runs of 2 zeros — leftmost wins.
+      expect(parseIp('1:0:0:1:0:0:1:1')?.canonical).toBe('1::1:0:0:1:1');
+    });
   });
 });

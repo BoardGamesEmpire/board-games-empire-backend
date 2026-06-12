@@ -54,15 +54,28 @@ export class SafeHttpService {
       throw new NotFoundException(`SafeHttp policy ${id} not found`);
     }
 
-    const effective = { ...existing, ...dto };
+    // Normalize hostname casing before validation and persistence. The
+    // runtime loader (`SafeHttpPolicyService.normalize`) already lower-cases
+    // on read; doing the same on write keeps GET/PATCH symmetric and means
+    // the stored row matches what the loader operates on.
+    const normalized: UpdateSafeHttpPolicyDto = {
+      ...dto,
+      ...(dto.allowedHosts !== undefined && {
+        allowedHosts: dto.allowedHosts.map((h) => h.toLowerCase()),
+      }),
+      ...(dto.blockedHosts !== undefined && {
+        blockedHosts: dto.blockedHosts.map((h) => h.toLowerCase()),
+      }),
+    };
+
+    const effective = { ...existing, ...normalized };
     this.assertWildcardPolicyConsistent(effective);
 
-    const actor = this.audit.getActorOrThrow();
-    const updatedBy = actorUserId(actor);
+    const updatedBy = actorUserId(this.audit.getActorOrThrow());
     const updated = await this.db.safeHttpPolicy.update({
       where: { id },
       data: {
-        ...dto,
+        ...normalized,
         updatedBy,
       },
     });

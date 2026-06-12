@@ -64,7 +64,7 @@ export function parseIp(input: string): ParsedIp | null {
 
     return {
       family: 6,
-      canonical: lower,
+      canonical: bytesToCanonicalIpv6(v6Bytes),
       bytes: v6Bytes,
       wasIpv4Mapped: false,
     } satisfies ParsedIp;
@@ -127,6 +127,52 @@ function ipv6ToBytes(input: string): Uint8Array {
   }
 
   return bytes;
+}
+
+/**
+ * Render 16 IPv6 bytes as RFC 5952 canonical text. Used for the
+ * `ParsedIp.canonical` field on IPv6 results — guarantees the field lives
+ * up to its name regardless of input casing or expansion. Rules:
+ *
+ *   - Each 16-bit group is hex with no leading zeros.
+ *   - The longest run of consecutive all-zero groups (length ≥ 2) is
+ *     replaced with `::`. Ties broken leftmost. Single zero groups are
+ *     NOT compressed.
+ *   - All hex digits lowercase.
+ */
+function bytesToCanonicalIpv6(bytes: Uint8Array): string {
+  const groups: string[] = [];
+  for (let i = 0; i < 16; i += 2) {
+    const value = (bytes[i] << 8) | bytes[i + 1];
+    groups.push(value.toString(16));
+  }
+
+  // Find the longest run of zero groups (length ≥ 2, leftmost on tie).
+  let bestStart = -1;
+  let bestLen = 0;
+  let curStart = -1;
+  let curLen = 0;
+  for (let i = 0; i < 8; i++) {
+    if (groups[i] === '0') {
+      if (curStart === -1) curStart = i;
+      curLen++;
+      if (curLen > bestLen) {
+        bestLen = curLen;
+        bestStart = curStart;
+      }
+    } else {
+      curStart = -1;
+      curLen = 0;
+    }
+  }
+
+  if (bestLen >= 2) {
+    const before = groups.slice(0, bestStart).join(':');
+    const after = groups.slice(bestStart + bestLen).join(':');
+    return `${before}::${after}`;
+  }
+
+  return groups.join(':');
 }
 
 function isIpv4Mapped(bytes: Uint8Array): boolean {
