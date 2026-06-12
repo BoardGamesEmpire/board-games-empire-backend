@@ -107,9 +107,14 @@ export class SecureHttpService {
   ) {}
 
   async request<T = unknown>(url: string, options: SafeHttpRequestOptions = {}): Promise<SafeHttpResponse<T>> {
-    const startedAt = Date.now();
-    const totalAttempts = options.retry?.attempts ?? 1;
+    // Clamp to a safe positive integer. `attempts: 0`, negative, NaN, or
+    // Infinity from a misconfigured caller would otherwise skip the loop and
+    // surface as a misleading "Retry loop exhausted" error. Treat anything
+    // outside [1, ∞) as "single attempt, no retry".
+    const rawAttempts = options.retry?.attempts ?? 1;
+    const totalAttempts = Number.isFinite(rawAttempts) && rawAttempts >= 1 ? Math.floor(rawAttempts) : 1;
 
+    const startedAt = Date.now();
     let lastError: SafeHttpError | undefined;
 
     for (let attempt = 1; attempt <= totalAttempts; attempt++) {
@@ -202,6 +207,7 @@ export class SecureHttpService {
             ip: decision.ip,
             reason: decision.reason,
           });
+
           throw ssrfErr;
         }
 
@@ -250,6 +256,7 @@ export class SecureHttpService {
 
         currentUrl = nextUrl;
         redirectCount++;
+
         continue;
       }
 
@@ -301,9 +308,10 @@ export class SecureHttpService {
       };
     } catch (err) {
       // Distinguish timeout from generic network failure for clean error mapping.
-      if (this.isAbortByTimeout(err, timeoutSignal)) {
+      if (timeoutSignal.aborted) {
         throw new RequestTimeoutError(url.toString(), timeoutMs);
       }
+
       throw err;
     } finally {
       // Close the per-hop agent so the underlying socket is released
@@ -425,11 +433,18 @@ export class SecureHttpService {
   }
 
   private parseUrl(url: string): URL {
+    let parsed: URL;
     try {
-      return new URL(url);
+      parsed = new URL(url);
     } catch (err) {
       throw new InvalidRequestUrlError(url, 'parse-failure', err instanceof Error ? err.message : undefined);
     }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new InvalidRequestUrlError(url, 'invalid-scheme', `unsupported scheme: ${parsed.protocol}`);
+    }
+
+    return parsed;
   }
 
   private resolveRedirectTarget(location: string, base: string): string {
@@ -467,7 +482,10 @@ export class SecureHttpService {
   private normalizeHeaders(input: Dispatcher.ResponseData['headers']): Record<string, string> {
     const out: Record<string, string> = {};
     for (const [key, value] of Object.entries(input)) {
-      if (value === undefined) continue;
+      if (value === undefined) {
+        continue;
+      }
+
       const lower = key.toLowerCase();
       if (Array.isArray(value)) {
         out[lower] = value.join(', ');
@@ -475,13 +493,8 @@ export class SecureHttpService {
         out[lower] = String(value);
       }
     }
-    return out;
-  }
 
-  private isAbortByTimeout(err: unknown, timeoutSignal: AbortSignal): boolean {
-    if (!(err instanceof Error)) return false;
-    if (err.name !== 'AbortError' && err.name !== 'TimeoutError') return false;
-    return timeoutSignal.aborted;
+    return out;
   }
 
   /**
@@ -499,8 +512,14 @@ export class SecureHttpService {
   }
 
   private toSafeHttpError(url: string, err: unknown): SafeHttpError {
-    if (err instanceof SafeHttpError) return err;
-    if (err instanceof Error) return new OutboundNetworkError(url, err);
+    if (err instanceof SafeHttpError) {
+      return err;
+    }
+
+    if (err instanceof Error) {
+      return new OutboundNetworkError(url, err);
+    }
+
     return new OutboundNetworkError(url, new Error(String(err)));
   }
 
@@ -510,7 +529,9 @@ export class SecureHttpService {
   }
 
   private shouldRetryError(err: SafeHttpError, retry: SafeHttpRetryPolicy): boolean {
-    if (retry.retryOnNetworkError === false) return false;
+    if (retry.retryOnNetworkError === false) {
+      return false;
+    }
     return err instanceof OutboundNetworkError || err instanceof RequestTimeoutError;
   }
 
