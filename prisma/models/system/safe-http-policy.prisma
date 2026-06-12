@@ -1,0 +1,50 @@
+/// Admin-controlled SSRF defense policy for outbound HTTP traffic
+/// originating from user-supplied URLs (webhooks, plugin outbound calls,
+/// future media integrations).
+///
+/// Singleton row — there is exactly one policy per deployment. Updates to
+/// this row publish on the Redis `safe_http.policy_updated` pub/sub channel
+/// (see `@bge/secure-http`), prompting every running process to refresh its
+/// in-memory snapshot without a restart.
+///
+/// Allow lists *loosen* the built-in SSRF rejection rules so admins running
+/// in-cluster (private IPs are normal) or co-locating multiple services on
+/// loopback can permit specific destinations. Block lists are absolute —
+/// they cannot be overridden by per-call options.
+model SafeHttpPolicy {
+  id String @id @default(cuid(2))
+
+  singleton  Boolean @unique @default(true)
+
+  /// Per-request timeout in milliseconds. Per-call options may override.
+  defaultTimeoutMs Int @default(10000) @map("default_timeout_ms")
+
+  /// Maximum redirect hops. Per-call options may override.
+  defaultMaxRedirects Int @default(5) @map("default_max_redirects")
+
+  /// When true, wildcard entries in per-call `allowedDomains` and plugin
+  /// manifest `network.outboundDomains` are rejected. When false, wildcard
+  /// suffix matching (right-anchored, e.g. `*.example.com`) is permitted.
+  strictMode Boolean @default(true) @map("strict_mode")
+
+  /// Hostnames (lower-case, exact match) that bypass SSRF deny rules.
+  /// Example: `["example.internal", "minio.local"]`.
+  allowedHosts String[] @default([]) @map("allowed_hosts")
+
+  /// CIDR ranges (IPv4 or IPv6) that bypass SSRF deny rules.
+  /// Example: `["10.0.0.0/8", "fd00::/8"]`.
+  allowedCidrs String[] @default([]) @map("allowed_cidrs")
+
+  /// Hostnames that are always blocked, regardless of any allowlist.
+  /// Per-call options cannot override entries here.
+  blockedHosts String[] @default([]) @map("blocked_hosts")
+
+  /// CIDR ranges that are always blocked, regardless of any allowlist.
+  /// Per-call options cannot override entries here.
+  blockedCidrs String[] @default([]) @map("blocked_cidrs")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("safe_http_policy")
+}

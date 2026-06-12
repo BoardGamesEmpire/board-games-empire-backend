@@ -141,6 +141,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     role: mockDelegate(),
     rolePermission: mockDelegate(),
     ruleVariant: mockDelegate(),
+    safeHttpPolicy: mockDelegate(),
     session: mockDelegate(),
     sessionPlayer: mockDelegate(),
     systemSetting: mockDelegate(),

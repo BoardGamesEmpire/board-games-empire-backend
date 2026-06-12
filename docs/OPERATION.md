@@ -2,8 +2,8 @@
 
 ## Phase 0 — preparatory (weeks, in parallel with current work)
 
-1. #57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows.
-2. #72 OpenTelemetry in core. Same logic — retrofit pain is real, observability you don't have when you need it is worse.
+1. #57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows. - partially complete
+2. #72 OpenTelemetry in core. Same logic — retrofit pain is real, observability you don't have when you need it is worse. - complete in #82 with prisma metrics deferred [#81](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/81)
 
 These two can land alongside whatever else is in flight; they're cross-cutting prep, not standalone features.
 

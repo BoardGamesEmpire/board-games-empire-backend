@@ -667,6 +667,21 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       slug: 'read:feedback_sink_dispatch',
       reason: 'Read sink-dispatch audit trail',
     },
+
+    // ─── SafeHttpPolicy ─────────────────────────────────────
+    {
+      action: Action.read,
+      subject: 'SafeHttpPolicy',
+      slug: 'read:safe_http_policy',
+      reason: 'View the outbound HTTP SSRF policy',
+    },
+    {
+      action: Action.manage,
+      subject: 'SafeHttpPolicy',
+      slug: 'manage:safe_http_policy',
+      reason:
+        'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
+    },
   ];
 
   const permissionsBySlug: Record<string, any> = {};

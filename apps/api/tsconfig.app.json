@@ -23,6 +23,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/common/otel/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
     },
     {
@@ -47,13 +50,16 @@
       "path": "../../libs/api/system-settings/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/secure-http/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/safe-http/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/common/otel/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/notifications/tsconfig.lib.json"
