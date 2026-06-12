@@ -10,7 +10,7 @@ import { SafeHttpService } from './safe-http.service';
  *
  * Dependencies are resolved from global modules registered at AppModule:
  *   - `DatabaseModule` (global) — Prisma client.
- *   - `SafeHttpModule` (global) — supplies `SafeHttpPolicyEventsService` for
+ *   - `SecureHttpModule` (global) — supplies `SafeHttpPolicyEventsService` for
  *     the Redis pub/sub hot-reload notification after writes commit.
  *   - `AuditContextModule` (global) — supplies `AuditContextService` so the
  *     service can stamp `updatedBy` with the calling user's ID from CLS.

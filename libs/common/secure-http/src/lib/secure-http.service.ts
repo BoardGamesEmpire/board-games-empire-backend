@@ -107,15 +107,15 @@ export class SecureHttpService {
   ) {}
 
   async request<T = unknown>(url: string, options: SafeHttpRequestOptions = {}): Promise<SafeHttpResponse<T>> {
-    const snapshot = this.policy.current();
-    const resolved = this.resolveOptions(options, snapshot);
-
     const startedAt = Date.now();
-    const totalAttempts = resolved.retry?.attempts ?? 1;
+    const totalAttempts = options.retry?.attempts ?? 1;
 
     let lastError: SafeHttpError | undefined;
 
     for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      const snapshot = this.policy.current();
+      const resolved = this.resolveOptions(options, snapshot);
+
       await this.notify('onRequest', { url, method: resolved.method, attempt });
 
       try {
@@ -293,7 +293,7 @@ export class SecureHttpService {
         signal,
       });
 
-      const bodyBytes = await this.readBodyCapped(result.body);
+      const bodyBytes = await this.readBodyCapped(result.body, url);
       return {
         status: result.statusCode,
         headers: this.normalizeHeaders(result.headers),
@@ -444,7 +444,7 @@ export class SecureHttpService {
     return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
   }
 
-  private async readBodyCapped(body: Dispatcher.ResponseData['body']): Promise<Buffer> {
+  private async readBodyCapped(body: Dispatcher.ResponseData['body'], url: URL): Promise<Buffer> {
     const chunks: Buffer[] = [];
     let total = 0;
 
@@ -455,11 +455,9 @@ export class SecureHttpService {
       if (total > MAX_RESPONSE_BYTES) {
         // Destroy the stream to release the connection promptly.
         body.destroy?.();
-        throw new OutboundNetworkError(
-          'response-body',
-          new Error(`Response exceeded ${MAX_RESPONSE_BYTES} byte limit`),
-        );
+        throw new OutboundNetworkError(url.toString(), new Error(`Response exceeded ${MAX_RESPONSE_BYTES} byte limit`));
       }
+
       chunks.push(buf);
     }
 

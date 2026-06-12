@@ -20,6 +20,3 @@ CREATE TABLE "safe_http_policy" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "safe_http_policy_singleton_key" ON "safe_http_policy"("singleton");
-
--- CreateIndex
-CREATE UNIQUE INDEX "safe_http_policy_identifier_key" ON "safe_http_policy"("identifier");

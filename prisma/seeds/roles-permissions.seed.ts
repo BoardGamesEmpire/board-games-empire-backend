@@ -797,6 +797,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:household',
     'read:households',
     'read:public_content',
+    'read:safe_http_policy',
     'read:user:profile',
     'update:event',
     'update:game',

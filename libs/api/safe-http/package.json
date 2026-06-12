@@ -15,7 +15,7 @@
   "nx": {
     "name": "@board-games-empire/safe-http",
     "tags": [
-      "apio",
+      "api",
       "safe-http"
     ]
   },
