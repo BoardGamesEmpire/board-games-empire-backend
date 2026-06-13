@@ -53,5 +53,5 @@ async function bootstrap() {
 
 bootstrap().catch((error) => {
   bootstrapLogger.error({ err: error }, 'bootstrap failed');
-  process.exit(1);
+  bootstrapLogger.flush(() => process.exit(1));
 });
