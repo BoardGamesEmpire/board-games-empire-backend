@@ -18,5 +18,10 @@ CREATE TABLE "safe_http_policy" (
     CONSTRAINT "safe_http_policy_pkey" PRIMARY KEY ("id")
 );
 
+-- AlterTable
+ALTER TABLE "feedback_reports" ADD COLUMN     "breadcrumbs" JSONB,
+ADD COLUMN     "stack_trace" TEXT;
+
+
 -- CreateIndex
 CREATE UNIQUE INDEX "safe_http_policy_singleton_key" ON "safe_http_policy"("singleton");

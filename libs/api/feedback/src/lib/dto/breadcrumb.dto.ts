@@ -26,10 +26,6 @@ export enum BreadcrumbLogLevel {
  * reaches this DTO, it is already scrubbed. The backend only enforces
  * structural correctness; aggregate size is capped on the parent array via
  * `@MaxJsonBytes(FEEDBACK_BREADCRUMBS_MAX_BYTES)`.
- *
- * Stack traces are NOT carried here — crash traces compose into the
- * `message` field via `composeCrashMessage` until a dedicated column
- * lands.
  */
 export class BreadcrumbDto {
   @ApiProperty({

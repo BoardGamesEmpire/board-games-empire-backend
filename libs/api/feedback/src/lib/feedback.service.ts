@@ -242,7 +242,7 @@ export class FeedbackService {
     }
 
     const messageResult = this.redaction.scrubString(dto.message);
-    const stackTraceResult = dto.stackTrace !== undefined ? this.redaction.scrubString(dto.stackTrace) : null;
+    const stackTraceResult = dto.stackTrace ? this.redaction.scrubString(dto.stackTrace) : null;
     const deviceInfoResult = this.redaction.scrubObject(dto.deviceInfo ?? null);
     const breadcrumbsResult = this.scrubBreadcrumbs(dto.breadcrumbs);
 
@@ -270,7 +270,7 @@ export class FeedbackService {
    * "absent" distinguishable downstream.
    */
   private scrubBreadcrumbs(breadcrumbs: BreadcrumbDto[] | undefined): BreadcrumbsScrubResult {
-    if (breadcrumbs === undefined) {
+    if (!breadcrumbs) {
       return { value: null, mutated: false };
     }
 

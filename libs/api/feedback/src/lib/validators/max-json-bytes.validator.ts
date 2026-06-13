@@ -10,7 +10,7 @@ import {
  * Validates that the UTF-8 byte size of `JSON.stringify(value)` does not
  * exceed the configured maximum.
  *
- * Existed primarily for the `breadcrumbs` field on `CreateFeedbackReportDto`,
+ * Exists primarily for the `breadcrumbs` field on `CreateFeedbackReportDto`,
  * where the client emits a bounded ring buffer of structured entries and we
  * need a transport-level ceiling that is robust to multi-byte characters
  * (emoji in messages, non-Latin loggerName segments). Using UTF-8 byte size
