@@ -21,6 +21,14 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { EventService } from './event.service';
 import type { EventCreatedEvent, EventDeletedEvent } from './interfaces/event.interface';
 
+/**
+ * Assertions go through `expect.objectContaining` on `toHaveBeenCalledWith`
+ * rather than casting `mock.calls[0][0]` to a hand-rolled shape — the cast
+ * pattern collides with Prisma's input-type unions and reads as line noise.
+ * Use `objectContaining` (with literal arrays for exact-length array
+ * matching) for all mock-call assertions in this file going forward.
+ */
+
 describe('EventService', () => {
   let service: EventService;
   let db: MockDatabaseService;
@@ -194,14 +202,20 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', dto);
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: { occurrences: { create: Array<{ status: OccurrenceStatus }> } };
-      };
-      const occurrenceCreates = createCall.data.occurrences.create;
-
-      expect(occurrenceCreates).toHaveLength(2);
-      expect(occurrenceCreates[0].status).toBe(OccurrenceStatus.Proposed);
-      expect(occurrenceCreates[1].status).toBe(OccurrenceStatus.Proposed);
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            occurrences: expect.objectContaining({
+              // Exact array — both elements must have status: Proposed,
+              // and the array must contain exactly two entries.
+              create: [
+                expect.objectContaining({ status: OccurrenceStatus.Proposed }),
+                expect.objectContaining({ status: OccurrenceStatus.Proposed }),
+              ],
+            }),
+          }),
+        }),
+      );
     });
 
     it('throws BadRequestException when Fixed mode has more than one occurrence', async () => {
@@ -278,51 +292,37 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', dto);
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: {
-          attendees: {
-            create: Array<{
-              user: { connect: { id: string } };
-              status: string;
-              role: { create: { role: { connect: { name: string } } } };
-            }>;
-          };
-        };
-      };
-      const attendeeCreates = createCall.data.attendees.create;
-
-      // Host + 2 invitees = 3 records
-      expect(attendeeCreates).toHaveLength(3);
-
-      // First is always the host
-      expect(attendeeCreates[0]).toEqual(
+      expect(db.event.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          user: { connect: { id: 'user-1' } },
-          status: 'Attending',
-          role: expect.objectContaining({
-            create: expect.objectContaining({
-              role: { connect: { name: SystemRole.EventHost } },
+          data: expect.objectContaining({
+            attendees: expect.objectContaining({
+              // Exact array — three entries in order: host first, then invitees.
+              create: [
+                expect.objectContaining({
+                  user: { connect: { id: 'user-1' } },
+                  status: EventParticipationStatus.Attending,
+                  role: expect.objectContaining({
+                    create: expect.objectContaining({
+                      role: { connect: { name: SystemRole.EventHost } },
+                    }),
+                  }),
+                }),
+                expect.objectContaining({
+                  user: { connect: { id: 'user-friend-1' } },
+                  status: EventParticipationStatus.Invited,
+                  role: expect.objectContaining({
+                    create: expect.objectContaining({
+                      role: { connect: { name: SystemRole.EventParticipant } },
+                    }),
+                  }),
+                }),
+                expect.objectContaining({
+                  user: { connect: { id: 'user-friend-2' } },
+                  status: EventParticipationStatus.Invited,
+                }),
+              ],
             }),
           }),
-        }),
-      );
-
-      // Invitees are EventParticipant with Invited status
-      expect(attendeeCreates[1]).toEqual(
-        expect.objectContaining({
-          user: { connect: { id: 'user-friend-1' } },
-          status: 'Invited',
-          role: expect.objectContaining({
-            create: expect.objectContaining({
-              role: { connect: { name: SystemRole.EventParticipant } },
-            }),
-          }),
-        }),
-      );
-      expect(attendeeCreates[2]).toEqual(
-        expect.objectContaining({
-          user: { connect: { id: 'user-friend-2' } },
-          status: 'Invited',
         }),
       );
     });
@@ -338,14 +338,20 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', dto);
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: { attendees: { create: Array<{ user: { connect: { id: string } } }> } };
-      };
-      const attendeeCreates = createCall.data.attendees.create;
-
-      // Only host + 1 friend (creator filtered out)
-      expect(attendeeCreates).toHaveLength(2);
-      expect(attendeeCreates.map((a) => a.user.connect.id)).toEqual(['user-1', 'user-friend-1']);
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attendees: expect.objectContaining({
+              // Host + 1 friend (creator filtered out of invites). Order
+              // matters — host always first.
+              create: [
+                expect.objectContaining({ user: { connect: { id: 'user-1' } } }),
+                expect.objectContaining({ user: { connect: { id: 'user-friend-1' } } }),
+              ],
+            }),
+          }),
+        }),
+      );
     });
 
     it('deduplicates inviteUserIds', async () => {
@@ -359,13 +365,20 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', dto);
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: { attendees: { create: Array<{ user: { connect: { id: string } } }> } };
-      };
-      const attendeeCreates = createCall.data.attendees.create;
-
-      // Host + 2 unique friends
-      expect(attendeeCreates).toHaveLength(3);
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attendees: expect.objectContaining({
+              // Host + 2 unique friends — duplicate user-friend-1 collapses.
+              create: [
+                expect.objectContaining({ user: { connect: { id: 'user-1' } } }),
+                expect.objectContaining({ user: { connect: { id: 'user-friend-1' } } }),
+                expect.objectContaining({ user: { connect: { id: 'user-friend-2' } } }),
+              ],
+            }),
+          }),
+        }),
+      );
     });
 
     it('emits EventCreated with the deduplicated invitedUserIds', async () => {
@@ -396,12 +409,15 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', dto);
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: { attendees: { create: Array<{ user: { connect: { id: string } } }> } };
-      };
-
-      expect(createCall.data.attendees.create).toHaveLength(1);
-      expect(createCall.data.attendees.create[0].user.connect.id).toBe('user-1');
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attendees: expect.objectContaining({
+              create: [expect.objectContaining({ user: { connect: { id: 'user-1' } } })],
+            }),
+          }),
+        }),
+      );
     });
 
     it('creates only the host attendee when inviteUserIds is not provided', async () => {
@@ -411,11 +427,15 @@ describe('EventService', () => {
 
       await service.createEvent('user-1', makeCreateDto());
 
-      const createCall = db.event.create.mock.calls[0][0] as {
-        data: { attendees: { create: Array<{ user: { connect: { id: string } } }> } };
-      };
-
-      expect(createCall.data.attendees.create).toHaveLength(1);
+      expect(db.event.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            attendees: expect.objectContaining({
+              create: [expect.objectContaining({ user: { connect: { id: 'user-1' } } })],
+            }),
+          }),
+        }),
+      );
     });
   });
 

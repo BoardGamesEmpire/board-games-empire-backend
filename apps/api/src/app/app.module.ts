@@ -4,6 +4,7 @@ import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
+import { FeedbackModule } from '@bge/feedback';
 import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportProducerModule } from '@bge/game-import';
@@ -132,6 +133,7 @@ import { baseLogger } from './lib/logger';
     // Feature modules
     AuthModule,
     EventModule,
+    FeedbackModule,
     GameGatewayModule,
     GameImportProducerModule,
     GameModule,

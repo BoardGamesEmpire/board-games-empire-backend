@@ -6,6 +6,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
 import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import type { BreadcrumbDto } from './dto/breadcrumb.dto';
 import type { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import type {
   FeedbackReportPurgedEvent,
@@ -14,6 +15,19 @@ import type {
   UserFeedbackUnbannedEvent,
 } from './interfaces/feedback.interface';
 import { RedactionService } from './services/redaction.service';
+
+interface RedactionOutcome {
+  readonly redactedMessage: string;
+  readonly redactedStackTrace: string | null;
+  readonly redactedDeviceInfo: Record<string, unknown> | null;
+  readonly redactedBreadcrumbs: BreadcrumbDto[] | null;
+  readonly serverRedacted: boolean;
+}
+
+interface BreadcrumbsScrubResult {
+  readonly value: BreadcrumbDto[] | null;
+  readonly mutated: boolean;
+}
 
 /**
  * Feedback feature service.
@@ -45,10 +59,19 @@ export class FeedbackService {
    * has `create:FeedbackReport` ability — the controller's `PoliciesGuard`
    * enforces this. Banned users are denied at the guard layer because their
    * `UserPermission` inverts the role-derived `create:feedback_report` grant.
+   *
+   * All user-supplied free-text fields (message, stackTrace) and structured
+   * payloads (deviceInfo, breadcrumbs[].message, breadcrumbs[].sanitizedContext)
+   * pass through `RedactionService` when `feedbackReportServerRedactionEnabled`
+   * is on. The first-party client already sanitises breadcrumbs at capture, but
+   * third-party clients can't be trusted to do so — re-running redaction here
+   * is cheap and idempotent, and `serverRedacted` flips to expose mismatches
+   * for operational telemetry.
    */
   async submit(userId: string, dto: CreateFeedbackReportDto): Promise<FeedbackReport> {
     const settings = await this.getSettings();
-    const { redactedMessage, redactedDeviceInfo, serverRedacted } = this.redactIfEnabled(dto, settings);
+    const { redactedMessage, redactedStackTrace, redactedDeviceInfo, redactedBreadcrumbs, serverRedacted } =
+      this.redactIfEnabled(dto, settings);
 
     const { runtime, version } = this.deploymentInfo.getInfo();
     const userRedactedFields = dto.userRedactedFields ?? [];
@@ -56,6 +79,7 @@ export class FeedbackService {
     const created = await this.db.feedbackReport.create({
       data: {
         message: redactedMessage,
+        stackTrace: redactedStackTrace,
         title: dto.title ?? null,
         category: dto.category,
         context: dto.context ?? 'Unknown',
@@ -64,6 +88,8 @@ export class FeedbackService {
         platform: dto.platform ?? null,
         locale: dto.locale ?? null,
         deviceInfo: redactedDeviceInfo !== null ? (redactedDeviceInfo as Prisma.InputJsonValue) : Prisma.DbNull,
+        breadcrumbs:
+          redactedBreadcrumbs !== null ? (redactedBreadcrumbs as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
         deploymentRuntime: runtime,
         deploymentVersion: version,
         correlationKey: dto.correlationKey ?? null,
@@ -204,26 +230,67 @@ export class FeedbackService {
     return permission;
   }
 
-  private redactIfEnabled(
-    dto: CreateFeedbackReportDto,
-    settings: SystemSetting,
-  ): { redactedMessage: string; redactedDeviceInfo: Record<string, unknown> | null; serverRedacted: boolean } {
+  private redactIfEnabled(dto: CreateFeedbackReportDto, settings: SystemSetting): RedactionOutcome {
     if (settings.feedbackReportServerRedactionEnabled === false) {
       return {
         redactedMessage: dto.message,
+        redactedStackTrace: dto.stackTrace ?? null,
         redactedDeviceInfo: dto.deviceInfo ?? null,
+        redactedBreadcrumbs: dto.breadcrumbs ?? null,
         serverRedacted: false,
       };
     }
 
     const messageResult = this.redaction.scrubString(dto.message);
+    const stackTraceResult = dto.stackTrace ? this.redaction.scrubString(dto.stackTrace) : null;
     const deviceInfoResult = this.redaction.scrubObject(dto.deviceInfo ?? null);
+    const breadcrumbsResult = this.scrubBreadcrumbs(dto.breadcrumbs);
 
     return {
       redactedMessage: messageResult.value,
+      redactedStackTrace: stackTraceResult?.value ?? null,
       redactedDeviceInfo: deviceInfoResult.value,
-      serverRedacted: messageResult.mutated || deviceInfoResult.mutated,
+      redactedBreadcrumbs: breadcrumbsResult.value,
+      serverRedacted:
+        messageResult.mutated ||
+        (stackTraceResult?.mutated ?? false) ||
+        deviceInfoResult.mutated ||
+        breadcrumbsResult.mutated,
     };
+  }
+
+  /**
+   * Re-runs the message + sanitizedContext redaction pipeline over each
+   * breadcrumb. Idempotent on already-sanitized input (the first-party
+   * client scrubs at capture; this is the third-party defense). Preserves
+   * non-redaction fields (timestamp, level, loggerName) verbatim.
+   *
+   * Returns `value: null` when the caller omitted breadcrumbs entirely;
+   * an empty array round-trips as `value: []` to keep "explicit empty" and
+   * "absent" distinguishable downstream.
+   */
+  private scrubBreadcrumbs(breadcrumbs: BreadcrumbDto[] | undefined): BreadcrumbsScrubResult {
+    if (!breadcrumbs) {
+      return { value: null, mutated: false };
+    }
+
+    let mutated = false;
+    const scrubbed: BreadcrumbDto[] = breadcrumbs.map((crumb): BreadcrumbDto => {
+      const messageResult = this.redaction.scrubString(crumb.message);
+      const contextResult = this.redaction.scrubObject(crumb.sanitizedContext ?? null);
+
+      if (messageResult.mutated || contextResult.mutated) {
+        mutated = true;
+      }
+
+      return {
+        ...crumb,
+        message: messageResult.value,
+        sanitizedContext: contextResult.value,
+      };
+    });
+
+    return { value: scrubbed, mutated };
   }
 
   private async getSettings(): Promise<SystemSetting> {

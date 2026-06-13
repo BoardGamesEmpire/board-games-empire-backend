@@ -13,6 +13,15 @@ export const FEEDBACK_MAX_BODY_BYTES = 256 * 1024;
 /** Field-level cap on the `message` string. */
 export const FEEDBACK_MAX_MESSAGE_LENGTH = 10_000;
 
+/**
+ * Field-level cap on the optional `stackTrace` string. Generous enough to
+ * accommodate deep async chains and framework noise; the client is
+ * expected to truncate tail-preserving when a trace exceeds this. The
+ * backend rejects anything past the cap — no server-side truncation of
+ * client-supplied content (pre-alpha: fail loudly).
+ */
+export const FEEDBACK_MAX_STACK_TRACE_LENGTH = 32_768;
+
 /** Field-level cap on the optional `title` string. */
 export const FEEDBACK_MAX_TITLE_LENGTH = 200;
 
@@ -24,6 +33,16 @@ export const FEEDBACK_MAX_CORRELATION_KEY_LENGTH = 128;
 
 /** Cap on the `userRedactedFields` array length. */
 export const FEEDBACK_MAX_REDACTED_FIELDS = 64;
+
+/**
+ * UTF-8 byte cap on the serialized `breadcrumbs` array.
+ *
+ * The client buffers up to 100 sanitized crumbs (see Dart
+ * `BreadcrumbBuffer.defaultCapacity`); a typical entry serializes to a few
+ * hundred bytes, so 64 KB leaves comfortable headroom while staying well
+ * under the 256 KB transport cap. Enforced via `@MaxJsonBytes` on the DTO.
+ */
+export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
 
 /** Per-user throttle. TODO: migrate to SystemSetting once a dynamic
  * ThrottlerStorage exists in the codebase. */
