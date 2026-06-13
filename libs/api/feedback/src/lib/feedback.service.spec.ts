@@ -5,6 +5,7 @@ import {
   FeedbackContext,
   FeedbackSeverity,
   FeedbackStatus,
+  Prisma,
   ResourceType,
 } from '@bge/database';
 import { DeploymentInfoService } from '@bge/services';
@@ -14,6 +15,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
 import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import { BreadcrumbLogLevel, type BreadcrumbDto } from './dto/breadcrumb.dto';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackService } from './feedback.service';
 import type {
@@ -23,6 +25,14 @@ import type {
   UserFeedbackUnbannedEvent,
 } from './interfaces/feedback.interface';
 import { RedactionService } from './services/redaction.service';
+
+/**
+ * Assertions go through `expect.objectContaining` on `toHaveBeenCalledWith`
+ * rather than casting `mock.calls[0][0]` to a hand-rolled shape — the cast
+ * pattern collides with Prisma's input-type unions (especially for `Json`
+ * columns) and reads as line noise. Use `objectContaining` for all
+ * mock-call assertions in this file going forward.
+ */
 
 const CREATE_PERMISSION_ID = 'perm-create-feedback-report';
 
@@ -60,6 +70,7 @@ describe('FeedbackService', () => {
 
     db.systemSetting.findFirst.mockResolvedValue(stubSettings());
     db.permission.findUnique.mockResolvedValue({ id: CREATE_PERMISSION_ID } as Permission);
+    db.feedbackReport.create.mockResolvedValue(stubReport());
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -90,11 +101,14 @@ describe('FeedbackService', () => {
 
       await service.submit('user-1', makeDto());
 
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as {
-        data: { deploymentRuntime: DeploymentRuntime; deploymentVersion: string | null };
-      };
-      expect(createArg.data.deploymentRuntime).toBe(DeploymentRuntime.DockerCompose);
-      expect(createArg.data.deploymentVersion).toBe('0.5.0');
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            deploymentRuntime: DeploymentRuntime.DockerCompose,
+            deploymentVersion: '0.5.0',
+          }),
+        }),
+      );
     });
 
     it('defaults context to Unknown when omitted', async () => {
@@ -102,8 +116,11 @@ describe('FeedbackService', () => {
 
       await service.submit('user-1', makeDto({ context: undefined }));
 
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as { data: { context: FeedbackContext } };
-      expect(createArg.data.context).toBe(FeedbackContext.Unknown);
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ context: FeedbackContext.Unknown }),
+        }),
+      );
     });
 
     it('marks redactionApplied=true when the client redacted fields', async () => {
@@ -111,11 +128,14 @@ describe('FeedbackService', () => {
 
       await service.submit('user-1', makeDto({ userRedactedFields: ['email', 'deviceInfo.serial'] }));
 
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as {
-        data: { redactionApplied: boolean; userRedactedFields: string[] };
-      };
-      expect(createArg.data.redactionApplied).toBe(true);
-      expect(createArg.data.userRedactedFields).toEqual(['email', 'deviceInfo.serial']);
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            redactionApplied: true,
+            userRedactedFields: ['email', 'deviceInfo.serial'],
+          }),
+        }),
+      );
     });
 
     it('persists an empty userRedactedFields array when none supplied', async () => {
@@ -123,11 +143,14 @@ describe('FeedbackService', () => {
 
       await service.submit('user-1', makeDto({ userRedactedFields: undefined }));
 
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as {
-        data: { redactionApplied: boolean; userRedactedFields: string[] };
-      };
-      expect(createArg.data.redactionApplied).toBe(false);
-      expect(createArg.data.userRedactedFields).toEqual([]);
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            redactionApplied: false,
+            userRedactedFields: [],
+          }),
+        }),
+      );
     });
 
     it('runs server-side redaction when enabled and flips serverRedacted on mutation', async () => {
@@ -137,11 +160,14 @@ describe('FeedbackService', () => {
       await service.submit('user-1', makeDto({ message: 'leaked email@x.io body' }));
 
       expect(redaction.scrubString).toHaveBeenCalledWith('leaked email@x.io body');
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as {
-        data: { message: string; serverRedacted: boolean };
-      };
-      expect(createArg.data.message).toBe('scrubbed [REDACTED:email] body');
-      expect(createArg.data.serverRedacted).toBe(true);
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            message: 'scrubbed [REDACTED:email] body',
+            serverRedacted: true,
+          }),
+        }),
+      );
     });
 
     it('skips server-side redaction when SystemSetting disables it', async () => {
@@ -151,8 +177,11 @@ describe('FeedbackService', () => {
       await service.submit('user-1', makeDto({ message: 'leaked email@x.io body' }));
 
       expect(redaction.scrubString).not.toHaveBeenCalled();
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as { data: { serverRedacted: boolean } };
-      expect(createArg.data.serverRedacted).toBe(false);
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ serverRedacted: false }),
+        }),
+      );
     });
 
     it('emits FeedbackReportSubmitted after a successful create', async () => {
@@ -185,8 +214,11 @@ describe('FeedbackService', () => {
 
       await service.submit('user-1', makeDto({ correlationKey: 'retry-abc' }));
 
-      const createArg = db.feedbackReport.create.mock.calls[0][0] as { data: { correlationKey: string | null } };
-      expect(createArg.data.correlationKey).toBe('retry-abc');
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ correlationKey: 'retry-abc' }),
+        }),
+      );
     });
   });
 
@@ -252,35 +284,29 @@ describe('FeedbackService', () => {
         select: { id: true },
       });
 
-      const upsertArg = db.userPermission.upsert.mock.calls[0][0] as {
-        where: { userId_permissionId_resourceType_resourceId: { userId: string; permissionId: string } };
-        create: {
-          userId: string;
-          permissionId: string;
-          inverted: boolean;
-          grantedById: string;
-          expiresAt: Date | null;
-        };
-        update: { inverted: boolean; grantedById: string; expiresAt: Date | null };
-      };
-
-      expect(upsertArg.where.userId_permissionId_resourceType_resourceId).toMatchObject({
-        userId: 'user-9',
-        permissionId: CREATE_PERMISSION_ID,
-      });
-      expect(upsertArg.create).toMatchObject({
-        userId: 'user-9',
-        permissionId: CREATE_PERMISSION_ID,
-        resourceType: ResourceType.FeedbackReport,
-        inverted: true,
-        grantedById: 'admin-1',
-        expiresAt: null,
-      });
-      expect(upsertArg.update).toMatchObject({
-        inverted: true,
-        grantedById: 'admin-1',
-        expiresAt: null,
-      });
+      expect(db.userPermission.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId_permissionId_resourceType_resourceId: expect.objectContaining({
+              userId: 'user-9',
+              permissionId: CREATE_PERMISSION_ID,
+            }),
+          }),
+          create: expect.objectContaining({
+            userId: 'user-9',
+            permissionId: CREATE_PERMISSION_ID,
+            resourceType: ResourceType.FeedbackReport,
+            inverted: true,
+            grantedById: 'admin-1',
+            expiresAt: null,
+          }),
+          update: expect.objectContaining({
+            inverted: true,
+            grantedById: 'admin-1',
+            expiresAt: null,
+          }),
+        }),
+      );
     });
 
     it('emits UserFeedbackBanned with reason and (null) expiry', async () => {
@@ -307,10 +333,11 @@ describe('FeedbackService', () => {
 
       await service.banUser('user-9', 'admin-1', null, expiresAt);
 
-      const upsertArg = db.userPermission.upsert.mock.calls[0][0] as {
-        create: { expiresAt: Date | null };
-      };
-      expect(upsertArg.create.expiresAt).toBe(expiresAt);
+      expect(db.userPermission.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ expiresAt }),
+        }),
+      );
       expect(events.emit).toHaveBeenCalledWith(
         FeedbackEvents.UserFeedbackBanned,
         expect.objectContaining({ expiresAt } satisfies Partial<UserFeedbackBannedEvent>),
@@ -371,6 +398,229 @@ describe('FeedbackService', () => {
       expect(events.emit).toHaveBeenCalledWith(FeedbackEvents.UserFeedbackUnbanned, expect.any(Object));
     });
   });
+
+  describe('stackTrace', () => {
+    it('persists stackTrace verbatim when present and unmutated', async () => {
+      const stackTrace = 'TypeError: x is not a function\n    at Collection.tsx:42';
+
+      await service.submit('user-1', makeDto({ stackTrace }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ stackTrace }),
+        }),
+      );
+    });
+
+    it('persists stackTrace as null when omitted', async () => {
+      await service.submit('user-1', makeDto());
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ stackTrace: null }),
+        }),
+      );
+    });
+
+    it('runs stackTrace through scrubString when redaction is enabled', async () => {
+      const stackTrace = 'at sendTo(email@x.io)\n    at Foo.bar';
+
+      await service.submit('user-1', makeDto({ stackTrace }));
+
+      expect(redaction.scrubString).toHaveBeenCalledWith(stackTrace);
+    });
+
+    it('flips serverRedacted when scrubString mutates the stackTrace', async () => {
+      redaction.scrubString.mockImplementation((value: string) =>
+        value.includes('email@x.io')
+          ? { value: value.replace('email@x.io', '[REDACTED:email]'), mutated: true }
+          : { value, mutated: false },
+      );
+
+      await service.submit('user-1', makeDto({ message: 'clean message', stackTrace: 'at sendTo(email@x.io)' }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            stackTrace: 'at sendTo([REDACTED:email])',
+            serverRedacted: true,
+          }),
+        }),
+      );
+    });
+
+    it('skips stackTrace redaction when SystemSetting disables it', async () => {
+      db.systemSetting.findFirst.mockResolvedValue(stubSettings({ feedbackReportServerRedactionEnabled: false }));
+      const stackTrace = 'at sendTo(email@x.io)';
+
+      await service.submit('user-1', makeDto({ stackTrace }));
+
+      expect(redaction.scrubString).not.toHaveBeenCalled();
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ stackTrace, serverRedacted: false }),
+        }),
+      );
+    });
+  });
+
+  describe('breadcrumbs', () => {
+    it('passes breadcrumbs through when unmutated (sanitizedContext null-normalized on output)', async () => {
+      const breadcrumbs: BreadcrumbDto[] = [makeBreadcrumb(), makeBreadcrumb({ message: 'second' })];
+
+      await service.submit('user-1', makeDto({ breadcrumbs }));
+
+      // The service's scrub pipeline normalizes an omitted sanitizedContext
+      // to explicit null on the way out (mirrors the Dart client's nullable
+      // wire form, where a missing optional always serializes as null).
+      // Other fields pass through verbatim when no mutation is needed.
+      const expected = breadcrumbs.map((crumb) => ({ ...crumb, sanitizedContext: null }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ breadcrumbs: expected }),
+        }),
+      );
+    });
+
+    it('persists breadcrumbs as Prisma.DbNull when omitted', async () => {
+      await service.submit('user-1', makeDto());
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ breadcrumbs: Prisma.DbNull }),
+        }),
+      );
+    });
+
+    it('persists an empty breadcrumbs array as an empty array (not DbNull)', async () => {
+      // Distinguishing "client tried but had nothing" from "client omitted"
+      // is the contract.
+      await service.submit('user-1', makeDto({ breadcrumbs: [] }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ breadcrumbs: [] }),
+        }),
+      );
+    });
+
+    it('runs each breadcrumb message through scrubString', async () => {
+      const breadcrumbs: BreadcrumbDto[] = [
+        makeBreadcrumb({ message: 'crumb one' }),
+        makeBreadcrumb({ message: 'crumb two' }),
+      ];
+
+      await service.submit('user-1', makeDto({ breadcrumbs }));
+
+      expect(redaction.scrubString).toHaveBeenCalledWith('crumb one');
+      expect(redaction.scrubString).toHaveBeenCalledWith('crumb two');
+    });
+
+    it('runs each breadcrumb sanitizedContext through scrubObject (null when omitted)', async () => {
+      const breadcrumbs: BreadcrumbDto[] = [
+        makeBreadcrumb({ sanitizedContext: { gameId: 'g-1' } }),
+        makeBreadcrumb({ sanitizedContext: undefined }),
+      ];
+
+      await service.submit('user-1', makeDto({ breadcrumbs }));
+
+      expect(redaction.scrubObject).toHaveBeenCalledWith({ gameId: 'g-1' });
+      expect(redaction.scrubObject).toHaveBeenCalledWith(null);
+    });
+
+    it('flips serverRedacted when any breadcrumb message mutates', async () => {
+      redaction.scrubString.mockImplementation((value: string) =>
+        value === 'leak: email@x.io' ? { value: 'leak: [REDACTED:email]', mutated: true } : { value, mutated: false },
+      );
+
+      await service.submit(
+        'user-1',
+        makeDto({
+          breadcrumbs: [makeBreadcrumb({ message: 'clean' }), makeBreadcrumb({ message: 'leak: email@x.io' })],
+        }),
+      );
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            serverRedacted: true,
+            breadcrumbs: [
+              expect.objectContaining({ message: 'clean' }),
+              expect.objectContaining({ message: 'leak: [REDACTED:email]' }),
+            ],
+          }),
+        }),
+      );
+    });
+
+    it('flips serverRedacted when any breadcrumb sanitizedContext mutates', async () => {
+      redaction.scrubObject.mockImplementation((value: Record<string, unknown> | null | undefined) => {
+        if (value !== null && value !== undefined && 'apiKey' in value) {
+          return { value: { ...value, apiKey: '[REDACTED]' }, mutated: true };
+        }
+        return { value: value ?? null, mutated: false };
+      });
+
+      await service.submit(
+        'user-1',
+        makeDto({
+          breadcrumbs: [makeBreadcrumb({ sanitizedContext: { apiKey: 'sk-leak' } })],
+        }),
+      );
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            serverRedacted: true,
+            breadcrumbs: [expect.objectContaining({ sanitizedContext: { apiKey: '[REDACTED]' } })],
+          }),
+        }),
+      );
+    });
+
+    it('preserves non-redaction fields (timestamp, level, loggerName) verbatim', async () => {
+      const breadcrumbs: BreadcrumbDto[] = [
+        makeBreadcrumb({
+          timestamp: '2026-06-13T10:00:00.000Z',
+          level: BreadcrumbLogLevel.Warn,
+          loggerName: 'bge.sync',
+          message: 'something happened',
+        }),
+      ];
+
+      await service.submit('user-1', makeDto({ breadcrumbs }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            breadcrumbs: [
+              expect.objectContaining({
+                timestamp: '2026-06-13T10:00:00.000Z',
+                level: BreadcrumbLogLevel.Warn,
+                loggerName: 'bge.sync',
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+
+    it('skips breadcrumb redaction when SystemSetting disables it', async () => {
+      db.systemSetting.findFirst.mockResolvedValue(stubSettings({ feedbackReportServerRedactionEnabled: false }));
+      const breadcrumbs: BreadcrumbDto[] = [makeBreadcrumb({ message: 'leak: email@x.io' })];
+
+      await service.submit('user-1', makeDto({ breadcrumbs }));
+
+      expect(redaction.scrubString).not.toHaveBeenCalled();
+      expect(redaction.scrubObject).not.toHaveBeenCalled();
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ breadcrumbs, serverRedacted: false }),
+        }),
+      );
+    });
+  });
 });
 
 function makeDto(overrides: Partial<CreateFeedbackReportDto> = {}): CreateFeedbackReportDto {
@@ -388,6 +638,7 @@ function stubReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
   return {
     id: 'fb-1',
     message: 'Crash on add-to-collection',
+    stackTrace: null,
     title: null,
     category: FeedbackCategory.Bug,
     context: FeedbackContext.Unknown,
@@ -396,6 +647,7 @@ function stubReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
     platform: null,
     locale: null,
     deviceInfo: null,
+    breadcrumbs: null,
     deploymentRuntime: DeploymentRuntime.Kubernetes,
     deploymentVersion: '0.4.1',
     userId: 'user-1',
@@ -422,4 +674,14 @@ function stubSettings(overrides: Partial<SystemSetting> = {}): SystemSetting {
     feedbackReportServerRedactionEnabled: true,
     ...overrides,
   } as SystemSetting;
+}
+
+function makeBreadcrumb(overrides: Partial<BreadcrumbDto> = {}): BreadcrumbDto {
+  return {
+    timestamp: '2026-06-13T10:00:00.000Z',
+    level: BreadcrumbLogLevel.Info,
+    loggerName: 'bge.storage.sync_queue',
+    message: 'queued draft report 1f3a',
+    ...overrides,
+  } as BreadcrumbDto;
 }

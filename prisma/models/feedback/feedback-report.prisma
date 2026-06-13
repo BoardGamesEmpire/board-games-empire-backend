@@ -11,10 +11,16 @@ model FeedbackReport {
   severity FeedbackSeverity?
 
   // ─── Client metadata ────────────────────────────────────
-  appVersion String? @map("app_version")
-  platform   String?
-  locale     String?
-  deviceInfo Json?   @map("device_info")
+  appVersion  String? @map("app_version")
+  platform    String?
+  locale      String?
+  deviceInfo  Json?   @map("device_info")
+  // Client-emitted breadcrumb ring (mirrors the Dart Breadcrumb shape on
+  // `packages/core/observability/lib/src/breadcrumbs`). Stored opaquely;
+  // shape + UTF-8 byte cap are enforced at the DTO layer. Sanitization
+  // happens client-side before submission.
+  breadcrumbs  Json?   @map("breadcrumbs")
+  stackTrace   String? @map("stack_trace")
 
   // ─── Deployment snapshot at submission ──────────────────
   deploymentRuntime DeploymentRuntime @default(Unknown) @map("deployment_runtime")

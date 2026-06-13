@@ -1,5 +1,6 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
@@ -10,16 +11,21 @@ import {
   IsString,
   MaxLength,
   ValidateIf,
+  ValidateNested,
 } from 'class-validator';
 import {
+  FEEDBACK_BREADCRUMBS_MAX_BYTES,
   FEEDBACK_MAX_APP_VERSION_LENGTH,
   FEEDBACK_MAX_CORRELATION_KEY_LENGTH,
   FEEDBACK_MAX_LOCALE_LENGTH,
   FEEDBACK_MAX_MESSAGE_LENGTH,
   FEEDBACK_MAX_PLATFORM_LENGTH,
   FEEDBACK_MAX_REDACTED_FIELDS,
+  FEEDBACK_MAX_STACK_TRACE_LENGTH,
   FEEDBACK_MAX_TITLE_LENGTH,
 } from '../constants/feedback.constants';
+import { MaxJsonBytes } from '../validators/max-json-bytes.validator';
+import { BreadcrumbDto } from './breadcrumb.dto';
 
 /** Categories that require a severity. `FeatureRequest` does not. */
 const SEVERITY_REQUIRED_CATEGORIES: ReadonlySet<FeedbackCategory> = new Set([
@@ -43,6 +49,17 @@ export class CreateFeedbackReportDto {
   @IsNotEmpty()
   @MaxLength(FEEDBACK_MAX_MESSAGE_LENGTH)
   message!: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Stack trace for crash-category reports. Client truncates tail-preserving (head clipped) when the trace exceeds the cap; the backend rejects anything past it.',
+    maxLength: FEEDBACK_MAX_STACK_TRACE_LENGTH,
+  })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(FEEDBACK_MAX_STACK_TRACE_LENGTH)
+  stackTrace?: string;
 
   @ApiPropertyOptional({ description: 'Short title; surfaced as the GitHub issue title when forwarded.' })
   @IsOptional()
@@ -95,6 +112,18 @@ export class CreateFeedbackReportDto {
   @IsOptional()
   @IsObject()
   deviceInfo?: Record<string, unknown>;
+
+  @ApiPropertyOptional({
+    type: () => [BreadcrumbDto],
+    description:
+      'Client-emitted breadcrumb ring (post sanitization; see the Dart `BreadcrumbBuffer`). Aggregate size capped at FEEDBACK_BREADCRUMBS_MAX_BYTES UTF-8 bytes.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BreadcrumbDto)
+  @MaxJsonBytes(FEEDBACK_BREADCRUMBS_MAX_BYTES)
+  breadcrumbs?: BreadcrumbDto[];
 
   @ApiPropertyOptional({
     description: 'Idempotency token. Column persisted; server-side short-circuit deferred (see backlog).',
