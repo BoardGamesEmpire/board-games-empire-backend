@@ -134,6 +134,9 @@
     },
     {
       "path": "./libs/api/safe-http"
+    },
+    {
+      "path": "./libs/common/logger"
     }
   ]
 }
