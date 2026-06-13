@@ -19,6 +19,9 @@
   "references": [
     {
       "path": "../actor-context/tsconfig.lib.json"
+    },
+    {
+      "path": "../logger/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

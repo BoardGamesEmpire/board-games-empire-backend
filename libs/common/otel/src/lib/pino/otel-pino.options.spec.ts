@@ -1,5 +1,5 @@
 import type { Span, SpanContext } from '@opentelemetry/api';
-import type { TransportTargetOptions } from 'pino';
+import type { LoggerOptions, TransportTargetOptions } from 'pino';
 
 jest.mock('@opentelemetry/api', () => {
   const actual = jest.requireActual<typeof import('@opentelemetry/api')>('@opentelemetry/api');
@@ -30,6 +30,19 @@ const buildSpanContext = (overrides: Partial<SpanContext> = {}): SpanContext => 
 });
 
 const buildSpan = (spanContext: SpanContext): Span => ({ spanContext: () => spanContext }) as Span;
+
+/**
+ * Narrows the loose `LoggerOptions['transport']` to the multi-target
+ * shape that {@link buildOtelPinoOptions} always produces. Lets every
+ * assertion in this file address `targets` without `any` casts.
+ */
+const getTargets = (options: LoggerOptions): TransportTargetOptions[] => {
+  const transport = options.transport;
+  if (transport && typeof transport === 'object' && 'targets' in transport) {
+    return transport.targets as TransportTargetOptions[];
+  }
+  throw new Error('expected transport to expose targets[]');
+};
 
 describe('otelTraceMixin', () => {
   beforeEach(() => {
@@ -66,102 +79,90 @@ describe('otelTraceMixin', () => {
 });
 
 describe('buildOtelPinoOptions', () => {
-  it('always sets the trace correlation mixin', () => {
-    const options = buildOtelPinoOptions({});
+  describe('composition with @bge/logger base options', () => {
+    it('preserves the pino-pretty target inherited from buildBasePinoOptions', () => {
+      const targets = getTargets(buildOtelPinoOptions({}));
 
-    expect(options.mixin).toBe(otelTraceMixin);
-  });
-
-  it('always configures at least one transport target', () => {
-    const options = buildOtelPinoOptions({});
-
-    expect((options.transport as { targets: unknown[] }).targets).toHaveLength(1);
-  });
-
-  it('configures pino-opentelemetry-transport when OTLP endpoint is set', () => {
-    const options = buildOtelPinoOptions({
-      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+      expect(targets.some((t) => t.target === 'pino-pretty')).toBe(true);
     });
 
-    const targets = (options.transport as { targets: { target: string; options: unknown }[] }).targets;
-    expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(true);
+    it('inherits the resolved level from base options at the top level', () => {
+      const options = buildOtelPinoOptions({ LOG_LEVEL: 'warn' });
+
+      expect(options.level).toBe('warn');
+    });
   });
 
-  it('forwards OTEL_RESOURCE_ATTRIBUTES into the transport options', () => {
-    const options = buildOtelPinoOptions({
-      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-      OTEL_RESOURCE_ATTRIBUTES: 'service.name=bge-api,service.version=1.0.0',
-    });
-
-    const targets = (options.transport as { targets: { target: string; options: { resourceAttributes?: string } }[] })
-      .targets;
-    const otelTransport = targets.find((t) => t.target === 'pino-opentelemetry-transport');
-    expect(otelTransport).toBeDefined();
-    expect(otelTransport!.options.resourceAttributes).toBe('service.name=bge-api,service.version=1.0.0');
-  });
-
-  it('defaults env to process.env when no argument is supplied', () => {
-    const originalEndpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
-    delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
-
-    try {
-      const options = buildOtelPinoOptions();
-      const targets = (options.transport as { targets: unknown[] }).targets;
-      expect(targets).toHaveLength(1);
-    } finally {
-      if (originalEndpoint !== undefined) {
-        process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = originalEndpoint;
-      }
-    }
-  });
-
-  describe('log level', () => {
-    // Every assertion in this block reads the level from the produced
-    // options. The function under test must derive the level from the
-    // `env` parameter — never from `process.env` or `@bge/env` —
-    // otherwise the test runner's environment would leak into these
-    // results and the parameter contract would be violated.
-
-    it('uses LOG_LEVEL from the passed env when set', () => {
-      const options = buildOtelPinoOptions({ LOG_LEVEL: 'trace' });
-
-      expect(options.level).toBe('trace');
-    });
-
-    it('defaults to "info" when NODE_ENV is "production" and LOG_LEVEL is unset', () => {
-      const options = buildOtelPinoOptions({ NODE_ENV: 'production' });
-
-      expect(options.level).toBe('info');
-    });
-
-    it('defaults to "debug" when NODE_ENV is not "production" and LOG_LEVEL is unset', () => {
-      const options = buildOtelPinoOptions({ NODE_ENV: 'development' });
-
-      expect(options.level).toBe('debug');
-    });
-
-    it('defaults to "debug" when both NODE_ENV and LOG_LEVEL are unset', () => {
+  describe('OTel trace correlation', () => {
+    it('always sets the trace correlation mixin', () => {
       const options = buildOtelPinoOptions({});
 
-      expect(options.level).toBe('debug');
+      expect(options.mixin).toBe(otelTraceMixin);
+    });
+  });
+
+  describe('pino-opentelemetry-transport', () => {
+    it('omits the OTLP transport target when OTEL_EXPORTER_OTLP_ENDPOINT is unset', () => {
+      const targets = getTargets(buildOtelPinoOptions({}));
+
+      expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(false);
     });
 
-    it('LOG_LEVEL takes precedence over the NODE_ENV-derived default', () => {
-      const options = buildOtelPinoOptions({ NODE_ENV: 'production', LOG_LEVEL: 'trace' });
+    it('appends pino-opentelemetry-transport when OTLP endpoint is set', () => {
+      const targets = getTargets(buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }));
 
-      expect(options.level).toBe('trace');
+      expect(targets.some((t) => t.target === 'pino-opentelemetry-transport')).toBe(true);
     });
 
-    it('applies the resolved level to every transport target', () => {
-      const options = buildOtelPinoOptions({
-        LOG_LEVEL: 'warn',
-        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
-      }) as unknown as { transport: { targets: TransportTargetOptions[] } };
+    it('appends after the inherited base targets (does not replace them)', () => {
+      const targets = getTargets(buildOtelPinoOptions({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318' }));
 
-      const targets = options.transport.targets as unknown as TransportTargetOptions[];
       expect(targets).toHaveLength(2);
+      expect(targets[0].target).toBe('pino-pretty');
+      expect(targets[1].target).toBe('pino-opentelemetry-transport');
+    });
+
+    it('forwards OTEL_RESOURCE_ATTRIBUTES into the transport options', () => {
+      const targets = getTargets(
+        buildOtelPinoOptions({
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+          OTEL_RESOURCE_ATTRIBUTES: 'service.name=bge-api,service.version=1.0.0',
+        }),
+      );
+
+      const otelTransport = targets.find((t) => t.target === 'pino-opentelemetry-transport');
+      expect(otelTransport).toBeDefined();
+      const transportOptions = otelTransport?.options as { resourceAttributes?: string };
+      expect(transportOptions.resourceAttributes).toBe('service.name=bge-api,service.version=1.0.0');
+    });
+
+    it('applies the resolved level to the OTLP transport target', () => {
+      const targets = getTargets(
+        buildOtelPinoOptions({
+          LOG_LEVEL: 'warn',
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318',
+        }),
+      );
+
       for (const target of targets) {
         expect(target.level).toBe('warn');
+      }
+    });
+  });
+
+  describe('env defaulting', () => {
+    it('defaults env to process.env when no argument is supplied', () => {
+      const originalEndpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+      delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+
+      try {
+        const targets = getTargets(buildOtelPinoOptions());
+        expect(targets).toHaveLength(1);
+        expect(targets[0].target).toBe('pino-pretty');
+      } finally {
+        if (originalEndpoint !== undefined) {
+          process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = originalEndpoint;
+        }
       }
     });
   });

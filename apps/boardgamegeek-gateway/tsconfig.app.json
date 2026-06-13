@@ -28,10 +28,13 @@
   ],
   "references": [
     {
-      "path": "../../libs/proto/gateway/tsconfig.lib.json"
+      "path": "../../libs/common/utils/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/utils/tsconfig.lib.json"
+      "path": "../../libs/common/logger/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/env/tsconfig.lib.json"

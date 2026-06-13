@@ -2,9 +2,13 @@ import { getActorSnapshotFromCls } from '@bge/actor-context';
 import { env } from '@bge/env';
 import { bootstrapObservability } from '@bge/otel';
 
-export const { otel, baseLogger, bootstrapLogger } = bootstrapObservability({
+const { otel, baseLogger } = bootstrapObservability({
   serviceName: 'bge-gateway-worker',
   serviceVersion: process.env['npm_package_version'] ?? '0.0.0',
   environment: env.provide('NODE_ENV', { defaultValue: 'development' }),
   actorContextProvider: getActorSnapshotFromCls,
 });
+
+const bootstrapLogger = baseLogger.child({ component: 'bootstrap' });
+
+export { baseLogger, bootstrapLogger, otel };

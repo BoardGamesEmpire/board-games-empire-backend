@@ -1,3 +1,4 @@
+import type { Logger as PinoInstance } from 'pino';
 import type { OtelBootstrapHandle } from '../init/init-otel';
 import type { OtelInitConfig } from '../init/otel.config';
 import { noopActorContextProvider } from '../processors/actor-context-provider';
@@ -17,7 +18,7 @@ jest.mock('../pino/otel-pino.options', () => ({
   buildOtelPinoOptions: jest.fn(() => ({ level: 'info' })),
 }));
 
-const bootstrapChildLogger = {
+const internalBootstrapChild = {
   trace: jest.fn(),
   debug: jest.fn(),
   info: jest.fn(),
@@ -25,22 +26,17 @@ const bootstrapChildLogger = {
   error: jest.fn(),
 };
 
-const baseChildLogger = {
+const baseLogger = {
   trace: jest.fn(),
   debug: jest.fn(),
   info: jest.fn(),
   warn: jest.fn(),
   error: jest.fn(),
-  child: jest.fn(() => bootstrapChildLogger),
+  child: jest.fn(() => internalBootstrapChild),
 };
 
-const rootLogger = {
-  child: jest.fn(() => baseChildLogger),
-};
-
-jest.mock('pino', () => ({
-  __esModule: true,
-  default: jest.fn(() => rootLogger),
+jest.mock('@bge/logger', () => ({
+  bootstrapLogging: jest.fn(() => baseLogger),
 }));
 
 jest.mock('@opentelemetry/api', () => {
@@ -54,8 +50,8 @@ jest.mock('@opentelemetry/api', () => {
   };
 });
 
+import { bootstrapLogging } from '@bge/logger';
 import { diag, DiagLogLevel } from '@opentelemetry/api';
-import pino from 'pino';
 import { OTEL_LOG_LEVEL_ENV } from '../init/diag-log-level';
 import { initOtel } from '../init/init-otel';
 import { buildOtelPinoOptions } from '../pino/otel-pino.options';
@@ -63,7 +59,7 @@ import { bootstrapObservability } from './bootstrap-observability';
 
 const initOtelMock = initOtel as jest.Mock;
 const buildOptionsMock = buildOtelPinoOptions as jest.Mock;
-const pinoMock = pino as unknown as jest.Mock;
+const bootstrapLoggingMock = bootstrapLogging as jest.Mock;
 const diagSetLoggerMock = diag.setLogger as jest.Mock;
 
 const baseConfig: OtelInitConfig = {
@@ -85,9 +81,8 @@ describe('bootstrapObservability', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    baseChildLogger.child.mockReturnValue(bootstrapChildLogger);
-    rootLogger.child.mockReturnValue(baseChildLogger);
-    pinoMock.mockReturnValue(rootLogger);
+    baseLogger.child.mockReturnValue(internalBootstrapChild);
+    bootstrapLoggingMock.mockReturnValue(baseLogger);
     initOtelMock.mockReturnValue(mockOtelHandle);
     buildOptionsMock.mockReturnValue({ level: 'info' });
 
@@ -101,12 +96,20 @@ describe('bootstrapObservability', () => {
   });
 
   describe('initialization order', () => {
-    it('builds pino options before initializing the SDK', () => {
+    it('builds pino options before constructing the base logger', () => {
       bootstrapObservability(baseConfig);
 
       const buildOptionsOrder = buildOptionsMock.mock.invocationCallOrder[0];
+      const bootstrapLoggingOrder = bootstrapLoggingMock.mock.invocationCallOrder[0];
+      expect(buildOptionsOrder).toBeLessThan(bootstrapLoggingOrder);
+    });
+
+    it('constructs the base logger before initializing the SDK', () => {
+      bootstrapObservability(baseConfig);
+
+      const bootstrapLoggingOrder = bootstrapLoggingMock.mock.invocationCallOrder[0];
       const initOtelOrder = initOtelMock.mock.invocationCallOrder[0];
-      expect(buildOptionsOrder).toBeLessThan(initOtelOrder);
+      expect(bootstrapLoggingOrder).toBeLessThan(initOtelOrder);
     });
 
     it('initializes the SDK before installing the diag logger', () => {
@@ -118,51 +121,58 @@ describe('bootstrapObservability', () => {
     });
   });
 
-  describe('pino loggers', () => {
-    it('constructs pino with the result of buildOtelPinoOptions', () => {
+  describe('base logger construction', () => {
+    it('delegates to bootstrapLogging from @bge/logger', () => {
       bootstrapObservability(baseConfig);
 
-      expect(pinoMock).toHaveBeenCalledWith({ level: 'info' });
+      expect(bootstrapLoggingMock).toHaveBeenCalledTimes(1);
     });
 
-    it('creates the base logger with only the service binding', () => {
+    it('forwards the configured serviceName to bootstrapLogging', () => {
       bootstrapObservability({ ...baseConfig, serviceName: 'bge-coordinator' });
 
-      expect(rootLogger.child).toHaveBeenCalledTimes(1);
-      expect(rootLogger.child).toHaveBeenCalledWith({
-        service: 'bge-coordinator',
-      });
+      expect(bootstrapLoggingMock).toHaveBeenCalledWith(
+        { serviceName: 'bge-coordinator' },
+        expect.objectContaining({ level: 'info' }),
+      );
     });
 
-    it('creates the bootstrap logger as a child of the base with the component binding', () => {
+    it('passes the result of buildOtelPinoOptions as the options argument', () => {
       bootstrapObservability(baseConfig);
 
-      expect(baseChildLogger.child).toHaveBeenCalledTimes(1);
-      expect(baseChildLogger.child).toHaveBeenCalledWith({
-        component: 'bootstrap',
-      });
+      expect(bootstrapLoggingMock).toHaveBeenCalledWith(expect.any(Object), { level: 'info' });
     });
 
-    it('returns the base child as baseLogger', () => {
-      const { baseLogger } = bootstrapObservability(baseConfig);
+    it('returns the bootstrapLogging result as baseLogger', () => {
+      const result = bootstrapObservability(baseConfig);
 
-      expect(baseLogger).toBe(baseChildLogger);
+      expect(result.baseLogger).toBe(baseLogger as unknown as PinoInstance);
     });
 
-    it('returns the bootstrap child as bootstrapLogger', () => {
-      const { bootstrapLogger } = bootstrapObservability(baseConfig);
+    it('does not expose the internal bootstrap child on the return value', () => {
+      const result = bootstrapObservability(baseConfig);
 
-      expect(bootstrapLogger).toBe(bootstrapChildLogger);
+      expect(Object.keys(result)).toEqual(expect.arrayContaining(['otel', 'baseLogger']));
+      expect(Object.keys(result)).not.toEqual(expect.arrayContaining(['bootstrapLogger']));
     });
+  });
 
-    it('emits the startup info log through the bootstrap logger (not the base)', () => {
+  describe('internal bootstrap child', () => {
+    it('derives the bootstrap child from the base logger with the component binding', () => {
       bootstrapObservability(baseConfig);
 
-      expect(bootstrapChildLogger.info).toHaveBeenCalledWith(
+      expect(baseLogger.child).toHaveBeenCalledTimes(1);
+      expect(baseLogger.child).toHaveBeenCalledWith({ component: 'bootstrap' });
+    });
+
+    it('emits the startup info log through the internal bootstrap child (not the base)', () => {
+      bootstrapObservability(baseConfig);
+
+      expect(internalBootstrapChild.info).toHaveBeenCalledWith(
         { serviceName: 'bge-test', serviceVersion: '1.2.3' },
         'OpenTelemetry SDK initialized',
       );
-      expect(baseChildLogger.info).not.toHaveBeenCalled();
+      expect(baseLogger.info).not.toHaveBeenCalled();
     });
   });
 
@@ -225,49 +235,49 @@ describe('bootstrapObservability', () => {
       expect(level).toBe(DiagLogLevel.INFO);
     });
 
-    it('routes diag.info through the bootstrap pino at info level', () => {
+    it('routes diag.info through the internal bootstrap pino at info level', () => {
       bootstrapObservability(baseConfig);
 
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.info('sdk message', 'arg1', 'arg2');
 
-      expect(bootstrapChildLogger.info).toHaveBeenCalledWith({ otel: ['arg1', 'arg2'] }, 'sdk message');
+      expect(internalBootstrapChild.info).toHaveBeenCalledWith({ otel: ['arg1', 'arg2'] }, 'sdk message');
     });
 
-    it('routes diag.warn through the bootstrap pino at warn level', () => {
+    it('routes diag.warn through the internal bootstrap pino at warn level', () => {
       bootstrapObservability(baseConfig);
 
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.warn('exporter retry');
 
-      expect(bootstrapChildLogger.warn).toHaveBeenCalledWith({ otel: [] }, 'exporter retry');
+      expect(internalBootstrapChild.warn).toHaveBeenCalledWith({ otel: [] }, 'exporter retry');
     });
 
-    it('routes diag.error through the bootstrap pino at error level', () => {
+    it('routes diag.error through the internal bootstrap pino at error level', () => {
       bootstrapObservability(baseConfig);
 
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.error('failed to flush');
 
-      expect(bootstrapChildLogger.error).toHaveBeenCalledWith({ otel: [] }, 'failed to flush');
+      expect(internalBootstrapChild.error).toHaveBeenCalledWith({ otel: [] }, 'failed to flush');
     });
 
-    it('routes diag.verbose through the bootstrap pino at trace level', () => {
+    it('routes diag.verbose through the internal bootstrap pino at trace level', () => {
       bootstrapObservability(baseConfig);
 
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.verbose('span queued');
 
-      expect(bootstrapChildLogger.trace).toHaveBeenCalledWith({ otel: [] }, 'span queued');
+      expect(internalBootstrapChild.trace).toHaveBeenCalledWith({ otel: [] }, 'span queued');
     });
 
-    it('routes diag.debug through the bootstrap pino at debug level', () => {
+    it('routes diag.debug through the internal bootstrap pino at debug level', () => {
       bootstrapObservability(baseConfig);
 
       const [installedLogger] = diagSetLoggerMock.mock.calls[0];
       installedLogger.debug('instrumentation patched');
 
-      expect(bootstrapChildLogger.debug).toHaveBeenCalledWith({ otel: [] }, 'instrumentation patched');
+      expect(internalBootstrapChild.debug).toHaveBeenCalledWith({ otel: [] }, 'instrumentation patched');
     });
   });
 });

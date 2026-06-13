@@ -1,21 +1,32 @@
 import 'reflect-metadata';
 
 import { env } from '@bge/env';
+import { registerLoggerShutdown } from '@bge/logger';
 import { walkDir } from '@bge/utils';
 import { PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';
-import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Transport } from '@nestjs/microservices';
+import { Logger as PinoLogger } from 'nestjs-pino';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
+import { bootstrapLogger } from './app/lib/logger';
 
 async function bootstrap() {
+  if (!env.isProduction) {
+    Error.stackTraceLimit = Infinity;
+  }
+
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
-  Logger.log(`Loading gRPC proto files from: ${protoPaths.join(', ')}`);
+  bootstrapLogger.info({ protoPaths }, 'loading gRPC proto files');
+
   const url = `${env.provide('BOARDGAMEGEEK_GATEWAY_GRPC_HOST')}:${env.provide('BOARDGAMEGEEK_GATEWAY_GRPC_PORT')}`;
 
   const app = await NestFactory.createMicroservice(AppModule, {
     transport: Transport.GRPC,
+    // Buffer module-init logs until `useLogger` is called below, so
+    // they flow through nestjs-pino rather than Nest's default
+    // ConsoleLogger going to stdout.
+    bufferLogs: true,
     options: {
       url,
       package: PROTO_PACKAGE_NAME,
@@ -28,8 +39,19 @@ async function bootstrap() {
       },
     },
   });
+
+  app.useLogger(app.get(PinoLogger));
+
+  // `enableShutdownHooks()` is intentionally omitted — the handlers
+  // registered below sequence `app.close()` before flushing pino so
+  // the trailing batch of log records is not dropped.
+  registerLoggerShutdown(app, bootstrapLogger);
+
   await app.listen();
-  Logger.log(`🚀 Application is running on: grpc://${url}`);
+  bootstrapLogger.info({ url }, '🚀 application is running on grpc');
 }
 
-bootstrap();
+bootstrap().catch((error) => {
+  bootstrapLogger.error({ err: error }, 'bootstrap failed');
+  bootstrapLogger.flush(() => process.exit(1));
+});
