@@ -2,6 +2,7 @@ import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry } from '@bge/otel';
+import { WebhookQueueConsumerModule } from '@bge/queue-webhooks';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
@@ -37,12 +38,11 @@ import { baseLogger } from './lib/logger';
       verboseMemoryLeak: true,
     }),
 
-    // Shared Redis client (iovalkey via @bge/redis). Worker configures the
-    // queue connection only — it consumes BullMQ jobs but has no gateway
-    // registry, no cache layer, and no health endpoints. If any downstream
-    // consumer module unexpectedly tries to inject CACHE_REDIS_CLIENT, DI
-    // will fail at startup with a clear "no provider" error.
     RedisModule.forRootAsync({
+      cache: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.cache'),
+      },
       queue: {
         inject: [ConfigService],
         useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
@@ -87,6 +87,7 @@ import { baseLogger } from './lib/logger';
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,
+    WebhookQueueConsumerModule,
   ],
 })
 export class WorkerModule {}

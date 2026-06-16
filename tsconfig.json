@@ -137,6 +137,15 @@
     },
     {
       "path": "./libs/common/logger"
+    },
+    {
+      "path": "./libs/api/webhook-subscription"
+    },
+    {
+      "path": "./libs/common/webhooks"
+    },
+    {
+      "path": "./libs/queue/webhooks"
     }
   ]
 }

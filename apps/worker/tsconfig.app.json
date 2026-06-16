@@ -31,6 +31,9 @@
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/queue/webhooks/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {

@@ -3,13 +3,13 @@ import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
 export interface AuthConfig {
-  authSecret: string;
   disableEmailSignUp: boolean;
   disableOriginCheck: boolean;
   oidcClientId: string;
   oidcClientSecret: string;
   oidcProviderId: string;
   oidcWellKnownUrl: string;
+  secret: string;
   sendEmailVerification: boolean;
   trustedOrigins: string[];
   url: string;

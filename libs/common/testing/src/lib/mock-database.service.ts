@@ -150,5 +150,6 @@ export function createMockDatabaseService(): MockDatabaseService {
     userPreferences: mockDelegate(),
     userProfile: mockDelegate(),
     userRole: mockDelegate(),
+    webhookSubscription: mockDelegate(),
   } as unknown as MockDatabaseService;
 }

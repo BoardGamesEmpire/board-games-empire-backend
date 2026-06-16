@@ -21,6 +21,7 @@ import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
+import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvValkey from '@keyv/valkey';
 import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
@@ -31,6 +32,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
+import Keyv from 'keyv';
 import { ClsInterceptor, ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
@@ -85,13 +87,22 @@ import { baseLogger } from './lib/logger';
         inject: [ConfigService],
         useFactory: (config: ConfigService) => config.getOrThrow('redis.cache'),
       },
+      queue: {
+        inject: [ConfigService],
+        useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
+      },
     }),
 
     CacheModule.registerAsync({
       isGlobal: true,
       inject: [CACHE_REDIS_CLIENT, ConfigService],
       useFactory: (cacheClient: Redis, configService: ConfigService) => ({
-        stores: [new KeyvValkey(cacheClient)],
+        stores: [
+          new Keyv({
+            store: new KeyvValkey(cacheClient),
+            namespace: 'api:cache',
+          }),
+        ],
         ttl: configService.get<number>('cache.ttl'),
         max: configService.get<number>('cache.max'),
       }),
@@ -148,6 +159,7 @@ import { baseLogger } from './lib/logger';
     SafeHttpModule,
     SystemSettingsModule,
     UserModule,
+    WebhookSubscriptionModule,
     WellKnownModule,
   ],
   controllers: [],

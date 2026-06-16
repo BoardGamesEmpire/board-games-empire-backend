@@ -1,0 +1,81 @@
+// Outbound webhook delivery. A subscription is a standing grant tied to its
+// creating user (`createdById`): events are delivered only when that user can
+// still `read` the subject at dispatch time (CASL intersection). Scoped to one
+// `resourceType`, optionally narrowed by a specific `resourceId` (an instance
+// of that type) and/or a `householdId` container. Both filters null ⇒ all
+// instances of `resourceType` the creator can read.
+//
+// Status is reason-encoded — no separate `disabledReason`:
+//   Active   delivering
+//   Pending  reserved for the future URL-verification handshake; v1 never sets it
+//   Disabled user turned it off
+//   Failed   auto-disabled after consecutive delivery failures
+//   Revoked  (future) creator lost the underlying read grant — pairs with #87
+enum WebhookSubscriptionStatus {
+  Active
+  Pending
+  Disabled
+  Failed
+  Revoked
+
+  @@map("webhook_subscription_statuses")
+}
+
+model WebhookSubscription {
+  id String @id @default(cuid(2))
+
+  // What this subscription is about. Every subscribed event type must map to
+  // this subject in the WebhookEventRegistry (validated at create).
+  resourceType ResourceType @map("resource_type")
+
+  // Optional instance-level narrowing (a specific record of `resourceType`).
+  resourceId String? @map("resource_id")
+
+  // Optional container narrowing. Independent of `resourceId`; usually a
+  // different type than the subject (e.g. Event subject, Household container).
+  household   Household? @relation(fields: [householdId], references: [id])
+  householdId String?    @map("household_id")
+
+  url    String
+  secret String
+
+  status WebhookSubscriptionStatus @default(Active)
+
+  createdBy   User   @relation("WebhookSubscriptionsCreated", fields: [createdById], references: [id])
+  createdById String @map("created_by_id")
+
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  lastDeliveryAt      DateTime? @map("last_delivery_at") @db.Timestamptz(3)
+  disabledAt          DateTime? @map("disabled_at") @db.Timestamptz(3)
+
+  eventTypes WebhookSubscriptionEventType[]
+
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([resourceType, status])
+  @@index([householdId])
+  @@index([createdById])
+  @@map("webhook_subscriptions")
+}
+
+// Join table over the subscribed event names. Preferred to String[] for
+// indexable "which subscriptions want event X" lookups at dispatch.
+model WebhookSubscriptionEventType {
+  id String @id @default(cuid(2))
+
+  subscription   WebhookSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscriptionId String              @map("subscription_id")
+
+  // Canonical versioned event name, e.g. `event.event.created.v1`. Matches a
+  // WebhookEventRegistry key; not a DB enum because the event taxonomy lives
+  // in code (the registry), not the schema.
+  eventType String @map("event_type")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([subscriptionId, eventType])
+  @@index([eventType])
+  @@map("webhook_subscription_event_types")
+}
