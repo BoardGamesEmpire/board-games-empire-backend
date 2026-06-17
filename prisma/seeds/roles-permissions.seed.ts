@@ -1,4 +1,4 @@
-import { Action, PrismaClient, SystemRole } from '@bge/database';
+import { Action, PrismaClient, ResourceType, SystemRole } from '@bge/database';
 import type { Logger } from '@nestjs/common';
 
 /**
@@ -20,43 +20,58 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // --- App Level / User ---
     // TODO: consider the ability to block other users from viewing your profile, etc.
-    { action: Action.read, subject: 'UserProfile', slug: 'read:user:profile', reason: 'View user profiles' },
+    { action: Action.read, subject: ResourceType.UserProfile, slug: 'read:user:profile', reason: 'View user profiles' },
     {
       action: Action.update,
-      subject: 'UserProfile',
-      conditions: { id: '{{ user.id }}' },
+      subject: ResourceType.UserProfile,
+      conditions: { userId: '{{ user.id }}' },
       slug: 'update:user:profile:own',
       reason: 'Update own profile',
     },
 
     // --- Games ---
-    { action: Action.read, subject: 'Game', slug: 'read:game', reason: 'View games' },
-    { action: Action.create, subject: 'Game', slug: 'create:game', reason: 'Create games' },
-    { action: Action.update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
-    { action: Action.delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
+    { action: Action.read, subject: ResourceType.Game, slug: 'read:game', reason: 'View games' },
+    { action: Action.create, subject: ResourceType.Game, slug: 'create:game', reason: 'Create games' },
+    { action: Action.update, subject: ResourceType.Game, slug: 'update:game', reason: 'Update games' },
+    { action: Action.delete, subject: ResourceType.Game, slug: 'delete:game', reason: 'Delete games' },
+
+    {
+      action: Action.update,
+      subject: ResourceType.Game,
+      slug: 'update:game:own',
+      reason: 'Update own games',
+      conditions: { createdById: '{{ user.id }}' },
+    },
+    {
+      action: Action.delete,
+      subject: ResourceType.Game,
+      slug: 'delete:game:own',
+      reason: 'Delete own games',
+      conditions: { createdById: '{{ user.id }}' },
+    },
 
     // --- PlatformGame ---
     {
       action: Action.read,
-      subject: 'PlatformGame',
+      subject: ResourceType.PlatformGame,
       slug: 'read:platform_game',
       reason: 'View platform-specific game entries',
     },
     {
       action: Action.create,
-      subject: 'PlatformGame',
+      subject: ResourceType.PlatformGame,
       slug: 'create:platform_game',
       reason: 'Create a platform-specific game entry (import pipelines)',
     },
     {
       action: Action.update,
-      subject: 'PlatformGame',
+      subject: ResourceType.PlatformGame,
       slug: 'update:platform_game',
       reason: 'Update platform-specific game capabilities or overrides',
     },
     {
       action: Action.delete,
-      subject: 'PlatformGame',
+      subject: ResourceType.PlatformGame,
       slug: 'delete:platform_game',
       reason: 'Remove a platform-specific game entry',
     },
@@ -64,73 +79,69 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // --- Platform ---
     {
       action: Action.read,
-      subject: 'Platform',
+      subject: ResourceType.Platform,
       slug: 'read:platform',
       reason: 'View platforms',
     },
     {
       action: Action.create,
-      subject: 'Platform',
+      subject: ResourceType.Platform,
       slug: 'create:platform',
       reason: 'Create platforms',
     },
     {
       action: Action.update,
-      subject: 'Platform',
+      subject: ResourceType.Platform,
       slug: 'update:platform',
       reason: 'Update platforms',
     },
     {
       action: Action.delete,
-      subject: 'Platform',
+      subject: ResourceType.Platform,
       slug: 'delete:platform',
       reason: 'Delete platforms',
     },
 
-    // TODO: We should probably have conditions here to only allow updating/deleting games you created or that are in your collection, etc. Otherwise users could mess with each other's games.
-    { action: Action.update, subject: 'Game', slug: 'update:game', reason: 'Update games' },
-    { action: Action.delete, subject: 'Game', slug: 'delete:game', reason: 'Delete games' },
-
     // ─── EventOccurrence ────────────────────────────────
     {
       action: Action.read,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'read:event_occurrence',
       reason: 'View event occurrences',
     },
     {
       action: Action.create,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'create:event_occurrence',
       reason: 'Add occurrences to an event',
     },
     {
       action: Action.update,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence',
       reason: 'Update occurrence details (label, date, location)',
     },
     {
       action: Action.delete,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'delete:event_occurrence',
       reason: 'Remove an occurrence from an event',
     },
     {
       action: Action.update,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:confirm',
       reason: 'Confirm a proposed occurrence (Proposed → Confirmed)',
     },
     {
       action: Action.update,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:decline',
       reason: 'Decline a proposed occurrence (Proposed → Declined)',
     },
     {
       action: Action.update,
-      subject: 'EventOccurrence',
+      subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:cancel',
       reason: 'Cancel a confirmed occurrence (Confirmed → Cancelled)',
     },
@@ -138,13 +149,13 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventAvailabilityVote ──────────────────────────
     {
       action: Action.read,
-      subject: 'EventAvailabilityVote',
+      subject: ResourceType.EventAvailabilityVote,
       slug: 'read:event_availability_vote',
       reason: 'View availability votes and summary',
     },
     {
       action: Action.create,
-      subject: 'EventAvailabilityVote',
+      subject: ResourceType.EventAvailabilityVote,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:event_availability_vote',
       reason: 'Submit or update your availability vote on a proposed occurrence',
@@ -153,14 +164,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventAttendee ──────────────────────────────────
     {
       action: Action.read,
-      subject: 'EventAttendee',
+      subject: ResourceType.EventAttendee,
       conditions: { event: { id: '{{ eventId }}' } },
       slug: 'read:event_attendee',
       reason: 'View event attendees',
     },
     {
       action: Action.update,
-      subject: 'EventAttendee',
+      subject: ResourceType.EventAttendee,
       fields: ['status', 'notes'],
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:event_attendee:status:self',
@@ -168,7 +179,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.update,
-      subject: 'EventAttendee',
+      subject: ResourceType.EventAttendee,
       fields: ['status', 'notes'],
       conditions: { event: { id: '{{ eventId }}' } },
       slug: 'update:event_attendee:status',
@@ -178,38 +189,38 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventGameNomination ────────────────────────────
     {
       action: Action.read,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       slug: 'read:event_game_nomination',
       reason: 'View game nominations',
     },
     {
       action: Action.create,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       slug: 'create:event_game_nomination',
       reason: 'Nominate a game for the event',
     },
     {
       action: Action.update,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       conditions: { nominatedBy: { userId: '{{ user.id }}' } },
       slug: 'update:event_game_nomination:withdraw',
       reason: 'Withdraw your own nomination',
     },
     {
       action: Action.update,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:resolve',
       reason: 'Resolve a nomination (tally votes)',
     },
     {
       action: Action.update,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:approve',
       reason: 'Approve a nomination (HostApproval mode)',
     },
     {
       action: Action.update,
-      subject: 'EventGameNomination',
+      subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:reject',
       reason: 'Reject a nomination (HostApproval mode)',
     },
@@ -217,13 +228,13 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventGameVote ──────────────────────────────────
     {
       action: Action.read,
-      subject: 'EventGameVote',
+      subject: ResourceType.EventGameVote,
       slug: 'read:event_game_vote',
       reason: 'View game nomination votes',
     },
     {
       action: Action.create,
-      subject: 'EventGameVote',
+      subject: ResourceType.EventGameVote,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:event_game_vote',
       reason: 'Cast or update your vote on a nomination',
@@ -232,19 +243,19 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventGame ──────────────────────────────────────
     {
       action: Action.read,
-      subject: 'EventGame',
+      subject: ResourceType.EventGame,
       slug: 'read:event_game',
       reason: 'View the event game lineup',
     },
     {
       action: Action.create,
-      subject: 'EventGame',
+      subject: ResourceType.EventGame,
       slug: 'create:event_game',
       reason: 'Directly add a game to the event lineup',
     },
     {
       action: Action.delete,
-      subject: 'EventGame',
+      subject: ResourceType.EventGame,
       slug: 'delete:event_game',
       reason: 'Remove a game from the event lineup',
     },
@@ -252,27 +263,27 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventAttendeeGameList ──────────────────────────
     {
       action: Action.read,
-      subject: 'EventAttendeeGameList',
+      subject: ResourceType.EventAttendeeGameList,
       slug: 'read:attendee_game_list',
       reason: "View an attendee's available game list",
     },
     {
       action: Action.create,
-      subject: 'EventAttendeeGameList',
+      subject: ResourceType.EventAttendeeGameList,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:attendee_game_list',
       reason: 'Add a game to your own available game list',
     },
     {
       action: Action.delete,
-      subject: 'EventAttendeeGameList',
+      subject: ResourceType.EventAttendeeGameList,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'delete:attendee_game_list',
       reason: 'Remove a game from your own available game list',
     },
     {
       action: Action.manage,
-      subject: 'EventAttendeeGameList',
+      subject: ResourceType.EventAttendeeGameList,
       slug: 'manage:attendee_game_list',
       reason: "Manage any attendee's available game list",
     },
@@ -280,67 +291,77 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── EventPolicy ────────────────────────────────────
     {
       action: Action.read,
-      subject: 'EventPolicy',
+      subject: ResourceType.EventPolicy,
       slug: 'read:event_policy',
       reason: 'View event policy configuration',
     },
     {
       action: Action.update,
-      subject: 'EventPolicy',
+      subject: ResourceType.EventPolicy,
       slug: 'update:event_policy',
       reason: 'Update event policy configuration',
     },
 
     // Game Collection
-    { action: Action.read, subject: 'GameCollection', slug: 'read:game_collection', reason: 'View game collections' },
+    {
+      action: Action.read,
+      subject: ResourceType.GameCollection,
+      slug: 'read:game_collection',
+      reason: 'View game collections',
+    },
     {
       action: Action.create,
-      subject: 'GameCollection',
+      subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'create:game_collection',
       reason: 'Add game to collection',
     },
     {
       action: Action.update,
-      subject: 'GameCollection',
+      subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:game_collection',
       reason: 'Update game in collection',
     },
     {
       action: Action.delete,
-      subject: 'GameCollection',
+      subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'delete:game_collection',
       reason: 'Remove game from collection',
     },
 
     // --- Game Gateway ---
-    { action: Action.read, subject: 'GameGateway', slug: 'read:game_gateway', reason: 'View game gateway connections' },
+    {
+      action: Action.read,
+      subject: ResourceType.GameGateway,
+      slug: 'read:game_gateway',
+      reason: 'View game gateway connections',
+    },
     {
       action: Action.create,
-      subject: 'GameGateway',
+      subject: ResourceType.GameGateway,
       slug: 'create:game_gateway',
       reason: 'Create game gateway connections',
     },
     {
       action: Action.update,
-      subject: 'GameGateway',
+      subject: ResourceType.GameGateway,
       slug: 'update:game_gateway',
       reason: 'Update game gateway connections',
     },
     {
       action: Action.delete,
-      subject: 'GameGateway',
+      subject: ResourceType.GameGateway,
       slug: 'delete:game_gateway',
       reason: 'Delete game gateway connections',
     },
 
     // --- Households ---
-    { action: Action.create, subject: 'Household', slug: 'create:household', reason: 'Create a household' },
+    { action: Action.create, subject: ResourceType.Household, slug: 'create:household', reason: 'Create a household' },
     {
       action: Action.read,
-      subject: 'Household',
+      subject: ResourceType.Household,
       conditions: {
         members: { some: { userId: '{{ user.id }}' } },
       },
@@ -349,7 +370,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.read,
-      subject: 'Household',
+      subject: ResourceType.Household,
       conditions: {
         id: '{{ householdId }}',
       },
@@ -360,7 +381,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // TODO: We should probably have more granular permissions here to allow for different levels of household management, etc. Otherwise, any member could update the household details
     {
       action: Action.update,
-      subject: 'Household',
+      subject: ResourceType.Household,
       conditions: {
         id: '{{ householdId }}',
         members: { some: { userId: '{{ user.id }}' } },
@@ -370,7 +391,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.delete,
-      subject: 'Household',
+      subject: ResourceType.Household,
       conditions: {
         id: '{{ householdId }}',
         members: {
@@ -385,7 +406,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.manage,
-      subject: 'HouseholdMember',
+      subject: ResourceType.HouseholdMember,
       conditions: {
         householdId: '{{ householdId }}',
         members: {
@@ -400,7 +421,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.create,
-      subject: 'HouseholdRole',
+      subject: ResourceType.HouseholdRole,
       conditions: {
         householdId: '{{ householdId }}',
         members: {
@@ -417,7 +438,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // TODO: maybe defer to a household policy?
     {
       action: Action.create,
-      subject: 'Invite',
+      subject: ResourceType.Invite,
       conditions: {
         householdId: '{{ householdId }}',
         members: {
@@ -434,7 +455,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // TODO: this is likely too simplistic
     {
       action: Action.create,
-      subject: 'HouseholdMember',
+      subject: ResourceType.HouseholdMember,
       conditions: {
         householdId: '{{ householdId }}',
       },
@@ -443,13 +464,13 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // --- Events ---
-    { action: Action.create, subject: 'Event', slug: 'create:event', reason: 'Create an event' },
+    { action: Action.create, subject: ResourceType.Event, slug: 'create:event', reason: 'Create an event' },
 
     // TODO household specific event permissions? i.e read:household_event etc
-    { action: Action.read, subject: 'Event', slug: 'read:event', reason: 'View an event' },
+    { action: Action.read, subject: ResourceType.Event, slug: 'read:event', reason: 'View an event' },
     {
       action: Action.update,
-      subject: 'Event',
+      subject: ResourceType.Event,
       conditions: {
         id: '{{ eventId }}',
         attendees: {
@@ -464,7 +485,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.delete,
-      subject: 'Event',
+      subject: ResourceType.Event,
       conditions: { createdById: '{{ user.id }}' },
       slug: 'delete:event',
       reason: 'Delete an event as creator',
@@ -473,7 +494,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // TODO: this needs conditions to validate moderator role and scope
     {
       action: Action.delete,
-      subject: 'Event',
+      subject: ResourceType.Event,
       slug: 'delete:event:moderate',
       reason: 'Delete any event as moderator',
     },
@@ -481,7 +502,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // TODO: this doesn't actually ensure the event is being cancelled...
     {
       action: Action.update,
-      subject: 'Event',
+      subject: ResourceType.Event,
       fields: ['status'],
       conditions: {
         id: '{{ eventId }}',
@@ -499,7 +520,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // An event can be archived if it is cancelled and the user is the host
     {
       action: Action.update,
-      subject: 'Event',
+      subject: ResourceType.Event,
       fields: ['status'],
       conditions: {
         id: '{{ eventId }}',
@@ -516,7 +537,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.create,
-      subject: 'Invite',
+      subject: ResourceType.Invite,
       conditions: {
         eventId: '{{ eventId }}',
         event: {
@@ -533,7 +554,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.manage,
-      subject: 'EventAttendee',
+      subject: ResourceType.EventAttendee,
       conditions: { eventId: '{{ eventId }}' },
       slug: 'manage:event_attendee',
       reason: 'Manage event participants',
@@ -542,47 +563,57 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // --- Game Sessions ---
     {
       action: Action.create,
-      subject: 'GamePlayResult',
+      subject: ResourceType.GamePlayResult,
       slug: 'create:play_record',
       reason: 'Create a play record',
     },
-    { action: Action.read, subject: 'GamePlaySession', slug: 'read:game_play_session', reason: 'View a game session' },
+    {
+      action: Action.read,
+      subject: ResourceType.GamePlaySession,
+      slug: 'read:game_play_session',
+      reason: 'View a game session',
+    },
     {
       action: Action.create,
-      subject: 'GamePlaySession',
+      subject: ResourceType.GamePlaySession,
       slug: 'create:game_play_session',
       reason: 'Create a game session',
     },
     {
       action: Action.update,
-      subject: 'GamePlaySession',
+      subject: ResourceType.GamePlaySession,
       slug: 'update:game_play_session',
       reason: 'Update a game session',
     },
     {
       action: Action.delete,
-      subject: 'GamePlaySession',
+      subject: ResourceType.GamePlaySession,
       slug: 'delete:game_play_session',
       reason: 'Delete a game session',
     },
     {
       action: Action.create,
-      subject: 'SessionPlayer',
+      subject: ResourceType.SessionPlayer,
       slug: 'create:session_player:join',
       reason: 'Join a game session',
     },
     {
       action: Action.create,
-      subject: 'SessionPlayer',
+      subject: ResourceType.SessionPlayer,
       slug: 'create:session_player:observer:join',
       reason: 'Join a game session as observer',
     },
 
     // --- Rule Variants ---
-    { action: Action.create, subject: 'RuleVariant', slug: 'create:rule_variant', reason: 'Create rule variant' },
+    {
+      action: Action.create,
+      subject: ResourceType.RuleVariant,
+      slug: 'create:rule_variant',
+      reason: 'Create rule variant',
+    },
     {
       action: Action.update,
-      subject: 'RuleVariant',
+      subject: ResourceType.RuleVariant,
       conditions: {
         createdById: '{{ user.id }}',
       },
@@ -591,7 +622,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.delete,
-      subject: 'RuleVariant',
+      subject: ResourceType.RuleVariant,
       conditions: {
         createdById: '{{ user.id }}',
       },
@@ -601,18 +632,18 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // --- Media ---
     // TODO: expand media permissions
-    { action: Action.create, subject: 'Media', slug: 'create:media:upload', reason: 'Upload media' },
+    { action: Action.create, subject: ResourceType.Media, slug: 'create:media:upload', reason: 'Upload media' },
 
     // --- Customization ---
     {
       action: Action.create,
-      subject: 'UserGameCustomization',
+      subject: ResourceType.UserGameCustomization,
       slug: 'create:user_game_customization',
       reason: 'Create customization',
     },
     {
       action: Action.update,
-      subject: 'UserGameCustomization',
+      subject: ResourceType.UserGameCustomization,
       conditions: {
         userId: '{{ user.id }}',
       },
@@ -621,7 +652,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
     {
       action: Action.delete,
-      subject: 'UserGameCustomization',
+      subject: ResourceType.UserGameCustomization,
       conditions: {
         userId: '{{ user.id }}',
       },
@@ -632,38 +663,38 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── Feedback ───────────────────────────────────────────
     {
       action: Action.create,
-      subject: 'FeedbackReport',
+      subject: ResourceType.FeedbackReport,
       slug: 'create:feedback_report',
       reason: 'Submit a feedback report',
     },
     {
       action: Action.read,
-      subject: 'FeedbackReport',
+      subject: ResourceType.FeedbackReport,
       conditions: { userId: '{{ user.id }}' },
       slug: 'read:feedback_report:own',
       reason: 'Read own feedback reports',
     },
     {
       action: Action.read,
-      subject: 'FeedbackReport',
+      subject: ResourceType.FeedbackReport,
       slug: 'read:feedback_report',
       reason: 'Read any feedback report',
     },
     {
       action: Action.delete,
-      subject: 'FeedbackReport',
+      subject: ResourceType.FeedbackReport,
       slug: 'delete:feedback_report',
       reason: 'Hard-delete a feedback report (separate from retention sweep)',
     },
     {
       action: Action.manage,
-      subject: 'FeedbackReport',
+      subject: ResourceType.FeedbackReport,
       slug: 'manage:feedback_report',
       reason: 'Full administrative control over feedback reports',
     },
     {
       action: Action.read,
-      subject: 'FeedbackSinkDispatch',
+      subject: ResourceType.FeedbackSinkDispatch,
       slug: 'read:feedback_sink_dispatch',
       reason: 'Read sink-dispatch audit trail',
     },
@@ -671,16 +702,32 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // ─── SafeHttpPolicy ─────────────────────────────────────
     {
       action: Action.read,
-      subject: 'SafeHttpPolicy',
+      subject: ResourceType.SafeHttpPolicy,
       slug: 'read:safe_http_policy',
       reason: 'View the outbound HTTP SSRF policy',
     },
     {
       action: Action.manage,
-      subject: 'SafeHttpPolicy',
+      subject: ResourceType.SafeHttpPolicy,
       slug: 'manage:safe_http_policy',
       reason:
         'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
+    },
+
+    // --- Webhook Subscriptions ─────────────────────────────────────
+    {
+      action: Action.manage,
+      subject: ResourceType.WebhookSubscription,
+      conditions: { createdById: '{{ user.id }}' },
+      slug: 'manage:webhook_subscription:own',
+      reason: 'Manage own webhook subscriptions',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.WebhookSubscription,
+      conditions: { createdById: '{{ user.id }}' },
+      slug: 'read:webhook_subscription:own',
+      reason: 'View own webhook subscriptions',
     },
   ];
 
@@ -816,6 +863,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:user_game_customization',
     'delete:game_collection',
     'delete:user_game_customization',
+    'manage:webhook_subscription:own',
     'read:feedback_report:own',
     'read:game_collection',
     'read:game_play_session',
@@ -824,6 +872,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:platform_game',
     'read:platform',
     'read:user:profile',
+    'read:webhook_subscription:own',
     'update:game_collection',
     'update:user_game_customization',
     'update:user:profile:own',

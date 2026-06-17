@@ -147,7 +147,7 @@ async function bootstrap() {
 
   registerShutdownHandlers(app, otel, bootstrapLogger);
 
-  const port = configService.get<number>('server.port', 33333);
+  const port = configService.get<number>('system.port', 33333);
   await app.listen(port);
   Logger.log(`🚀 Application is running on: http://localhost:${port}/${globalPrefix}`, LOGGER_CONTEXT);
 }

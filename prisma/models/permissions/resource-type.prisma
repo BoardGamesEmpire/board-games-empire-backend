@@ -4,6 +4,7 @@ enum ResourceType {
   Notification
   SafeHttpPolicy
   Media
+  WebhookSubscription
 
   // ─── User ───────────────────────────────────────────────
   User

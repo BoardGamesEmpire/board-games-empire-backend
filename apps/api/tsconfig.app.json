@@ -44,6 +44,9 @@
       "path": "../../libs/api/well-known/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/webhook-subscription/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/user/tsconfig.lib.json"
     },
     {

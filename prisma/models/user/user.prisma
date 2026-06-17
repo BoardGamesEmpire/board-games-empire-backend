@@ -33,6 +33,7 @@ model User {
   lists              List[]
   gatewayConnections UserGatewayConnection[]
   householdMember    HouseholdMember[]
+  webhookSubscriptions WebhookSubscription[] @relation("WebhookSubscriptionsCreated")
 
   preferences UserPreferences?
   profile     UserProfile?

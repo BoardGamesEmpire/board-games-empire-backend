@@ -34,7 +34,7 @@ export function authFactory(
 
   const options = buildOptions(configService);
 
-  const port = configService?.get<number>('server.port') || parseInt(process.env.PORT || '33333', 10);
+  const port = configService?.get<number>('system.port') || parseInt(process.env.PORT || '33333', 10);
   const trustedOrigins = options.trusted.map((origin) => origin.replace(/{PORT}\/?$/i, port.toString()));
 
   logger.log(`Trusted origins set to: ${trustedOrigins.join(', ')}`);
@@ -120,7 +120,7 @@ export function authFactory(
     url: options.hostUrl,
     secret: options.secret,
     database: prismaAdapter(prisma, {
-      debugLogs: configService?.get<boolean>('server.is_production') !== true,
+      debugLogs: configService?.get<boolean>('system.is_production') !== true,
       transaction: false,
       provider: 'postgresql',
     }),

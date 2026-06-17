@@ -201,7 +201,8 @@
     "libs/api/*",
     "libs/common/env",
     "libs/common/*",
-    "libs/proto/gateway"
+    "libs/proto/gateway",
+    "libs/queue/*"
   ],
   "nx": {
     "includedScripts": [],
