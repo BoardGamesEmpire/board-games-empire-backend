@@ -1,6 +1,6 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityFactory, PermissionsService, type AppAbility } from '@bge/permissions';
+import { AbilityFactory, PermissionsService } from '@bge/permissions';
 import {
   WebhookEventRegistry,
   WebhookVisibilityService,
@@ -73,10 +73,9 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
       return;
     }
     if (!isWebhookEmittableEvent(payload)) {
-      this.logger.warn(
+      return this.logger.warn(
         `Registered webhook event "${eventName}" emitted a payload missing the WebhookEmittableEvent shape; skipping`,
       );
-      return;
     }
 
     try {
@@ -98,11 +97,18 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     }
 
     const actor = this.auditContext.getActor() ?? this.unattributedActor();
-    const abilityCache = new Map<string, AppAbility>();
-
+    // subject + subjectId are loop-invariant, so visibility is a pure function of
+    // the owner — memoize per createdById so an owner with multiple matching
+    // subscriptions costs one ability build + one visibility query, not one each.
+    const visibilityCache = new Map<string, boolean>();
     for (const subscription of subscriptions) {
-      const ability = await this.abilityFor(subscription.createdById, abilityCache);
-      const visible = await this.visibility.isVisibleTo(descriptor.subject, event.subjectId, ability);
+      const visible = await this.visibleTo(
+        subscription.createdById,
+        descriptor.subject,
+        event.subjectId,
+        visibilityCache,
+      );
+
       if (!visible) {
         continue;
       }
@@ -129,17 +135,22 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async abilityFor(userId: string, cache: Map<string, AppAbility>): Promise<AppAbility> {
+  private async visibleTo(
+    userId: string,
+    subject: ResourceType,
+    subjectId: string,
+    cache: Map<string, boolean>,
+  ): Promise<boolean> {
     const cached = cache.get(userId);
-    if (cached) {
+    if (cached !== undefined) {
       return cached;
     }
     const graph = await this.permissions.getUserRoleGraph(userId);
     const ability = this.abilityFactory.createForUser(graph);
-    cache.set(userId, ability);
-    return ability;
+    const visible = await this.visibility.isVisibleTo(subject, subjectId, ability);
+    cache.set(userId, visible);
+    return visible;
   }
-
   private async enqueue(
     subscriptionId: string,
     eventType: WebhookEventType,
