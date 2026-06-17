@@ -24,7 +24,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     {
       action: Action.update,
       subject: ResourceType.UserProfile,
-      conditions: { id: '{{ user.id }}' },
+      conditions: { userId: '{{ user.id }}' },
       slug: 'update:user:profile:own',
       reason: 'Update own profile',
     },
@@ -40,14 +40,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Game,
       slug: 'update:game:own',
       reason: 'Update own games',
-      conditions: { id: '{{ user.id }}' },
+      conditions: { createdById: '{{ user.id }}' },
     },
     {
       action: Action.delete,
       subject: ResourceType.Game,
       slug: 'delete:game:own',
       reason: 'Delete own games',
-      conditions: { id: '{{ user.id }}' },
+      conditions: { createdById: '{{ user.id }}' },
     },
 
     // --- PlatformGame ---

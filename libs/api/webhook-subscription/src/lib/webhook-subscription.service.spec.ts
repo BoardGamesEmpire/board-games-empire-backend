@@ -10,6 +10,7 @@ import {
 } from '@bge/webhooks';
 import { createPrismaAbility } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { WEBHOOK_SECRET_REDACTED, WebhookSubscriptionService } from './webhook-subscription.service';
 
 type WebhookWithEvents = Prisma.WebhookSubscriptionGetPayload<{ include: { eventTypes: true } }>;
@@ -69,6 +70,7 @@ describe('WebhookSubscriptionService', () => {
         WebhookEventRegistry,
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: EncryptionService, useValue: encryption },
+        { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('development-secret') } },
       ],
     });
 
@@ -78,12 +80,14 @@ describe('WebhookSubscriptionService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  const baseDto = (overrides: Partial<CreateWebhookSubscriptionDto> = {}): CreateWebhookSubscriptionDto => ({
-    url: 'https://hooks.example.com/bge',
-    resourceType: ResourceType.Event,
-    eventTypes: [WebhookEventType.EventCreated, WebhookEventType.EventUpdated],
-    ...overrides,
-  });
+  function baseDto(overrides: Partial<CreateWebhookSubscriptionDto> = {}): CreateWebhookSubscriptionDto {
+    return {
+      url: 'https://hooks.example.com/bge',
+      resourceType: ResourceType.Event,
+      eventTypes: [WebhookEventType.EventCreated, WebhookEventType.EventUpdated],
+      ...overrides,
+    };
+  }
 
   describe('create', () => {
     it('stores the secret encrypted and reveals the generated plaintext exactly once', async () => {

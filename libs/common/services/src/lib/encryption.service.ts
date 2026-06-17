@@ -9,20 +9,21 @@ export class EncryptionService {
   private readonly key: Buffer;
 
   constructor(private configService: ConfigService) {
-    const secret = this.configService.get<string>('BETTER_AUTH_SECRET');
+    const secret = this.configService.get<string>('system.encryption_key');
     if (!secret) {
-      throw new Error('BETTER_AUTH_SECRET is not defined in the configuration');
+      throw new Error('DATA_ENCRYPTION_KEY is not defined in the configuration');
     }
 
     this.key = crypto.createHash('sha256').update(secret).digest();
   }
 
   /**
-   * Encrypts pl
-   * Format: iv:tag:ciphertext
+   * Encrypts a plaintext string with AES-256-GCM.
+   * Returns `iv:tag:ciphertext` (all hex, colon-delimited) — everything
+   * `decrypt` needs to reverse it.
    *
-   * @param plainText
-   * @returns
+   * @param plainText value to encrypt
+   * @returns `iv:tag:ciphertext`
    */
   encrypt(plainText: string): string {
     const iv = crypto.randomBytes(16);
@@ -34,6 +35,13 @@ export class EncryptionService {
     return `${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
   }
 
+  /**
+   * Decrypts an encrypted string with AES-256-GCM.
+   * Expects `iv:tag:ciphertext` format (all hex, colon-delimited).
+   *
+   * @param encryptedText value to decrypt
+   * @returns decrypted plaintext
+   */
   decrypt(encryptedText: string): string {
     const parts = encryptedText.split(':');
     if (parts.length !== 3) {
@@ -51,42 +59,8 @@ export class EncryptionService {
       const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
       return decrypted.toString('utf8');
     } catch (error) {
-      this.logger.error('Decryption failed', error);
+      this.logger.error('Decryption failed', error instanceof Error ? error.stack : String(error));
       throw new Error('Failed to decrypt data');
     }
-  }
-
-  /**
-   * Creates a HMAC signature for the given envelope using the provided secret and algorithm.
-   *
-   * @param envelope
-   * @param secret
-   * @param algorithm
-   * @returns
-   */
-  createSignature(envelope: string, secret: string, algorithm = 'sha256'): string {
-    return crypto.createHmac(algorithm, secret).update(envelope).digest('hex');
-  }
-
-  /**
-   * Verifies that the provided signature matches the computed signature for the given envelope and secret.
-   *
-   * @param envelope
-   * @param secret
-   * @param signature
-   * @param algorithm
-   * @returns
-   */
-  verifySignature(envelope: string, secret: string, signature: string, algorithm = 'sha256'): boolean {
-    const computedSignature = this.createSignature(envelope, secret, algorithm);
-
-    const computedBuffer = Buffer.from(computedSignature, 'hex');
-    const signatureBuffer = Buffer.from(signature, 'hex');
-
-    if (computedBuffer.length !== signatureBuffer.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(computedBuffer, signatureBuffer);
   }
 }

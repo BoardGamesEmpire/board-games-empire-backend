@@ -4,6 +4,7 @@ import { EncryptionService } from '@bge/services';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import { WEBHOOK_DISABLED_EVENT, WebhookSigner } from '@bge/webhooks';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Http } from '@status/codes';
 import { createHmac } from 'node:crypto';
 import { WEBHOOK_DELIVERY_HEADERS } from '../constants/webhook-queue.constants';
 import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.interface';
@@ -74,7 +75,7 @@ describe('WebhookDeliveryService', () => {
     });
 
     it('decrypts the stored secret and signs the exact bytes on the wire with the plaintext', async () => {
-      http.request.mockResolvedValue(httpResponse(200));
+      http.request.mockResolvedValue(httpResponse(Http.Ok));
 
       await service.deliver(job());
 
@@ -95,20 +96,23 @@ describe('WebhookDeliveryService', () => {
     });
 
     it('resets failure tracking on a 2xx', async () => {
-      http.request.mockResolvedValue(httpResponse(202));
+      http.request.mockResolvedValue(httpResponse(Http.Accepted));
 
       await service.deliver(job());
 
-      expect(db.webhookSubscription.update).toHaveBeenCalledWith(
+      expect(db.webhookSubscription.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'sub-1' },
+          where: {
+            id: 'sub-1',
+            deletedAt: null,
+          },
           data: expect.objectContaining({ consecutiveFailures: 0, lastDeliveryAt: expect.any(Date) }),
         }),
       );
     });
 
     it('throws on a non-2xx so BullMQ counts the attempt', async () => {
-      http.request.mockResolvedValue(httpResponse(503));
+      http.request.mockResolvedValue(httpResponse(Http.InternalServerError));
       await expect(service.deliver(job())).rejects.toThrow(WebhookDeliveryFailedError);
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });

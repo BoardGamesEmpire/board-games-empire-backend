@@ -19,6 +19,7 @@ import { baseLogger } from './lib/logger';
   imports: [
     ConfigModule.forRoot({
       load: [...Object.values(configuration)],
+      envFilePath: env.isProduction ? undefined : '.env',
       cache: true,
       isGlobal: true,
       expandVariables: true,

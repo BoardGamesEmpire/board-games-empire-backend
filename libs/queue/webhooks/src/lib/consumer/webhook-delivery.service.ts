@@ -1,4 +1,4 @@
-import { DatabaseService, WebhookSubscriptionStatus } from '@bge/database';
+import { DatabaseService, WebhookSubscriptionStatus, isPrismaDependentRecordNotFoundError } from '@bge/database';
 import { SecureHttpService } from '@bge/secure-http';
 import { EncryptionService } from '@bge/services';
 import { WEBHOOK_DISABLED_EVENT, WebhookSigner, type WebhookDisabledEvent } from '@bge/webhooks';
@@ -58,9 +58,12 @@ export class WebhookDeliveryService {
       select: { id: true, url: true, secret: true, status: true },
     });
 
-    if (!subscription || subscription.status !== WebhookSubscriptionStatus.Active) {
-      this.logger.debug(`Skipping delivery ${job.deliveryId}: subscription ${job.subscriptionId} is not active`);
-      return;
+    if (!subscription) {
+      return this.logger.debug(`Skipping delivery ${job.deliveryId}: subscription ${job.subscriptionId} not found`);
+    }
+
+    if (subscription.status !== WebhookSubscriptionStatus.Active) {
+      return this.logger.debug(`Skipping delivery ${job.deliveryId}: subscription ${job.subscriptionId} is not active`);
     }
 
     // The secret is stored encrypted at rest; decrypt to its plaintext, then
@@ -90,13 +93,17 @@ export class WebhookDeliveryService {
       );
     }
 
-    await this.onSuccess(job.subscriptionId);
+    return this.onSuccess(job.subscriptionId);
   }
 
-  /** Resets failure tracking after a successful delivery. */
+  /**
+   * Resets failure tracking after a successful delivery.
+   */
   private async onSuccess(subscriptionId: string): Promise<void> {
-    await this.db.webhookSubscription.update({
-      where: { id: subscriptionId },
+    // updateMany: a subscription deleted between deliver()'s lookup and this
+    // bookkeeping write becomes a 0-row no-op, not a P2025 that fails the job.
+    await this.db.webhookSubscription.updateMany({
+      where: { id: subscriptionId, deletedAt: null },
       data: { consecutiveFailures: 0, lastDeliveryAt: new Date() },
     });
   }
@@ -107,11 +114,22 @@ export class WebhookDeliveryService {
    * trips the race-safe auto-disable.
    */
   async recordTerminalFailure(subscriptionId: string, lastError: string): Promise<void> {
-    const updated = await this.db.webhookSubscription.update({
-      where: { id: subscriptionId },
-      data: { consecutiveFailures: { increment: 1 } },
-      select: { consecutiveFailures: true, createdById: true },
-    });
+    let updated: { consecutiveFailures: number; createdById: string };
+    try {
+      updated = await this.db.webhookSubscription.update({
+        where: { id: subscriptionId },
+        data: { consecutiveFailures: { increment: 1 } },
+        select: { consecutiveFailures: true, createdById: true },
+      });
+    } catch (error) {
+      // Deleted mid-retry: nothing left to track or disable, and letting P2025
+      // escape would crash the worker's `failed` handler.
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        return this.logger.debug(`Subscription ${subscriptionId} gone; skipping terminal-failure bookkeeping`);
+      }
+
+      throw error;
+    }
 
     this.logger.warn(
       `Delivery to subscription ${subscriptionId} failed (consecutive failures: ${updated.consecutiveFailures}): ${lastError}`,

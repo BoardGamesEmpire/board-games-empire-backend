@@ -1,9 +1,8 @@
 import { DatabaseModule } from '@bge/database';
 import { PoliciesGuard } from '@bge/permissions';
-import { ServicesModule } from '@bge/services';
+import { EncryptionService } from '@bge/services';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { WebhooksModule } from '@bge/webhooks';
-import { ConfigModule } from '@nestjs/config';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { WebhookSubscriptionController } from './webhook-subscription.controller';
 import { WebhookSubscriptionService } from './webhook-subscription.service';
@@ -13,8 +12,14 @@ describe('WebhookSubscriptionController', () => {
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
-      imports: [DatabaseModule, WebhooksModule, ServicesModule, ConfigModule.forRoot({ isGlobal: true })],
-      providers: [WebhookSubscriptionService],
+      imports: [DatabaseModule, WebhooksModule],
+      providers: [
+        WebhookSubscriptionService,
+        {
+          provide: EncryptionService,
+          useValue: { encrypt: jest.fn(), decrypt: jest.fn() },
+        },
+      ],
       controllers: [WebhookSubscriptionController],
       overrideGuards: [AuthGuard, PoliciesGuard],
     });
