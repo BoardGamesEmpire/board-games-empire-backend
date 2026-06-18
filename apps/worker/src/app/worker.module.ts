@@ -9,6 +9,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import type { RedisClient } from 'bullmq';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
@@ -39,6 +40,11 @@ import { baseLogger } from './lib/logger';
       delimiter: '.',
       verboseMemoryLeak: true,
     }),
+
+    // Drives the SafeHttpPolicyService periodic-refresh backstop (@Interval).
+    // The Redis pub/sub subscription handles immediate updates; this catches
+    // any pub/sub message missed during a transient Redis disconnect.
+    ScheduleModule.forRoot(),
 
     RedisModule.forRootAsync({
       cache: {

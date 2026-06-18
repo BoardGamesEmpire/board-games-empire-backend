@@ -1,9 +1,12 @@
 import { DatabaseService, type SafeHttpPolicy } from '@bge/database';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import {
   SAFE_HTTP_DEFAULT_MAX_REDIRECTS,
   SAFE_HTTP_DEFAULT_STRICT_MODE,
   SAFE_HTTP_DEFAULT_TIMEOUT_MS,
+  SAFE_HTTP_POLICY_REFRESH_INTERVAL_MS,
+  SAFE_HTTP_POLICY_REFRESH_INTERVAL_NAME,
 } from '../constants/safe-http.constants';
 import type { SafeHttpPolicySnapshot } from '../interfaces/safe-http-policy-snapshot.interface';
 import { parseCidr } from '../ip/cidr';
@@ -12,7 +15,9 @@ import { SafeHttpPolicyEventsService } from './safe-http-policy-events.service';
 /**
  * Holder of the in-memory `SafeHttpPolicy` snapshot consumed by
  * `IpPolicyService` and `SafeHttpService`. Loads the singleton row from DB
- * on module init and refreshes on Redis pub/sub events.
+ * on module init, refreshes on Redis pub/sub events, and re-reads on a
+ * periodic backstop interval (see `refreshOnInterval`) to recover from any
+ * pub/sub message missed during a transient Redis disconnect.
  *
  * Concurrency model: readers call `current()` which returns the current
  * snapshot reference. `refresh()` swaps the reference atomically; a reader
@@ -54,6 +59,19 @@ export class SafeHttpPolicyService implements OnModuleInit {
    */
   current(): SafeHttpPolicySnapshot {
     return this.snapshot;
+  }
+
+  /**
+   * Periodic backstop: re-reads the snapshot on a fixed cadence so a pub/sub
+   * message missed during a transient Redis disconnect is recovered within
+   * one interval. Only fires in apps that register `ScheduleModule.forRoot()`
+   * (api, worker); elsewhere the decorator is an inert no-op. `refresh()` is
+   * idempotent and swallows its own errors, so a tick can never crash the
+   * scheduler.
+   */
+  @Interval(SAFE_HTTP_POLICY_REFRESH_INTERVAL_NAME, SAFE_HTTP_POLICY_REFRESH_INTERVAL_MS)
+  async refreshOnInterval(): Promise<void> {
+    await this.refresh();
   }
 
   /**

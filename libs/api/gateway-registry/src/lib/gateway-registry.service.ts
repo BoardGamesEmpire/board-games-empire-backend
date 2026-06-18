@@ -45,6 +45,9 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(GatewayRegistryService.name);
   private readonly clients = new Map<string, CachedClient>();
   private readonly failures = new Map<string, FailureTrack>();
+  // In-flight lazy connects, keyed by gatewayId, so concurrent callers for the
+  // same gateway share one connect attempt instead of stampeding the gateway.
+  private readonly connecting = new Map<string, Promise<void>>();
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(
@@ -70,6 +73,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     }
     this.clients.clear();
     this.failures.clear();
+    this.connecting.clear();
   }
 
   /**
@@ -148,16 +152,80 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Gateway ${gatewayId} disconnected`);
   }
 
-  get(gatewayId: string): ClientGrpcProxy {
-    const cached = this.clients.get(gatewayId);
-    if (!cached) {
-      throw new Error(`No connection found for gateway ${gatewayId}. Ensure it is enabled and connected.`);
-    }
-    return cached.proxy;
+  /**
+   * Resolves a gateway's gRPC service client, lazily establishing the
+   * connection on a cache miss by loading the gateway's config from the DB
+   * (the source of truth). Concurrent callers for the same gateway share a
+   * single in-flight connect, so a burst of jobs for a newly-added gateway
+   * triggers one connect — not a ping stampede.
+   *
+   * Throws if the gateway is absent, disabled, or soft-deleted in the DB, or
+   * if the connection (ping) fails. Connection failures feed the same
+   * auto-disable tracking as any other failed interaction.
+   */
+  async getServiceClient(gatewayId: string): Promise<GatewayServiceClient> {
+    const proxy = await this.resolveProxy(gatewayId);
+    return proxy.getService<GatewayServiceClient>('GatewayService');
   }
 
-  getServiceClient(gatewayId: string): GatewayServiceClient {
-    return this.get(gatewayId).getService<GatewayServiceClient>('GatewayService');
+  private async resolveProxy(gatewayId: string): Promise<ClientGrpcProxy> {
+    const cached = this.clients.get(gatewayId);
+    if (cached) {
+      return cached.proxy;
+    }
+
+    await this.ensureConnected(gatewayId);
+
+    const connected = this.clients.get(gatewayId);
+    if (!connected) {
+      // connect() resolved without populating the cache — defensive guard.
+      throw new Error(`No connection established for gateway ${gatewayId}.`);
+    }
+    return connected.proxy;
+  }
+
+  /**
+   * Ensures a connection exists for the gateway, connecting from DB config if
+   * not already cached. Deduplicates concurrent callers via an in-flight
+   * promise so simultaneous jobs for the same gateway connect only once.
+   */
+  private async ensureConnected(gatewayId: string): Promise<void> {
+    if (this.clients.has(gatewayId)) {
+      return;
+    }
+
+    const inFlight = this.connecting.get(gatewayId);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const attempt = this.connectFromDb(gatewayId).finally(() => this.connecting.delete(gatewayId));
+    this.connecting.set(gatewayId, attempt);
+    return attempt;
+  }
+
+  /**
+   * Loads an enabled, non-deleted gateway from the DB and establishes its
+   * connection. Throws if the gateway no longer qualifies for connection —
+   * callers should treat that as "gateway unavailable".
+   */
+  private async connectFromDb(gatewayId: string): Promise<void> {
+    const gateway = await this.db.gameGateway.findFirst({
+      where: { id: gatewayId, enabled: true, deletedAt: null },
+    });
+
+    if (!gateway) {
+      throw new Error(`Gateway ${gatewayId} is not available (absent, disabled, or deleted); cannot connect.`);
+    }
+
+    this.logger.log(`Lazily connecting to gateway '${gateway.name}' (${gatewayId}) on demand`);
+    await this.connect({
+      gatewayId: gateway.id,
+      connectionUrl: gateway.connectionUrl,
+      connectionPort: gateway.connectionPort,
+      authType: gateway.authType,
+      authParameters: gateway.authParameters ?? undefined,
+    });
   }
 
   isConnected(gatewayId: string): boolean {
@@ -271,9 +339,19 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Handles incoming config-update events from other processes. Invalidates
-   * cached client if config has changed; doesn't reconnect — next getClient
-   * call triggers reconnect on demand.
+   * Handles incoming config-update events from other processes.
+   *
+   * The registry connects lazily (see getServiceClient), so for most events
+   * the correct local action is simply to drop any stale cached client; the
+   * next call re-establishes the connection from current DB config:
+   *  - 'disabled' / 'deleted': invalidate unconditionally — the gateway must
+   *    not be used here, and a lazy reconnect would (correctly) refuse it.
+   *  - 'updated': invalidate only if the config hash actually changed.
+   *  - 'created': nothing is cached yet; first use connects lazily — no-op.
+   *
+   * 'reconnect-requested' is the exception: it is an explicit, low-frequency
+   * operator/system signal to re-establish the connection now, so we drop any
+   * existing client and eagerly reconnect rather than waiting for next use.
    */
   private async handleConfigUpdate(event: GatewayConfigEvent): Promise<void> {
     const cached = this.clients.get(event.gatewayId);
@@ -288,7 +366,30 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Updates only invalidate if config actually changed.
+    // Explicit reconnect request: drop any existing client and re-establish
+    // now (regardless of hash). Eager here is safe — it's operator/system
+    // initiated and low-frequency, so no ping-storm concern.
+    if (event.changeType === 'reconnect-requested') {
+      this.logger.log(`Reconnect requested for gateway ${event.gatewayId}; refreshing connection`);
+      if (cached) {
+        this.disconnect(event.gatewayId);
+      }
+      this.failures.delete(event.gatewayId);
+
+      try {
+        await this.ensureConnected(event.gatewayId);
+      } catch (err) {
+        // Don't rethrow inside the pub/sub message handler: connect() already
+        // fed failure tracking, and the next call will retry lazily.
+        this.logger.warn(
+          `Reconnect for gateway ${event.gatewayId} failed: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+      return;
+    }
+
+    // 'created' → nothing cached yet (lazy connect handles first use).
+    // 'updated' → invalidate only when the config actually changed.
     if (cached && cached.configHash !== event.configHash) {
       this.logger.log(
         `Gateway ${event.gatewayId} config changed (hash ${cached.configHash} → ${event.configHash}); invalidating local client`,

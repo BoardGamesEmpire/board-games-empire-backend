@@ -45,7 +45,7 @@ describe('GameFetchProcessor', () => {
     };
     fetchGame = jest.fn();
     gatewayRegistry = {
-      getServiceClient: jest.fn().mockReturnValue({ fetchGame }),
+      getServiceClient: jest.fn().mockResolvedValue({ fetchGame }),
       reportSuccess: jest.fn(),
       reportFailure: jest.fn().mockResolvedValue(undefined),
     };
