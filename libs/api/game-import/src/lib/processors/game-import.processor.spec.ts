@@ -101,6 +101,10 @@ describe('GameImportProcessor', () => {
         makeJob(JobNames.GameImport, basePayload, { attemptsMade: 3, attempts: 3 }),
         new Error('boom'),
       );
+      expect(runWith).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'queue', actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' }),
+        expect.any(Function),
+      );
       expect(db.job.update).toHaveBeenCalledWith({
         where: { id: 'job-1' },
         data: { status: JobStatus.Failed, error: 'boom' },
@@ -118,6 +122,7 @@ describe('GameImportProcessor', () => {
       );
       expect(db.job.update).not.toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
+      expect(runWith).not.toHaveBeenCalled();
     });
   });
 });

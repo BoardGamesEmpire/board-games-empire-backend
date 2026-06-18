@@ -121,19 +121,24 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
       );
     }
 
-    this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);
+    // Reconstruct the originating actor's CLS scope so the failure DB write and
+    // the JobFailed event are attributed to the user who triggered the import,
+    // mirroring the successful path in processJob.
+    return this.runInActorScope(job, async () => {
+      this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);
 
-    await this.db.job.update({
-      where: { id: jobId },
-      data: { status: JobStatus.Failed, error: error.message },
+      await this.db.job.update({
+        where: { id: jobId },
+        data: { status: JobStatus.Failed, error: error.message },
+      });
+
+      this.events.emit(ImportEvents.JobFailed, {
+        jobId,
+        batchId,
+        error: error.message,
+        correlationId,
+      } satisfies ImportJobFailedEvent);
     });
-
-    this.events.emit(ImportEvents.JobFailed, {
-      jobId,
-      batchId,
-      error: error.message,
-      correlationId,
-    } satisfies ImportJobFailedEvent);
   }
 
   private markRunning(jobId: string, bullmqJobId: string) {

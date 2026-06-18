@@ -112,4 +112,18 @@ describe('ActorAwareWorkerHost', () => {
 
     await expect(failing.process(job)).rejects.toThrow('boom');
   });
+
+  it('runInActorScope still runs the callback when the envelope is absent', async () => {
+    // The motivating case: a job that failed *because* it was enqueued without
+    // wrapJobData is handed back to a lifecycle hook (onFailed). The hook must
+    // still run rather than re-throw the missing-envelope error.
+    const unwrapped = buildJob({ gameId: 'g1' }); // deliberately NOT wrapped
+    const ran = await (
+      worker as unknown as {
+        runInActorScope: (job: Job<SampleJobData>, fn: () => Promise<string>) => Promise<string>;
+      }
+    ).runInActorScope(unwrapped, async () => 'ran');
+
+    expect(ran).toBe('ran');
+  });
 });

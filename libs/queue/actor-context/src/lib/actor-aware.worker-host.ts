@@ -33,10 +33,28 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
   private readonly auditContext!: AuditContextInternalService;
 
   async process(job: Job<TData, TResult, TName>, token?: string): Promise<TResult> {
+    if (!extractJobMeta(job.data)) {
+      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+    }
+
+    return this.runInActorScope(job, () => this.processJob(job, token));
+  }
+
+  /**
+   * Runs `fn` inside the CLS scope reconstructed from the job's actor envelope.
+   * Use from `@OnWorkerEvent` lifecycle hooks (e.g. `onFailed`) so work outside
+   * the main `process` path — DB writes, emitted events — is still attributed to
+   * the originating actor and correlation.
+   *
+   * Lenient by design: a job missing the envelope runs `fn` without a scope
+   * rather than throwing — a failure handler must not mask the original error.
+   * The strict envelope requirement is enforced in {@link process}.
+   */
+  protected runInActorScope<T>(job: Job<TData, TResult, TName>, fn: () => T): T {
     const meta = extractJobMeta(job.data);
 
     if (!meta) {
-      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+      return fn();
     }
 
     return this.auditContext.runWith(
@@ -45,7 +63,7 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
         correlationId: meta.correlationId,
         source: 'queue',
       },
-      () => this.processJob(job, token),
+      fn,
     );
   }
 

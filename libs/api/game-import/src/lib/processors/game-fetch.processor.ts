@@ -85,11 +85,15 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       return;
     }
 
-    this.logger.error(`${job.name} jobId=${jobId} failed permanently`, error.stack);
+    // Attribute the failure DB write to the originating actor, mirroring the
+    // CLS scope opened around the successful fetch path in processJob.
+    await this.runInActorScope(job, async () => {
+      this.logger.error(`${job.name} jobId=${jobId} failed permanently`, error.stack);
 
-    await this.db.job.update({
-      where: { id: jobId },
-      data: { status: JobStatus.Failed, error: error.message },
+      await this.db.job.update({
+        where: { id: jobId },
+        data: { status: JobStatus.Failed, error: error.message },
+      });
     });
   }
 }

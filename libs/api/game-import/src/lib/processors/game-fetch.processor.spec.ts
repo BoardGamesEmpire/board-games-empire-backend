@@ -111,10 +111,15 @@ describe('GameFetchProcessor', () => {
     it('does not fail the Job row while retries remain', async () => {
       await processor.onFailed(makeJob({ attemptsMade: 2, attempts: 5 }), new Error('boom'));
       expect(db.job.update).not.toHaveBeenCalled();
+      expect(runWith).not.toHaveBeenCalled();
     });
 
-    it('marks the Job row Failed once attempts are exhausted', async () => {
+    it('marks the Job row Failed once attempts are exhausted, inside the actor scope', async () => {
       await processor.onFailed(makeJob({ attemptsMade: 5, attempts: 5 }), new Error('gateway down'));
+      expect(runWith).toHaveBeenCalledWith(
+        expect.objectContaining({ source: 'queue', actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' }),
+        expect.any(Function),
+      );
       expect(db.job.update).toHaveBeenCalledWith({
         where: { id: 'job-1' },
         data: { status: JobStatus.Failed, error: 'gateway down' },
