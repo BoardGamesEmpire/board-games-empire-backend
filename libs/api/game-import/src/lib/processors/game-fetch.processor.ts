@@ -51,8 +51,14 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       data: { status: JobStatus.Running, startedAt: new Date(), bullmqJobId: job.id?.toString() },
     });
 
+    // Resolve (lazily connecting on a cache miss) outside the try below:
+    // connect() already feeds failure tracking on connection errors, so this
+    // must not also be reported as a call failure. A missing/disabled gateway
+    // or failed connect throws here, failing the job for BullMQ to retry — by
+    // which time a newly-added gateway may have become connectable.
+    const client = await this.gatewayRegistry.getServiceClient(gatewayId);
+
     try {
-      const client = this.gatewayRegistry.getServiceClient(gatewayId);
       const response = await firstValueFrom(client.fetchGame({ correlationId, externalId, locale }));
 
       if (!response.game) {

@@ -11,12 +11,19 @@
 export const SAFE_HTTP_POLICY_UPDATE_CHANNEL = 'safe_http.policy_updated';
 
 /**
- * EventEmitter2 event emitted in-process after the snapshot has been
- * refreshed. Consumers that want to react in the same process (e.g.
- * clearing a per-host counter cache) listen for this rather than the Redis
- * channel.
+ * Cadence for the periodic snapshot-refresh backstop. The Redis pub/sub
+ * subscription refreshes immediately on every policy change; this timer only
+ * exists to recover from a pub/sub message missed during a transient Redis
+ * disconnect, so a coarse interval is appropriate. Requires
+ * `ScheduleModule.forRoot()` in the host app for the `@Interval` to fire.
  */
-export const SAFE_HTTP_POLICY_UPDATED_EVENT = 'safe_http.policy_updated';
+export const SAFE_HTTP_POLICY_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Named identifier for the refresh interval, for lookup/management via
+ * `SchedulerRegistry` if ever needed.
+ */
+export const SAFE_HTTP_POLICY_REFRESH_INTERVAL_NAME = 'safe-http-policy-refresh';
 
 /**
  * Fallback defaults used when the singleton `SafeHttpPolicy` row is absent

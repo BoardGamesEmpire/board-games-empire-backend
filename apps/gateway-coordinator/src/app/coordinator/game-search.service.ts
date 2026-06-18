@@ -49,7 +49,7 @@ export class GameSearchService {
    * Used by the import worker — bypasses the search cache.
    */
   fetchGame(request: proto.CoordinatorFetchGameRequest): Observable<proto.CoordinatorFetchGameResponse> {
-    return defer(() => of(this.registry.getServiceClient(request.gatewayId))).pipe(
+    return defer(() => from(this.registry.getServiceClient(request.gatewayId))).pipe(
       tap(() =>
         this.logger.debug(`Fetching game from gateway ${request.gatewayId} with externalId ${request.externalId}`),
       ),
@@ -169,34 +169,42 @@ export class GameSearchService {
     request: proto.SearchGamesRequest,
     cacheKey: string,
   ): Observable<proto.SearchGameResult> {
-    let client;
-    try {
-      client = this.registry.getServiceClient(gatewayId);
-    } catch {
-      return this.errorGameSearchResult(
-        gatewayId,
-        request.correlationId,
-        `Gateway ${gatewayId} is not connected`,
-        proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
-      );
-    }
+    return from(this.registry.getServiceClient(gatewayId)).pipe(
+      mergeMap((client) => {
+        const accumulated: proto.GameSearchData[] = [];
 
-    const stream$ = client.searchGames({
-      correlationId: request.correlationId,
-      query: request.query,
-      limit: request.limit,
-      offset: request.offset,
-      locale: request.locale,
-    });
+        return client
+          .searchGames({
+            correlationId: request.correlationId,
+            query: request.query,
+            limit: request.limit,
+            offset: request.offset,
+            locale: request.locale,
+          })
+          .pipe(
+            mergeMap((result: proto.GatewaySearchResult) =>
+              this.mapGatewayResult(gatewayId, result, accumulated, cacheKey),
+            ),
+            catchError((err) => {
+              const message = err instanceof Error ? err.message : String(err);
+              this.logger.error(`gRPC stream error from gateway ${gatewayId}: ${message}`);
 
-    const accumulated: proto.GameSearchData[] = [];
-    return stream$.pipe(
-      mergeMap((result: proto.GatewaySearchResult) => this.mapGatewayResult(gatewayId, result, accumulated, cacheKey)),
+              return this.errorGameSearchResult(gatewayId, request.correlationId, message);
+            }),
+          );
+      }),
+      // Resolve/lazy-connect failure → the gateway is unavailable, distinct
+      // from a mid-stream gRPC error (handled above as ERROR).
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error(`gRPC stream error from gateway ${gatewayId}: ${message}`);
+        this.logger.warn(`Gateway ${gatewayId} unavailable: ${message}`);
 
-        return this.errorGameSearchResult(gatewayId, request.correlationId, message);
+        return this.errorGameSearchResult(
+          gatewayId,
+          request.correlationId,
+          `Gateway ${gatewayId} is not connected`,
+          proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
+        );
       }),
     );
   }
@@ -323,40 +331,44 @@ export class GameSearchService {
     correlationId: string,
     locale?: string,
   ): Observable<proto.SearchGameResult> {
-    let client;
-    try {
-      client = this.registry.getServiceClient(gatewayId);
-    } catch {
-      return this.errorGameSearchResult(
-        gatewayId,
-        correlationId,
-        `Gateway ${gatewayId} is not connected`,
-        proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
-      );
-    }
+    return from(this.registry.getServiceClient(gatewayId)).pipe(
+      mergeMap((client) =>
+        client.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
+          mergeMap((result: proto.GatewaySearchResult) => {
+            if (result.status !== proto.ResultStatus.RESULT_STATUS_RESULT || !result.game) {
+              return of<proto.SearchGameResult>({ correlationId, gatewayId, status: result.status });
+            }
 
-    return client.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
-      mergeMap((result: proto.GatewaySearchResult) => {
-        if (result.status !== proto.ResultStatus.RESULT_STATUS_RESULT || !result.game) {
-          return of<proto.SearchGameResult>({ correlationId, gatewayId, status: result.status });
-        }
-
-        return from(this.resolveDedup(gatewayId, result.game.externalId)).pipe(
-          mergeMap(({ inSystem, gameId }) =>
-            of<proto.SearchGameResult>({
-              correlationId,
-              gatewayId,
-              status: proto.ResultStatus.RESULT_STATUS_RESULT,
-              game: result.game,
-              inSystem,
-              gameId,
-            }),
-          ),
-        );
-      }),
+            return from(this.resolveDedup(gatewayId, result.game.externalId)).pipe(
+              mergeMap(({ inSystem, gameId }) =>
+                of<proto.SearchGameResult>({
+                  correlationId,
+                  gatewayId,
+                  status: proto.ResultStatus.RESULT_STATUS_RESULT,
+                  game: result.game,
+                  inSystem,
+                  gameId,
+                }),
+              ),
+            );
+          }),
+          catchError((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            return this.errorGameSearchResult(gatewayId, correlationId, message);
+          }),
+        ),
+      ),
+      // Resolve/lazy-connect failure → gateway unavailable.
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
-        return this.errorGameSearchResult(gatewayId, correlationId, message);
+        this.logger.warn(`Gateway ${gatewayId} unavailable: ${message}`);
+
+        return this.errorGameSearchResult(
+          gatewayId,
+          correlationId,
+          `Gateway ${gatewayId} is not connected`,
+          proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
+        );
       }),
     );
   }

@@ -29,6 +29,7 @@ import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
@@ -63,6 +64,11 @@ import { baseLogger } from './lib/logger';
       delimiter: '.',
       verboseMemoryLeak: true,
     }),
+
+    // Drives the SafeHttpPolicyService periodic-refresh backstop (@Interval).
+    // Redis pub/sub handles immediate updates; this catches any message missed
+    // during a transient Redis disconnect.
+    ScheduleModule.forRoot(),
 
     // Rate limiting
     ThrottlerModule.forRootAsync({

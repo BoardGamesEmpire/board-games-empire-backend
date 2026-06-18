@@ -44,8 +44,7 @@ export class BullMQQueueDepthRecorder implements OnApplicationBootstrap, OnAppli
 
   onApplicationBootstrap(): void {
     if (!metricsExportEnabled()) {
-      this.logger.debug('Metrics export not enabled; queue depth recorder is idle');
-      return;
+      return this.logger.debug('Metrics export not enabled; queue depth recorder is idle');
     }
 
     this.queues = this.discoverQueues();
