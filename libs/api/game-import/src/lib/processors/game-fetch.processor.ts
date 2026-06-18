@@ -1,7 +1,8 @@
 import { DatabaseService, JobStatus } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import * as proto from '@board-games-empire/proto-gateway';
-import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger, NotFoundException } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { firstValueFrom } from 'rxjs';
@@ -9,18 +10,26 @@ import { QueueNames } from '../constants/queue.constants';
 import type { ExpansionFetchJobPayload, GameFetchJobPayload } from '../interfaces/import-job.interface';
 
 /**
- * Consumes fetch jobs from the gateway-worker. Each job calls a
- * specific gateway's FetchGame RPC via the shared GatewayRegistryService
- * (no callback to the coordinator). The job's return value is the
- * resolved GameData, stored by BullMQ and consumed by the parent import
- * job via getChildrenValues().
+ * Consumes fetch jobs in the gateway-worker. Each job calls a specific gateway's
+ * FetchGame RPC via the shared GatewayRegistryService (no callback to the
+ * coordinator). The return value is the resolved GameData, stored by BullMQ and
+ * consumed by the parent import job via getChildrenValues().
  *
- * Reports success/failure to the registry to feed the auto-disable
- * tracking. failParentOnFailure on the flow's child opts ensures a
- * persistent fetch failure cascades to the parent import.
+ * Extends ActorAwareWorkerHost: the originating actor + correlation are restored
+ * into CLS for the duration of processJob, so gateway-registry reporting and any
+ * downstream events are attributed to the user who triggered the import. Every
+ * fetch job MUST be enqueued via wrapJobData (GameImportEnqueuerService does) —
+ * the base rejects jobs without the __meta envelope; there is no fallback actor.
+ *
+ * Reports success/failure to the registry to feed auto-disable tracking.
+ * failParentOnFailure on the flow's child opts ensures a persistent fetch
+ * failure cascades to the parent import.
  */
 @Processor(QueueNames.GatewayFetch)
-export class GameFetchProcessor extends WorkerHost {
+export class GameFetchProcessor extends ActorAwareWorkerHost<
+  GameFetchJobPayload | ExpansionFetchJobPayload,
+  proto.GameData
+> {
   private readonly logger = new Logger(GameFetchProcessor.name);
 
   constructor(
@@ -30,7 +39,7 @@ export class GameFetchProcessor extends WorkerHost {
     super();
   }
 
-  async process(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>): Promise<proto.GameData> {
+  protected async processJob(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>): Promise<proto.GameData> {
     const { jobId, gatewayId, externalId, locale, correlationId } = job.data;
 
     this.logger.log(`${job.name} jobId=${jobId} gatewayId=${gatewayId} externalId=${externalId} — fetching`);

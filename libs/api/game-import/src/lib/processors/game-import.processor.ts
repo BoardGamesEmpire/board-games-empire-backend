@@ -1,5 +1,6 @@
 import { DatabaseService, JobStatus } from '@bge/database';
-import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
+import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
+import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
@@ -15,7 +16,10 @@ import { GameUpsertService } from '../services/game.service';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
 
 @Processor(QueueNames.GamesImport)
-export class GameImportProcessor extends WorkerHost {
+export class GameImportProcessor extends ActorAwareWorkerHost<
+  GameImportJobPayload | ExpansionImportJobPayload,
+  ImportJobResult
+> {
   private readonly logger = new Logger(GameImportProcessor.name);
 
   constructor(
@@ -26,7 +30,7 @@ export class GameImportProcessor extends WorkerHost {
     super();
   }
 
-  process(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
+  protected processJob(job: Job<GameImportJobPayload | ExpansionImportJobPayload>): Promise<ImportJobResult> {
     switch (job.name) {
       case JobNames.GameImport: {
         return this.processBaseGame(job as Job<GameImportJobPayload>);

@@ -6,6 +6,7 @@ import type {
   GameImportJobPayload,
 } from '@bge/game-import';
 import { FlowProducerNames, JobNames, QueueNames } from '@bge/game-import';
+import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { InjectFlowProducer } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { FlowJob, FlowProducer } from 'bullmq';
@@ -126,6 +127,15 @@ export class GameImportEnqueuerService {
   }): FlowJob {
     const { batchId, input, baseJobId, expansionJobIds, initiatorType } = args;
 
+    // The coordinator is a gRPC service with no CLS actor of its own — the
+    // originating identity arrives on the request as userId. Reconstruct the
+    // actor from it (mirrors initiatorType) and stamp every node so the actor
+    // survives the queue hop into the gateway-worker's ActorAwareWorkerHost.
+    const meta: JobActorMeta = {
+      actor: input.userId ? { kind: 'user', userId: input.userId } : { kind: 'system', reason: 'game-import' },
+      correlationId: input.correlationId,
+    };
+
     const baseContext = {
       jobId: baseJobId,
       batchId,
@@ -158,13 +168,13 @@ export class GameImportEnqueuerService {
       return {
         name: JobNames.ExpansionImport,
         queueName: QueueNames.GamesImport,
-        data: expansionImportPayload,
+        data: wrapJobData(expansionImportPayload, meta),
         opts: { failParentOnFailure: true },
         children: [
           {
             name: JobNames.ExpansionFetch,
             queueName: QueueNames.GatewayFetch,
-            data: expansionFetchPayload,
+            data: wrapJobData(expansionFetchPayload, meta),
             opts: { failParentOnFailure: true },
           },
         ],
@@ -174,12 +184,12 @@ export class GameImportEnqueuerService {
     return {
       name: JobNames.GameImport,
       queueName: QueueNames.GamesImport,
-      data: baseContext,
+      data: wrapJobData(baseContext, meta),
       children: [
         {
           name: JobNames.GameFetch,
           queueName: QueueNames.GatewayFetch,
-          data: baseFetchPayload,
+          data: wrapJobData(baseFetchPayload, meta),
           opts: { failParentOnFailure: true },
         },
         ...expansionFlows,

@@ -1,11 +1,11 @@
+import type { Actor } from '@bge/actor-context';
+import { AuditContextInternalService, AuditContextService } from '@bge/actor-context';
+import { Injectable } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Job } from 'bullmq';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { ActorAwareWorkerHost } from './actor-aware.worker-host';
 import { type JobActorMeta, wrapJobData } from './job-meta';
-import { AuditContextInternalService } from './services/audit-context-internal.service';
-import { AuditContextService } from './services/audit-context.service';
-import type { Actor } from './types';
 
 interface SampleJobData {
   readonly gameId: string;
@@ -17,12 +17,10 @@ interface CapturedContext {
   readonly source: string | null;
 }
 
+@Injectable()
 class SampleWorker extends ActorAwareWorkerHost<SampleJobData, CapturedContext> {
-  constructor(
-    auditContext: AuditContextInternalService,
-    private readonly context: AuditContextService,
-  ) {
-    super(auditContext);
+  constructor(private readonly context: AuditContextService) {
+    super();
   }
 
   protected async processJob(): Promise<CapturedContext> {
@@ -50,16 +48,11 @@ describe('ActorAwareWorkerHost', () => {
   beforeEach(async () => {
     module = await Test.createTestingModule({
       imports: [ClsModule.forRoot({ global: true, middleware: { mount: false } })],
-      providers: [
-        AuditContextService,
-        AuditContextInternalService,
-        {
-          provide: SampleWorker,
-          useFactory: (internal: AuditContextInternalService, context: AuditContextService) =>
-            new SampleWorker(internal, context),
-          inject: [AuditContextInternalService, AuditContextService],
-        },
-      ],
+      // SampleWorker is registered as a plain class provider so Nest performs
+      // the real constructor injection (AuditContextService) *and* the base
+      // class's property injection (AuditContextInternalService) — exercising
+      // the wiring the production processors rely on.
+      providers: [AuditContextService, AuditContextInternalService, SampleWorker],
     }).compile();
 
     worker = module.get(SampleWorker);
@@ -107,16 +100,14 @@ describe('ActorAwareWorkerHost', () => {
 
   it('propagates errors from processJob through the CLS scope', async () => {
     class FailingWorker extends ActorAwareWorkerHost<SampleJobData> {
-      constructor(internal: AuditContextInternalService) {
-        super(internal);
-      }
       protected async processJob(): Promise<never> {
         throw new Error('boom');
       }
     }
 
     const internal = module.get(AuditContextInternalService);
-    const failing = new FailingWorker(internal);
+    const failing = new FailingWorker();
+    (failing as unknown as { auditContext: AuditContextInternalService }).auditContext = internal;
     const job = buildJob(wrapJobData({ gameId: 'g1' }, { actor: { kind: 'system', reason: 't' }, correlationId: 'c' }));
 
     await expect(failing.process(job)).rejects.toThrow('boom');
