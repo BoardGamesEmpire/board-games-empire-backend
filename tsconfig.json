@@ -146,6 +146,9 @@
     },
     {
       "path": "./libs/queue/webhooks"
+    },
+    {
+      "path": "./libs/queue/actor-context"
     }
   ]
 }

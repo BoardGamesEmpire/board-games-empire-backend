@@ -1,4 +1,4 @@
-import type { Actor } from './types';
+import type { Actor } from '@bge/actor-context';
 
 /**
  * Reserved key on `job.data` that carries actor + correlation context across
@@ -34,7 +34,7 @@ export type JobMetaEnvelope = {
  * @example
  *   await queue.add('import', wrapJobData({ gameId }, { actor, correlationId }));
  */
-export function wrapJobData<T extends Record<string, unknown>>(payload: T, meta: JobActorMeta): T & JobMetaEnvelope {
+export function wrapJobData<T extends object>(payload: T, meta: JobActorMeta): T & JobMetaEnvelope {
   return {
     ...payload,
     [JOB_META_KEY]: meta,

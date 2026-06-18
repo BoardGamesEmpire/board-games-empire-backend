@@ -1,5 +1,5 @@
+import type { Actor } from '@bge/actor-context';
 import { JOB_META_KEY, type JobActorMeta, extractJobMeta, wrapJobData } from './job-meta';
-import type { Actor } from './types';
 
 const actor: Actor = {
   kind: 'user',

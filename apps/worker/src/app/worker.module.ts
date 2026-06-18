@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
@@ -85,6 +86,11 @@ import { baseLogger } from './lib/logger';
     }),
 
     DatabaseModule,
+
+    // Provides AuditContextInternalService for the now actor-aware
+    // GameImportProcessor; the global ClsModule.forRoot above satisfies its CLS
+    // requirement (runWith establishes the context — no HTTP middleware needed).
+    AuditContextModule,
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,

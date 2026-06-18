@@ -51,7 +51,3 @@ export { ACTOR_CLS_KEY, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './lib/ser
 // Module (registers reader + internal populator + system scope; ClsModule.forRoot
 // is the caller's responsibility).
 export { AuditContextModule } from './lib/audit-context.module';
-
-// BullMQ envelope helpers + actor-aware worker base.
-export { ActorAwareWorkerHost } from './lib/actor-aware.worker-host';
-export { JOB_META_KEY, extractJobMeta, wrapJobData, type JobActorMeta, type JobMetaEnvelope } from './lib/job-meta';

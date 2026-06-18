@@ -1,7 +1,8 @@
+import { AuditContextInternalService } from '@bge/actor-context';
 import { WorkerHost } from '@nestjs/bullmq';
+import { Inject } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { extractJobMeta } from './job-meta';
-import { AuditContextInternalService } from './services/audit-context-internal.service';
 
 /**
  * Base class for BullMQ processors that participate in the actor/audit system.
@@ -23,15 +24,37 @@ import { AuditContextInternalService } from './services/audit-context-internal.s
  *   }
  */
 export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName extends string = string> extends WorkerHost {
-  protected constructor(private readonly auditContext: AuditContextInternalService) {
-    super();
-  }
+  // Injected as a property rather than through the constructor so subclasses
+  // never have to import the eslint-restricted AuditContextInternalService just
+  // to forward it through `super()`. That keeps the restricted-import exception
+  // confined to this single base lib. Nest resolves `@Inject` properties
+  // declared on a base class against the concrete subclass provider.
+  @Inject(AuditContextInternalService)
+  private readonly auditContext!: AuditContextInternalService;
 
   async process(job: Job<TData, TResult, TName>, token?: string): Promise<TResult> {
+    if (!extractJobMeta(job.data)) {
+      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+    }
+
+    return this.runInActorScope(job, () => this.processJob(job, token));
+  }
+
+  /**
+   * Runs `fn` inside the CLS scope reconstructed from the job's actor envelope.
+   * Use from `@OnWorkerEvent` lifecycle hooks (e.g. `onFailed`) so work outside
+   * the main `process` path — DB writes, emitted events — is still attributed to
+   * the originating actor and correlation.
+   *
+   * Lenient by design: a job missing the envelope runs `fn` without a scope
+   * rather than throwing — a failure handler must not mask the original error.
+   * The strict envelope requirement is enforced in {@link process}.
+   */
+  protected runInActorScope<T>(job: Job<TData, TResult, TName>, fn: () => T): T {
     const meta = extractJobMeta(job.data);
 
     if (!meta) {
-      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+      return fn();
     }
 
     return this.auditContext.runWith(
@@ -40,7 +63,7 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
         correlationId: meta.correlationId,
         source: 'queue',
       },
-      () => this.processJob(job, token),
+      fn,
     );
   }
 
