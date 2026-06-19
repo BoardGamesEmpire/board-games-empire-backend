@@ -1,8 +1,8 @@
-import { DatabaseService } from '@bge/database';
+import { AuthType, DatabaseService } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Test } from '@nestjs/testing';
 import type { ClientGrpcProxy } from '@nestjs/microservices';
+import { Test } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
@@ -39,7 +39,7 @@ describe('GatewayRegistryService', () => {
     name: 'BGG',
     connectionUrl: 'http://gateway',
     connectionPort: 50051,
-    authType: 'NONE',
+    authType: AuthType.None,
     authParameters: null,
   };
 

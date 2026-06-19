@@ -1,0 +1,64 @@
+/// Operational cap primitive. A row caps one `resource`
+/// for one `scope` target. Absence of a row means unlimited — self-hosters who
+/// set nothing get no limits.
+///
+/// `scopeId` semantics:
+///   - an instance id (householdId / householdMemberId / userId) → caps that instance
+///   - the `DEFAULT_SCOPE_ID` sentinel ('*') → the type-level default for every
+///     instance of `scope`, and the sole form used for `Server`
+///
+/// Why a sentinel rather than a nullable `scopeId`: a compound unique over a
+/// nullable column does not constrain on Postgres (NULL is distinct from NULL,
+/// so duplicate default rows are accepted) and Prisma rejects `null` in a
+/// compound-unique `where` (so `upsert`-by-key on a default row throws). The
+/// non-null sentinel keeps `@@unique` real and upserts working. Callers see the
+/// conceptual "null = default" — null↔sentinel mapping lives at the DB boundary
+/// (see `@bge/quota` DEFAULT_SCOPE_ID).
+///
+/// Resolution: instance row overrides type-level default within a scope;
+/// across scopes every applicable scope is an independent ceiling (see
+/// QuotaService).
+enum QuotaScope {
+  Server
+  Household
+  HouseholdMember
+  User
+
+  @@map("quota_scopes")
+}
+
+model Quota {
+  id String @id @default(cuid(2))
+
+  scope   QuotaScope
+  scopeId String     @map("scope_id")
+
+  /// Denormalized for CASL `accessibleBy` (scopes household-admin rows) and the
+  /// "list this household's quotas" index. Set to the household id for
+  /// Household/HouseholdMember *instance* rows; null for Server, User, and
+  /// every type-level default ('*'), since a default isn't tied to one household.
+  household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String?    @map("household_id")
+
+  /// QuotaResource key. Taxonomy lives in code (QuotaResourceRegistry), not the
+  /// schema — same rationale as WebhookSubscriptionEventType.eventType.
+  resource String
+
+  description String?
+
+  createdBy   User?   @relation("QuotaCreatedBy", fields: [createdById], references: [id])
+  createdById String? @map("created_by_id")
+  updatedBy   User?   @relation("QuotaUpdatedBy", fields: [updatedById], references: [id])
+  updatedById String? @map("updated_by_id")
+
+  limit       BigInt
+  softOverage Boolean @default(false) @map("soft_overage")
+  enforced    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([scope, scopeId, resource])
+  @@index([householdId])
+  @@map("quotas")
+}

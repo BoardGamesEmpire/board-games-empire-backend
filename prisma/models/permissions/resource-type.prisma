@@ -5,6 +5,7 @@ enum ResourceType {
   SafeHttpPolicy
   Media
   WebhookSubscription
+  Quota
 
   // ─── User ───────────────────────────────────────────────
   User

@@ -62,6 +62,9 @@
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/quota/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {

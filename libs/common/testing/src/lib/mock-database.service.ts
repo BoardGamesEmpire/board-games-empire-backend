@@ -138,6 +138,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     platformGatewayLink: mockDelegate(),
     publisher: mockDelegate(),
     publisherGatewayLink: mockDelegate(),
+    quota: mockDelegate(),
     role: mockDelegate(),
     rolePermission: mockDelegate(),
     ruleVariant: mockDelegate(),

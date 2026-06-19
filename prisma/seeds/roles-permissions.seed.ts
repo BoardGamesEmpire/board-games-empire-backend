@@ -729,6 +729,24 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       slug: 'read:webhook_subscription:own',
       reason: 'View own webhook subscriptions',
     },
+
+    // --- Quotas ─────────────────────────────────────────────
+    { action: Action.manage, subject: ResourceType.Quota, slug: 'manage:quota', reason: 'Manage operational quotas' },
+    { action: Action.read, subject: ResourceType.Quota, slug: 'read:quota', reason: 'View operational quotas' },
+    {
+      action: Action.read,
+      subject: ResourceType.Quota,
+      conditions: { householdId: '{{ householdId }}' },
+      slug: 'read:quota:household',
+      reason: "View this household's own and per-member quota caps",
+    },
+    {
+      action: Action.manage,
+      subject: ResourceType.Quota,
+      conditions: { scope: 'HouseholdMember', householdId: '{{ householdId }}' },
+      slug: 'manage:quota:household_member',
+      reason: 'Sub-allocate member quotas within own household',
+    },
   ];
 
   const permissionsBySlug: Record<string, any> = {};
@@ -890,7 +908,9 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:rule_variant',
     'delete:event_game',
     'delete:event_occurrence',
+    'manage:quota:household_member',
     'delete:event',
+    'read:quota:household',
     'delete:game_play_session',
     'delete:household',
     'delete:rule_variant',
