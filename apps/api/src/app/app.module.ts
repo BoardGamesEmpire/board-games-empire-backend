@@ -16,6 +16,7 @@ import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { ContextGuard, PermissionsModule } from '@bge/permissions';
+import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
@@ -163,6 +164,7 @@ import { baseLogger } from './lib/logger';
     MetricsModule,
     NotificationsModule,
     PermissionsModule,
+    QuotasModule,
     SafeHttpModule,
     SystemSettingsModule,
     UserModule,

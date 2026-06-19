@@ -149,6 +149,12 @@
     },
     {
       "path": "./libs/queue/actor-context"
+    },
+    {
+      "path": "./libs/common/quota"
+    },
+    {
+      "path": "./libs/api/quota"
     }
   ]
 }
