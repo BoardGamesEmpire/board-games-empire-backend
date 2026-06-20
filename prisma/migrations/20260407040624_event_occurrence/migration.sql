@@ -196,6 +196,8 @@ CREATE TABLE "occurrence_categories" (
 -- CreateTable
 CREATE TABLE "event_occurrences" (
     "id" TEXT NOT NULL,
+    "cancelled_by_id" TEXT,
+    "cancel_reason" TEXT,
     "event_id" TEXT NOT NULL,
     "label" TEXT,
     "start_date" TIMESTAMPTZ(3),
@@ -340,6 +342,9 @@ ALTER TABLE "occurrence_categories" ADD CONSTRAINT "occurrence_categories_catego
 
 -- AddForeignKey
 ALTER TABLE "event_occurrences" ADD CONSTRAINT "event_occurrences_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "events"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "event_occurrences" ADD CONSTRAINT "event_occurrences_cancelled_by_id_fkey" FOREIGN KEY ("cancelled_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "event_recurrence_rules" ADD CONSTRAINT "event_recurrence_rules_template_event_id_fkey" FOREIGN KEY ("template_event_id") REFERENCES "events"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

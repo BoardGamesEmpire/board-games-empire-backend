@@ -1,9 +1,8 @@
 import { EventAttendee, EventAttendeeGameList, EventParticipationStatus } from '@bge/database';
-import { AppAbility, PoliciesGuard } from '@bge/permissions';
+import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AuthGuard, UserSession } from '@thallesp/nestjs-better-auth';
-import type { ClsService } from 'nestjs-cls';
+import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -25,12 +24,6 @@ describe('EventAttendeeController', () => {
       | 'removeGameFromList'
     >
   >;
-  let cls: jest.Mocked<ClsService>;
-
-  const mockUserAbility = { rules: [] } as unknown as AppAbility;
-  const mockApiKeyAbility = { rules: [] } as unknown as AppAbility;
-  const expectedAbilities = [mockUserAbility, mockApiKeyAbility];
-
   beforeEach(async () => {
     service = {
       getAttendees: jest.fn(),
@@ -43,7 +36,7 @@ describe('EventAttendeeController', () => {
       removeGameFromList: jest.fn(),
     } satisfies Partial<jest.Mocked<EventAttendeeService>> as typeof service;
 
-    const { module, cls: mockCls } = await createTestingModuleWithDb({
+    const { module } = await createTestingModuleWithDb({
       controllers: [EventAttendeeController],
       providers: [
         { provide: EventAttendeeService, useValue: service },
@@ -53,13 +46,6 @@ describe('EventAttendeeController', () => {
     });
 
     controller = module.get(EventAttendeeController);
-    cls = mockCls;
-
-    cls.get.mockImplementation((key: unknown) => {
-      if (key === 'userAbility') return mockUserAbility;
-      if (key === 'apiKeyAbility') return mockApiKeyAbility;
-      return undefined;
-    });
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -71,7 +57,7 @@ describe('EventAttendeeController', () => {
 
       const result = await firstValueFrom(controller.getAttendees('event-1'));
 
-      expect(service.getAttendees).toHaveBeenCalledWith('event-1', expectedAbilities);
+      expect(service.getAttendees).toHaveBeenCalledWith('event-1');
       expect(result).toEqual({ attendees });
     });
   });
@@ -83,20 +69,20 @@ describe('EventAttendeeController', () => {
 
       const result = await firstValueFrom(controller.getAttendee('event-1', 'att-42'));
 
-      expect(service.getAttendee).toHaveBeenCalledWith('event-1', 'att-42', expectedAbilities);
+      expect(service.getAttendee).toHaveBeenCalledWith('event-1', 'att-42');
       expect(result).toEqual({ attendee });
     });
   });
 
   describe('addAttendee', () => {
-    it('delegates with session userId as invitedBy', async () => {
+    it('delegates to service.addAttendee', async () => {
       const created = stubAttendee({ id: 'att-new' });
       service.addAttendee.mockResolvedValue(created);
 
       const dto: AddAttendeeDto = { userId: 'user-2' };
-      const result = await firstValueFrom(controller.addAttendee('event-1', makeSession('user-host'), dto));
+      const result = await firstValueFrom(controller.addAttendee('event-1', dto));
 
-      expect(service.addAttendee).toHaveBeenCalledWith('event-1', dto, 'user-host');
+      expect(service.addAttendee).toHaveBeenCalledWith('event-1', dto);
       expect(result).toEqual({
         message: 'Attendee added successfully',
         attendee: created,
@@ -105,13 +91,13 @@ describe('EventAttendeeController', () => {
   });
 
   describe('removeAttendee', () => {
-    it('delegates with session userId as removedBy and abilities', async () => {
+    it('delegates to service.removeAttendee', async () => {
       const removed = stubAttendee({ id: 'att-del' });
       service.removeAttendee.mockResolvedValue(removed);
 
-      const result = await firstValueFrom(controller.removeAttendee('event-1', 'att-del', makeSession('user-host')));
+      const result = await firstValueFrom(controller.removeAttendee('event-1', 'att-del'));
 
-      expect(service.removeAttendee).toHaveBeenCalledWith('event-1', 'att-del', 'user-host', expectedAbilities);
+      expect(service.removeAttendee).toHaveBeenCalledWith('event-1', 'att-del');
       expect(result).toEqual({
         message: 'Attendee removed successfully',
         attendee: removed,
@@ -131,7 +117,7 @@ describe('EventAttendeeController', () => {
       };
       const result = await firstValueFrom(controller.updateStatus('event-1', 'att-1', dto));
 
-      expect(service.updateStatus).toHaveBeenCalledWith('event-1', 'att-1', dto, expectedAbilities);
+      expect(service.updateStatus).toHaveBeenCalledWith('event-1', 'att-1', dto);
       expect(result).toEqual({
         message: 'Attendee status updated',
         attendee: updated,
@@ -146,7 +132,7 @@ describe('EventAttendeeController', () => {
 
       const result = await firstValueFrom(controller.getGameList('event-1', 'att-1'));
 
-      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1', expectedAbilities);
+      expect(service.getGameList).toHaveBeenCalledWith('event-1', 'att-1');
       expect(result).toEqual({ games });
     });
   });
@@ -166,13 +152,13 @@ describe('EventAttendeeController', () => {
   });
 
   describe('removeGameFromList', () => {
-    it('delegates with abilities and returns { entry }', async () => {
+    it('delegates to service.removeGameFromList and returns { entry }', async () => {
       const entry = { id: 'gl-del' } as EventAttendeeGameList;
       service.removeGameFromList.mockResolvedValue(entry);
 
       const result = await firstValueFrom(controller.removeGameFromList('event-1', 'att-1', 'gl-del'));
 
-      expect(service.removeGameFromList).toHaveBeenCalledWith('event-1', 'att-1', 'gl-del', expectedAbilities);
+      expect(service.removeGameFromList).toHaveBeenCalledWith('event-1', 'att-1', 'gl-del');
       expect(result).toEqual({ message: 'Game removed from list', entry });
     });
   });
@@ -184,8 +170,4 @@ function stubAttendee(overrides: Partial<EventAttendee> = {}): EventAttendee {
     userId: 'user-1',
     ...overrides,
   });
-}
-
-function makeSession(userId = 'user-1') {
-  return { user: { id: userId } } as UserSession;
 }

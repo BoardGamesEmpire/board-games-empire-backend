@@ -37,6 +37,11 @@ model EventOccurrence {
   declinedAt  DateTime? @map("declined_at") @db.Timestamptz(3)
   cancelledAt DateTime? @map("cancelled_at") @db.Timestamptz(3)
 
+  cancelledBy   User?   @relation("CancelledBy", fields: [cancelledById], references: [id])
+  cancelledById String? @map("cancelled_by_id")
+
+  cancelReason String? @map("cancel_reason")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

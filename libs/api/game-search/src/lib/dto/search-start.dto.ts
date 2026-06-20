@@ -1,3 +1,4 @@
+import { TransformBoolean } from '@bge/shared';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
@@ -22,7 +23,7 @@ export class SearchStartDto {
    */
   @IsOptional()
   @IsBoolean()
-  @Type(() => Boolean)
+  @TransformBoolean()
   includeLocal?: boolean = true;
 
   /**
@@ -31,7 +32,7 @@ export class SearchStartDto {
    */
   @IsOptional()
   @IsBoolean()
-  @Type(() => Boolean)
+  @TransformBoolean()
   includeExternal?: boolean = true;
 
   @IsOptional()

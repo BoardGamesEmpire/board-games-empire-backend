@@ -79,6 +79,8 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
 
     const actor = this.extractActor(metadata);
 
+    this.logger.debug(`Extracted actor from gRPC metadata: ${actor.kind}`);
+
     const init: ActorContextInit = {
       actor,
       correlationId: resolveCorrelationId({
@@ -236,7 +238,8 @@ export const validateActorShape = (value: unknown): Actor => {
       return { kind: 'plugin', pluginId, trigger };
     }
 
-    default:
+    default: {
       throw new BadRequestException(`unknown actor kind: '${obj['kind']}'`);
+    }
   }
 };

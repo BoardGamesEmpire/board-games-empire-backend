@@ -1,12 +1,9 @@
 import { Action, QuotaScope, ResourceType } from '@bge/database';
-import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { isQuotaResource, QuotaService, SetQuotaDto, toPublicScopeId } from '@bge/quota';
 import { BadRequestException, Body, Controller, Get, Param, ParseEnumPipe, Patch, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { Session } from '@thallesp/nestjs-better-auth';
-import { ClsService } from 'nestjs-cls';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 
@@ -18,21 +15,18 @@ import { map } from 'rxjs/operators';
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-@ApiTags('admin', 'quotas')
+@ApiTags('quotas')
 @UseGuards(PoliciesGuard)
 @Controller('quotas')
 export class QuotasController {
-  constructor(
-    private readonly quotas: QuotaService,
-    private readonly cls: ClsService,
-  ) {}
+  constructor(private readonly quotas: QuotaService) {}
 
   @ApiOperation({ summary: 'List quotas you can read' })
   @ApiResponse({ status: Http.Ok, description: 'Quotas retrieved' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Quota))
   @Get()
   list() {
-    return from(this.quotas.getQuotas(this.getAbilities())).pipe(map((quotas) => ({ quotas })));
+    return from(this.quotas.getQuotas()).pipe(map((quotas) => ({ quotas })));
   }
 
   @ApiOperation({ summary: 'Create or update a quota (partial — only provided fields change)' })
@@ -48,21 +42,14 @@ export class QuotasController {
     @Param('scopeId') scopeId: string,
     @Param('resource') resource: string,
     @Body() dto: SetQuotaDto,
-    @Session() session: UserSession,
   ) {
     if (!isQuotaResource(resource)) {
       throw new BadRequestException(`Unknown quota resource "${resource}"`);
     }
 
     const publicScopeId = toPublicScopeId(scopeId);
-    return from(this.quotas.setQuota(scope, publicScopeId, resource, dto, session.user.id, this.getAbilities())).pipe(
+    return from(this.quotas.setQuota(scope, publicScopeId, resource, dto)).pipe(
       map((quota) => ({ message: 'Quota set', quota })),
     );
-  }
-
-  private getAbilities(): AppAbility[] {
-    const userAbility = this.cls.get<AppAbility>('userAbility');
-    const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean);
   }
 }

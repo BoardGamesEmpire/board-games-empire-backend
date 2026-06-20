@@ -1,10 +1,8 @@
 import { Event } from '@bge/database';
-import { AppAbility, PoliciesGuard } from '@bge/permissions';
+import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEvent } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
-import type { ClsService } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -16,10 +14,6 @@ describe('EventController', () => {
   let service: jest.Mocked<
     Pick<EventService, 'getEvents' | 'getEventById' | 'createEvent' | 'updateEvent' | 'deleteEvent'>
   >;
-  let cls: jest.Mocked<ClsService>;
-
-  const mockUserAbility = { rules: [] } as unknown as AppAbility;
-  const mockApiKeyAbility = { rules: [] } as unknown as AppAbility;
 
   beforeEach(async () => {
     service = {
@@ -30,7 +24,7 @@ describe('EventController', () => {
       deleteEvent: jest.fn(),
     } satisfies Partial<jest.Mocked<EventService>>;
 
-    const { module, cls: mockCls } = await createTestingModuleWithDb({
+    const { module } = await createTestingModuleWithDb({
       controllers: [EventController],
       providers: [
         { provide: EventService, useValue: service },
@@ -40,35 +34,19 @@ describe('EventController', () => {
     });
 
     controller = module.get(EventController);
-    cls = mockCls;
-
-    cls.get.mockImplementation((key: unknown) => {
-      if (key === 'userAbility') return mockUserAbility;
-      if (key === 'apiKeyAbility') return mockApiKeyAbility;
-      return undefined;
-    });
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('getEvents', () => {
-    it('delegates to EventService.getEvents with abilities and wraps response', async () => {
+    it('delegates to EventService.getEvents and wraps response', async () => {
       const events = [stubEvent(), stubEvent()];
       service.getEvents.mockResolvedValue(events);
 
       const result = await firstValueFrom(controller.getEvents({ limit: 10, offset: 0 }));
 
-      expect(service.getEvents).toHaveBeenCalledWith({ limit: 10, offset: 0 }, [mockUserAbility, mockApiKeyAbility]);
+      expect(service.getEvents).toHaveBeenCalledWith({ limit: 10, offset: 0 });
       expect(result).toEqual({ events });
-    });
-
-    it('retrieves abilities from CLS', async () => {
-      service.getEvents.mockResolvedValue([]);
-
-      await firstValueFrom(controller.getEvents({ limit: 10, offset: 0 }));
-
-      expect(cls.get).toHaveBeenCalledWith('userAbility');
-      expect(cls.get).toHaveBeenCalledWith('apiKeyAbility');
     });
   });
 
@@ -79,7 +57,7 @@ describe('EventController', () => {
 
       const result = await firstValueFrom(controller.getEventById('ev-42'));
 
-      expect(service.getEventById).toHaveBeenCalledWith('ev-42', [mockUserAbility, mockApiKeyAbility]);
+      expect(service.getEventById).toHaveBeenCalledWith('ev-42');
       expect(result).toEqual({ event });
     });
   });
@@ -90,9 +68,9 @@ describe('EventController', () => {
       service.createEvent.mockResolvedValue(created);
 
       const dto: CreateEventDto = { title: 'Game Night' } as CreateEventDto;
-      const result = await firstValueFrom(controller.createEvent(makeSession('user-42'), dto));
+      const result = await firstValueFrom(controller.createEvent(dto));
 
-      expect(service.createEvent).toHaveBeenCalledWith('user-42', dto);
+      expect(service.createEvent).toHaveBeenCalledWith(dto);
       expect(result).toEqual({
         message: 'Event created successfully',
         event: created,
@@ -108,7 +86,7 @@ describe('EventController', () => {
       const dto: UpdateEventDto = { title: 'Updated' };
       const result = await firstValueFrom(controller.updateEvent('ev-1', dto));
 
-      expect(service.updateEvent).toHaveBeenCalledWith('ev-1', dto, [mockUserAbility, mockApiKeyAbility]);
+      expect(service.updateEvent).toHaveBeenCalledWith('ev-1', dto);
       expect(result).toEqual({
         message: 'Event with ID ev-1 updated successfully',
         event: updated,
@@ -117,13 +95,13 @@ describe('EventController', () => {
   });
 
   describe('deleteEvent', () => {
-    it('delegates to EventService.deleteEvent with userId', async () => {
+    it('delegates to EventService.deleteEvent', async () => {
       const deleted = stubEvent({ id: 'ev-del' });
       service.deleteEvent.mockResolvedValue(deleted);
 
-      const result = await firstValueFrom(controller.deleteEvent('ev-del', makeSession('user-del')));
+      const result = await firstValueFrom(controller.deleteEvent('ev-del'));
 
-      expect(service.deleteEvent).toHaveBeenCalledWith('ev-del', 'user-del', [mockUserAbility, mockApiKeyAbility]);
+      expect(service.deleteEvent).toHaveBeenCalledWith('ev-del');
       expect(result).toEqual({
         message: 'Event with ID ev-del deleted successfully',
         event: deleted,
@@ -138,8 +116,4 @@ function stubEvent(overrides: Partial<Event> = {}): Event {
     createdById: 'user-1',
     ...overrides,
   });
-}
-
-function makeSession(userId = 'user-1') {
-  return { user: { id: userId } } as UserSession;
 }

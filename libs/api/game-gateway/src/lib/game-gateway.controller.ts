@@ -1,12 +1,10 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, GameGateway, ResourceType } from '@bge/database';
-import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@board-games-empire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
-import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
-import { ClsService } from 'nestjs-cls';
 import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
@@ -22,7 +20,6 @@ export class GameGatewayController {
 
   constructor(
     private readonly gameGatewayService: GameGatewayService,
-    private readonly cls: ClsService,
     private readonly coordinator: GatewayCoordinatorClientService,
   ) {}
 
@@ -31,10 +28,7 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get()
   getAll(@Query() pagination: PaginationQueryDto) {
-    const abilities = this.getAbilities();
-    return from(this.gameGatewayService.getAll(pagination, abilities.userAbility, abilities.apiAbility)).pipe(
-      map((gateways) => ({ gateways })),
-    );
+    return from(this.gameGatewayService.getAll(pagination)).pipe(map((gateways) => ({ gateways })));
   }
 
   @ApiResponse({ status: 401, description: 'Authentication required' })
@@ -42,18 +36,15 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get(':id')
   getById(@Param('id') id: string) {
-    const abilities = this.getAbilities();
-    return from(this.gameGatewayService.getById(id, abilities.userAbility, abilities.apiAbility)).pipe(
-      map((gateway) => ({ gateway })),
-    );
+    return from(this.gameGatewayService.getById(id)).pipe(map((gateway) => ({ gateway })));
   }
 
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.GameGateway))
   @Post()
-  create(@Session() session: UserSession, @Body() createGameGatewayDto: CreateGameGatewayDto) {
-    return from(this.gameGatewayService.create(session.user.id, createGameGatewayDto)).pipe(
+  create(@Body() createGameGatewayDto: CreateGameGatewayDto) {
+    return from(this.gameGatewayService.create(createGameGatewayDto)).pipe(
       tap((gateway: GameGateway) => this.logger.log(`Created game gateway with name: ${gateway.name}`)),
       concatMap((gateway) =>
         gateway.enabled
@@ -72,10 +63,7 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateGameGatewayDto: UpdateGameGatewayDto) {
-    const abilities = this.getAbilities();
-    return from(
-      this.gameGatewayService.update(id, updateGameGatewayDto, abilities.userAbility, abilities.apiAbility),
-    ).pipe(
+    return from(this.gameGatewayService.update(id, updateGameGatewayDto)).pipe(
       tap((gateway: GameGateway) => this.logger.log(`Updated game gateway with ID: ${gateway.id}`)),
       concatMap((gateway) => {
         if (updateGameGatewayDto.enabled === undefined) {
@@ -96,8 +84,7 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.GameGateway))
   @Delete(':id')
   delete(@Param('id') id: string) {
-    const abilities = this.getAbilities();
-    return from(this.gameGatewayService.delete(id, abilities.userAbility, abilities.apiAbility)).pipe(
+    return from(this.gameGatewayService.delete(id)).pipe(
       tap((gateway: GameGateway) => this.logger.log(`Deleted game gateway with ID: ${gateway.id}`)),
       concatMap((gateway) =>
         gateway.enabled
@@ -116,10 +103,9 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Post(':id/connect')
   connect(@Param('id') id: string) {
-    const abilities = this.getAbilities();
-    return from(
-      this.gameGatewayService.update(id, { enabled: true }, abilities.userAbility, abilities.apiAbility),
-    ).pipe(concatMap((gateway: GameGateway) => this.connectToGateway(gateway)));
+    return from(this.gameGatewayService.update(id, { enabled: true })).pipe(
+      concatMap((gateway: GameGateway) => this.connectToGateway(gateway)),
+    );
   }
 
   private connectToGateway(gateway: GameGateway) {
@@ -154,10 +140,9 @@ export class GameGatewayController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.GameGateway))
   @Post(':id/disconnect')
   disconnect(@Param('id') id: string) {
-    const abilities = this.getAbilities();
-    return from(
-      this.gameGatewayService.update(id, { enabled: false }, abilities.userAbility, abilities.apiAbility),
-    ).pipe(concatMap((gateway: GameGateway) => this.disconnectFromGateway(gateway)));
+    return from(this.gameGatewayService.update(id, { enabled: false })).pipe(
+      concatMap((gateway: GameGateway) => this.disconnectFromGateway(gateway)),
+    );
   }
 
   private disconnectFromGateway(gateway: GameGateway) {
@@ -181,11 +166,5 @@ export class GameGatewayController {
         });
       }),
     );
-  }
-
-  private getAbilities() {
-    const userAbility = this.cls.get<AppAbility>('userAbility');
-    const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return { userAbility, apiAbility };
   }
 }

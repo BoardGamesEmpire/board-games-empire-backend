@@ -1,4 +1,5 @@
 import {
+  Action,
   DatabaseService,
   EventGame,
   EventGameNomination,
@@ -13,12 +14,12 @@ import {
   VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
-import { accessibleBy, WhereInput } from '@casl/prisma';
+import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { CastVoteDto } from '../dto/cast-vote.dto';
+import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { NominationEvent } from './constants';
@@ -38,29 +39,30 @@ export class EventGameNominationService {
   constructor(
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly abilityService: AbilityService,
   ) {}
 
-  async getNominations(eventId: string, abilities: AppAbility[]): Promise<EventGameNomination[]> {
-    await this.assertEventExists(eventId);
+  async getNominations(eventId: string): Promise<EventGameNomination[]> {
+    await assertEventExists(this.db, eventId);
 
     return this.db.eventGameNomination.findMany({
       where: {
         eventId,
-        AND: this.createNominationWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
       },
       include: NOMINATION_INCLUDE,
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async getNomination(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
-    await this.assertEventExists(eventId);
+  async getNomination(eventId: string, nominationId: string): Promise<EventGameNomination> {
+    await assertEventExists(this.db, eventId);
 
     const nomination = await this.db.eventGameNomination.findUnique({
       where: {
         id: nominationId,
         eventId,
-        AND: this.createNominationWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
       },
       include: NOMINATION_INCLUDE,
     });
@@ -69,7 +71,8 @@ export class EventGameNominationService {
     return nomination;
   }
 
-  async nominate(eventId: string, attendeeId: string, dto: NominateGameDto): Promise<EventGameNomination> {
+  async nominate(eventId: string, dto: NominateGameDto): Promise<EventGameNomination> {
+    const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
     if (policy.gameAdditionMode === GameAdditionMode.HostOnly) {
@@ -151,12 +154,9 @@ export class EventGameNominationService {
     return nomination;
   }
 
-  async withdraw(
-    eventId: string,
-    nominationId: string,
-    attendeeId: string,
-    abilities: AppAbility[],
-  ): Promise<EventGameNomination> {
+  async withdraw(eventId: string, nominationId: string): Promise<EventGameNomination> {
+    const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
+
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
       select: { id: true, nominatedById: true, status: true },
@@ -178,7 +178,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
-          AND: this.createNominationWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: NominationStatus.Withdrawn },
         include: NOMINATION_INCLUDE,
@@ -199,7 +199,8 @@ export class EventGameNominationService {
     }
   }
 
-  async castVote(eventId: string, nominationId: string, attendeeId: string, dto: CastVoteDto): Promise<EventGameVote> {
+  async castVote(eventId: string, nominationId: string, dto: CastVoteDto): Promise<EventGameVote> {
+    const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
       select: { id: true, status: true },
@@ -253,7 +254,6 @@ export class EventGameNominationService {
   async resolveNomination(
     eventId: string,
     nominationId: string,
-    abilities: AppAbility[],
   ): Promise<{ nomination: EventGameNomination; resolution: ResolutionResult }> {
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
@@ -282,7 +282,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
-          AND: this.createNominationWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: resolvedStatus },
         include: NOMINATION_INCLUDE,
@@ -312,19 +312,18 @@ export class EventGameNominationService {
     }
   }
 
-  hostApprove(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
-    return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved, abilities);
+  hostApprove(eventId: string, nominationId: string): Promise<EventGameNomination> {
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Approved);
   }
 
-  hostReject(eventId: string, nominationId: string, abilities: AppAbility[]): Promise<EventGameNomination> {
-    return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected, abilities);
+  hostReject(eventId: string, nominationId: string): Promise<EventGameNomination> {
+    return this.handleHostDecision(eventId, nominationId, NominationStatus.Rejected);
   }
 
   private async handleHostDecision(
     eventId: string,
     nominationId: string,
     decision: NominationStatus,
-    abilities: AppAbility[],
   ): Promise<EventGameNomination> {
     if (decision !== NominationStatus.Approved && decision !== NominationStatus.Rejected) {
       throw new BadRequestException('Must be "Approved" or "Rejected".');
@@ -353,7 +352,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
-          AND: this.createNominationWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: decision },
         include: NOMINATION_INCLUDE,
@@ -383,7 +382,8 @@ export class EventGameNominationService {
     }
   }
 
-  async directAddGame(eventId: string, attendeeId: string, dto: DirectAddGameDto): Promise<EventGame> {
+  async directAddGame(eventId: string, dto: DirectAddGameDto): Promise<EventGame> {
+    const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
     if (policy.gameAdditionMode !== GameAdditionMode.Direct && policy.gameAdditionMode !== GameAdditionMode.HostOnly) {
@@ -492,31 +492,6 @@ export class EventGameNominationService {
         availableGames: { select: { id: true } },
       },
     });
-  }
-
-  private createNominationWhereAnd(abilities: AppAbility[]): WhereInput<EventGameNomination>[] {
-    const whereAnd: WhereInput<EventGameNomination>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventGameNomination));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for nomination access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-    return whereAnd;
-  }
-
-  private async assertEventExists(eventId: string): Promise<void> {
-    const count = await this.db.event.count({
-      where: { id: eventId, deletedAt: null },
-    });
-    assert(count > 0, new NotFoundException(`Event ${eventId} not found`));
   }
 }
 

@@ -9,8 +9,16 @@ model Event {
   household   Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
   householdId String?    @map("household_id")
 
-  createdBy   User   @relation(fields: [createdById], references: [id])
+  createdBy   User   @relation("EventsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
+
+  cancelledBy   User?   @relation("CancelledBy", fields: [cancelledById], references: [id])
+  cancelledById String? @map("cancelled_by_id")
+
+  cancelReason String? @map("cancel_reason")
+
+  deletedBy   User?   @relation("DeletedBy", fields: [deletedById], references: [id])
+  deletedById String? @map("deleted_by_id")
 
   title          String
   status         EventStatus         @default(Planning)

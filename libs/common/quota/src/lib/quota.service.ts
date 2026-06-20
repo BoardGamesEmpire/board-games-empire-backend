@@ -1,6 +1,5 @@
 import { Action, DatabaseService, Prisma, Quota, QuotaScope, ResourceType } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
-import { accessibleBy } from '@casl/prisma';
+import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuotaEvents } from './constants/quota-events.constant';
@@ -34,21 +33,9 @@ export class QuotaService {
     private readonly databaseService: DatabaseService,
     private readonly registry: QuotaResourceRegistry,
     private readonly eventEmitter: EventEmitter2,
+    private readonly abilityService: AbilityService,
   ) {}
 
-  /**
-   * Evaluates whether `amount` more of `resource` is permitted given current
-   * usage. The user scope is supplied in `ctx` (from actor-context at the call
-   * site); Server is implicit; Household/HouseholdMember are evaluated only when
-   * their ids are present in `ctx`.
-   *
-   * `allowed` is false only when a *hard* constraint is exceeded. Every exceeded
-   * *soft* constraint emits `quota.soft_overage` (warn-every). Within a scope
-   * the most-specific row wins (instance overrides type-level default,
-   * including a disabling override); across scopes each is an independent
-   * ceiling and usage is computed per scope. Returns `allowed: true` with null
-   * limit when no cap applies.
-   */
   async check(resource: QuotaResource, amount: bigint, ctx: QuotaCheckContext): Promise<QuotaCheckResult> {
     if (amount < 0n) {
       throw new BadRequestException('check amount must be non-negative');
@@ -76,16 +63,12 @@ export class QuotaService {
       },
     });
 
-    // Resolve the binding row per scope first (cheap, in-memory), then fetch all
-    // usages concurrently: these are independent COUNT queries on a write path,
-    // so serializing them would add a round-trip of latency per scope.
     const applicable: { scope: QuotaScope; scopeId: string; row: QuotaRow }[] = [];
     for (const { scope, scopeId } of targets) {
       const row = this.mostSpecific(rows, scope, scopeId);
       if (row && row.enforced) {
         applicable.push({ scope, scopeId, row });
       }
-      // else: no cap, or explicitly disabled → unlimited for this scope
     }
 
     if (applicable.length === 0) {
@@ -131,42 +114,23 @@ export class QuotaService {
     };
   }
 
-  /**
-   * Lists the quota rows the caller can `read`, narrowed by the two-ability
-   * intersection (user ability AND api-key ability). Server admins see all;
-   * household admins see their own household's rows via the denormalized
-   * `householdId`.
-   */
-  async getQuotas(abilities: AppAbility[]): Promise<QuotaView[]> {
-    if (abilities.length === 0) {
-      return [];
-    }
-
+  async getQuotas(): Promise<QuotaView[]> {
     const quotas = await this.databaseService.quota.findMany({
-      where: { AND: this.accessibleQuotaWhere(abilities) },
+      where: { AND: this.abilityService.getCurrentResourceConditions(ResourceType.Quota, Action.read) },
       orderBy: [{ scope: 'asc' }, { resource: 'asc' }],
     });
 
     return quotas.map(toQuotaView);
   }
 
-  /**
-   * Upserts a cap. `publicScopeId` is `null` for a type-level default (mapped to
-   * the storage sentinel). Validates the resource and scope/target coherence,
-   * denormalizes `householdId` for Household/HouseholdMember rows, and emits
-   * `quota.updated`.
-   */
   async setQuota(
     scope: QuotaScope,
     publicScopeId: string | null,
     resource: QuotaResource,
     dto: SetQuotaDto,
-    actorId: string,
-    abilities: AppAbility[],
   ): Promise<QuotaView> {
-    if (abilities.length === 0) {
-      throw new ForbiddenException("You don't have permission to manage quotas");
-    }
+    const actorId = this.abilityService.getActingUserId();
+
     if (!this.registry.has(resource)) {
       throw new BadRequestException(`Unknown quota resource "${resource}"`);
     }
@@ -197,7 +161,6 @@ export class QuotaService {
     const limit = dto.limit !== undefined ? this.parseLimit(dto.limit) : undefined;
     const key = { scope_scopeId_resource: { scope, scopeId, resource } };
 
-    // Partial: only provided fields are written — omitting one leaves it as-is.
     const patch = {
       ...(limit !== undefined ? { limit } : {}),
       ...(dto.softOverage !== undefined ? { softOverage: dto.softOverage } : {}),
@@ -210,7 +173,6 @@ export class QuotaService {
     const quota = await this.databaseService.$transaction(async (tx) => {
       let row: Quota;
       if (limit !== undefined) {
-        // create-capable → upsert keeps first-write race-safe (unique constraint backstops).
         row = await tx.quota.upsert({
           where: key,
           update: patch,
@@ -228,7 +190,6 @@ export class QuotaService {
           },
         });
       } else {
-        // update-only: a limit-less call cannot create.
         const existing = await tx.quota.findUnique({ where: key, select: { id: true } });
         if (!existing) {
           throw new BadRequestException('limit is required when creating a quota');
@@ -240,7 +201,7 @@ export class QuotaService {
       const authorized = await tx.quota.count({
         where: {
           id: row.id,
-          AND: this.accessibleQuotaWhere(abilities, Action.manage),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Quota, Action.manage),
         },
       });
 
@@ -321,20 +282,14 @@ export class QuotaService {
   }
 
   private assertScopeTargetCoherent(scope: QuotaScope, publicScopeId: string | null): void {
-    // Server is a singleton: only the sentinel default, never an instance target.
     if (scope === QuotaScope.Server && publicScopeId !== null) {
       throw new BadRequestException('Server-scope quotas have no instance target');
     }
-
-    // User / Household / HouseholdMember each accept BOTH an instance id (caps
-    // that one instance) and null (the type-level default that caps every
-    // instance of the scope, resolved via mostSpecific's '*' fallback). The
-    // default form is intentional — it's the "one row caps everyone" path.
   }
 
   private async resolveHouseholdId(scope: QuotaScope, scopeId: string): Promise<string | null> {
     if (scopeId === DEFAULT_SCOPE_ID) {
-      return null; // a type-level default is not tied to one household
+      return null;
     }
 
     switch (scope) {
@@ -368,40 +323,6 @@ export class QuotaService {
         return null;
       }
     }
-  }
-
-  /**
-   * Per-ability `accessibleBy` filters for `Quota`, to be intersected by the
-   * caller via `AND`. A malformed ability rule makes CASL throw; translate that
-   * to a 403 rather than letting it surface as a 500 (mirrors the domain
-   * services' `create*WhereAnd` helpers).
-   */
-  private accessibleQuotaWhere(abilities: AppAbility[], action?: Action): Prisma.QuotaWhereInput[] {
-    const whereAnd: Prisma.QuotaWhereInput[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(
-            action === undefined
-              ? accessibleBy(ability).ofType(ResourceType.Quota)
-              : accessibleBy(ability, action).ofType(ResourceType.Quota),
-          );
-        }
-      }
-    } catch (error) {
-      const stack = error instanceof Error ? error.stack : String(error);
-
-      this.logger.error('Failed to build quota access-control filter', stack);
-
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    if (whereAnd.length === 0) {
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    return whereAnd;
   }
 
   /** Parse a decimal-string limit to a non-negative bigint; 400 on anything else. */

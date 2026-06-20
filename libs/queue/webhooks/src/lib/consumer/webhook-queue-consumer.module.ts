@@ -11,7 +11,7 @@ import { WebhookDeliveryService } from './webhook-delivery.service';
 /**
  * Consumer end of the webhook delivery queue. Imported by the worker app only.
  * Registering the same queue name here attaches the BullMQ worker; the producer
- * module (API side) registers it for enqueue. The global `WebhooksModule`
+ * module (API side) registers it for enqueue. The `WebhooksModule`
  * supplies the signer; `ServicesModule` supplies `EncryptionService` to decrypt
  * the at-rest secret before signing.
  *

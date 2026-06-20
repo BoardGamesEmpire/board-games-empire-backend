@@ -160,7 +160,10 @@ CREATE TABLE "event_member_permissions" (
 CREATE TABLE "events" (
     "id" TEXT NOT NULL,
     "household_id" TEXT NOT NULL,
+    "cancelled_by_id" TEXT,
+    "cancel_reason" TEXT,
     "created_by_id" TEXT NOT NULL,
+    "deleted_by_id" TEXT,
     "title" TEXT NOT NULL,
     "image" TEXT,
     "description" TEXT,
@@ -363,6 +366,7 @@ CREATE TABLE "games" (
     "owned_by_count" INTEGER NOT NULL DEFAULT 0,
     "visibility" "visibility_types" NOT NULL DEFAULT 'Public',
     "created_by_id" TEXT,
+    "updated_by_id" TEXT,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 
@@ -693,6 +697,7 @@ CREATE TABLE "households" (
     "name" TEXT NOT NULL,
     "image" TEXT,
     "language_id" TEXT,
+    "created_by_id" TEXT NOT NULL,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(3) NOT NULL,
 
@@ -1333,6 +1338,9 @@ CREATE INDEX "household_roles_role_id_idx" ON "household_roles"("role_id");
 CREATE UNIQUE INDEX "household_roles_household_member_id_role_id_key" ON "household_roles"("household_member_id", "role_id");
 
 -- CreateIndex
+CREATE INDEX "households_created_by_id_idx" ON "households"("created_by_id");
+
+-- CreateIndex
 CREATE INDEX "game_documents_game_id_idx" ON "game_documents"("game_id");
 
 -- CreateIndex
@@ -1534,6 +1542,12 @@ ALTER TABLE "events" ADD CONSTRAINT "events_household_id_fkey" FOREIGN KEY ("hou
 ALTER TABLE "events" ADD CONSTRAINT "events_created_by_id_fkey" FOREIGN KEY ("created_by_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "events" ADD CONSTRAINT "events_cancelled_by_id_fkey" FOREIGN KEY ("cancelled_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "events" ADD CONSTRAINT "events_deleted_by_id_fkey" FOREIGN KEY ("deleted_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "expansion_compatibilities" ADD CONSTRAINT "expansion_compatibilities_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "games"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -1586,6 +1600,9 @@ ALTER TABLE "game_versions" ADD CONSTRAINT "game_versions_parent_version_id_fkey
 
 -- AddForeignKey
 ALTER TABLE "games" ADD CONSTRAINT "games_created_by_id_fkey" FOREIGN KEY ("created_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "games" ADD CONSTRAINT "games_updated_by_id_fkey" FOREIGN KEY ("updated_by_id") REFERENCES "users"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_artists" ADD CONSTRAINT "game_artists_game_id_fkey" FOREIGN KEY ("game_id") REFERENCES "games"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -1703,6 +1720,9 @@ ALTER TABLE "household_roles" ADD CONSTRAINT "household_roles_role_id_fkey" FORE
 
 -- AddForeignKey
 ALTER TABLE "households" ADD CONSTRAINT "households_language_id_fkey" FOREIGN KEY ("language_id") REFERENCES "languages"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "households" ADD CONSTRAINT "households_created_by_id_fkey" FOREIGN KEY ("created_by_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "game_lists" ADD CONSTRAINT "game_lists_list_id_fkey" FOREIGN KEY ("list_id") REFERENCES "lists"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

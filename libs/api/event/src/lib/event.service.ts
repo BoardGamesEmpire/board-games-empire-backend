@@ -1,4 +1,5 @@
 import {
+  Action,
   DatabaseService,
   Event,
   EventParticipationStatus,
@@ -9,9 +10,8 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
+import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
@@ -27,13 +27,14 @@ export class EventService {
   constructor(
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly abilityService: AbilityService,
   ) {}
 
-  async getEvents(pagination: PaginationQueryDto, abilities: AppAbility[]): Promise<Event[]> {
+  async getEvents(pagination: PaginationQueryDto): Promise<Event[]> {
     return this.db.event.findMany({
       where: {
         deletedAt: null,
-        AND: this.createEventWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
       },
       include: {
         occurrences: {
@@ -47,12 +48,12 @@ export class EventService {
     });
   }
 
-  async getEventById(id: string, abilities: AppAbility[]): Promise<Event> {
+  async getEventById(id: string): Promise<Event> {
     const event = await this.db.event.findUnique({
       where: {
         id,
         deletedAt: null,
-        AND: this.createEventWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
       },
 
       include: {
@@ -92,7 +93,8 @@ export class EventService {
     return event;
   }
 
-  async createEvent(userId: string, dto: CreateEventDto): Promise<Event> {
+  async createEvent(dto: CreateEventDto): Promise<Event> {
+    const userId = this.abilityService.getActingUserId();
     const { occurrences, policy, householdId, inviteUserIds = [], ...eventFields } = dto;
 
     this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
@@ -216,7 +218,7 @@ export class EventService {
     return event;
   }
 
-  async updateEvent(id: string, dto: UpdateEventDto, abilities: AppAbility[]): Promise<Event> {
+  async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
     assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -238,7 +240,7 @@ export class EventService {
       return await this.db.event.update({
         where: {
           id,
-          AND: this.createEventWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
         },
         data: {
           ...fields,
@@ -259,7 +261,8 @@ export class EventService {
     }
   }
 
-  async deleteEvent(id: string, userId: string, abilities: AppAbility[]): Promise<Event> {
+  async deleteEvent(id: string): Promise<Event> {
+    const userId = this.abilityService.getActingUserId();
     try {
       const existing = await this.db.event.count({
         where: { id, deletedAt: null },
@@ -269,9 +272,12 @@ export class EventService {
       const event = await this.db.event.update({
         where: {
           id,
-          AND: this.createEventWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.delete),
         },
-        data: { deletedAt: new Date() },
+        data: {
+          deletedAt: new Date(),
+          deletedById: userId,
+        },
       });
 
       this.eventEmitter.emit(EventEvents.EventDeleted, {
@@ -294,23 +300,5 @@ export class EventService {
     if (mode === EventSchedulingMode.Fixed && occurrences && occurrences.length > 1) {
       throw new BadRequestException('Fixed scheduling mode allows at most one occurrence.');
     }
-  }
-
-  private createEventWhereAnd(abilities: AppAbility[]): WhereInput<Event>[] {
-    const whereAnd: WhereInput<Event>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.Event));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for event access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-    return whereAnd;
   }
 }

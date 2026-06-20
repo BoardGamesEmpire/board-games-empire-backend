@@ -1,3 +1,4 @@
+import { TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
@@ -20,13 +21,13 @@ export class SearchQueryDto {
   @ApiPropertyOptional({ description: 'Include local DB results', default: true })
   @IsOptional()
   @IsBoolean()
-  @Type(() => Boolean)
+  @TransformBoolean()
   includeLocal?: boolean = true;
 
   @ApiPropertyOptional({ description: 'Include external gateway results', default: true })
   @IsOptional()
   @IsBoolean()
-  @Type(() => Boolean)
+  @TransformBoolean()
   includeExternal?: boolean = true;
 
   @ApiPropertyOptional({ description: 'Locale hint for gateway-side optimizations (e.g. "en", "de")' })

@@ -37,7 +37,20 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
       throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
     }
 
-    return this.runInActorScope(job, () => this.processJob(job, token));
+    return this.runInActorScope(job, async () => {
+      await this.onScopeReady(job, token);
+      return this.processJob(job, token);
+    });
+  }
+
+  /**
+   * Hook invoked inside the actor scope, immediately before {@link processJob}.
+   * No-op by default; subclasses needing extra per-job CLS state override it
+   * (e.g. `AbilityAwareWorkerHost`, which primes abilities). Kept off the lenient
+   * `runInActorScope` path so `@OnWorkerEvent` failure handlers are unaffected.
+   */
+  protected async onScopeReady(_job: Job<TData, TResult, TName>, _token?: string): Promise<void> {
+    // no-op
   }
 
   /**

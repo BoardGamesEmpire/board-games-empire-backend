@@ -5,6 +5,13 @@ import { SearchQueryDto } from './search-query.dto';
 describe('SearchQueryDto', () => {
   const toDto = (plain: Record<string, unknown>): SearchQueryDto => plainToInstance(SearchQueryDto, plain);
 
+  // Mirror the GLOBAL ValidationPipe transformOptions from apps/api/src/main.ts.
+  // enableImplicitConversion is the condition under which a naive boolean
+  // (implicit Boolean() or @Type(() => Boolean)) silently turns 'false' into
+  // true, so the boolean cases must be validated with it on.
+  const toDtoWithPipe = (plain: Record<string, unknown>): SearchQueryDto =>
+    plainToInstance(SearchQueryDto, plain, { enableImplicitConversion: true });
+
   describe('query', () => {
     it('accepts a valid query string', async () => {
       const dto = toDto({ query: 'Hades' });
@@ -59,11 +66,23 @@ describe('SearchQueryDto', () => {
       expect(dto.includeLocal).toBe(true);
     });
 
-    it('accepts false', async () => {
+    it('keeps the default when the param is absent', () => {
+      expect(toDto({ query: 'test' }).includeLocal).toBe(true);
+    });
+
+    it('accepts a real false', async () => {
       const dto = toDto({ query: 'test', includeLocal: false });
       const errors = await validate(dto);
       expect(errors.filter((e) => e.property === 'includeLocal')).toHaveLength(0);
       expect(dto.includeLocal).toBe(false);
+    });
+
+    it("parses the query string 'false' as false", () => {
+      expect(toDtoWithPipe({ query: 'test', includeLocal: 'false' }).includeLocal).toBe(false);
+    });
+
+    it("parses the query string 'true' as true", () => {
+      expect(toDtoWithPipe({ query: 'test', includeLocal: 'true' }).includeLocal).toBe(true);
     });
   });
 
@@ -73,11 +92,19 @@ describe('SearchQueryDto', () => {
       expect(dto.includeExternal).toBe(true);
     });
 
-    it('accepts false', async () => {
+    it('keeps the default when the param is absent', () => {
+      expect(toDto({ query: 'test' }).includeExternal).toBe(true);
+    });
+
+    it('accepts a real false', async () => {
       const dto = toDto({ query: 'test', includeExternal: false });
       const errors = await validate(dto);
       expect(errors.filter((e) => e.property === 'includeExternal')).toHaveLength(0);
       expect(dto.includeExternal).toBe(false);
+    });
+
+    it("parses the query string 'false' as false", () => {
+      expect(toDtoWithPipe({ query: 'test', includeExternal: 'false' }).includeExternal).toBe(false);
     });
   });
 

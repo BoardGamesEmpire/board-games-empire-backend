@@ -1,4 +1,5 @@
 import {
+  Action,
   AvailabilityResponse,
   DatabaseService,
   EventAvailabilityVote,
@@ -9,11 +10,11 @@ import {
   OccurrenceStatus,
   ResourceType,
 } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
-import { accessibleBy, WhereInput } from '@casl/prisma';
+import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
@@ -33,29 +34,30 @@ export class EventOccurrenceService {
   constructor(
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly abilityService: AbilityService,
   ) {}
 
-  async getOccurrences(eventId: string, abilities: AppAbility[]): Promise<EventOccurrence[]> {
-    await this.assertEventExists(eventId);
+  async getOccurrences(eventId: string): Promise<EventOccurrence[]> {
+    await assertEventExists(this.db, eventId);
 
     return this.db.eventOccurrence.findMany({
       where: {
         eventId,
-        AND: this.createOccurrenceWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
       },
       include: OCCURRENCE_INCLUDE,
       orderBy: { sortOrder: 'asc' },
     });
   }
 
-  async getOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    await this.assertEventExists(eventId);
+  async getOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+    await assertEventExists(this.db, eventId);
 
     const occurrence = await this.db.eventOccurrence.findUnique({
       where: {
         id: occurrenceId,
         eventId,
-        AND: this.createOccurrenceWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
       },
       include: OCCURRENCE_INCLUDE,
     });
@@ -115,7 +117,6 @@ export class EventOccurrenceService {
     eventId: string,
     occurrenceId: string,
     dto: UpdateEventOccurrenceDto,
-    abilities: AppAbility[],
   ): Promise<EventOccurrence> {
     assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
 
@@ -130,7 +131,7 @@ export class EventOccurrenceService {
       const updated = await this.db.eventOccurrence.update({
         where: {
           id: occurrenceId,
-          AND: this.createOccurrenceWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
         },
         data: {
           label: dto.label,
@@ -157,7 +158,7 @@ export class EventOccurrenceService {
     }
   }
 
-  async removeOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
+  async removeOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
     this.logger.debug(`Attempting to remove occurrence ${occurrenceId} from event ${eventId}`);
 
     const existing = await this.db.eventOccurrence.findUnique({
@@ -171,7 +172,7 @@ export class EventOccurrenceService {
       return this.db.eventOccurrence.delete({
         where: {
           id: occurrenceId,
-          AND: this.createOccurrenceWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
         },
         include: OCCURRENCE_INCLUDE,
       });
@@ -184,43 +185,23 @@ export class EventOccurrenceService {
     }
   }
 
-  async confirmOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(
-      eventId,
-      occurrenceId,
-      [OccurrenceStatus.Proposed],
-      OccurrenceStatus.Confirmed,
-      {
-        confirmedAt: new Date(),
-      },
-      abilities,
-    );
+  async confirmOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
+      confirmedAt: new Date(),
+    });
   }
 
-  async declineOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(
-      eventId,
-      occurrenceId,
-      [OccurrenceStatus.Proposed],
-      OccurrenceStatus.Declined,
-      {
-        declinedAt: new Date(),
-      },
-      abilities,
-    );
+  async declineOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
+      declinedAt: new Date(),
+    });
   }
 
-  async cancelOccurrence(eventId: string, occurrenceId: string, abilities: AppAbility[]): Promise<EventOccurrence> {
-    return this.transitionStatus(
-      eventId,
-      occurrenceId,
-      [OccurrenceStatus.Confirmed],
-      OccurrenceStatus.Cancelled,
-      {
-        cancelledAt: new Date(),
-      },
-      abilities,
-    );
+  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+    return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
+      cancelledAt: new Date(),
+      cancelledById: this.abilityService.getActingUserId(),
+    });
   }
 
   private async transitionStatus(
@@ -229,14 +210,15 @@ export class EventOccurrenceService {
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
-    abilities: AppAbility[],
   ): Promise<EventOccurrence> {
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
       select: { id: true, status: true },
     });
 
-    assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
+    if (!existing) {
+      throw new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`);
+    }
 
     if (!allowedFrom.includes(existing.status)) {
       throw new BadRequestException(
@@ -249,7 +231,8 @@ export class EventOccurrenceService {
       const updated = await this.db.eventOccurrence.update({
         where: {
           id: occurrenceId,
-          AND: this.createOccurrenceWhereAnd(abilities),
+          // Status transitions are mutations → filter by `update`, not `read`.
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
         },
         data: { status: newStatus, ...extraData },
         include: OCCURRENCE_INCLUDE,
@@ -275,6 +258,7 @@ export class EventOccurrenceService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException("You don't have permission to update this resource.");
       }
+
       throw error;
     }
   }
@@ -282,15 +266,17 @@ export class EventOccurrenceService {
   async submitAvailability(
     eventId: string,
     occurrenceId: string,
-    attendeeId: string,
     dto: SubmitAvailabilityDto,
   ): Promise<EventAvailabilityVote> {
+    const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const occurrence = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
       select: { id: true, status: true },
     });
 
-    assert(occurrence, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
+    if (!occurrence) {
+      throw new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`);
+    }
 
     if (occurrence.status !== OccurrenceStatus.Proposed) {
       throw new BadRequestException(
@@ -322,8 +308,8 @@ export class EventOccurrenceService {
     return vote;
   }
 
-  async getAvailabilitySummary(eventId: string, abilities: AppAbility[]): Promise<AvailabilitySummary> {
-    await this.assertEventExists(eventId);
+  async getAvailabilitySummary(eventId: string): Promise<AvailabilitySummary> {
+    await assertEventExists(this.db, eventId);
 
     const [attendees, occurrences] = await Promise.all([
       this.db.eventAttendee.findMany({
@@ -333,7 +319,7 @@ export class EventOccurrenceService {
       this.db.eventOccurrence.findMany({
         where: {
           eventId,
-          AND: this.createOccurrenceWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
         },
         include: {
           availabilityVotes: {
@@ -425,31 +411,6 @@ export class EventOccurrenceService {
       eligibleVoters,
       occurrences: occurrenceEntries,
     } satisfies AvailabilitySummary;
-  }
-
-  private createOccurrenceWhereAnd(abilities: AppAbility[]): WhereInput<EventOccurrence>[] {
-    const whereAnd: WhereInput<EventOccurrence>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventOccurrence));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for occurrence access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-    return whereAnd;
-  }
-
-  private async assertEventExists(eventId: string): Promise<void> {
-    const count = await this.db.event.count({
-      where: { id: eventId, deletedAt: null },
-    });
-    assert(count > 0, new NotFoundException(`Event ${eventId} not found`));
   }
 }
 

@@ -1,11 +1,11 @@
 import { DatabaseService } from '@bge/database';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { CanActivate, ModuleMetadata, Type } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import * as jest from 'jest-mock';
 import { ClsService } from 'nestjs-cls';
-import type { MockDatabaseService } from './mock-database.service.js';
-import { createMockDatabaseService } from './mock-database.service.js';
+import type { MockDatabaseService } from './mocks/database.service.mock.js';
+import { createMockDatabaseService } from './mocks/database.service.mock.js';
 
 // ---------------------------------------------------------------------------
 // PassThroughGuard — canActivate always returns true.
@@ -35,21 +35,23 @@ export function createMockClsService(): jest.Mocked<ClsService> {
   } as unknown as jest.Mocked<ClsService>;
 }
 
+export type CacheMock = jest.Mocked<Pick<Cache, 'get' | 'set' | 'del' | 'wrap'>>;
+
 export function createMockCacheManager() {
   return {
     get: jest.fn(),
     set: jest.fn(),
     del: jest.fn(),
-    reset: jest.fn(),
     wrap: jest.fn(),
     store: {},
-  };
+  } as unknown as CacheMock;
 }
 
 export interface TestingModuleWithDb {
   module: TestingModule;
   db: MockDatabaseService;
   cls: jest.Mocked<ClsService>;
+  cache: CacheMock;
 }
 
 /**
@@ -143,5 +145,5 @@ export async function createTestingModuleWithDb(options: CreateTestingModuleOpti
   }
 
   const module = await builder.compile();
-  return { module, db, cls };
+  return { module, db, cls, cache };
 }

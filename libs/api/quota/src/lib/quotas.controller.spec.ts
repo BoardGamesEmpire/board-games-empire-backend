@@ -3,11 +3,8 @@ import { PoliciesGuard } from '@bge/permissions';
 import { QuotaService, type QuotaView } from '@bge/quota';
 import { createTestingModuleWithDb, type TestingModuleWithDb } from '@bge/testing';
 import { BadRequestException } from '@nestjs/common';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import { QuotasController } from './quotas.controller';
-
-const SESSION = { user: { id: 'admin_1' } } as unknown as UserSession;
 
 describe('QuotasController', () => {
   let moduleRef: TestingModuleWithDb;
@@ -23,9 +20,6 @@ describe('QuotasController', () => {
       overrideGuards: [PoliciesGuard],
     });
     controller = moduleRef.module.get(QuotasController);
-
-    // getAbilities() reads both abilities from CLS.
-    moduleRef.cls.get.mockReturnValue({} as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -36,48 +30,32 @@ describe('QuotasController', () => {
     const result = await firstValueFrom(controller.list());
 
     expect(result).toEqual({ quotas: [stubQuotaView()] });
-    expect(quotas.getQuotas).toHaveBeenCalledWith([{}, {}]);
+    expect(quotas.getQuotas).toHaveBeenCalledWith();
   });
 
   it('maps a "*" scopeId to the type-level default (null) when setting', async () => {
     quotas.setQuota.mockResolvedValue(stubQuotaView());
 
     const result = await firstValueFrom(
-      controller.set(QuotaScope.Household, '*', 'household_member_count', { limit: '8' }, SESSION),
+      controller.set(QuotaScope.Household, '*', 'household_member_count', { limit: '8' }),
     );
 
-    expect(quotas.setQuota).toHaveBeenCalledWith(
-      QuotaScope.Household,
-      null,
-      'household_member_count',
-      { limit: '8' },
-      'admin_1',
-      [{}, {}],
-    );
+    expect(quotas.setQuota).toHaveBeenCalledWith(QuotaScope.Household, null, 'household_member_count', { limit: '8' });
     expect(result).toEqual({ message: 'Quota set', quota: stubQuotaView() });
   });
 
   it('passes a concrete scopeId through unchanged', async () => {
     quotas.setQuota.mockResolvedValue(stubQuotaView());
 
-    await firstValueFrom(
-      controller.set(QuotaScope.HouseholdMember, 'hm_1', 'storage_bytes', { limit: '1024' }, SESSION),
-    );
+    await firstValueFrom(controller.set(QuotaScope.HouseholdMember, 'hm_1', 'storage_bytes', { limit: '1024' }));
 
-    expect(quotas.setQuota).toHaveBeenCalledWith(
-      QuotaScope.HouseholdMember,
-      'hm_1',
-      'storage_bytes',
-      {
-        limit: '1024',
-      },
-      'admin_1',
-      [{}, {}],
-    );
+    expect(quotas.setQuota).toHaveBeenCalledWith(QuotaScope.HouseholdMember, 'hm_1', 'storage_bytes', {
+      limit: '1024',
+    });
   });
 
   it('rejects an unknown resource before touching the service', () => {
-    expect(() => controller.set(QuotaScope.User, 'user_1', 'bogus_resource', { limit: '1' }, SESSION)).toThrow(
+    expect(() => controller.set(QuotaScope.User, 'user_1', 'bogus_resource', { limit: '1' })).toThrow(
       BadRequestException,
     );
     expect(quotas.setQuota).not.toHaveBeenCalled();

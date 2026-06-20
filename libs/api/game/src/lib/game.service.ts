@@ -1,7 +1,6 @@
-import { DatabaseService, Game, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
-import { AppAbility } from '@bge/permissions';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
 import assert from 'node:assert';
@@ -11,19 +10,22 @@ import { CreateGameDto, UpdateGameDto } from './dto';
 export class GameService {
   private readonly logger = new Logger(GameService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly abilityService: AbilityService,
+  ) {}
 
-  async getGames(pagination: PaginationQueryDto, abilities: AppAbility[]) {
+  async getGames(pagination: PaginationQueryDto) {
     return this.db.game.findMany({
       where: {
-        AND: this.createGameWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
       },
       skip: pagination.offset,
       take: pagination.limit || 20,
     });
   }
 
-  async getGame(id: string, abilities: AppAbility[]) {
+  async getGame(id: string) {
     try {
       const existing = await this.db.game.count({ where: { id } });
       assert(existing > 0, new NotFoundException(`Game with ID ${id} not found`));
@@ -31,7 +33,7 @@ export class GameService {
       return await this.db.game.findUniqueOrThrow({
         where: {
           id,
-          AND: this.createGameWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
         },
 
         include: {
@@ -144,16 +146,18 @@ export class GameService {
         },
       });
     } catch (error) {
-      this.logger.error(`Error updating game with id ${id}`, error);
+      this.logger.error(`Error fetching game with id ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException("You don't have permission to view this resource.");
       }
 
       throw error;
     }
   }
 
-  async createGame(userId: string, createGameDto: CreateGameDto) {
+  async createGame(createGameDto: CreateGameDto) {
+    const userId = this.abilityService.getActingUserId();
+
     try {
       return await this.db.game.create({
         data: {
@@ -172,23 +176,25 @@ export class GameService {
     }
   }
 
-  async updateGame(id: string, updateGameDto: UpdateGameDto, abilities: AppAbility[]) {
-    assert(
-      Object.keys(updateGameDto).length > 0,
-      new BadRequestException('At least one field must be provided for update'),
-    );
+  async updateGame(id: string, updateGameDto: UpdateGameDto) {
+    if (Object.keys(updateGameDto).length === 0) {
+      throw new BadRequestException('At least one field must be provided for update');
+    }
 
     try {
       const existing = await this.db.game.count({ where: { id } });
-      assert(existing > 0, new NotFoundException(`Game with ID ${id} not found`));
+      if (existing === 0) {
+        throw new NotFoundException(`Game with ID ${id} not found`);
+      }
 
       return await this.db.game.update({
         where: {
           id,
-          AND: this.createGameWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.update),
         },
         data: {
           ...updateGameDto,
+          updatedById: this.abilityService.getActingUserId(),
         },
       });
     } catch (error) {
@@ -203,10 +209,12 @@ export class GameService {
     }
   }
 
-  async deleteGame(id: string, abilities: AppAbility[]) {
+  async deleteGame(id: string) {
     try {
       const existing = await this.db.game.count({ where: { id } });
-      assert(existing > 0, new NotFoundException(`Game with ID ${id} not found`));
+      if (existing === 0) {
+        throw new NotFoundException(`Game with ID ${id} not found`);
+      }
 
       const collectionsCount = await this.db.gameCollection.count({
         where: {
@@ -215,41 +223,23 @@ export class GameService {
           },
         },
       });
-
-      assert(collectionsCount === 0, new BadRequestException('Cannot delete game that is part of a collection'));
+      if (collectionsCount > 0) {
+        throw new BadRequestException('Cannot delete game that is part of a collection');
+      }
 
       return await this.db.game.delete({
         where: {
           id,
-          AND: this.createGameWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.delete),
         },
       });
     } catch (error) {
       this.logger.error(`Error deleting game with id ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new ForbiddenException("You don't have permission to delete this resource.");
-        }
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to delete this resource.");
       }
 
       throw error;
     }
-  }
-
-  private createGameWhereAnd(abilities: AppAbility[]): WhereInput<Game>[] {
-    const whereAnd: WhereInput<Game>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.Game));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for game access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    return whereAnd;
   }
 }

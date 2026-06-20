@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { BullModule } from '@nestjs/bullmq';
@@ -14,7 +15,12 @@ import { ReleaseGraphResolver } from './services/release-graph.resolver';
 import { TaxonomyUpsertService } from './services/taxonomy.service';
 
 @Module({
-  imports: [DatabaseModule, NotificationsServiceModule, BullModule.registerQueue({ name: QueueNames.GamesImport })],
+  imports: [
+    AuditContextModule,
+    DatabaseModule,
+    NotificationsServiceModule,
+    BullModule.registerQueue({ name: QueueNames.GamesImport }),
+  ],
   providers: [
     GameImportProcessor,
     GameUpsertService,

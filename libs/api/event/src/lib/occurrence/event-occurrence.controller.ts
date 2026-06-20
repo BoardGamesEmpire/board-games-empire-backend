@@ -1,14 +1,10 @@
 import { Action, ResourceType } from '@bge/database';
-import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { Session } from '@thallesp/nestjs-better-auth';
-import { ClsService } from 'nestjs-cls';
 import { from } from 'rxjs';
-import { concatMap, map, tap } from 'rxjs/operators';
-import { EventAttendeeService } from '../attendee/event-attendee.service';
+import { map, tap } from 'rxjs/operators';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
 import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
@@ -23,21 +19,14 @@ import { EventOccurrenceService } from './event-occurrence.service';
 export class EventOccurrenceController {
   private readonly logger = new Logger(EventOccurrenceController.name);
 
-  constructor(
-    private readonly attendeeService: EventAttendeeService,
-    private readonly occurrenceService: EventOccurrenceService,
-    private readonly cls: ClsService,
-  ) {}
+  constructor(private readonly occurrenceService: EventOccurrenceService) {}
 
   @ApiOperation({ summary: 'List occurrences for an event' })
   @ApiResponse({ status: Http.Ok, description: 'Occurrences retrieved' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventOccurrence))
   @Get()
   getOccurrences(@Param('eventId') eventId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.getOccurrences(eventId, abilities)).pipe(
-      map((occurrences) => ({ occurrences })),
-    );
+    return from(this.occurrenceService.getOccurrences(eventId)).pipe(map((occurrences) => ({ occurrences })));
   }
 
   @ApiOperation({ summary: 'Get a single occurrence' })
@@ -47,8 +36,7 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventOccurrence))
   @Get(':occurrenceId')
   getOccurrence(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.getOccurrence(eventId, occurrenceId, abilities)).pipe(
+    return from(this.occurrenceService.getOccurrence(eventId, occurrenceId)).pipe(
       map((occurrence) => ({ occurrence })),
     );
   }
@@ -74,8 +62,7 @@ export class EventOccurrenceController {
     @Param('occurrenceId') occurrenceId: string,
     @Body() dto: UpdateEventOccurrenceDto,
   ) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.updateOccurrence(eventId, occurrenceId, dto, abilities)).pipe(
+    return from(this.occurrenceService.updateOccurrence(eventId, occurrenceId, dto)).pipe(
       map((occurrence) => ({ message: 'Occurrence updated', occurrence })),
     );
   }
@@ -86,8 +73,7 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.EventOccurrence))
   @Delete(':occurrenceId')
   removeOccurrence(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.removeOccurrence(eventId, occurrenceId, abilities)).pipe(
+    return from(this.occurrenceService.removeOccurrence(eventId, occurrenceId)).pipe(
       tap(() => this.logger.log(`Occurrence ${occurrenceId} removed from event ${eventId}`)),
       map((occurrence) => ({ message: 'Occurrence removed', occurrence })),
     );
@@ -99,8 +85,7 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
   @Post(':occurrenceId/confirm')
   confirm(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.confirmOccurrence(eventId, occurrenceId, abilities)).pipe(
+    return from(this.occurrenceService.confirmOccurrence(eventId, occurrenceId)).pipe(
       map((occurrence) => ({ message: 'Occurrence confirmed', occurrence })),
     );
   }
@@ -111,8 +96,7 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
   @Post(':occurrenceId/decline')
   decline(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.declineOccurrence(eventId, occurrenceId, abilities)).pipe(
+    return from(this.occurrenceService.declineOccurrence(eventId, occurrenceId)).pipe(
       map((occurrence) => ({ message: 'Occurrence declined', occurrence })),
     );
   }
@@ -123,8 +107,7 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.EventOccurrence))
   @Post(':occurrenceId/cancel')
   cancel(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.cancelOccurrence(eventId, occurrenceId, abilities)).pipe(
+    return from(this.occurrenceService.cancelOccurrence(eventId, occurrenceId)).pipe(
       map((occurrence) => ({ message: 'Occurrence cancelled', occurrence })),
     );
   }
@@ -138,16 +121,12 @@ export class EventOccurrenceController {
   submitAvailability(
     @Param('eventId') eventId: string,
     @Param('occurrenceId') occurrenceId: string,
-    @Session() session: UserSession,
     @Body() dto: SubmitAvailabilityDto,
   ) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.getAttendeeByUserId(eventId, session.user.id, abilities)).pipe(
-      map(({ id }) => id),
-      concatMap((attendeeId) => this.occurrenceService.submitAvailability(eventId, occurrenceId, attendeeId, dto)),
-      tap(() =>
+    return from(this.occurrenceService.submitAvailability(eventId, occurrenceId, dto)).pipe(
+      tap((vote) =>
         this.logger.log(
-          `User ${session.user.id} submitted availability for occurrence ${occurrenceId} in event ${eventId}: ${dto.response}`,
+          `User ${vote.attendeeId} submitted availability for occurrence ${occurrenceId} in event ${eventId}: ${dto.response}`,
         ),
       ),
       map((vote) => ({ message: 'Availability recorded', vote })),
@@ -159,15 +138,6 @@ export class EventOccurrenceController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAvailabilityVote))
   @Get('summary/availability')
   getAvailabilitySummary(@Param('eventId') eventId: string) {
-    const abilities = this.getAbilities();
-    return from(this.occurrenceService.getAvailabilitySummary(eventId, abilities)).pipe(
-      map((summary) => ({ summary })),
-    );
-  }
-
-  private getAbilities(): AppAbility[] {
-    const userAbility = this.cls.get<AppAbility>('userAbility');
-    const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean);
+    return from(this.occurrenceService.getAvailabilitySummary(eventId)).pipe(map((summary) => ({ summary })));
   }
 }

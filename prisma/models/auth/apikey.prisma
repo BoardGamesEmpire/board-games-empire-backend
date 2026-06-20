@@ -6,13 +6,13 @@ model Apikey {
   prefix String?
   key    String
 
-  configId            String    @default("default") @map("config_id")
+  configId String @default("default") @map("config_id")
 
   // user or organization id
   // NOTE: upstream better-auth dropped the User relation + onDelete: Cascade
   // here. There is no DB-enforced cleanup, so keys must be removed in app code
   // on user delete (see databaseHooks TODO in auth-factory.ts).
-  referenceId         String    @map("reference_id")
+  referenceId String @map("reference_id")
 
   refillInterval Int?      @map("refill_interval")
   refillAmount   Int?      @map("refill_amount")

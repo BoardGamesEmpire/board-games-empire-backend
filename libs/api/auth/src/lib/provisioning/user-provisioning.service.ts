@@ -10,7 +10,7 @@ export class UserProvisioningService {
   async provisionNewUser(user: User & { name?: string }): Promise<void> {
     const displayName = user.firstName
       ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim()
-      : (user.name || user.username) ?? user.email?.split('@')[0];
+      : ((user.name || user.username) ?? user.email?.split('@')[0]);
 
     // Determine role: first committed user becomes Owner, all others get User
     const usersCount = await this.db.user.count();
@@ -44,6 +44,16 @@ export class UserProvisioningService {
           roleId: role.id,
         },
       });
+
+      if (roleName === SystemRole.Owner) {
+        await db.user.update({
+          where: { id: user.id },
+          data: {
+            role: SystemRole.Admin.toLowerCase(),
+            emailVerified: true,
+          },
+        });
+      }
     });
 
     this.logger.debug(`Provisioned user ${user.id} with role '${roleName}'`);
