@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { ActorContextTransportModule, HttpActorMiddleware, WsActorInterceptor } from '@bge/actor-context-transport';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
@@ -15,7 +16,7 @@ import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
-import { ContextGuard, PermissionsModule } from '@bge/permissions';
+import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
@@ -35,7 +36,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Request } from 'express';
 import Keyv from 'keyv';
-import { ClsInterceptor, ClsModule } from 'nestjs-cls';
+import { ClsMiddleware, ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
@@ -136,7 +137,7 @@ import { baseLogger } from './lib/logger';
     ClsModule.forRoot({
       global: true,
       middleware: {
-        mount: true,
+        mount: false,
         generateId: true,
         idGenerator: (req: Request) => <string>req?.headers?.['x-request-id'] || crypto.randomUUID(),
       },
@@ -148,6 +149,7 @@ import { baseLogger } from './lib/logger';
     GatewayConfigEventsModule,
 
     ActorContextTransportModule,
+    AuditContextModule,
 
     // Feature modules
     AuthModule,
@@ -173,8 +175,12 @@ import { baseLogger } from './lib/logger';
   ],
   controllers: [],
   providers: [
-    { provide: APP_INTERCEPTOR, useClass: ClsInterceptor },
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: CacheInterceptor,
+    },
+
     // Global guards
     {
       provide: APP_GUARD,
@@ -184,15 +190,6 @@ import { baseLogger } from './lib/logger';
       provide: APP_GUARD,
       useClass: AuthGuard,
     },
-    {
-      provide: APP_GUARD,
-      useClass: ContextGuard,
-    },
-
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: CacheInterceptor,
-    },
 
     // WS Gateways
     GameSearchGateway,
@@ -200,6 +197,10 @@ import { baseLogger } from './lib/logger';
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer) {
-    consumer.apply(HttpActorMiddleware).forRoutes('*');
+    // Order matters: HttpActorMiddleware populates the CLS actor, and
+    // AbilityContextMiddleware reads that actor to resolve and prime the
+    // per-request ability array. Both run before guards, so PoliciesGuard
+    // (which reads the primed abilities via AbilityService) sees them.
+    consumer.apply(ClsMiddleware, HttpActorMiddleware, AbilityContextMiddleware).forRoutes('*');
   }
 }

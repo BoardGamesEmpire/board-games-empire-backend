@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { Actor, EventSource } from '../types';
 
@@ -34,6 +34,24 @@ export class AuditContextService {
    */
   getActor(): Actor | null {
     return this.cls.get<Actor | undefined>(ACTOR_CLS_KEY) ?? null;
+  }
+
+  // AuditContextService (the actor reader, @bge/actor-context)
+  getActingUserId(): string {
+    const actor = this.getActor();
+    if (!actor) {
+      throw new Error('getActingUserId called with no actor in context');
+    }
+
+    switch (actor.kind) {
+      case 'user':
+      case 'anonymous':
+      case 'apiKey':
+        return actor.userId;
+      default:
+        // system | external | plugin — no backing user yet (polymorphic attribution deferred to #59)
+        throw new ForbiddenException(`Actor kind '${actor.kind}' cannot perform user-attributed writes.`);
+    }
   }
 
   /**

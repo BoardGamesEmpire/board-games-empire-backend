@@ -1,5 +1,5 @@
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
+import { AbilityService, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   CreateWebhookSubscriptionDto,
@@ -34,14 +34,15 @@ export class WebhookSubscriptionService {
     private readonly registry: WebhookEventRegistry,
     private readonly visibility: WebhookVisibilityService,
     private readonly encryption: EncryptionService,
+    private readonly abilityService: AbilityService,
   ) {}
 
   /**
-   * Creates a subscription owned by `userId`. The subscription is a standing
-   * grant: we verify at create that the creator can currently `read` (or the
-   * descriptor's stricter action) the subject of every requested event type,
-   * and — when scoped — that they can read the named instance/household. This
-   * is the coarse gate; per-event instance authorization still runs at
+   * Creates a subscription owned by the acting user. The subscription is a
+   * standing grant: we verify at create that the creator can currently `read`
+   * (or the descriptor's stricter action) the subject of every requested event
+   * type, and — when scoped — that they can read the named instance/household.
+   * This is the coarse gate; per-event instance authorization still runs at
    * dispatch, so this rejects only subscriptions the creator could never
    * legitimately receive (including users denied via inverse permission once
    * #87 lands).
@@ -49,14 +50,9 @@ export class WebhookSubscriptionService {
    * The signing secret is stored encrypted (`EncryptionService`) and returned
    * in plaintext exactly once, here — the caller cannot retrieve it again.
    */
-  async create(
-    userId: string,
-    dto: CreateWebhookSubscriptionDto,
-    abilities: AppAbility[],
-  ): Promise<WebhookSubscriptionWithEventTypes> {
-    if (abilities.length === 0) {
-      throw new ForbiddenException("You don't have permission to create webhook subscriptions");
-    }
+  async create(dto: CreateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
+    const userId = this.abilityService.getActingUserId();
+    const abilities = this.requireAbilities("You don't have permission to create webhook subscriptions");
 
     this.assertTypesMatchResource(dto.eventTypes, dto.resourceType);
     this.assertCanReadSubjects(dto.eventTypes, abilities);
@@ -92,7 +88,8 @@ export class WebhookSubscriptionService {
   }
 
   /** Lists the caller's own subscriptions (excluding soft-deleted), secrets redacted. */
-  async list(userId: string): Promise<WebhookSubscriptionWithEventTypes[]> {
+  async list(): Promise<WebhookSubscriptionWithEventTypes[]> {
+    const userId = this.abilityService.getActingUserId();
     const subscriptions = await this.db.webhookSubscription.findMany({
       where: { createdById: userId, deletedAt: null },
       include: { eventTypes: true },
@@ -101,7 +98,8 @@ export class WebhookSubscriptionService {
     return subscriptions.map((subscription) => this.redact(subscription));
   }
 
-  async getById(id: string, userId: string): Promise<WebhookSubscriptionWithEventTypes> {
+  async getById(id: string): Promise<WebhookSubscriptionWithEventTypes> {
+    const userId = this.abilityService.getActingUserId();
     const subscription = await this.db.webhookSubscription.findFirst({
       where: { id, createdById: userId, deletedAt: null },
       include: { eventTypes: true },
@@ -121,22 +119,15 @@ export class WebhookSubscriptionService {
    * reveals the new plaintext once (same contract as create); otherwise the
    * secret is redacted on the way out.
    */
-  async update(
-    id: string,
-    userId: string,
-    dto: UpdateWebhookSubscriptionDto,
-    abilities: AppAbility[],
-  ): Promise<WebhookSubscriptionWithEventTypes> {
+  async update(id: string, dto: UpdateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     if (Object.keys(dto).length === 0) {
       throw new BadRequestException('At least one field must be provided');
     }
 
-    const existing = await this.getById(id, userId);
+    const existing = await this.getById(id);
 
     if (dto.eventTypes) {
-      if (abilities.length === 0) {
-        throw new ForbiddenException("You don't have permission to change subscribed events");
-      }
+      const abilities = this.requireAbilities("You don't have permission to change subscribed events");
 
       this.assertTypesMatchResource(dto.eventTypes, existing.resourceType);
       this.assertCanReadSubjects(dto.eventTypes, abilities);
@@ -161,8 +152,8 @@ export class WebhookSubscriptionService {
   /**
    * Owner-initiated disable. Distinct status from failure auto-disable.
    */
-  async disable(id: string, userId: string): Promise<WebhookSubscriptionWithEventTypes> {
-    await this.getById(id, userId);
+  async disable(id: string): Promise<WebhookSubscriptionWithEventTypes> {
+    await this.getById(id);
 
     const updated = await this.db.webhookSubscription.update({
       where: { id },
@@ -181,12 +172,10 @@ export class WebhookSubscriptionService {
    * regardless, but re-activation should not silently restore a scope the
    * creator can no longer reach.)
    */
-  async reactivate(id: string, userId: string, abilities: AppAbility[]): Promise<WebhookSubscriptionWithEventTypes> {
-    if (abilities.length === 0) {
-      throw new ForbiddenException("You don't have permission to reactivate this subscription");
-    }
+  async reactivate(id: string): Promise<WebhookSubscriptionWithEventTypes> {
+    const abilities = this.requireAbilities("You don't have permission to reactivate this subscription");
 
-    const existing = await this.getById(id, userId);
+    const existing = await this.getById(id);
 
     this.assertCanReadSubjects(
       existing.eventTypes.map((row) => row.eventType as WebhookEventType),
@@ -211,8 +200,8 @@ export class WebhookSubscriptionService {
   }
 
   /** Soft delete. */
-  async remove(id: string, userId: string): Promise<WebhookSubscriptionWithEventTypes> {
-    await this.getById(id, userId);
+  async remove(id: string): Promise<WebhookSubscriptionWithEventTypes> {
+    await this.getById(id);
     const updated = await this.db.webhookSubscription.update({
       where: { id },
       data: { deletedAt: new Date(), status: WebhookSubscriptionStatus.Disabled },
@@ -220,6 +209,20 @@ export class WebhookSubscriptionService {
     });
 
     return this.redact(updated);
+  }
+
+  /**
+   * Resolves the acting principal's abilities for the imperative `.can()` /
+   * `accessibleBy` checks below. An empty set must fail loudly: `[].every()` is
+   * vacuously true, so without this guard a principal with no abilities would
+   * *pass* the subject checks.
+   */
+  private requireAbilities(message: string): AppAbility[] {
+    const abilities = this.abilityService.getCurrentAbilities();
+    if (abilities.length === 0) {
+      throw new ForbiddenException(message);
+    }
+    return abilities;
   }
 
   private assertTypesMatchResource(types: readonly WebhookEventType[], resourceType: ResourceType): void {

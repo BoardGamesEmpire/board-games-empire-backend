@@ -1,7 +1,12 @@
-import { HouseholdMember, Prisma, QuotaScope, type Quota } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import { createPrismaAbility } from '@casl/prisma';
+import { Action, HouseholdMember, Prisma, QuotaScope, ResourceType, type Quota } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
+import {
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  MOCK_RESOURCE_CONDITION,
+  type MockAbilityService,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuotaEvents } from './constants/quota-events.constant';
@@ -18,6 +23,7 @@ type RegistryStub = {
 const USER_ID = 'user_1';
 const HOUSEHOLD_ID = 'hh_1';
 const MEMBER_ID = 'hm_1';
+const ACTOR_ID = 'admin_1';
 
 /**
  * Minimal quota row factory — only the fields the resolver reads.
@@ -40,16 +46,19 @@ describe('QuotaService', () => {
   let db: MockDatabaseService;
   let registry: RegistryStub;
   let emitter: { emit: jest.Mock };
+  let ability: MockAbilityService;
 
   beforeEach(async () => {
     registry = { has: jest.fn(), require: jest.fn(), requireUsage: jest.fn() };
     emitter = { emit: jest.fn() };
+    ability = createMockAbilityService();
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         QuotaService,
         { provide: QuotaResourceRegistry, useValue: registry },
         { provide: EventEmitter2, useValue: emitter },
+        { provide: AbilityService, useValue: ability },
       ],
     });
     service = module.get(QuotaService);
@@ -186,9 +195,8 @@ describe('QuotaService', () => {
   });
 
   describe('setQuota', () => {
-    const ABILITIES: AppAbility[] = [createPrismaAbility([]) as AppAbility]; // rules-free ability; accessibleBy resolves via the mocked count
-
     beforeEach(() => {
+      ability.getActingUserId.mockReturnValue(ACTOR_ID);
       registry.has.mockReturnValue(true);
       db.$transaction.mockImplementation((c) => c(db));
       db.quota.count.mockResolvedValue(1); // authorized by default
@@ -204,15 +212,9 @@ describe('QuotaService', () => {
         makeQuota({ scope: QuotaScope.Household, scopeId: '*', resource: 'household_member_count', limit: 8n }),
       );
 
-      const view = await service.setQuota(
-        QuotaScope.Household,
-        null,
-        'household_member_count',
-        { limit: '8' },
-        'admin_1',
-        ABILITIES,
-      );
+      const view = await service.setQuota(QuotaScope.Household, null, 'household_member_count', { limit: '8' });
 
+      expect(ability.getActingUserId).toHaveBeenCalled();
       expect(db.quota.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: {
@@ -222,16 +224,27 @@ describe('QuotaService', () => {
             scopeId: '*',
             limit: 8n,
             householdId: null,
-            createdById: 'admin_1',
-            updatedById: 'admin_1',
+            createdById: ACTOR_ID,
+            updatedById: ACTOR_ID,
           }),
-          update: expect.objectContaining({ updatedById: 'admin_1' }),
+          update: expect.objectContaining({ updatedById: ACTOR_ID }),
         }),
       );
       expect(view).toMatchObject({ scopeId: null, limit: '8' });
       expect(emitter.emit).toHaveBeenCalledWith(
         QuotaEvents.Updated,
         expect.objectContaining({ scope: QuotaScope.Household, scopeId: null, limit: '8' }),
+      );
+    });
+
+    it('authorizes the written row against the manage ability before committing', async () => {
+      db.quota.upsert.mockResolvedValue(makeQuota({ scope: QuotaScope.Server, scopeId: '*', limit: 1n }));
+
+      await service.setQuota(QuotaScope.Server, null, 'storage_bytes', { limit: '1' });
+
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Quota, Action.manage);
+      expect(db.quota.count).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ AND: [MOCK_RESOURCE_CONDITION] }) }),
       );
     });
 
@@ -247,14 +260,7 @@ describe('QuotaService', () => {
         }),
       );
 
-      await service.setQuota(
-        QuotaScope.HouseholdMember,
-        MEMBER_ID,
-        'storage_bytes',
-        { limit: '1024' },
-        'admin_1',
-        ABILITIES,
-      );
+      await service.setQuota(QuotaScope.HouseholdMember, MEMBER_ID, 'storage_bytes', { limit: '1024' });
 
       expect(db.householdMember.findUnique).toHaveBeenCalledWith({
         where: { id: MEMBER_ID },
@@ -269,28 +275,33 @@ describe('QuotaService', () => {
       db.quota.upsert.mockResolvedValue(makeQuota({ scope: QuotaScope.Server, scopeId: '*', limit: 1n }));
       db.quota.count.mockResolvedValue(0); // accessibleBy(manage) matches nothing
 
-      await expect(
-        service.setQuota(QuotaScope.Server, null, 'storage_bytes', { limit: '1' }, 'hh_admin', ABILITIES),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.setQuota(QuotaScope.Server, null, 'storage_bytes', { limit: '1' })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
     });
 
-    it('rejects an empty ability set', async () => {
-      await expect(
-        service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { limit: '1' }, 'u', []),
-      ).rejects.toBeInstanceOf(ForbiddenException);
+    it('forbids when the caller has no manage ability (empty conditions)', async () => {
+      db.quota.upsert.mockResolvedValue(makeQuota({ scope: QuotaScope.Server, scopeId: '*', limit: 1n }));
+      ability.getCurrentResourceConditions.mockImplementation(() => {
+        throw new ForbiddenException("You don't have permission to access this resource.");
+      });
+
+      await expect(service.setQuota(QuotaScope.Server, null, 'storage_bytes', { limit: '1' })).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
     });
 
     it('rejects an unknown resource', async () => {
       registry.has.mockReturnValue(false);
-      await expect(
-        service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { limit: '1' }, 'admin_1', ABILITIES),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { limit: '1' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it('rejects a Server-scope quota that carries an instance target', async () => {
-      await expect(
-        service.setQuota(QuotaScope.Server, 'nope', 'storage_bytes', { limit: '1' }, 'admin_1', ABILITIES),
-      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.setQuota(QuotaScope.Server, 'nope', 'storage_bytes', { limit: '1' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
     });
 
     it('updates only the provided fields without a limit, leaving others untouched', async () => {
@@ -299,12 +310,12 @@ describe('QuotaService', () => {
         makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 5n, enforced: false }),
       );
 
-      await service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { enforced: false }, 'admin_1', ABILITIES);
+      await service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { enforced: false });
 
       expect(db.quota.upsert).not.toHaveBeenCalled();
       expect(db.quota.update).toHaveBeenCalledWith({
         where: { id: 'q_1' },
-        data: expect.objectContaining({ enforced: false, updatedById: 'admin_1' }),
+        data: expect.objectContaining({ enforced: false, updatedById: ACTOR_ID }),
       });
       const { data } = db.quota.update.mock.calls[0][0] as Prisma.QuotaUpdateArgs;
 
@@ -316,14 +327,14 @@ describe('QuotaService', () => {
       db.quota.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { description: 'x' }, 'admin_1', ABILITIES),
+        service.setQuota(QuotaScope.User, USER_ID, 'storage_bytes', { description: 'x' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
     it('accepts a User-scope type-level default (null target → sentinel)', async () => {
       db.quota.upsert.mockResolvedValue(makeQuota({ scope: QuotaScope.User, scopeId: '*', limit: 5n }));
 
-      await service.setQuota(QuotaScope.User, null, 'storage_bytes', { limit: '5' }, 'admin_1', ABILITIES);
+      await service.setQuota(QuotaScope.User, null, 'storage_bytes', { limit: '5' });
 
       expect(db.quota.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -338,7 +349,7 @@ describe('QuotaService', () => {
         applicableScopes: [QuotaScope.Household],
       } satisfies QuotaResourceDefinition);
       await expect(
-        service.setQuota(QuotaScope.User, USER_ID, 'household_member_count', { limit: '1' }, 'admin_1', ABILITIES),
+        service.setQuota(QuotaScope.User, USER_ID, 'household_member_count', { limit: '1' }),
       ).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -346,14 +357,7 @@ describe('QuotaService', () => {
       db.householdMember.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.setQuota(
-          QuotaScope.HouseholdMember,
-          'hm_missing',
-          'storage_bytes',
-          { limit: '1024' },
-          'hh_admin',
-          ABILITIES,
-        ),
+        service.setQuota(QuotaScope.HouseholdMember, 'hm_missing', 'storage_bytes', { limit: '1024' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
       // never reaches the row write — resolution fails before the transaction
       expect(db.$transaction).not.toHaveBeenCalled();
@@ -363,14 +367,32 @@ describe('QuotaService', () => {
       db.household.findUnique.mockResolvedValue(null);
 
       await expect(
-        service.setQuota(QuotaScope.Household, 'hh_missing', 'storage_bytes', { limit: '1024' }, 'hh_admin', ABILITIES),
+        service.setQuota(QuotaScope.Household, 'hh_missing', 'storage_bytes', { limit: '1024' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
 
   describe('getQuotas', () => {
-    it('returns an empty list when the caller has no abilities', async () => {
-      await expect(service.getQuotas([])).resolves.toEqual([]);
+    it('lists the rows the caller can read, narrowed by the ability conditions', async () => {
+      db.quota.findMany.mockResolvedValue([makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 5n })]);
+
+      const result = await service.getQuotas();
+
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Quota, Action.read);
+      expect(db.quota.findMany).toHaveBeenCalledWith({
+        where: { AND: [MOCK_RESOURCE_CONDITION] },
+        orderBy: [{ scope: 'asc' }, { resource: 'asc' }],
+      });
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ scope: QuotaScope.User, limit: '5' });
+    });
+
+    it('propagates ForbiddenException (never an unfiltered query) when the caller has no abilities', async () => {
+      ability.getCurrentResourceConditions.mockImplementation(() => {
+        throw new ForbiddenException("You don't have permission to access this resource.");
+      });
+
+      await expect(service.getQuotas()).rejects.toBeInstanceOf(ForbiddenException);
       expect(db.quota.findMany).not.toHaveBeenCalled();
     });
   });

@@ -1,4 +1,5 @@
 import {
+  Action,
   DatabaseService,
   EventAttendee,
   EventAttendeeGameList,
@@ -8,8 +9,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
-import { accessibleBy, WhereInput } from '@casl/prisma';
+import { AbilityService } from '@bge/permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -21,6 +21,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { AttendeeEvents } from '../attendee/constants';
+import { assertEventExists } from '../event-access.helpers';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -38,29 +39,30 @@ export class EventAttendeeService {
   constructor(
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly abilityService: AbilityService,
   ) {}
 
-  async getAttendees(eventId: string, abilities: AppAbility[]): Promise<EventAttendee[]> {
-    await this.assertEventExists(eventId);
+  async getAttendees(eventId: string): Promise<EventAttendee[]> {
+    await assertEventExists(this.db, eventId);
 
     return this.db.eventAttendee.findMany({
       where: {
         eventId,
-        AND: this.createAttendeeWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
       include: ATTENDEE_INCLUDE,
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  async getAttendee(eventId: string, attendeeId: string, abilities: AppAbility[]): Promise<EventAttendee> {
-    await this.assertEventExists(eventId);
+  async getAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+    await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
       where: {
         id: attendeeId,
         eventId,
-        AND: this.createAttendeeWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
       include: ATTENDEE_INCLUDE,
     });
@@ -72,13 +74,13 @@ export class EventAttendeeService {
     return attendee;
   }
 
-  async getAttendeeByUserId(eventId: string, userId: string, abilities: AppAbility[]): Promise<EventAttendee> {
-    await this.assertEventExists(eventId);
+  async getAttendeeByUserId(eventId: string, userId: string): Promise<EventAttendee> {
+    await assertEventExists(this.db, eventId);
 
     const attendee = await this.db.eventAttendee.findUnique({
       where: {
         eventId_userId: { eventId, userId },
-        AND: this.createAttendeeWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
       include: ATTENDEE_INCLUDE,
     });
@@ -87,8 +89,9 @@ export class EventAttendeeService {
     return attendee;
   }
 
-  async addAttendee(eventId: string, dto: AddAttendeeDto, invitedByUserId: string): Promise<EventAttendee> {
-    await this.assertEventExists(eventId);
+  async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<EventAttendee> {
+    await assertEventExists(this.db, eventId);
+    const invitedByUserId = this.abilityService.getActingUserId();
 
     if (!dto.userId && !dto.guestName) {
       throw new BadRequestException('Either userId or guestName must be provided.');
@@ -141,12 +144,10 @@ export class EventAttendeeService {
     }
   }
 
-  async removeAttendee(
-    eventId: string,
-    attendeeId: string,
-    removedByUserId: string,
-    abilities: AppAbility[],
-  ): Promise<EventAttendee> {
+  async removeAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+    await assertEventExists(this.db, eventId);
+
+    const removedByUserId = this.abilityService.getActingUserId();
     const attendee = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId },
       select: { id: true, userId: true },
@@ -158,7 +159,7 @@ export class EventAttendeeService {
       const deleted = await this.db.eventAttendee.delete({
         where: {
           id: attendeeId,
-          AND: this.createAttendeeWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.manage),
         },
         include: ATTENDEE_INCLUDE,
       });
@@ -180,12 +181,9 @@ export class EventAttendeeService {
     }
   }
 
-  async updateStatus(
-    eventId: string,
-    attendeeId: string,
-    dto: UpdateAttendeeStatusDto,
-    abilities: AppAbility[],
-  ): Promise<EventAttendee> {
+  async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
+    await assertEventExists(this.db, eventId);
+
     const existing = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId },
       select: { id: true, userId: true, status: true },
@@ -204,7 +202,7 @@ export class EventAttendeeService {
       const updated = await this.db.eventAttendee.update({
         where: {
           id: attendeeId,
-          AND: this.createAttendeeWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.update),
         },
         data: {
           status: dto.status,
@@ -232,13 +230,14 @@ export class EventAttendeeService {
     }
   }
 
-  async getGameList(eventId: string, attendeeId: string, abilities: AppAbility[]): Promise<EventAttendeeGameList[]> {
+  async getGameList(eventId: string, attendeeId: string): Promise<EventAttendeeGameList[]> {
+    await assertEventExists(this.db, eventId);
     await this.assertAttendeeExists(eventId, attendeeId);
 
     return this.db.eventAttendeeGameList.findMany({
       where: {
         attendeeId,
-        AND: this.createGameListWhereAnd(abilities),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendeeGameList, Action.read),
       },
       include: {
         collection: {
@@ -275,6 +274,7 @@ export class EventAttendeeService {
   }
 
   async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<EventAttendeeGameList> {
+    await assertEventExists(this.db, eventId);
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
 
     if (attendee.userId) {
@@ -343,12 +343,7 @@ export class EventAttendeeService {
     }
   }
 
-  async removeGameFromList(
-    eventId: string,
-    attendeeId: string,
-    gameListId: string,
-    abilities: AppAbility[],
-  ): Promise<EventAttendeeGameList> {
+  async removeGameFromList(eventId: string, attendeeId: string, gameListId: string): Promise<EventAttendeeGameList> {
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
 
     const entry = await this.db.eventAttendeeGameList.findUnique({
@@ -363,7 +358,7 @@ export class EventAttendeeService {
       const deleted = await this.db.eventAttendeeGameList.delete({
         where: {
           id: gameListId,
-          AND: this.createGameListWhereAnd(abilities),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendeeGameList, Action.delete),
         },
       });
 
@@ -383,49 +378,6 @@ export class EventAttendeeService {
       }
       throw error;
     }
-  }
-
-  private createAttendeeWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendee>[] {
-    const whereAnd: WhereInput<EventAttendee>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventAttendee));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for attendee access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-    return whereAnd;
-  }
-
-  private createGameListWhereAnd(abilities: AppAbility[]): WhereInput<EventAttendeeGameList>[] {
-    const whereAnd: WhereInput<EventAttendeeGameList>[] = [];
-
-    try {
-      for (const ability of abilities) {
-        if (ability) {
-          whereAnd.push(accessibleBy(ability).ofType(ResourceType.EventAttendeeGameList));
-        }
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for game list access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    assert(whereAnd.length > 0, new ForbiddenException("You don't have permission to access this resource"));
-    return whereAnd;
-  }
-
-  private async assertEventExists(eventId: string): Promise<void> {
-    const count = await this.db.event.count({
-      where: { id: eventId, deletedAt: null },
-    });
-    assert(count > 0, new NotFoundException(`Event ${eventId} not found`));
   }
 
   private async assertAttendeeExists(

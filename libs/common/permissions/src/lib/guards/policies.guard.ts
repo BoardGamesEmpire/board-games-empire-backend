@@ -1,8 +1,7 @@
 import { IS_PUBLIC_KEY } from '@bge/shared';
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ClsService } from 'nestjs-cls';
-import assert from 'node:assert';
+import { AbilityService } from '../ability.service';
 import { CHECK_POLICIES_KEY } from '../decorators';
 import type { AppAbility, PolicyHandler } from '../interfaces';
 
@@ -11,8 +10,8 @@ export class PoliciesGuard implements CanActivate {
   private readonly logger = new Logger(PoliciesGuard.name);
 
   constructor(
-    private reflector: Reflector,
-    private cls: ClsService,
+    private readonly reflector: Reflector,
+    private readonly abilityService: AbilityService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -25,30 +24,41 @@ export class PoliciesGuard implements CanActivate {
       return true;
     }
 
-    const policyHandlers = this.reflector.get<PolicyHandler[]>(CHECK_POLICIES_KEY, context.getHandler()) || [];
+    const policyHandlers = this.reflector.get<PolicyHandler[]>(CHECK_POLICIES_KEY, context.getHandler()) ?? [];
     if (policyHandlers.length === 0) {
-      // If no policies are defined, allow access by default? Is this handled by isPublic?
       return true;
     }
 
-    const userAbility = this.cls.get<AppAbility>('userAbility');
-    assert(userAbility, new ForbiddenException('User ability not found in context.'));
-
-    const userPasses = policyHandlers.every((handler) => this.execPolicyHandler(handler, userAbility));
-    assert(userPasses, new ForbiddenException('You do not have permission to perform this action.'));
-
-    const apiKeyAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    if (apiKeyAbility) {
-      const keyPasses = policyHandlers.every((handler) => this.execPolicyHandler(handler, apiKeyAbility));
-      assert(keyPasses, new ForbiddenException('This API Key does not have the required permissions for this action.'));
+    // Empty abilities (anonymous or not-yet-supported actor kinds) cannot
+    // satisfy any policy: deny rather than vacuously pass `[].every(...)`.
+    const abilities = this.abilityService.getCurrentAbilities();
+    if (abilities.length === 0) {
+      throw new ForbiddenException('You do not have permission to perform this action.');
     }
 
-    this.logger.debug(`Access granted by PoliciesGuard`);
+    // Every ability must satisfy every handler. For an API key actor the array
+    // is `[ownerAbility, apiKeyAbility]`, so this reproduces the two-ability
+    // intersection at the guard layer (the user AND the key must both pass).
+    const passes = abilities.every((ability) => this.satisfiesPolicies(policyHandlers, ability));
+    if (!passes) {
+      this.logger.debug(
+        `Access denied by PoliciesGuard: at least one of ${abilities.length} ability set(s) failed a policy ` +
+          `handler (${policyHandlers.length} handler(s) checked).`,
+      );
+
+      throw new ForbiddenException('You do not have permission to perform this action.');
+    }
+
+    this.logger.debug('Access granted by PoliciesGuard');
 
     return true;
   }
 
-  private execPolicyHandler(handler: PolicyHandler, ability: AppAbility) {
+  private satisfiesPolicies(handlers: PolicyHandler[], ability: AppAbility): boolean {
+    return handlers.every((handler) => this.execPolicyHandler(handler, ability));
+  }
+
+  private execPolicyHandler(handler: PolicyHandler, ability: AppAbility): boolean {
     if (typeof handler === 'function') {
       return handler(ability);
     }

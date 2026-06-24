@@ -1,4 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
+import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { of } from 'rxjs';
 import { GameImportController } from './game-import.controller';
@@ -9,6 +10,7 @@ describe('GameImportController', () => {
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
       controllers: [GameImportController],
+      overrideGuards: [PoliciesGuard],
       providers: [
         {
           provide: GatewayCoordinatorClientService,

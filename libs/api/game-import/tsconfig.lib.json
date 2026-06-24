@@ -42,6 +42,9 @@
       "path": "../../database/tsconfig.lib.json"
     },
     {
+      "path": "../../common/actor-context/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/env/tsconfig.lib.json"
     }
   ],

@@ -8,6 +8,7 @@ export function makeHousehold(overrides: Partial<Household> = {}): Household {
     name: `Household ${n}`,
     description: null,
     image: null,
+    createdById: `user-${n}`,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,

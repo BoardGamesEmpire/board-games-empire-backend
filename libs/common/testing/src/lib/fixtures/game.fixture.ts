@@ -30,6 +30,7 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     thumbnail: null,
     title: 'Gloomhaven',
     totalPlayCount: 0,
+    updatedById: null,
     updatedAt: new Date('2024-01-01T00:00:00.000Z'),
     visibility: Visibility.Public,
     ...overrides,

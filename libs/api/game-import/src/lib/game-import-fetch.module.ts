@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { GameFetchProcessor } from './processors/game-fetch.processor';
  */
 @Module({
   imports: [
+    AuditContextModule,
     DatabaseModule,
     BullModule.registerQueue({
       name: QueueNames.GatewayFetch,

@@ -66,6 +66,9 @@ model Game {
   createdBy   User?      @relation("GamesCreated", fields: [createdById], references: [id])
   createdById String?    @map("created_by_id")
 
+  updatedBy   User?   @relation("GamesUpdated", fields: [updatedById], references: [id])
+  updatedById String? @map("updated_by_id")
+
   userCustomizations UserGameCustomization[]
   favorites          FavoriteGame[]          @relation("FavoriteGames")
   disliked           DislikedGame[]          @relation("DislikedGames")

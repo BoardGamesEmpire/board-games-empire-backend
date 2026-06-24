@@ -19,8 +19,8 @@ model FeedbackReport {
   // `packages/core/observability/lib/src/breadcrumbs`). Stored opaquely;
   // shape + UTF-8 byte cap are enforced at the DTO layer. Sanitization
   // happens client-side before submission.
-  breadcrumbs  Json?   @map("breadcrumbs")
-  stackTrace   String? @map("stack_trace")
+  breadcrumbs Json?   @map("breadcrumbs")
+  stackTrace  String? @map("stack_trace")
 
   // ─── Deployment snapshot at submission ──────────────────
   deploymentRuntime DeploymentRuntime @default(Unknown) @map("deployment_runtime")

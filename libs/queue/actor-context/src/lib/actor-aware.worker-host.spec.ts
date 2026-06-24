@@ -126,4 +126,32 @@ describe('ActorAwareWorkerHost', () => {
 
     expect(ran).toBe('ran');
   });
+
+  it('runs onScopeReady before processJob inside the actor scope', async () => {
+    class OrderTrackingProcessor extends ActorAwareWorkerHost<{ x: number }> {
+      readonly calls: string[] = [];
+      protected override async onScopeReady(): Promise<void> {
+        this.calls.push('onScopeReady');
+      }
+
+      protected async processJob(): Promise<unknown> {
+        this.calls.push('processJob');
+        return 'ok';
+      }
+    }
+
+    const processor = new OrderTrackingProcessor();
+    const auditContext = { runWith: jest.fn((_init: unknown, fn: () => unknown) => fn()) };
+    (processor as unknown as { auditContext: typeof auditContext }).auditContext = auditContext;
+
+    const job = {
+      data: wrapJobData({ x: 1 }, { actor: { kind: 'system', reason: 'test' }, correlationId: 'corr-1' }),
+      queueName: 'q',
+      id: '1',
+    } as unknown as Job<{ x: number }>;
+
+    await processor.process(job);
+
+    expect(processor.calls).toEqual(['onScopeReady', 'processJob']);
+  });
 });

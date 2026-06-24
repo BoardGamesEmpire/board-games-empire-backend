@@ -1,11 +1,8 @@
 import { Action, ResourceType } from '@bge/database';
-import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { Session } from '@thallesp/nestjs-better-auth';
-import { ClsService } from 'nestjs-cls';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
@@ -21,7 +18,7 @@ import { EventAttendeeService } from './event-attendee.service';
 export class EventAttendeeController {
   private readonly logger = new Logger(EventAttendeeController.name);
 
-  constructor(private readonly attendeeService: EventAttendeeService, private readonly cls: ClsService) {}
+  constructor(private readonly attendeeService: EventAttendeeService) {}
 
   @ApiOperation({ summary: 'List attendees for an event' })
   @ApiParam({ name: 'eventId', type: String })
@@ -30,8 +27,7 @@ export class EventAttendeeController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAttendee))
   @Get()
   getAttendees(@Param('eventId') eventId: string) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.getAttendees(eventId, abilities)).pipe(map((attendees) => ({ attendees })));
+    return from(this.attendeeService.getAttendees(eventId)).pipe(map((attendees) => ({ attendees })));
   }
 
   @ApiOperation({ summary: 'Get a single attendee' })
@@ -42,10 +38,7 @@ export class EventAttendeeController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAttendee))
   @Get(':attendeeId')
   getAttendee(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.getAttendee(eventId, attendeeId, abilities)).pipe(
-      map((attendee) => ({ attendee })),
-    );
+    return from(this.attendeeService.getAttendee(eventId, attendeeId)).pipe(map((attendee) => ({ attendee })));
   }
 
   @ApiOperation({ summary: 'Add an attendee to an event' })
@@ -54,9 +47,9 @@ export class EventAttendeeController {
   @ApiResponse({ status: Http.Conflict, description: 'User is already an attendee' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.EventAttendee))
   @Post()
-  addAttendee(@Param('eventId') eventId: string, @Session() session: UserSession, @Body() dto: AddAttendeeDto) {
-    return from(this.attendeeService.addAttendee(eventId, dto, session.user.id)).pipe(
-      tap((attendee) => this.logger.log(`Attendee ${attendee.id} added to event ${eventId} by ${session.user.id}`)),
+  addAttendee(@Param('eventId') eventId: string, @Body() dto: AddAttendeeDto) {
+    return from(this.attendeeService.addAttendee(eventId, dto)).pipe(
+      tap((attendee) => this.logger.log(`Attendee ${attendee.id} added to event ${eventId}`)),
       map((attendee) => ({ message: 'Attendee added successfully', attendee })),
     );
   }
@@ -68,14 +61,9 @@ export class EventAttendeeController {
   @ApiResponse({ status: Http.NotFound, description: 'Attendee not found' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.EventAttendee))
   @Delete(':attendeeId')
-  removeAttendee(
-    @Param('eventId') eventId: string,
-    @Param('attendeeId') attendeeId: string,
-    @Session() session: UserSession,
-  ) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.removeAttendee(eventId, attendeeId, session.user.id, abilities)).pipe(
-      tap(() => this.logger.log(`Attendee ${attendeeId} removed from event ${eventId} by ${session.user.id}`)),
+  removeAttendee(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
+    return from(this.attendeeService.removeAttendee(eventId, attendeeId)).pipe(
+      tap(() => this.logger.log(`Attendee ${attendeeId} removed from event ${eventId}`)),
       map((attendee) => ({
         message: 'Attendee removed successfully',
         attendee,
@@ -95,8 +83,7 @@ export class EventAttendeeController {
     @Param('attendeeId') attendeeId: string,
     @Body() dto: UpdateAttendeeStatusDto,
   ) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.updateStatus(eventId, attendeeId, dto, abilities)).pipe(
+    return from(this.attendeeService.updateStatus(eventId, attendeeId, dto)).pipe(
       map((attendee) => ({
         message: 'Attendee status updated',
         attendee,
@@ -111,8 +98,7 @@ export class EventAttendeeController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventAttendeeGameList))
   @Get(':attendeeId/games')
   getGameList(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.getGameList(eventId, attendeeId, abilities)).pipe(map((games) => ({ games })));
+    return from(this.attendeeService.getGameList(eventId, attendeeId)).pipe(map((games) => ({ games })));
   }
 
   @ApiOperation({ summary: "Add a game to an attendee's available list" })
@@ -145,15 +131,8 @@ export class EventAttendeeController {
     @Param('attendeeId') attendeeId: string,
     @Param('gameListId') gameListId: string,
   ) {
-    const abilities = this.getAbilities();
-    return from(this.attendeeService.removeGameFromList(eventId, attendeeId, gameListId, abilities)).pipe(
+    return from(this.attendeeService.removeGameFromList(eventId, attendeeId, gameListId)).pipe(
       map((entry) => ({ message: 'Game removed from list', entry })),
     );
-  }
-
-  private getAbilities(): AppAbility[] {
-    const userAbility = this.cls.get<AppAbility>('userAbility');
-    const apiAbility = this.cls.get<AppAbility>('apiKeyAbility');
-    return [userAbility, apiAbility].filter(Boolean);
   }
 }

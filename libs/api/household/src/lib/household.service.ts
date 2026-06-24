@@ -1,7 +1,6 @@
-import { DatabaseService, Household, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
-import { AppAbility } from '@bge/permissions';
+import { Action, DatabaseService, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { accessibleBy, WhereInput } from '@casl/prisma';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
 import assert from 'node:assert';
@@ -11,15 +10,16 @@ import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 export class HouseholdService {
   private readonly logger = new Logger(HouseholdService.name);
 
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly abilityService: AbilityService,
+  ) {}
 
-  async getHouseholdById(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
-    // consider a raw query instead of this madness
-
+  async getHouseholdById(id: string) {
     const household = await this.db.household.findUnique({
       where: {
         id,
-        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
       include: {
         invites: {
@@ -107,10 +107,6 @@ export class HouseholdService {
 
   /**
    * @todo refine game selection permissions
-   *
-   * @param memberId
-   * @param excludedCollectionIds
-   * @returns
    */
   private async getSelectMemberGames(memberId: string, excludedCollectionIds: string[]) {
     const gameCollections = await this.db.gameCollection.findMany({
@@ -141,14 +137,14 @@ export class HouseholdService {
     const shuffled = gameCollections.sort(() => 0.5 - Math.random());
     const selectGames = shuffled.slice(0, 5);
 
-    // TODO: interfaces
     return {
       gameCollections: selectGames,
       memberId,
     };
   }
 
-  async create(userId: string, createHouseholdDto: CreateHouseholdDto) {
+  async create(createHouseholdDto: CreateHouseholdDto) {
+    const userId = this.abilityService.getActingUserId();
     const { languageId, ...rest } = createHouseholdDto;
 
     return this.db.household.create({
@@ -161,6 +157,12 @@ export class HouseholdService {
               },
             }
           : undefined,
+
+        createdBy: {
+          connect: {
+            id: userId,
+          },
+        },
 
         members: {
           create: {
@@ -180,12 +182,7 @@ export class HouseholdService {
     });
   }
 
-  async updateHousehold(
-    id: string,
-    updateHouseholdDto: UpdateHouseholdDto,
-    userAbility: AppAbility,
-    apiKeyAbility?: AppAbility,
-  ) {
+  async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
     if (Object.keys(updateHouseholdDto).length === 0) {
       throw new BadRequestException('At least one field must be provided for update');
     }
@@ -204,7 +201,7 @@ export class HouseholdService {
       return await this.db.household.update({
         where: {
           id,
-          AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
         },
         data: {
           ...rest,
@@ -229,10 +226,10 @@ export class HouseholdService {
     }
   }
 
-  async getHouseholdsForUser(pagination: PaginationQueryDto, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
+  async getHouseholdsForUser(pagination: PaginationQueryDto) {
     return this.db.household.findMany({
       where: {
-        AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
 
       include: {
@@ -279,11 +276,8 @@ export class HouseholdService {
 
   /**
    * @todo soft delete - also need to consider how this affects invites and game collection sharing
-   *
-   * @param id
-   * @returns
    */
-  async deleteHousehold(id: string, userAbility: AppAbility, apiKeyAbility?: AppAbility) {
+  async deleteHousehold(id: string) {
     try {
       const count = await this.db.household.count({ where: { id } });
       assert(count > 0, new NotFoundException(`Household with id ${id} not found`));
@@ -291,7 +285,7 @@ export class HouseholdService {
       return await this.db.household.delete({
         where: {
           id,
-          AND: this.createHouseholdWhereAnd(userAbility, apiKeyAbility),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.delete),
         },
       });
     } catch (error) {
@@ -304,23 +298,5 @@ export class HouseholdService {
 
       throw error;
     }
-  }
-
-  private createHouseholdWhereAnd(userAbility: AppAbility, apiKeyAbility?: AppAbility): WhereInput<Household>[] {
-    const whereAnd: WhereInput<Household>[] = [];
-
-    try {
-      if (userAbility) {
-        whereAnd.push(accessibleBy(userAbility).ofType(ResourceType.Household));
-      }
-      if (apiKeyAbility) {
-        whereAnd.push(accessibleBy(apiKeyAbility).ofType(ResourceType.Household));
-      }
-    } catch (error) {
-      this.logger.error('Error creating where conditions for household access control', error);
-      throw new ForbiddenException("You don't have permission to access this resource.");
-    }
-
-    return whereAnd;
   }
 }

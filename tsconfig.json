@@ -155,6 +155,9 @@
     },
     {
       "path": "./libs/api/quota"
+    },
+    {
+      "path": "./libs/queue/ability-context"
     }
   ]
 }

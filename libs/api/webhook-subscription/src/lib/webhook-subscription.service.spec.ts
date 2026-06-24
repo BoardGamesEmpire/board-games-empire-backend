@@ -1,7 +1,7 @@
 import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
+import { AbilityService, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
-import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   CreateWebhookSubscriptionDto,
   WebhookEventRegistry,
@@ -14,6 +14,8 @@ import { ConfigService } from '@nestjs/config';
 import { WEBHOOK_SECRET_REDACTED, WebhookSubscriptionService } from './webhook-subscription.service';
 
 type WebhookWithEvents = Prisma.WebhookSubscriptionGetPayload<{ include: { eventTypes: true } }>;
+
+const ACTING_USER_ID = 'user-1';
 
 function makeEventType(overrides: Partial<WebhookSubscriptionEventType> = {}): WebhookSubscriptionEventType {
   return {
@@ -38,7 +40,7 @@ function makeWebhookSub(overrides: Partial<WebhookWithEvents> = {}): WebhookWith
     lastDeliveryAt: null,
     disabledAt: null,
     deletedAt: null,
-    createdById: 'user-1',
+    createdById: ACTING_USER_ID,
     createdAt: new Date('2026-01-01'),
     updatedAt: new Date('2026-01-01'),
     eventTypes: [],
@@ -51,9 +53,13 @@ describe('WebhookSubscriptionService', () => {
   let db: MockDatabaseService;
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
+  let ability: MockAbilityService;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
   const denyAll = createPrismaAbility([]) as AppAbility;
+
+  /** Sets the abilities the service will read from `getCurrentAbilities()`. */
+  const primeAbilities = (...abilities: AppAbility[]) => ability.getCurrentAbilities.mockReturnValue(abilities);
 
   beforeEach(async () => {
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
@@ -63,6 +69,11 @@ describe('WebhookSubscriptionService', () => {
       encrypt: jest.fn((plain: string) => `enc(${plain})`),
       decrypt: jest.fn((cipher: string) => cipher.replace(/^enc\(|\)$/g, '')),
     };
+    // Acting user + abilities now come from CLS via AbilityService, not method
+    // params. Default to the owner with full access; per-test overrides narrow it.
+    ability = createMockAbilityService();
+    ability.getActingUserId.mockReturnValue(ACTING_USER_ID);
+    primeAbilities(allowAll);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
@@ -70,6 +81,7 @@ describe('WebhookSubscriptionService', () => {
         WebhookEventRegistry,
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: EncryptionService, useValue: encryption },
+        { provide: AbilityService, useValue: ability },
         { provide: ConfigService, useValue: { get: jest.fn().mockReturnValue('development-secret') } },
       ],
     });
@@ -93,7 +105,7 @@ describe('WebhookSubscriptionService', () => {
     it('stores the secret encrypted and reveals the generated plaintext exactly once', async () => {
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
 
-      const result = await service.create('user-1', baseDto(), [allowAll]);
+      const result = await service.create(baseDto());
 
       // Stored ciphertext is the encrypted form of a freshly generated whsec_ secret.
       expect(encryption.encrypt).toHaveBeenCalledWith(expect.stringMatching(/^whsec_/));
@@ -103,7 +115,7 @@ describe('WebhookSubscriptionService', () => {
             url: 'https://hooks.example.com/bge',
             status: WebhookSubscriptionStatus.Active,
             secret: expect.stringMatching(/^enc\(whsec_/),
-            createdBy: { connect: { id: 'user-1' } },
+            createdBy: { connect: { id: ACTING_USER_ID } },
             eventTypes: {
               create: [{ eventType: WebhookEventType.EventCreated }, { eventType: WebhookEventType.EventUpdated }],
             },
@@ -119,9 +131,7 @@ describe('WebhookSubscriptionService', () => {
     it('encrypts and reveals a caller-supplied secret', async () => {
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
 
-      const result = await service.create('user-1', baseDto({ secret: 'whsec_caller_supplied_secret_value' }), [
-        allowAll,
-      ]);
+      const result = await service.create(baseDto({ secret: 'whsec_caller_supplied_secret_value' }));
 
       expect(encryption.encrypt).toHaveBeenCalledWith('whsec_caller_supplied_secret_value');
       expect(db.webhookSubscription.create).toHaveBeenCalledWith(
@@ -133,49 +143,49 @@ describe('WebhookSubscriptionService', () => {
     });
 
     it('rejects when the caller cannot read the subject (CASL-at-create)', async () => {
-      await expect(service.create('user-1', baseDto(), [denyAll])).rejects.toThrow(ForbiddenException);
+      primeAbilities(denyAll);
+      await expect(service.create(baseDto())).rejects.toThrow(ForbiddenException);
       expect(db.webhookSubscription.create).not.toHaveBeenCalled();
       expect(encryption.encrypt).not.toHaveBeenCalled();
     });
 
     it('rejects when no abilities are present', async () => {
-      await expect(service.create('user-1', baseDto(), [])).rejects.toThrow(ForbiddenException);
+      primeAbilities();
+      await expect(service.create(baseDto())).rejects.toThrow(ForbiddenException);
+      expect(db.webhookSubscription.create).not.toHaveBeenCalled();
     });
 
     it('requires every ability in the intersection to permit the subject', async () => {
-      await expect(service.create('user-1', baseDto(), [allowAll, denyAll])).rejects.toThrow(ForbiddenException);
+      primeAbilities(allowAll, denyAll);
+      await expect(service.create(baseDto())).rejects.toThrow(ForbiddenException);
     });
 
     it('rejects an event type that does not belong to the declared resource', async () => {
       const dto = baseDto({ resourceType: ResourceType.Game, eventTypes: [WebhookEventType.EventCreated] });
-      await expect(service.create('user-1', dto, [allowAll])).rejects.toThrow(BadRequestException);
+      await expect(service.create(dto)).rejects.toThrow(BadRequestException);
     });
 
     it('checks instance visibility when resourceId is scoped', async () => {
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
-      await service.create('user-1', baseDto({ resourceId: 'event-9' }), [allowAll]);
+      await service.create(baseDto({ resourceId: 'event-9' }));
       expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll);
     });
 
     it('rejects when the scoped instance is not visible', async () => {
       visibility.isVisibleTo.mockResolvedValue(false);
-      await expect(service.create('user-1', baseDto({ resourceId: 'event-9' }), [allowAll])).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.create(baseDto({ resourceId: 'event-9' }))).rejects.toThrow(ForbiddenException);
     });
 
     it('checks household readability when householdId is scoped', async () => {
       db.household.count.mockResolvedValue(0);
-      await expect(service.create('user-1', baseDto({ householdId: 'hh-1' }), [allowAll])).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.create(baseDto({ householdId: 'hh-1' }))).rejects.toThrow(ForbiddenException);
     });
   });
 
   describe('reads redact the secret', () => {
     it('getById never returns the stored ciphertext', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub({ secret: 'enc(whsec_x)' }));
-      const result = await service.getById('sub-1', 'user-1');
+      const result = await service.getById('sub-1');
       expect(result.secret).toBe(WEBHOOK_SECRET_REDACTED);
     });
 
@@ -184,17 +194,25 @@ describe('WebhookSubscriptionService', () => {
         makeWebhookSub({ id: 'sub-1', secret: 'enc(whsec_a)' }),
         makeWebhookSub({ id: 'sub-2', secret: 'enc(whsec_b)' }),
       ]);
-      const result = await service.list('user-1');
+      const result = await service.list();
       expect(result.map((s) => s.secret)).toEqual([WEBHOOK_SECRET_REDACTED, WEBHOOK_SECRET_REDACTED]);
+    });
+
+    it('scopes the list to the acting user', async () => {
+      db.webhookSubscription.findMany.mockResolvedValue([]);
+      await service.list();
+      expect(db.webhookSubscription.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { createdById: ACTING_USER_ID, deletedAt: null } }),
+      );
     });
   });
 
   describe('getById', () => {
-    it('scopes by owner and throws NotFound when absent', async () => {
+    it('scopes by the acting user and throws NotFound when absent', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(null);
-      await expect(service.getById('sub-x', 'user-1')).rejects.toThrow(NotFoundException);
+      await expect(service.getById('sub-x')).rejects.toThrow(NotFoundException);
       expect(db.webhookSubscription.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'sub-x', createdById: 'user-1', deletedAt: null } }),
+        expect.objectContaining({ where: { id: 'sub-x', createdById: ACTING_USER_ID, deletedAt: null } }),
       );
     });
   });
@@ -204,7 +222,7 @@ describe('WebhookSubscriptionService', () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
 
-      const result = await service.update('sub-1', 'user-1', { secret: 'whsec_rotated_value_1234567890' }, [allowAll]);
+      const result = await service.update('sub-1', { secret: 'whsec_rotated_value_1234567890' });
 
       expect(encryption.encrypt).toHaveBeenCalledWith('whsec_rotated_value_1234567890');
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
@@ -218,7 +236,7 @@ describe('WebhookSubscriptionService', () => {
 
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
 
-      const result = await service.update('sub-1', 'user-1', { url: 'https://new.example.com/hook' }, [allowAll]);
+      const result = await service.update('sub-1', { url: 'https://new.example.com/hook' });
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ secret: undefined }) }),
@@ -227,22 +245,24 @@ describe('WebhookSubscriptionService', () => {
     });
 
     it('throws when the DTO is empty', async () => {
-      await expect(service.update('sub-1', 'user-1', {}, [allowAll])).rejects.toThrow(BadRequestException);
+      await expect(service.update('sub-1', {})).rejects.toThrow(BadRequestException);
     });
 
     it('refuses an eventTypes change when abilities are empty', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
-      await expect(
-        service.update('sub-1', 'user-1', { eventTypes: [WebhookEventType.EventCreated] }, []),
-      ).rejects.toThrow(ForbiddenException);
+      primeAbilities();
+      await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventCreated] })).rejects.toThrow(
+        ForbiddenException,
+      );
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });
 
     it('refuses an eventTypes change the caller cannot read', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
-      await expect(
-        service.update('sub-1', 'user-1', { eventTypes: [WebhookEventType.EventCreated] }, [denyAll]),
-      ).rejects.toThrow(ForbiddenException);
+      primeAbilities(denyAll);
+      await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventCreated] })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
@@ -251,7 +271,7 @@ describe('WebhookSubscriptionService', () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub({ secret: 'enc(x)' }));
 
-      const result = await service.disable('sub-1', 'user-1');
+      const result = await service.disable('sub-1');
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -271,7 +291,7 @@ describe('WebhookSubscriptionService', () => {
       );
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub({ secret: 'enc(x)' }));
 
-      const result = await service.reactivate('sub-1', 'user-1', [allowAll]);
+      const result = await service.reactivate('sub-1');
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -289,7 +309,8 @@ describe('WebhookSubscriptionService', () => {
       db.webhookSubscription.findFirst.mockResolvedValue(
         makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
       );
-      await expect(service.reactivate('sub-1', 'user-1', [denyAll])).rejects.toThrow(ForbiddenException);
+      primeAbilities(denyAll);
+      await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
     });
 
     it('re-checks instance scope and refuses when the resourceId is no longer visible', async () => {
@@ -305,7 +326,7 @@ describe('WebhookSubscriptionService', () => {
       );
       visibility.isVisibleTo.mockResolvedValue(false);
 
-      await expect(service.reactivate('sub-1', 'user-1', [allowAll])).rejects.toThrow(ForbiddenException);
+      await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
       expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll);
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });
@@ -321,12 +342,13 @@ describe('WebhookSubscriptionService', () => {
       );
       db.household.count.mockResolvedValue(0);
 
-      await expect(service.reactivate('sub-1', 'user-1', [allowAll])).rejects.toThrow(ForbiddenException);
+      await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });
 
     it('refuses with no abilities present', async () => {
-      await expect(service.reactivate('sub-1', 'user-1', [])).rejects.toThrow(ForbiddenException);
+      primeAbilities();
+      await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
     });
   });
 
@@ -335,7 +357,7 @@ describe('WebhookSubscriptionService', () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
       db.webhookSubscription.update.mockResolvedValue(makeWebhookSub({ secret: 'enc(x)' }));
 
-      const result = await service.remove('sub-1', 'user-1');
+      const result = await service.remove('sub-1');
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ deletedAt: expect.any(Date) }) }),
