@@ -1,8 +1,11 @@
-import { Action } from '@bge/database';
+import { Action, ResourceType, User } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { Cache } from 'cache-manager';
-import type { ApikeyWithScopes } from './interfaces';
+import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
 import { PermissionsService } from './permissions.service';
+
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
+const MIN_TTL_MS = 5 * 1000;
 
 describe('PermissionsService', () => {
   let service: PermissionsService;
@@ -67,6 +70,115 @@ describe('PermissionsService', () => {
       expect(cache.set).not.toHaveBeenCalled();
     });
   });
+
+  describe('getUserRoleGraph', () => {
+    it('returns the cached graph without hitting the database on a cache hit', async () => {
+      const cached = makeUserGraph();
+      cache.get.mockResolvedValue(cached);
+
+      const result = await service.getUserRoleGraph('user-1');
+
+      expect(result).toBe(cached);
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('loads role, household, event, and direct-permission sources (expired excluded) and caches it', async () => {
+      cache.get.mockResolvedValue(undefined);
+      const graph = makeUserGraph();
+      db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+      const result = await service.getUserRoleGraph('user-1');
+
+      expect(db.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'user-1' },
+          select: expect.objectContaining({
+            permissions: expect.objectContaining({
+              where: { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+              select: expect.objectContaining({
+                inverted: true,
+                resourceType: true,
+                resourceId: true,
+                expiresAt: true,
+                permission: {
+                  select: {
+                    action: true,
+                    subject: true,
+                    conditions: true,
+                    fields: true,
+                    inverted: true,
+                  },
+                },
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', graph, expect.any(Number));
+      expect(result).toBe(graph);
+    });
+
+    it('returns null and does not cache when the user is missing', async () => {
+      cache.get.mockResolvedValue(undefined);
+      db.user.findUnique.mockResolvedValue(null);
+
+      const result = await service.getUserRoleGraph('gone');
+
+      expect(result).toBeNull();
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+
+    describe('cache TTL', () => {
+      it('uses the default TTL when no permission expires within the window', async () => {
+        cache.get.mockResolvedValue(undefined);
+        db.user.findUnique.mockResolvedValue(makeUserGraph() as unknown as User);
+
+        await service.getUserRoleGraph('user-1');
+
+        expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), DEFAULT_TTL_MS);
+      });
+
+      it('clamps the TTL to a soon-to-expire permission', async () => {
+        cache.get.mockResolvedValue(undefined);
+        const expiresInMs = 30_000;
+        const graph = makeUserGraph({
+          permissions: [makeGraphPermission(new Date(Date.now() + expiresInMs))],
+        });
+        db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+        await service.getUserRoleGraph('user-1');
+
+        const ttl = cache.set.mock.calls[0]?.[2] as number;
+        expect(ttl).toBeGreaterThan(0);
+        expect(ttl).toBeLessThanOrEqual(expiresInMs);
+      });
+
+      it('floors the TTL when a permission expires sub-floor', async () => {
+        cache.get.mockResolvedValue(undefined);
+        const graph = makeUserGraph({
+          permissions: [makeGraphPermission(new Date(Date.now() + 500))],
+        });
+        db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+        await service.getUserRoleGraph('user-1');
+
+        const ttl = cache.set.mock.calls[0]?.[2] as number;
+        expect(ttl).toBe(MIN_TTL_MS);
+      });
+
+      it('ignores already-expired permissions when computing the TTL', async () => {
+        cache.get.mockResolvedValue(undefined);
+        const graph = makeUserGraph({
+          permissions: [makeGraphPermission(new Date(Date.now() - 60_000))],
+        });
+        db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+        await service.getUserRoleGraph('user-1');
+
+        expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), DEFAULT_TTL_MS);
+      });
+    });
+  });
 });
 
 function makeApiKeyGraph(scopes: ApikeyWithScopes['scopes'] = []): ApikeyWithScopes {
@@ -106,5 +218,26 @@ function makeApiKeyGraph(scopes: ApikeyWithScopes['scopes'] = []): ApikeyWithSco
             permission: { action: Action.read, subject: 'Household', inverted: false },
           },
         ],
+  };
+}
+
+function makeUserGraph(overrides: Partial<UserWithRoles> = {}): UserWithRoles {
+  return {
+    id: 'user-1',
+    roles: [],
+    householdMember: [],
+    eventsAttended: [],
+    permissions: [],
+    ...overrides,
+  };
+}
+
+function makeGraphPermission(expiresAt: Date | null): UserPermissionWithPermission {
+  return {
+    inverted: false,
+    resourceType: ResourceType.Game,
+    resourceId: null,
+    expiresAt,
+    permission: { action: Action.read, subject: 'Game', conditions: {}, fields: [], inverted: false },
   };
 }

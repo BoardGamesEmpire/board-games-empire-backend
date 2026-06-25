@@ -96,7 +96,7 @@ ALTER TABLE "rule_variants" ADD COLUMN     "deleted_at" TIMESTAMPTZ(3);
 
 -- AlterTable
 ALTER TABLE "user_permissions" DROP COLUMN "permission",
-ADD COLUMN     "inverted" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "inverted" BOOLEAN,
 ADD COLUMN     "permission_id" TEXT NOT NULL;
 
 -- DropTable
