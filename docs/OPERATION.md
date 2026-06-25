@@ -9,13 +9,16 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 ## Phase 1 — foundations with immediate user value
 
-3. #55 SafeHttpService. Tiny, blocks #56. Completed in #83.
-4. #56 Webhook subscriptions. Standalone primitive, immediately useful, exercises SafeHttpService end-to-end. Completed in #88.
-5. #69 Quota primitive. Lands before storage so quota checks are in MediaObject create from day one (retrofit pain). Completed in #91.
+3. ~~#55 SafeHttpService. Tiny, blocks #56.~~ Completed in #83.
+4. ~~#56 Webhook subscriptions. Standalone primitive, immediately useful, exercises SafeHttpService end-to-end.~~ Completed in #88.
+5. ~~#69 Quota primitive. Lands before storage so quota checks are in MediaObject create from day one (retrofit pain).~~ Completed in #91.
 6. #58 MediaObject + StorageDriver + LocalDiskDriver. Foundation; usable without plugin loader.
-7. #68 AbilityService. Lands with user/apiKey/system dispatch; plugin dispatch added later. Existing services start migrating opportunistically.
+7. ~~#68 AbilityService. Lands with user/apiKey/system dispatch; plugin dispatch added later. Existing services start migrating opportunistically.~~ Completed in #92.
 8. #57 Phase 2 (audit log table + listener). Now that Phase 1 prep is everywhere, the listener has substrate to work against.
-9. Phase 2 — feedback module completes. Feedback module (in progress) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.
+
+## Phase 2 — feedback module completes
+
+9. Feedback module (in progress) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.
 10. #70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.
 
 ## Phase 3 — plugin loader (extraction, not invention)

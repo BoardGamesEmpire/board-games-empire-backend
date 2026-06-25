@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../common/otel/tsconfig.lib.json"
+    },
+    {
       "path": "../common/env/tsconfig.lib.json"
     }
   ],

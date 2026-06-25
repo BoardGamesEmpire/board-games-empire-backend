@@ -33,3 +33,14 @@ export { createShutdown, registerShutdownHandlers } from './lib/bootstrap/regist
 export { BullMQQueueDepthRecorderModule } from './lib/bullmq/bullmq-queue-depth-recorder.module';
 export { BullMQQueueDepthRecorder } from './lib/bullmq/bullmq-queue-depth-recorder.service';
 export { createBullMQTelemetry, type CreateBullMQTelemetryOptions } from './lib/bullmq/create-bullmq-telemetry';
+
+// Database connection-pool metrics. Import `DbPoolMetricsRecorderModule`
+// at the app root alongside `DatabaseModule`; the recorder discovers any
+// `DatabasePoolMetricsSource` and bridges pg pool gauges to OTel.
+export { DbPoolMetricsRecorderModule } from './lib/database/pool-metrics-recorder.module';
+export { DbPoolMetricsRecorder } from './lib/database/pool-metrics-recorder.service';
+export {
+  isDatabasePoolMetricsSource,
+  type DatabasePoolMetricsSnapshot,
+  type DatabasePoolMetricsSource,
+} from './lib/database/pool-metrics-source';
