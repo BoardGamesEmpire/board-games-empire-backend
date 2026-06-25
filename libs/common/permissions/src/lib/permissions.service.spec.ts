@@ -4,9 +4,6 @@ import type { Cache } from 'cache-manager';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
 import { PermissionsService } from './permissions.service';
 
-const DEFAULT_TTL_MS = 5 * 60 * 1000;
-const MIN_TTL_MS = 5 * 1000;
-
 describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
@@ -135,7 +132,11 @@ describe('PermissionsService', () => {
 
         await service.getUserRoleGraph('user-1');
 
-        expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), DEFAULT_TTL_MS);
+        expect(cache.set).toHaveBeenCalledWith(
+          'bge:user:permissions:user-1',
+          expect.anything(),
+          PermissionsService.CACHE_TTL_IN_MILLISECONDS,
+        );
       });
 
       it('clamps the TTL to a soon-to-expire permission', async () => {
@@ -163,7 +164,7 @@ describe('PermissionsService', () => {
         await service.getUserRoleGraph('user-1');
 
         const ttl = cache.set.mock.calls[0]?.[2] as number;
-        expect(ttl).toBe(MIN_TTL_MS);
+        expect(ttl).toBe(PermissionsService.MIN_CACHE_TTL_IN_MILLISECONDS);
       });
 
       it('ignores already-expired permissions when computing the TTL', async () => {
@@ -175,7 +176,11 @@ describe('PermissionsService', () => {
 
         await service.getUserRoleGraph('user-1');
 
-        expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), DEFAULT_TTL_MS);
+        expect(cache.set).toHaveBeenCalledWith(
+          'bge:user:permissions:user-1',
+          expect.anything(),
+          PermissionsService.CACHE_TTL_IN_MILLISECONDS,
+        );
       });
     });
   });

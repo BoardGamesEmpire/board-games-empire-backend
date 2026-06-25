@@ -8,7 +8,7 @@ import type { ApikeyWithScopes, UserWithRoles } from './interfaces';
 export class PermissionsService {
   private readonly logger = new Logger(PermissionsService.name);
 
-  private static readonly CACHE_TTL_IN_MILLISECONDS = 5 * 60 * 1000;
+  static readonly CACHE_TTL_IN_MILLISECONDS = 5 * 60 * 1000;
 
   /**
    * Floor for the user-graph cache TTL. The build-time `expiresAt` re-check in
@@ -16,7 +16,7 @@ export class PermissionsService {
    * an optimization to refresh sooner, so it never needs to drop below this floor
    * (which also avoids cache stampede when a permission is about to expire).
    */
-  private static readonly MIN_CACHE_TTL_IN_MILLISECONDS = 5 * 1000;
+  static readonly MIN_CACHE_TTL_IN_MILLISECONDS = 5 * 1000;
 
   constructor(
     private readonly db: DatabaseService,

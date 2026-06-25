@@ -158,7 +158,14 @@ export class AbilityFactory {
     user: UserWithRoles,
   ): void {
     const now = Date.now();
-    const active = userPermissions.filter((up) => up.expiresAt === null || up.expiresAt.getTime() > now);
+    const active = userPermissions.filter((up) => {
+      if (up.expiresAt === null) {
+        return true;
+      }
+      // The user graph round-trips through Redis (Keyv/Valkey), where Date values
+      // deserialize to ISO strings on a cache hit; normalize before comparing.
+      return new Date(up.expiresAt).getTime() > now;
+    });
 
     // `UserPermission.inverted` overrides the base permission's polarity; `null`
     // inherits it. Grants first, denials last → a denial wins any same-target

@@ -347,6 +347,36 @@ describe('AbilityFactory', () => {
         const ability = factory.createForUser(user);
         expect(ability.can(Action.read, 'Game')).toBe(true);
       });
+
+      it('treats a cache-deserialized (string) expiry like a Date', () => {
+        const user = makeUser({
+          permissions: [
+            makeUserPermission({
+              resourceType: ResourceType.Game,
+              expiresAt: new Date(Date.now() + 60_000).toISOString() as unknown as Date,
+              permission: { action: Action.read, subject: 'Game' },
+            }),
+          ],
+        });
+
+        expect(factory.createForUser(user).can(Action.read, 'Game')).toBe(true);
+      });
+
+      it('skips an already-passed string expiry', () => {
+        const user = makeUser({
+          roles: [makeRole('User', [makePermission({ action: Action.read, subject: 'Game' })])],
+          permissions: [
+            makeUserPermission({
+              inverted: true,
+              resourceType: ResourceType.Game,
+              expiresAt: new Date(Date.now() - 60_000).toISOString() as unknown as Date,
+              permission: { action: Action.read, subject: 'Game' },
+            }),
+          ],
+        });
+
+        expect(factory.createForUser(user).can(Action.read, 'Game')).toBe(true);
+      });
     });
 
     describe("skips the 'all' wildcard subject", () => {
