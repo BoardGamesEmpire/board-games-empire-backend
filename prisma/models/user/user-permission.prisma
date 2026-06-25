@@ -11,7 +11,7 @@ model UserPermission {
   resourceType ResourceType @map("resource_type")
   resourceId   String?      @map("resource_id")
   // override Permission.inverted
-  inverted     Boolean      @default(false)
+  inverted     Boolean?
 
   grantedBy   User      @relation("PermissionGranter", fields: [grantedById], references: [id])
   grantedById String    @map("granted_by_id")
