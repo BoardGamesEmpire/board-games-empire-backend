@@ -3,7 +3,7 @@ import { GrpcInternalActorInterceptor } from '@bge/actor-context-transport';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
-import { BullMQQueueDepthRecorderModule, createBullMQTelemetry } from '@bge/otel';
+import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
@@ -108,6 +108,7 @@ import { baseLogger } from './lib/logger';
     GatewayRegistryModule,
 
     DatabaseModule,
+    DbPoolMetricsRecorderModule,
     CoordinatorModule,
   ],
   providers: [

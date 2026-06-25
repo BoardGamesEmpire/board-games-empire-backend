@@ -16,6 +16,7 @@ import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
+import { DbPoolMetricsRecorderModule } from '@bge/otel';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
@@ -87,6 +88,7 @@ import { baseLogger } from './lib/logger';
     }),
 
     DatabaseModule,
+    DbPoolMetricsRecorderModule,
     SecureHttpModule,
 
     // Shared Redis clients (ioredis). Owns the lifecycle of the cache and

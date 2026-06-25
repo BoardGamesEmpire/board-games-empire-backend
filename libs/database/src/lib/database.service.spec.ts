@@ -21,6 +21,31 @@ jest.mock('@prisma/adapter-pg', () => ({
   PrismaPg: jest.fn().mockImplementation(() => ({})),
 }));
 
+// Mock the pg pool so the service constructs a deterministic, offline
+// pool. node-postgres connects lazily, but mocking keeps the test free of
+// any real handles and lets us assert pool lifecycle + gauge reads.
+jest.mock('pg', () => {
+  class MockPool {
+    public totalCount = 7;
+    public idleCount = 2;
+    public waitingCount = 1;
+    public options = { max: 10 };
+    public end = jest.fn().mockResolvedValue(undefined);
+  }
+  return { Pool: MockPool };
+});
+
+interface MockPoolInstance {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+  options: { max: number };
+  end: jest.Mock<Promise<void>, []>;
+}
+
+const getPool = (service: DatabaseService): MockPoolInstance =>
+  (service as unknown as { readonly pool: MockPoolInstance }).pool;
+
 describe('DatabaseService', () => {
   let module: TestingModule;
   let service: DatabaseService;
@@ -89,6 +114,47 @@ describe('DatabaseService', () => {
       await service.onModuleDestroy();
 
       expect(service.$disconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it('ends the owned pool after disconnecting', async () => {
+      const pool = getPool(service);
+
+      await service.onModuleDestroy();
+
+      expect(service.$disconnect).toHaveBeenCalledTimes(1);
+      expect(pool.end).toHaveBeenCalledTimes(1);
+      // Disconnect Prisma before tearing down the pool it was using.
+      const disconnectOrder = (service.$disconnect as jest.Mock).mock.invocationCallOrder[0];
+      const endOrder = pool.end.mock.invocationCallOrder[0];
+      expect(disconnectOrder).toBeLessThan(endOrder);
+    });
+  });
+
+  describe('getDatabasePoolMetrics', () => {
+    it('maps the pg pool gauges onto the snapshot shape', () => {
+      const pool = getPool(service);
+      pool.totalCount = 7;
+      pool.idleCount = 2;
+      pool.waitingCount = 1;
+      pool.options.max = 10;
+
+      expect(service.getDatabasePoolMetrics()).toEqual({
+        open: 7,
+        busy: 5, // total - idle
+        idle: 2,
+        pending: 1,
+        max: 10,
+      });
+    });
+
+    it('reflects live pool changes on each read', () => {
+      const pool = getPool(service);
+
+      pool.totalCount = 10;
+      pool.idleCount = 0;
+      pool.waitingCount = 4;
+
+      expect(service.getDatabasePoolMetrics()).toMatchObject({ open: 10, busy: 10, idle: 0, pending: 4 });
     });
   });
 });

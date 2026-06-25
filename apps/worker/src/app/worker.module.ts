@@ -2,7 +2,7 @@ import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
-import { BullMQQueueDepthRecorderModule, createBullMQTelemetry } from '@bge/otel';
+import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { WebhookQueueConsumerModule } from '@bge/queue-webhooks';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
 import { BullModule } from '@nestjs/bullmq';
@@ -92,6 +92,7 @@ import { baseLogger } from './lib/logger';
     }),
 
     DatabaseModule,
+    DbPoolMetricsRecorderModule,
 
     // Provides AuditContextInternalService for the now actor-aware
     // GameImportProcessor; the global ClsModule.forRoot above satisfies its CLS

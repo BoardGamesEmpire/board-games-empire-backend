@@ -3,7 +3,7 @@ import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportFetchModule } from '@bge/game-import';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
-import { BullMQQueueDepthRecorderModule, createBullMQTelemetry } from '@bge/otel';
+import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
 import { WebhooksModule } from '@bge/webhooks';
@@ -124,6 +124,7 @@ import { baseLogger } from './lib/logger';
     WebhookQueueProducerModule,
 
     DatabaseModule,
+    DbPoolMetricsRecorderModule,
 
     GatewayRegistryModule,
 

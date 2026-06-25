@@ -27,11 +27,18 @@ registerShutdownHandlers(app, otel, bootstrapLogger);
 Each app's NestJS module:
 
 ```ts
-import { BullMQQueueDepthRecorderModule, buildOtelPinoOptions, createBullMQTelemetry } from '@bge/otel';
+import {
+  BullMQQueueDepthRecorderModule,
+  DbPoolMetricsRecorderModule,
+  buildOtelPinoOptions,
+  createBullMQTelemetry,
+} from '@bge/otel';
 
 @Module({
   imports: [
     LoggerModule.forRoot({ pinoHttp: buildOtelPinoOptions() }),
+    DatabaseModule,
+    DbPoolMetricsRecorderModule,
     BullModule.forRoot({
       connection: queueRedisClient,
       telemetry: createBullMQTelemetry(),
@@ -43,7 +50,7 @@ import { BullMQQueueDepthRecorderModule, buildOtelPinoOptions, createBullMQTelem
 export class AppModule {}
 ```
 
-`createBullMQTelemetry()` wraps `bullmq-otel` and emits the BullMQ metrics + lifecycle spans; `BullMQQueueDepthRecorderModule` keeps the `bullmq.queue.jobs` gauge fresh by calling `Queue#recordJobCountsMetric()` on a timer. Wire both — the recorder by itself emits nothing.
+`createBullMQTelemetry()` wraps `bullmq-otel` and emits the BullMQ metrics + lifecycle spans; `BullMQQueueDepthRecorderModule` keeps the `bullmq.queue.jobs` gauge fresh by calling `Queue#recordJobCountsMetric()` on a timer. `DbPoolMetricsRecorderModule` bridges the database connection-pool gauges. Wire each — the recorders by themselves emit nothing.
 
 ## Environment variables
 
@@ -91,6 +98,10 @@ Via `@opentelemetry/auto-instrumentations-node`: HTTP server/client, gRPC server
 
 ## Custom metrics
 
+Two BGE-specific metric sources — BullMQ and the database connection pool — both gated by the same activation check (see the activation matrix above). Auto-instrumentations contribute the rest.
+
+### BullMQ
+
 BullMQ metrics come from two cooperating pieces:
 
 - **`createBullMQTelemetry()`** — passed to `BullModule.forRoot({ telemetry: ... })`. Wraps `bullmq-otel`, which registers the meter and emits `bullmq.queue.jobs` (regular gauge) plus lifecycle counters for completed / failed / retried / delayed jobs and a histogram for job duration. Trace context propagation across the queue boundary also rides on this.
@@ -105,6 +116,52 @@ Gauge details:
 States observed: `waiting`, `active`, `delayed`, `failed`, `completed`, `paused`, `waiting-children`. One Redis round-trip per queue per `OTEL_METRIC_EXPORT_INTERVAL`. Per-queue failure isolation — one broken Redis connection does not silence healthy queues.
 
 Both pieces consult the same activation gate. When the gate is closed (the default), `createBullMQTelemetry()` returns a telemetry instance with no meter and the recorder stays idle — trace propagation still works.
+
+### Database connection pool
+
+`DbPoolMetricsRecorderModule` discovers any provider implementing `DatabasePoolMetricsSource` (in practice `DatabaseService`) via `DiscoveryService` and bridges the `pg` driver-adapter pool's stats to OTel. Unlike the BullMQ recorder, there is no timer: these are `ObservableGauge`s, pulled by the SDK at export time, and pool reads are cheap synchronous getters.
+
+This does **not** come from Prisma instrumentation. Prisma's `metrics` preview feature (and the `prisma.$metrics` API) was removed in Prisma ORM 7, and `@prisma/instrumentation` emits spans only — so the driver-adapter pool is the only source of pool-saturation signal. `DatabaseService` constructs and owns the `pg.Pool` (rather than letting `PrismaPg` build one internally) and ends it on shutdown. See #81.
+
+| Metric                        | Type  | Unit           | Source                                                    |
+| ----------------------------- | ----- | -------------- | --------------------------------------------------------- |
+| `db.pool.connections.open`    | gauge | `{connection}` | `pg.Pool#totalCount` (busy + idle)                        |
+| `db.pool.connections.busy`    | gauge | `{connection}` | `totalCount - idleCount`                                  |
+| `db.pool.connections.idle`    | gauge | `{connection}` | `pg.Pool#idleCount`                                       |
+| `db.pool.connections.pending` | gauge | `{request}`    | `pg.Pool#waitingCount` — requests queued for a connection |
+| `db.pool.connections.max`     | gauge | `{connection}` | `pg.Pool#options.max`                                     |
+
+`pending > 0` is the exhaustion signal: every connection is checked out and new work is queuing. Per-source failure isolation — a source that throws on read is logged and skipped. Multiple sources (e.g. a future read replica) are summed into a single process-level view rather than clobbering one another. Idles when metrics export is disabled or no source is discovered.
+
+### Dashboards & alerts
+
+Metric names arrive verbatim (`db.pool.connections.*`) in OTLP-native backends. Prometheus-style backends replace dots with underscores → `db_pool_connections_open`, and so on. Example PromQL once the metrics reach a Prometheus-compatible store:
+
+```promql
+# Pool utilization (0–1). Alert when sustained high.
+db_pool_connections_busy / db_pool_connections_max
+
+# Saturation: connections checked out AND work queued behind them.
+db_pool_connections_pending > 0
+
+# Headroom remaining.
+db_pool_connections_max - db_pool_connections_busy
+```
+
+A starting alert for pool exhaustion:
+
+```yaml
+- alert: DatabasePoolSaturated
+  # Requests queuing for 2m while utilization is effectively maxed.
+  expr: db_pool_connections_pending > 0 and (db_pool_connections_busy / db_pool_connections_max) >= 0.9
+  for: 2m
+  labels: { severity: warning }
+  annotations:
+    summary: 'DB connection pool saturated on {{ $labels.service_name }}'
+    description: 'Requests are queuing for a free connection. Raise pool size, or investigate slow queries / leaked connections.'
+```
+
+Suggested panels: a stacked area of `busy` + `idle` against the `max` ceiling, and a separate `pending` time series — flat at zero in healthy operation, so any deviation is the headline.
 
 Auto-instrumentations contribute their own metrics (HTTP request duration histograms, gRPC server metrics, Prisma query duration) flowing through the same exporter once metrics are enabled.
 
@@ -175,4 +232,4 @@ Do **not** also call `app.enableShutdownHooks()` — Nest's own signal handlers 
 
 - **#72** — original observability scope
 - **#57** — actor context infrastructure (audit log foundation)
-- **#81** — Prisma client metrics bridge (follow-up)
+- **#81** — DB connection-pool metrics bridge (follow-up)
