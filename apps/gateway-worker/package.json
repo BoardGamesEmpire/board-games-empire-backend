@@ -1,5 +1,5 @@
 {
-  "name": "@board-games-empire/gateway-worker",
+  "name": "@boardgamesempire/gateway-worker",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -63,15 +63,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@board-games-empire/gateway-worker:build",
+          "buildTarget": "@boardgamesempire/gateway-worker:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@board-games-empire/gateway-worker:build:development"
+            "buildTarget": "@boardgamesempire/gateway-worker:build:development"
           },
           "production": {
-            "buildTarget": "@board-games-empire/gateway-worker:build:production"
+            "buildTarget": "@boardgamesempire/gateway-worker:build:production"
           }
         }
       },

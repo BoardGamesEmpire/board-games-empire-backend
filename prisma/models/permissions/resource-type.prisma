@@ -4,6 +4,8 @@ enum ResourceType {
   Notification
   SafeHttpPolicy
   Media
+  MediaObject
+  MediaContribution
   WebhookSubscription
   Quota
 

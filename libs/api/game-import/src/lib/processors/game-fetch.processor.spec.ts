@@ -1,7 +1,7 @@
 import { DatabaseService, InitiatorType, JobStatus } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { of } from 'rxjs';
@@ -117,7 +117,11 @@ describe('GameFetchProcessor', () => {
     it('marks the Job row Failed once attempts are exhausted, inside the actor scope', async () => {
       await processor.onFailed(makeJob({ attemptsMade: 5, attempts: 5 }), new Error('gateway down'));
       expect(runWith).toHaveBeenCalledWith(
-        expect.objectContaining({ source: 'queue', actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' }),
+        expect.objectContaining({
+          source: 'queue',
+          actor: { kind: 'user', userId: 'user-7' },
+          correlationId: 'corr-1',
+        }),
         expect.any(Function),
       );
       expect(db.job.update).toHaveBeenCalledWith({

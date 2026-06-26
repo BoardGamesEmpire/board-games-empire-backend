@@ -1,6 +1,6 @@
 import { DatabaseService } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';

@@ -1,5 +1,5 @@
-import type * as proto from '@board-games-empire/proto-gateway';
-import { GatewayServiceControllerMethods } from '@board-games-empire/proto-gateway';
+import type * as proto from '@boardgamesempire/proto-gateway';
+import { GatewayServiceControllerMethods } from '@boardgamesempire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
 import type { Observable } from 'rxjs';
 import { GameGatewayService } from './game-gateway.service';

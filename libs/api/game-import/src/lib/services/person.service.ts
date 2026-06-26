@@ -1,5 +1,5 @@
 import { DatabaseService } from '@bge/database';
-import type { PersonData, PublisherData } from '@board-games-empire/proto-gateway';
+import type { PersonData, PublisherData } from '@boardgamesempire/proto-gateway';
 import { Injectable } from '@nestjs/common';
 
 /**

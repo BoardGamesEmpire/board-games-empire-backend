@@ -1,6 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { DatabaseService } from '@bge/database';
-import { ResultStatus, type SearchGameResult } from '@board-games-empire/proto-gateway';
+import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { forkJoin, from, Observable, of, timer } from 'rxjs';
@@ -14,7 +14,10 @@ import type { SearchGamesResponse } from './interfaces';
 export class GameSearchService {
   private readonly logger = new Logger(GameSearchService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly coordinator: GatewayCoordinatorClientService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly coordinator: GatewayCoordinatorClientService,
+  ) {}
 
   search(dto: SearchQueryDto): Observable<SearchResponseDto> {
     const correlationId = crypto.randomUUID();

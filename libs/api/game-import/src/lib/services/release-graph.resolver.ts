@@ -1,4 +1,4 @@
-import type { GameReleaseData } from '@board-games-empire/proto-gateway';
+import type { GameReleaseData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toEditionKey } from './helpers';
 

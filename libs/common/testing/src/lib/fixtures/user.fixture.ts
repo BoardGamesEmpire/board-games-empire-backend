@@ -15,6 +15,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     image: null,
     firstName: 'Test',
     lastName: 'User',
+    isServiceAccount: false,
     twoFactorEnabled: false,
     role: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),

@@ -1,5 +1,5 @@
 {
-  "name": "@board-games-empire/worker",
+  "name": "@boardgamesempire/worker",
   "version": "0.0.1",
   "private": true,
   "nx": {
@@ -63,15 +63,15 @@
           "build"
         ],
         "options": {
-          "buildTarget": "@board-games-empire/worker:build",
+          "buildTarget": "@boardgamesempire/worker:build",
           "runBuildTargetDependencies": false
         },
         "configurations": {
           "development": {
-            "buildTarget": "@board-games-empire/worker:build:development"
+            "buildTarget": "@boardgamesempire/worker:build:development"
           },
           "production": {
-            "buildTarget": "@board-games-empire/worker:build:production"
+            "buildTarget": "@boardgamesempire/worker:build:production"
           }
         }
       },

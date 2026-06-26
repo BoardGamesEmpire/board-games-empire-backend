@@ -1,4 +1,4 @@
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
 import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
 

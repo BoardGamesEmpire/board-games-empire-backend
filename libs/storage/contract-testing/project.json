@@ -1,0 +1,9 @@
+{
+  "name": "storage-contract-testing",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/storage/contract-testing/src",
+  "projectType": "library",
+  "tags": ["scope:public-testing"],
+  "// targets": "to see all targets run: nx show project storage-contract-testing --web",
+  "targets": {}
+}

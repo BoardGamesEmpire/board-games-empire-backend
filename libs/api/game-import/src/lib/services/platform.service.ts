@@ -1,5 +1,5 @@
 import { DatabaseService, PlatformType } from '@bge/database';
-import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@board-games-empire/proto-gateway';
+import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toEditionKey, toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
 import { ReleaseGraphResolver } from './release-graph.resolver';
@@ -17,7 +17,10 @@ type ReleaseIdMap = Map<string, string>;
 export class PlatformUpsertService {
   private readonly logger = new Logger(PlatformUpsertService.name);
 
-  constructor(private readonly db: DatabaseService, private readonly releaseGraphResolver: ReleaseGraphResolver) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly releaseGraphResolver: ReleaseGraphResolver,
+  ) {}
 
   /**
    * Resolves a canonical Platform record for the given proto PlatformData,

@@ -1,0 +1,104 @@
+/// Storage/bytes + ownership layer. A row exists only after a successful
+/// driver `put`, so byte metadata is non-null. Access policy (owner, visibility,
+/// household shares, contribution state) lives here; presentation metadata lives
+/// on the 1:1 `Media` row. Byte access is authorized via signed URLs, not CASL;
+/// CASL gates metadata reads, signed-URL minting, and management.
+model MediaObject {
+  id String @id @default(cuid(2))
+
+  // ─── Ownership ──────────────────────────────────────────
+  // owner = current controlling principal (the service account once contributed).
+  // uploader = immutable provenance/credit; never reassigned, even on contribute.
+  owner   User   @relation("MediaOwner", fields: [ownerId], references: [id])
+  ownerId String @map("owner_id")
+
+  uploader   User   @relation("MediaUploader", fields: [uploaderId], references: [id])
+  uploaderId String @map("uploader_id")
+
+  // ─── Reach ──────────────────────────────────────────────
+  // Private (owner-only) → Household (+ MediaShare rows) → Public (site-wide).
+  visibility Visibility @default(Private)
+
+  // ─── Storage location ───────────────────────────────────
+  driverSlug String @map("driver_slug")
+  driverKey  String @map("driver_key")
+
+  // ─── Byte metadata ──────────────────────────────────────
+  sizeBytes    BigInt  @map("size_bytes")
+  mimeType     String  @map("mime_type")
+  checksum     String // sha256 of content, computed on put
+  etag         String? // optional HTTP validator; driver-specific
+  originalName String? @map("original_name")
+
+  // ─── Relations ──────────────────────────────────────────
+  media         Media? // 1:1 presentation layer (optional: raw blobs need none)
+  shares        MediaShare[]
+  contributions MediaContribution[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([driverSlug, driverKey])
+  @@index([ownerId])
+  @@index([uploaderId])
+  @@index([checksum])
+  @@map("media_objects")
+}
+
+/// Explicit many-to-many share: scopes a MediaObject to specific households the
+/// owner belongs to (the middle reach tier). Moot once visibility is Public.
+model MediaShare {
+  id String @id @default(cuid(2))
+
+  mediaObject   MediaObject @relation(fields: [mediaObjectId], references: [id], onDelete: Cascade)
+  mediaObjectId String      @map("media_object_id")
+
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String    @map("household_id")
+
+  sharedBy   User?   @relation("MediaSharedBy", fields: [sharedById], references: [id], onDelete: SetNull)
+  sharedById String? @map("shared_by_id")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([mediaObjectId, householdId])
+  @@index([householdId])
+  @@map("media_shares")
+}
+
+/// Tracks a "contribute to the server" request and its moderation lifecycle.
+/// Holds the intended subject until approval — the subject join row (e.g.
+/// GameDocument) is created on approve, alongside the owner→service-account flip
+/// and visibility→Public. `origin` drives reject cleanup: DirectUpload rejects
+/// are swept after `reclaimDeadline`; ExistingMedia rejects are left untouched.
+model MediaContribution {
+  id String @id @default(cuid(2))
+
+  mediaObject   MediaObject @relation(fields: [mediaObjectId], references: [id], onDelete: Cascade)
+  mediaObjectId String      @map("media_object_id")
+
+  subjectType ResourceType @map("subject_type")
+  subjectId   String       @map("subject_id")
+  category    String? // e.g. "rulebook", "score_card" — feeds the subject join row
+
+  status MediaContributionStatus @default(Pending)
+  origin ContributionOrigin
+
+  contributedBy   User   @relation("MediaContributedBy", fields: [contributedById], references: [id])
+  contributedById String @map("contributed_by_id")
+
+  reviewedBy   User?   @relation("MediaContributionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedById String? @map("reviewed_by_id")
+  reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(3)
+
+  rejectionReason String?   @map("rejection_reason")
+  reclaimDeadline DateTime? @map("reclaim_deadline") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([mediaObjectId])
+  @@index([status, origin, reclaimDeadline]) // sweep query
+  @@index([subjectType, subjectId])
+  @@map("media_contributions")
+}

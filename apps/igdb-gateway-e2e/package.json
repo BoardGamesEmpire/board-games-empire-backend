@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire/igdb-gateway-e2e",
+  "name": "@boardgamesempire/igdb-gateway-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@board-games-empire/igdb-gateway"
+      "@boardgamesempire/igdb-gateway"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@board-games-empire/igdb-gateway:build",
-          "@board-games-empire/igdb-gateway:serve"
+          "@boardgamesempire/igdb-gateway:build",
+          "@boardgamesempire/igdb-gateway:serve"
         ]
       }
     }

@@ -1,4 +1,4 @@
-import { GatewayPingResponse, GatewayServiceClient } from '@board-games-empire/proto-gateway';
+import { GatewayPingResponse, GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import type { Logger } from '@nestjs/common';
 import assert from 'node:assert';
 import * as crypto from 'node:crypto';

@@ -2,8 +2,8 @@
 
 ## Phase 0 — preparatory (weeks, in parallel with current work)
 
-1. #57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows. - partially complete
-2. #72 OpenTelemetry in core. Same logic — retrofit pain is real, observability you don't have when you need it is worse. - complete in #82 with prisma metrics deferred [#81](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/81)
+1. #57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows. Partially completed in #80
+2. ~~#72 OpenTelemetry in core. Same logic — retrofit pain is real, observability you don't have when you need it is worse.~~ Completed in #82 with Prisma metrics deferred [#81](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/81). Completed in #93
 
 These two can land alongside whatever else is in flight; they're cross-cutting prep, not standalone features.
 
@@ -18,7 +18,7 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 ## Phase 2 — feedback module completes
 
-9. Feedback module (in progress) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.
+9. Feedback module (#77) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.
 10. #70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.
 
 ## Phase 3 — plugin loader (extraction, not invention)
@@ -30,7 +30,7 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 ## Phase 4 — first non-bundled plugin
 
-15. #61 S3 storage driver plugin. Dogfood. Validates the abstraction with one real out-of-tree consumer. Expect this to surface design flaws in #59; fix them here before the next plugin.
+15. #61 S3 storage driver plugin. Validates the abstraction with one real out-of-tree consumer. Expect this to surface design flaws in #59; fix them here before the next plugin.
 
 ## Phase 5 — second wave plugins
 

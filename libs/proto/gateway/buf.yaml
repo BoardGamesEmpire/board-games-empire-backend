@@ -1,11 +1,11 @@
 version: v2
 modules:
   - path: src/proto
-    name: buf.build/board-games-empire/bge-coordinator
+    name: buf.build/boardgamesempire/bge-coordinator
     includes:
       - src/proto/bge/coordinator
   - path: src/proto
-    name: buf.build/board-games-empire/bge-gateway
+    name: buf.build/boardgamesempire/bge-gateway
     includes:
       - src/proto/bge/gateway
 lint:

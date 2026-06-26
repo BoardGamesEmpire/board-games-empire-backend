@@ -1,6 +1,6 @@
 import { PlatformType, ReleaseRegion, ReleaseStatus } from '@bge/database';
-import type { LocalizationData } from '@board-games-empire/proto-gateway';
-import * as proto from '@board-games-empire/proto-gateway';
+import type { LocalizationData } from '@boardgamesempire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 
 const PROTO_TO_DB_PLATFORM_TYPE: Record<string, PlatformType> = {
   [proto.PlatformType.PLATFORM_TYPE_CONSOLE]: PlatformType.Console,

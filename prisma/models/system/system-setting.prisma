@@ -11,5 +11,9 @@ model SystemSetting {
   feedbackReportRetentionDays          Int     @default(90) @map("feedback_report_retention_days")
   feedbackReportServerRedactionEnabled Boolean @default(true) @map("feedback_report_server_redaction_enabled")
 
+  mediaSigningSecret          String? @map("media_signing_secret") // encrypted at rest (EncryptionService)
+  requireContributionApproval Boolean @default(false) @map("require_contribution_approval")
+  contributionReclaimDays     Int     @default(14) @map("contribution_reclaim_days")
+
   @@map("system_settings")
 }

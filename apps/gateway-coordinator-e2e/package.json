@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire/gateway-coordinator-e2e",
+  "name": "@boardgamesempire/gateway-coordinator-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@board-games-empire/gateway-coordinator"
+      "@boardgamesempire/gateway-coordinator"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@board-games-empire/gateway-coordinator:build",
-          "@board-games-empire/gateway-coordinator:serve"
+          "@boardgamesempire/gateway-coordinator:build",
+          "@boardgamesempire/gateway-coordinator:serve"
         ]
       }
     }

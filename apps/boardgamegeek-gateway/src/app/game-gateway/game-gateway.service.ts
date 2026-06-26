@@ -1,4 +1,4 @@
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { EMPTY, Observable, defer, from, of } from 'rxjs';
@@ -71,7 +71,7 @@ export class GameGatewayService {
             correlationId: request.correlationId,
             status: proto.ResultStatus.RESULT_STATUS_RESULT,
             game: searchItemToGameSearchData(item),
-          } satisfies proto.GatewaySearchResult),
+          }) satisfies proto.GatewaySearchResult,
       ),
 
       endWith<proto.GatewaySearchResult>({
@@ -180,7 +180,7 @@ export class GameGatewayService {
             correlationId: request.correlationId,
             status: proto.ResultStatus.RESULT_STATUS_RESULT,
             game: thingToGameSearchData(thing),
-          } satisfies proto.GatewaySearchResult),
+          }) satisfies proto.GatewaySearchResult,
       ),
 
       endWith<proto.GatewaySearchResult>({

@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire/gateway-worker-e2e",
+  "name": "@boardgamesempire/gateway-worker-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@board-games-empire/gateway-worker"
+      "@boardgamesempire/gateway-worker"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@board-games-empire/gateway-worker:build",
-          "@board-games-empire/gateway-worker:serve"
+          "@boardgamesempire/gateway-worker:build",
+          "@boardgamesempire/gateway-worker:serve"
         ]
       }
     }

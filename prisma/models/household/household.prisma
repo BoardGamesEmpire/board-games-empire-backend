@@ -18,6 +18,7 @@ model Household {
   gamePlaySessions     GamePlaySession[]
   invites              Invite[]
   members              HouseholdMember[]
+  mediaShares          MediaShare[]
   ruleVariants         RuleVariant[]
   webhookSubscriptions WebhookSubscription[]
   quotas               Quota[]

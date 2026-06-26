@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire/worker-e2e",
+  "name": "@boardgamesempire/worker-e2e",
   "version": "0.0.1",
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@board-games-empire/worker"
+      "@boardgamesempire/worker"
     ],
     "targets": {
       "e2e": {
@@ -17,8 +17,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@board-games-empire/worker:build",
-          "@board-games-empire/worker:serve"
+          "@boardgamesempire/worker:build",
+          "@boardgamesempire/worker:serve"
         ]
       }
     }

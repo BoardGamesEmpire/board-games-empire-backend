@@ -4,9 +4,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/api with Nx",
+      "name": "Debug @boardgamesempire/api with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/api"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/api"],
       "env": {
         "NODE_OPTIONS": "--inspect=9229"
       },
@@ -19,9 +19,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/gateway-coordinator with Nx",
+      "name": "Debug @boardgamesempire/gateway-coordinator with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/gateway-coordinator"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/gateway-coordinator"],
       "env": {
         "NODE_OPTIONS": "--inspect=9230"
       },
@@ -34,9 +34,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/boardgamegeek-gateway with Nx",
+      "name": "Debug @boardgamesempire/boardgamegeek-gateway with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/boardgamegeek-gateway"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/boardgamegeek-gateway"],
       "env": {
         "NODE_OPTIONS": "--inspect=9231"
       },
@@ -49,9 +49,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/igdb-gateway with Nx",
+      "name": "Debug @boardgamesempire/igdb-gateway with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/igdb-gateway"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/igdb-gateway"],
       "env": {
         "NODE_OPTIONS": "--inspect=9232"
       },
@@ -64,9 +64,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/worker with Nx",
+      "name": "Debug @boardgamesempire/worker with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/worker"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/worker"],
       "env": {
         "NODE_OPTIONS": "--inspect=9233"
       },
@@ -79,9 +79,9 @@
     {
       "type": "node",
       "request": "launch",
-      "name": "Debug @board-games-empire/gateway-worker with Nx",
+      "name": "Debug @boardgamesempire/gateway-worker with Nx",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["nx", "serve", "@board-games-empire/gateway-worker"],
+      "runtimeArgs": ["nx", "serve", "@boardgamesempire/gateway-worker"],
       "env": {
         "NODE_OPTIONS": "--inspect=9234"
       },
