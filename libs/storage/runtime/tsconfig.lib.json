@@ -6,9 +6,35 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": ["node"],
+    "target": "esnext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "strictNullChecks": true,
+    "noImplicitAny": true,
+    "strictBindCallApply": true,
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src/**/*.ts"],
-  "references": [],
+  "references": [
+    {
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/services/tsconfig.lib.json"
+    },
+    {
+      "path": "../../database/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/env/tsconfig.lib.json"
+    },
+    {
+      "path": "../contract-testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../contract/tsconfig.lib.json"
+    }
+  ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]
 }

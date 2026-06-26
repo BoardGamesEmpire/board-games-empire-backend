@@ -1,7 +1,6 @@
-import { storageContractTesting } from './storage-contract-testing.js';
+import { InMemoryStorageDriver } from './in-memory-driver.js';
+import { runStorageDriverContract } from './run-storage-driver-contract.js';
 
-describe('storageContractTesting', () => {
-  it('should work', () => {
-    expect(storageContractTesting()).toEqual('storage-contract-testing');
-  });
+describe('InMemoryStorageDriver', () => {
+  runStorageDriverContract(() => ({ driver: new InMemoryStorageDriver() }));
 });

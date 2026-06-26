@@ -8,7 +8,7 @@ const swcJestConfig = JSON.parse(readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8
 swcJestConfig.swcrc = false;
 
 module.exports = {
-  displayName: '@board-games-empire/logger',
+  displayName: 'logger',
   preset: '../../../jest.preset.js',
   testEnvironment: 'node',
   transform: {

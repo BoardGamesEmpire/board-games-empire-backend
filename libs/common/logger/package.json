@@ -18,7 +18,7 @@
       "common",
       "logger"
     ],
-    "name": "@board-games-empire/logger"
+    "name": "logger"
   },
   "dependencies": {}
 }
