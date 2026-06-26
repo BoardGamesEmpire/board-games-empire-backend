@@ -15,7 +15,7 @@ import {
   ResultStatus,
   SearchGameResult,
   SearchGamesRequest,
-} from '@board-games-empire/proto-gateway';
+} from '@boardgamesempire/proto-gateway';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';

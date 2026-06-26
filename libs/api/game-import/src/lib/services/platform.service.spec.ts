@@ -1,8 +1,8 @@
 import type { GameRelease, PlatformGatewayLink } from '@bge/database';
 import { PlatformType } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import type { GameData, PlatformData } from '@board-games-empire/proto-gateway';
-import * as proto from '@board-games-empire/proto-gateway';
+import type { GameData, PlatformData } from '@boardgamesempire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import type { PlatformGameMap } from './platform.service';
 import { PlatformUpsertService } from './platform.service';

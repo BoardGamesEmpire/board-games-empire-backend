@@ -1,7 +1,7 @@
 import { GameSource } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import type { GameData } from '@board-games-empire/proto-gateway';
-import { ContentType, PlatformType as ProtoPlatformType } from '@board-games-empire/proto-gateway';
+import type { GameData } from '@boardgamesempire/proto-gateway';
+import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
 import { GameUpsertService } from './game.service';
 import { PersonUpsertService } from './person.service';

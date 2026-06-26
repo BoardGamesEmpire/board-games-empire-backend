@@ -1,4 +1,4 @@
-import type { GameData } from '@board-games-empire/proto-gateway';
+import type { GameData } from '@boardgamesempire/proto-gateway';
 
 /**
  * Helper used by GameImportProcessor to extract GameData from its

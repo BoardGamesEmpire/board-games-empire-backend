@@ -18,8 +18,9 @@ const ESM_PACKAGES = [
   'better-auth',
   'better-call',
   'jose',
+  'kysely',
   'nanostores',
-  'rou3'
+  'rou3',
 ];
 
 const esmPattern = ESM_PACKAGES.join('|');

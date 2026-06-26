@@ -1,4 +1,4 @@
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { DateTime } from 'luxon';
 import { AgeRatingOrganization, GameStatus, GameType, OrganizationRating, PlatformType, Region } from '../constants';
 import type {

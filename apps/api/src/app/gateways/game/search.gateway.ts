@@ -12,7 +12,7 @@ import type {
   WsSourceUnavailablePayload,
 } from '@bge/game-search';
 import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import { ResultStatus } from '@board-games-empire/proto-gateway';
+import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,

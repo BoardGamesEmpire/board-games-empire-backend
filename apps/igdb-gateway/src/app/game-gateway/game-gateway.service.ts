@@ -1,4 +1,4 @@
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
 import { Observable, from, merge, of } from 'rxjs';

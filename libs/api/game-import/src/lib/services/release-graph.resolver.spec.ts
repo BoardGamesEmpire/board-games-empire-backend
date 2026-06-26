@@ -1,4 +1,4 @@
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ReleaseGraphResolver } from './release-graph.resolver';

@@ -8,6 +8,7 @@ model User {
   username String
 
   isAnonymous Boolean? @default(false) @map("is_anonymous")
+  isServiceAccount Boolean @default(false) @map("is_service_account")
 
   email         String
   emailVerified Boolean @default(false) @map("email_verified")
@@ -29,7 +30,11 @@ model User {
   sessions             Session[]
   twofactors           TwoFactor[]
   sessionPlayers       SessionPlayer[]
-  userMedia            Media[]
+  mediaOwned                 MediaObject[]       @relation("MediaOwner")
+  mediaUploaded              MediaObject[]       @relation("MediaUploader")
+  mediaSharesCreated         MediaShare[]        @relation("MediaSharedBy")
+  mediaContributed           MediaContribution[] @relation("MediaContributedBy")
+  mediaContributionsReviewed MediaContribution[] @relation("MediaContributionReviewer")
   lists                List[]
   gatewayConnections   UserGatewayConnection[]
   householdMember      HouseholdMember[]

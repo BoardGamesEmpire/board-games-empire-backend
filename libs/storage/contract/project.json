@@ -1,0 +1,9 @@
+{
+  "name": "storage-contract",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/storage/contract/src",
+  "projectType": "library",
+  "tags": ["scope:public-contract"],
+  "// targets": "to see all targets run: nx show project storage-contract --web",
+  "targets": {}
+}

@@ -1,0 +1,8 @@
+enum MediaContributionStatus {
+  Pending
+  Approved
+  Rejected
+  Reclaimed
+
+  @@map("media_contribution_statuses")
+}

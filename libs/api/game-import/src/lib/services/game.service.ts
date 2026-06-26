@@ -1,5 +1,5 @@
 import { ContentType, DatabaseService, ExpansionType, Prisma, Visibility } from '@bge/database';
-import { DlcData, type GameData, ContentType as ProtoContentType } from '@board-games-empire/proto-gateway';
+import { DlcData, type GameData, ContentType as ProtoContentType } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult } from '../interfaces/import-job.interface';
 import { toReleaseDate, toReleaseRegion } from './helpers';

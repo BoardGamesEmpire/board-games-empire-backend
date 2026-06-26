@@ -1,5 +1,5 @@
 import { DatabaseService, isPrismaUniqueConstraintError } from '@bge/database';
-import type { CategoryData, FamilyData, MechanicData } from '@board-games-empire/proto-gateway';
+import type { CategoryData, FamilyData, MechanicData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toSlug } from '../utils/slug';
 

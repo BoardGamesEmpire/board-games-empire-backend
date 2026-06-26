@@ -54,9 +54,9 @@
   "private": true,
   "dependencies": {
     "@aws-sdk/client-s3": "3.1053.0",
-    "@better-auth/api-key": "1.6.13",
-    "@better-auth/passkey": "1.6.13",
-    "@better-auth/prisma-adapter": "1.6.13",
+    "@better-auth/api-key": "1.6.20",
+    "@better-auth/passkey": "1.6.20",
+    "@better-auth/prisma-adapter": "1.6.20",
     "@casl/ability": "7.0.0",
     "@casl/prisma": "2.0.1",
     "@grpc/grpc-js": "1.14.4",
@@ -109,7 +109,7 @@
     "@willsoto/nestjs-prometheus": "6.1.0",
     "argon2": "0.44.0",
     "axios": "1.16.1",
-    "better-auth": "1.6.13",
+    "better-auth": "1.6.20",
     "bgg-ts-client": "0.2.0",
     "bullmq": "5.76.6",
     "bullmq-otel": "1.3.1",
@@ -203,7 +203,8 @@
     "libs/common/env",
     "libs/common/*",
     "libs/proto/gateway",
-    "libs/queue/*"
+    "libs/queue/*",
+    "libs/storage/*"
   ],
   "nx": {
     "includedScripts": [],

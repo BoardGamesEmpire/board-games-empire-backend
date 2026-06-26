@@ -1,10 +1,10 @@
 {
-  "name": "@board-games-empire/proto-gateway",
+  "name": "@boardgamesempire/proto-gateway",
   "$schema": "../../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/proto/gateway/src",
   "projectType": "library",
   "tags": ["proto", "gateway"],
-  "// targets": "to see all targets run: nx show project @board-games-empire/proto-gateway --web",
+  "// targets": "to see all targets run: nx show project @boardgamesempire/proto-gateway --web",
   "targets": {
     "generate": {
       "executor": "nx:run-commands",
@@ -69,7 +69,7 @@
           "command": "buf breaking --against '.git#branch=main,subdir=libs/proto/gateway'"
         },
         "bsr": {
-          "command": "buf breaking --against 'https://buf.build/board-games-empire/bge-gateway'"
+          "command": "buf breaking --against 'https://buf.build/boardgamesempire/bge-gateway'"
         }
       }
     },

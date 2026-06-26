@@ -2,7 +2,7 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, GameGateway, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@board-games-empire/proto-gateway';
+import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { from, of } from 'rxjs';

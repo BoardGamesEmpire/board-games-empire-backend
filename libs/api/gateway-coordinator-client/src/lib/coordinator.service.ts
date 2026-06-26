@@ -1,5 +1,5 @@
 import { SystemActorScope } from '@bge/actor-context';
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import type { ClientGrpc } from '@nestjs/microservices';
 import * as crypto from 'node:crypto';

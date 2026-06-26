@@ -1,6 +1,6 @@
 import { AuthType, Prisma } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';

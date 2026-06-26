@@ -1,6 +1,6 @@
 import { DatabaseService } from '@bge/database';
 import { pingWithRetry, walkDir } from '@bge/utils';
-import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@board-games-empire/proto-gateway';
+import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';

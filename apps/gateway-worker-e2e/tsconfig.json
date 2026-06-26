@@ -1,7 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "out-tsc/@board-games-empire/gateway-worker-e2e",
+    "outDir": "out-tsc/@boardgamesempire/gateway-worker-e2e",
     "esModuleInterop": true,
     "noUnusedLocals": false,
     "noImplicitAny": false

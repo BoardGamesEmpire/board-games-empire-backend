@@ -1,7 +1,7 @@
 import { DatabaseService, JobStatus } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
-import * as proto from '@board-games-empire/proto-gateway';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger, NotFoundException } from '@nestjs/common';
 import { Job } from 'bullmq';
