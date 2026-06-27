@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/queue-webhooks",
+    "name": "queue-webhooks",
     "tags": [
       "libs",
       "queue",

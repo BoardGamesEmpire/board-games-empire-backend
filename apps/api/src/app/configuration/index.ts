@@ -1,3 +1,4 @@
+import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
 import Joi from 'joi';
 import cache, { cacheConfigValidationSchema } from './cache.config';
 import redisBullmq, { redisQueueConfigValidationSchema } from './redis-queue.config';
@@ -9,6 +10,7 @@ import throttle, { throttleConfigValidationSchema } from './throttle.config';
 
 export const configuration = {
   cache,
+  mediaConfig,
   redis,
   redisBullmq,
   redisWebsocket,
@@ -19,6 +21,7 @@ export const configuration = {
 
 export const configurationValidationSchema = Joi.object({
   ...cacheConfigValidationSchema,
+  ...mediaConfigValidationSchema,
   ...redisConfigValidationSchema,
   ...redisQueueConfigValidationSchema,
   ...systemConfigValidationSchema,

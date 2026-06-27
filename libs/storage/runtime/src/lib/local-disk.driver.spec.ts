@@ -14,8 +14,9 @@ function makeConfig(root: string): ConfigService {
   const media: MediaConfig = {
     driver: 'localdisk',
     localDiskRoot: root,
+    signedUrlTtlSeconds: 300,
     baseUrl: 'https://bge.test',
-    streamPath: '/media/stream',
+    streamPath: '/media-stream',
   };
   return { getOrThrow: jest.fn().mockReturnValue(media) } as unknown as ConfigService;
 }
@@ -80,7 +81,7 @@ describe('LocalDiskDriver', () => {
         bindings: { ownerId: 'u1' },
       });
 
-      expect(signed.url).toContain('https://bge.test/media/stream?');
+      expect(signed.url).toContain('https://bge.test/media-stream?');
       const url = new URL(signed.url);
       expect(url.searchParams.get('op')).toBe('get');
       expect(url.searchParams.get('ct')).toBeNull();

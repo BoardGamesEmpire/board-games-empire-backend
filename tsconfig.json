@@ -167,6 +167,9 @@
     },
     {
       "path": "./libs/storage/runtime"
+    },
+    {
+      "path": "./libs/api/media"
     }
   ]
 }

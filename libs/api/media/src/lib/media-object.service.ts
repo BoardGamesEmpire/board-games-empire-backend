@@ -1,0 +1,183 @@
+import { Action, DatabaseService, type MediaObject, Prisma, ResourceType, Visibility } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
+import { PaginationQueryDto } from '@bge/shared';
+import { type MediaConfig, MediaUrlSigner, StorageService } from '@bge/storage';
+import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
+import {
+  ForbiddenException,
+  GoneException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnsupportedMediaTypeException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { createId } from '@paralleldrive/cuid2';
+import { PrismaError } from '@status/codes';
+import { Readable } from 'node:stream';
+import { formatContentDisposition } from './content-disposition.util';
+import { StreamMediaQueryDto, UploadedMediaFile } from './dto';
+import { ALLOWED_UPLOAD_MIME_TYPES, INLINE_SAFE_MIME_TYPES } from './media-mime.policy';
+
+@Injectable()
+export class MediaObjectService {
+  private readonly logger = new Logger(MediaObjectService.name);
+
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly ability: AbilityService,
+    private readonly storage: StorageService,
+    private readonly signer: MediaUrlSigner,
+    private readonly config: ConfigService,
+  ) {}
+
+  async upload(file: UploadedMediaFile) {
+    // Defense-in-depth: the controller's fileFilter rejects earlier, but the
+    // service must not trust its caller. SVG/HTML never reach here.
+    if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
+      throw new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`);
+    }
+
+    const userId = this.ability.getActingUserId();
+    const id = createId(); // own the id so storage key and row id match
+    const key = `users/${userId}/${id}`; // uploader-anchored: stable across ownership changes
+
+    const stored = await this.storage.put(key, file.buffer, {
+      contentType: file.mimetype,
+      originalName: file.originalname,
+    });
+
+    try {
+      return await this.db.mediaObject.create({
+        data: {
+          id,
+          ownerId: userId,
+          uploaderId: userId,
+          visibility: Visibility.Private,
+          driverSlug: stored.driverSlug,
+          driverKey: key,
+          sizeBytes: stored.size,
+          mimeType: stored.contentType,
+          checksum: stored.checksum,
+          etag: stored.etag ?? null,
+          originalName: file.originalname ?? null,
+        },
+      });
+    } catch (error) {
+      // Row never persisted → these bytes are orphaned. This best-effort delete
+      // is the ONLY cleanup that exists today; there is no sweep job yet
+      // (planned, batch 6), so a failure here leaks bytes until then. Log loudly.
+      await this.storage
+        .delete(key)
+        .catch((cleanupError) =>
+          this.logger.error(`Orphaned bytes at ${key} after failed row insert; manual cleanup needed`, cleanupError),
+        );
+      throw error;
+    }
+  }
+
+  async findById(id: string) {
+    const media = await this.db.mediaObject.findUnique({
+      where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
+    });
+
+    if (!media) {
+      throw new NotFoundException(`Media object ${id} not found`);
+    }
+
+    return media;
+  }
+
+  async list(pagination: PaginationQueryDto) {
+    return this.db.mediaObject.findMany({
+      where: { AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
+      skip: pagination.offset,
+      take: pagination.limit ?? 10, // ?? not ||: a real limit of 0 isn't silently bumped to 10
+    });
+  }
+
+  async createSignedUrl(id: string) {
+    const media = await this.findById(id); // enforces read access
+    const { signedUrlTtlSeconds } = this.config.getOrThrow<MediaConfig>('media');
+
+    return this.storage.signedUrl(media.driverKey, 'get', {
+      ttlSeconds: signedUrlTtlSeconds,
+      contentType: media.mimeType,
+      bindings: { ownerId: media.ownerId },
+    });
+  }
+
+  async delete(id: string) {
+    const media = await this.deleteRowChecked(id);
+
+    await this.storage
+      .delete(media.driverKey)
+      .catch((error) => this.logger.error(`Deleted row ${id} but failed to remove bytes at ${media.driverKey}`, error));
+
+    return media;
+  }
+
+  private async deleteRowChecked(id: string): Promise<MediaObject> {
+    try {
+      return await this.db.mediaObject.delete({
+        where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.delete) },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+        throw new NotFoundException(`Media object ${id} not found`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Verifies a signed-URL request and returns the byte stream. Sessionless — the
+   * signature is the authorization. An unknown key returns the SAME 403 as a bad
+   * signature so existence isn't leaked to probes; 410 only reaches a caller who
+   * presented a cryptographically-valid (i.e. previously-issued) but expired URL.
+   */
+  async getVerifiedStream(query: StreamMediaQueryDto) {
+    const { key, op, exp, sig } = query;
+
+    const media = await this.db.mediaObject.findUnique({
+      where: { driverSlug_driverKey: { driverSlug: this.storage.driverSlug, driverKey: key } },
+      select: { ownerId: true, mimeType: true, originalName: true }, // hot path: only what we use
+    });
+
+    if (!media) {
+      throw new ForbiddenException('Invalid signature'); // uniform with a bad sig — no existence oracle
+    }
+
+    try {
+      await this.signer.verify(
+        { key, op, expiresAt: Number(exp), contentType: media.mimeType, bindings: { ownerId: media.ownerId } },
+        sig,
+      );
+    } catch (error) {
+      if (error instanceof SignatureExpiredError) {
+        throw new GoneException('Signed URL has expired');
+      }
+      if (error instanceof SignatureInvalidError) {
+        throw new ForbiddenException('Invalid signature');
+      }
+      throw error;
+    }
+
+    let body: Readable;
+    try {
+      ({ body } = await this.storage.get(key));
+    } catch (error) {
+      if (error instanceof ObjectNotFoundError) {
+        throw new NotFoundException('Media not found');
+      }
+      throw error;
+    }
+
+    const inline = INLINE_SAFE_MIME_TYPES.has(media.mimeType);
+    return {
+      stream: body,
+      contentType: media.mimeType,
+      contentDisposition: formatContentDisposition(inline ? 'inline' : 'attachment', media.originalName ?? 'download'),
+    };
+  }
+}

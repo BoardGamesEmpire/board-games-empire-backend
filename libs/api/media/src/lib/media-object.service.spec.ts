@@ -1,0 +1,235 @@
+import { Action, type MediaObject, Prisma, ResourceType, Visibility } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
+import { MediaUrlSigner, StorageService } from '@bge/storage';
+import {
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  MOCK_ACTING_USER_ID,
+  MOCK_RESOURCE_CONDITION,
+  type MockAbilityService,
+  type MockDatabaseService,
+} from '@bge/testing';
+import {
+  ObjectNotFoundError,
+  SignatureExpiredError,
+  SignatureInvalidError,
+  type StoredObject,
+} from '@boardgamesempire/storage-contract';
+import { ForbiddenException, GoneException, NotFoundException, UnsupportedMediaTypeException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Readable } from 'node:stream';
+import { UploadedMediaFile } from './dto';
+import { MediaObjectService } from './media-object.service';
+
+describe('MediaObjectService', () => {
+  let service: MediaObjectService;
+  let db: MockDatabaseService;
+  let ability: MockAbilityService;
+  let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl' | 'driverSlug'>>;
+  let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
+
+  const stored: StoredObject = {
+    key: 'k',
+    size: 1234n,
+    contentType: 'image/png',
+    checksum: 'sha',
+    etag: 'sha',
+    lastModified: new Date(0),
+    driverSlug: 'localdisk',
+  };
+  const row = {
+    id: 'm1',
+    ownerId: MOCK_ACTING_USER_ID,
+    mimeType: 'image/png',
+    driverKey: 'users/u/m1',
+  } as unknown as MediaObject;
+  const file: UploadedMediaFile = { buffer: Buffer.from('x'), mimetype: 'image/png', originalname: 'cat.png', size: 1 };
+
+  beforeEach(async () => {
+    ability = createMockAbilityService();
+    storage = {
+      put: jest.fn(),
+      get: jest.fn(),
+      delete: jest.fn().mockResolvedValue(undefined),
+      signedUrl: jest.fn(),
+      driverSlug: 'localdisk',
+    };
+    signer = { verify: jest.fn() };
+
+    const config = { getOrThrow: jest.fn().mockReturnValue({ signedUrlTtlSeconds: 300 }) };
+
+    const ctx = await createTestingModuleWithDb({
+      providers: [
+        MediaObjectService,
+        { provide: AbilityService, useValue: ability },
+        { provide: StorageService, useValue: storage },
+        { provide: MediaUrlSigner, useValue: signer },
+        { provide: ConfigService, useValue: config },
+      ],
+    });
+
+    db = ctx.db;
+    service = ctx.module.get(MediaObjectService);
+  });
+
+  describe('upload', () => {
+    it('puts under an uploader-anchored key, then persists the row', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+
+      await expect(service.upload(file)).resolves.toBe(row);
+
+      expect(storage.put).toHaveBeenCalledWith(
+        expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
+        file.buffer,
+        expect.objectContaining({ contentType: 'image/png', originalName: 'cat.png' }),
+      );
+      expect(db.mediaObject.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          ownerId: MOCK_ACTING_USER_ID,
+          uploaderId: MOCK_ACTING_USER_ID,
+          visibility: Visibility.Private,
+          driverSlug: 'localdisk',
+          sizeBytes: 1234n,
+          checksum: 'sha',
+          mimeType: 'image/png',
+        }),
+      });
+    });
+
+    it('cleans up bytes if the row fails to persist', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockRejectedValue(new Error('db down'));
+
+      await expect(service.upload(file)).rejects.toThrow('db down');
+      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+    });
+
+    it('rejects a disallowed media type on upload', async () => {
+      await expect(service.upload({ ...file, mimetype: 'text/html' })).rejects.toBeInstanceOf(
+        UnsupportedMediaTypeException,
+      );
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findById', () => {
+    it('applies read conditions and returns the row', async () => {
+      db.mediaObject.findUnique.mockResolvedValue(row);
+      await expect(service.findById('m1')).resolves.toBe(row);
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.read);
+      expect(db.mediaObject.findUnique).toHaveBeenCalledWith({ where: { id: 'm1', AND: [MOCK_RESOURCE_CONDITION] } });
+    });
+
+    it('throws NotFound when absent or inaccessible', async () => {
+      db.mediaObject.findUnique.mockResolvedValue(null);
+      await expect(service.findById('m1')).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('createSignedUrl', () => {
+    it('mints a GET URL bound to mime + owner', async () => {
+      db.mediaObject.findUnique.mockResolvedValue(row);
+      storage.signedUrl.mockResolvedValue({ url: 'https://x', expiresAt: new Date(0), method: 'GET' });
+
+      await service.createSignedUrl('m1');
+      expect(storage.signedUrl).toHaveBeenCalledWith('users/u/m1', 'get', {
+        ttlSeconds: 300,
+        contentType: 'image/png',
+        bindings: { ownerId: MOCK_ACTING_USER_ID },
+      });
+    });
+  });
+
+  describe('delete', () => {
+    it('deletes the row (access-checked) then the bytes', async () => {
+      db.mediaObject.delete.mockResolvedValue(row);
+      await service.delete('m1');
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.delete);
+      expect(storage.delete).toHaveBeenCalledWith('users/u/m1');
+    });
+
+    it('maps a missing/forbidden row to NotFound', async () => {
+      db.mediaObject.delete.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('x', { code: 'P2025', clientVersion: '7' }),
+      );
+      await expect(service.delete('m1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(storage.delete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getVerifiedStream', () => {
+    const query = { key: 'users/u/m1', op: 'get', exp: '9999999999', sig: 'deadbeef' } as const;
+
+    beforeEach(() => db.mediaObject.findUnique.mockResolvedValue(row));
+
+    it('verifies and returns the stream', async () => {
+      signer.verify.mockResolvedValue(undefined);
+      storage.get.mockResolvedValue({ body: Readable.from(Buffer.from('x')), metadata: stored });
+
+      const result = await service.getVerifiedStream(query);
+      expect(result.contentType).toBe('image/png');
+      expect(signer.verify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          key: 'users/u/m1',
+          op: 'get',
+          expiresAt: 9999999999,
+          contentType: 'image/png',
+          bindings: { ownerId: MOCK_ACTING_USER_ID },
+        }),
+        'deadbeef',
+      );
+    });
+
+    it('returns 403 (not 404) for an unknown key — no existence oracle', async () => {
+      db.mediaObject.findUnique.mockResolvedValue(null);
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(signer.verify).not.toHaveBeenCalled();
+    });
+
+    it('serves inline-safe types inline and others as attachment', async () => {
+      signer.verify.mockResolvedValue(undefined);
+      storage.get.mockResolvedValue({ body: Readable.from(Buffer.from('x')), metadata: stored });
+
+      db.mediaObject.findUnique.mockResolvedValue({
+        ownerId: 'u1',
+        mimeType: 'image/png',
+        originalName: 'a.png',
+      } as never);
+      await expect(service.getVerifiedStream(query)).resolves.toMatchObject({
+        contentDisposition: expect.stringMatching(/^inline;/),
+      });
+
+      db.mediaObject.findUnique.mockResolvedValue({
+        ownerId: 'u1',
+        mimeType: 'text/plain',
+        originalName: 'a.txt',
+      } as never);
+      await expect(service.getVerifiedStream(query)).resolves.toMatchObject({
+        contentDisposition: expect.stringMatching(/^attachment;/),
+      });
+    });
+
+    it('maps an expired signature to 410 Gone', async () => {
+      signer.verify.mockRejectedValue(new SignatureExpiredError());
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(GoneException);
+    });
+
+    it('maps an invalid signature to 403 Forbidden', async () => {
+      signer.verify.mockRejectedValue(new SignatureInvalidError());
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('403s an unknown key without verifying', async () => {
+      db.mediaObject.findUnique.mockResolvedValue(null);
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(ForbiddenException);
+      expect(signer.verify).not.toHaveBeenCalled();
+    });
+
+    it('404s when the row exists but bytes are gone', async () => {
+      signer.verify.mockResolvedValue(undefined);
+      storage.get.mockRejectedValue(new ObjectNotFoundError('users/u/m1'));
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+});
