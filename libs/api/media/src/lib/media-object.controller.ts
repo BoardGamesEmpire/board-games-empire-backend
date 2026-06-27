@@ -22,7 +22,14 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { UploadedMediaFile } from './dto';
-import { ContributeMediaDto, toMediaContributionResponse, toMediaObjectResponse } from './dto';
+import {
+  AttachMediaDto,
+  ContributeMediaDto,
+  DetachMediaDto,
+  toMediaContributionResponse,
+  toMediaObjectResponse,
+} from './dto';
+import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
 import { ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_BYTES } from './media-mime.policy';
 import { MediaObjectService } from './media-object.service';
@@ -37,6 +44,7 @@ export class MediaObjectController {
   constructor(
     private readonly media: MediaObjectService,
     private readonly contributions: MediaContributionService,
+    private readonly link: MediaLinkService,
   ) {}
 
   @ApiResponse({ status: Http.PayloadTooLarge, description: 'File exceeds the size limit' })
@@ -110,5 +118,25 @@ export class MediaObjectController {
     return from(this.contributions.contribute(id, dto)).pipe(
       map((c) => ({ contribution: toMediaContributionResponse(c) })),
     );
+  }
+
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaObject))
+  @Post(':id/attach')
+  attach(@Param('id') id: string, @Body() dto: AttachMediaDto) {
+    const { subjectType, subjectId, title, caption, altText, thumbnailUrl, ...context } = dto;
+    return from(
+      this.link.attach(id, {
+        subjectType,
+        subjectId,
+        presentation: { title, caption, altText, thumbnailUrl },
+        context,
+      }),
+    ).pipe(map((attachment) => ({ attachment })));
+  }
+
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaObject))
+  @Post(':id/detach')
+  detach(@Param('id') id: string, @Body() dto: DetachMediaDto) {
+    return from(this.link.detach(id, dto)).pipe(map((result) => ({ detached: result.removed })));
   }
 }

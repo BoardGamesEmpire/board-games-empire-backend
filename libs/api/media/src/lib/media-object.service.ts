@@ -15,6 +15,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { createId } from '@paralleldrive/cuid2';
 import { PrismaError } from '@status/codes';
+import { imageSize } from 'image-size';
 import { Readable } from 'node:stream';
 import { formatContentDisposition } from './content-disposition.util';
 import { StreamMediaQueryDto, UploadedMediaFile } from './dto';
@@ -51,6 +52,8 @@ export class MediaObjectService {
       originalName: file.originalname,
     });
 
+    const dimensions = this.probeImageDimensions(file);
+
     try {
       // Authoritative gate: the driver computes the true stored size, and that is
       // what usage measures. For a transforming driver it can differ from the
@@ -63,6 +66,8 @@ export class MediaObjectService {
           id,
           ownerId: userId,
           uploaderId: userId,
+          width: dimensions?.width ?? null,
+          height: dimensions?.height ?? null,
           visibility: Visibility.Private,
           driverSlug: stored.driverSlug,
           driverKey: key,
@@ -223,6 +228,22 @@ export class MediaObjectService {
     if (!result.allowed) {
       // `allowed` is false only on a hard violation; the binding fields are then set.
       throw new QuotaExceededException('storage_bytes', result.scope!, result.limit!, result.currentUsage!, amount);
+    }
+  }
+
+  private probeImageDimensions(file: UploadedMediaFile): { width: number; height: number } | null {
+    if (!file.mimetype.startsWith('image/')) {
+      return null;
+    }
+
+    try {
+      const { width, height } = imageSize(file.buffer);
+      return typeof width === 'number' && typeof height === 'number' ? { width, height } : null;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to probe image dimensions for ${file.originalname}: ${error instanceof Error ? error.message : error}`,
+      );
+      return null;
     }
   }
 }

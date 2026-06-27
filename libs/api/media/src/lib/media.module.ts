@@ -4,6 +4,7 @@ import { QuotaModule } from '@bge/quota';
 import { ServicesModule } from '@bge/services';
 import { StorageModule } from '@bge/storage';
 import { Module } from '@nestjs/common';
+import { MediaLinkService } from './link/link.service';
 import { MediaContributionNotificationListener } from './listeners/media-contribution-notification.listener';
 import { MediaContributionController } from './media-contribution.controller';
 import { MediaContributionService } from './media-contribution.service';
@@ -14,7 +15,7 @@ import { MediaStreamController } from './media-stream.controller';
 @Module({
   imports: [DatabaseModule, StorageModule, QuotaModule, ServicesModule, NotificationsServiceModule],
   controllers: [MediaStreamController, MediaObjectController, MediaContributionController],
-  providers: [MediaObjectService, MediaContributionService, MediaContributionNotificationListener],
-  exports: [MediaObjectService, MediaContributionService],
+  providers: [MediaObjectService, MediaContributionService, MediaLinkService, MediaContributionNotificationListener],
+  exports: [MediaObjectService, MediaContributionService, MediaLinkService],
 })
 export class MediaModule {}

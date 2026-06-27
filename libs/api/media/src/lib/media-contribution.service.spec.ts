@@ -8,9 +8,10 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaContributionEvents } from './constants/media-contribution-events.constant';
+import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
 
 describe('MediaContributionService', () => {
@@ -19,6 +20,7 @@ describe('MediaContributionService', () => {
   let ability: MockAbilityService;
   const emit = jest.fn();
   const serviceAccount = { resolve: jest.fn().mockResolvedValue({ id: 'svc' }), ensure: jest.fn() };
+  const mediaLink = { attachWithin: jest.fn(), canLink: jest.fn().mockReturnValue(true) };
 
   const ownedMedia = { id: 'm1', ownerId: MOCK_ACTING_USER_ID };
   const dto = { subjectType: ResourceType.Game, subjectId: 'g1', category: 'rulebook' };
@@ -31,6 +33,7 @@ describe('MediaContributionService', () => {
         { provide: AbilityService, useValue: ability },
         { provide: ServiceAccountService, useValue: serviceAccount },
         { provide: EventEmitter2, useValue: { emit } },
+        { provide: MediaLinkService, useValue: mediaLink },
       ],
     });
     db = ctx.db;
@@ -89,6 +92,22 @@ describe('MediaContributionService', () => {
       await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(ConflictException);
       expect(db.mediaContribution.create).not.toHaveBeenCalled();
     });
+
+    it('attaches to the subject on auto-approve', async () => {
+      db.systemSetting.findFirst.mockResolvedValue({ requireContributionApproval: false } as never);
+      db.mediaContribution.create.mockResolvedValue({ id: 'c1' } as never);
+      await service.contribute('m1', dto);
+      expect(mediaLink.attachWithin).toHaveBeenCalledWith(
+        expect.anything(),
+        'm1',
+        expect.objectContaining({ subjectType: dto.subjectType, subjectId: dto.subjectId }),
+      );
+    });
+
+    it('rejects contributing a non-linkable media type', async () => {
+      mediaLink.canLink.mockReturnValueOnce(false);
+      await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 
   describe('approve', () => {
@@ -122,6 +141,24 @@ describe('MediaContributionService', () => {
         status: MediaContributionStatus.Approved,
       } as never);
       await expect(service.approve('c1')).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('attaches to the subject on approve', async () => {
+      db.mediaContribution.findUnique.mockResolvedValue({
+        id: 'c1',
+        mediaObjectId: 'm1',
+        status: MediaContributionStatus.Pending,
+        subjectType: ResourceType.Game,
+        subjectId: 'g1',
+        category: 'rulebook',
+      } as never);
+      db.mediaContribution.update.mockResolvedValue({ id: 'c1' } as never);
+      await service.approve('c1');
+      expect(mediaLink.attachWithin).toHaveBeenCalledWith(
+        expect.anything(),
+        'm1',
+        expect.objectContaining({ subjectType: ResourceType.Game, subjectId: 'g1' }),
+      );
     });
   });
 

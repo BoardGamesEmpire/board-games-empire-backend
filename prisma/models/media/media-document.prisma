@@ -7,10 +7,6 @@ model GameDocument {
   game   Game   @relation(fields: [gameId], references: [id], onDelete: Cascade)
   gameId String @map("game_id")
 
-  // Document-specific fields
-  pageCount Int?   @map("page_count")
-  format    String
-
   // Context-specific fields
   category String? // "rulebook", "quick_reference", "errata"
 
@@ -27,9 +23,6 @@ model EventDocument {
   event   Event  @relation(fields: [eventId], references: [id], onDelete: Cascade)
   eventId String @map("event_id")
 
-  pageCount Int?   @map("page_count")
-  format    String
-
   category String?
 
   @@index([eventId])
@@ -45,7 +38,6 @@ model FeedbackReportDocument {
   feedbackReport   FeedbackReport @relation(fields: [feedbackReportId], references: [id], onDelete: Cascade)
   feedbackReportId String         @map("feedback_report_id")
 
-  pageCount Int?    @map("page_count")
   language  String?
 
   caption   String?
