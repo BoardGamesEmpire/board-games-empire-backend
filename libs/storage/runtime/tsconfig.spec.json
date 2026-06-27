@@ -7,8 +7,8 @@
   },
   "include": ["jest.config.ts", "jest.config.cts", "src/**/*.test.ts", "src/**/*.spec.ts", "src/**/*.d.ts"],
   "references": [
-    {
-      "path": "./tsconfig.lib.json"
-    }
+    { "path": "./tsconfig.lib.json" },
+    { "path": "../../common/testing/tsconfig.lib.json" },
+    { "path": "../contract-testing/tsconfig.lib.json" }
   ]
 }

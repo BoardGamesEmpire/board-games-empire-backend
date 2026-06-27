@@ -47,6 +47,9 @@
     },
     {
       "path": "../../libs/common/env/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/storage/runtime/tsconfig.lib.json"
     }
   ]
 }

@@ -58,6 +58,7 @@
     "kubelet",
     "kysely",
     "linebreak",
+    "localdisk",
     "luxon",
     "maxplayers",
     "maxplaytime",

@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/actor-context-transport",
+    "name": "actor-context-transport",
     "tags": [
       "api",
       "audit"
