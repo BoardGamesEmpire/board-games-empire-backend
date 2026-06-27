@@ -28,7 +28,7 @@ class SampleWorker extends ActorAwareWorkerHost<SampleJobData, CapturedContext> 
       actor: this.context.getActor(),
       correlationId: this.context.getCorrelationId(),
       source: this.context.getSource(),
-    };
+    } satisfies CapturedContext;
   }
 }
 

@@ -1,5 +1,5 @@
 {
-  "name": "@board-games-empire/database",
+  "name": "@bge/database",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "libs/database/src",
   "projectType": "library",

@@ -11,6 +11,7 @@ const nxPreset = require('@nx/jest/preset').default;
  */
 const ESM_PACKAGES = [
   '@better-auth',
+  '@paralleldrive',
   '@noble',
   '@thallesp/nestjs-better-auth',
   'apicalypse',

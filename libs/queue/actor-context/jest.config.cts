@@ -8,7 +8,7 @@ const swcJestConfig = JSON.parse(readFileSync(`${__dirname}/.spec.swcrc`, 'utf-8
 swcJestConfig.swcrc = false;
 
 module.exports = {
-  displayName: '@board-games-empire/queue-actor-context',
+  displayName: 'queue-actor-context',
   preset: '../../../jest.preset.js',
   testEnvironment: 'node',
   transform: {

@@ -14,6 +14,7 @@ import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
 import { LanguageModule } from '@bge/language';
+import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { DbPoolMetricsRecorderModule } from '@bge/otel';
@@ -165,6 +166,7 @@ import { baseLogger } from './lib/logger';
     HealthModule,
     HouseholdModule,
     LanguageModule,
+    MediaModule,
     MetricsModule,
     NotificationsModule,
     PermissionsModule,

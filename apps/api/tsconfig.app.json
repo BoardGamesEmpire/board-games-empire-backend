@@ -23,12 +23,6 @@
   ],
   "references": [
     {
-      "path": "../../libs/common/otel/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/common/actor-context/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {
@@ -39,6 +33,9 @@
     },
     {
       "path": "../../libs/common/shared/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/storage/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/well-known/tsconfig.lib.json"
@@ -68,10 +65,16 @@
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/otel/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/notifications/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/metrics/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/media/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/language/tsconfig.lib.json"
@@ -117,6 +120,9 @@
     },
     {
       "path": "../../libs/api/actor-context-transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/actor-context/tsconfig.lib.json"
     }
   ]
 }

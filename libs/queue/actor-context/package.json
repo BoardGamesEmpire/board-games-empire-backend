@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "nx": {
-    "name": "@board-games-empire/queue-actor-context",
+    "name": "queue-actor-context",
     "tags": [
       "libs",
       "queue",

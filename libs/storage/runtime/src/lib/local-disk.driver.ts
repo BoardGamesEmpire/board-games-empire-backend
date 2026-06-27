@@ -107,7 +107,7 @@ export class LocalDiskDriver implements StorageDriver {
   }
 
   async signedUrl(key: string, op: StorageOp, options: SignedUrlOptions): Promise<SignedUrl> {
-    this.assertCanonicalKey(key); // never mint a URL for a non-canonical / traversal key (finding 1)
+    this.assertCanonicalKey(key); // never mint a URL for a non-canonical / traversal key
     if (!Number.isFinite(options.ttlSeconds) || options.ttlSeconds <= 0) {
       throw new RangeError(`signedUrl ttlSeconds must be a positive, finite number; received ${options.ttlSeconds}`);
     }
@@ -173,9 +173,9 @@ export class LocalDiskDriver implements StorageDriver {
   }
 
   /**
-   * Validates the full list prefix (finding 3) — not just the directory part.
+   * Validates the full list prefix — not just the directory part.
    * Allows an empty prefix (list all; authorization is the caller's concern,
-   * finding 6) and a single trailing slash (`media/`), but rejects `.`/`..`
+   * and a single trailing slash (`media/`), but rejects `.`/`..`
    * segments, internal empty segments (`a//b`), and backslashes.
    */
   private assertCanonicalPrefix(prefix: string): void {
