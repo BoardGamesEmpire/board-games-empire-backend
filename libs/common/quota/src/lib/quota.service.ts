@@ -36,6 +36,16 @@ export class QuotaService {
     private readonly abilityService: AbilityService,
   ) {}
 
+  /**
+   * Evaluates whether `amount` of `resource` fits the applicable caps for `ctx`,
+   * returning the per-scope breakdown and binding result. Callers throw
+   * QuotaExceededException when `allowed` is false.
+   *
+   * Best-effort and non-atomic: usage is read live with no lock, so concurrent
+   * writers can both pass against the same stale figure and overshoot a *hard*
+   * cap. Acceptable under the overcommit-allowed design (soft caps are meant to
+   * overshoot); a truly-atomic `consume(...)` for hard caps is tracked in #98.
+   */
   async check(resource: QuotaResource, amount: bigint, ctx: QuotaCheckContext): Promise<QuotaCheckResult> {
     if (amount < 0n) {
       throw new BadRequestException('check amount must be non-negative');

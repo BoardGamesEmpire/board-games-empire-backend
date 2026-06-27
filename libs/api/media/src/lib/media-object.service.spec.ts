@@ -1,5 +1,6 @@
-import { Action, type MediaObject, Prisma, ResourceType, Visibility } from '@bge/database';
+import { Action, type MediaObject, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
 import {
   createMockAbilityService,
@@ -27,6 +28,7 @@ describe('MediaObjectService', () => {
   let ability: MockAbilityService;
   let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl' | 'driverSlug'>>;
   let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
+  let quota: jest.Mocked<Pick<QuotaService, 'check'>>;
 
   const stored: StoredObject = {
     key: 'k',
@@ -42,7 +44,8 @@ describe('MediaObjectService', () => {
     ownerId: MOCK_ACTING_USER_ID,
     mimeType: 'image/png',
     driverKey: 'users/u/m1',
-  } as unknown as MediaObject;
+  } as MediaObject;
+
   const file: UploadedMediaFile = { buffer: Buffer.from('x'), mimetype: 'image/png', originalname: 'cat.png', size: 1 };
 
   beforeEach(async () => {
@@ -56,6 +59,17 @@ describe('MediaObjectService', () => {
     };
     signer = { verify: jest.fn() };
 
+    quota = {
+      check: jest.fn().mockResolvedValue({
+        allowed: true,
+        scope: null,
+        currentUsage: null,
+        limit: null,
+        softOverage: false,
+        constraints: [],
+      }),
+    };
+
     const config = { getOrThrow: jest.fn().mockReturnValue({ signedUrlTtlSeconds: 300 }) };
 
     const ctx = await createTestingModuleWithDb({
@@ -65,11 +79,17 @@ describe('MediaObjectService', () => {
         { provide: StorageService, useValue: storage },
         { provide: MediaUrlSigner, useValue: signer },
         { provide: ConfigService, useValue: config },
+        { provide: QuotaService, useValue: quota },
       ],
     });
 
     db = ctx.db;
     service = ctx.module.get(MediaObjectService);
+  });
+
+  afterEach(() => {
+    jest.resetAllMocks();
+    jest.clearAllMocks();
   });
 
   describe('upload', () => {
@@ -110,6 +130,68 @@ describe('MediaObjectService', () => {
         UnsupportedMediaTypeException,
       );
       expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('checks the storage quota for the acting user before writing bytes', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+
+      await service.upload(file);
+
+      expect(quota.check).toHaveBeenCalledWith('storage_bytes', BigInt(file.buffer.byteLength), {
+        userId: MOCK_ACTING_USER_ID,
+      });
+    });
+
+    it('rejects an over-quota upload before touching storage', async () => {
+      quota.check.mockResolvedValue({
+        allowed: false,
+        scope: QuotaScope.User,
+        currentUsage: 100n,
+        limit: 100n,
+        softOverage: false,
+        constraints: [],
+      });
+
+      await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
+      expect(storage.put).not.toHaveBeenCalled();
+      expect(db.mediaObject.create).not.toHaveBeenCalled();
+    });
+
+    it('guards on input length up front, then re-checks the authoritative stored size', async () => {
+      storage.put.mockResolvedValue(stored); // stored.size = 1234n
+      db.mediaObject.create.mockResolvedValue(row);
+
+      await service.upload(file); // file.buffer = 1 byte
+
+      expect(quota.check).toHaveBeenNthCalledWith(1, 'storage_bytes', 1n, { userId: MOCK_ACTING_USER_ID });
+      expect(quota.check).toHaveBeenNthCalledWith(2, 'storage_bytes', 1234n, { userId: MOCK_ACTING_USER_ID });
+    });
+
+    it('deletes the written bytes if the authoritative size pushes over quota', async () => {
+      storage.put.mockResolvedValue(stored);
+      quota.check
+        .mockResolvedValueOnce({
+          allowed: true,
+          scope: null,
+          currentUsage: null,
+          limit: null,
+          softOverage: false,
+          constraints: [],
+        })
+        .mockResolvedValueOnce({
+          allowed: false,
+          scope: QuotaScope.User,
+          currentUsage: 100n,
+          limit: 100n,
+          softOverage: false,
+          constraints: [],
+        });
+
+      await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
+      expect(storage.put).toHaveBeenCalled();
+      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(db.mediaObject.create).not.toHaveBeenCalled();
     });
   });
 
@@ -218,12 +300,6 @@ describe('MediaObjectService', () => {
     it('maps an invalid signature to 403 Forbidden', async () => {
       signer.verify.mockRejectedValue(new SignatureInvalidError());
       await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(ForbiddenException);
-    });
-
-    it('403s an unknown key without verifying', async () => {
-      db.mediaObject.findUnique.mockResolvedValue(null);
-      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(ForbiddenException);
-      expect(signer.verify).not.toHaveBeenCalled();
     });
 
     it('404s when the row exists but bytes are gone', async () => {

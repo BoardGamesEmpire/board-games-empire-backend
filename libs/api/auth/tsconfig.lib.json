@@ -18,7 +18,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/env/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/services/tsconfig.lib.json"
     },
     {
       "path": "../../database/tsconfig.lib.json"

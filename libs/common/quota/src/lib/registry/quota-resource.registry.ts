@@ -38,14 +38,16 @@ export class QuotaResourceRegistry {
       },
     ],
     [
-      // Pending #58 (MediaObject/StorageDriver): Media is owned by uploaderId
-      // with no stable household attribution yet. Registered so caps can be set,
-      // not yet enforceable. HouseholdMember scope becomes meaningful once
-      // storage attribution lands.
+      // Owner-anchored: storage is charged to MediaObject.ownerId (the controlling
+      // principal — the service account once media is contributed), summed per
+      // user and globally. Households are share *targets*, not owners, so storage
+      // is intentionally not measured at Household scope — charging share targets
+      // would double-count the same bytes.
       'storage_bytes',
       {
         key: 'storage_bytes',
         applicableScopes: [QuotaScope.Server, QuotaScope.User],
+        usage: this.sumStorageBytes.bind(this),
       },
     ],
     [
@@ -102,5 +104,20 @@ export class QuotaResourceRegistry {
       where: { createdById: scopeId, deletedAt: null },
     });
     return BigInt(count);
+  }
+
+  private async sumStorageBytes(scope: QuotaScope, scopeId: string): Promise<bigint> {
+    if (scope !== QuotaScope.Server && scope !== QuotaScope.User) {
+      // storage_bytes declares only [Server, User]; a new scope must opt in here
+      // explicitly rather than be silently treated as User and skew accounting.
+      throw new Error(`storage_bytes usage is not defined for scope '${scope}'`);
+    }
+
+    const { _sum } = await this.databaseService.mediaObject.aggregate({
+      _sum: { sizeBytes: true },
+      where: scope === QuotaScope.Server ? {} : { ownerId: scopeId },
+    });
+
+    return _sum?.sizeBytes ?? 0n;
   }
 }

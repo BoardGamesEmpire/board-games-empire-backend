@@ -1,4 +1,5 @@
 import { DatabaseModule, DatabaseService } from '@bge/database';
+import { ServicesModule } from '@bge/services';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -16,6 +17,7 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
   imports: [
     ConfigModule.forFeature(authConfig),
     DatabaseModule,
+    ServicesModule,
     BetterAuthModule.forRootAsync({
       useFactory: (auth: AuthType) => ({ auth }),
       imports: [AuthModule],

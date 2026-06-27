@@ -3,6 +3,7 @@ import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
+  Body,
   Controller,
   Delete,
   Get,
@@ -21,7 +22,8 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import type { UploadedMediaFile } from './dto';
-import { toMediaObjectResponse } from './dto';
+import { ContributeMediaDto, toMediaContributionResponse, toMediaObjectResponse } from './dto';
+import { MediaContributionService } from './media-contribution.service';
 import { ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_BYTES } from './media-mime.policy';
 import { MediaObjectService } from './media-object.service';
 import { MulterExceptionFilter } from './multer-exception.filter';
@@ -32,7 +34,10 @@ import { MulterExceptionFilter } from './multer-exception.filter';
 @ApiTags('media')
 @Controller('media')
 export class MediaObjectController {
-  constructor(private readonly media: MediaObjectService) {}
+  constructor(
+    private readonly media: MediaObjectService,
+    private readonly contributions: MediaContributionService,
+  ) {}
 
   @ApiResponse({ status: Http.PayloadTooLarge, description: 'File exceeds the size limit' })
   @ApiResponse({ status: Http.UnsupportedMediaType, description: 'Disallowed media type' })
@@ -53,7 +58,7 @@ export class MediaObjectController {
     }),
   )
   @Post()
-  upload(@UploadedFile() file: UploadedMediaFile) {
+  upload(@UploadedFile() file?: UploadedMediaFile) {
     if (!file) {
       throw new BadRequestException('A file is required under the "file" field');
     }
@@ -84,6 +89,26 @@ export class MediaObjectController {
   remove(@Param('id') id: string) {
     return from(this.media.delete(id)).pipe(
       map((media) => ({ message: `Media object ${id} deleted successfully`, media: toMediaObjectResponse(media) })),
+    );
+  }
+
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaObject))
+  @Post(':id/publish')
+  publish(@Param('id') id: string) {
+    return from(this.media.publish(id)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
+  }
+
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.MediaObject))
+  @Post(':id/unpublish')
+  unpublish(@Param('id') id: string) {
+    return from(this.media.unpublish(id)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
+  }
+
+  @CheckPolicies((ability) => ability.can(Action.create, ResourceType.MediaContribution))
+  @Post(':id/contribute')
+  contribute(@Param('id') id: string, @Body() dto: ContributeMediaDto) {
+    return from(this.contributions.contribute(id, dto)).pipe(
+      map((c) => ({ contribution: toMediaContributionResponse(c) })),
     );
   }
 }

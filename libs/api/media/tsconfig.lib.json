@@ -21,16 +21,25 @@
       "path": "../../storage/contract/tsconfig.lib.json"
     },
     {
-      "path": "../../common/testing/tsconfig.lib.json"
-    },
-    {
       "path": "../../storage/runtime/tsconfig.lib.json"
     },
     {
-      "path": "../../common/shared/tsconfig.lib.json"
+      "path": "../../common/quota/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/services/tsconfig.lib.json"
     },
     {
       "path": "../../common/permissions/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/notifications/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/shared/tsconfig.lib.json"
     },
     {
       "path": "../../database/tsconfig.lib.json"
