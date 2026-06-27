@@ -1,5 +1,6 @@
 import { Action, DatabaseService, type MediaObject, Prisma, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto } from '@bge/shared';
 import { type MediaConfig, MediaUrlSigner, StorageService } from '@bge/storage';
 import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
@@ -29,25 +30,34 @@ export class MediaObjectService {
     private readonly storage: StorageService,
     private readonly signer: MediaUrlSigner,
     private readonly config: ConfigService,
+    private readonly quota: QuotaService,
   ) {}
 
   async upload(file: UploadedMediaFile) {
-    // Defense-in-depth: the controller's fileFilter rejects earlier, but the
-    // service must not trust its caller. SVG/HTML never reach here.
     if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
       throw new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`);
     }
 
     const userId = this.ability.getActingUserId();
-    const id = createId(); // own the id so storage key and row id match
-    const key = `users/${userId}/${id}`; // uploader-anchored: stable across ownership changes
 
+    // Early guard against the input length: rejects the common over-quota case
+    // without writing bytes. Exact for non-transforming drivers.
+    await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength));
+
+    const id = createId();
+    const key = `users/${userId}/${id}`;
     const stored = await this.storage.put(key, file.buffer, {
       contentType: file.mimetype,
       originalName: file.originalname,
     });
 
     try {
+      // Authoritative gate: the driver computes the true stored size, and that is
+      // what usage measures. For a transforming driver it can differ from the
+      // input length, so the binding enforcement is here. Cleanup below covers
+      // both a quota rejection and a failed insert.
+      await this.assertWithinStorageQuota(userId, stored.size);
+
       return await this.db.mediaObject.create({
         data: {
           id,
@@ -64,18 +74,17 @@ export class MediaObjectService {
         },
       });
     } catch (error) {
-      // Row never persisted → these bytes are orphaned. This best-effort delete
-      // is the ONLY cleanup that exists today; there is no sweep job yet
-      // (planned, batch 6), so a failure here leaks bytes until then. Log loudly.
       await this.storage
         .delete(key)
         .catch((cleanupError) =>
-          this.logger.error(`Orphaned bytes at ${key} after failed row insert; manual cleanup needed`, cleanupError),
+          this.logger.error(
+            `Orphaned bytes at ${key} after failed/over-quota upload; manual cleanup needed`,
+            cleanupError,
+          ),
         );
       throw error;
     }
   }
-
   async findById(id: string) {
     const media = await this.db.mediaObject.findUnique({
       where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
@@ -179,5 +188,41 @@ export class MediaObjectService {
       contentType: media.mimeType,
       contentDisposition: formatContentDisposition(inline ? 'inline' : 'attachment', media.originalName ?? 'download'),
     };
+  }
+
+  async publish(id: string) {
+    return this.setVisibility(id, Visibility.Public);
+  }
+
+  async unpublish(id: string) {
+    return this.setVisibility(id, Visibility.Private);
+  }
+
+  private async setVisibility(id: string, visibility: Visibility) {
+    try {
+      return await this.db.mediaObject.update({
+        where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update) },
+        data: { visibility },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+        throw new NotFoundException(`Media object ${id} not found`);
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Charges the acting user (= owner) for the incoming bytes. Soft-overage caps
+   * are honored inside QuotaService (they allow + emit an event); only a hard
+   * cap blocks here.
+   */
+  private async assertWithinStorageQuota(userId: string, amount: bigint): Promise<void> {
+    const result = await this.quota.check('storage_bytes', amount, { userId });
+    if (!result.allowed) {
+      // `allowed` is false only on a hard violation; the binding fields are then set.
+      throw new QuotaExceededException('storage_bytes', result.scope!, result.limit!, result.currentUsage!, amount);
+    }
   }
 }

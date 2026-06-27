@@ -30,6 +30,7 @@ enum NotificationType {
   GameImported
   ExpansionImported
   WatchedExpansionImported
+  MediaContributionRejected
 
   HouseholdInviteReceived
   EventInviteReceived

@@ -41,10 +41,10 @@ describe('QuotaResourceRegistry', () => {
     it('returns a provider for enforceable resources', () => {
       expect(typeof registry.requireUsage('household_member_count')).toBe('function');
       expect(typeof registry.requireUsage('webhook_subscription_count')).toBe('function');
+      expect(typeof registry.requireUsage('storage_bytes')).toBe('function');
     });
 
     it('throws for registered-but-pending resources', () => {
-      expect(() => registry.requireUsage('storage_bytes')).toThrow(/not yet enforceable/);
       expect(() => registry.requireUsage('plugin_install_count')).toThrow(/not yet enforceable/);
     });
   });
@@ -68,6 +68,38 @@ describe('QuotaResourceRegistry', () => {
         where: { createdById: 'user_1', deletedAt: null },
       });
       expect(usage).toBe(2n);
+    });
+
+    it('sums bytes owned by the user at User scope', async () => {
+      db.mediaObject.aggregate.mockResolvedValue({ _sum: { sizeBytes: 5000n } } as never);
+
+      const usage = await registry.requireUsage('storage_bytes')(QuotaScope.User, 'user_1');
+
+      expect(db.mediaObject.aggregate).toHaveBeenCalledWith({
+        _sum: { sizeBytes: true },
+        where: { ownerId: 'user_1' },
+      });
+      expect(usage).toBe(5000n);
+    });
+
+    it('sums all bytes at Server scope and treats an empty table as 0', async () => {
+      db.mediaObject.aggregate.mockResolvedValue({ _sum: { sizeBytes: null } } as never);
+
+      const usage = await registry.requireUsage('storage_bytes')(QuotaScope.Server, '*');
+
+      expect(db.mediaObject.aggregate).toHaveBeenCalledWith({
+        _sum: {
+          sizeBytes: true,
+        },
+        where: {},
+      });
+      expect(usage).toBe(0n);
+    });
+
+    it('throws for an unsupported storage scope', async () => {
+      await expect(registry.requireUsage('storage_bytes')(QuotaScope.Household, 'h1')).rejects.toThrow(
+        /not defined for scope/,
+      );
     });
   });
 });
