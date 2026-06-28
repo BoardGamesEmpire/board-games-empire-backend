@@ -11,9 +11,12 @@ model GameImage {
   isCover   Boolean @default(false) @map("is_cover")
   sortOrder Int     @default(0) @map("sort_order")
 
+  @@unique([gameId, mediaId])
+  @@index([mediaId])
   @@index([gameId])
   @@map("game_images")
 }
+
 model EventImage {
   id      String @id @default(cuid(2))
   media   Media  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
@@ -26,6 +29,8 @@ model EventImage {
   isFeatured Boolean   @default(false) @map("is_featured")
   takenAt    DateTime? @map("taken_at") @db.Timestamptz(3)
 
+  @@unique([eventId, mediaId])
+  @@index([mediaId])
   @@index([eventId])
   @@map("event_images")
 }
@@ -43,6 +48,8 @@ model FeedbackReportImage {
   caption   String?
   sortOrder Int     @default(0) @map("sort_order")
 
+  @@unique([feedbackReportId, mediaId])
+  @@index([mediaId])
   @@index([feedbackReportId])
   @@map("feedback_report_images")
 }

@@ -7,8 +7,8 @@ model User {
 
   username String
 
-  isAnonymous Boolean? @default(false) @map("is_anonymous")
-  isServiceAccount Boolean @default(false) @map("is_service_account")
+  isAnonymous      Boolean? @default(false) @map("is_anonymous")
+  isServiceAccount Boolean  @default(false) @map("is_service_account")
 
   email         String
   emailVerified Boolean @default(false) @map("email_verified")
@@ -24,21 +24,21 @@ model User {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  accounts             Account[]
-  deviceCodes          DeviceCode[]
-  passkeys             Passkey[]
-  sessions             Session[]
-  twofactors           TwoFactor[]
-  sessionPlayers       SessionPlayer[]
-  mediaOwned                 MediaObject[]       @relation("MediaOwner")
-  mediaUploaded              MediaObject[]       @relation("MediaUploader")
-  mediaSharesCreated         MediaShare[]        @relation("MediaSharedBy")
-  mediaContributed           MediaContribution[] @relation("MediaContributedBy")
-  mediaContributionsReviewed MediaContribution[] @relation("MediaContributionReviewer")
-  lists                List[]
-  gatewayConnections   UserGatewayConnection[]
-  householdMember      HouseholdMember[]
-  webhookSubscriptions WebhookSubscription[]   @relation("WebhookSubscriptionsCreated")
+  accounts                   Account[]
+  deviceCodes                DeviceCode[]
+  passkeys                   Passkey[]
+  sessions                   Session[]
+  twofactors                 TwoFactor[]
+  sessionPlayers             SessionPlayer[]
+  mediaOwned                 MediaObject[]           @relation("MediaOwner")
+  mediaUploaded              MediaObject[]           @relation("MediaUploader")
+  mediaSharesCreated         MediaShare[]            @relation("MediaSharedBy")
+  mediaContributed           MediaContribution[]     @relation("MediaContributedBy")
+  mediaContributionsReviewed MediaContribution[]     @relation("MediaContributionReviewer")
+  lists                      List[]
+  gatewayConnections         UserGatewayConnection[]
+  householdMember            HouseholdMember[]
+  webhookSubscriptions       WebhookSubscription[]   @relation("WebhookSubscriptionsCreated")
 
   preferences UserPreferences?
   profile     UserProfile?

@@ -10,6 +10,8 @@ model GameDocument {
   // Context-specific fields
   category String? // "rulebook", "quick_reference", "errata"
 
+  @@unique([gameId, mediaId])
+  @@index([mediaId])
   @@index([gameId])
   @@map("game_documents")
 }
@@ -25,6 +27,8 @@ model EventDocument {
 
   category String?
 
+  @@unique([eventId, mediaId])
+  @@index([mediaId])
   @@index([eventId])
   @@map("event_documents")
 }
@@ -38,11 +42,13 @@ model FeedbackReportDocument {
   feedbackReport   FeedbackReport @relation(fields: [feedbackReportId], references: [id], onDelete: Cascade)
   feedbackReportId String         @map("feedback_report_id")
 
-  language  String?
+  language String?
 
   caption   String?
   sortOrder Int     @default(0) @map("sort_order")
 
+  @@unique([feedbackReportId, mediaId])
+  @@index([mediaId])
   @@index([feedbackReportId])
   @@map("feedback_report_documents")
 }
