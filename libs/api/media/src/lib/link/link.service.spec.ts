@@ -29,7 +29,6 @@ describe('MediaLinkService', () => {
         .mockResolvedValueOnce({ id: 'mo1' } as never) // update-access check
         .mockResolvedValueOnce({ mimeType: 'image/png' } as never); // attachWithin mime read
       db.game.findUnique.mockResolvedValue({ id: 'g1' } as never); // subject-update access
-      db.gameImage.findFirst.mockResolvedValue(null); // not yet attached
       db.gameImage.create.mockResolvedValue({ id: 'gi1' } as never);
     });
 
@@ -40,12 +39,12 @@ describe('MediaLinkService', () => {
       );
     });
 
-    it('forbids attaching when the caller cannot update the subject', async () => {
+    it('forbids attaching when the caller cannot read the subject', async () => {
       db.game.findUnique.mockResolvedValue(null);
       await expect(service.attach('mo1', { subjectType: ResourceType.Game, subjectId: 'g1' })).rejects.toBeInstanceOf(
         ForbiddenException,
       );
-      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.update);
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
     });
 
     it('rejects an unsupported subject type with 400', async () => {
@@ -64,32 +63,39 @@ describe('MediaLinkService', () => {
       );
     });
 
-    it('upserts the Media row and dispatches to the GameImage handler', async () => {
+    it('upserts on (game, media) and applies only the provided context', async () => {
+      db.game.findUnique.mockResolvedValue({ id: 'g1' } as never);
+      db.gameImage.upsert.mockResolvedValue({ id: 'gi1' } as never);
+
       const result = await service.attach('mo1', {
         subjectType: ResourceType.Game,
         subjectId: 'g1',
         context: { isCover: true },
       });
-      expect(db.media.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { mediaObjectId: 'mo1' } }));
-      expect(db.gameImage.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ mediaId: 'media-1', gameId: 'g1', isCover: true }) }),
+
+      expect(db.gameImage.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { gameId_mediaId: { gameId: 'g1', mediaId: 'media-1' } },
+          create: expect.objectContaining({ mediaId: 'media-1', gameId: 'g1', isCover: true }),
+          update: { isCover: true },
+        }),
       );
-      expect(result).toMatchObject({ attachmentId: 'gi1', subjectType: ResourceType.Game });
+      expect(result).toMatchObject({ attachmentId: 'gi1' });
     });
 
-    it('is idempotent — returns the existing attachment instead of duplicating', async () => {
-      db.gameImage.findFirst.mockResolvedValue({ id: 'gi-existing' } as never);
-      const result = await service.attach('mo1', { subjectType: ResourceType.Game, subjectId: 'g1' });
-      expect(db.gameImage.create).not.toHaveBeenCalled();
-      expect(result).toMatchObject({ attachmentId: 'gi-existing' });
+    it('re-attach with no context updates nothing (idempotent)', async () => {
+      db.game.findUnique.mockResolvedValue({ id: 'g1' } as never);
+      db.gameImage.upsert.mockResolvedValue({ id: 'gi1' } as never);
+
+      await service.attach('mo1', { subjectType: ResourceType.Game, subjectId: 'g1' });
+      expect(db.gameImage.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: {} }));
     });
   });
 
   describe('attachWithin (contribution path — no subject-auth)', () => {
     it('maps a missing subject (FK violation) to NotFound', async () => {
       db.mediaObject.findUnique.mockResolvedValue({ mimeType: 'image/png' } as never);
-      db.gameImage.findFirst.mockResolvedValue(null);
-      db.gameImage.create.mockRejectedValue(
+      db.gameImage.upsert.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('fk', { code: 'P2003', clientVersion: '7' }),
       );
       await expect(

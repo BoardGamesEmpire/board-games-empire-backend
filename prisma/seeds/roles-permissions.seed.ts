@@ -467,7 +467,22 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     { action: Action.create, subject: ResourceType.Event, slug: 'create:event', reason: 'Create an event' },
 
     // TODO household specific event permissions? i.e read:household_event etc
-    { action: Action.read, subject: ResourceType.Event, slug: 'read:event', reason: 'View an event' },
+    {
+      action: Action.read,
+      subject: ResourceType.Event,
+      slug: 'read:event',
+      reason: 'View any event (moderation/admin)',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Event,
+      conditions: {
+        id: '{{ eventId }}',
+        attendees: { some: { userId: '{{ user.id }}' } },
+      },
+      slug: 'read:event:participant',
+      reason: 'View an event you attend',
+    },
     {
       action: Action.update,
       subject: ResourceType.Event,
@@ -605,6 +620,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // --- Rule Variants ---
+    // TODO: own rules vs admin/moderator
     {
       action: Action.create,
       subject: ResourceType.RuleVariant,
@@ -631,8 +647,71 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // --- Media ---
-    // TODO: expand media permissions
     { action: Action.create, subject: ResourceType.Media, slug: 'create:media:upload', reason: 'Upload media' },
+
+    // ─── MediaObject ────────────────────────────────────────
+    {
+      action: Action.create,
+      subject: ResourceType.MediaObject,
+      slug: 'create:media_object',
+      reason: 'Upload a media object',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.MediaObject,
+      conditions: { ownerId: '{{ user.id }}' },
+      slug: 'read:media_object:own',
+      reason: 'View own media objects',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.MediaObject,
+      conditions: { visibility: 'Public' },
+      slug: 'read:media_object:public',
+      reason: 'View public media objects',
+    },
+    {
+      action: Action.update,
+      subject: ResourceType.MediaObject,
+      conditions: { ownerId: '{{ user.id }}' },
+      slug: 'update:media_object:own',
+      reason: 'Update own media objects (publish/unpublish, attach/detach)',
+    },
+    {
+      action: Action.delete,
+      subject: ResourceType.MediaObject,
+      conditions: { ownerId: '{{ user.id }}' },
+      slug: 'delete:media_object:own',
+      reason: 'Delete own media objects',
+    },
+
+    // ─── MediaContribution ──────────────────────────────────
+    {
+      action: Action.create,
+      subject: ResourceType.MediaContribution,
+      conditions: { contributedById: '{{ user.id }}' },
+      slug: 'create:media_contribution',
+      reason: 'Contribute own media to a game or event',
+    },
+    {
+      action: Action.update,
+      subject: ResourceType.MediaContribution,
+      conditions: { contributedById: '{{ user.id }}' },
+      slug: 'update:media_contribution:reclaim',
+      reason: 'Reclaim own contribution before its deadline',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.MediaContribution,
+      slug: 'read:media_contribution',
+      reason: 'View contributions for moderation',
+    },
+    {
+      action: Action.update,
+      subject: ResourceType.MediaContribution,
+      slug: 'update:media_contribution:moderate',
+      reason: 'Approve or reject media contributions',
+    },
 
     // --- Customization ---
     {
@@ -814,6 +893,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   }
   logger.log('✅ Roles created.');
 
+  const resources = new Set([...Object.values(ResourceType), 'all']);
+
   // Helper to map permissions to roles
   const assignPermissions = async (roleName: string, slugs: string[]) => {
     const roleId: string = rolesByName[roleName].id;
@@ -821,6 +902,10 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       const permission = permissionsBySlug[slug];
       if (!permission) {
         throw new Error(`Permission with slug ${slug} not found for role ${roleName}`);
+      }
+
+      if (!resources.has(permission.subject)) {
+        throw new Error(`Permission subject ${permission.subject} is not a valid resource type for role ${roleName}`);
       }
 
       await prisma.rolePermission.upsert({
@@ -850,50 +935,93 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
   // MODERATOR
   await assignPermissions(SystemRole.Moderator, [
-    'delete:event:moderate',
-    'delete:game_play_session',
     'manage:content:moderate',
+    'read:public_content',
+
+    // event
     'read:event',
+    'delete:event:moderate',
+    'update:event',
+
+    // feedback
     'read:feedback_report',
     'read:feedback_sink_dispatch',
+
+    // game
     'read:game_collection',
-    'read:game_play_session',
     'read:game',
+    'update:game',
+    'delete:game_play_session',
+    'read:game_play_session',
+
+    // household
     'read:household',
     'read:households',
-    'read:public_content',
+
     'read:safe_http_policy',
     'read:user:profile',
-    'update:event',
-    'update:game',
+
+    // Media
+    'read:media_contribution',
+    'read:media_object:public',
+    'update:media_contribution:moderate',
   ]);
 
   // STANDARD USER
   await assignPermissions(SystemRole.User, [
+    // event
     'create:event',
+
+    // feedback
     'create:feedback_report',
-    'create:game_collection',
-    'create:game',
-    'create:household_member:join',
-    'create:household',
-    'create:rule_variant',
-    'create:session_player:join',
-    'create:user_game_customization',
-    'delete:game_collection',
-    'delete:user_game_customization',
-    'manage:webhook_subscription:own',
     'read:feedback_report:own',
-    'read:game_collection',
-    'read:game_play_session',
+
+    // game
+    'create:game',
     'read:game',
+
+    // game collection
+    'create:game_collection',
+    'delete:game_collection',
+    'read:game_collection',
+    'update:game_collection',
+
+    // household
+    'create:household',
     'read:households',
+
+    // game session
+    'read:game_play_session',
+    'create:session_player:join',
+
+    // media
+    'create:media_contribution',
+    'create:media_object',
+    'delete:media_object:own',
+    'read:media_object:own',
+    'read:media_object:public',
+    'update:media_contribution:reclaim',
+    'update:media_object:own',
+
+    // platform
     'read:platform_game',
     'read:platform',
+
+    // rule variant
+    'create:rule_variant',
+    'update:rule_variant',
+    'delete:rule_variant',
+
+    // user
+    'create:user_game_customization',
+    'delete:user_game_customization',
     'read:user:profile',
-    'read:webhook_subscription:own',
-    'update:game_collection',
     'update:user_game_customization',
     'update:user:profile:own',
+
+    // webhook
+    'manage:webhook_subscription:own',
+    'read:webhook_subscription:own',
   ]);
 
   const householdOwnerPermissions = [
@@ -909,6 +1037,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:event_game',
     'delete:event_occurrence',
     'manage:quota:household_member',
+    'create:household_member:join',
     'delete:event',
     'read:quota:household',
     'delete:game_play_session',
@@ -964,7 +1093,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'read:game_collection',
     'read:game_play_session',
     'read:household',
@@ -974,7 +1103,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // HOUSEHOLD GUEST
   await assignPermissions(SystemRole.HouseholdGuest, [
     'create:session_player:join',
-    'read:event',
+    'read:event:participant',
     'read:game_play_session',
     'read:household',
     'read:households',
@@ -988,7 +1117,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:game_play_session',
     'manage:event_attendee',
     'read:event_attendee',
-    'read:event',
+    'read:event:participant',
     'read:game_play_session',
     'update:event_attendee:status',
     'update:event:status:archive-event',
@@ -1062,7 +1191,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'update:event_attendee:status',
     'update:event_occurrence',
     'update:event',
@@ -1082,7 +1211,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'update:event_attendee:status',
     'update:event_game_nomination:resolve',
     'update:event_occurrence:cancel',
@@ -1112,7 +1241,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'read:game_collection',
     'read:game_play_session',
     'update:event_attendee:status:self',
@@ -1134,7 +1263,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'read:game_play_session',
     'update:event_attendee:status:self',
   ]);
@@ -1150,7 +1279,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game',
     'read:event_occurrence',
     'read:event_policy',
-    'read:event',
+    'read:event:participant',
     'read:game_play_session',
   ]);
 

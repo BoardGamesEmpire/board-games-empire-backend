@@ -46,7 +46,7 @@ export class MediaLinkService {
       throw new NotFoundException(`Media object ${mediaObjectId} not found`);
     }
 
-    await this.assertSubjectUpdatable(target.subjectType, target.subjectId);
+    await this.assertSubjectReadable(target.subjectType, target.subjectId);
     return this.db.$transaction((tx) => this.attachWithin(tx, mediaObjectId, target));
   }
 
@@ -117,6 +117,7 @@ export class MediaLinkService {
     if (!media) {
       throw new NotFoundException(`Media object ${mediaObjectId} not found`);
     }
+
     if (!media.media) {
       return { removed: 0 }; // never attached
     }
@@ -127,18 +128,19 @@ export class MediaLinkService {
       throw new BadRequestException(`Cannot detach ${target.subjectType} media of this type`);
     }
 
-    await this.assertSubjectUpdatable(target.subjectType, target.subjectId);
+    await this.assertSubjectReadable(target.subjectType, target.subjectId);
     return { removed: await handler.remove(this.db, media.media.id, target.subjectId) };
   }
 
   /**
-   * Endpoint-path guard: the caller must be able to update the *target subject*,
-   * not just the media object — otherwise updating your own object would let you
-   * attach it to any game/event. Not applied in attachWithin: contribution
-   * approval carries its own (moderator) authority.
+   * Endpoint-path guard: the caller must be able to *read* the target subject.
+   * Read is the bar for attaching media — games are public, events are
+   * attendee-private, so "can see it" cleanly means "can contribute media to
+   * it" (a spectator at a competitive event can post photos). Not applied in
+   * attachWithin: contribution approval carries its own authority.
    */
-  private async assertSubjectUpdatable(subjectType: ModelResourceType, subjectId: string): Promise<void> {
-    const AND = this.ability.getCurrentResourceConditions(subjectType, Action.update);
+  private async assertSubjectReadable(subjectType: ResourceType, subjectId: string): Promise<void> {
+    const AND = this.ability.getCurrentResourceConditions(subjectType as ModelResourceType, Action.read);
 
     let found: { id: string } | null;
     if (subjectType === ResourceType.Game) {
@@ -150,7 +152,6 @@ export class MediaLinkService {
     }
 
     if (!found) {
-      // Uniform 403 whether missing or forbidden — no existence oracle.
       throw new ForbiddenException(`Cannot attach media to ${subjectType} ${subjectId}`);
     }
   }

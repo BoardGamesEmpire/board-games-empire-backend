@@ -87,6 +87,7 @@ export class MediaObjectService {
             cleanupError,
           ),
         );
+
       throw error;
     }
   }
@@ -140,6 +141,7 @@ export class MediaObjectService {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
         throw new NotFoundException(`Media object ${id} not found`);
       }
+
       throw error;
     }
   }

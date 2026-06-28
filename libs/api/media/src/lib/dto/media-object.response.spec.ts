@@ -17,6 +17,9 @@ describe('toMediaObjectResponse', () => {
     pageCount: 1,
     width: 800,
     height: 600,
+    duration: null,
+    codec: null,
+    resolution: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
   } satisfies MediaObject;

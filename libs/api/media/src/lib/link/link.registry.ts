@@ -20,61 +20,56 @@ interface LinkHandler {
  *  means "not linkable", surfaced as a 400. Adding a subject/kind is one entry. */
 export const LINK_HANDLERS: Readonly<Record<string, LinkHandler>> = {
   [linkKey(ResourceType.Game, 'image')]: {
-    create: async (tx, mediaId, gameId, ctx) => {
-      const existing = await tx.gameImage.findFirst({ where: { mediaId, gameId }, select: { id: true } });
-      return (
-        existing ??
-        tx.gameImage.create({
-          data: {
-            mediaId,
-            gameId,
-            isDefault: ctx.isDefault ?? false,
-            isCover: ctx.isCover ?? false,
-            sortOrder: ctx.sortOrder ?? 0,
-          },
-          select: { id: true },
-        })
-      );
-    },
+    create: (tx, mediaId, gameId, ctx) =>
+      tx.gameImage.upsert({
+        where: { gameId_mediaId: { gameId, mediaId } },
+        create: {
+          mediaId,
+          gameId,
+          isDefault: ctx.isDefault ?? false,
+          isCover: ctx.isCover ?? false,
+          sortOrder: ctx.sortOrder ?? 0,
+        },
+        update: {
+          ...(ctx.isDefault !== undefined && { isDefault: ctx.isDefault }),
+          ...(ctx.isCover !== undefined && { isCover: ctx.isCover }),
+          ...(ctx.sortOrder !== undefined && { sortOrder: ctx.sortOrder }),
+        },
+        select: { id: true },
+      }),
     remove: (tx, mediaId, gameId) => tx.gameImage.deleteMany({ where: { mediaId, gameId } }).then((r) => r.count),
   },
   [linkKey(ResourceType.Game, 'document')]: {
-    create: async (tx, mediaId, gameId, ctx) => {
-      const existing = await tx.gameDocument.findFirst({
-        where: { mediaId, gameId, category: ctx.category ?? null },
+    create: (tx, mediaId, gameId, ctx) =>
+      tx.gameDocument.upsert({
+        where: { gameId_mediaId: { gameId, mediaId } },
+        create: { mediaId, gameId, category: ctx.category ?? null },
+        update: { ...(ctx.category !== undefined && { category: ctx.category }) },
         select: { id: true },
-      });
-      return (
-        existing ??
-        tx.gameDocument.create({ data: { mediaId, gameId, category: ctx.category ?? null }, select: { id: true } })
-      );
-    },
+      }),
     remove: (tx, mediaId, gameId) => tx.gameDocument.deleteMany({ where: { mediaId, gameId } }).then((r) => r.count),
   },
   [linkKey(ResourceType.Event, 'image')]: {
-    create: async (tx, mediaId, eventId, ctx) => {
-      const existing = await tx.eventImage.findFirst({ where: { mediaId, eventId }, select: { id: true } });
-      return (
-        existing ??
-        tx.eventImage.create({
-          data: { mediaId, eventId, isFeatured: ctx.isFeatured ?? false, takenAt: ctx.takenAt ?? null },
-          select: { id: true },
-        })
-      );
-    },
+    create: (tx, mediaId, eventId, ctx) =>
+      tx.eventImage.upsert({
+        where: { eventId_mediaId: { eventId, mediaId } },
+        create: { mediaId, eventId, isFeatured: ctx.isFeatured ?? false, takenAt: ctx.takenAt ?? null },
+        update: {
+          ...(ctx.isFeatured !== undefined && { isFeatured: ctx.isFeatured }),
+          ...(ctx.takenAt !== undefined && { takenAt: ctx.takenAt }),
+        },
+        select: { id: true },
+      }),
     remove: (tx, mediaId, eventId) => tx.eventImage.deleteMany({ where: { mediaId, eventId } }).then((r) => r.count),
   },
   [linkKey(ResourceType.Event, 'document')]: {
-    create: async (tx, mediaId, eventId, ctx) => {
-      const existing = await tx.eventDocument.findFirst({
-        where: { mediaId, eventId, category: ctx.category ?? null },
+    create: (tx, mediaId, eventId, ctx) =>
+      tx.eventDocument.upsert({
+        where: { eventId_mediaId: { eventId, mediaId } },
+        create: { mediaId, eventId, category: ctx.category ?? null },
+        update: { ...(ctx.category !== undefined && { category: ctx.category }) },
         select: { id: true },
-      });
-      return (
-        existing ??
-        tx.eventDocument.create({ data: { mediaId, eventId, category: ctx.category ?? null }, select: { id: true } })
-      );
-    },
+      }),
     remove: (tx, mediaId, eventId) => tx.eventDocument.deleteMany({ where: { mediaId, eventId } }).then((r) => r.count),
   },
 };

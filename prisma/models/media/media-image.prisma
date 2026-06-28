@@ -13,7 +13,6 @@ model GameImage {
 
   @@unique([gameId, mediaId])
   @@index([mediaId])
-  @@index([gameId])
   @@map("game_images")
 }
 
@@ -31,7 +30,6 @@ model EventImage {
 
   @@unique([eventId, mediaId])
   @@index([mediaId])
-  @@index([eventId])
   @@map("event_images")
 }
 
@@ -50,7 +48,6 @@ model FeedbackReportImage {
 
   @@unique([feedbackReportId, mediaId])
   @@index([mediaId])
-  @@index([feedbackReportId])
   @@map("feedback_report_images")
 }
 
@@ -65,13 +62,10 @@ model FeedbackReportImage {
 //   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 //   campaignId String   @map("campaign_id")
 
-//   width  Int
-//   height Int
-//   format String
-
 //   isSecret Boolean @default(false) @map("is_secret") // DM-only view
 //   category String? // "map", "npc_portrait", "scene"
 
-//   @@index([campaignId])
+//   @@unique([campaignId, mediaId])
+//   @@index([mediaId])
 //   @@map("campaign_images")
 // }

@@ -35,7 +35,7 @@ model MediaObject {
   height    Int? // images
   pageCount Int? @map("page_count") // documents (probing deferred → null for now)
   // Video-specific fields
-  duration   Int
+  duration   Int?
   codec      String?
   resolution String?
 

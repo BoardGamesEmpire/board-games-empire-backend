@@ -81,7 +81,7 @@ DROP COLUMN "resolution";
 
 -- AlterTable
 ALTER TABLE "media_objects" ADD COLUMN     "codec" TEXT,
-ADD COLUMN     "duration" INTEGER NOT NULL,
+ADD COLUMN     "duration" INTEGER,
 ADD COLUMN     "height" INTEGER,
 ADD COLUMN     "page_count" INTEGER,
 ADD COLUMN     "resolution" TEXT,
@@ -134,3 +134,27 @@ CREATE INDEX "game_videos_media_id_idx" ON "game_videos"("media_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "game_videos_game_id_media_id_key" ON "game_videos"("game_id", "media_id");
+
+-- DropIndex
+DROP INDEX "event_documents_event_id_idx";
+
+-- DropIndex
+DROP INDEX "event_images_event_id_idx";
+
+-- DropIndex
+DROP INDEX "event_videos_event_id_idx";
+
+-- DropIndex
+DROP INDEX "feedback_report_documents_feedback_report_id_idx";
+
+-- DropIndex
+DROP INDEX "feedback_report_images_feedback_report_id_idx";
+
+-- DropIndex
+DROP INDEX "game_documents_game_id_idx";
+
+-- DropIndex
+DROP INDEX "game_images_game_id_idx";
+
+-- DropIndex
+DROP INDEX "game_videos_game_id_idx";
