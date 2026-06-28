@@ -1,4 +1,6 @@
 export * from './lib/content-disposition.util';
+export * from './lib/contribution-sweep/sweep.module';
+export * from './lib/contribution-sweep/sweep.service';
 export * from './lib/dto';
 export * from './lib/media-contribution.service';
 export * from './lib/media-mime.policy';

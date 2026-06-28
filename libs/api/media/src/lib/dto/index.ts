@@ -1,4 +1,6 @@
+export * from './attach-media.dto';
 export * from './contribute-media.dto';
+export * from './detach-media.dto';
 export * from './list-contributions-query.dto';
 export * from './media-contribution.response';
 export * from './media-object.response';

@@ -2,6 +2,7 @@ import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
+import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { WebhookQueueConsumerModule } from '@bge/queue-webhooks';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
@@ -100,6 +101,10 @@ import { baseLogger } from './lib/logger';
     // GameImportProcessor; the global ClsModule.forRoot above satisfies its CLS
     // requirement (runWith establishes the context — no HTTP middleware needed).
     AuditContextModule,
+
+    // Periodic hard-delete of rejected DirectUpload contributions past their
+    // reclaim window (issue #58 sweep). Worker-only so it runs once.
+    MediaSweepModule,
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,

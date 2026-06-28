@@ -30,6 +30,15 @@ model MediaObject {
   etag         String? // optional HTTP validator; driver-specific
   originalName String? @map("original_name")
 
+  // ─── Intrinsic media metadata (probed from bytes; null when N/A) ──
+  width     Int? // images
+  height    Int? // images
+  pageCount Int? @map("page_count") // documents (probing deferred → null for now)
+  // Video-specific fields
+  duration   Int?
+  codec      String?
+  resolution String?
+
   // ─── Relations ──────────────────────────────────────────
   media         Media? // 1:1 presentation layer (optional: raw blobs need none)
   shares        MediaShare[]
@@ -87,8 +96,8 @@ model MediaContribution {
   contributedBy   User   @relation("MediaContributedBy", fields: [contributedById], references: [id])
   contributedById String @map("contributed_by_id")
 
-  reviewedBy   User?   @relation("MediaContributionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
-  reviewedById String? @map("reviewed_by_id")
+  reviewedBy   User?     @relation("MediaContributionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedById String?   @map("reviewed_by_id")
   reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(3)
 
   rejectionReason String?   @map("rejection_reason")

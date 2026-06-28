@@ -1,6 +1,6 @@
 enum ContributionOrigin {
   ExistingMedia // contributed from media the user already uploaded — left on reject
-  DirectUpload  // uploaded solely to contribute — swept after grace period on reject
+  DirectUpload // uploaded solely to contribute — swept after grace period on reject
 
   @@map("contribution_origins")
 }

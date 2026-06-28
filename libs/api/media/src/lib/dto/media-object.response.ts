@@ -14,6 +14,9 @@ export interface MediaObjectResponse {
   originalName: string | null;
   createdAt: string;
   updatedAt: string;
+  width: number | null;
+  height: number | null;
+  pageCount: number | null;
 }
 
 export function toMediaObjectResponse(media: MediaObject): MediaObjectResponse {
@@ -29,5 +32,8 @@ export function toMediaObjectResponse(media: MediaObject): MediaObjectResponse {
     originalName: media.originalName,
     createdAt: media.createdAt.toISOString(),
     updatedAt: media.updatedAt.toISOString(),
+    width: media.width,
+    height: media.height,
+    pageCount: media.pageCount,
   };
 }

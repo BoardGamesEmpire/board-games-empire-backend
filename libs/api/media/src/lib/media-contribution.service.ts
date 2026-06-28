@@ -6,13 +6,20 @@ import {
   ResourceType,
   Visibility,
 } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ModelResourceType } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MediaContributionEvents } from './constants/media-contribution-events.constant';
 import { ContributeMediaDto, ListContributionsQueryDto, RejectContributionDto } from './dto';
 import type { MediaContributionRejectedEvent } from './interfaces/media-contribution.interface';
+import { MediaLinkService } from './link/link.service';
 
 @Injectable()
 export class MediaContributionService {
@@ -21,6 +28,7 @@ export class MediaContributionService {
     private readonly ability: AbilityService,
     private readonly serviceAccount: ServiceAccountService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly mediaLink: MediaLinkService,
   ) {}
 
   /**
@@ -54,6 +62,10 @@ export class MediaContributionService {
       throw new ConflictException(`Media object ${mediaObjectId} already has a ${existing.status} contribution`);
     }
 
+    if (!this.mediaLink.canLink(media.mimeType, dto.subjectType)) {
+      throw new BadRequestException(`This media type can't be contributed to a ${dto.subjectType}`);
+    }
+
     const data = {
       mediaObjectId,
       subjectType: dto.subjectType,
@@ -72,7 +84,14 @@ export class MediaContributionService {
       const contribution = await tx.mediaContribution.create({
         data: { ...data, status: MediaContributionStatus.Approved, reviewedAt: new Date() },
       });
+
       await this.flipOwnership(tx, mediaObjectId, serviceAccountId);
+      await this.mediaLink.attachWithin(tx, mediaObjectId, {
+        subjectType: dto.subjectType,
+        subjectId: dto.subjectId,
+        context: { category: dto.category ?? undefined },
+      });
+
       return contribution;
     });
   }
@@ -84,6 +103,12 @@ export class MediaContributionService {
 
     return this.db.$transaction(async (tx) => {
       await this.flipOwnership(tx, contribution.mediaObjectId, serviceAccountId);
+      await this.mediaLink.attachWithin(tx, contribution.mediaObjectId, {
+        subjectType: contribution.subjectType as ModelResourceType,
+        subjectId: contribution.subjectId,
+        context: { category: contribution.category ?? undefined },
+      });
+
       return tx.mediaContribution.update({
         where: { id: contributionId },
         data: { status: MediaContributionStatus.Approved, reviewedById: reviewerId, reviewedAt: new Date() },
@@ -134,15 +159,19 @@ export class MediaContributionService {
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.update),
       },
     });
+
     if (!contribution) {
       throw new NotFoundException(`Contribution ${contributionId} not found`);
     }
+
     if (contribution.contributedById !== actorId) {
       throw new ForbiddenException('You can only reclaim your own contribution');
     }
+
     if (contribution.status !== MediaContributionStatus.Rejected) {
       throw new ConflictException(`Only a rejected contribution can be reclaimed (status: ${contribution.status})`);
     }
+
     if (contribution.reclaimDeadline && contribution.reclaimDeadline.getTime() < Date.now()) {
       throw new ConflictException('The reclaim window has closed');
     }
@@ -170,7 +199,7 @@ export class MediaContributionService {
     mediaObjectId: string,
     serviceAccountId: string,
   ): Promise<void> {
-    // owner → service account (quota reattributes for free; usage sums by ownerId),
+    // owner → service account (quota re-attributes for free; usage sums by ownerId),
     // visibility → Public. uploaderId is left untouched: credit is permanent.
     await tx.mediaObject.update({
       where: { id: mediaObjectId },
@@ -185,12 +214,15 @@ export class MediaContributionService {
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.update),
       },
     });
+
     if (!contribution) {
       throw new NotFoundException(`Contribution ${contributionId} not found`);
     }
+
     if (contribution.status !== MediaContributionStatus.Pending) {
       throw new ConflictException(`Contribution is not pending (status: ${contribution.status})`);
     }
+
     return contribution;
   }
 

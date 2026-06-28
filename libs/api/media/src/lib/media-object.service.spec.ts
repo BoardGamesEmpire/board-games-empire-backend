@@ -1,3 +1,6 @@
+jest.mock('image-size', () => ({ imageSize: jest.fn(() => ({ width: 800, height: 600, type: 'png' })) }));
+import { imageSize } from 'image-size';
+
 import { Action, type MediaObject, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
@@ -42,13 +45,30 @@ describe('MediaObjectService', () => {
   const row = {
     id: 'm1',
     ownerId: MOCK_ACTING_USER_ID,
+    uploaderId: MOCK_ACTING_USER_ID,
     mimeType: 'image/png',
     driverKey: 'users/u/m1',
-  } as MediaObject;
+    driverSlug: 'localdisk',
+    sizeBytes: 1234n,
+    checksum: 'sha',
+    etag: 'sha',
+    visibility: Visibility.Private,
+    originalName: 'cat.png',
+    pageCount: 1,
+    width: 800,
+    height: 600,
+    duration: null,
+    codec: null,
+    resolution: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  } satisfies MediaObject;
 
   const file: UploadedMediaFile = { buffer: Buffer.from('x'), mimetype: 'image/png', originalname: 'cat.png', size: 1 };
 
   beforeEach(async () => {
+    jest.mocked(imageSize).mockReturnValue({ width: 800, height: 600, type: 'png' });
+
     ability = createMockAbilityService();
     storage = {
       put: jest.fn(),
@@ -192,6 +212,33 @@ describe('MediaObjectService', () => {
       expect(storage.put).toHaveBeenCalled();
       expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
       expect(db.mediaObject.create).not.toHaveBeenCalled();
+    });
+
+    it('probes and stores dimensions for an image upload', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+
+      await service.upload(file); // file.mimetype = 'image/png'
+
+      expect(db.mediaObject.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ width: 800, height: 600 }) }),
+      );
+    });
+
+    it('stores null dimensions for a non-image upload', async () => {
+      (imageSize as jest.Mock).mockClear();
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue({
+        ...row,
+        mimeType: 'application/pdf',
+        width: null,
+        height: null,
+      });
+      await service.upload({ ...file, mimetype: 'application/pdf' });
+      expect(imageSize).not.toHaveBeenCalled();
+      expect(db.mediaObject.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ width: null, height: null }) }),
+      );
     });
   });
 
