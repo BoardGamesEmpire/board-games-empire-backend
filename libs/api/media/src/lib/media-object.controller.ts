@@ -10,13 +10,11 @@ import {
   Param,
   Post,
   Query,
-  UnsupportedMediaTypeException,
   UploadedFile,
   UseFilters,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiConsumes, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -29,9 +27,9 @@ import {
   toMediaContributionResponse,
   toMediaObjectResponse,
 } from './dto';
+import { MediaFileInterceptor } from './interceptors/media-file.interceptor';
 import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
-import { ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_BYTES } from './media-mime.policy';
 import { MediaObjectService } from './media-object.service';
 import { MulterExceptionFilter } from './multer-exception.filter';
 
@@ -52,19 +50,7 @@ export class MediaObjectController {
   @ApiConsumes('multipart/form-data')
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.MediaObject))
   @UseFilters(MulterExceptionFilter)
-  @UseInterceptors(
-    FileInterceptor('file', {
-      limits: { fileSize: MAX_UPLOAD_BYTES, files: 1 },
-      fileFilter: (
-        _req: unknown,
-        file: { mimetype: string },
-        cb: (error: Error | null, acceptFile: boolean) => void,
-      ) =>
-        ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)
-          ? cb(null, true)
-          : cb(new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`), false),
-    }),
-  )
+  @UseInterceptors(MediaFileInterceptor)
   @Post()
   upload(@UploadedFile() file?: UploadedMediaFile) {
     if (!file) {
@@ -72,6 +58,30 @@ export class MediaObjectController {
     }
 
     return from(this.media.upload(file)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
+  }
+
+  @ApiResponse({ status: Http.PayloadTooLarge, description: 'File exceeds the size limit' })
+  @ApiResponse({ status: Http.UnsupportedMediaType, description: 'Disallowed media type' })
+  @ApiConsumes('multipart/form-data')
+  @CheckPolicies(
+    (ability) =>
+      ability.can(Action.create, ResourceType.MediaObject) &&
+      ability.can(Action.create, ResourceType.MediaContribution),
+  )
+  @UseFilters(MulterExceptionFilter)
+  @UseInterceptors(MediaFileInterceptor)
+  @Post('contribute')
+  uploadAndContribute(@Body() dto: ContributeMediaDto, @UploadedFile() file?: UploadedMediaFile) {
+    if (!file) {
+      throw new BadRequestException('A file is required under the "file" field');
+    }
+
+    return from(this.media.uploadAndContribute(file, dto)).pipe(
+      map(({ media, contribution }) => ({
+        media: toMediaObjectResponse(media),
+        contribution: toMediaContributionResponse(contribution),
+      })),
+    );
   }
 
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
