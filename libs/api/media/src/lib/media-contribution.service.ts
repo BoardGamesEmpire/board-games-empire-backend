@@ -1,3 +1,4 @@
+import type { MediaContribution, Prisma } from '@bge/database';
 import {
   Action,
   ContributionOrigin,
@@ -32,10 +33,8 @@ export class MediaContributionService {
   ) {}
 
   /**
-   * Contribute media the caller owns to a subject. With approval disabled the
-   * ownership flip happens immediately; with it enabled the contribution is
-   * Pending until a moderator approves. Subject join rows are NOT created yet
-   * (deferred linkage batch) — the intended target is recorded on the record.
+   * Contribute media the caller owns to a subject (ExistingMedia origin). Authorizes
+   * ownership up front, then delegates to the shared primitive in a transaction.
    */
   async contribute(mediaObjectId: string, dto: ContributeMediaDto) {
     const actorId = this.ability.getActingUserId();
@@ -45,16 +44,40 @@ export class MediaContributionService {
         id: mediaObjectId,
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update),
       },
+      select: { ownerId: true },
     });
     if (!media) {
       throw new NotFoundException(`Media object ${mediaObjectId} not found`);
     }
-
     if (media.ownerId !== actorId) {
       throw new ForbiddenException('You may only contribute media you own');
     }
 
-    const existing = await this.db.mediaContribution.findFirst({
+    return this.db.$transaction((tx) =>
+      this.createContributionWithin(tx, mediaObjectId, dto, ContributionOrigin.ExistingMedia, actorId),
+    );
+  }
+
+  /**
+   * Creates a contribution for an already-persisted media object, inside the caller's
+   * transaction. Shared by `contribute` (ExistingMedia) and the DirectUpload
+   * upload-and-contribute path. The caller is responsible for authorizing the object
+   * (contribute checks ownership; the DirectUpload path just created it as the actor).
+   * With approval disabled, the ownership flip + attach happen here in the same tx.
+   */
+  async createContributionWithin(
+    tx: Prisma.TransactionClient,
+    mediaObjectId: string,
+    dto: ContributeMediaDto,
+    origin: ContributionOrigin,
+    actorId: string,
+  ): Promise<MediaContribution> {
+    const media = await tx.mediaObject.findUnique({ where: { id: mediaObjectId }, select: { mimeType: true } });
+    if (!media) {
+      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+    }
+
+    const existing = await tx.mediaContribution.findFirst({
       where: { mediaObjectId, status: { in: [MediaContributionStatus.Pending, MediaContributionStatus.Approved] } },
       select: { id: true, status: true },
     });
@@ -71,29 +94,25 @@ export class MediaContributionService {
       subjectType: dto.subjectType,
       subjectId: dto.subjectId,
       category: dto.category ?? null,
-      origin: ContributionOrigin.ExistingMedia, // DirectUpload comes from the future upload+contribute path
+      origin,
       contributedById: actorId,
     };
 
     if (await this.approvalRequired()) {
-      return this.db.mediaContribution.create({ data: { ...data, status: MediaContributionStatus.Pending } });
+      return tx.mediaContribution.create({ data: { ...data, status: MediaContributionStatus.Pending } });
     }
 
     const serviceAccountId = (await this.serviceAccount.resolve()).id;
-    return this.db.$transaction(async (tx) => {
-      const contribution = await tx.mediaContribution.create({
-        data: { ...data, status: MediaContributionStatus.Approved, reviewedAt: new Date() },
-      });
-
-      await this.flipOwnership(tx, mediaObjectId, serviceAccountId);
-      await this.mediaLink.attachWithin(tx, mediaObjectId, {
-        subjectType: dto.subjectType,
-        subjectId: dto.subjectId,
-        context: { category: dto.category ?? undefined },
-      });
-
-      return contribution;
+    const contribution = await tx.mediaContribution.create({
+      data: { ...data, status: MediaContributionStatus.Approved, reviewedAt: new Date() },
     });
+    await this.flipOwnership(tx, mediaObjectId, serviceAccountId);
+    await this.mediaLink.attachWithin(tx, mediaObjectId, {
+      subjectType: dto.subjectType,
+      subjectId: dto.subjectId,
+      context: { category: dto.category ?? undefined },
+    });
+    return contribution;
   }
 
   async approve(contributionId: string) {

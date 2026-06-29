@@ -258,4 +258,31 @@ describe('MediaContributionService', () => {
       await expect(service.reclaim('c1')).rejects.toBeInstanceOf(ForbiddenException);
     });
   });
+
+  describe('createContributionWithin', () => {
+    it('records the given origin (DirectUpload) and auto-approves when approval is off', async () => {
+      db.mediaObject.findUnique.mockResolvedValue({ mimeType: 'image/png' } as never);
+      db.mediaContribution.findFirst.mockResolvedValue(null);
+      db.systemSetting.findFirst.mockResolvedValue({ requireContributionApproval: false } as never);
+      db.mediaContribution.create.mockResolvedValue({ id: 'c1' } as never);
+
+      await service.createContributionWithin(
+        db as never,
+        'm1',
+        dto,
+        ContributionOrigin.DirectUpload,
+        MOCK_ACTING_USER_ID,
+      );
+
+      expect(db.mediaContribution.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            origin: ContributionOrigin.DirectUpload,
+            status: MediaContributionStatus.Approved,
+          }),
+        }),
+      );
+      expect(mediaLink.attachWithin).toHaveBeenCalled();
+    });
+  });
 });

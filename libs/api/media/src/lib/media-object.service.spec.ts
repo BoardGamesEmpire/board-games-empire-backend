@@ -1,28 +1,33 @@
 jest.mock('image-size', () => ({ imageSize: jest.fn(() => ({ width: 800, height: 600, type: 'png' })) }));
 import { imageSize } from 'image-size';
 
-import { Action, type MediaObject, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
+import type { MediaObject } from '@bge/database';
+import { Action, ContributionOrigin, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
+import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
   MOCK_RESOURCE_CONDITION,
-  type MockAbilityService,
-  type MockDatabaseService,
 } from '@bge/testing';
+import type { StoredObject } from '@boardgamesempire/storage-contract';
+import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
 import {
-  ObjectNotFoundError,
-  SignatureExpiredError,
-  SignatureInvalidError,
-  type StoredObject,
-} from '@boardgamesempire/storage-contract';
-import { ForbiddenException, GoneException, NotFoundException, UnsupportedMediaTypeException } from '@nestjs/common';
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  GoneException,
+  NotFoundException,
+  UnsupportedMediaTypeException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Readable } from 'node:stream';
 import { UploadedMediaFile } from './dto';
+import { MediaLinkService } from './link/link.service';
+import { MediaContributionService } from './media-contribution.service';
 import { MediaObjectService } from './media-object.service';
 
 describe('MediaObjectService', () => {
@@ -32,6 +37,8 @@ describe('MediaObjectService', () => {
   let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl' | 'driverSlug'>>;
   let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
   let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume'>>;
+  let contributions: jest.Mocked<Pick<MediaContributionService, 'createContributionWithin'>>;
+  let mediaLink: jest.Mocked<Pick<MediaLinkService, 'canLink'>>;
 
   const stored: StoredObject = {
     key: 'k',
@@ -67,6 +74,9 @@ describe('MediaObjectService', () => {
   const file: UploadedMediaFile = { buffer: Buffer.from('x'), mimetype: 'image/png', originalname: 'cat.png', size: 1 };
 
   beforeEach(async () => {
+    contributions = { createContributionWithin: jest.fn().mockResolvedValue({ id: 'c1' }) };
+    mediaLink = { canLink: jest.fn().mockReturnValue(true) };
+
     jest.mocked(imageSize).mockReturnValue({ width: 800, height: 600, type: 'png' });
 
     ability = createMockAbilityService();
@@ -99,6 +109,8 @@ describe('MediaObjectService', () => {
         { provide: MediaUrlSigner, useValue: signer },
         { provide: ConfigService, useValue: config },
         { provide: QuotaService, useValue: quota },
+        { provide: MediaContributionService, useValue: contributions },
+        { provide: MediaLinkService, useValue: mediaLink },
       ],
     });
 
@@ -230,6 +242,65 @@ describe('MediaObjectService', () => {
       expect(db.mediaObject.create).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ width: null, height: null }) }),
       );
+    });
+  });
+
+  describe('uploadAndContribute', () => {
+    const contributeDto = { subjectType: ResourceType.Game, subjectId: 'g1', category: 'rulebook' };
+
+    it('uploads, creates the object, and records a DirectUpload contribution', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+
+      const result = await service.uploadAndContribute(file, contributeDto);
+
+      expect(storage.put).toHaveBeenCalled();
+      expect(contributions.createContributionWithin).toHaveBeenCalledWith(
+        db, // tx === db via the $transaction mock
+        expect.any(String), // the freshly minted object id
+        contributeDto,
+        ContributionOrigin.DirectUpload,
+        MOCK_ACTING_USER_ID,
+      );
+      expect(result).toEqual({ media: row, contribution: { id: 'c1' } });
+    });
+
+    it('fails fast before writing bytes when the type cannot be linked', async () => {
+      mediaLink.canLink.mockReturnValueOnce(false);
+      await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(BadRequestException);
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('rejects a disallowed media type', async () => {
+      await expect(
+        service.uploadAndContribute({ ...file, mimetype: 'text/html' }, contributeDto),
+      ).rejects.toBeInstanceOf(UnsupportedMediaTypeException);
+      expect(storage.put).not.toHaveBeenCalled();
+    });
+
+    it('compensates stored bytes and does not contribute when over quota', async () => {
+      storage.put.mockResolvedValue(stored);
+      quota.consume.mockResolvedValue({
+        allowed: false,
+        scope: QuotaScope.User,
+        currentUsage: 100n,
+        limit: 100n,
+        softOverage: false,
+        constraints: [],
+      });
+
+      await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(QuotaExceededException);
+      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(contributions.createContributionWithin).not.toHaveBeenCalled();
+    });
+
+    it('compensates stored bytes if the contribution fails', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+      contributions.createContributionWithin.mockRejectedValueOnce(new ConflictException('dup'));
+
+      await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(ConflictException);
+      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
     });
   });
 

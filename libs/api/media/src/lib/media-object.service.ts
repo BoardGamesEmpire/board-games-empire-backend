@@ -1,10 +1,14 @@
-import { Action, DatabaseService, type MediaObject, Prisma, ResourceType, Visibility } from '@bge/database';
+import type { MediaObject } from '@bge/database';
+import { Action, ContributionOrigin, DatabaseService, Prisma, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto } from '@bge/shared';
-import { type MediaConfig, MediaUrlSigner, StorageService } from '@bge/storage';
+import type { MediaConfig } from '@bge/storage';
+import { MediaUrlSigner, StorageService } from '@bge/storage';
+import type { StoredObject } from '@boardgamesempire/storage-contract';
 import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
 import {
+  BadRequestException,
   ForbiddenException,
   GoneException,
   Injectable,
@@ -18,7 +22,9 @@ import { PrismaError } from '@status/codes';
 import { imageSize } from 'image-size';
 import { Readable } from 'node:stream';
 import { formatContentDisposition } from './content-disposition.util';
-import { StreamMediaQueryDto, UploadedMediaFile } from './dto';
+import { ContributeMediaDto, StreamMediaQueryDto, UploadedMediaFile } from './dto';
+import { MediaLinkService } from './link/link.service';
+import { MediaContributionService } from './media-contribution.service';
 import { ALLOWED_UPLOAD_MIME_TYPES, INLINE_SAFE_MIME_TYPES } from './media-mime.policy';
 
 @Injectable()
@@ -32,6 +38,8 @@ export class MediaObjectService {
     private readonly signer: MediaUrlSigner,
     private readonly config: ConfigService,
     private readonly quota: QuotaService,
+    private readonly contributions: MediaContributionService,
+    private readonly mediaLink: MediaLinkService,
   ) {}
 
   async upload(file: UploadedMediaFile) {
@@ -40,58 +48,117 @@ export class MediaObjectService {
     }
 
     const userId = this.ability.getActingUserId();
+    await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength)); // early, non-atomic guard
 
-    // Early guard against input length: rejects the common over-quota case without
-    // writing bytes. Non-atomic/best-effort — the authoritative, race-free gate is
-    // consume() inside the transaction below.
+    const prepared = await this.writeBytes(file, userId);
+    return this.withByteCompensation(prepared.key, () =>
+      this.db.$transaction((tx) =>
+        this.storeOwnedObjectWithin(tx, { ...prepared, userId, originalName: file.originalname ?? null }),
+      ),
+    );
+  }
+
+  /**
+   * Upload new bytes AND contribute them in one operation (ContributionOrigin.DirectUpload —
+   * media the user uploads solely to give away; swept on reject after the reclaim window).
+   * The object create, quota consume, and contribution all commit in a single transaction;
+   * the bytes are compensated on any rollback.
+   */
+  async uploadAndContribute(file: UploadedMediaFile, dto: ContributeMediaDto) {
+    if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
+      throw new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`);
+    }
+    // Fail fast before writing bytes: a type that can't link to the subject can never be approved.
+    if (!this.mediaLink.canLink(file.mimetype, dto.subjectType)) {
+      throw new BadRequestException(`This media type can't be contributed to a ${dto.subjectType}`);
+    }
+
+    const userId = this.ability.getActingUserId();
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength));
 
+    const prepared = await this.writeBytes(file, userId);
+    return this.withByteCompensation(prepared.key, () =>
+      this.db.$transaction(async (tx) => {
+        const media = await this.storeOwnedObjectWithin(tx, {
+          ...prepared,
+          userId,
+          originalName: file.originalname ?? null,
+        });
+        const contribution = await this.contributions.createContributionWithin(
+          tx,
+          prepared.id,
+          dto,
+          ContributionOrigin.DirectUpload,
+          userId,
+        );
+        return { media, contribution };
+      }),
+    );
+  }
+
+  /** Pre-transaction: allocate id/key, write bytes, probe dimensions. Caller compensates on later failure. */
+  private async writeBytes(
+    file: UploadedMediaFile,
+    userId: string,
+  ): Promise<{ id: string; key: string; stored: StoredObject; dimensions: { width: number; height: number } | null }> {
     const id = createId();
     const key = `users/${userId}/${id}`;
     const stored = await this.storage.put(key, file.buffer, {
       contentType: file.mimetype,
       originalName: file.originalname,
     });
+    return { id, key, stored, dimensions: this.probeImageDimensions(file) };
+  }
 
-    const dimensions = this.probeImageDimensions(file);
+  /** In-transaction: atomically consume storage quota for the true stored size and create the owned (Private) row. */
+  private async storeOwnedObjectWithin(
+    tx: Prisma.TransactionClient,
+    params: {
+      id: string;
+      key: string;
+      userId: string;
+      stored: StoredObject;
+      dimensions: { width: number; height: number } | null;
+      originalName: string | null;
+    },
+  ): Promise<MediaObject> {
+    const { id, key, userId, stored, dimensions, originalName } = params;
 
+    const decision = await this.quota.consume('storage_bytes', stored.size, { userId }, tx);
+    if (!decision.allowed) {
+      throw new QuotaExceededException(
+        'storage_bytes',
+        decision.scope!,
+        decision.limit!,
+        decision.currentUsage!,
+        stored.size,
+      );
+    }
+
+    return tx.mediaObject.create({
+      data: {
+        id,
+        ownerId: userId,
+        uploaderId: userId,
+        width: dimensions?.width ?? null,
+        height: dimensions?.height ?? null,
+        visibility: Visibility.Private,
+        driverSlug: stored.driverSlug,
+        driverKey: key,
+        sizeBytes: stored.size,
+        mimeType: stored.contentType,
+        checksum: stored.checksum,
+        etag: stored.etag ?? null,
+        originalName: originalName ?? null,
+      },
+    });
+  }
+
+  /** Runs `fn`; if it throws, compensates the orphaned bytes at `key` (storage isn't transactional) and rethrows. */
+  private async withByteCompensation<T>(key: string, fn: () => Promise<T>): Promise<T> {
     try {
-      // Atomic gate: consume() locks the storage_bytes cap(s) and re-measures usage
-      // under that lock inside this tx; the create that moves usage commits under the
-      // same lock, so concurrent uploads can't both clear a hard cap.
-      return await this.db.$transaction(async (tx) => {
-        const decision = await this.quota.consume('storage_bytes', stored.size, { userId }, tx);
-        if (!decision.allowed) {
-          throw new QuotaExceededException(
-            'storage_bytes',
-            decision.scope!,
-            decision.limit!,
-            decision.currentUsage!,
-            stored.size,
-          );
-        }
-
-        return tx.mediaObject.create({
-          data: {
-            id,
-            ownerId: userId,
-            uploaderId: userId,
-            width: dimensions?.width ?? null,
-            height: dimensions?.height ?? null,
-            visibility: Visibility.Private,
-            driverSlug: stored.driverSlug,
-            driverKey: key,
-            sizeBytes: stored.size,
-            mimeType: stored.contentType,
-            checksum: stored.checksum,
-            etag: stored.etag ?? null,
-            originalName: file.originalname ?? null,
-          },
-        });
-      });
+      return await fn();
     } catch (error) {
-      // tx rollback (over-quota or failed insert) leaves bytes with no row. Storage
-      // isn't transactional, so compensate out of band.
       await this.storage
         .delete(key)
         .catch((cleanupError) =>
@@ -100,7 +167,6 @@ export class MediaObjectService {
             cleanupError,
           ),
         );
-
       throw error;
     }
   }

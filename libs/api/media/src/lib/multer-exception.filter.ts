@@ -9,7 +9,7 @@ interface MulterLikeError {
 
 // Duck-typed to avoid an @types/multer dependency for one branch.
 function isMulterError(error: unknown): error is MulterLikeError {
-  return typeof error === 'object' && error !== null && (error as MulterLikeError).name === 'MulterError';
+  return (error as MulterLikeError)?.name === 'MulterError';
 }
 
 /** Maps Multer limit errors (thrown inside the file interceptor, before the
