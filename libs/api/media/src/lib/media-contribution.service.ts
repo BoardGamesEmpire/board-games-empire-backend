@@ -98,15 +98,16 @@ export class MediaContributionService {
       contributedById: actorId,
     };
 
-    if (await this.approvalRequired()) {
+    const isApprovalRequired = await this.approvalRequired(tx);
+    if (isApprovalRequired) {
       return tx.mediaContribution.create({ data: { ...data, status: MediaContributionStatus.Pending } });
     }
 
-    const serviceAccountId = (await this.serviceAccount.resolve()).id;
+    const serviceAccount = await this.serviceAccount.resolve();
     const contribution = await tx.mediaContribution.create({
       data: { ...data, status: MediaContributionStatus.Approved, reviewedAt: new Date() },
     });
-    await this.flipOwnership(tx, mediaObjectId, serviceAccountId);
+    await this.flipOwnership(tx, mediaObjectId, serviceAccount.id);
     await this.mediaLink.attachWithin(tx, mediaObjectId, {
       subjectType: dto.subjectType,
       subjectId: dto.subjectId,
@@ -118,10 +119,10 @@ export class MediaContributionService {
   async approve(contributionId: string) {
     const reviewerId = this.ability.getActingUserId();
     const contribution = await this.requirePending(contributionId);
-    const serviceAccountId = (await this.serviceAccount.resolve()).id;
+    const serviceAccount = await this.serviceAccount.resolve();
 
     return this.db.$transaction(async (tx) => {
-      await this.flipOwnership(tx, contribution.mediaObjectId, serviceAccountId);
+      await this.flipOwnership(tx, contribution.mediaObjectId, serviceAccount.id);
       await this.mediaLink.attachWithin(tx, contribution.mediaObjectId, {
         subjectType: contribution.subjectType as ModelResourceType,
         subjectId: contribution.subjectId,
@@ -245,8 +246,8 @@ export class MediaContributionService {
     return contribution;
   }
 
-  private async approvalRequired(): Promise<boolean> {
-    const settings = await this.db.systemSetting.findFirst({ select: { requireContributionApproval: true } });
+  private async approvalRequired(executor: Prisma.TransactionClient | DatabaseService = this.db): Promise<boolean> {
+    const settings = await executor.systemSetting.findFirst({ select: { requireContributionApproval: true } });
     return settings?.requireContributionApproval ?? false;
   }
 

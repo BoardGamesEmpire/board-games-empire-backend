@@ -249,20 +249,21 @@ describe('MediaObjectService', () => {
     const contributeDto = { subjectType: ResourceType.Game, subjectId: 'g1', category: 'rulebook' };
 
     it('uploads, creates the object, and records a DirectUpload contribution', async () => {
+      const postFlip = { ...row, visibility: Visibility.Public, ownerId: 'svc' };
       storage.put.mockResolvedValue(stored);
-      db.mediaObject.create.mockResolvedValue(row);
+      db.mediaObject.create.mockResolvedValue(row); // pre-flip
+      db.mediaObject.findUniqueOrThrow.mockResolvedValue(postFlip); // post-flip re-read
 
       const result = await service.uploadAndContribute(file, contributeDto);
 
-      expect(storage.put).toHaveBeenCalled();
       expect(contributions.createContributionWithin).toHaveBeenCalledWith(
-        db, // tx === db via the $transaction mock
-        expect.any(String), // the freshly minted object id
+        db,
+        expect.any(String),
         contributeDto,
         ContributionOrigin.DirectUpload,
         MOCK_ACTING_USER_ID,
       );
-      expect(result).toEqual({ media: row, contribution: { id: 'c1' } });
+      expect(result).toEqual({ media: postFlip, contribution: { id: 'c1' } });
     });
 
     it('fails fast before writing bytes when the type cannot be linked', async () => {

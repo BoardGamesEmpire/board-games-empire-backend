@@ -79,18 +79,21 @@ export class MediaObjectService {
     const prepared = await this.writeBytes(file, userId);
     return this.withByteCompensation(prepared.key, () =>
       this.db.$transaction(async (tx) => {
-        const media = await this.storeOwnedObjectWithin(tx, {
+        const created = await this.storeOwnedObjectWithin(tx, {
           ...prepared,
           userId,
           originalName: file.originalname ?? null,
         });
         const contribution = await this.contributions.createContributionWithin(
           tx,
-          prepared.id,
+          created.id,
           dto,
           ContributionOrigin.DirectUpload,
           userId,
         );
+        // Auto-approval flips ownerId + visibility in this same tx, so the create()
+        // result is stale — return the post-flip row.
+        const media = await tx.mediaObject.findUniqueOrThrow({ where: { id: created.id } });
         return { media, contribution };
       }),
     );
