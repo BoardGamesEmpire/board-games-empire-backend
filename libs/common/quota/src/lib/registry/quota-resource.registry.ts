@@ -1,7 +1,7 @@
 import { DatabaseService, QuotaScope } from '@bge/database';
 import { Injectable } from '@nestjs/common';
-import { type QuotaResource } from '../constants/quota-resource';
-import type { QuotaResourceDefinition, QuotaUsageProvider } from '../interfaces';
+import type { QuotaResource } from '../constants/quota-resource';
+import type { QuotaExecutor, QuotaResourceDefinition, QuotaUsageProvider } from '../interfaces';
 
 /**
  * Stateless catalogue of every quota-eligible resource. Mirrors
@@ -94,30 +94,29 @@ export class QuotaResourceRegistry {
     return [...this.definitions.keys()];
   }
 
-  private async countHouseholdMembers(_scope: QuotaScope, scopeId: string) {
-    const count = await this.databaseService.householdMember.count({ where: { householdId: scopeId } });
+  private async countHouseholdMembers(_scope: QuotaScope, scopeId: string, db?: QuotaExecutor) {
+    const client = db ?? this.databaseService;
+    const count = await client.householdMember.count({ where: { householdId: scopeId } });
     return BigInt(count);
   }
 
-  private async countWebhookSubscriptions(_scope: QuotaScope, scopeId: string) {
-    const count = await this.databaseService.webhookSubscription.count({
-      where: { createdById: scopeId, deletedAt: null },
-    });
+  private async countWebhookSubscriptions(_scope: QuotaScope, scopeId: string, db?: QuotaExecutor) {
+    const client = db ?? this.databaseService;
+    const count = await client.webhookSubscription.count({ where: { createdById: scopeId, deletedAt: null } });
     return BigInt(count);
   }
 
-  private async sumStorageBytes(scope: QuotaScope, scopeId: string): Promise<bigint> {
+  private async sumStorageBytes(scope: QuotaScope, scopeId: string, db?: QuotaExecutor): Promise<bigint> {
     if (scope !== QuotaScope.Server && scope !== QuotaScope.User) {
       // storage_bytes declares only [Server, User]; a new scope must opt in here
       // explicitly rather than be silently treated as User and skew accounting.
       throw new Error(`storage_bytes usage is not defined for scope '${scope}'`);
     }
-
-    const { _sum } = await this.databaseService.mediaObject.aggregate({
+    const client = db ?? this.databaseService;
+    const { _sum } = await client.mediaObject.aggregate({
       _sum: { sizeBytes: true },
       where: scope === QuotaScope.Server ? {} : { ownerId: scopeId },
     });
-
     return _sum?.sizeBytes ?? 0n;
   }
 }

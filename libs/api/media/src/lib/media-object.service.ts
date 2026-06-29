@@ -41,8 +41,9 @@ export class MediaObjectService {
 
     const userId = this.ability.getActingUserId();
 
-    // Early guard against the input length: rejects the common over-quota case
-    // without writing bytes. Exact for non-transforming drivers.
+    // Early guard against input length: rejects the common over-quota case without
+    // writing bytes. Non-atomic/best-effort — the authoritative, race-free gate is
+    // consume() inside the transaction below.
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength));
 
     const id = createId();
@@ -55,30 +56,42 @@ export class MediaObjectService {
     const dimensions = this.probeImageDimensions(file);
 
     try {
-      // Authoritative gate: the driver computes the true stored size, and that is
-      // what usage measures. For a transforming driver it can differ from the
-      // input length, so the binding enforcement is here. Cleanup below covers
-      // both a quota rejection and a failed insert.
-      await this.assertWithinStorageQuota(userId, stored.size);
+      // Atomic gate: consume() locks the storage_bytes cap(s) and re-measures usage
+      // under that lock inside this tx; the create that moves usage commits under the
+      // same lock, so concurrent uploads can't both clear a hard cap.
+      return await this.db.$transaction(async (tx) => {
+        const decision = await this.quota.consume('storage_bytes', stored.size, { userId }, tx);
+        if (!decision.allowed) {
+          throw new QuotaExceededException(
+            'storage_bytes',
+            decision.scope!,
+            decision.limit!,
+            decision.currentUsage!,
+            stored.size,
+          );
+        }
 
-      return await this.db.mediaObject.create({
-        data: {
-          id,
-          ownerId: userId,
-          uploaderId: userId,
-          width: dimensions?.width ?? null,
-          height: dimensions?.height ?? null,
-          visibility: Visibility.Private,
-          driverSlug: stored.driverSlug,
-          driverKey: key,
-          sizeBytes: stored.size,
-          mimeType: stored.contentType,
-          checksum: stored.checksum,
-          etag: stored.etag ?? null,
-          originalName: file.originalname ?? null,
-        },
+        return tx.mediaObject.create({
+          data: {
+            id,
+            ownerId: userId,
+            uploaderId: userId,
+            width: dimensions?.width ?? null,
+            height: dimensions?.height ?? null,
+            visibility: Visibility.Private,
+            driverSlug: stored.driverSlug,
+            driverKey: key,
+            sizeBytes: stored.size,
+            mimeType: stored.contentType,
+            checksum: stored.checksum,
+            etag: stored.etag ?? null,
+            originalName: file.originalname ?? null,
+          },
+        });
       });
     } catch (error) {
+      // tx rollback (over-quota or failed insert) leaves bytes with no row. Storage
+      // isn't transactional, so compensate out of band.
       await this.storage
         .delete(key)
         .catch((cleanupError) =>
@@ -91,6 +104,7 @@ export class MediaObjectService {
       throw error;
     }
   }
+
   async findById(id: string) {
     const media = await this.db.mediaObject.findUnique({
       where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },

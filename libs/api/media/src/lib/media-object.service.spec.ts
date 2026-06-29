@@ -31,7 +31,7 @@ describe('MediaObjectService', () => {
   let ability: MockAbilityService;
   let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl' | 'driverSlug'>>;
   let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
-  let quota: jest.Mocked<Pick<QuotaService, 'check'>>;
+  let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume'>>;
 
   const stored: StoredObject = {
     key: 'k',
@@ -79,17 +79,16 @@ describe('MediaObjectService', () => {
     };
     signer = { verify: jest.fn() };
 
-    quota = {
-      check: jest.fn().mockResolvedValue({
-        allowed: true,
-        scope: null,
-        currentUsage: null,
-        limit: null,
-        softOverage: false,
-        constraints: [],
-      }),
+    const allowed = {
+      allowed: true,
+      scope: null,
+      currentUsage: null,
+      limit: null,
+      softOverage: false,
+      constraints: [],
     };
 
+    quota = { check: jest.fn().mockResolvedValue(allowed), consume: jest.fn().mockResolvedValue(allowed) };
     const config = { getOrThrow: jest.fn().mockReturnValue({ signedUrlTtlSeconds: 300 }) };
 
     const ctx = await createTestingModuleWithDb({
@@ -104,6 +103,7 @@ describe('MediaObjectService', () => {
     });
 
     db = ctx.db;
+    db.$transaction.mockImplementation((cb) => cb(db)); // run the tx body with db as the client
     service = ctx.module.get(MediaObjectService);
   });
 
@@ -178,35 +178,26 @@ describe('MediaObjectService', () => {
       expect(db.mediaObject.create).not.toHaveBeenCalled();
     });
 
-    it('guards on input length up front, then re-checks the authoritative stored size', async () => {
+    it('guards on input length up front, then consumes the authoritative stored size atomically', async () => {
       storage.put.mockResolvedValue(stored); // stored.size = 1234n
       db.mediaObject.create.mockResolvedValue(row);
 
-      await service.upload(file); // file.buffer = 1 byte
+      await service.upload(file); // 1-byte buffer
 
-      expect(quota.check).toHaveBeenNthCalledWith(1, 'storage_bytes', 1n, { userId: MOCK_ACTING_USER_ID });
-      expect(quota.check).toHaveBeenNthCalledWith(2, 'storage_bytes', 1234n, { userId: MOCK_ACTING_USER_ID });
+      expect(quota.check).toHaveBeenCalledWith('storage_bytes', 1n, { userId: MOCK_ACTING_USER_ID });
+      expect(quota.consume).toHaveBeenCalledWith('storage_bytes', 1234n, { userId: MOCK_ACTING_USER_ID }, db);
     });
 
     it('deletes the written bytes if the authoritative size pushes over quota', async () => {
       storage.put.mockResolvedValue(stored);
-      quota.check
-        .mockResolvedValueOnce({
-          allowed: true,
-          scope: null,
-          currentUsage: null,
-          limit: null,
-          softOverage: false,
-          constraints: [],
-        })
-        .mockResolvedValueOnce({
-          allowed: false,
-          scope: QuotaScope.User,
-          currentUsage: 100n,
-          limit: 100n,
-          softOverage: false,
-          constraints: [],
-        });
+      quota.consume.mockResolvedValue({
+        allowed: false,
+        scope: QuotaScope.User,
+        currentUsage: 100n,
+        limit: 100n,
+        softOverage: false,
+        constraints: [],
+      });
 
       await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
       expect(storage.put).toHaveBeenCalled();
