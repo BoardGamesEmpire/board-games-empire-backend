@@ -194,6 +194,100 @@ describe('QuotaService', () => {
     });
   });
 
+  describe('consume', () => {
+    function makeTx() {
+      return {
+        quota: { findMany: jest.fn() },
+        $executeRaw: jest.fn().mockResolvedValue(1),
+      } as unknown as Prisma.TransactionClient;
+    }
+
+    it('allows under cap, locking the applicable scope and measuring under the tx', async () => {
+      defineResource([QuotaScope.User], { [QuotaScope.User]: 5n });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 10n }),
+      ]);
+
+      const result = await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+
+      expect(result.allowed).toBe(true);
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
+    it('hard-blocks under the lock when the re-measured usage is over', async () => {
+      defineResource([QuotaScope.User], { [QuotaScope.User]: 5n });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 5n }),
+      ]);
+
+      const result = await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+      expect(result).toMatchObject({ allowed: false, scope: QuotaScope.User, limit: 5n, currentUsage: 5n });
+    });
+
+    it('locks every applicable scope in ascending key order (deadlock-free)', async () => {
+      defineResource([QuotaScope.Server, QuotaScope.User], { [QuotaScope.Server]: 1n, [QuotaScope.User]: 1n });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.Server, scopeId: '*', limit: 1000n }),
+        makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 1000n }),
+      ]);
+
+      await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(2);
+      const keys = (tx.$executeRaw as jest.Mock).mock.calls.map((call) => call[1] as bigint);
+      expect(keys).toEqual([...keys].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+    });
+
+    it('passes the transaction executor to the usage provider (atomic re-measure)', async () => {
+      const usage = jest.fn().mockResolvedValue(0n);
+      registry.require.mockReturnValue({
+        key: 'storage_bytes',
+        applicableScopes: [QuotaScope.User],
+        usage,
+      } as unknown as QuotaResourceDefinition);
+      registry.requireUsage.mockReturnValue(usage as unknown as QuotaUsageProvider);
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 10n }),
+      ]);
+
+      await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+      expect(usage).toHaveBeenCalledWith(QuotaScope.User, USER_ID, tx);
+    });
+
+    it('takes no lock and allows when no enforced row applies', async () => {
+      defineResource([QuotaScope.User], { [QuotaScope.User]: 0n });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([]);
+
+      const result = await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+      expect(result).toMatchObject({ allowed: true, scope: null });
+      expect(tx.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('takes no lock when the resource has no applicable target in context', async () => {
+      defineResource([QuotaScope.Household], { [QuotaScope.Household]: 0n });
+      const tx = makeTx();
+
+      const result = await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx); // no householdId
+      expect(result.allowed).toBe(true);
+      expect(tx.quota.findMany).not.toHaveBeenCalled();
+      expect(tx.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('rejects a negative amount before touching the tx', async () => {
+      defineResource([QuotaScope.User], { [QuotaScope.User]: 0n });
+      const tx = makeTx();
+      await expect(service.consume('storage_bytes', -1n, { userId: USER_ID }, tx)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+      expect(tx.$executeRaw).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setQuota', () => {
     beforeEach(() => {
       ability.getActingUserId.mockReturnValue(ACTOR_ID);

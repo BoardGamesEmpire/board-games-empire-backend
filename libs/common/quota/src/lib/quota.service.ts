@@ -2,6 +2,7 @@ import { Action, DatabaseService, Prisma, Quota, QuotaScope, ResourceType } from
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createHash } from 'node:crypto';
 import { QuotaEvents } from './constants/quota-events.constant';
 import { DEFAULT_SCOPE_ID, type QuotaResource } from './constants/quota-resource';
 import type { QuotaView } from './dto/quota-response.dto';
@@ -10,8 +11,10 @@ import type {
   QuotaCheckContext,
   QuotaCheckResult,
   QuotaConstraint,
+  QuotaExecutor,
   QuotaSoftOverageEvent,
   QuotaUpdatedEvent,
+  QuotaUsageProvider,
 } from './interfaces';
 import { toPublicScopeId, toQuotaView, toStorageScopeId } from './quota.serialization';
 import { QuotaResourceRegistry } from './registry/quota-resource.registry';
@@ -37,14 +40,9 @@ export class QuotaService {
   ) {}
 
   /**
-   * Evaluates whether `amount` of `resource` fits the applicable caps for `ctx`,
-   * returning the per-scope breakdown and binding result. Callers throw
-   * QuotaExceededException when `allowed` is false.
-   *
-   * Best-effort and non-atomic: usage is read live with no lock, so concurrent
-   * writers can both pass against the same stale figure and overshoot a *hard*
-   * cap. Acceptable under the overcommit-allowed design (soft caps are meant to
-   * overshoot); a truly-atomic `consume(...)` for hard caps is tracked in #98.
+   * Read-only headroom evaluation: reads usage live with no lock, so concurrent
+   * writers can both pass against the same figure and overshoot a *hard* cap.
+   * Use for fast-fail/UI; the race-free pre-write gate is `consume(...)`.
    */
   async check(resource: QuotaResource, amount: bigint, ctx: QuotaCheckContext): Promise<QuotaCheckResult> {
     if (amount < 0n) {
@@ -59,7 +57,65 @@ export class QuotaService {
       return this.unconstrained();
     }
 
-    const rows = await this.databaseService.quota.findMany({
+    const applicable = await this.loadApplicable(this.databaseService, resource, targets);
+    if (applicable.length === 0) {
+      return this.unconstrained();
+    }
+
+    return this.evaluate(this.databaseService, resource, usage, applicable, amount);
+  }
+
+  /**
+   * Race-free counterpart to `check()`. MUST be called inside the caller's
+   * interactive transaction, and the caller MUST perform the usage-moving write
+   * in that SAME transaction. Acquires a transaction-scoped advisory lock on
+   * every applicable (enforced) scope — ascending by key so overlapping sets
+   * lock in one order (deadlock-free) — then re-measures usage under the lock.
+   * The lock is held until the transaction commits/rolls back, so two consumers
+   * of the same cap serialize across measure+write and a hard cap can't be
+   * overshot. Limits are read just before locking; concurrent admin limit edits
+   * (which don't take this lock) are out of scope, by design.
+   */
+  async consume(
+    resource: QuotaResource,
+    amount: bigint,
+    ctx: QuotaCheckContext,
+    tx: Prisma.TransactionClient,
+  ): Promise<QuotaCheckResult> {
+    if (amount < 0n) {
+      throw new BadRequestException('consume amount must be non-negative');
+    }
+
+    const definition = this.registry.require(resource);
+    const usage = this.registry.requireUsage(resource);
+
+    const targets = this.resolveTargets(definition.applicableScopes, ctx);
+    if (targets.length === 0) {
+      return this.unconstrained();
+    }
+
+    const applicable = await this.loadApplicable(tx, resource, targets);
+    if (applicable.length === 0) {
+      return this.unconstrained();
+    }
+
+    const lockKeys = [
+      ...new Set(applicable.map(({ scope, scopeId }) => this.advisoryLockKey(resource, scope, scopeId))),
+    ].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    for (const key of lockKeys) {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${key})`;
+    }
+
+    return this.evaluate(tx, resource, usage, applicable, amount);
+  }
+
+  /** Enforced quota rows that apply to the targets (instance row, else type-level default). */
+  private async loadApplicable(
+    executor: QuotaExecutor,
+    resource: QuotaResource,
+    targets: ResolvedTarget[],
+  ): Promise<{ scope: QuotaScope; scopeId: string; row: QuotaRow }[]> {
+    const rows = await executor.quota.findMany({
       where: {
         resource,
         OR: targets.flatMap(({ scope, scopeId }) =>
@@ -80,12 +136,18 @@ export class QuotaService {
         applicable.push({ scope, scopeId, row });
       }
     }
+    return applicable;
+  }
 
-    if (applicable.length === 0) {
-      return this.unconstrained();
-    }
-
-    const usages = await Promise.all(applicable.map(({ scope, scopeId }) => usage(scope, scopeId)));
+  /** Measures usage (via `executor`), builds constraints, emits soft-overage, picks the binding. */
+  private async evaluate(
+    executor: QuotaExecutor,
+    resource: QuotaResource,
+    usage: QuotaUsageProvider,
+    applicable: { scope: QuotaScope; scopeId: string; row: QuotaRow }[],
+    amount: bigint,
+  ): Promise<QuotaCheckResult> {
+    const usages = await Promise.all(applicable.map(({ scope, scopeId }) => usage(scope, scopeId, executor)));
 
     const constraints: QuotaConstraint[] = applicable.map(({ scope, scopeId, row }, index) => {
       const currentUsage = usages[index];
@@ -99,8 +161,6 @@ export class QuotaService {
       };
     });
 
-    const hardViolations = constraints.filter((c) => c.exceeded && !c.softOverage);
-
     for (const violation of constraints.filter((c) => c.exceeded && c.softOverage)) {
       this.eventEmitter.emit(QuotaEvents.SoftOverage, {
         scope: violation.scope,
@@ -112,6 +172,7 @@ export class QuotaService {
       } satisfies QuotaSoftOverageEvent);
     }
 
+    const hardViolations = constraints.filter((c) => c.exceeded && !c.softOverage);
     const binding = this.pickBinding(hardViolations.length > 0 ? hardViolations : constraints);
 
     return {
@@ -122,6 +183,12 @@ export class QuotaService {
       softOverage: binding.softOverage,
       constraints,
     };
+  }
+
+  /** Stable signed-64-bit key for pg_advisory_xact_lock(bigint). A collision only
+   *  over-serializes two unrelated caps; it never under-locks. */
+  private advisoryLockKey(resource: QuotaResource, scope: QuotaScope, scopeId: string): bigint {
+    return createHash('sha1').update(`quota:${resource}:${scope}:${scopeId}`).digest().readBigInt64BE(0);
   }
 
   async getQuotas(): Promise<QuotaView[]> {

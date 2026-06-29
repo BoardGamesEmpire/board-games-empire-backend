@@ -1,5 +1,12 @@
-import type { QuotaScope } from '@bge/database';
+import type { DatabaseService, Prisma, QuotaScope } from '@bge/database';
 import type { QuotaResource } from '../constants/quota-resource';
+
+/**
+ * Either the root client or an interactive-transaction client. Usage providers
+ * accept one so `consume()` can re-measure under an advisory lock inside the
+ * caller's transaction; `check()` passes the root client.
+ */
+export type QuotaExecutor = DatabaseService | Prisma.TransactionClient;
 
 /**
  * Computes current usage of a resource for one resolved scope target.
@@ -10,7 +17,7 @@ import type { QuotaResource } from '../constants/quota-resource';
  * Returns a non-negative bigint. Implementations branch on `scope` when a
  * resource is measured in more than one scope (e.g. storage at Server + User).
  */
-export type QuotaUsageProvider = (scope: QuotaScope, scopeId: string) => Promise<bigint>;
+export type QuotaUsageProvider = (scope: QuotaScope, scopeId: string, db?: QuotaExecutor) => Promise<bigint>;
 
 /**
  * Code-defined description of a quota-eligible resource.
