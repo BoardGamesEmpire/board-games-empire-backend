@@ -83,6 +83,7 @@ describe('LocalDiskDriver', () => {
 
       expect(signed.url).toContain('https://bge.test/media-stream?');
       const url = new URL(signed.url);
+      expect(url.searchParams.get('slug')).toBe('localdisk');
       expect(url.searchParams.get('op')).toBe('get');
       expect(url.searchParams.get('ct')).toBeNull();
       expect(url.searchParams.get('ownerId')).toBeNull();
@@ -90,7 +91,14 @@ describe('LocalDiskDriver', () => {
       const exp = Number(url.searchParams.get('exp'));
       await expect(
         signer.verify(
-          { key: 'media/a.png', op: 'get', expiresAt: exp, contentType: 'image/png', bindings: { ownerId: 'u1' } },
+          {
+            slug: 'localdisk',
+            key: 'media/a.png',
+            op: 'get',
+            expiresAt: exp,
+            contentType: 'image/png',
+            bindings: { ownerId: 'u1' },
+          },
           url.searchParams.get('sig') ?? '',
         ),
       ).resolves.toBeUndefined();

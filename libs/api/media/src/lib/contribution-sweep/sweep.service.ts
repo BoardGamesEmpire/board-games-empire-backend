@@ -1,7 +1,6 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { ContributionOrigin, DatabaseService, MediaContributionStatus } from '@bge/database';
 import { type JobActorMeta, wrapJobData } from '@bge/queue-actor-context';
-import { StorageService } from '@bge/storage';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
@@ -23,7 +22,6 @@ export class MediaContributionSweepService {
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly storage: StorageService,
     private readonly audit: AuditContextService,
     private readonly systemActorScope: SystemActorScope,
     @InjectQueue(MediaQueueNames.ContributionSweep) private readonly queue: Queue<PurgeContributionJob>,
@@ -41,10 +39,9 @@ export class MediaContributionSweepService {
 
   /**
    * Enqueues a purge job for each DirectUpload contribution that was rejected and
-   * whose reclaim window has closed. Restricted to objects on the active storage
-   * driver — byte ops can't target a non-active driver yet (#100); legacy-driver
-   * objects are skipped until that lands. Public for tests / admin tooling;
-   * assumes an actor scope is active.
+   * whose reclaim window has closed, regardless of which driver holds the bytes —
+   * the purge processor resolves the driver by the object's recorded slug (#100).
+   * Public for tests / admin tooling; assumes an actor scope is active.
    */
   async dispatch(): Promise<{ enqueued: number }> {
     const meta: JobActorMeta = {
@@ -57,7 +54,6 @@ export class MediaContributionSweepService {
         status: MediaContributionStatus.Rejected,
         origin: ContributionOrigin.DirectUpload,
         reclaimDeadline: { lte: new Date() },
-        mediaObject: { driverSlug: this.storage.driverSlug }, // #100
       },
       select: {
         id: true,

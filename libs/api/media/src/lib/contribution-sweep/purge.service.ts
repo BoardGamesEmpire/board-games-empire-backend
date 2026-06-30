@@ -1,6 +1,7 @@
 import { DatabaseService, NotificationType, Prisma } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { StorageService } from '@bge/storage';
+import type { StorageLocator } from '@boardgamesempire/storage-contract';
 import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
@@ -24,28 +25,21 @@ export class MediaContributionPurgeService {
    * concurrent runner double-notifies.
    */
   async purge(job: PurgeContributionJob): Promise<void> {
-    // #100 guard: dispatch filters to the active driver, but it could change
-    // between dispatch and processing. Never delete from the wrong backend.
-    if (job.driverSlug !== this.storage.driverSlug) {
-      this.logger.warn(
-        `Skipping purge of ${job.mediaObjectId}: stored on '${job.driverSlug}', active driver '${this.storage.driverSlug}' (#100)`,
-      );
-      return;
-    }
-
-    await this.deleteBytes(job.driverKey);
+    await this.deleteBytes({ driverSlug: job.driverSlug, driverKey: job.driverKey });
 
     if (await this.deleteRow(job.mediaObjectId)) {
       await this.notifyContributor(job);
     }
   }
 
-  private async deleteBytes(driverKey: string): Promise<void> {
+  private async deleteBytes(locator: StorageLocator): Promise<void> {
     try {
-      await this.storage.delete(driverKey);
+      await this.storage.delete(locator);
     } catch (error) {
+      // Already-gone bytes are fine. Anything else — including an unregistered
+      // driver (#100) — propagates so BullMQ retries and ultimately parks the job.
       if (!(error instanceof ObjectNotFoundError)) {
-        throw error; // already gone is fine; anything else is real
+        throw error;
       }
     }
   }

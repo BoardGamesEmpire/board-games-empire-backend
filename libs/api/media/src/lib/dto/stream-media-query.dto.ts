@@ -9,6 +9,11 @@ export class StreamMediaQueryDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
+  slug!: string;
+
+  @ApiProperty()
+  @IsString()
+  @IsNotEmpty()
   key!: string;
 
   @ApiProperty({ enum: ['get'] })

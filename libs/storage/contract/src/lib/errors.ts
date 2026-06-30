@@ -55,3 +55,14 @@ export class StorageMisconfiguredError extends StorageError {
     super(message, options);
   }
 }
+
+export class DriverNotRegisteredError extends StorageError {
+  readonly code = 'DRIVER_NOT_REGISTERED';
+
+  constructor(
+    readonly slug: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`No storage driver registered for slug '${slug}'`, options);
+  }
+}

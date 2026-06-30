@@ -3,6 +3,17 @@ import type { Readable } from 'node:stream';
 /** Operation a signed URL authorizes. */
 export type StorageOp = 'get' | 'put';
 
+/**
+ * Addresses a stored object across drivers: `driverSlug` selects the backend,
+ * `driverKey` locates the bytes within it. Required by every object-addressed op
+ * (`get`/`head`/`delete`/`signedUrl`) so routing follows the object's recorded
+ * driver, not the active write driver. Mirrors `MediaObject @@unique([driverSlug, driverKey])`.
+ */
+export interface StorageLocator {
+  readonly driverSlug: string;
+  readonly driverKey: string;
+}
+
 /** Caller-supplied metadata at write time. The driver computes authoritative size/checksum. */
 export interface ObjectMeta {
   readonly contentType: string;

@@ -8,6 +8,7 @@ describe('MediaUrlSigner', () => {
 
   const future = Math.floor(Date.now() / 1000) + 300;
   const base: SignaturePayload = {
+    slug: 'localdisk',
     key: 'media/a',
     op: 'get',
     expiresAt: future,
@@ -36,6 +37,11 @@ describe('MediaUrlSigner', () => {
     await expect(signer.verify({ ...base, bindings: { ownerId: 'attacker' } }, sig)).rejects.toBeInstanceOf(
       SignatureInvalidError,
     );
+  });
+
+  it('rejects a signature bound to a different driver slug (cross-backend replay)', async () => {
+    const sig = await signer.sign(base);
+    await expect(signer.verify({ ...base, slug: 's3' }, sig)).rejects.toBeInstanceOf(SignatureInvalidError);
   });
 
   it('rejects a tampered content type', async () => {
