@@ -12,7 +12,7 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 3. ~~#55 SafeHttpService. Tiny, blocks #56.~~ Completed in #83.
 4. ~~#56 Webhook subscriptions. Standalone primitive, immediately useful, exercises SafeHttpService end-to-end.~~ Completed in #88.
 5. ~~#69 Quota primitive. Lands before storage so quota checks are in MediaObject create from day one (retrofit pain).~~ Completed in #91.
-6. #58 MediaObject + StorageDriver + LocalDiskDriver. Foundation; usable without plugin loader.
+6. ~~#58 MediaObject + StorageDriver + LocalDiskDriver. Foundation; usable without plugin loader.~~ Completed across #95, #96, #97, #99, #104
 7. ~~#68 AbilityService. Lands with user/apiKey/system dispatch; plugin dispatch added later. Existing services start migrating opportunistically.~~ Completed in #92.
 8. #57 Phase 2 (audit log table + listener). Now that Phase 1 prep is everywhere, the listener has substrate to work against.
 

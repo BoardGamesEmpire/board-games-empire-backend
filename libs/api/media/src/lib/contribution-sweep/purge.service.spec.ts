@@ -2,13 +2,13 @@ import { NotificationType, Prisma, ResourceType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { StorageService } from '@bge/storage';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
+import { DriverNotRegisteredError, ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { MediaContributionPurgeService } from './purge.service';
 
 describe('MediaContributionPurgeService', () => {
   let service: MediaContributionPurgeService;
   let db: MockDatabaseService;
-  const storage = { delete: jest.fn().mockResolvedValue(undefined), driverSlug: 'localdisk' };
+  const storage = { delete: jest.fn().mockResolvedValue(undefined) };
   const notifications = { create: jest.fn().mockResolvedValue(undefined) };
 
   const job = {
@@ -37,7 +37,7 @@ describe('MediaContributionPurgeService', () => {
 
   it('deletes bytes, deletes the row, then notifies the contributor', async () => {
     await service.purge(job);
-    expect(storage.delete).toHaveBeenCalledWith('users/u/mo1');
+    expect(storage.delete).toHaveBeenCalledWith({ driverSlug: 'localdisk', driverKey: 'users/u/mo1' });
     expect(db.mediaObject.delete).toHaveBeenCalledWith({ where: { id: 'mo1' } });
     expect(notifications.create).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'u1', type: NotificationType.MediaContributionReclaimExpired }),
@@ -63,9 +63,15 @@ describe('MediaContributionPurgeService', () => {
     await expect(service.purge(job)).resolves.toBeUndefined();
   });
 
-  it('refuses to delete from a non-active driver (#100)', async () => {
-    await service.purge({ ...job, driverSlug: 's3' });
-    expect(storage.delete).not.toHaveBeenCalled();
+  it('purges an object on a non-default driver by its recorded slug (#100)', async () => {
+    await service.purge({ ...job, driverSlug: 's3', driverKey: 'users/u/legacy' });
+    expect(storage.delete).toHaveBeenCalledWith({ driverSlug: 's3', driverKey: 'users/u/legacy' });
+    expect(db.mediaObject.delete).toHaveBeenCalledWith({ where: { id: 'mo1' } });
+  });
+
+  it('propagates a delete failure so BullMQ can retry/park the job (#100)', async () => {
+    storage.delete.mockRejectedValueOnce(new DriverNotRegisteredError('s3'));
+    await expect(service.purge({ ...job, driverSlug: 's3' })).rejects.toBeInstanceOf(DriverNotRegisteredError);
     expect(db.mediaObject.delete).not.toHaveBeenCalled();
   });
 });

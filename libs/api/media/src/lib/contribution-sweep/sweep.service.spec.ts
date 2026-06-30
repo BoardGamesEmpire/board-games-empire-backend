@@ -1,6 +1,5 @@
 import { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { ContributionOrigin, MediaContribution, MediaContributionStatus, ResourceType } from '@bge/database';
-import { StorageService } from '@bge/storage';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { getQueueToken } from '@nestjs/bullmq';
 import { MediaJobNames, MediaQueueNames } from '../constants/media-queue.constants';
@@ -10,7 +9,6 @@ describe('MediaContributionSweepService', () => {
   let service: MediaContributionSweepService;
   let db: MockDatabaseService;
   const queue = { add: jest.fn() };
-  const storage = { driverSlug: 'localdisk' };
   const audit = {
     getActorOrThrow: jest.fn().mockReturnValue({ kind: 'system', reason: 'media-contribution-sweep' }),
     getCorrelationId: jest.fn().mockReturnValue('corr-1'),
@@ -32,7 +30,6 @@ describe('MediaContributionSweepService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         MediaContributionSweepService,
-        { provide: StorageService, useValue: storage },
         { provide: AuditContextService, useValue: audit },
         { provide: SystemActorScope, useValue: systemActorScope },
         { provide: getQueueToken(MediaQueueNames.ContributionSweep), useValue: queue },
@@ -48,17 +45,16 @@ describe('MediaContributionSweepService', () => {
     expect(systemActorScope.run).toHaveBeenCalledWith('media-contribution-sweep', expect.any(Function));
   });
 
-  it('scans only expired rejected DirectUpload on the active driver', async () => {
+  it('scans expired rejected DirectUpload across all drivers (no active-driver filter)', async () => {
     db.mediaContribution.findMany.mockResolvedValue([]);
     await service.dispatch();
     expect(db.mediaContribution.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({
+        where: {
           status: MediaContributionStatus.Rejected,
           origin: ContributionOrigin.DirectUpload,
           reclaimDeadline: { lte: expect.any(Date) },
-          mediaObject: { driverSlug: 'localdisk' },
-        }),
+        },
       }),
     );
   });

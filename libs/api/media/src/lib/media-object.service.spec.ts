@@ -14,7 +14,12 @@ import {
   MOCK_RESOURCE_CONDITION,
 } from '@bge/testing';
 import type { StoredObject } from '@boardgamesempire/storage-contract';
-import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
+import {
+  DriverNotRegisteredError,
+  ObjectNotFoundError,
+  SignatureExpiredError,
+  SignatureInvalidError,
+} from '@boardgamesempire/storage-contract';
 import {
   BadRequestException,
   ConflictException,
@@ -34,7 +39,7 @@ describe('MediaObjectService', () => {
   let service: MediaObjectService;
   let db: MockDatabaseService;
   let ability: MockAbilityService;
-  let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl' | 'driverSlug'>>;
+  let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl'>>;
   let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
   let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume'>>;
   let contributions: jest.Mocked<Pick<MediaContributionService, 'createContributionWithin'>>;
@@ -85,7 +90,6 @@ describe('MediaObjectService', () => {
       get: jest.fn(),
       delete: jest.fn().mockResolvedValue(undefined),
       signedUrl: jest.fn(),
-      driverSlug: 'localdisk',
     };
     signer = { verify: jest.fn() };
 
@@ -154,7 +158,12 @@ describe('MediaObjectService', () => {
       db.mediaObject.create.mockRejectedValue(new Error('db down'));
 
       await expect(service.upload(file)).rejects.toThrow('db down');
-      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(storage.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverSlug: 'localdisk',
+          driverKey: expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
+        }),
+      );
     });
 
     it('rejects a disallowed media type on upload', async () => {
@@ -213,7 +222,12 @@ describe('MediaObjectService', () => {
 
       await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
       expect(storage.put).toHaveBeenCalled();
-      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(storage.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverSlug: 'localdisk',
+          driverKey: expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
+        }),
+      );
       expect(db.mediaObject.create).not.toHaveBeenCalled();
     });
 
@@ -291,7 +305,12 @@ describe('MediaObjectService', () => {
       });
 
       await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(QuotaExceededException);
-      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(storage.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverSlug: 'localdisk',
+          driverKey: expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
+        }),
+      );
       expect(contributions.createContributionWithin).not.toHaveBeenCalled();
     });
 
@@ -301,7 +320,12 @@ describe('MediaObjectService', () => {
       contributions.createContributionWithin.mockRejectedValueOnce(new ConflictException('dup'));
 
       await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(ConflictException);
-      expect(storage.delete).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)));
+      expect(storage.delete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          driverSlug: 'localdisk',
+          driverKey: expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
+        }),
+      );
     });
   });
 
@@ -325,7 +349,7 @@ describe('MediaObjectService', () => {
       storage.signedUrl.mockResolvedValue({ url: 'https://x', expiresAt: new Date(0), method: 'GET' });
 
       await service.createSignedUrl('m1');
-      expect(storage.signedUrl).toHaveBeenCalledWith('users/u/m1', 'get', {
+      expect(storage.signedUrl).toHaveBeenCalledWith({ driverSlug: 'localdisk', driverKey: 'users/u/m1' }, 'get', {
         ttlSeconds: 300,
         contentType: 'image/png',
         bindings: { ownerId: MOCK_ACTING_USER_ID },
@@ -338,7 +362,7 @@ describe('MediaObjectService', () => {
       db.mediaObject.delete.mockResolvedValue(row);
       await service.delete('m1');
       expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.delete);
-      expect(storage.delete).toHaveBeenCalledWith('users/u/m1');
+      expect(storage.delete).toHaveBeenCalledWith({ driverSlug: 'localdisk', driverKey: 'users/u/m1' });
     });
 
     it('maps a missing/forbidden row to NotFound', async () => {
@@ -351,7 +375,7 @@ describe('MediaObjectService', () => {
   });
 
   describe('getVerifiedStream', () => {
-    const query = { key: 'users/u/m1', op: 'get', exp: '9999999999', sig: 'deadbeef' } as const;
+    const query = { slug: 'localdisk', key: 'users/u/m1', op: 'get', exp: '9999999999', sig: 'deadbeef' } as const;
 
     beforeEach(() => db.mediaObject.findUnique.mockResolvedValue(row));
 
@@ -363,6 +387,32 @@ describe('MediaObjectService', () => {
       expect(result.contentType).toBe('image/png');
       expect(signer.verify).toHaveBeenCalledWith(
         expect.objectContaining({
+          key: 'users/u/m1',
+          op: 'get',
+          expiresAt: 9999999999,
+          contentType: 'image/png',
+          bindings: { ownerId: MOCK_ACTING_USER_ID },
+        }),
+        'deadbeef',
+      );
+    });
+
+    it('verifies and resolves row + bytes by the URL slug, then returns the stream', async () => {
+      signer.verify.mockResolvedValue(undefined);
+      storage.get.mockResolvedValue({ body: Readable.from(Buffer.from('x')), metadata: stored });
+
+      const result = await service.getVerifiedStream(query);
+      expect(result.contentType).toBe('image/png');
+
+      expect(db.mediaObject.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { driverSlug_driverKey: { driverSlug: 'localdisk', driverKey: 'users/u/m1' } },
+        }),
+      );
+      expect(storage.get).toHaveBeenCalledWith({ driverSlug: 'localdisk', driverKey: 'users/u/m1' });
+      expect(signer.verify).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: 'localdisk',
           key: 'users/u/m1',
           op: 'get',
           expiresAt: 9999999999,
@@ -415,6 +465,12 @@ describe('MediaObjectService', () => {
     it('404s when the row exists but bytes are gone', async () => {
       signer.verify.mockResolvedValue(undefined);
       storage.get.mockRejectedValue(new ObjectNotFoundError('users/u/m1'));
+      await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('404s when the recorded driver is no longer configured (#100)', async () => {
+      signer.verify.mockResolvedValue(undefined);
+      storage.get.mockRejectedValue(new DriverNotRegisteredError('localdisk'));
       await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(NotFoundException);
     });
   });

@@ -114,6 +114,7 @@ export class LocalDiskDriver implements StorageDriver {
 
     const expiresAt = Math.floor(Date.now() / 1000) + Math.floor(options.ttlSeconds);
     const signature = await this.signer.sign({
+      slug: this.slug,
       key,
       op,
       expiresAt,
@@ -121,7 +122,7 @@ export class LocalDiskDriver implements StorageDriver {
       bindings: options.bindings,
     });
 
-    const params = new URLSearchParams({ key, op, exp: String(expiresAt), sig: signature });
+    const params = new URLSearchParams({ slug: this.slug, key, op, exp: String(expiresAt), sig: signature });
     return {
       url: `${this.baseUrl}${this.streamPath}?${params.toString()}`,
       expiresAt: new Date(expiresAt * 1000),

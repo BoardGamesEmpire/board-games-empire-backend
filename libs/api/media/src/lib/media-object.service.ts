@@ -5,8 +5,13 @@ import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto } from '@bge/shared';
 import type { MediaConfig } from '@bge/storage';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
-import type { StoredObject } from '@boardgamesempire/storage-contract';
-import { ObjectNotFoundError, SignatureExpiredError, SignatureInvalidError } from '@boardgamesempire/storage-contract';
+import type { StorageLocator, StoredObject } from '@boardgamesempire/storage-contract';
+import {
+  DriverNotRegisteredError,
+  ObjectNotFoundError,
+  SignatureExpiredError,
+  SignatureInvalidError,
+} from '@boardgamesempire/storage-contract';
 import {
   BadRequestException,
   ForbiddenException,
@@ -51,7 +56,7 @@ export class MediaObjectService {
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength)); // early, non-atomic guard
 
     const prepared = await this.writeBytes(file, userId);
-    return this.withByteCompensation(prepared.key, () =>
+    return this.withByteCompensation({ driverSlug: prepared.stored.driverSlug, driverKey: prepared.key }, () =>
       this.db.$transaction((tx) =>
         this.storeOwnedObjectWithin(tx, { ...prepared, userId, originalName: file.originalname ?? null }),
       ),
@@ -77,7 +82,7 @@ export class MediaObjectService {
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength));
 
     const prepared = await this.writeBytes(file, userId);
-    return this.withByteCompensation(prepared.key, () =>
+    return this.withByteCompensation({ driverSlug: prepared.stored.driverSlug, driverKey: prepared.key }, () =>
       this.db.$transaction(async (tx) => {
         const created = await this.storeOwnedObjectWithin(tx, {
           ...prepared,
@@ -157,16 +162,18 @@ export class MediaObjectService {
     });
   }
 
-  /** Runs `fn`; if it throws, compensates the orphaned bytes at `key` (storage isn't transactional) and rethrows. */
-  private async withByteCompensation<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  /**
+   * Runs `fn`; if it throws, compensates the orphaned bytes (storage isn't transactional) and rethrows.
+   */
+  private async withByteCompensation<T>(locator: StorageLocator, fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (error) {
       await this.storage
-        .delete(key)
+        .delete(locator)
         .catch((cleanupError) =>
           this.logger.error(
-            `Orphaned bytes at ${key} after failed/over-quota upload; manual cleanup needed`,
+            `Orphaned bytes at ${locator.driverSlug}/${locator.driverKey} after failed/over-quota upload; manual cleanup needed`,
             cleanupError,
           ),
         );
@@ -198,7 +205,7 @@ export class MediaObjectService {
     const media = await this.findById(id); // enforces read access
     const { signedUrlTtlSeconds } = this.config.getOrThrow<MediaConfig>('media');
 
-    return this.storage.signedUrl(media.driverKey, 'get', {
+    return this.storage.signedUrl({ driverSlug: media.driverSlug, driverKey: media.driverKey }, 'get', {
       ttlSeconds: signedUrlTtlSeconds,
       contentType: media.mimeType,
       bindings: { ownerId: media.ownerId },
@@ -209,8 +216,13 @@ export class MediaObjectService {
     const media = await this.deleteRowChecked(id);
 
     await this.storage
-      .delete(media.driverKey)
-      .catch((error) => this.logger.error(`Deleted row ${id} but failed to remove bytes at ${media.driverKey}`, error));
+      .delete({ driverSlug: media.driverSlug, driverKey: media.driverKey })
+      .catch((error) =>
+        this.logger.error(
+          `Deleted row ${id} but failed to remove bytes at ${media.driverSlug}/${media.driverKey}`,
+          error,
+        ),
+      );
 
     return media;
   }
@@ -236,10 +248,10 @@ export class MediaObjectService {
    * presented a cryptographically-valid (i.e. previously-issued) but expired URL.
    */
   async getVerifiedStream(query: StreamMediaQueryDto) {
-    const { key, op, exp, sig } = query;
+    const { slug, key, op, exp, sig } = query;
 
     const media = await this.db.mediaObject.findUnique({
-      where: { driverSlug_driverKey: { driverSlug: this.storage.driverSlug, driverKey: key } },
+      where: { driverSlug_driverKey: { driverSlug: slug, driverKey: key } },
       select: { ownerId: true, mimeType: true, originalName: true }, // hot path: only what we use
     });
 
@@ -249,7 +261,7 @@ export class MediaObjectService {
 
     try {
       await this.signer.verify(
-        { key, op, expiresAt: Number(exp), contentType: media.mimeType, bindings: { ownerId: media.ownerId } },
+        { slug, key, op, expiresAt: Number(exp), contentType: media.mimeType, bindings: { ownerId: media.ownerId } },
         sig,
       );
     } catch (error) {
@@ -264,8 +276,15 @@ export class MediaObjectService {
 
     let body: Readable;
     try {
-      ({ body } = await this.storage.get(key));
+      ({ body } = await this.storage.get({ driverSlug: slug, driverKey: key }));
     } catch (error) {
+      // The slug here is signature-bound, so this only runs for a valid URL. An
+      // object whose recorded driver is no longer configured (#100) is unservable —
+      // log it loud, but return the same 404 as missing bytes (no internals leaked).
+      if (error instanceof DriverNotRegisteredError) {
+        this.logger.error(`Media ${slug}/${key} references unregistered driver '${error.slug}'`, error);
+        throw new NotFoundException('Media not found');
+      }
       if (error instanceof ObjectNotFoundError) {
         throw new NotFoundException('Media not found');
       }
