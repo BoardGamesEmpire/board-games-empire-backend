@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, HttpCode, HttpStatus, Logger, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Http } from '@status/codes';
@@ -33,7 +33,7 @@ export class FeedbackController {
   @ApiResponse({ status: Http.TooManyRequests, description: 'Submission rate limit exceeded' })
   @CheckPolicies((ability: AppAbility) => ability.can(Action.create, ResourceType.FeedbackReport))
   @Throttle({ default: { limit: FEEDBACK_THROTTLE_LIMIT, ttl: FEEDBACK_THROTTLE_TTL_SECONDS } })
-  @HttpCode(HttpStatus.CREATED)
+  @HttpCode(Http.Created)
   @Post('reports')
   submitReport(
     @Session() session: UserSession,

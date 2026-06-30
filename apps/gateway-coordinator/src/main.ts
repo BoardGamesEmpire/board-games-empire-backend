@@ -15,6 +15,12 @@ import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 
 async function bootstrap() {
+  if (!env.isProduction) {
+    Error.stackTraceLimit = Infinity;
+  }
+
+  bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire Gateway Coordinator in ${env.currentEnv} mode`);
+
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])gateway([/\\]|$)/]);
   bootstrapLogger.info({ protoPaths }, 'loading gRPC proto files');
 

@@ -9,12 +9,18 @@ import type {
   StorageOp,
   StoredObject,
 } from '@boardgamesempire/storage-contract';
-import { InvalidObjectKeyError, ObjectNotFoundError } from '@boardgamesempire/storage-contract';
-import { Injectable } from '@nestjs/common';
+import {
+  InsufficientStorageError,
+  InvalidObjectKeyError,
+  ObjectNotFoundError,
+  StorageMisconfiguredError,
+  StorageUnavailableError,
+} from '@boardgamesempire/storage-contract';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, statSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { Readable, Transform } from 'node:stream';
@@ -46,6 +52,8 @@ const isENOENT = (error: unknown): boolean =>
  */
 @Injectable()
 export class LocalDiskDriver implements StorageDriver {
+  private readonly logger = new Logger(LocalDiskDriver.name);
+
   readonly slug = 'localdisk';
   private readonly root: string;
   private readonly baseUrl: string;
@@ -59,34 +67,45 @@ export class LocalDiskDriver implements StorageDriver {
     this.root = resolve(media.localDiskRoot);
     this.baseUrl = media.baseUrl.replace(/\/+$/, '');
     this.streamPath = media.streamPath;
+    this.logger.debug(`LocalDiskDriver root: ${this.root}`);
+    this.assertRootExists();
   }
 
   async put(key: string, body: Readable | Buffer, meta: ObjectMeta): Promise<StoredObject> {
-    const filePath = this.resolveKey(key);
-    await mkdir(dirname(filePath), { recursive: true });
+    const filePath = this.resolveKey(key); // validation only — keep outside the I/O try
 
-    const hash = createHash('sha256');
-    const meter = new Transform({
-      transform(chunk, _encoding, callback) {
-        hash.update(chunk);
-        callback(null, chunk);
-      },
-    });
+    try {
+      await mkdir(dirname(filePath), { recursive: true });
 
-    const source = Buffer.isBuffer(body) ? Readable.from(body) : body;
-    await pipeline(source, meter, createWriteStream(filePath));
+      const hash = createHash('sha256');
+      const meter = new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      });
 
-    const checksum = hash.digest('hex');
-    const sidecar: Sidecar = {
-      contentType: meta.contentType,
-      checksum,
-      etag: checksum,
-      originalName: meta.originalName,
-    };
-    await writeFile(this.sidecarPath(filePath), JSON.stringify(sidecar), 'utf8');
+      const source = Buffer.isBuffer(body) ? Readable.from(body) : body;
+      await pipeline(source, meter, createWriteStream(filePath));
 
-    const info = await stat(filePath);
-    return this.toStoredObject(key, BigInt(info.size), sidecar, info.mtime);
+      const checksum = hash.digest('hex');
+      const sidecar: Sidecar = {
+        contentType: meta.contentType,
+        checksum,
+        etag: checksum,
+        originalName: meta.originalName,
+      };
+      await writeFile(this.sidecarPath(filePath), JSON.stringify(sidecar), 'utf8');
+
+      const info = await stat(filePath);
+      return this.toStoredObject(key, BigInt(info.size), sidecar, info.mtime);
+    } catch (error) {
+      // "A failed put leaves no bytes": drop any partial data/sidecar before
+      // translating, so a disk-full write doesn't strand a half-written object.
+      await rm(filePath, { force: true }).catch(() => undefined);
+      await rm(this.sidecarPath(filePath), { force: true }).catch(() => undefined);
+      throw this.classify(error, key) ?? error;
+    }
   }
 
   async get(key: string): Promise<RetrievedObject> {
@@ -102,8 +121,12 @@ export class LocalDiskDriver implements StorageDriver {
 
   async delete(key: string): Promise<void> {
     const filePath = this.resolveKey(key);
-    await rm(filePath, { force: true });
-    await rm(this.sidecarPath(filePath), { force: true });
+    try {
+      await rm(filePath, { force: true });
+      await rm(this.sidecarPath(filePath), { force: true });
+    } catch (error) {
+      throw this.classify(error, key) ?? error;
+    }
   }
 
   async signedUrl(key: string, op: StorageOp, options: SignedUrlOptions): Promise<SignedUrl> {
@@ -218,9 +241,9 @@ export class LocalDiskDriver implements StorageDriver {
       return await stat(filePath);
     } catch (error) {
       if (isENOENT(error)) {
-        throw new ObjectNotFoundError(key, { cause: error });
+        throw await this.classifyEnoent(error, key);
       }
-      throw error;
+      throw this.classify(error, key) ?? error;
     }
   }
 
@@ -229,9 +252,74 @@ export class LocalDiskDriver implements StorageDriver {
       return JSON.parse(await readFile(this.sidecarPath(filePath), 'utf8')) as Sidecar;
     } catch (error) {
       if (isENOENT(error)) {
-        throw new ObjectNotFoundError(key, { cause: error });
+        throw await this.classifyEnoent(error, key);
       }
-      throw error;
+
+      throw this.classify(error, key) ?? error;
+    }
+  }
+
+  /**
+   * Translates a native errno failure into the portable storage vocabulary so
+   * callers never sniff `error.code`. Returns `undefined` for codes we don't
+   * model — the caller rethrows the original, so a genuinely unexpected failure
+   * still surfaces as a 500 (fail loud) rather than masquerading as a 503.
+   *
+   * ENOENT is deliberately absent: for object reads it means "missing key",
+   * resolved by `classifyEnoent` (which probes the root to tell an absent object
+   * from an unmounted volume).
+   */
+  private classify(error: unknown, key: string): InsufficientStorageError | StorageUnavailableError | undefined {
+    switch ((error as NodeJS.ErrnoException | null)?.code) {
+      case 'ENOSPC':
+      case 'EDQUOT':
+        return new InsufficientStorageError(`No space left while accessing '${key}'`, { cause: error });
+      case 'EIO':
+        return new StorageUnavailableError(`Storage I/O error while accessing '${key}'`, {
+          retryable: true,
+          cause: error,
+        });
+      case 'EACCES':
+      case 'EPERM':
+        return new StorageUnavailableError(`Storage permission denied while accessing '${key}'`, {
+          retryable: false,
+          cause: error,
+        });
+      default:
+        return undefined;
+    }
+  }
+
+  /**
+   * Disambiguates an ENOENT on an object path: a genuinely missing key
+   * (`ObjectNotFoundError`, unchanged) vs an unreachable root. Probes the root
+   * once, only on this already-failing path, and preserves the root failure's
+   * retryability — a missing/unmounted root is retryable, but EACCES/EPERM on
+   * the root is not (matching `classify`).
+   */
+  private async classifyEnoent(error: unknown, key: string): Promise<ObjectNotFoundError | StorageUnavailableError> {
+    const rootFailure = await this.probeRoot();
+    return rootFailure ?? new ObjectNotFoundError(key, { cause: error });
+  }
+
+  /**
+   * Reachability probe for the root. Returns `undefined` when the root is a
+   * healthy directory; otherwise a `StorageUnavailableError` carrying the
+   * correct retryability: permission errors (EACCES/EPERM) and I/O errors are
+   * classified by the shared helper (non-retryable / retryable respectively),
+   * and a missing root (ENOENT — unmounted volume) is retryable.
+   */
+  private async probeRoot(): Promise<StorageUnavailableError | undefined> {
+    try {
+      await stat(this.root);
+      return undefined;
+    } catch (error) {
+      const classified = this.classify(error, this.root);
+      if (classified instanceof StorageUnavailableError) {
+        return classified;
+      }
+
+      return new StorageUnavailableError('Storage root is unavailable (unmounted?)', { retryable: true, cause: error });
     }
   }
 
@@ -241,9 +329,18 @@ export class LocalDiskDriver implements StorageDriver {
       entries = await readdir(dir, { withFileTypes: true });
     } catch (error) {
       if (isENOENT(error)) {
-        return []; // fresh root that hasn't been written to yet
+        // A missing prefix subtree under a healthy root is normal (no objects
+        // there). A root that's gone/unreachable surfaces with the right
+        // retryability instead of a misleading "empty".
+        const rootFailure = await this.probeRoot();
+        if (!rootFailure) {
+          return [];
+        }
+
+        throw rootFailure;
       }
-      throw error;
+
+      throw this.classify(error, dir) ?? error;
     }
 
     const keys: string[] = [];
@@ -257,5 +354,37 @@ export class LocalDiskDriver implements StorageDriver {
     }
 
     return keys;
+  }
+
+  async ping(): Promise<void> {
+    const rootFailure = await this.probeRoot();
+    if (rootFailure) {
+      this.logger.error(rootFailure.message, rootFailure.stack);
+      throw rootFailure;
+    }
+  }
+
+  /**
+   * The root is operator-provisioned infrastructure (a mount point / volume),
+   * not the driver's to create. Asserting it at construction turns a missing or
+   * misconfigured path into a loud bootstrap failure, rather than letting `put`'s
+   * recursive `mkdir` silently recreate it on the underlying filesystem and
+   * accept writes that vanish on remount. Per-object key subdirectories are
+   * still created on demand — those are ours to manage. Sync stat is fine: it
+   * runs once at DI construction, never on the request path.
+   */
+  private assertRootExists(): void {
+    let stats: Stats;
+    try {
+      stats = statSync(this.root);
+    } catch (error) {
+      throw new StorageMisconfiguredError(
+        `media.localDiskRoot '${this.root}' does not exist or is unreadable; the storage volume must be provisioned before startup`,
+        { cause: error },
+      );
+    }
+    if (!stats.isDirectory()) {
+      throw new StorageMisconfiguredError(`media.localDiskRoot '${this.root}' is not a directory`);
+    }
   }
 }

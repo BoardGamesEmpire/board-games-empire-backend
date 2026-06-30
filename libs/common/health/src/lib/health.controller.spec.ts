@@ -1,4 +1,5 @@
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
+import { StorageService } from '@bge/storage';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -9,6 +10,7 @@ import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
+import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 
 // ---------------------------------------------------------------------------
 // Config mocking — same pattern as libs/api/well-known security-txt spec.
@@ -57,8 +59,12 @@ function makeRedis(pingResponse: 'PONG' | string = 'PONG'): MockRedis {
 interface BuildOptions extends MockHealthConfig {
   /** Pass `null` to simulate CACHE_REDIS_CLIENT not being bound. */
   cacheRedis?: MockRedis | null;
+
   /** Pass `null` to simulate QUEUE_REDIS_CLIENT not being bound. */
   queueRedis?: MockRedis | null;
+
+  /** Pass `null` (default) to simulate StorageService unbound → "not configured". */
+  storage?: { ping: jest.Mock } | null;
 }
 
 /**
@@ -101,7 +107,9 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
       PrismaHealthIndicator,
       CacheRedisHealthIndicator,
       QueueRedisHealthIndicator,
+      StorageHealthIndicator,
       { provide: ConfigService, useValue: configService },
+      ...(options.storage ? [{ provide: StorageService, useValue: options.storage }] : []),
       ...(cacheRedis !== null ? [{ provide: CACHE_REDIS_CLIENT, useValue: cacheRedis }] : []),
       ...(queueRedis !== null ? [{ provide: QUEUE_REDIS_CLIENT, useValue: queueRedis }] : []),
     ],
@@ -202,6 +210,24 @@ describe('HealthController', () => {
         expect(result.info?.cache).toEqual({ status: 'up', message: 'not configured' });
         expect(result.info?.queue).toEqual({ status: 'up', message: 'not configured' });
       });
+
+      it('reports storage "not configured" (still up) when StorageService is unbound', async () => {
+        const { controller } = await buildController();
+
+        const result = await controller.ready();
+
+        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        expect(result.info?.storage).toEqual({ status: 'up', message: 'not configured' });
+      });
+
+      it('reports storage up when the backend ping resolves', async () => {
+        const { controller } = await buildController({ storage: { ping: jest.fn().mockResolvedValue(undefined) } });
+
+        const result = await controller.ready();
+
+        if (!isHealthCheckResult(result)) throw new Error('expected HealthCheckResult, got disabled response');
+        expect(result.info?.storage).toEqual({ status: 'up' });
+      });
     });
 
     describe('unhealthy paths (Terminus throws ServiceUnavailableException)', () => {
@@ -243,6 +269,17 @@ describe('HealthController', () => {
             error: expect.objectContaining({
               queue: { status: 'down', message: 'queue unreachable' },
             }),
+          }),
+        });
+      });
+
+      it('throws 503 when the storage backend is unavailable', async () => {
+        const storage = { ping: jest.fn().mockRejectedValue(new Error('volume gone')) };
+        const { controller } = await buildController({ storage });
+
+        await expect(controller.ready()).rejects.toMatchObject({
+          response: expect.objectContaining({
+            error: expect.objectContaining({ storage: { status: 'down', message: 'volume gone' } }),
           }),
         });
       });
@@ -353,6 +390,7 @@ describe('HealthController', () => {
       expect(module.get(PrismaHealthIndicator)).toBeInstanceOf(PrismaHealthIndicator);
       expect(module.get(CacheRedisHealthIndicator)).toBeInstanceOf(CacheRedisHealthIndicator);
       expect(module.get(QueueRedisHealthIndicator)).toBeInstanceOf(QueueRedisHealthIndicator);
+      expect(module.get(StorageHealthIndicator)).toBeInstanceOf(StorageHealthIndicator);
     });
 
     it('configService is resolved (Surrogate runConditions can access it on the controller)', async () => {

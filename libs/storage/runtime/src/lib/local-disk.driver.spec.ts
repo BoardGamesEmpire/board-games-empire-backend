@@ -1,8 +1,8 @@
-import { InvalidObjectKeyError } from '@boardgamesempire/storage-contract';
+import { InvalidObjectKeyError, StorageMisconfiguredError } from '@boardgamesempire/storage-contract';
 import { runStorageDriverContract } from '@boardgamesempire/storage-contract-testing';
 import type { ConfigService } from '@nestjs/config';
 import { Buffer } from 'node:buffer';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalDiskDriver } from './local-disk.driver.js';
@@ -125,5 +125,18 @@ describe('LocalDiskDriver', () => {
         );
       },
     );
+
+    it('refuses to construct when the configured root does not exist', () => {
+      const missing = join(tmpdir(), `bge-localdisk-missing-${Date.now()}`);
+      expect(() => new LocalDiskDriver(makeConfig(missing), signer)).toThrow(StorageMisconfiguredError);
+    });
+
+    it('refuses to construct when the configured root is not a directory', async () => {
+      const dir = await mkdtemp(join(tmpdir(), 'bge-localdisk-'));
+      const filePath = join(dir, 'not-a-dir');
+      await writeFile(filePath, 'x');
+      expect(() => new LocalDiskDriver(makeConfig(filePath), signer)).toThrow(StorageMisconfiguredError);
+      await rm(dir, { recursive: true, force: true });
+    });
   });
 });

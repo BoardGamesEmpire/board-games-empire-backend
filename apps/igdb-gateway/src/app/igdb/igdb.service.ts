@@ -1,5 +1,6 @@
-import { HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Http } from '@status/codes';
 import { isAxiosError } from 'axios';
 import igdb from 'igdb-api-node';
 import { from, Observable, throwError } from 'rxjs';
@@ -37,12 +38,12 @@ export class IGDBService {
     return from(request(this.igdbClient)).pipe(
       catchError((err) => {
         if (isAxiosError(err)) {
-          if (err.response?.status === HttpStatus.UNAUTHORIZED) {
+          if (err.response?.status === Http.Unauthorized) {
             this.logger.warn('Unauthorized error received, refreshing access token...');
             return from(this.refreshAccessToken()).pipe(switchMap(() => request(this.igdbClient)));
           }
 
-          if (err.response?.status === HttpStatus.TOO_MANY_REQUESTS) {
+          if (err.response?.status === Http.TooManyRequests) {
             this.logger.warn('Rate limit exceeded, retrying request...');
             // TODO: Are there headers for rate limit reset time? - investigate
             return from(new Promise((resolve) => setTimeout(resolve, 1000))).pipe(

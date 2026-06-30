@@ -1,5 +1,13 @@
 import type { MediaObject } from '@bge/database';
-import { Action, ContributionOrigin, DatabaseService, Prisma, ResourceType, Visibility } from '@bge/database';
+import {
+  Action,
+  ContributionOrigin,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+  Visibility,
+} from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto } from '@bge/shared';
@@ -23,7 +31,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createId } from '@paralleldrive/cuid2';
-import { PrismaError } from '@status/codes';
 import { imageSize } from 'image-size';
 import { Readable } from 'node:stream';
 import { formatContentDisposition } from './content-disposition.util';
@@ -233,7 +240,7 @@ export class MediaObjectService {
         where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.delete) },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
         throw new NotFoundException(`Media object ${id} not found`);
       }
 
@@ -314,7 +321,7 @@ export class MediaObjectService {
         data: { visibility },
       });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
         throw new NotFoundException(`Media object ${id} not found`);
       }
 

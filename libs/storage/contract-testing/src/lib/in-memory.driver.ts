@@ -9,7 +9,7 @@ import type {
   StorageOp,
   StoredObject,
 } from '@boardgamesempire/storage-contract';
-import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
+import { ObjectNotFoundError, type StorageError } from '@boardgamesempire/storage-contract';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { Readable } from 'node:stream';
@@ -19,6 +19,10 @@ interface StoredEntry {
   readonly object: StoredObject;
 }
 
+/** Driver methods whose failure can be simulated. `signedUrl` is excluded: it's
+ *  pure HMAC and never touches storage, so it can't fail on availability grounds. */
+export type FaultableMethod = 'put' | 'get' | 'head' | 'delete' | 'list' | 'ping';
+
 /**
  * Reference in-memory `StorageDriver`. Test-only: validates the contract harness
  * and lets consumers exercise services without touching disk. Not for production.
@@ -26,8 +30,29 @@ interface StoredEntry {
 export class InMemoryStorageDriver implements StorageDriver {
   readonly slug = 'memory';
   private readonly store = new Map<string, StoredEntry>();
+  private readonly faults = new Map<FaultableMethod | 'all', StorageError>();
+
+  /**
+   * Test hook: make `method` (or every faultable method, with `'all'`) reject
+   * with `error`. Pass `null` to clear. A method-specific fault wins over `'all'`.
+   */
+  setFault(method: FaultableMethod | 'all', error: StorageError | null): void {
+    if (error) {
+      this.faults.set(method, error);
+    } else {
+      this.faults.delete(method);
+    }
+  }
+
+  private throwIfFaulted(method: FaultableMethod): void {
+    const fault = this.faults.get(method) ?? this.faults.get('all');
+    if (fault) {
+      throw fault;
+    }
+  }
 
   async put(key: string, body: Readable | Buffer, meta: ObjectMeta): Promise<StoredObject> {
+    this.throwIfFaulted('put');
     const bytes = Buffer.isBuffer(body) ? body : await this.drain(body);
     const checksum = createHash('sha256').update(bytes).digest('hex');
     const object: StoredObject = {
@@ -44,16 +69,23 @@ export class InMemoryStorageDriver implements StorageDriver {
   }
 
   async get(key: string): Promise<RetrievedObject> {
+    this.throwIfFaulted('get');
     const entry = this.require(key);
     return { body: Readable.from(entry.bytes), metadata: entry.object };
   }
 
   async head(key: string): Promise<StoredObject> {
+    this.throwIfFaulted('head');
     return this.require(key).object;
   }
 
   async delete(key: string): Promise<void> {
+    this.throwIfFaulted('delete');
     this.store.delete(key);
+  }
+
+  async ping(): Promise<void> {
+    this.throwIfFaulted('ping');
   }
 
   async signedUrl(key: string, op: StorageOp, options: SignedUrlOptions): Promise<SignedUrl> {
@@ -67,6 +99,7 @@ export class InMemoryStorageDriver implements StorageDriver {
   }
 
   async list(prefix: string, options: ListOptions = {}): Promise<ListResult> {
+    this.throwIfFaulted('list');
     const { cursor, limit } = options;
     const keys = [...this.store.keys()].filter((k) => k.startsWith(prefix)).sort();
 

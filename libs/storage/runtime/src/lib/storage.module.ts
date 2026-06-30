@@ -1,7 +1,7 @@
 import { DatabaseModule } from '@bge/database';
 import { ServicesModule } from '@bge/services';
 import type { StorageDriver } from '@boardgamesempire/storage-contract';
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { LocalDiskDriver } from './local-disk.driver.js';
 import { MediaUrlSigner } from './media-url-signer.js';
@@ -18,7 +18,13 @@ import { STORAGE_DEFAULT_WRITE_SLUG, STORAGE_DRIVERS } from './storage.tokens.js
  * as they land (the registry/write-default invariants are enforced by the router
  * at construction, #100). Requires `mediaConfig` loaded by the host's
  * `ConfigModule.forRoot`.
+ *
+ * `@Global()`: a single storage runtime per process. Marking it global lets
+ * cross-cutting consumers (the readiness `StorageHealthIndicator` in `@bge/health`)
+ * optional-inject `StorageService` without importing this module — symmetric with
+ * the global cache/queue Redis clients. Feature modules still import it explicitly.
  */
+@Global()
 @Module({
   imports: [DatabaseModule, ServicesModule],
   providers: [

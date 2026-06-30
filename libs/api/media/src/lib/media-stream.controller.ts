@@ -1,9 +1,10 @@
-import { Controller, Get, Header, Query, StreamableFile } from '@nestjs/common';
+import { Controller, Get, Header, Query, StreamableFile, UseFilters } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { StreamMediaQueryDto } from './dto';
+import { StorageExceptionFilter } from './filters/storage-exception.filter';
 import { MediaObjectService } from './media-object.service';
 
 /**
@@ -12,6 +13,7 @@ import { MediaObjectService } from './media-object.service';
  * authorization). `nosniff` + a server-chosen disposition mitigate stored XSS.
  */
 @ApiTags('media')
+@UseFilters(StorageExceptionFilter)
 @Controller('media-stream')
 export class MediaStreamController {
   constructor(private readonly media: MediaObjectService) {}

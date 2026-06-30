@@ -1,9 +1,11 @@
 import {
   DriverNotRegisteredError,
+  InsufficientStorageError,
   ObjectNotFoundError,
   SignatureExpiredError,
   SignatureInvalidError,
   StorageError,
+  StorageUnavailableError,
 } from './errors.js';
 
 describe('storage errors', () => {
@@ -40,5 +42,29 @@ describe('storage errors', () => {
   it('DriverNotRegisteredError preserves the error cause', () => {
     const cause = new Error('config drift');
     expect(new DriverNotRegisteredError('s3', { cause }).cause).toBe(cause);
+  });
+
+  it('StorageUnavailableError carries retryable, code, name, and cause', () => {
+    const cause = new Error('EIO');
+    const err = new StorageUnavailableError('volume gone', { retryable: true, cause });
+    expect(err).toBeInstanceOf(StorageError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBe('STORAGE_UNAVAILABLE');
+    expect(err.retryable).toBe(true);
+    expect(err.name).toBe('StorageUnavailableError');
+    expect(err.cause).toBe(cause);
+  });
+
+  it('StorageUnavailableError can be non-retryable', () => {
+    expect(new StorageUnavailableError('denied', { retryable: false }).retryable).toBe(false);
+  });
+
+  it('InsufficientStorageError carries code, name, and cause', () => {
+    const cause = new Error('ENOSPC');
+    const err = new InsufficientStorageError('disk full', { cause });
+    expect(err).toBeInstanceOf(StorageError);
+    expect(err.code).toBe('INSUFFICIENT_STORAGE');
+    expect(err.name).toBe('InsufficientStorageError');
+    expect(err.cause).toBe(cause);
   });
 });

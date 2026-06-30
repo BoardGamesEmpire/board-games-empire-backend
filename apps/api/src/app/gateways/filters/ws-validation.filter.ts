@@ -1,5 +1,6 @@
-import { ArgumentsHost, BadRequestException, Catch, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, BadRequestException, Catch } from '@nestjs/common';
 import { BaseWsExceptionFilter } from '@nestjs/websockets';
+import { Http } from '@status/codes';
 import type { Socket } from 'socket.io';
 
 @Catch(BadRequestException)
@@ -13,7 +14,7 @@ export class WsValidationFilter extends BaseWsExceptionFilter {
     client.emit(`${pattern}:error`, {
       pattern,
       statusText: 'BAD_REQUEST',
-      statusCode: HttpStatus.BAD_REQUEST,
+      statusCode: Http.BadRequest,
       message: response.message ?? 'Validation failed',
     } satisfies ValidationErrorResponse);
   }

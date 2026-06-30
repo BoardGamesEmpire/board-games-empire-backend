@@ -18,13 +18,19 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../storage/contract/tsconfig.lib.json"
+    },
+    {
+      "path": "../../storage/runtime/tsconfig.lib.json"
+    },
+    {
+      "path": "../../database/tsconfig.lib.json"
+    },
+    {
       "path": "../testing/tsconfig.lib.json"
     },
     {
       "path": "../redis/tsconfig.lib.json"
-    },
-    {
-      "path": "../../database/tsconfig.lib.json"
     },
     {
       "path": "../env/tsconfig.lib.json"

@@ -130,6 +130,10 @@ export function runStorageDriverContract(
       expect(nextCursor).toBeUndefined();
     });
 
+    it('ping resolves for a healthy driver', async () => {
+      await expect(driver.ping()).resolves.toBeUndefined();
+    });
+
     if (!options.skipSignedUrl) {
       it('signedUrl returns a future expiry and matching method', async () => {
         await driver.put('docs/fox.txt', body, meta);
