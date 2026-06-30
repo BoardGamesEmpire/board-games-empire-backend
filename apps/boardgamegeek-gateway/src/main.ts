@@ -6,7 +6,7 @@ import { walkDir } from '@bge/utils';
 import { PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import { NestFactory } from '@nestjs/core';
 import { Transport } from '@nestjs/microservices';
-import { Logger as PinoLogger } from 'nestjs-pino';
+import { Logger } from 'nestjs-pino';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
 import { bootstrapLogger } from './app/lib/logger';
@@ -15,6 +15,8 @@ async function bootstrap() {
   if (!env.isProduction) {
     Error.stackTraceLimit = Infinity;
   }
+
+  bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire BoardgameGeek Gateway in ${env.currentEnv} mode`);
 
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
   bootstrapLogger.info({ protoPaths }, 'loading gRPC proto files');
@@ -40,7 +42,7 @@ async function bootstrap() {
     },
   });
 
-  app.useLogger(app.get(PinoLogger));
+  app.useLogger(app.get(Logger));
 
   // `enableShutdownHooks()` is intentionally omitted — the handlers
   // registered below sequence `app.close()` before flushing pino so

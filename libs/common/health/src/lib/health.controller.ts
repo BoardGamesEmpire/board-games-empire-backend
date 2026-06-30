@@ -13,6 +13,7 @@ import { type NextParameters, NextAsyncPre, SurrogateDelegate } from 'surrogate'
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
+import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 
 /**
  * Shape returned by Surrogate when `ENABLE_HEALTH_CHECKS=false`. Distinct
@@ -39,6 +40,7 @@ export class HealthController {
     private readonly prismaIndicator: PrismaHealthIndicator,
     private readonly cacheRedisIndicator: CacheRedisHealthIndicator,
     private readonly queueRedisIndicator: QueueRedisHealthIndicator,
+    private readonly storageIndicator: StorageHealthIndicator,
   ) {}
 
   /**
@@ -78,6 +80,7 @@ export class HealthController {
       () => this.prismaIndicator.isHealthy('database'),
       () => this.cacheRedisIndicator.isHealthy('cache'),
       () => this.queueRedisIndicator.isHealthy('queue'),
+      () => this.storageIndicator?.isHealthy('storage'),
     ]);
   }
 

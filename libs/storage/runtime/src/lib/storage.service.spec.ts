@@ -25,6 +25,7 @@ function makeDriver(slug: string): jest.Mocked<StorageDriver> {
     delete: jest.fn().mockResolvedValue(undefined),
     signedUrl: jest.fn().mockResolvedValue({ url: 'https://x', expiresAt: new Date(0), method: 'GET' }),
     list: jest.fn().mockResolvedValue({ objects: [] }),
+    ping: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<StorageDriver>;
 }
 
@@ -117,5 +118,11 @@ describe('StorageService', () => {
     expect(() => new StorageService([localdisk, makeDriver('localdisk')], 'localdisk')).toThrow(
       StorageMisconfiguredError,
     );
+  });
+
+  it('ping probes the default-write driver only', async () => {
+    await service.ping();
+    expect(localdisk.ping).toHaveBeenCalledTimes(1);
+    expect(s3.ping).not.toHaveBeenCalled();
   });
 });

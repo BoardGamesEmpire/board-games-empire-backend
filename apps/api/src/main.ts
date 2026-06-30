@@ -25,6 +25,8 @@ async function bootstrap() {
     Error.stackTraceLimit = Infinity;
   }
 
+  bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire api in ${env.currentEnv} mode`);
+
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,
     // Buffer module-init logs until `useLogger` is called below, so they

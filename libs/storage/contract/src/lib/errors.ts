@@ -66,3 +66,21 @@ export class DriverNotRegisteredError extends StorageError {
     super(`No storage driver registered for slug '${slug}'`, options);
   }
 }
+
+export class StorageUnavailableError extends StorageError {
+  readonly code = 'STORAGE_UNAVAILABLE';
+  readonly retryable: boolean;
+
+  constructor(message: string, options: { retryable: boolean; cause?: unknown }) {
+    super(message, { cause: options.cause });
+    this.retryable = options.retryable;
+  }
+}
+
+export class InsufficientStorageError extends StorageError {
+  readonly code = 'INSUFFICIENT_STORAGE';
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+  }
+}

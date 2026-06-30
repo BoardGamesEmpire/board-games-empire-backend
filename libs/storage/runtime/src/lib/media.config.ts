@@ -32,7 +32,14 @@ export interface MediaConfig {
 export const mediaConfig = registerAs('media', () =>
   env.provideMany<MediaConfig>([
     { keyTo: 'driver', key: 'MEDIA_STORAGE_DRIVER', defaultValue: 'localdisk' },
-    { keyTo: 'localDiskRoot', key: 'MEDIA_LOCAL_DISK_ROOT', defaultValue: '/var/lib/bge/media' },
+    {
+      keyTo: 'localDiskRoot',
+      key: 'MEDIA_LOCAL_DISK_ROOT',
+      defaultsFor: {
+        production: '/var/lib/bge/media',
+        development: '/tmp',
+      },
+    },
     {
       keyTo: 'signedUrlTtlSeconds',
       key: 'MEDIA_SIGNED_URL_TTL_SECONDS',
@@ -46,7 +53,7 @@ export const mediaConfig = registerAs('media', () =>
 
 export const mediaConfigValidationSchema = {
   MEDIA_STORAGE_DRIVER: Joi.string().valid('localdisk').default('localdisk'),
-  MEDIA_LOCAL_DISK_ROOT: Joi.string().default('/var/lib/bge/media'),
+  MEDIA_LOCAL_DISK_ROOT: Joi.string(),
   MEDIA_SIGNED_URL_TTL_SECONDS: Joi.number().integer().positive().default(DEFAULT_MEDIA_TTL_SECONDS),
   MEDIA_BASE_URL: Joi.string().uri().default('http://localhost:3000'),
   MEDIA_STREAM_PATH: Joi.string().default('/media-stream'),

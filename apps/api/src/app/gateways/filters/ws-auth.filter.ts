@@ -1,5 +1,6 @@
-import { ArgumentsHost, Catch, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, Catch } from '@nestjs/common';
 import { BaseWsExceptionFilter, WsException } from '@nestjs/websockets';
+import { Http } from '@status/codes';
 import { setTimeout } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
 
@@ -14,7 +15,7 @@ export class WsAuthFilter extends BaseWsExceptionFilter {
       client.emit('auth:error', {
         pattern,
         statusText: 'UNAUTHORIZED',
-        statusCode: HttpStatus.UNAUTHORIZED,
+        statusCode: Http.Unauthorized,
         message: exception.message ?? 'Unauthorized',
       } satisfies WsErrorResponse);
 

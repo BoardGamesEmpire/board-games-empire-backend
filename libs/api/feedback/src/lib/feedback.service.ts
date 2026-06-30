@@ -63,7 +63,7 @@ export class FeedbackService {
    * All user-supplied free-text fields (message, stackTrace) and structured
    * payloads (deviceInfo, breadcrumbs[].message, breadcrumbs[].sanitizedContext)
    * pass through `RedactionService` when `feedbackReportServerRedactionEnabled`
-   * is on. The first-party client already sanitises breadcrumbs at capture, but
+   * is on. The first-party client already sanitizes breadcrumbs at capture, but
    * third-party clients can't be trusted to do so — re-running redaction here
    * is cheap and idempotent, and `serverRedacted` flips to expose mismatches
    * for operational telemetry.

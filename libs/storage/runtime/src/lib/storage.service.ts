@@ -42,6 +42,7 @@ export class StorageService {
         `Default-write driver '${writeSlug}' is not registered; available: ${[...this.drivers.keys()].join(', ') || '(none)'}`,
       );
     }
+
     this.writeDriver = writeDriver;
   }
 
@@ -79,11 +80,19 @@ export class StorageService {
     return this.writeDriver.list(prefix, options);
   }
 
+  /**
+   * Liveness probe against the default-write driver, for readiness checks.
+   */
+  ping(): Promise<void> {
+    return this.writeDriver.ping();
+  }
+
   private resolve(slug: string): StorageDriver {
     const driver = this.drivers.get(slug);
     if (!driver) {
       throw new DriverNotRegisteredError(slug);
     }
+
     return driver;
   }
 
@@ -93,8 +102,10 @@ export class StorageService {
       if (map.has(driver.slug)) {
         throw new StorageMisconfiguredError(`Duplicate storage driver slug '${driver.slug}'`);
       }
+
       map.set(driver.slug, driver);
     }
+
     return map;
   }
 }

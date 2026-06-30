@@ -16,6 +16,8 @@ async function bootstrap() {
     Error.stackTraceLimit = Infinity;
   }
 
+  bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire IGDB Gateway in ${env.currentEnv} mode`);
+
   const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
   bootstrapLogger.info({ protoPaths }, 'loading gRPC proto files');
 

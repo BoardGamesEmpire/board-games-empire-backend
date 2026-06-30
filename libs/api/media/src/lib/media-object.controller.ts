@@ -27,6 +27,7 @@ import {
   toMediaContributionResponse,
   toMediaObjectResponse,
 } from './dto';
+import { StorageExceptionFilter } from './filters/storage-exception.filter';
 import { MediaFileInterceptor } from './interceptors/media-file.interceptor';
 import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
@@ -36,6 +37,7 @@ import { MulterExceptionFilter } from './multer-exception.filter';
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
+@UseFilters(StorageExceptionFilter, MulterExceptionFilter)
 @ApiTags('media')
 @Controller('media')
 export class MediaObjectController {
@@ -49,7 +51,6 @@ export class MediaObjectController {
   @ApiResponse({ status: Http.UnsupportedMediaType, description: 'Disallowed media type' })
   @ApiConsumes('multipart/form-data')
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.MediaObject))
-  @UseFilters(MulterExceptionFilter)
   @UseInterceptors(MediaFileInterceptor)
   @Post()
   upload(@UploadedFile() file?: UploadedMediaFile) {
@@ -68,7 +69,6 @@ export class MediaObjectController {
       ability.can(Action.create, ResourceType.MediaObject) &&
       ability.can(Action.create, ResourceType.MediaContribution),
   )
-  @UseFilters(MulterExceptionFilter)
   @UseInterceptors(MediaFileInterceptor)
   @Post('contribute')
   uploadAndContribute(@Body() dto: ContributeMediaDto, @UploadedFile() file?: UploadedMediaFile) {

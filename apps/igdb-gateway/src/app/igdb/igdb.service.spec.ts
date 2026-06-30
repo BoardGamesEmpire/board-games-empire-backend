@@ -1,6 +1,6 @@
-import { HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { Http } from '@status/codes';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import type { IgdbGame } from '../types';
@@ -127,7 +127,7 @@ describe('IGDBService', () => {
 function make401Error(): AxiosError {
   const err = new AxiosError('Unauthorized');
   err.response = {
-    status: HttpStatus.UNAUTHORIZED,
+    status: Http.Unauthorized,
     statusText: 'Unauthorized',
     data: {},
     headers: {},

@@ -15,6 +15,8 @@ async function bootstrap() {
     Error.stackTraceLimit = Infinity;
   }
 
+  bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire Gateway Worker in ${env.currentEnv} mode`);
+
   const app = await NestFactory.createApplicationContext(GatewayWorkerModule, {
     bufferLogs: true,
   });

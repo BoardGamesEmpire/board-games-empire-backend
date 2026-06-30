@@ -8,6 +8,7 @@ import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
 import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indicator';
+import { StorageHealthIndicator } from './indicators/storage.health-indicator';
 
 /**
  * HealthModule wires the three internal-dependency indicators (Prisma + cache
@@ -33,7 +34,7 @@ import { QueueRedisHealthIndicator } from './indicators/queue-redis.health-indic
 @Module({
   controllers: [HealthController],
   imports: [ConfigModule.forFeature(healthConfig), DatabaseModule, HttpModule, TerminusModule],
-  providers: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator],
-  exports: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator],
+  providers: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator, StorageHealthIndicator],
+  exports: [CacheRedisHealthIndicator, PrismaHealthIndicator, QueueRedisHealthIndicator, StorageHealthIndicator],
 })
 export class HealthModule {}
