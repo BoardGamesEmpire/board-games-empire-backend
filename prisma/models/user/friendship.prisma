@@ -1,0 +1,48 @@
+enum FriendshipStatus {
+  Accepted
+  Blocked
+  Declined
+  Pending
+  Withdrawn
+
+  @@map("friendship_statuses")
+}
+
+// A user-to-user relationship. A single directional row represents both the
+// request (Pending) and, once responded to, the established relationship
+// (Accepted) or its terminal states (Declined/Withdrawn/Blocked).
+//
+// A friendship is undirected — A-friends-B is the same relationship as
+// B-friends-A — so uniqueness must cover the unordered pair, not the directed
+// one. `pairKey` is the two user ids sorted and joined; its unique constraint
+// is what actually guarantees a single row per pair (the directed
+// `@@unique([requesterId, addresseeId])` alone cannot catch a reverse-direction
+// duplicate created in a race). `requester`/`addressee` still record who
+// initiated / was blocked.
+model Friendship {
+  id String @id @default(cuid(2))
+
+  requester   User   @relation("FriendshipsRequested", fields: [requesterId], references: [id], onDelete: Cascade)
+  requesterId String @map("requester_id")
+
+  addressee   User   @relation("FriendshipsReceived", fields: [addresseeId], references: [id], onDelete: Cascade)
+  addresseeId String @map("addressee_id")
+
+  // Canonical undirected-pair key: `[requesterId, addresseeId].sort().join(':')`.
+  // Maintained by the service; identical for both directions of a pair.
+  pairKey String @map("pair_key")
+
+  status  FriendshipStatus @default(Pending)
+  message String?
+
+  respondedAt DateTime? @map("responded_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([pairKey])
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId])
+  @@index([status])
+  @@map("friendships")
+}

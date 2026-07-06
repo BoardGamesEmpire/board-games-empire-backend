@@ -6,6 +6,7 @@ import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
 import { FeedbackModule } from '@bge/feedback';
+import { FriendshipModule } from '@bge/friendship';
 import { GameModule } from '@bge/game';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportProducerModule } from '@bge/game-import';
@@ -158,6 +159,7 @@ import { baseLogger } from './lib/logger';
     AuthModule,
     EventModule,
     FeedbackModule,
+    FriendshipModule,
     GameGatewayModule,
     GameImportProducerModule,
     GameSearchModule,

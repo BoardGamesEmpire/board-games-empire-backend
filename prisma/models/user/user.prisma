@@ -47,6 +47,9 @@ model User {
   invitesSent     Invite[] @relation("InvitesSent")
   approvedInvites Invite[] @relation("ApprovedInvites")
 
+  friendshipsRequested Friendship[] @relation("FriendshipsRequested")
+  friendshipsReceived  Friendship[] @relation("FriendshipsReceived")
+
   eventsCreated   Event[]         @relation("EventsCreated")
   eventsCancelled Event[]         @relation("CancelledBy")
   eventsDeleted   Event[]         @relation("DeletedBy")
