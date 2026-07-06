@@ -101,6 +101,9 @@
       "path": "../../libs/api/game/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/game-collection/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/friendship/tsconfig.lib.json"
     },
     {

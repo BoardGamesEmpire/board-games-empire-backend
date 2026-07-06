@@ -280,13 +280,18 @@ export class EventAttendeeService {
     if (attendee.userId) {
       const collection = await this.db.gameCollection.findUnique({
         where: { id: dto.collectionId },
-        select: { userId: true },
+        select: { userId: true, deletedAt: true },
       });
 
       assert(collection, new NotFoundException(`Game collection entry ${dto.collectionId} not found.`));
       assert(
         collection.userId === attendee.userId,
         new ForbiddenException("Cannot add a game from another user's collection."),
+      );
+      // A tombstoned entry is a game the attendee no longer owns.
+      assert(
+        !collection.deletedAt,
+        new BadRequestException('Cannot add a game that has been removed from the collection.'),
       );
     }
 

@@ -31,9 +31,9 @@ model MediaObject {
   originalName String? @map("original_name")
 
   // ─── Intrinsic media metadata (probed from bytes; null when N/A) ──
-  width     Int? // images
-  height    Int? // images
-  pageCount Int? @map("page_count") // documents (probing deferred → null for now)
+  width      Int? // images
+  height     Int? // images
+  pageCount  Int?    @map("page_count") // documents (probing deferred → null for now)
   // Video-specific fields
   duration   Int?
   codec      String?

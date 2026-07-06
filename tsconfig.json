@@ -172,6 +172,9 @@
       "path": "./libs/api/media"
     },
     {
+      "path": "./libs/api/game-collection"
+    },
+    {
       "path": "./libs/api/friendship"
     }
   ]

@@ -113,6 +113,8 @@ export class HouseholdService {
       where: {
         userId: memberId,
         id: { notIn: excludedCollectionIds },
+        // Removed (tombstoned) entries are no longer owned — never household-visible.
+        deletedAt: null,
       },
       select: {
         id: true,
