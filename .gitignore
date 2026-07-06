@@ -49,3 +49,6 @@ Thumbs.db
 .nx/self-healing
 
 test-output
+
+.claude/worktrees
+.claude/settings.local.json

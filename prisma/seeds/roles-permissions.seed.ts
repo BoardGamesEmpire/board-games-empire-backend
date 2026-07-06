@@ -360,11 +360,84 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     },
 
     // Game Collection
+    //
+    // Read access is a union of scoped grants (CASL `can` rules on the same
+    // action+subject OR together): own rows (tombstones included, for the
+    // "previously owned" view), household-shared, friend-shared, and public.
+    // The shared scopes never expose tombstoned rows.
+    //
+    // NOTE: `read:game_collection` was previously unconditioned — any holder
+    // (household/event roles included) could read EVERY user's collection.
+    // It is now own-rows-only by design. Household/event surfaces read member
+    // collections through their own queries (household game view, attendee
+    // game lists), not through this grant, and cross-user API reads flow
+    // through the :household/:friends/:public scopes on the base User role.
+    // Moderators keep full read via `manage:content:moderate` (subject 'all').
     {
       action: Action.read,
       subject: ResourceType.GameCollection,
+      conditions: { userId: '{{ user.id }}' },
       slug: 'read:game_collection',
-      reason: 'View game collections',
+      reason: 'View your own game collection',
+    },
+    // Row visible when the owner shares a household with the acting user, the
+    // owner's membership in that household has `showAllGames`, the row is not
+    // excluded from a household the acting user belongs to, and the row's
+    // visibility admits household viewers.
+    //
+    // Known approximation: `showAllGames` and the ExcludedGame check cannot be
+    // correlated to the *same* shared household from inside this flat Prisma
+    // clause — when owner and viewer share 2+ households with differing
+    // exclusions/flags, an exclusion in any shared household hides the row.
+    {
+      action: Action.read,
+      subject: ResourceType.GameCollection,
+      conditions: {
+        deletedAt: null,
+        visibility: { in: ['Household', 'Friends', 'FriendsOfFriends', 'Public'] },
+        user: {
+          householdMember: {
+            some: {
+              showAllGames: true,
+              household: { members: { some: { userId: '{{ user.id }}' } } },
+            },
+          },
+        },
+        excludedFromHouseholds: {
+          none: {
+            householdMember: { household: { members: { some: { userId: '{{ user.id }}' } } } },
+          },
+        },
+      },
+      slug: 'read:game_collection:household',
+      reason: 'View collections shared with your household',
+    },
+    // Row visible to accepted friends of the owner when the owner's
+    // preferences allow it (absent preferences row → schema default `true`,
+    // mirroring FriendshipService). FriendsOfFriends currently grants to
+    // direct friends only — 2-hop traversal is deferred.
+    {
+      action: Action.read,
+      subject: ResourceType.GameCollection,
+      conditions: {
+        deletedAt: null,
+        visibility: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        user: {
+          AND: [
+            { OR: [{ preferences: { is: null } }, { preferences: { showCollectionToFriends: true } }] },
+            acceptedFriendOfActingUser,
+          ],
+        },
+      },
+      slug: 'read:game_collection:friends',
+      reason: "View your friends' collections",
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.GameCollection,
+      conditions: { deletedAt: null, visibility: 'Public' },
+      slug: 'read:game_collection:public',
+      reason: 'View public collections',
     },
     {
       action: Action.create,
@@ -1049,6 +1122,9 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'create:game_collection',
     'delete:game_collection',
     'read:game_collection',
+    'read:game_collection:household',
+    'read:game_collection:friends',
+    'read:game_collection:public',
     'update:game_collection',
 
     // household

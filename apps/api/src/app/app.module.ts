@@ -8,6 +8,7 @@ import { EventModule } from '@bge/event';
 import { FeedbackModule } from '@bge/feedback';
 import { FriendshipModule } from '@bge/friendship';
 import { GameModule } from '@bge/game';
+import { GameCollectionModule } from '@bge/game-collection';
 import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportProducerModule } from '@bge/game-import';
 import { GameSearchModule } from '@bge/game-search';
@@ -29,7 +30,7 @@ import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvValkey from '@keyv/valkey';
-import { CacheInterceptor, CacheModule } from '@nestjs/cache-manager';
+import { CacheModule } from '@nestjs/cache-manager';
 import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
@@ -44,6 +45,7 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
+import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
 
 @Module({
@@ -160,6 +162,7 @@ import { baseLogger } from './lib/logger';
     EventModule,
     FeedbackModule,
     FriendshipModule,
+    GameCollectionModule,
     GameGatewayModule,
     GameImportProducerModule,
     GameSearchModule,
@@ -184,7 +187,7 @@ import { baseLogger } from './lib/logger';
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {
       provide: APP_INTERCEPTOR,
-      useClass: CacheInterceptor,
+      useClass: UserAwareCacheInterceptor,
     },
 
     // Global guards

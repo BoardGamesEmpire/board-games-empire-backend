@@ -216,8 +216,11 @@ export class GameService {
         throw new NotFoundException(`Game with ID ${id} not found`);
       }
 
+      // Tombstoned (removed) collection entries don't block deletion — only
+      // copies users still own do.
       const collectionsCount = await this.db.gameCollection.count({
         where: {
+          deletedAt: null,
           platformGame: {
             gameId: id,
           },

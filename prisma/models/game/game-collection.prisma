@@ -1,3 +1,17 @@
+// Why a game left the user's collection. Recorded on soft delete so the
+// "previously owned" view can say more than "gone".
+enum GameRemovalReason {
+  Destroyed
+  Gifted
+  Lost
+  Other
+  Sold
+  Stolen
+  Traded
+
+  @@map("game_removal_reasons")
+}
+
 model GameCollection {
   id String @id @default(cuid(2))
 
@@ -13,6 +27,11 @@ model GameCollection {
 
   quantity Int @default(1)
 
+  // Who may see this row beyond the owner. Household visibility additionally
+  // honors the owner's HouseholdMember.showAllGames flag and ExcludedGame
+  // opt-outs; Friends visibility honors UserPreferences.showCollectionToFriends.
+  visibility Visibility @default(Private)
+
   rating      Int?
   playCount   Int?      @map("play_count")
   playAgain   Boolean?  @map("play_again")
@@ -20,6 +39,13 @@ model GameCollection {
   comment     String?
   lastPlayed  DateTime? @map("last_played") @db.Timestamptz(3)
   lastUpdated DateTime? @map("last_updated") @db.Timestamptz(3)
+
+  // Removal is a tombstone, never a hard delete: play history (playCount,
+  // lastPlayed, playAgain, favorite) must survive a remove→re-add cycle, and
+  // child rows (locations, event game lists, loans) would otherwise cascade.
+  // Re-adding the same (user, platformGame, medium) clears both fields.
+  deletedAt    DateTime?          @map("deleted_at") @db.Timestamptz(3)
+  deleteReason GameRemovalReason? @map("delete_reason")
 
   excludedFromHouseholds ExcludedGame[]
   locations              GameLocation[]

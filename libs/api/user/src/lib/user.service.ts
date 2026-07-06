@@ -22,7 +22,7 @@ export class UserService {
   }
 
   async searchUsers(requestingUserId: string, query: UserSearchQueryDto): Promise<UserSearchResult[]> {
-    const take = Math.min(query.limit, this.MAX_SEARCH_RESULTS);
+    const take = Math.min(query?.limit || 10, this.MAX_SEARCH_RESULTS);
     return this.db.user.findMany({
       where: {
         AND: [
