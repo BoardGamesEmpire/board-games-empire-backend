@@ -12,6 +12,17 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // ============================================
   logger.log('📋 Creating permissions...');
 
+  // Relational clause meaning "this User node is an accepted friend of the
+  // acting user". A friendship is a single directional row, so both directions
+  // must be checked. Rendered by the ability factory against `{{ user.id }}`
+  // and evaluated live against the friendship table at query time.
+  const acceptedFriendOfActingUser = {
+    OR: [
+      { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
+      { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
+    ],
+  };
+
   const permissionsToCreate = [
     // --- Global Admin/Owner ---
     { action: Action.manage, subject: 'all', slug: 'manage:all', reason: 'Unrestricted access for Owner' },
@@ -27,6 +38,52 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:user:profile:own',
       reason: 'Update own profile',
+    },
+
+    // --- Friendships ---
+    // Self-management: the acting user is a participant (requester or addressee).
+    {
+      action: Action.create,
+      subject: ResourceType.Friendship,
+      conditions: { requesterId: '{{ user.id }}' },
+      slug: 'create:friendship',
+      reason: 'Send a friend request',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Friendship,
+      conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
+      slug: 'read:friendships:own',
+      reason: 'View your own friendships and requests',
+    },
+    {
+      action: Action.update,
+      subject: ResourceType.Friendship,
+      conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
+      slug: 'update:friendship:own',
+      reason: 'Respond to, withdraw, or block a friendship you are part of',
+    },
+    {
+      action: Action.delete,
+      subject: ResourceType.Friendship,
+      conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
+      slug: 'delete:friendship:own',
+      reason: 'Remove a friendship you are part of',
+    },
+    // Friend visibility: read resources exposed to friends by their owner.
+    {
+      action: Action.read,
+      subject: ResourceType.Event,
+      conditions: { visibility: 'Friends', createdBy: acceptedFriendOfActingUser },
+      slug: 'read:event:friends',
+      reason: "View a friend's friends-visible events",
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Household,
+      conditions: { visibility: 'Friends', members: { some: { user: acceptedFriendOfActingUser } } },
+      slug: 'read:households:friends',
+      reason: "View a friend's friends-visible households",
     },
 
     // --- Games ---
@@ -975,6 +1032,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // feedback
     'create:feedback_report',
     'read:feedback_report:own',
+
+    // friendships
+    'create:friendship',
+    'read:friendships:own',
+    'update:friendship:own',
+    'delete:friendship:own',
+    'read:event:friends',
+    'read:households:friends',
 
     // game
     'create:game',

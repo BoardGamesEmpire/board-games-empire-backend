@@ -12,6 +12,9 @@ model Household {
   createdBy   User   @relation("HouseholdsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
 
+  // Members-only by default; an owner sets `Friends` to let members' friends view it.
+  visibility Visibility @default(Household)
+
   // campaigns        Campaign[]
   events               Event[]
   gameLocations        GameLocation[]

@@ -170,6 +170,9 @@
     },
     {
       "path": "./libs/api/media"
+    },
+    {
+      "path": "./libs/api/friendship"
     }
   ]
 }
