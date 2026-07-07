@@ -1,4 +1,5 @@
 import type { InitiatorType } from '@bge/database';
+import type { ImportErrorCode } from '../utils/sanitize-import-error';
 
 /**
  * Common fields shared by every job in the import flow. The DB Job row
@@ -58,6 +59,18 @@ export interface ExpansionImportJobPayload extends GameImportJobPayload {
   baseGameExternalId: string;
 }
 
+/**
+ * PlatformGame ids created/resolved for the imported game — one per
+ * platform the gateway reported. Collections (and everything else
+ * downstream of the client's "add to collection" step) key on
+ * PlatformGame.id, so the import pipeline surfaces them rather than
+ * forcing clients to re-derive them from gameId.
+ */
+export interface PlatformGameRef {
+  platformId: string;
+  platformGameId: string;
+}
+
 export interface ImportJobResult {
   /**
    * True when the Game row was created for the first time (not a re-import)
@@ -65,6 +78,8 @@ export interface ImportJobResult {
   gameCreated: boolean;
 
   gameId: string;
+
+  platformGames: PlatformGameRef[];
 
   /**
    * True when this specific gatewayId+externalId GameSource was new
@@ -75,6 +90,31 @@ export interface ImportJobResult {
    * Resolved DB id of the base game — only set for expansion imports
    */
   baseGameId?: string;
+}
+
+/**
+ * Shape persisted to Job.result on completion — the durable summary the
+ * REST status endpoint (GET /games/import/:batchId) returns to clients.
+ */
+export interface PersistedJobResult {
+  gameId: string;
+  gameTitle: string;
+  thumbnail: string | null;
+  platformGames: PlatformGameRef[];
+}
+
+/**
+ * Shape persisted to Job.result on terminal failure — sanitized code +
+ * static message, safe for the REST status endpoint. `GET
+ * /games/import/:batchId` is deliberately not owner-scoped (imported games
+ * are public), so its audience is exactly as broad as a webhook
+ * subscriber's; the raw `Job.error` column (which can carry gRPC transport
+ * detail, internal hostnames, Prisma error text) is written for operator
+ * debugging only and must never be serialized into an API response.
+ */
+export interface PersistedJobFailure {
+  errorCode: ImportErrorCode;
+  error: string;
 }
 
 export interface ImportJobCompletedEvent {
@@ -92,14 +132,80 @@ export interface ImportJobCompletedEvent {
   gatewayId: string;
   isExpansion: boolean;
   jobId: string;
+  platformGames: PlatformGameRef[];
   sourceCreated: boolean;
   thumbnail: string | null;
   userId: string | null;
 }
 
+export interface ImportJobStartedEvent {
+  batchId: string;
+  correlationId: string;
+  externalId: string;
+  gatewayId: string;
+  isExpansion: boolean;
+  jobId: string;
+  userId: string | null;
+}
+
+/**
+ * In-process failure event consumed only by the NotificationListener (owner-
+ * facing). Carries the SAME sanitized classification persisted to Job.result
+ * and emitted on the webhook — never the raw error. The raw text (which can
+ * carry gRPC transport detail, internal hostnames, Prisma error text) lives
+ * only in the Job.error DB column and operator logs.
+ */
 export interface ImportJobFailedEvent {
   batchId: string;
   correlationId: string;
+  errorCode: ImportErrorCode;
+  /** Sanitized, static message — safe to surface to the initiating user */
   error: string;
+  externalId: string;
+  gatewayId: string;
+  isExpansion: boolean;
   jobId: string;
+  userId: string | null;
+}
+
+/**
+ * Emitted once per batch when every Job row in the batch has reached a
+ * terminal status. Emission is best-effort-exactly-once: two jobs
+ * finishing concurrently in different processes can both observe the
+ * batch as terminal and double-emit; webhook delivery dedups via the
+ * batchId occurrenceId, in-process listeners must tolerate a duplicate.
+ */
+export interface ImportBatchCompletedEvent {
+  batchId: string;
+  baseJobId: string;
+  correlationId: string;
+  status: ImportBatchStatus;
+  counts: ImportBatchCounts;
+  userId: string | null;
+}
+
+export interface ImportBatchCounts {
+  total: number;
+  completed: number;
+  failed: number;
+  cancelled: number;
+}
+
+/**
+ * Batch-level rollup derived from the statuses of a batch's Job rows.
+ * Terminal states: Completed, PartiallyCompleted, Failed, Cancelled.
+ */
+export enum ImportBatchStatus {
+  /** No job has started yet */
+  Pending = 'Pending',
+  /** At least one job is still Pending/Running */
+  Running = 'Running',
+  /** Every job completed successfully */
+  Completed = 'Completed',
+  /** All jobs terminal; some completed, some failed/cancelled */
+  PartiallyCompleted = 'PartiallyCompleted',
+  /** All jobs terminal; none completed, at least one failed */
+  Failed = 'Failed',
+  /** Every job was cancelled */
+  Cancelled = 'Cancelled',
 }

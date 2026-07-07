@@ -66,20 +66,25 @@ describe('WebhookDeliveryProcessor', () => {
     });
 
     it('records a terminal failure once the attempt budget is exhausted', async () => {
-      await processor.onFailed(makeJob({ attempts: 5, attemptsMade: 5 }), new Error('gateway down'));
+      const error = new Error('gateway down');
+      await processor.onFailed(makeJob({ attempts: 5, attemptsMade: 5 }), error);
       expect(delivery.recordTerminalFailure).toHaveBeenCalledTimes(1);
-      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', 'gateway down');
+      // The raw Error is passed through — recordTerminalFailure (not the
+      // processor) owns classifying it into a subscriber-safe message.
+      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', error);
     });
 
     it('treats the first failure as terminal when no retries are configured', async () => {
-      await processor.onFailed(makeJob({ attempts: 1, attemptsMade: 1 }), new Error('nope'));
-      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', 'nope');
+      const error = new Error('nope');
+      await processor.onFailed(makeJob({ attempts: 1, attemptsMade: 1 }), error);
+      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', error);
     });
 
     it('treats a missing attempts option as a single attempt (terminal)', async () => {
       const job = { data, opts: {}, attemptsMade: 1 } as unknown as Job<WebhookDeliveryJob>;
-      await processor.onFailed(job, new Error('x'));
-      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', 'x');
+      const error = new Error('x');
+      await processor.onFailed(job, error);
+      expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', error);
     });
   });
 });

@@ -8,6 +8,7 @@ import { GameWatchListener } from './listeners/game-watch.listener';
 import { ImportActivityListener } from './listeners/import-activity.listener';
 import { NotificationListener } from './listeners/notification.listener';
 import { GameImportProcessor } from './processors/game-import.processor';
+import { ImportBatchCompletionService } from './services/batch-completion.service';
 import { GameUpsertService } from './services/game.service';
 import { PersonUpsertService } from './services/person.service';
 import { PlatformUpsertService } from './services/platform.service';
@@ -25,6 +26,7 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     GameImportProcessor,
     GameUpsertService,
     GameWatchListener,
+    ImportBatchCompletionService,
     ImportActivityListener,
     NotificationListener,
     PersonUpsertService,

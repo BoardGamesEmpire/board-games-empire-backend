@@ -139,7 +139,7 @@ describe('WebhookDeliveryService', () => {
         createdById: 'owner-1',
       } as WebhookSubscription);
 
-      await service.recordTerminalFailure('sub-1', 'boom');
+      await service.recordTerminalFailure('sub-1', new Error('boom'));
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { consecutiveFailures: { increment: 1 } } }),
@@ -155,7 +155,7 @@ describe('WebhookDeliveryService', () => {
       } as WebhookSubscription);
       db.webhookSubscription.updateMany.mockResolvedValue({ count: 1 });
 
-      await service.recordTerminalFailure('sub-1', 'boom');
+      await service.recordTerminalFailure('sub-1', new Error('boom'));
 
       expect(db.webhookSubscription.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -176,9 +176,30 @@ describe('WebhookDeliveryService', () => {
       } as WebhookSubscription);
       db.webhookSubscription.updateMany.mockResolvedValue({ count: 0 });
 
-      await service.recordTerminalFailure('sub-1', 'boom');
+      await service.recordTerminalFailure('sub-1', new Error('boom'));
 
       expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('emits a sanitized code + message on the disabled event — never the raw error', async () => {
+      db.webhookSubscription.update.mockResolvedValue({
+        consecutiveFailures: 3,
+        createdById: 'owner-1',
+      } as WebhookSubscription);
+      db.webhookSubscription.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.recordTerminalFailure(
+        'sub-1',
+        new Error('connect ECONNREFUSED 10.0.4.12:443 (internal service, not the subscriber URL)'),
+      );
+
+      expect(emitter.emit).toHaveBeenCalledWith(
+        WEBHOOK_DISABLED_EVENT,
+        expect.objectContaining({
+          lastErrorCode: 'UNKNOWN',
+          lastError: 'Webhook delivery failed due to an internal error.',
+        }),
+      );
     });
   });
 });

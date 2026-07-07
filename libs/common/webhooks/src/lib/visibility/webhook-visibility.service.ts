@@ -36,6 +36,35 @@ export class WebhookVisibilityService {
         return count > 0;
       }
 
+      case ResourceType.Game: {
+        const count = await this.db.game.count({
+          where: {
+            id: subjectId,
+            deletedAt: null,
+            AND: [accessibleBy(ability).ofType(subject)],
+          },
+        });
+
+        return count > 0;
+      }
+
+      // read:job is seeded unconditionally on the base User role by design —
+      // import jobs describe public content (mirroring the ImportActivity
+      // feed), so a Job-subject subscription legitimately observes every
+      // user's import lifecycle. If job types with private payloads land
+      // later, scope the seed (or add a conditional rule) and this check
+      // tightens automatically.
+      case ResourceType.Job: {
+        const count = await this.db.job.count({
+          where: {
+            id: subjectId,
+            AND: [accessibleBy(ability).ofType(subject)],
+          },
+        });
+
+        return count > 0;
+      }
+
       default:
         throw new Error(`No webhook visibility check implemented for subject "${subject}"`);
     }

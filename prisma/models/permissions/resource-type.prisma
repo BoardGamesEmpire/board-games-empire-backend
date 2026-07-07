@@ -8,6 +8,7 @@ enum ResourceType {
   MediaContribution
   WebhookSubscription
   Quota
+  Job
 
   // ─── User ───────────────────────────────────────────────
   User

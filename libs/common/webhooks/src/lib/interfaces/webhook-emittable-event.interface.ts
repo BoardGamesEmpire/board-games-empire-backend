@@ -37,6 +37,28 @@ export interface WebhookEmittableEvent<TData = unknown> {
 }
 
 /**
+ * Builds the envelope every webhook-eligible emit site must carry. Prefer this
+ * over a hand-written object literal: it centralizes the contract (notably
+ * that `occurrenceId` should be a STABLE id so duplicate emits dedup to one
+ * delivery, and that `householdId` defaults to null for non-household-scoped
+ * subjects) instead of enforcing it by copy-paste.
+ */
+export function webhookEnvelope<TData>(args: {
+  subjectId: string;
+  data: TData;
+  /** Stable id of this logical event occurrence — enables delivery dedup. */
+  occurrenceId?: string;
+  householdId?: string | null;
+}): WebhookEmittableEvent<TData> {
+  return {
+    subjectId: args.subjectId,
+    householdId: args.householdId ?? null,
+    occurrenceId: args.occurrenceId,
+    data: args.data,
+  };
+}
+
+/**
  * Narrows an arbitrary EventEmitter2 payload to the contract. Structural, not
  * nominal — any event carrying the three fields qualifies, which is what lets
  * the dispatcher subscribe with `onAny` and filter by the registry rather than

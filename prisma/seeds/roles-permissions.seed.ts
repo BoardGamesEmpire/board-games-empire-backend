@@ -88,6 +88,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
 
     // --- Games ---
     { action: Action.read, subject: ResourceType.Game, slug: 'read:game', reason: 'View games' },
+    { action: Action.read, subject: ResourceType.Job, slug: 'read:job', reason: 'View import/system job status' },
     { action: Action.create, subject: ResourceType.Game, slug: 'create:game', reason: 'Create games' },
     { action: Action.update, subject: ResourceType.Game, slug: 'update:game', reason: 'Update games' },
     { action: Action.delete, subject: ResourceType.Game, slug: 'delete:game', reason: 'Delete games' },
@@ -1117,6 +1118,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     // game
     'create:game',
     'read:game',
+    'read:job',
 
     // game collection
     'create:game_collection',
