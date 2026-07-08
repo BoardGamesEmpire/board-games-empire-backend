@@ -1,15 +1,10 @@
 import { DatabaseService, InitiatorType, JobStatus, JobType } from '@bge/database';
-import type {
-  ExpansionFetchJobPayload,
-  ExpansionImportJobPayload,
-  GameFetchJobPayload,
-  GameImportJobPayload,
-} from '@bge/game-import';
-import { FlowProducerNames, JobNames, QueueNames } from '@bge/game-import';
-import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import type { GameImportJobPayload } from '@bge/game-import';
+import { buildBaseFlow, FlowProducerNames, idempotencyKeyFor } from '@bge/game-import';
+import type { JobActorMeta } from '@bge/queue-actor-context';
 import { InjectFlowProducer } from '@nestjs/bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { FlowJob, FlowProducer } from 'bullmq';
+import { FlowProducer } from 'bullmq';
 import * as crypto from 'node:crypto';
 
 @Injectable()
@@ -23,120 +18,33 @@ export class GameImportEnqueuerService {
   ) {}
 
   /**
-   * Creates Job rows and enqueues the import flow tree. No gateway calls
-   * happen here — the actual fetches run as GameFetch / ExpansionFetch
-   * jobs in the gateway-worker, each as a child of the corresponding
-   * import job.
+   * Creates the base Job row and enqueues the base import flow — the base
+   * import job plus its single fetch child:
    *
-   * Flow structure:
-   *   GameImport (base) — parent, runs after all children complete
-   *   ├── GameFetch (base) — fetches base game data, returns GameData
-   *   ├── ExpansionImport (exp 1) — runs after its own fetch child
-   *   │   └── ExpansionFetch (exp 1)
-   *   └── ExpansionImport (exp 2)
-   *       └── ExpansionFetch (exp 2)
+   *   GameImport (base) — persists the base game, then spawns expansion flows
+   *   └── GameFetch (base) — fetches base game data, returns GameData
    *
-   * failParentOnFailure on every fetch child ensures a persistent fetch
-   * failure cascades to the import, rather than the import waiting
-   * indefinitely.
+   * Expansions are deliberately NOT enqueued here. The base import processor
+   * spawns one expansion flow per id *after* the base GameSource exists, so an
+   * expansion can never run before its base (the ordering bug this fixes). No
+   * gateway calls happen here — fetches run in the gateway-worker.
    */
   async enqueue(input: StartGameImportInput): Promise<EnqueueResult> {
     const batchId = crypto.randomUUID();
     const initiatorType: InitiatorType = input.userId ? InitiatorType.User : InitiatorType.System;
 
-    const { baseJobId, expansionJobIds } = await this.createJobRows(batchId, input, initiatorType);
-
-    const flow = this.buildFlow({
-      batchId,
-      input,
-      baseJobId,
-      expansionJobIds,
-      initiatorType,
-    });
-
-    await this.flowProducer.add(flow);
-
-    this.logger.log(
-      `Enqueued import batchId=${batchId}: 1 base + ${expansionJobIds.length} expansion(s) for gateway=${input.gatewayId}`,
-    );
-
-    return { batchId, baseJobId, expansionJobIds };
-  }
-
-  /**
-   * Creates Job rows in a single transaction. One row per game-being-
-   * imported (base + each expansion). Status starts Pending; the fetch
-   * processor transitions to Running on first attempt.
-   */
-  private async createJobRows(
-    batchId: string,
-    input: StartGameImportInput,
-    initiatorType: InitiatorType,
-  ): Promise<{ baseJobId: string; expansionJobIds: string[] }> {
-    return this.db.$transaction(async (tx) => {
-      const baseJob = await tx.job.create({
-        data: {
-          type: JobType.GameImport,
-          status: JobStatus.Pending,
-          initiatorType,
-          userId: input.userId,
-          batchId,
-          parentJobId: null,
-          payload: {
-            correlationId: input.correlationId,
-            gatewayId: input.gatewayId,
-            externalId: input.externalId,
-          },
-        },
-        select: { id: true },
-      });
-
-      const expansionJobIds: string[] = [];
-      for (const expansionExternalId of input.expansionExternalIds) {
-        const expansionJob = await tx.job.create({
-          data: {
-            type: JobType.GameImport,
-            status: JobStatus.Pending,
-            initiatorType,
-            userId: input.userId,
-            batchId,
-            parentJobId: baseJob.id,
-            payload: {
-              correlationId: input.correlationId,
-              gatewayId: input.gatewayId,
-              externalId: expansionExternalId,
-              baseGameExternalId: input.externalId,
-            },
-          },
-          select: { id: true },
-        });
-
-        expansionJobIds.push(expansionJob.id);
-      }
-
-      return { baseJobId: baseJob.id, expansionJobIds };
-    });
-  }
-
-  private buildFlow(args: {
-    batchId: string;
-    input: StartGameImportInput;
-    baseJobId: string;
-    expansionJobIds: readonly string[];
-    initiatorType: InitiatorType;
-  }): FlowJob {
-    const { batchId, input, baseJobId, expansionJobIds, initiatorType } = args;
+    const baseJobId = await this.createBaseJobRow(batchId, input, initiatorType);
 
     // The coordinator is a gRPC service with no CLS actor of its own — the
-    // originating identity arrives on the request as userId. Reconstruct the
-    // actor from it (mirrors initiatorType) and stamp every node so the actor
-    // survives the queue hop into the gateway-worker's ActorAwareWorkerHost.
+    // originating identity arrives as userId. Reconstruct the actor from it so
+    // it survives the queue hop into the worker's ActorAwareWorkerHost and, in
+    // turn, onto the expansion flows the base processor spawns.
     const meta: JobActorMeta = {
       actor: input.userId ? { kind: 'user', userId: input.userId } : { kind: 'system', reason: 'game-import' },
       correlationId: input.correlationId,
     };
 
-    const baseContext = {
+    const basePayload: GameImportJobPayload = {
       jobId: baseJobId,
       batchId,
       correlationId: input.correlationId,
@@ -144,57 +52,53 @@ export class GameImportEnqueuerService {
       externalId: input.externalId,
       initiatorType,
       userId: input.userId,
-    } satisfies GameImportJobPayload;
+      expansionExternalIds: [...input.expansionExternalIds],
+      locale: input.locale,
+    };
 
-    const baseFetchPayload: GameFetchJobPayload = { ...baseContext, locale: input.locale };
+    await this.flowProducer.add(buildBaseFlow(basePayload, meta));
 
-    const expansionFlows: FlowJob[] = input.expansionExternalIds.map((expansionExternalId, index) => {
-      const expansionImportPayload: ExpansionImportJobPayload = {
-        jobId: expansionJobIds[index],
-        batchId,
-        correlationId: input.correlationId,
-        gatewayId: input.gatewayId,
-        externalId: expansionExternalId,
-        baseGameExternalId: input.externalId,
+    this.logger.log(
+      `Enqueued import batchId=${batchId}: base + ${input.expansionExternalIds.length} deferred expansion(s) for gateway=${input.gatewayId}`,
+    );
+
+    // expansionJobIds is intentionally empty: expansion Job rows are created by
+    // the base processor once the base persists, and are discovered via
+    // GET /games/import/:batchId rather than returned at enqueue time.
+    return { batchId, baseJobId, expansionJobIds: [] };
+  }
+
+  /**
+   * Creates the base Job row. Status starts Pending; the fetch processor
+   * transitions it to Running on first attempt. The `expansionExternalIds`
+   * snapshot lets the status endpoint render the full requested graph (including
+   * expansions not yet spawned) and gives the base processor its spawn list.
+   */
+  private async createBaseJobRow(
+    batchId: string,
+    input: StartGameImportInput,
+    initiatorType: InitiatorType,
+  ): Promise<string> {
+    const baseJob = await this.db.job.create({
+      data: {
+        type: JobType.GameImport,
+        status: JobStatus.Pending,
         initiatorType,
         userId: input.userId,
-      };
-
-      const expansionFetchPayload: ExpansionFetchJobPayload = {
-        ...expansionImportPayload,
-        locale: input.locale,
-      };
-
-      return {
-        name: JobNames.ExpansionImport,
-        queueName: QueueNames.GamesImport,
-        data: wrapJobData(expansionImportPayload, meta),
-        opts: { failParentOnFailure: true },
-        children: [
-          {
-            name: JobNames.ExpansionFetch,
-            queueName: QueueNames.GatewayFetch,
-            data: wrapJobData(expansionFetchPayload, meta),
-            opts: { failParentOnFailure: true },
-          },
-        ],
-      } satisfies FlowJob;
+        batchId,
+        parentJobId: null,
+        idempotencyKey: idempotencyKeyFor(batchId, 'base', input.externalId),
+        payload: {
+          correlationId: input.correlationId,
+          gatewayId: input.gatewayId,
+          externalId: input.externalId,
+          expansionExternalIds: [...input.expansionExternalIds],
+        },
+      },
+      select: { id: true },
     });
 
-    return {
-      name: JobNames.GameImport,
-      queueName: QueueNames.GamesImport,
-      data: wrapJobData(baseContext, meta),
-      children: [
-        {
-          name: JobNames.GameFetch,
-          queueName: QueueNames.GatewayFetch,
-          data: wrapJobData(baseFetchPayload, meta),
-          opts: { failParentOnFailure: true },
-        },
-        ...expansionFlows,
-      ],
-    } satisfies FlowJob;
+    return baseJob.id;
   }
 }
 

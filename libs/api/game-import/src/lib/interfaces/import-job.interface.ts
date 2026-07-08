@@ -49,6 +49,20 @@ export interface ExpansionFetchJobPayload extends GameFetchJobPayload {
  */
 export interface GameImportJobPayload extends JobContext {
   externalId: string;
+
+  /**
+   * External ids of expansions to co-import once this base game persists.
+   * Base jobs only. The base import processor spawns one expansion flow per id
+   * *after* the base source exists, so expansions never run before their base
+   * (the ordering bug this replaces). Empty/absent on expansion jobs.
+   */
+  expansionExternalIds?: string[];
+
+  /**
+   * Locale forwarded to the expansion fetch jobs this base spawns. Base jobs
+   * only; expansion fetch payloads carry their own locale directly.
+   */
+  locale?: string;
 }
 
 export interface ExpansionImportJobPayload extends GameImportJobPayload {

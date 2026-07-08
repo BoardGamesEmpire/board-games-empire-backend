@@ -1,5 +1,5 @@
 import { DatabaseService, JobStatus, Prisma } from '@bge/database';
-import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
+import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
@@ -15,10 +15,11 @@ import type {
   PersistedJobResult,
 } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
+import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
 import { GameUpsertService } from '../services/game.service';
 import { emitJobFailedEvents } from '../utils/emit-job-failed';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
-import { sanitizeImportError } from '../utils/sanitize-import-error';
+import { ImportErrorCode, importErrorMessage, sanitizeImportError } from '../utils/sanitize-import-error';
 
 @Processor(QueueNames.GamesImport)
 export class GameImportProcessor extends ActorAwareWorkerHost<
@@ -32,6 +33,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     private readonly gameUpsert: GameUpsertService,
     private readonly events: EventEmitter2,
     private readonly batchCompletion: ImportBatchCompletionService,
+    private readonly expansionSpawner: ExpansionSpawnerService,
   ) {
     super();
   }
@@ -81,12 +83,31 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
         )
       : await this.gameUpsert.upsert(gameData, gatewayId);
 
-    await this.markCompleted(jobId, {
+    // The base GameSource now exists, so its expansions can resolve it. Spawn
+    // their flows BEFORE marking this base Completed: the freshly-created
+    // Pending expansion rows must be visible to batch-completion so it can't
+    // fire on the base alone. Idempotent, so a retry after a mid-spawn crash
+    // converges rather than duplicating work.
+    if (!isExpansion) {
+      await this.spawnExpansions(job as Job<GameImportJobPayload>);
+    }
+
+    const completed = await this.markCompleted(jobId, {
       gameId: result.gameId,
       gameTitle: gameData.title,
       thumbnail: gameData.thumbnailUrl ?? null,
       platformGames: result.platformGames,
     });
+
+    if (completed.count === 0) {
+      // The row was already terminal — e.g. cancelled by its base's failure
+      // sweep while this expansion's flow was in flight. The upsert above is
+      // idempotent, so the data is still persisted; but the terminal write that
+      // won already emitted for this job and ran batch completion, so don't
+      // emit a contradictory second completion here.
+      this.logger.warn(`Import for jobId=${jobId} hit an already-terminal row; skipping completion events`);
+      return result;
+    }
 
     this.emitCompleted({
       jobId,
@@ -108,6 +129,44 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     await this.batchCompletion.checkAndEmit(batchId);
 
     return result;
+  }
+
+  /**
+   * Spawns the expansion flows for a just-persisted base game. The spawn list
+   * comes from the base job's own payload, and the originating actor is
+   * re-derived from the job meta so the expansion jobs are attributed to the
+   * same user. Row creation + enqueue (and their idempotency) live in
+   * ExpansionSpawnerService.
+   */
+  private async spawnExpansions(job: Job<GameImportJobPayload>): Promise<void> {
+    const data = job.data;
+    const expansionExternalIds = data.expansionExternalIds ?? [];
+    if (expansionExternalIds.length === 0) {
+      return;
+    }
+
+    const meta = extractJobMeta(job.data);
+    if (!meta) {
+      // Unreachable in practice: ActorAwareWorkerHost.process rejects jobs
+      // lacking the meta envelope before processJob runs. Guard defensively so
+      // a spawned job can never lose actor attribution silently.
+      throw new Error(`Cannot spawn expansions for job ${job.id}: missing actor meta envelope`);
+    }
+
+    await this.expansionSpawner.spawn(
+      {
+        baseJobId: data.jobId,
+        batchId: data.batchId,
+        correlationId: data.correlationId,
+        gatewayId: data.gatewayId,
+        baseExternalId: data.externalId,
+        expansionExternalIds,
+        locale: data.locale,
+        initiatorType: data.initiatorType,
+        userId: data.userId,
+      },
+      meta,
+    );
   }
 
   @OnWorkerEvent('failed')
@@ -152,6 +211,24 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
       if (transitioned.count === 0) {
         return;
+      }
+
+      // Base failure: cancel any still-Pending expansion rows this base
+      // spawned. In the common cases the base never persisted, so no expansion
+      // rows exist and this is a no-op — but it guarantees the batch can't hang
+      // Running forever on orphaned children (e.g. a crash after row creation
+      // but before their flows enqueued, with retries then exhausted). An
+      // expansion whose flow *did* enqueue and is mid-flight self-heals: its own
+      // unconditional markCompleted wins the race back to Completed.
+      if (job.name === JobNames.GameImport) {
+        const cancellation: PersistedJobFailure = {
+          errorCode: ImportErrorCode.BaseImportFailed,
+          error: importErrorMessage(ImportErrorCode.BaseImportFailed),
+        };
+        await this.db.job.updateMany({
+          where: { parentJobId: jobId, status: JobStatus.Pending },
+          data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
+        });
       }
 
       emitJobFailedEvents(
@@ -215,8 +292,12 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     // startedAt is owned by the fetch processor (set on the first
     // Pending → Running transition); deliberately not touched here so the
     // reported start time isn't pushed later to when this parent job ran.
-    return this.db.job.update({
-      where: { id: jobId },
+    //
+    // Guarded against terminal states (same discipline as markCompleted and
+    // onFailed): a row cancelled by its base's failure sweep must not be
+    // resurrected to Running by an expansion flow that was already in flight.
+    return this.db.job.updateMany({
+      where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
       data: { status: JobStatus.Running, bullmqJobId },
     });
   }
@@ -225,10 +306,15 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
    * Persists the durable completion summary the REST status endpoint
    * (GET /games/import/:batchId) serves — notably platformGames, since
    * collections key on PlatformGame.id rather than Game.id.
+   *
+   * Guarded: only a non-terminal row transitions to Completed. Returns the
+   * affected-row count so the caller can skip emitting a completion for a row
+   * that was already terminal (e.g. cancelled after its base failed), which
+   * would otherwise resurrect it and double-fire batch completion.
    */
   private markCompleted(jobId: string, result: PersistedJobResult) {
-    return this.db.job.update({
-      where: { id: jobId },
+    return this.db.job.updateMany({
+      where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
       data: {
         status: JobStatus.Completed,
         completedAt: new Date(),

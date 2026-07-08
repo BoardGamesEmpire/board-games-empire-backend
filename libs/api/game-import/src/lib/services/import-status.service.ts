@@ -132,13 +132,18 @@ export class GameImportStatusService {
   }
 
   private toJobDto(job: JobRow): ImportJobStatusDto {
-    const payload = (job.payload ?? {}) as { externalId?: string };
+    const payload = (job.payload ?? {}) as { externalId?: string; expansionExternalIds?: string[] };
     const result = (job.result ?? undefined) as Partial<PersistedJobResult & PersistedJobFailure> | undefined;
 
     return {
       jobId: job.id,
       status: job.status as JobStatus,
       isExpansion: job.parentJobId !== null,
+      parentJobId: job.parentJobId,
+      // Present on base rows (the coordinator snapshots the requested set on the
+      // base payload). Lets the graph show expansions not yet spawned — or never
+      // spawned, if the base failed — as pending/skipped nodes off the base.
+      requestedExpansions: payload.expansionExternalIds,
       externalId: payload.externalId ?? '',
       gameId: job.gameId ?? result?.gameId,
       gameTitle: result?.gameTitle,

@@ -6,6 +6,7 @@ import { Job } from 'bullmq';
 import { ImportEvents, JobNames } from '../constants/queue.constants';
 import type { GameImportJobPayload, ImportJobResult } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
+import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
 import { GameUpsertService } from '../services/game.service';
 import { extractGameDataFromChildren } from '../utils/extract-game-data';
 import { GameImportProcessor } from './game-import.processor';
@@ -19,6 +20,7 @@ describe('GameImportProcessor', () => {
   let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert' | 'upsertExpansion'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
+  let expansionSpawner: { spawn: jest.Mock };
   let runWith: jest.Mock;
 
   const meta: JobActorMeta = { actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' };
@@ -53,6 +55,7 @@ describe('GameImportProcessor', () => {
     gameUpsert = { upsert: jest.fn(), upsertExpansion: jest.fn() };
     events = { emit: jest.fn() };
     batchCompletion = { checkAndEmit: jest.fn().mockResolvedValue(undefined) };
+    expansionSpawner = { spawn: jest.fn().mockResolvedValue(undefined) };
     runWith = jest.fn((_init: unknown, fn: () => unknown) => fn());
     extractMock.mockReturnValue({ externalId: 'ext-1', title: 'Catan', thumbnailUrl: 'http://x/y.png' } as ReturnType<
       typeof extractGameDataFromChildren
@@ -63,6 +66,7 @@ describe('GameImportProcessor', () => {
       gameUpsert as unknown as GameUpsertService,
       events as unknown as EventEmitter2,
       batchCompletion as unknown as ImportBatchCompletionService,
+      expansionSpawner as unknown as ExpansionSpawnerService,
     );
     // ActorAwareWorkerHost injects auditContext as a property; set it directly.
     (processor as unknown as { auditContext: { runWith: typeof runWith } }).auditContext = { runWith };
@@ -89,15 +93,67 @@ describe('GameImportProcessor', () => {
     expect(returned).toBe(result);
   });
 
+  it('spawns expansion flows after persisting a base that requested them, before marking it Completed', async () => {
+    const withExpansions: GameImportJobPayload = {
+      ...basePayload,
+      expansionExternalIds: ['exp-a', 'exp-b'],
+      locale: 'en',
+    };
+    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+
+    await processor.process(makeJob(JobNames.GameImport, withExpansions));
+
+    expect(expansionSpawner.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseJobId: 'job-1',
+        batchId: 'batch-1',
+        gatewayId: 'bgg',
+        baseExternalId: 'ext-1',
+        expansionExternalIds: ['exp-a', 'exp-b'],
+        locale: 'en',
+        userId: 'user-7',
+      }),
+      meta,
+    );
+
+    // Ordering guarantee: expansions must be spawned (their Pending rows created)
+    // before the base row flips to Completed, so batch-completion can't fire on
+    // the base alone.
+    const spawnOrder = expansionSpawner.spawn.mock.invocationCallOrder[0];
+    const completedIdx = db.job.updateMany.mock.calls.findIndex(([arg]) => arg?.data?.status === JobStatus.Completed);
+    expect(spawnOrder).toBeLessThan(db.job.updateMany.mock.invocationCallOrder[completedIdx]);
+  });
+
+  it('does not spawn when a base requested no expansions', async () => {
+    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+
+    await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+    expect(expansionSpawner.spawn).not.toHaveBeenCalled();
+  });
+
+  it('skips completion events when the row is already terminal (guarded markCompleted no-ops)', async () => {
+    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+    // Both markRunning and markCompleted no-op: the row was cancelled (e.g. its
+    // base failed) while this flow was in flight.
+    db.job.updateMany.mockResolvedValue({ count: 0 });
+
+    await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+    expect(gameUpsert.upsert).toHaveBeenCalled(); // idempotent persist still ran
+    expect(events.emit).not.toHaveBeenCalledWith(ImportEvents.JobCompleted, expect.anything());
+    expect(batchCompletion.checkAndEmit).not.toHaveBeenCalled();
+  });
+
   it('persists the durable result summary (platformGames included) and checks batch completion', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
     gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
-    expect(db.job.update).toHaveBeenCalledWith(
+    expect(db.job.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: 'job-1' },
+        where: { id: 'job-1', status: { in: [JobStatus.Pending, JobStatus.Running] } },
         data: expect.objectContaining({
           status: JobStatus.Completed,
           gameId: 'game-1',
@@ -130,7 +186,7 @@ describe('GameImportProcessor', () => {
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
-    const runningCall = db.job.update.mock.calls.find(([arg]) => arg?.data?.status === JobStatus.Running);
+    const runningCall = db.job.updateMany.mock.calls.find(([arg]) => arg?.data?.status === JobStatus.Running);
     expect(runningCall).toBeDefined();
     expect(runningCall![0].data).toEqual({ status: JobStatus.Running, bullmqJobId: '1' });
     expect(runningCall![0].data).not.toHaveProperty('startedAt');
@@ -182,6 +238,32 @@ describe('GameImportProcessor', () => {
         }),
       );
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
+    });
+
+    it('cancels still-Pending expansion children when a base import fails permanently', async () => {
+      await processor.onFailed(
+        makeJob(JobNames.GameImport, basePayload, { attemptsMade: 3, attempts: 3 }),
+        new Error('boom'),
+      );
+
+      expect(db.job.updateMany).toHaveBeenCalledWith({
+        where: { parentJobId: 'job-1', status: JobStatus.Pending },
+        data: {
+          status: JobStatus.Cancelled,
+          result: { errorCode: 'BASE_IMPORT_FAILED', error: 'Skipped because the base game import failed.' },
+        },
+      });
+    });
+
+    it('does not run the child-cancellation sweep when an expansion import fails', async () => {
+      await processor.onFailed(
+        makeJob(JobNames.ExpansionImport, { ...basePayload, baseGameExternalId: 'ext-base' }, { attemptsMade: 3, attempts: 3 }),
+        new Error('boom'),
+      );
+
+      expect(db.job.updateMany).not.toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ parentJobId: expect.anything() }) }),
+      );
     });
 
     it('sanitizes the webhook payload and the persisted result — no raw error text reaches ' +
