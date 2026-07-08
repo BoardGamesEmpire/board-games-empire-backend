@@ -13,6 +13,7 @@ export function makeJob(overrides: Partial<Job> = {}): Job {
     gameId: null,
     batchId: null,
     bullmqJobId: null,
+    idempotencyKey: null,
     payload: null,
     result: null,
     error: null,

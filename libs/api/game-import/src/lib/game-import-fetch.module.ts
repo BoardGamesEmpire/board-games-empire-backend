@@ -24,15 +24,12 @@ import { ImportBatchCompletionService } from './services/batch-completion.servic
     AuditContextModule,
     DatabaseModule,
     NotificationsServiceModule,
-    BullModule.registerQueue({
-      name: QueueNames.GatewayFetch,
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2_000 },
-        removeOnComplete: { count: 100 },
-        removeOnFail: { count: 500 },
-      },
-    }),
+    // Consumer-side registration only. Retry/backoff and removeOn* are set at
+    // PRODUCE time on the flow nodes (FETCH_JOB_OPTS in import-flow.builder) —
+    // `defaultJobOptions` here would be a silent no-op, since fetch jobs are
+    // produced by the coordinator's / worker's FlowProducer, not through this
+    // Queue instance.
+    BullModule.registerQueue({ name: QueueNames.GatewayFetch }),
   ],
   providers: [GameFetchProcessor, ImportBatchCompletionService, NotificationListener],
 })

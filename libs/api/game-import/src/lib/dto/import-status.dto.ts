@@ -27,6 +27,24 @@ export class ImportJobStatusDto {
   @ApiProperty({ description: 'False for the base game, true for a co-imported expansion' })
   isExpansion!: boolean;
 
+  @ApiPropertyOptional({
+    type: String,
+    nullable: true,
+    description:
+      'Job id of the base game this expansion belongs to; null for base games. Lets a client draw the ' +
+      'request → base → expansion graph (base ids are the graph edges when a batch has more than one base).',
+  })
+  parentJobId?: string | null;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description:
+      'External ids of the expansions this base was asked to co-import. Present on base jobs only. Expansions ' +
+      'are spawned once the base persists, so before then (or if the base fails) they have no job entry yet — ' +
+      'render these as pending/skipped nodes off the base.',
+  })
+  requestedExpansions?: string[];
+
   @ApiProperty({ description: 'External id of the game on the gateway' })
   externalId!: string;
 

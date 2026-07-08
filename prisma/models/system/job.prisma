@@ -19,6 +19,13 @@ model Job {
   // BullMQ job ID for correlation with queue state
   bullmqJobId String? @map("bullmq_job_id")
 
+  // Optional producer-supplied dedup key for idempotent creation. Generic:
+  // each producer chooses the semantic (the import spawner uses
+  // `<batchId>:<externalId>`) so a retry can `createMany`/`upsert` without
+  // duplicating rows. NULL for jobs that don't opt in (NULLs are distinct in
+  // Postgres, so unkeyed jobs never collide).
+  idempotencyKey String? @unique @map("idempotency_key")
+
   payload Json? // input snapshot
   result  Json? // summary on completion
   error   String?

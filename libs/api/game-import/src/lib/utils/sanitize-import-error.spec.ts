@@ -1,5 +1,5 @@
 import { NotFoundException } from '@nestjs/common';
-import { ImportErrorCode, sanitizeImportError } from './sanitize-import-error';
+import { ImportErrorCode, importErrorMessage, sanitizeImportError } from './sanitize-import-error';
 
 describe('sanitizeImportError', () => {
   it('classifies NotFoundException as NOT_FOUND regardless of origin', () => {
@@ -23,6 +23,10 @@ describe('sanitizeImportError', () => {
   it('classifies other persist-origin errors as INTERNAL_ERROR', () => {
     const result = sanitizeImportError(new Error('duplicate key value violates unique constraint "games_pkey"'), 'persist');
     expect(result.code).toBe(ImportErrorCode.InternalError);
+  });
+
+  it('exposes a static, client-safe message for the cascade-cancellation code', () => {
+    expect(importErrorMessage(ImportErrorCode.BaseImportFailed)).toBe('Skipped because the base game import failed.');
   });
 
   it('never includes the raw error message in the sanitized output', () => {

@@ -9,13 +9,29 @@ export enum ImportErrorCode {
   NotFound = 'NOT_FOUND',
   GatewayError = 'GATEWAY_ERROR',
   InternalError = 'INTERNAL_ERROR',
+  /**
+   * The expansion was never attempted because its base game import failed.
+   * Not derived from a raw exception — stamped when the base processor cancels
+   * expansion rows it can no longer spawn (the expansion is Cancelled, not Failed).
+   */
+  BaseImportFailed = 'BASE_IMPORT_FAILED',
 }
 
 const SAFE_MESSAGE: Record<ImportErrorCode, string> = {
   [ImportErrorCode.NotFound]: 'The requested game could not be found on the gateway.',
   [ImportErrorCode.GatewayError]: 'Fetching game data from the gateway failed.',
   [ImportErrorCode.InternalError]: 'The import failed due to an internal error.',
+  [ImportErrorCode.BaseImportFailed]: 'Skipped because the base game import failed.',
 };
+
+/**
+ * The stable, client-safe message for a classification. Use when constructing a
+ * failure result outside the exception path (e.g. cascade cancellation), so the
+ * same static, detail-free copy backs every `errorCode`.
+ */
+export function importErrorMessage(code: ImportErrorCode): string {
+  return SAFE_MESSAGE[code];
+}
 
 export interface SanitizedImportError {
   code: ImportErrorCode;
