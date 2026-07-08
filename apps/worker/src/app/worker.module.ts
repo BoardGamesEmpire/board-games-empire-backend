@@ -4,15 +4,19 @@ import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
 import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
-import { WebhookQueueConsumerModule } from '@bge/queue-webhooks';
-import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
+import { WebhookQueueConsumerModule, WebhookQueueProducerModule } from '@bge/queue-webhooks';
+import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
 import { StorageModule } from '@bge/storage';
+import { WebhooksModule } from '@bge/webhooks';
+import KeyvValkey from '@keyv/valkey';
 import { BullModule } from '@nestjs/bullmq';
+import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import type { RedisClient } from 'bullmq';
+import Keyv from 'keyv';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
@@ -57,6 +61,21 @@ import { baseLogger } from './lib/logger';
         inject: [ConfigService],
         useFactory: (config: ConfigService) => config.getOrThrow('redis.queue'),
       },
+    }),
+
+    CacheModule.registerAsync({
+      isGlobal: true,
+      inject: [CACHE_REDIS_CLIENT, ConfigService],
+      useFactory: (cacheClient: Redis, configService: ConfigService) => ({
+        stores: [
+          new Keyv({
+            store: new KeyvValkey(cacheClient),
+            namespace: 'worker:cache',
+          }),
+        ],
+        ttl: configService.get<number>('cache.ttl'),
+        max: configService.get<number>('cache.max'),
+      }),
     }),
 
     // BullMQ telemetry attaches at the root so every Worker registered
@@ -109,6 +128,16 @@ import { baseLogger } from './lib/logger';
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,
     WebhookQueueConsumerModule,
+
+    // Webhook domain providers + delivery-queue PRODUCER. The import
+    // processor emits game.game.imported.v1 / game.import.failed.v1 /
+    // game.import-batch.completed.v1 in this process, so the onAny
+    // dispatcher must run here for those events to fan out to
+    // subscriptions. (This process also consumes the delivery queue via
+    // WebhookQueueConsumerModule above — producer and consumer are
+    // independent registrations of the same queue.)
+    WebhooksModule,
+    WebhookQueueProducerModule,
   ],
 })
 export class WorkerModule {}

@@ -16,7 +16,7 @@ describe('WebhookEventRegistry', () => {
 
     it('rejects an unregistered name', () => {
       expect(registry.has('event.event.created')).toBe(false); // unversioned
-      expect(registry.has('game.game.imported.v1')).toBe(false); // not yet wired
+      expect(registry.has('game.game.updated.v1')).toBe(false); // not yet wired
       expect(registry.has('nonsense')).toBe(false);
     });
   });
@@ -54,14 +54,33 @@ describe('WebhookEventRegistry', () => {
       expect(subjects).toEqual([ResourceType.Event]);
     });
 
+    it('spans subjects for the import lifecycle (Game for imported, Job for the rest)', () => {
+      const subjects = registry.subjectsFor([
+        WebhookEventType.GameImported,
+        WebhookEventType.ImportJobStarted,
+        WebhookEventType.ImportJobFailed,
+        WebhookEventType.ImportBatchCompleted,
+      ]);
+
+      expect(subjects.sort()).toEqual([ResourceType.Game, ResourceType.Job].sort());
+    });
+
     it('throws when any requested type is unregistered', () => {
       expect(() => registry.subjectsFor(['bogus.v1' as WebhookEventType])).toThrow();
     });
   });
 
-  it('exposes exactly the v1 Event-domain types', () => {
+  it('exposes exactly the v1 Event-domain and import-lifecycle types', () => {
     expect(registry.types().sort()).toEqual(
-      [WebhookEventType.EventCreated, WebhookEventType.EventDeleted, WebhookEventType.EventUpdated].sort(),
+      [
+        WebhookEventType.EventCreated,
+        WebhookEventType.EventDeleted,
+        WebhookEventType.EventUpdated,
+        WebhookEventType.GameImported,
+        WebhookEventType.ImportJobStarted,
+        WebhookEventType.ImportJobFailed,
+        WebhookEventType.ImportBatchCompleted,
+      ].sort(),
     );
   });
 });

@@ -30,6 +30,10 @@ enum NotificationType {
   GameImported
   ExpansionImported
   WatchedExpansionImported
+  /**
+   * Import job failed terminally; payload distinguishes base game vs expansion.
+   */
+  ImportFailed
 
   MediaContributionRejected
   MediaContributionReclaimExpired

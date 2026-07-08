@@ -28,6 +28,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/common/webhooks/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {

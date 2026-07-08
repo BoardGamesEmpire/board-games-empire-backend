@@ -15,9 +15,12 @@ import type { WebhookEventDescriptor } from '../interfaces/webhook-event-descrip
  *
  * Adding an event is two coordinated edits: a name in `WebhookEventType` + an
  * entry here, and an emit site that fires that name carrying a
- * `WebhookEmittableEvent`. Game-domain entries land with the worker-side
- * dispatcher wiring (see NOTES) — omitted here so the catalogue never claims
- * eligibility for an event nothing emits.
+ * `WebhookEmittableEvent`.
+ *
+ * Import lifecycle events use `Job` as their subject — the import Job row is
+ * the thing a subscriber observes (gated by `read:job`); `GameImported` uses
+ * `Game`, since by then the game exists and game read-visibility is the right
+ * audience test.
  */
 @Injectable()
 export class WebhookEventRegistry {
@@ -36,6 +39,22 @@ export class WebhookEventRegistry {
     [
       WebhookEventType.EventDeleted,
       { type: WebhookEventType.EventDeleted, subject: ResourceType.Event, requiredAction: Action.read },
+    ],
+    [
+      WebhookEventType.GameImported,
+      { type: WebhookEventType.GameImported, subject: ResourceType.Game, requiredAction: Action.read },
+    ],
+    [
+      WebhookEventType.ImportJobStarted,
+      { type: WebhookEventType.ImportJobStarted, subject: ResourceType.Job, requiredAction: Action.read },
+    ],
+    [
+      WebhookEventType.ImportJobFailed,
+      { type: WebhookEventType.ImportJobFailed, subject: ResourceType.Job, requiredAction: Action.read },
+    ],
+    [
+      WebhookEventType.ImportBatchCompleted,
+      { type: WebhookEventType.ImportBatchCompleted, subject: ResourceType.Job, requiredAction: Action.read },
     ],
   ]);
 

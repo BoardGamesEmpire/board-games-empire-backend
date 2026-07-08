@@ -42,6 +42,6 @@ export class WebhookDeliveryProcessor extends WorkerHost {
 
     // Terminal: exhausted the attempt budget. One consecutive-failure increment
     // per delivery, which may cross the auto-disable threshold.
-    await this.delivery.recordTerminalFailure(subscriptionId, error.message);
+    await this.delivery.recordTerminalFailure(subscriptionId, error);
   }
 }

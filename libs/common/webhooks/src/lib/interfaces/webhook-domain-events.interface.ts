@@ -11,6 +11,13 @@ export interface WebhookDisabledEvent {
   readonly createdById: string;
   readonly status: Extract<WebhookSubscriptionStatus, 'Failed'>;
   readonly consecutiveFailures: number;
+  /**
+   * Stable classification (e.g. `TIMEOUT`, `NON_SUCCESS_RESPONSE`) — see
+   * `WebhookDeliveryErrorCode` in `@bge/queue-webhooks`. Typed `string` here
+   * rather than that enum: this package must not depend on the queue lib.
+   */
+  readonly lastErrorCode: string;
+  /** Sanitized, static message paired with `lastErrorCode` — never raw error text. */
   readonly lastError: string;
   readonly disabledAt: Date;
 }

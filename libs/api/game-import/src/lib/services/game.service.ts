@@ -1,7 +1,7 @@
 import { ContentType, DatabaseService, ExpansionType, Prisma, Visibility } from '@bge/database';
 import { DlcData, type GameData, ContentType as ProtoContentType } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { ImportJobResult } from '../interfaces/import-job.interface';
+import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
 import { toReleaseDate, toReleaseRegion } from './helpers';
 import { PersonUpsertService } from './person.service';
 import { PlatformUpsertService } from './platform.service';
@@ -21,8 +21,8 @@ export class GameUpsertService {
   async upsert(gameData: GameData, gatewayId: string): Promise<ImportJobResult> {
     const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
 
-    await this.upsertRelations(gameId, gameData, gatewayId);
-    return { gameId, gameCreated, sourceCreated };
+    const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
+    return { gameId, gameCreated, sourceCreated, platformGames };
   }
 
   async upsertExpansion(gameData: GameData, baseGameExternalId: string, gatewayId: string): Promise<ImportJobResult> {
@@ -39,7 +39,7 @@ export class GameUpsertService {
     }
 
     const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
-    await this.upsertRelations(gameId, gameData, gatewayId);
+    const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
 
     const baseGameId = baseSource.gameId;
     const contentType = toDbContentType(gameData.contentType);
@@ -58,7 +58,7 @@ export class GameUpsertService {
       },
     });
 
-    return { gameId, gameCreated, sourceCreated, baseGameId };
+    return { gameId, gameCreated, sourceCreated, baseGameId, platformGames };
   }
 
   private async upsertGameRecord(
@@ -118,7 +118,7 @@ export class GameUpsertService {
    * correct PlatformGame parent. Taxonomy, persons, and DLC are platform-
    * independent and run in parallel with PlatformGame creation.
    */
-  private async upsertRelations(gameId: string, gameData: GameData, gatewayId: string): Promise<void> {
+  private async upsertRelations(gameId: string, gameData: GameData, gatewayId: string): Promise<PlatformGameRef[]> {
     // PlatformGame must resolve before releases can be associated.
     // Taxonomy, persons, and DLC are independent and can run in parallel.
     const [platformGameMap] = await Promise.all([
@@ -134,6 +134,8 @@ export class GameUpsertService {
 
     // Releases depend on PlatformGame resolution — run after the parallel batch.
     await this.platform.upsertReleases(platformGameMap, gameData.releases ?? [], gatewayId);
+
+    return Array.from(platformGameMap, ([platformId, platformGameId]) => ({ platformId, platformGameId }));
   }
 
   private async upsertMechanics(gameId: string, mechanics: GameData['mechanics'], gatewayId: string) {

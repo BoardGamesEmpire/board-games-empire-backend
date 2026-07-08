@@ -10,18 +10,11 @@ import {
   WEBHOOK_DELIVERY_TIMEOUT_MS,
   WEBHOOK_FAILURE_THRESHOLD,
 } from '../constants/webhook-queue.constants';
+import { WebhookDeliveryFailedError } from '../errors/webhook-delivery-failed.error';
 import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.interface';
+import { classifyDeliveryError, type ClassifiedDeliveryError } from '../utils/classify-delivery-error';
 
-/** Thrown to mark a delivery attempt as failed so BullMQ retries it. */
-export class WebhookDeliveryFailedError extends Error {
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-    this.name = 'WebhookDeliveryFailedError';
-  }
-}
+export { WebhookDeliveryFailedError };
 
 /**
  * Performs a single delivery attempt and owns the success/failure bookkeeping —
@@ -112,8 +105,18 @@ export class WebhookDeliveryService {
    * Called by the processor only when a job has exhausted its BullMQ attempts.
    * Increments the consecutive-failure counter and, on crossing the threshold,
    * trips the race-safe auto-disable.
+   *
+   * Takes the raw `Error`, not a string: the classified {code, message} is
+   * what leaves this method (bookkeeping, `WebhookDisabledEvent`), the raw
+   * message stays in this method's own log line. Nothing currently persists
+   * or delivers the classified value anywhere either — `lastError` has no DB
+   * column and the disabled event has no listener — but the moment either
+   * lands (an in-app "your webhook was disabled" notification is the obvious
+   * next feature), this ensures raw error detail — which for network/SSRF
+   * failures already includes the subscriber's own URL/IP, and for anything
+   * else could be arbitrary internal detail — can't flow through by default.
    */
-  async recordTerminalFailure(subscriptionId: string, lastError: string): Promise<void> {
+  async recordTerminalFailure(subscriptionId: string, error: Error): Promise<void> {
     let updated: { consecutiveFailures: number; createdById: string };
     try {
       updated = await this.db.webhookSubscription.update({
@@ -121,22 +124,23 @@ export class WebhookDeliveryService {
         data: { consecutiveFailures: { increment: 1 } },
         select: { consecutiveFailures: true, createdById: true },
       });
-    } catch (error) {
+    } catch (err) {
       // Deleted mid-retry: nothing left to track or disable, and letting P2025
       // escape would crash the worker's `failed` handler.
-      if (isPrismaDependentRecordNotFoundError(error)) {
+      if (isPrismaDependentRecordNotFoundError(err)) {
         return this.logger.debug(`Subscription ${subscriptionId} gone; skipping terminal-failure bookkeeping`);
       }
 
-      throw error;
+      throw err;
     }
 
     this.logger.warn(
-      `Delivery to subscription ${subscriptionId} failed (consecutive failures: ${updated.consecutiveFailures}): ${lastError}`,
+      `Delivery to subscription ${subscriptionId} failed (consecutive failures: ${updated.consecutiveFailures}): ${error.message}`,
     );
 
     if (updated.consecutiveFailures >= WEBHOOK_FAILURE_THRESHOLD) {
-      await this.autoDisable(subscriptionId, updated.createdById, updated.consecutiveFailures, lastError);
+      const classified = classifyDeliveryError(error);
+      await this.autoDisable(subscriptionId, updated.createdById, updated.consecutiveFailures, classified);
     }
   }
 
@@ -144,7 +148,7 @@ export class WebhookDeliveryService {
     subscriptionId: string,
     createdById: string,
     consecutiveFailures: number,
-    lastError: string,
+    lastError: ClassifiedDeliveryError,
   ): Promise<void> {
     const disabledAt = new Date();
 
@@ -169,7 +173,8 @@ export class WebhookDeliveryService {
       createdById,
       status: 'Failed',
       consecutiveFailures,
-      lastError,
+      lastErrorCode: lastError.code,
+      lastError: lastError.message,
       disabledAt,
     } satisfies WebhookDisabledEvent);
   }
