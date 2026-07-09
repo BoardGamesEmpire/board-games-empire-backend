@@ -38,6 +38,14 @@ enum NotificationType {
   MediaContributionRejected
   MediaContributionReclaimExpired
 
+  /**
+   * An auditable mutation event reached the audit listener with no populated
+   * CLS actor scope — a code-path bug worth admin attention. Deduped per
+   * event name while an unread notification exists.
+   * Payload: { eventName, subject, source }
+   */
+  AuditUnattributedEvent
+
   HouseholdInviteReceived
   EventInviteReceived
 

@@ -1,4 +1,5 @@
 import { AuditContextModule } from '@bge/actor-context';
+import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportFetchModule } from '@bge/game-import';
@@ -122,6 +123,10 @@ import { baseLogger } from './lib/logger';
     // so import-completion events emitted here fan out to subscriptions. Enqueues
     // to the shared delivery queue; the consumer lives in apps/worker.
     WebhookQueueProducerModule,
+
+    // Audit capture (onAny listener) for MutationEvents emitted during
+    // fetch-job processing — same fan-out rationale as the webhook dispatcher.
+    AuditLogModule,
 
     DatabaseModule,
     DbPoolMetricsRecorderModule,

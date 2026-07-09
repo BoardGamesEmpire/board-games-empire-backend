@@ -22,15 +22,5 @@ export interface GatewayConfigEvent {
   timestamp: number;
 }
 
-/**
- * Payload emitted on EventEmitter2 when a gateway is auto-disabled.
- * Listeners build admin notifications from this.
- */
-export interface GatewayDisabledEvent {
-  gatewayId: string;
-  reason: 'repeated_connection_failure' | 'repeated_call_failure';
-  consecutiveFailures: number;
-  firstFailureAt: Date;
-  lastFailureAt: Date;
-  lastError: string;
-}
+// The EventEmitter2 auto-disable payload moved to a MutationEvent class:
+// see `../events/gateway-registry.events` (#57 emit-site migration).

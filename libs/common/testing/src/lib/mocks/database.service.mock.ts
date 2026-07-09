@@ -85,6 +85,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     // --- Model delegates ---
     account: mockDelegate(),
     apikey: mockDelegate(),
+    auditLog: mockDelegate(),
     category: mockDelegate(),
     categoryGatewayAlias: mockDelegate(),
     designer: mockDelegate(),
@@ -140,6 +141,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     mediaContribution: mockDelegate(),
     mediaObject: mockDelegate(),
     mediaShare: mockDelegate(),
+    notification: mockDelegate(),
     passkey: mockDelegate(),
     permission: mockDelegate(),
     platform: mockDelegate(),

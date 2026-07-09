@@ -940,6 +940,15 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'View own webhook subscriptions',
     },
 
+    // --- Audit Log ──────────────────────────────────────────
+    // Read-only by design — there is no mutation API for audit rows.
+    {
+      action: Action.read,
+      subject: ResourceType.AuditLog,
+      slug: 'read:audit_log',
+      reason: 'View the persisted audit trail',
+    },
+
     // --- Quotas ─────────────────────────────────────────────
     { action: Action.manage, subject: ResourceType.Quota, slug: 'manage:quota', reason: 'Manage operational quotas' },
     { action: Action.read, subject: ResourceType.Quota, slug: 'read:quota', reason: 'View operational quotas' },
@@ -1068,6 +1077,9 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   await assignPermissions(SystemRole.Moderator, [
     'manage:content:moderate',
     'read:public_content',
+
+    // audit
+    'read:audit_log',
 
     // event
     'read:event',

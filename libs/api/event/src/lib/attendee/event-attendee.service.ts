@@ -20,17 +20,17 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { AttendeeEvents } from '../attendee/constants';
 import { assertEventExists } from '../event-access.helpers';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
-import type {
+import {
   AttendeeAddedEvent,
   AttendeeRemovedEvent,
   AttendeeStatusUpdatedEvent,
-  GameListUpdatedEvent,
-} from './interfaces';
+  GameAddedToListEvent,
+  GameRemovedFromListEvent,
+} from './events/attendee.events';
 
 @Injectable()
 export class EventAttendeeService {
@@ -90,6 +90,7 @@ export class EventAttendeeService {
   }
 
   async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<EventAttendee> {
+    const initiatedAt = new Date();
     await assertEventExists(this.db, eventId);
     const invitedByUserId = this.abilityService.getActingUserId();
 
@@ -123,14 +124,20 @@ export class EventAttendeeService {
         include: ATTENDEE_INCLUDE,
       });
 
-      this.eventEmitter.emit(AttendeeEvents.AttendeeAdded, {
-        eventId,
-        attendeeId: attendee.id,
-        userId: dto.userId ?? null,
-        guestName: dto.guestName ?? null,
-        role: roleName,
-        addedById: invitedByUserId,
-      } satisfies AttendeeAddedEvent);
+      this.eventEmitter.emit(
+        AttendeeAddedEvent.eventName,
+        new AttendeeAddedEvent(
+          {
+            id: attendee.id,
+            eventId: attendee.eventId,
+            userId: attendee.userId,
+            guestName: attendee.guestName,
+            status: attendee.status,
+            invitedById: attendee.invitedById,
+          },
+          initiatedAt,
+        ),
+      );
 
       return attendee;
     } catch (error) {
@@ -145,9 +152,13 @@ export class EventAttendeeService {
   }
 
   async removeAttendee(eventId: string, attendeeId: string): Promise<EventAttendee> {
+    const initiatedAt = new Date();
+    // Attribution guard, not payload data: removal must be performed by a
+    // user-attributed actor — system/external actors throw here instead of
+    // silently deleting attendees. The value itself rides CLS for the audit row.
+    this.abilityService.getActingUserId();
     await assertEventExists(this.db, eventId);
 
-    const removedByUserId = this.abilityService.getActingUserId();
     const attendee = await this.db.eventAttendee.findUnique({
       where: { id: attendeeId, eventId },
       select: { id: true, userId: true },
@@ -164,12 +175,19 @@ export class EventAttendeeService {
         include: ATTENDEE_INCLUDE,
       });
 
-      this.eventEmitter.emit(AttendeeEvents.AttendeeRemoved, {
-        eventId,
-        attendeeId,
-        userId: attendee.userId,
-        removedById: removedByUserId,
-      } satisfies AttendeeRemovedEvent);
+      this.eventEmitter.emit(
+        AttendeeRemovedEvent.eventName,
+        new AttendeeRemovedEvent(
+          {
+            id: deleted.id,
+            eventId: deleted.eventId,
+            userId: deleted.userId,
+            guestName: deleted.guestName,
+            status: deleted.status,
+          },
+          initiatedAt,
+        ),
+      );
 
       return deleted;
     } catch (error) {
@@ -182,6 +200,7 @@ export class EventAttendeeService {
   }
 
   async updateStatus(eventId: string, attendeeId: string, dto: UpdateAttendeeStatusDto): Promise<EventAttendee> {
+    const initiatedAt = new Date();
     await assertEventExists(this.db, eventId);
 
     const existing = await this.db.eventAttendee.findUnique({
@@ -212,13 +231,14 @@ export class EventAttendeeService {
         include: ATTENDEE_INCLUDE,
       });
 
-      this.eventEmitter.emit(AttendeeEvents.AttendeeStatusUpdated, {
-        eventId,
-        attendeeId,
-        userId: existing.userId,
-        previousStatus: existing.status,
-        newStatus: dto.status,
-      } satisfies AttendeeStatusUpdatedEvent);
+      this.eventEmitter.emit(
+        AttendeeStatusUpdatedEvent.eventName,
+        new AttendeeStatusUpdatedEvent(
+          { id: attendeeId, eventId, userId: existing.userId, status: existing.status },
+          { id: updated.id, eventId: updated.eventId, userId: updated.userId, status: updated.status },
+          initiatedAt,
+        ),
+      );
 
       return updated;
     } catch (error) {
@@ -274,6 +294,7 @@ export class EventAttendeeService {
   }
 
   async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<EventAttendeeGameList> {
+    const initiatedAt = new Date();
     await assertEventExists(this.db, eventId);
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
 
@@ -329,13 +350,14 @@ export class EventAttendeeService {
         },
       });
 
-      this.eventEmitter.emit(AttendeeEvents.GameListUpdated, {
-        eventId,
-        attendeeId,
-        userId: attendee.userId,
-        action: 'added',
-        collectionId: dto.collectionId,
-      } satisfies GameListUpdatedEvent);
+      this.eventEmitter.emit(
+        GameAddedToListEvent.eventName,
+        new GameAddedToListEvent(
+          { id: entry.id, attendeeId: entry.attendeeId, collectionId: entry.collectionId },
+          eventId,
+          initiatedAt,
+        ),
+      );
 
       return entry;
     } catch (error) {
@@ -349,7 +371,8 @@ export class EventAttendeeService {
   }
 
   async removeGameFromList(eventId: string, attendeeId: string, gameListId: string): Promise<EventAttendeeGameList> {
-    const attendee = await this.assertAttendeeExists(eventId, attendeeId);
+    const initiatedAt = new Date();
+    await this.assertAttendeeExists(eventId, attendeeId);
 
     const entry = await this.db.eventAttendeeGameList.findUnique({
       where: { id: gameListId, attendeeId },
@@ -367,13 +390,14 @@ export class EventAttendeeService {
         },
       });
 
-      this.eventEmitter.emit(AttendeeEvents.GameListUpdated, {
-        eventId,
-        attendeeId,
-        userId: attendee.userId,
-        action: 'removed',
-        collectionId: entry.collectionId,
-      } satisfies GameListUpdatedEvent);
+      this.eventEmitter.emit(
+        GameRemovedFromListEvent.eventName,
+        new GameRemovedFromListEvent(
+          { id: deleted.id, attendeeId: deleted.attendeeId, collectionId: deleted.collectionId },
+          eventId,
+          initiatedAt,
+        ),
+      );
 
       return deleted;
     } catch (error) {

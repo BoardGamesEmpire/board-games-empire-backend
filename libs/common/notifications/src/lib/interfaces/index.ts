@@ -20,6 +20,14 @@ export interface NotificationPayload {
   gatewayId?: string;
   isExpansion?: boolean;
   jobType?: JobType;
+
+  // AuditUnattributedEvent — identifies the code path that emitted an
+  // auditable event without a populated CLS actor scope. eventName doubles
+  // as the dedupe key (source typed as string to avoid coupling to
+  // actor-context's EventSource union).
+  eventName?: string;
+  subject?: string;
+  source?: string | null;
 }
 
 export interface CreateNotificationInput<Payload extends Record<string, any> = Record<string, any>> {

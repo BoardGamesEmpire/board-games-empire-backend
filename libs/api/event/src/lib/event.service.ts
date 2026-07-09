@@ -15,10 +15,10 @@ import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { EventEvents } from './constants/event-events.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
-import type { EventCreatedEvent, EventDeletedEvent } from './interfaces/event.interface';
+import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
+import { pickSnapshot } from './utils/pick-snapshot.util';
 
 @Injectable()
 export class EventService {
@@ -94,6 +94,7 @@ export class EventService {
   }
 
   async createEvent(dto: CreateEventDto): Promise<Event> {
+    const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     const { occurrences, policy, householdId, inviteUserIds = [], ...eventFields } = dto;
 
@@ -207,28 +208,38 @@ export class EventService {
       return created;
     });
 
-    this.eventEmitter.emit(EventEvents.EventCreated, {
-      eventId: event.id,
-      createdById: userId,
-      householdId: householdId ?? null,
-      invitedUserIds: uniqueInviteIds,
-      title: event.title,
-    } satisfies EventCreatedEvent);
+    this.eventEmitter.emit(
+      EventCreatedEvent.eventName,
+      new EventCreatedEvent(
+        {
+          id: event.id,
+          title: event.title,
+          status: event.status,
+          schedulingMode: event.schedulingMode,
+          createdById: event.createdById,
+          householdId: event.householdId,
+        },
+        uniqueInviteIds,
+        initiatedAt,
+      ),
+    );
 
     return event;
   }
 
   async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
+    const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, householdId, ...fields } = dto;
 
     try {
-      const existing = await this.db.event.count({
+      // Full row (not a count) so the update event can carry a before snapshot.
+      const existing = await this.db.event.findUnique({
         where: { id, deletedAt: null },
       });
-      assert(existing > 0, new NotFoundException(`Event with ID ${id} not found`));
+      assert(existing, new NotFoundException(`Event with ID ${id} not found`));
 
       let householdRelation: { connect: { id: string } } | { disconnect: true } | undefined;
       if (householdId === null) {
@@ -237,7 +248,7 @@ export class EventService {
         householdRelation = { connect: { id: householdId } };
       }
 
-      return await this.db.event.update({
+      const updated = await this.db.event.update({
         where: {
           id,
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
@@ -251,6 +262,22 @@ export class EventService {
           policy: true,
         },
       });
+
+      const changedKeys = [
+        ...(Object.keys(fields) as (keyof Event)[]),
+        ...(householdRelation ? (['householdId'] as const) : []),
+      ];
+      // A PATCH touching only relation-managed inputs (occurrences / policy /
+      // inviteUserIds) changes no Event columns — an empty-diff "update" audit
+      // row would be noise, so emit only when a column actually changed.
+      if (changedKeys.length > 0) {
+        this.eventEmitter.emit(
+          EventUpdatedEvent.eventName,
+          new EventUpdatedEvent(pickSnapshot(existing, changedKeys), pickSnapshot(updated, changedKeys), initiatedAt),
+        );
+      }
+
+      return updated;
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -262,6 +289,7 @@ export class EventService {
   }
 
   async deleteEvent(id: string): Promise<Event> {
+    const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
     try {
       const existing = await this.db.event.count({
@@ -280,10 +308,13 @@ export class EventService {
         },
       });
 
-      this.eventEmitter.emit(EventEvents.EventDeleted, {
-        eventId: id,
-        deletedById: userId,
-      } satisfies EventDeletedEvent);
+      this.eventEmitter.emit(
+        EventDeletedEvent.eventName,
+        new EventDeletedEvent(
+          { id: event.id, title: event.title, createdById: event.createdById, householdId: event.householdId },
+          initiatedAt,
+        ),
+      );
 
       return event;
     } catch (error) {

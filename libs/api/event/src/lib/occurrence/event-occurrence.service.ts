@@ -19,13 +19,14 @@ import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
 import { UpdateEventOccurrenceDto } from './dto/update-event-occurrence.dto';
-import type {
-  AvailabilitySummary,
-  AvailabilitySummaryEntry,
+import {
   AvailabilityVoteSubmittedEvent,
   OccurrenceAddedEvent,
   OccurrenceStatusChangedEvent,
-} from './interfaces';
+  OccurrenceUpdatedEvent,
+} from './events/occurrence.events';
+import type { AvailabilitySummary, AvailabilitySummaryEntry } from './interfaces';
+import { pickSnapshot } from '../utils/pick-snapshot.util';
 
 @Injectable()
 export class EventOccurrenceService {
@@ -67,6 +68,7 @@ export class EventOccurrenceService {
   }
 
   async addOccurrence(eventId: string, dto: AddOccurrenceDto): Promise<EventOccurrence> {
+    const initiatedAt = new Date();
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
       select: { id: true, schedulingMode: true },
@@ -104,11 +106,22 @@ export class EventOccurrenceService {
       include: OCCURRENCE_INCLUDE,
     });
 
-    this.eventEmitter.emit(OccurrenceEvents.OccurrenceAdded, {
-      eventId,
-      occurrenceId: occurrence.id,
-      status,
-    } satisfies OccurrenceAddedEvent);
+    this.eventEmitter.emit(
+      OccurrenceAddedEvent.eventName,
+      new OccurrenceAddedEvent(
+        {
+          id: occurrence.id,
+          eventId: occurrence.eventId,
+          label: occurrence.label,
+          startDate: occurrence.startDate,
+          endDate: occurrence.endDate,
+          location: occurrence.location,
+          status: occurrence.status,
+          sortOrder: occurrence.sortOrder,
+        },
+        initiatedAt,
+      ),
+    );
 
     return occurrence;
   }
@@ -118,11 +131,12 @@ export class EventOccurrenceService {
     occurrenceId: string,
     dto: UpdateEventOccurrenceDto,
   ): Promise<EventOccurrence> {
+    const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
 
+    // Full row (not just the id) so the update event can carry a before snapshot.
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
-      select: { id: true },
     });
 
     assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
@@ -143,10 +157,17 @@ export class EventOccurrenceService {
         include: OCCURRENCE_INCLUDE,
       });
 
-      this.eventEmitter.emit(OccurrenceEvents.OccurrenceUpdated, {
-        eventId,
-        occurrenceId,
-      });
+      const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
+        (key) => dto[key] !== undefined,
+      );
+      this.eventEmitter.emit(
+        OccurrenceUpdatedEvent.eventName,
+        new OccurrenceUpdatedEvent(
+          pickSnapshot(existing, changedKeys),
+          pickSnapshot(updated, changedKeys),
+          initiatedAt,
+        ),
+      );
 
       return updated;
     } catch (error) {
@@ -211,6 +232,7 @@ export class EventOccurrenceService {
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
   ): Promise<EventOccurrence> {
+    const initiatedAt = new Date();
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
       select: { id: true, status: true },
@@ -245,12 +267,14 @@ export class EventOccurrenceService {
             ? OccurrenceEvents.OccurrenceDeclined
             : OccurrenceEvents.OccurrenceCancelled;
 
-      this.eventEmitter.emit(domainEvent, {
-        eventId,
-        occurrenceId,
-        previousStatus: existing.status,
-        newStatus,
-      } satisfies OccurrenceStatusChangedEvent);
+      this.eventEmitter.emit(
+        domainEvent,
+        new OccurrenceStatusChangedEvent(
+          { id: occurrenceId, eventId, status: existing.status },
+          { id: updated.id, eventId: updated.eventId, status: updated.status },
+          initiatedAt,
+        ),
+      );
 
       return updated;
     } catch (error) {
@@ -268,6 +292,7 @@ export class EventOccurrenceService {
     occurrenceId: string,
     dto: SubmitAvailabilityDto,
   ): Promise<EventAvailabilityVote> {
+    const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const occurrence = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
@@ -284,6 +309,16 @@ export class EventOccurrenceService {
       );
     }
 
+    // Pre-read classifies create vs update for the audit before-snapshot.
+    // Best-effort, not transactional: the unique (occurrence, attendee) key
+    // means only the same attendee can race this row (double-submit / retry),
+    // and in that narrow window the event may label a re-vote as a create or
+    // carry a slightly stale before. The upsert itself is always correct.
+    const existingVote = await this.db.eventAvailabilityVote.findUnique({
+      where: { occurrenceId_attendeeId: { occurrenceId, attendeeId } },
+      select: { id: true, response: true },
+    });
+
     const vote = await this.db.eventAvailabilityVote.upsert({
       where: {
         occurrenceId_attendeeId: { occurrenceId, attendeeId },
@@ -298,12 +333,16 @@ export class EventOccurrenceService {
       },
     });
 
-    this.eventEmitter.emit(OccurrenceEvents.AvailabilityVoteSubmitted, {
-      eventId,
-      occurrenceId,
-      attendeeId,
-      response: dto.response,
-    } satisfies AvailabilityVoteSubmittedEvent);
+    this.eventEmitter.emit(
+      AvailabilityVoteSubmittedEvent.eventName,
+      new AvailabilityVoteSubmittedEvent(
+        existingVote ? { id: existingVote.id, response: existingVote.response } : null,
+        existingVote
+          ? { id: vote.id, response: vote.response }
+          : { id: vote.id, occurrenceId: vote.occurrenceId, attendeeId: vote.attendeeId, response: vote.response },
+        initiatedAt,
+      ),
+    );
 
     return vote;
   }

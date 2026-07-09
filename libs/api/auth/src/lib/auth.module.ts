@@ -1,3 +1,4 @@
+import { AuditContextModule, AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { DatabaseModule, DatabaseService } from '@bge/database';
 import { ServicesModule } from '@bge/services';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
@@ -18,6 +19,9 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
     ConfigModule.forFeature(authConfig),
     DatabaseModule,
     ServicesModule,
+    // AuditContextModule supplies the CLS reader + SystemActorScope used by
+    // the user-created database hook (#57 emit-site migration).
+    AuditContextModule,
     BetterAuthModule.forRootAsync({
       useFactory: (auth: AuthType) => ({ auth }),
       imports: [AuthModule],
@@ -32,8 +36,10 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
         configService: ConfigService,
         cache: Cache,
         eventEmitter: EventEmitter2,
-      ) => authFactory(databaseClient, configService, cache, eventEmitter),
-      inject: [DatabaseService, ConfigService, CACHE_MANAGER, EventEmitter2],
+        auditContext: AuditContextService,
+        systemActorScope: SystemActorScope,
+      ) => authFactory(databaseClient, configService, cache, eventEmitter, auditContext, systemActorScope),
+      inject: [DatabaseService, ConfigService, CACHE_MANAGER, EventEmitter2, AuditContextService, SystemActorScope],
     },
     AuthService,
     UserProvisioningService,

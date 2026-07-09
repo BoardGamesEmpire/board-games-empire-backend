@@ -46,16 +46,19 @@
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/audit-log/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/otel/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/env/tsconfig.lib.json"
+      "path": "../../libs/storage/runtime/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/storage/runtime/tsconfig.lib.json"
+      "path": "../../libs/common/env/tsconfig.lib.json"
     }
   ]
 }

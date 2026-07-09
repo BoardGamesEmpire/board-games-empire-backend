@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { Global, Module } from '@nestjs/common';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
@@ -22,7 +23,9 @@ import { GatewayRegistryService } from './gateway-registry.service';
  */
 @Global()
 @Module({
-  imports: [DatabaseModule, GatewayConfigEventsModule],
+  // AuditContextModule supplies SystemActorScope for the auto-disable path
+  // (#57 emit-site migration).
+  imports: [AuditContextModule, DatabaseModule, GatewayConfigEventsModule],
   providers: [GatewayCredentialsFactory, GatewayRegistryService, GatewayRegistryBootstrapService],
   exports: [GatewayCredentialsFactory, GatewayRegistryService],
 })

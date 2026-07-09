@@ -22,15 +22,15 @@ import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
-import { NominationEvent } from './constants';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
 import { NominateGameDto } from './dto/nominate-game.dto';
-import type {
-  GameAddedToEventPayload,
+import {
+  GameAddedToEventEvent,
   NominationCreatedEvent,
   NominationResolvedEvent,
+  NominationWithdrawnEvent,
   VoteCastEvent,
-} from './interfaces';
+} from './events/nomination.events';
 
 @Injectable()
 export class EventGameNominationService {
@@ -72,6 +72,7 @@ export class EventGameNominationService {
   }
 
   async nominate(eventId: string, dto: NominateGameDto): Promise<EventGameNomination> {
+    const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
@@ -140,12 +141,22 @@ export class EventGameNominationService {
       include: NOMINATION_INCLUDE,
     });
 
-    this.eventEmitter.emit(NominationEvent.NominationCreated, {
-      eventId,
-      nominationId: nomination.id,
-      platformGameId: dto.platformGameId,
-      nominatedByAttendeeId: attendeeId,
-    } satisfies NominationCreatedEvent);
+    this.eventEmitter.emit(
+      NominationCreatedEvent.eventName,
+      new NominationCreatedEvent(
+        {
+          id: nomination.id,
+          eventId: nomination.eventId,
+          occurrenceId: nomination.occurrenceId,
+          platformGameId: nomination.platformGameId,
+          nominatedById: nomination.nominatedById,
+          suppliedFromId: nomination.suppliedFromId,
+          status: nomination.status,
+          votingDeadline: nomination.votingDeadline,
+        },
+        initiatedAt,
+      ),
+    );
 
     if (policy.gameAdditionMode === GameAdditionMode.Direct) {
       await this.elevateToEventGame(nomination.id, eventId, dto.occurrenceId);
@@ -155,6 +166,7 @@ export class EventGameNominationService {
   }
 
   async withdraw(eventId: string, nominationId: string): Promise<EventGameNomination> {
+    const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
 
     const nomination = await this.db.eventGameNomination.findUnique({
@@ -184,10 +196,14 @@ export class EventGameNominationService {
         include: NOMINATION_INCLUDE,
       });
 
-      this.eventEmitter.emit(NominationEvent.NominationWithdrawn, {
-        eventId,
-        nominationId,
-      });
+      this.eventEmitter.emit(
+        NominationWithdrawnEvent.eventName,
+        new NominationWithdrawnEvent(
+          { id: nominationId, eventId, status: nomination.status },
+          { id: updated.id, eventId: updated.eventId, status: updated.status },
+          initiatedAt,
+        ),
+      );
 
       return updated;
     } catch (error) {
@@ -200,6 +216,7 @@ export class EventGameNominationService {
   }
 
   async castVote(eventId: string, nominationId: string, dto: CastVoteDto): Promise<EventGameVote> {
+    const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
@@ -213,6 +230,21 @@ export class EventGameNominationService {
     );
 
     try {
+      // Pre-read classifies create vs update for the audit before-snapshot.
+      // Best-effort, not transactional: the unique (nomination, attendee) key
+      // means only the same attendee can race this row (double-submit / retry),
+      // and in that narrow window the event may label a re-vote as a create or
+      // carry a slightly stale before. The upsert itself is always correct.
+      const existingVote = await this.db.eventGameVote.findUnique({
+        where: {
+          eventGameNominationId_attendeeId: {
+            eventGameNominationId: nominationId,
+            attendeeId,
+          },
+        },
+        select: { id: true, voteType: true, priority: true, comment: true },
+      });
+
       const vote = await this.db.eventGameVote.upsert({
         where: {
           eventGameNominationId_attendeeId: {
@@ -234,12 +266,30 @@ export class EventGameNominationService {
         },
       });
 
-      this.eventEmitter.emit(NominationEvent.VoteCast, {
-        eventId,
-        nominationId,
-        attendeeId,
-        voteType: dto.voteType,
-      } satisfies VoteCastEvent);
+      this.eventEmitter.emit(
+        VoteCastEvent.eventName,
+        new VoteCastEvent(
+          existingVote
+            ? {
+                id: existingVote.id,
+                voteType: existingVote.voteType,
+                priority: existingVote.priority,
+                comment: existingVote.comment,
+              }
+            : null,
+          existingVote
+            ? { id: vote.id, voteType: vote.voteType, priority: vote.priority, comment: vote.comment }
+            : {
+                id: vote.id,
+                eventGameNominationId: vote.eventGameNominationId,
+                attendeeId: vote.attendeeId,
+                voteType: vote.voteType,
+                priority: vote.priority,
+                comment: vote.comment,
+              },
+          initiatedAt,
+        ),
+      );
 
       return vote;
     } catch (error: unknown) {
@@ -255,6 +305,7 @@ export class EventGameNominationService {
     eventId: string,
     nominationId: string,
   ): Promise<{ nomination: EventGameNomination; resolution: ResolutionResult }> {
+    const initiatedAt = new Date();
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
       select: {
@@ -294,13 +345,15 @@ export class EventGameNominationService {
         elevatedGameId = eventGame.id;
       }
 
-      this.eventEmitter.emit(NominationEvent.NominationResolved, {
-        eventId,
-        nominationId,
-        platformGameId: nomination.platformGameId,
-        status: resolvedStatus,
-        elevatedToEventGameId: elevatedGameId,
-      } satisfies NominationResolvedEvent);
+      this.eventEmitter.emit(
+        NominationResolvedEvent.eventName,
+        new NominationResolvedEvent(
+          { id: nominationId, eventId, platformGameId: nomination.platformGameId, status: nomination.status },
+          { id: updated.id, eventId: updated.eventId, platformGameId: updated.platformGameId, status: updated.status },
+          elevatedGameId,
+          initiatedAt,
+        ),
+      );
 
       return { nomination: updated, resolution: { ...resolution, status: resolvedStatus } };
     } catch (error) {
@@ -325,6 +378,7 @@ export class EventGameNominationService {
     nominationId: string,
     decision: NominationStatus,
   ): Promise<EventGameNomination> {
+    const initiatedAt = new Date();
     if (decision !== NominationStatus.Approved && decision !== NominationStatus.Rejected) {
       throw new BadRequestException('Must be "Approved" or "Rejected".');
     }
@@ -364,13 +418,15 @@ export class EventGameNominationService {
         elevatedGameId = eventGame.id;
       }
 
-      this.eventEmitter.emit(NominationEvent.NominationResolved, {
-        eventId,
-        nominationId,
-        platformGameId: nomination.platformGameId,
-        status: decision,
-        elevatedToEventGameId: elevatedGameId,
-      } satisfies NominationResolvedEvent);
+      this.eventEmitter.emit(
+        NominationResolvedEvent.eventName,
+        new NominationResolvedEvent(
+          { id: nominationId, eventId, platformGameId: nomination.platformGameId, status: nomination.status },
+          { id: updated.id, eventId: updated.eventId, platformGameId: updated.platformGameId, status: updated.status },
+          elevatedGameId,
+          initiatedAt,
+        ),
+      );
 
       return updated;
     } catch (error) {
@@ -383,6 +439,7 @@ export class EventGameNominationService {
   }
 
   async directAddGame(eventId: string, dto: DirectAddGameDto): Promise<EventGame> {
+    const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
@@ -404,17 +461,16 @@ export class EventGameNominationService {
       },
     });
 
-    this.eventEmitter.emit(NominationEvent.GameAddedToEvent, {
-      eventId,
-      eventGameId: eventGame.id,
-      platformGameId: dto.platformGameId,
-      addedByAttendeeId: attendeeId,
-    } satisfies GameAddedToEventPayload);
+    this.eventEmitter.emit(
+      GameAddedToEventEvent.eventName,
+      new GameAddedToEventEvent(this.toEventGameSnapshot(eventGame), eventId, attendeeId, initiatedAt),
+    );
 
     return eventGame;
   }
 
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
+    const initiatedAt = new Date();
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
       where: { id: nominationId },
       select: { platformGameId: true, suppliedFromId: true, nominatedById: true },
@@ -431,14 +487,26 @@ export class EventGameNominationService {
       },
     });
 
-    this.eventEmitter.emit(NominationEvent.GameAddedToEvent, {
-      eventId,
-      eventGameId: eventGame.id,
-      platformGameId: nomination.platformGameId,
-      addedByAttendeeId: nomination.nominatedById,
-    } satisfies GameAddedToEventPayload);
+    this.eventEmitter.emit(
+      GameAddedToEventEvent.eventName,
+      new GameAddedToEventEvent(this.toEventGameSnapshot(eventGame), eventId, nomination.nominatedById, initiatedAt),
+    );
 
     return eventGame;
+  }
+
+  /** Scalar snapshot of a created EventGame row for {@link GameAddedToEventEvent}. */
+  private toEventGameSnapshot(eventGame: EventGame): GameAddedToEventEvent['after'] {
+    return {
+      id: eventGame.id,
+      eventId: eventGame.eventId,
+      occurrenceId: eventGame.occurrenceId,
+      platformGameId: eventGame.platformGameId,
+      suppliedById: eventGame.suppliedById,
+      nominationId: eventGame.nominationId,
+      addedById: eventGame.addedById,
+      role: eventGame.role,
+    };
   }
 
   private async getEffectivePolicy(

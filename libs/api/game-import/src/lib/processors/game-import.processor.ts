@@ -5,11 +5,11 @@ import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
-import { ImportEvents, JobNames, QueueNames } from '../constants/queue.constants';
+import { JobNames, QueueNames } from '../constants/queue.constants';
+import { ImportJobCompletedEvent } from '../events/import.events';
 import type {
   ExpansionImportJobPayload,
   GameImportJobPayload,
-  ImportJobCompletedEvent,
   ImportJobResult,
   PersistedJobFailure,
   PersistedJobResult,
@@ -58,7 +58,8 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     job: Job<GameImportJobPayload | ExpansionImportJobPayload>,
     isExpansion: boolean,
   ): Promise<ImportJobResult> {
-    const { jobId, batchId, correlationId, gatewayId, userId } = job.data;
+    const initiatedAt = new Date();
+    const { jobId, batchId, gatewayId } = job.data;
 
     // GameData is the return value of this job's fetch child, run by the
     // gateway-worker. BullMQ stores it under the child's queue:jobId key.
@@ -109,22 +110,27 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
       return result;
     }
 
-    this.emitCompleted({
-      jobId,
-      batchId,
-      gameId: result.gameId,
-      gameTitle: gameData.title,
-      externalId: gameData.externalId,
-      thumbnail: gameData.thumbnailUrl ?? null,
-      gameCreated: result.gameCreated,
-      sourceCreated: result.sourceCreated,
-      platformGames: result.platformGames,
-      isExpansion,
-      baseGameId: result.baseGameId,
-      userId,
-      gatewayId,
-      correlationId,
-    });
+    // Actor / source / correlationId ride CLS (restored per job by
+    // ActorAwareWorkerHost), so the event carries only row state + context.
+    this.emitCompleted(
+      new ImportJobCompletedEvent(
+        { id: jobId, status: JobStatus.Running },
+        { id: jobId, status: JobStatus.Completed, gameId: result.gameId },
+        {
+          batchId,
+          gatewayId,
+          externalId: gameData.externalId,
+          isExpansion,
+          gameTitle: gameData.title,
+          thumbnail: gameData.thumbnailUrl ?? null,
+          gameCreated: result.gameCreated,
+          sourceCreated: result.sourceCreated,
+          platformGames: result.platformGames,
+          baseGameId: result.baseGameId,
+        },
+        initiatedAt,
+      ),
+    );
 
     await this.batchCompletion.checkAndEmit(batchId);
 
@@ -171,7 +177,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameImportJobPayload | ExpansionImportJobPayload>, error: Error): Promise<void> {
-    const { jobId, batchId, correlationId, gatewayId, externalId, userId } = job.data;
+    const { jobId, batchId, gatewayId, externalId } = job.data;
 
     const attempts = job.opts.attempts ?? 1;
     if (attempts > 1 && job.attemptsMade < attempts) {
@@ -179,6 +185,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
         `Import job failed but will retry: jobId=${jobId} attemptsMade=${job.attemptsMade} attempts=${attempts} error=${error.message}`,
       );
     }
+
+    // Start of the terminal-failure unit of work (guarded write + emits).
+    const initiatedAt = new Date();
 
     // Reconstruct the originating actor's CLS scope so the failure DB write and
     // the JobFailed event are attributed to the user who triggered the import,
@@ -217,9 +226,15 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
       // spawned. In the common cases the base never persisted, so no expansion
       // rows exist and this is a no-op — but it guarantees the batch can't hang
       // Running forever on orphaned children (e.g. a crash after row creation
-      // but before their flows enqueued, with retries then exhausted). An
-      // expansion whose flow *did* enqueue and is mid-flight self-heals: its own
-      // unconditional markCompleted wins the race back to Completed.
+      // but before their flows enqueued, with retries then exhausted).
+      //
+      // Deliberately scoped to Pending only: an expansion already Running when
+      // this sweep fires is left alone and proceeds to its own guarded
+      // markRunning/markCompleted normally — it was never a cancellation
+      // target, not "healing" from one. Conversely, a Pending row this sweep
+      // does cancel is safe from resurrection: markRunning/markCompleted only
+      // transition rows still in [Pending, Running], so they silently no-op
+      // against an already-Cancelled row instead of overwriting it.
       if (job.name === JobNames.GameImport) {
         const cancellation: PersistedJobFailure = {
           errorCode: ImportErrorCode.BaseImportFailed,
@@ -233,16 +248,9 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
       emitJobFailedEvents(
         this.events,
-        {
-          jobId,
-          batchId,
-          externalId,
-          gatewayId,
-          isExpansion: job.name === JobNames.ExpansionImport,
-          userId,
-          correlationId,
-        },
+        { jobId, batchId, externalId, gatewayId, isExpansion: job.name === JobNames.ExpansionImport },
         sanitized,
+        initiatedAt,
       );
 
       await this.batchCompletion.checkAndEmit(batchId);
@@ -259,7 +267,7 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
    * logical completion, so duplicate deliveries dedup at the webhook queue.
    */
   private emitCompleted(event: ImportJobCompletedEvent): void {
-    this.events.emit(ImportEvents.JobCompleted, event);
+    this.events.emit(ImportJobCompletedEvent.eventName, event);
 
     if (!event.sourceCreated) {
       return;
@@ -268,12 +276,12 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     this.events.emit(
       WebhookEventType.GameImported,
       webhookEnvelope({
-        subjectId: event.gameId,
-        occurrenceId: event.jobId,
+        subjectId: event.after.gameId,
+        occurrenceId: event.subjectId,
         data: {
-          jobId: event.jobId,
+          jobId: event.subjectId,
           batchId: event.batchId,
-          gameId: event.gameId,
+          gameId: event.after.gameId,
           gameTitle: event.gameTitle,
           thumbnail: event.thumbnail,
           gameCreated: event.gameCreated,

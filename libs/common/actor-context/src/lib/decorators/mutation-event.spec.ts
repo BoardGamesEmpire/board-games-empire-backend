@@ -8,17 +8,31 @@ interface SamplePayload {
   secretKey: string;
 }
 
+abstract class SampleEvent extends MutationEvent<SamplePayload> {
+  readonly subject = 'Sample';
+  readonly subjectId: string;
+
+  constructor(
+    before: Readonly<Partial<SamplePayload>> | null,
+    after: Readonly<Partial<SamplePayload>> | null,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = (after ?? before)?.id ?? 'sample-unknown';
+  }
+}
+
 @Auditable()
-class CreatedEvent extends MutationEvent<SamplePayload> {}
+class CreatedEvent extends SampleEvent {}
 
 @Auditable(false)
-class OptedOutEvent extends MutationEvent<SamplePayload> {}
+class OptedOutEvent extends SampleEvent {}
 
-class UndecoratedEvent extends MutationEvent<SamplePayload> {}
+class UndecoratedEvent extends SampleEvent {}
 
 @Auditable()
 @AuditExclude(['passwordHash', 'secretKey'])
-class WithDenylistEvent extends MutationEvent<SamplePayload> {}
+class WithDenylistEvent extends SampleEvent {}
 
 describe('@Auditable', () => {
   const reflector = new Reflector();
@@ -37,6 +51,8 @@ describe('@Auditable', () => {
   });
 
   it('returns undefined for undecorated event classes', () => {
+    // Audit semantics are opt-out: the listener persists unless the value is
+    // exactly `false`, so an undecorated subclass is still audited.
     expect(reflector.get(Auditable, UndecoratedEvent)).toBeUndefined();
   });
 });
@@ -71,6 +87,46 @@ describe('MutationEvent', () => {
 
     expect(event.before).toEqual({ id: 'g1', title: 'Catan' });
     expect(event.after).toBeNull();
+  });
+
+  it('rejects construction with neither before nor after', () => {
+    expect(() => new CreatedEvent(null, null, new Date())).toThrow(TypeError);
+    expect(() => new CreatedEvent(null, null, new Date())).toThrow(/CreatedEvent requires at least one of before\/after/);
+  });
+
+  describe('subject identification', () => {
+    it('exposes subject and subjectId', () => {
+      const event = new CreatedEvent(null, { id: 'g1', title: 'Catan' }, new Date());
+
+      expect(event.subject).toBe('Sample');
+      expect(event.subjectId).toBe('g1');
+    });
+
+    it('resolves subjectId from before on delete shape', () => {
+      const event = new CreatedEvent({ id: 'g9' }, null, new Date());
+
+      expect(event.subjectId).toBe('g9');
+    });
+  });
+
+  describe('action derivation', () => {
+    it('derives create when before is null', () => {
+      const event = new CreatedEvent(null, { id: 'g1' }, new Date());
+
+      expect(event.action).toBe('create');
+    });
+
+    it('derives delete when after is null', () => {
+      const event = new CreatedEvent({ id: 'g1' }, null, new Date());
+
+      expect(event.action).toBe('delete');
+    });
+
+    it('derives update when both sides are present', () => {
+      const event = new CreatedEvent({ id: 'g1', title: 'Catan' }, { id: 'g1', title: 'Catan 2e' }, new Date());
+
+      expect(event.action).toBe('update');
+    });
   });
 
   describe('initiatedAt', () => {

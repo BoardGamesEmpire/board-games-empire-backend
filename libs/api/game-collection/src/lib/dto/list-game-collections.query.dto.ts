@@ -1,17 +1,18 @@
 import { GameMedium } from '@bge/database';
-import { PaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsDate, IsEnum, IsOptional, Max } from 'class-validator';
+import { IsBoolean, IsDate, IsEnum, IsOptional } from 'class-validator';
 
-/** Pagination with a hard page-size ceiling (collections join platform/game rows). */
-class CappedPaginationQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ description: 'Maximum entries per page', maximum: 100 })
-  @Max(100)
-  declare limit?: number;
-}
+/** Page-size ceiling because collections join platform/game rows. */
+const GAME_COLLECTION_MAX_PAGE_SIZE = 100;
 
-export class ListGameCollectionsQueryDto extends CappedPaginationQueryDto {
+// Build the capped base once and share it: each factory call mints a distinct
+// anonymous class, so calling it per-DTO would give the two queries unrelated
+// base types and duplicate their Swagger schema / reflection metadata.
+class GameCollectionPaginationQueryDto extends CappedPaginationQueryDto(GAME_COLLECTION_MAX_PAGE_SIZE) {}
+
+export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDto {
   @ApiPropertyOptional({
     description: 'Include removed (previously owned) entries alongside active ones',
     default: false,
@@ -53,7 +54,7 @@ export class ListGameCollectionsQueryDto extends CappedPaginationQueryDto {
 }
 
 /** Query for viewing another user's collection — no tombstone access. */
-export class ListUserGameCollectionsQueryDto extends CappedPaginationQueryDto {
+export class ListUserGameCollectionsQueryDto extends GameCollectionPaginationQueryDto {
   @ApiPropertyOptional({ enum: GameMedium, description: 'Filter by medium' })
   @IsOptional()
   @IsEnum(GameMedium)

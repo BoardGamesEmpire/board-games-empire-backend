@@ -1,4 +1,4 @@
-import { EventAvailabilityVote, Game, NotificationType, PlatformGame } from '@bge/database';
+import { EventAvailabilityVote, Game, NominationStatus, NotificationType, OccurrenceStatus, PlatformGame } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import {
   createTestingModuleWithDb,
@@ -9,11 +9,18 @@ import {
   makePlatformGame,
   MockDatabaseService,
 } from '@bge/testing';
-import type { AttendeeAddedEvent } from '../attendee/interfaces';
-import type { EventCreatedEvent } from '../interfaces/event.interface';
-import type { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/interfaces';
-import type { OccurrenceStatusChangedEvent } from '../occurrence/interfaces';
+import { AttendeeAddedEvent } from '../attendee/events/attendee.events';
+import { EventCreatedEvent } from '../events/event.events';
+import { NominationCreatedEvent, NominationResolvedEvent } from '../nomination/events/nomination.events';
+import { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
 import { EventNotificationListener } from './event-notification.listener';
+
+const makeCreatedEvent = (overrides: Partial<Parameters<typeof makeEvent>[0]> = {}, invitedUserIds: string[] = []) =>
+  new EventCreatedEvent(
+    makeEvent({ id: 'ev-1', title: 'Game Night', createdById: 'user-creator', householdId: 'hh-1', ...overrides }),
+    invitedUserIds,
+    new Date(),
+  );
 
 describe('EventNotificationListener', () => {
   let listener: EventNotificationListener;
@@ -37,20 +44,8 @@ describe('EventNotificationListener', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('onEventCreated', () => {
-    const event: EventCreatedEvent = {
-      eventId: 'ev-1',
-      createdById: 'user-creator',
-      householdId: 'hh-1',
-      title: 'Game Night',
-      invitedUserIds: [],
-    };
-
     it('sends invite notifications even for venue-based events (no householdId)', async () => {
-      await listener.onEventCreated({
-        ...event,
-        householdId: null,
-        invitedUserIds: ['user-friend-1'],
-      });
+      await listener.onEventCreated(makeCreatedEvent({ householdId: null }, ['user-friend-1']));
 
       expect(db.householdMember.findMany).not.toHaveBeenCalled();
       expect(notifications.createMany).toHaveBeenCalledWith([
@@ -67,7 +62,7 @@ describe('EventNotificationListener', () => {
         makeHouseholdMember({ userId: 'user-b', householdId: 'hh-1' }),
       ]);
 
-      await listener.onEventCreated(event);
+      await listener.onEventCreated(makeCreatedEvent());
 
       expect(notifications.createMany).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -84,7 +79,7 @@ describe('EventNotificationListener', () => {
     });
 
     it('skips when householdId is null (venue-based event)', async () => {
-      await listener.onEventCreated({ ...event, householdId: null });
+      await listener.onEventCreated(makeCreatedEvent({ householdId: null }));
 
       expect(db.householdMember.findMany).not.toHaveBeenCalled();
       expect(notifications.createMany).not.toHaveBeenCalled();
@@ -93,7 +88,7 @@ describe('EventNotificationListener', () => {
     it('skips when no other household members exist', async () => {
       db.householdMember.findMany.mockResolvedValue([]);
 
-      await listener.onEventCreated(event);
+      await listener.onEventCreated(makeCreatedEvent());
 
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
@@ -101,10 +96,7 @@ describe('EventNotificationListener', () => {
     it('sends EventInviteReceived to explicitly invited users', async () => {
       db.householdMember.findMany.mockResolvedValue([]);
 
-      await listener.onEventCreated({
-        ...event,
-        invitedUserIds: ['user-friend-1', 'user-friend-2'],
-      });
+      await listener.onEventCreated(makeCreatedEvent({}, ['user-friend-1', 'user-friend-2']));
 
       expect(notifications.createMany).toHaveBeenCalledWith(
         expect.arrayContaining([
@@ -129,10 +121,8 @@ describe('EventNotificationListener', () => {
         makeHouseholdMember({ userId: 'user-a', householdId: 'hh-1' }), // not invited — should get EventCreated
       ]);
 
-      await listener.onEventCreated({
-        ...event,
-        invitedUserIds: ['user-b'], // invited — should get EventInviteReceived only
-      });
+      // user-b is invited — should get EventInviteReceived only
+      await listener.onEventCreated(makeCreatedEvent({}, ['user-b']));
 
       const allNotifications = notifications.createMany.mock.calls[0][0] as Array<{
         userId: string;
@@ -148,17 +138,13 @@ describe('EventNotificationListener', () => {
     it('skips when no other household members exist and no invitees', async () => {
       db.householdMember.findMany.mockResolvedValue([]);
 
-      await listener.onEventCreated(event);
+      await listener.onEventCreated(makeCreatedEvent());
 
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
 
     it('skips entirely when no household and no invitees', async () => {
-      await listener.onEventCreated({
-        ...event,
-        householdId: null,
-        invitedUserIds: [],
-      });
+      await listener.onEventCreated(makeCreatedEvent({ householdId: null }));
 
       expect(notifications.createMany).not.toHaveBeenCalled();
     });
@@ -168,14 +154,10 @@ describe('EventNotificationListener', () => {
     it('notifies the invited user', async () => {
       db.event.findUnique.mockResolvedValue(makeEvent({ title: 'Strategy Night' }));
 
-      const event: AttendeeAddedEvent = {
-        eventId: 'ev-1',
-        attendeeId: 'att-1',
-        userId: 'user-invited',
-        guestName: null,
-        role: 'EventParticipant',
-        addedById: 'user-host',
-      };
+      const event = new AttendeeAddedEvent(
+        makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: 'user-invited' }),
+        new Date(),
+      );
 
       await listener.onAttendeeAdded(event);
 
@@ -192,14 +174,10 @@ describe('EventNotificationListener', () => {
     });
 
     it('skips guest attendees (no userId)', async () => {
-      const event: AttendeeAddedEvent = {
-        eventId: 'ev-1',
-        attendeeId: 'att-1',
-        userId: null,
-        guestName: 'Alice',
-        role: 'EventGuest',
-        addedById: 'user-host',
-      };
+      const event = new AttendeeAddedEvent(
+        makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: null, guestName: 'Alice' }),
+        new Date(),
+      );
 
       await listener.onAttendeeAdded(event);
 
@@ -221,12 +199,19 @@ describe('EventNotificationListener', () => {
         makeEventAttendee({ id: 'att-another', userId: 'user-c', eventId: 'ev-1' }),
       ]);
 
-      const event: NominationCreatedEvent = {
-        eventId: 'ev-1',
-        nominationId: 'nom-1',
-        platformGameId: 'plat-game-1',
-        nominatedByAttendeeId: 'att-nominator',
-      };
+      const event = new NominationCreatedEvent(
+        {
+          id: 'nom-1',
+          eventId: 'ev-1',
+          occurrenceId: null,
+          platformGameId: 'plat-game-1',
+          nominatedById: 'att-nominator',
+          suppliedFromId: 'gl-1',
+          status: NominationStatus.Open,
+          votingDeadline: null,
+        },
+        new Date(),
+      );
 
       await listener.onNominationCreated(event);
 
@@ -250,13 +235,13 @@ describe('EventNotificationListener', () => {
   });
 
   describe('onNominationResolved', () => {
-    const baseEvent: NominationResolvedEvent = {
-      eventId: 'ev-1',
-      nominationId: 'nom-1',
-      platformGameId: 'plat-game-1',
-      status: 'Approved',
-      elevatedToEventGameId: 'eg-1',
-    };
+    const makeResolvedEvent = (status: NominationStatus, elevatedToEventGameId: string | null = 'eg-1') =>
+      new NominationResolvedEvent(
+        { id: 'nom-1', eventId: 'ev-1', platformGameId: 'plat-game-1', status: NominationStatus.Open },
+        { id: 'nom-1', eventId: 'ev-1', platformGameId: 'plat-game-1', status },
+        elevatedToEventGameId,
+        new Date(),
+      );
 
     beforeEach(() => {
       db.eventGameNomination.findUnique.mockResolvedValue({
@@ -270,7 +255,7 @@ describe('EventNotificationListener', () => {
     });
 
     it('notifies the nominator on Approved', async () => {
-      await listener.onNominationResolved({ ...baseEvent });
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Approved));
 
       expect(notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -281,11 +266,7 @@ describe('EventNotificationListener', () => {
     });
 
     it('notifies the nominator on Rejected', async () => {
-      await listener.onNominationResolved({
-        ...baseEvent,
-        status: 'Rejected',
-        elevatedToEventGameId: null,
-      });
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Rejected, null));
 
       expect(notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -295,7 +276,7 @@ describe('EventNotificationListener', () => {
     });
 
     it('notifies the nominator on Passed', async () => {
-      await listener.onNominationResolved({ ...baseEvent, status: 'Passed' });
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Passed));
 
       expect(notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -305,11 +286,7 @@ describe('EventNotificationListener', () => {
     });
 
     it('notifies the nominator on Failed', async () => {
-      await listener.onNominationResolved({
-        ...baseEvent,
-        status: 'Failed',
-        elevatedToEventGameId: null,
-      });
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Failed, null));
 
       expect(notifications.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -319,23 +296,18 @@ describe('EventNotificationListener', () => {
     });
 
     it('does not notify on Withdrawn status', async () => {
-      await listener.onNominationResolved({
-        ...baseEvent,
-        status: 'Withdrawn',
-        elevatedToEventGameId: null,
-      });
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Withdrawn, null));
 
       expect(notifications.create).not.toHaveBeenCalled();
     });
   });
 
   describe('onOccurrenceConfirmed', () => {
-    const event: OccurrenceStatusChangedEvent = {
-      eventId: 'ev-1',
-      occurrenceId: 'occ-1',
-      previousStatus: 'Proposed',
-      newStatus: 'Confirmed',
-    };
+    const event = new OccurrenceStatusChangedEvent(
+      { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Proposed },
+      { id: 'occ-1', eventId: 'ev-1', status: OccurrenceStatus.Confirmed },
+      new Date(),
+    );
 
     it('notifies voters who are not the host', async () => {
       db.event.findUnique.mockResolvedValue(
@@ -386,15 +358,7 @@ describe('EventNotificationListener', () => {
       notifications.createMany.mockRejectedValue(new Error('DB down'));
 
       // Should not throw — listener swallows errors and logs them
-      await expect(
-        listener.onEventCreated({
-          eventId: 'ev-1',
-          createdById: 'user-1',
-          householdId: 'hh-1',
-          title: 'Game Night',
-          invitedUserIds: [],
-        }),
-      ).resolves.toBeUndefined();
+      await expect(listener.onEventCreated(makeCreatedEvent({ createdById: 'user-1' }))).resolves.toBeUndefined();
     });
   });
 });
