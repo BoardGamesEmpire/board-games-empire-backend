@@ -1,4 +1,5 @@
 import { AuditContextModule } from '@bge/actor-context';
+import { AuditLogModule, AuditRetentionModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
@@ -124,6 +125,12 @@ import { baseLogger } from './lib/logger';
     // Periodic hard-delete of rejected DirectUpload contributions past their
     // reclaim window (issue #58 sweep). Worker-only so it runs once.
     MediaSweepModule,
+
+    // Audit capture (onAny listener) for MutationEvents emitted during job
+    // processing, plus the retention sweep — worker-only (like MediaSweepModule)
+    // so the @Interval runs in exactly one process.
+    AuditLogModule,
+    AuditRetentionModule,
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,

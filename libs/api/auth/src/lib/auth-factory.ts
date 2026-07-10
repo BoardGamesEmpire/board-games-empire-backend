@@ -1,6 +1,7 @@
 import { apiKey } from '@better-auth/api-key';
 import { passkey } from '@better-auth/passkey';
 import { prismaAdapter } from '@better-auth/prisma-adapter';
+import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
@@ -21,13 +22,87 @@ import {
 } from 'better-auth/plugins';
 import type { User } from 'better-auth/types';
 import process from 'node:process';
-import { AUTH_BASE_PATH, AuthEvent } from './constants';
+import { AUTH_BASE_PATH } from './constants';
+import { UserCreatedEvent } from './events/auth.events';
+
+interface UserCreatedHookDeps {
+  eventEmitter?: EventEmitter2;
+  auditContext?: AuditContextService;
+  systemActorScope?: SystemActorScope;
+}
+
+/**
+ * Builds the better-auth `user.create.after` database hook (#57 emit-site
+ * migration). Emits a `UserCreatedEvent` carrying a minimal row snapshot;
+ * attribution is never on the payload — the audit listener reads the CLS
+ * actor at handle time.
+ *
+ * Attribution at this emit site is flow-dependent:
+ *  - Self-signup (email+password, anonymous sign-in, OAuth first login)
+ *    requests carry no session, so `HttpActorMiddleware` populates a NULL
+ *    CLS actor. Emitting bare would persist an unattributed audit row AND
+ *    raise the admin notification, so those emissions run inside a `system`
+ *    actor scope (`auth:user-provisioning`).
+ *  - Admin-created users (better-auth admin plugin) run with the admin's
+ *    session actor in CLS — that attribution is kept as-is.
+ *
+ * Exported for unit tests; `authFactory` wires it into `databaseHooks`.
+ */
+export function createUserCreatedHook(deps: UserCreatedHookDeps): (user: User) => Promise<void> {
+  const { eventEmitter, auditContext, systemActorScope } = deps;
+
+  return async (user: User): Promise<void> => {
+    if (!eventEmitter) {
+      throw new Error('EventEmitter2 not provided to authFactory');
+    }
+
+    // The write is better-auth's, not ours — the row's own createdAt stamp is
+    // the closest capture of when this unit of work began.
+    const initiatedAt = user.createdAt ?? new Date();
+
+    // better-auth surfaces the DB `username` column as `name` (see the
+    // `user.fields` mapping below); `isAnonymous` comes from the anonymous
+    // plugin. Tolerate both shapes.
+    const record = user as User & { username?: string; isAnonymous?: boolean | null };
+
+    const event = new UserCreatedEvent(
+      {
+        id: user.id,
+        username: record.username ?? user.name,
+        email: user.email,
+        isAnonymous: record.isAnonymous ?? false,
+      },
+      initiatedAt,
+    );
+
+    const emit = (): void => {
+      eventEmitter.emit(UserCreatedEvent.eventName, event);
+    };
+
+    if (auditContext?.getActor()) {
+      // A signed-in creator (e.g. admin plugin) — keep their attribution.
+      emit();
+      return;
+    }
+
+    if (systemActorScope) {
+      systemActorScope.run('auth:user-provisioning', emit);
+      return;
+    }
+
+    // No scope available (factory built without full DI) — emit bare; the
+    // audit listener flags it as unattributed and notifies admins.
+    emit();
+  };
+}
 
 export function authFactory(
   prisma: PrismaClient,
   configService?: ConfigService,
   cache?: Cache,
   eventEmitter?: EventEmitter2,
+  auditContext?: AuditContextService,
+  systemActorScope?: SystemActorScope,
 ) {
   const logger = new Logger('AuthFactory');
   logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
@@ -127,14 +202,7 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
-          async after(user: User) {
-            if (!eventEmitter) {
-              throw new Error('EventEmitter2 not provided to authFactory');
-            }
-
-            // TODO: emit { userId } instead of full user object and let listeners fetch what they need
-            eventEmitter.emit(AuthEvent.UserCreated, user);
-          },
+          after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
         },
         // TODO: clean up API keys on user delete. The upstream better-auth
         // apikey schema dropped the Apikey -> User FK (and its onDelete:

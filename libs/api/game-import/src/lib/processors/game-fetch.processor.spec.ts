@@ -1,4 +1,4 @@
-import { DatabaseService, InitiatorType, JobStatus } from '@bge/database';
+import { DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
@@ -7,7 +7,8 @@ import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { of } from 'rxjs';
-import { ImportEvents, JobNames } from '../constants/queue.constants';
+import { JobNames } from '../constants/queue.constants';
+import { ImportJobFailedEvent, ImportJobStartedEvent } from '../events/import.events';
 import type { GameFetchJobPayload } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { GameFetchProcessor } from './game-fetch.processor';
@@ -98,14 +99,23 @@ describe('GameFetchProcessor', () => {
       expect(result).toBe(game);
     });
 
-    it('emits JobStarted exactly on the Pending → Running transition', async () => {
+    it('emits an ImportJobStartedEvent exactly on the Pending → Running transition', async () => {
       fetchGame.mockReturnValue(of({ game: { title: 'Catan' } as proto.GameData }));
 
       await processor.process(makeJob());
-      expect(events.emit).toHaveBeenCalledWith(
-        ImportEvents.JobStarted,
-        expect.objectContaining({ jobId: 'job-1', batchId: 'batch-1', isExpansion: false, userId: 'user-7' }),
-      );
+
+      const startedCall = events.emit.mock.calls.find(([name]) => name === ImportJobStartedEvent.eventName);
+      expect(startedCall).toBeDefined();
+      const started = startedCall![1] as ImportJobStartedEvent;
+      expect(started).toBeInstanceOf(ImportJobStartedEvent);
+      expect(started.action).toBe('update');
+      expect(started.subject).toBe(ResourceType.Job);
+      expect(started.subjectId).toBe('job-1');
+      expect(started.before).toEqual({ id: 'job-1', status: JobStatus.Pending });
+      expect(started.after).toEqual({ id: 'job-1', status: JobStatus.Running });
+      expect(started).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false });
+      // The acting user rides CLS, never the payload.
+      expect(started).not.toHaveProperty('userId');
 
       // Retry attempt: the row is already Running, so no started events fire.
       events.emit.mockClear();
@@ -162,15 +172,23 @@ describe('GameFetchProcessor', () => {
           result: { errorCode: 'GATEWAY_ERROR', error: 'Fetching game data from the gateway failed.' },
         },
       });
-      expect(events.emit).toHaveBeenCalledWith(
-        ImportEvents.JobFailed,
-        expect.objectContaining({
-          jobId: 'job-1',
-          errorCode: 'GATEWAY_ERROR',
-          error: 'Fetching game data from the gateway failed.',
-          isExpansion: false,
-        }),
-      );
+
+      const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
+      expect(failedCall).toBeDefined();
+      const failed = failedCall![1] as ImportJobFailedEvent;
+      expect(failed).toBeInstanceOf(ImportJobFailedEvent);
+      expect(failed.action).toBe('update');
+      expect(failed.subject).toBe(ResourceType.Job);
+      expect(failed.subjectId).toBe('job-1');
+      expect(failed.before).toEqual({ id: 'job-1' }); // prior status unknown at the shared emit point — identity only
+      // after carries the sanitized classification persisted to Job.result.
+      expect(failed.after).toEqual({
+        id: 'job-1',
+        status: JobStatus.Failed,
+        result: { errorCode: 'GATEWAY_ERROR', error: 'Fetching game data from the gateway failed.' },
+      });
+      expect(failed).toMatchObject({ batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false });
+      expect(failed).not.toHaveProperty('userId');
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 
@@ -204,10 +222,12 @@ describe('GameFetchProcessor', () => {
 
       await processor.onFailed(expansionJob, new Error('gateway down'));
 
-      expect(events.emit).toHaveBeenCalledWith(
-        ImportEvents.JobFailed,
-        expect.objectContaining({ jobId: 'exp-job', isExpansion: true }),
-      );
+      const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
+      expect(failedCall).toBeDefined();
+      const failed = failedCall![1] as ImportJobFailedEvent;
+      expect(failed).toBeInstanceOf(ImportJobFailedEvent);
+      expect(failed.subjectId).toBe('exp-job');
+      expect(failed.isExpansion).toBe(true);
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 

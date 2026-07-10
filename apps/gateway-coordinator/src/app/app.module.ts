@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { GrpcInternalActorInterceptor } from '@bge/actor-context-transport';
+import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
@@ -110,6 +111,10 @@ import { baseLogger } from './lib/logger';
     DatabaseModule,
     DbPoolMetricsRecorderModule,
     CoordinatorModule,
+
+    // Audit capture (onAny listener) for MutationEvents emitted in this
+    // process (e.g. gateway-registry mutations reached over gRPC).
+    AuditLogModule,
   ],
   providers: [
     // Reads `x-bge-actor` metadata from inbound gRPC calls and populates

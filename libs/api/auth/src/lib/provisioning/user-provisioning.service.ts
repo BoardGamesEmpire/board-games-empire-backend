@@ -1,4 +1,4 @@
-import { DatabaseService, SystemRole, Theme, User } from '@bge/database';
+import { DatabaseService, SystemRole, Theme } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { Injectable, Logger } from '@nestjs/common';
 
@@ -11,10 +11,14 @@ export class UserProvisioningService {
     private readonly serviceAccount: ServiceAccountService,
   ) {}
 
-  async provisionNewUser(user: User & { name?: string }): Promise<void> {
+  async provisionNewUser(userId: string): Promise<void> {
+    // Event payloads carry minimal snapshots (#57); load the full row for the
+    // fields provisioning needs (firstName/lastName drive the display name).
+    const user = await this.db.user.findUniqueOrThrow({ where: { id: userId } });
+
     const displayName = user.firstName
       ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim()
-      : ((user.name || user.username) ?? user.email?.split('@')[0]);
+      : user.username;
 
     // First *human* becomes Owner. Service accounts are real User rows, so they
     // must be excluded or they'd shift the first human off Owner.

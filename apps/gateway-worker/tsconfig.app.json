@@ -49,6 +49,9 @@
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/audit-log/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
     },
     {

@@ -27,6 +27,9 @@
       "path": "../../common/redis/tsconfig.lib.json"
     },
     {
+      "path": "../../common/actor-context/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     }
   ],

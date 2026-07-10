@@ -8,11 +8,11 @@ import { Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { firstValueFrom } from 'rxjs';
-import { ImportEvents, JobNames, QueueNames } from '../constants/queue.constants';
+import { JobNames, QueueNames } from '../constants/queue.constants';
+import { ImportJobStartedEvent } from '../events/import.events';
 import type {
   ExpansionFetchJobPayload,
   GameFetchJobPayload,
-  ImportJobStartedEvent,
   PersistedJobFailure,
 } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
@@ -52,7 +52,8 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
   }
 
   protected async processJob(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>): Promise<proto.GameData> {
-    const { jobId, batchId, gatewayId, externalId, locale, correlationId, userId } = job.data;
+    const initiatedAt = new Date();
+    const { jobId, batchId, gatewayId, externalId, locale, correlationId } = job.data;
 
     this.logger.log(`${job.name} jobId=${jobId} gatewayId=${gatewayId} externalId=${externalId} — fetching`);
 
@@ -67,15 +68,17 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
     if (transitioned.count === 1) {
       const isExpansion = job.name === JobNames.ExpansionFetch;
 
-      this.events.emit(ImportEvents.JobStarted, {
-        jobId,
-        batchId,
-        correlationId,
-        gatewayId,
-        externalId,
-        isExpansion,
-        userId,
-      } satisfies ImportJobStartedEvent);
+      // Actor / source / correlationId ride CLS (restored per job by
+      // ActorAwareWorkerHost), so the event carries only row state + context.
+      this.events.emit(
+        ImportJobStartedEvent.eventName,
+        new ImportJobStartedEvent(
+          { id: jobId, status: JobStatus.Pending },
+          { id: jobId, status: JobStatus.Running },
+          { batchId, gatewayId, externalId, isExpansion },
+          initiatedAt,
+        ),
+      );
 
       this.events.emit(
         WebhookEventType.ImportJobStarted,
@@ -115,7 +118,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job<GameFetchJobPayload | ExpansionFetchJobPayload>, error: Error): Promise<void> {
-    const { jobId, batchId, correlationId, gatewayId, externalId, userId } = job.data;
+    const { jobId, batchId, gatewayId, externalId } = job.data;
 
     // Only mark the DB job as failed after all retry attempts are exhausted.
     // BullMQ fires this event on every failed attempt; check attemptsMade vs
@@ -126,6 +129,9 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       );
       return;
     }
+
+    // Start of the terminal-failure unit of work (guarded write + emits).
+    const initiatedAt = new Date();
 
     // Attribute the failure DB write to the originating actor, mirroring the
     // CLS scope opened around the successful fetch path in processJob.
@@ -173,11 +179,7 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
         return;
       }
 
-      emitJobFailedEvents(
-        this.events,
-        { jobId, batchId, correlationId, gatewayId, externalId, isExpansion, userId },
-        sanitized,
-      );
+      emitJobFailedEvents(this.events, { jobId, batchId, gatewayId, externalId, isExpansion }, sanitized, initiatedAt);
 
       await this.batchCompletion.checkAndEmit(batchId);
     });

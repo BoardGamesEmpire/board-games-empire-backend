@@ -28,7 +28,9 @@ export interface SpawnExpansionsInput {
  * never consumes fetch jobs, so the worker still never calls a gateway).
  *
  * Idempotent by construction, so a base-import retry re-runs it harmlessly:
- *   1. rows are created with `skipDuplicates` on the (batchId, externalId) key;
+ *   1. rows are upserted on a per-expansion `idempotencyKey`
+ *      (`batchId:exp:externalId`) — a prior attempt's row is returned
+ *      untouched (`update: {}`) rather than duplicated;
  *   2. only rows still Pending are (re-)enqueued — completed expansions from a
  *      prior attempt are skipped;
  *   3. each flow's jobId is pinned to its Job row id, so a re-add of a

@@ -15,5 +15,9 @@ model SystemSetting {
   requireContributionApproval Boolean @default(false) @map("require_contribution_approval")
   contributionReclaimDays     Int     @default(14) @map("contribution_reclaim_days")
 
+  /// Audit rows older than this are soft-deleted by the retention sweep.
+  /// Null (the default) means unlimited retention — the sweep is a no-op.
+  auditLogRetentionDays Int? @map("audit_log_retention_days")
+
   @@map("system_settings")
 }

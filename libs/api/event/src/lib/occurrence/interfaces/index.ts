@@ -1,25 +1,5 @@
 import type { AvailabilityResponse, OccurrenceStatus } from '@bge/database';
 
-export interface OccurrenceAddedEvent {
-  eventId: string;
-  occurrenceId: string;
-  status: OccurrenceStatus;
-}
-
-export interface OccurrenceStatusChangedEvent {
-  eventId: string;
-  occurrenceId: string;
-  previousStatus: OccurrenceStatus;
-  newStatus: OccurrenceStatus;
-}
-
-export interface AvailabilityVoteSubmittedEvent {
-  eventId: string;
-  occurrenceId: string;
-  attendeeId: string;
-  response: AvailabilityResponse;
-}
-
 /** Event-level attendee context shared across all occurrences. */
 export interface AttendeeContext {
   /** Total EventAttendee records (registered + guests) */

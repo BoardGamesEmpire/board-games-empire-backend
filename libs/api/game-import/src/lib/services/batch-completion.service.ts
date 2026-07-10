@@ -70,6 +70,9 @@ export class ImportBatchCompletionService {
 
       this.logger.log(`Import batch complete: batchId=${batchId} status=${status} total=${counts.total}`);
 
+      // Aggregate signal over many rows (each Job transition is audited
+      // individually) — deliberately a plain payload, not a MutationEvent,
+      // so the audit listener intentionally ignores it.
       this.events.emit(ImportEvents.BatchComplete, {
         batchId,
         baseJobId: baseJob.id,

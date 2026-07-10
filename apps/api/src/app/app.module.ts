@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { ActorContextTransportModule, HttpActorMiddleware, WsActorInterceptor } from '@bge/actor-context-transport';
+import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
@@ -158,6 +159,10 @@ import { baseLogger } from './lib/logger';
     AuditContextModule,
 
     // Feature modules
+    // Audit capture (onAny listener) + the admin read endpoint. The listener
+    // registers in every event-emitting process; this app additionally mounts
+    // the HTTP surface.
+    AuditLogApiModule,
     AuthModule,
     EventModule,
     FeedbackModule,

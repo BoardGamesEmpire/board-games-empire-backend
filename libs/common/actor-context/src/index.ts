@@ -22,7 +22,7 @@ export type {
   UserActor,
 } from './lib/types';
 
-export { AuditExclude, Auditable, MutationEvent } from './lib/decorators/mutation-event';
+export { AuditExclude, Auditable, MutationEvent, type MutationAction } from './lib/decorators/mutation-event';
 
 // Public CLS reader (DI-injected).
 export { AuditContextService } from './lib/services/audit-context.service';

@@ -2,7 +2,7 @@
 
 ## Phase 0 — preparatory (weeks, in parallel with current work)
 
-1. #57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows. Partially completed in #80
+1. ~~#57 Phase 1 (audit log groundwork: Actor discriminated union, CLS migration, event meta). Touches everything; cheapest when done early; unblocks correct actor modeling for everything that follows.~~ Primitives + populators landed in #80; emit-site migration (event, game-import, auth, gateway-registry now emit `MutationEvent` subclasses with actor read from CLS) completed alongside Phase 2.
 2. ~~#72 OpenTelemetry in core. Same logic — retrofit pain is real, observability you don't have when you need it is worse.~~ Completed in #82 with Prisma metrics deferred [#81](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/81). Prisma metrics completed in #93
 
 These two can land alongside whatever else is in flight; they're cross-cutting prep, not standalone features.
@@ -14,7 +14,7 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 5. ~~#69 Quota primitive. Lands before storage so quota checks are in MediaObject create from day one (retrofit pain).~~ Completed in #91.
 6. ~~#58 MediaObject + StorageDriver + LocalDiskDriver. Foundation; usable without plugin loader.~~ Completed across #95, #96, #97, #99, #104
 7. ~~#68 AbilityService. Lands with user/apiKey/system dispatch; plugin dispatch added later. Existing services start migrating opportunistically.~~ Completed in #92.
-8. #57 Phase 2 (audit log table + listener). Now that Phase 1 prep is everywhere, the listener has substrate to work against.
+8. ~~#57 Phase 2 (audit log table + listener). Now that Phase 1 prep is everywhere, the listener has substrate to work against.~~ Completed: `@bge/audit-log` (`onAny` persistence listener in all four emitting apps, `AuditLog` table with denormalized actor columns, `read:audit_log` admin endpoint, `SystemSetting.auditLogRetentionDays` soft-delete sweep in the worker, deduped admin notification for unattributed emissions).
 
 ## Phase 2 — feedback module completes
 

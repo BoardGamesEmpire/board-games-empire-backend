@@ -131,57 +131,6 @@ export interface PersistedJobFailure {
   error: string;
 }
 
-export interface ImportJobCompletedEvent {
-  /**
-   * Expansion imports will include the baseGameId
-   */
-  baseGameId?: string;
-
-  batchId: string;
-  correlationId: string;
-  externalId: string;
-  gameCreated: boolean;
-  gameId: string;
-  gameTitle: string;
-  gatewayId: string;
-  isExpansion: boolean;
-  jobId: string;
-  platformGames: PlatformGameRef[];
-  sourceCreated: boolean;
-  thumbnail: string | null;
-  userId: string | null;
-}
-
-export interface ImportJobStartedEvent {
-  batchId: string;
-  correlationId: string;
-  externalId: string;
-  gatewayId: string;
-  isExpansion: boolean;
-  jobId: string;
-  userId: string | null;
-}
-
-/**
- * In-process failure event consumed only by the NotificationListener (owner-
- * facing). Carries the SAME sanitized classification persisted to Job.result
- * and emitted on the webhook — never the raw error. The raw text (which can
- * carry gRPC transport detail, internal hostnames, Prisma error text) lives
- * only in the Job.error DB column and operator logs.
- */
-export interface ImportJobFailedEvent {
-  batchId: string;
-  correlationId: string;
-  errorCode: ImportErrorCode;
-  /** Sanitized, static message — safe to surface to the initiating user */
-  error: string;
-  externalId: string;
-  gatewayId: string;
-  isExpansion: boolean;
-  jobId: string;
-  userId: string | null;
-}
-
 /**
  * Emitted once per batch when every Job row in the batch has reached a
  * terminal status. Emission is best-effort-exactly-once: two jobs

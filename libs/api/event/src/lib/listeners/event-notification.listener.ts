@@ -4,17 +4,17 @@ import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AttendeeEvents } from '../attendee/constants';
-import type { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/interfaces';
+import type { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
 import { EventEvents } from '../constants/event-events.constant';
-import type { EventCreatedEvent } from '../interfaces/event.interface';
+import type { EventCreatedEvent } from '../events/event.events';
 import { NominationEvent } from '../nomination/constants';
 import type {
-  GameAddedToEventPayload,
+  GameAddedToEventEvent,
   NominationCreatedEvent,
   NominationResolvedEvent,
-} from '../nomination/interfaces';
+} from '../nomination/events/nomination.events';
 import { OccurrenceEvents } from '../occurrence/constants/index';
-import type { OccurrenceStatusChangedEvent } from '../occurrence/interfaces';
+import type { OccurrenceStatusChangedEvent } from '../occurrence/events/occurrence.events';
 
 @Injectable()
 export class EventNotificationListener {
@@ -24,14 +24,16 @@ export class EventNotificationListener {
 
   @OnEvent(EventEvents.EventCreated, { async: true })
   async onEventCreated(event: EventCreatedEvent): Promise<void> {
+    const { id: eventId, title, householdId, createdById } = event.after;
+
     try {
       const notificationInputs: CreateNotificationInput[] = [];
 
-      if (event.householdId) {
+      if (householdId) {
         const members = await this.db.householdMember.findMany({
           where: {
-            householdId: event.householdId,
-            userId: { notIn: [event.createdById, ...event.invitedUserIds] },
+            householdId,
+            userId: { notIn: [createdById, ...event.invitedUserIds] },
           },
           select: { userId: true },
         });
@@ -41,8 +43,8 @@ export class EventNotificationListener {
             userId: member.userId,
             type: NotificationType.EventCreated,
             payload: {
-              eventId: event.eventId,
-              eventTitle: event.title,
+              eventId,
+              eventTitle: title,
             },
           });
         }
@@ -53,8 +55,8 @@ export class EventNotificationListener {
           userId: inviteeId,
           type: NotificationType.EventInviteReceived,
           payload: {
-            eventId: event.eventId,
-            eventTitle: event.title,
+            eventId,
+            eventTitle: title,
           },
         });
       }
@@ -64,12 +66,12 @@ export class EventNotificationListener {
       }
 
       this.logger.debug(
-        `EventCreated notifications: ${notificationInputs.length} sent for event ${event.eventId} ` +
+        `EventCreated notifications: ${notificationInputs.length} sent for event ${eventId} ` +
           `(${event.invitedUserIds.length} invites)`,
       );
     } catch (err) {
       this.logger.error(
-        `Failed to notify on EventCreated eventId=${event.eventId}`,
+        `Failed to notify on EventCreated eventId=${event.subjectId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -77,34 +79,36 @@ export class EventNotificationListener {
 
   @OnEvent(AttendeeEvents.AttendeeAdded, { async: true })
   async onAttendeeAdded(event: AttendeeAddedEvent): Promise<void> {
-    if (!event.userId) {
+    const { id: attendeeId, eventId, userId } = event.after;
+
+    if (!userId) {
       // Guest attendees — no user to notify
       return this.logger.debug(
-        `Attendee added without userId, skipping notification: eventId=${event.eventId}, attendeeId=${event.attendeeId}`,
+        `Attendee added without userId, skipping notification: eventId=${eventId}, attendeeId=${attendeeId}`,
       );
     }
 
     try {
       const eventRecord = await this.db.event.findUnique({
-        where: { id: event.eventId },
+        where: { id: eventId },
         select: { title: true },
       });
 
       if (!eventRecord) {
-        return this.logger.warn(`Event not found for AttendeeAdded notification, eventId=${event.eventId}`);
+        return this.logger.warn(`Event not found for AttendeeAdded notification, eventId=${eventId}`);
       }
 
       await this.notifications.create({
-        userId: event.userId,
+        userId,
         type: NotificationType.EventInviteReceived,
         payload: {
-          eventId: event.eventId,
+          eventId,
           eventTitle: eventRecord.title,
         },
       });
     } catch (err) {
       this.logger.error(
-        `Failed to notify on AttendeeAdded eventId=${event.eventId}`,
+        `Failed to notify on AttendeeAdded eventId=${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -112,23 +116,25 @@ export class EventNotificationListener {
 
   @OnEvent(AttendeeEvents.AttendeeStatusUpdated, { async: true })
   async onAttendeeRsvp(event: AttendeeStatusUpdatedEvent): Promise<void> {
+    const { eventId, userId } = event.after;
+
     try {
       // Notify the event host that someone RSVP'd
       const eventRecord = await this.db.event.findUnique({
-        where: { id: event.eventId },
+        where: { id: eventId },
         select: { createdById: true, title: true },
       });
 
-      if (!eventRecord || eventRecord.createdById === event.userId) {
+      if (!eventRecord || eventRecord.createdById === userId) {
         return this.logger.debug(
-          `No notification needed for AttendeeStatusUpdated eventId=${event.eventId}, userId=${event.userId}`,
+          `No notification needed for AttendeeStatusUpdated eventId=${eventId}, userId=${userId}`,
         );
       }
 
-      const attendeeName = event.userId
+      const attendeeName = userId
         ? await this.db.user
             .findUnique({
-              where: { id: event.userId },
+              where: { id: userId },
               select: {
                 username: true,
                 profile: { select: { displayName: true } },
@@ -141,14 +147,14 @@ export class EventNotificationListener {
         userId: eventRecord.createdById,
         type: NotificationType.EventRsvpReceived,
         payload: {
-          eventId: event.eventId,
+          eventId,
           eventTitle: eventRecord.title,
           attendeeName,
         },
       });
     } catch (err) {
       this.logger.error(
-        `Failed to notify on AttendeeStatusUpdated eventId=${event.eventId}`,
+        `Failed to notify on AttendeeStatusUpdated eventId=${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -156,39 +162,41 @@ export class EventNotificationListener {
 
   @OnEvent(NominationEvent.NominationCreated, { async: true })
   async onNominationCreated(event: NominationCreatedEvent): Promise<void> {
+    const { id: nominationId, eventId, platformGameId, nominatedById } = event.after;
+
     try {
       const [eventRecord, platformGame] = await Promise.all([
         this.db.event.findUnique({
-          where: { id: event.eventId },
+          where: { id: eventId },
           select: { title: true },
         }),
         this.db.platformGame.findUnique({
-          where: { id: event.platformGameId },
+          where: { id: platformGameId },
           select: { id: true, game: { select: { title: true } } },
         }),
       ]);
 
       if (!eventRecord || !platformGame) {
         return this.logger.warn(
-          `Event or game not found for NominationCreated notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
+          `Event or game not found for NominationCreated notification, eventId=${eventId}, platformGameId=${platformGameId}`,
         );
       }
 
       // Notify all attendees except the nominator
       const attendees = await this.db.eventAttendee.findMany({
-        where: { eventId: event.eventId, userId: { not: null } },
+        where: { eventId, userId: { not: null } },
         select: { userId: true, id: true },
       });
 
       const inputs: CreateNotificationInput[] = attendees
-        .filter((a) => a.id !== event.nominatedByAttendeeId && a.userId)
+        .filter((a) => a.id !== nominatedById && a.userId)
         .map((a) => ({
           userId: a.userId!,
           type: NotificationType.GameNominated,
           payload: {
-            eventId: event.eventId,
+            eventId,
             eventTitle: eventRecord.title,
-            nominationId: event.nominationId,
+            nominationId,
             nominatedGameTitle: platformGame.game.title,
           },
         }));
@@ -198,7 +206,7 @@ export class EventNotificationListener {
       }
     } catch (err) {
       this.logger.error(
-        `Failed to notify on NominationCreated nominationId=${event.nominationId}`,
+        `Failed to notify on NominationCreated nominationId=${nominationId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -206,9 +214,11 @@ export class EventNotificationListener {
 
   @OnEvent(NominationEvent.NominationResolved, { async: true })
   async onNominationResolved(event: NominationResolvedEvent): Promise<void> {
+    const { id: nominationId, eventId, status } = event.after;
+
     try {
       const nomination = await this.db.eventGameNomination.findUnique({
-        where: { id: event.nominationId },
+        where: { id: nominationId },
         select: {
           nominatedById: true,
           nominatedBy: { select: { userId: true } },
@@ -224,13 +234,13 @@ export class EventNotificationListener {
 
       if (!nomination?.nominatedBy?.userId) {
         return this.logger.warn(
-          `Nominator user not found for NominationResolved notification, nominationId=${event.nominationId}`,
+          `Nominator user not found for NominationResolved notification, nominationId=${nominationId}`,
         );
       }
 
       // Map resolution status to notification type
       let notificationType: NotificationType;
-      switch (event.status) {
+      switch (status) {
         case NominationStatus.Approved:
           notificationType = NotificationType.GameNominationApproved;
           break;
@@ -252,51 +262,56 @@ export class EventNotificationListener {
         userId: nomination.nominatedBy.userId,
         type: notificationType,
         payload: {
-          eventId: event.eventId,
-          nominationId: event.nominationId,
+          eventId,
+          nominationId,
           nominatedGameTitle: nomination.platformGame.game.title,
         },
       });
     } catch (err) {
       this.logger.error(
-        `Failed to notify on NominationResolved nominationId=${event.nominationId}`,
+        `Failed to notify on NominationResolved nominationId=${nominationId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
   }
 
   @OnEvent(NominationEvent.GameAddedToEvent, { async: true })
-  async onGameAdded(event: GameAddedToEventPayload): Promise<void> {
+  async onGameAdded(event: GameAddedToEventEvent): Promise<void> {
+    // The row's own eventId is null for occurrence-scoped games — use the
+    // context field, which always carries the parent event id.
+    const { eventId, addedByAttendeeId } = event;
+    const { platformGameId } = event.after;
+
     try {
       const [eventRecord, platformGame] = await Promise.all([
         this.db.event.findUnique({
-          where: { id: event.eventId },
+          where: { id: eventId },
           select: { title: true },
         }),
         this.db.platformGame.findUnique({
-          where: { id: event.platformGameId },
+          where: { id: platformGameId },
           select: { id: true, game: { select: { title: true } } },
         }),
       ]);
 
       if (!eventRecord || !platformGame) {
         return this.logger.warn(
-          `Event or game not found for GameAddedToEvent notification, eventId=${event.eventId}, platformGameId=${event.platformGameId}`,
+          `Event or game not found for GameAddedToEvent notification, eventId=${eventId}, platformGameId=${platformGameId}`,
         );
       }
 
       const attendees = await this.db.eventAttendee.findMany({
-        where: { eventId: event.eventId, userId: { not: null } },
+        where: { eventId, userId: { not: null } },
         select: { userId: true, id: true },
       });
 
       const inputs: CreateNotificationInput[] = attendees
-        .filter((attendee) => attendee.id !== event.addedByAttendeeId && attendee.userId)
+        .filter((attendee) => attendee.id !== addedByAttendeeId && attendee.userId)
         .map((attendee) => ({
           userId: attendee.userId!,
           type: NotificationType.GameAddedToEvent,
           payload: {
-            eventId: event.eventId,
+            eventId,
             eventTitle: eventRecord.title,
             nominatedGameTitle: platformGame.game.title,
           },
@@ -307,7 +322,7 @@ export class EventNotificationListener {
       }
     } catch (err) {
       this.logger.error(
-        `Failed to notify on GameAddedToEvent eventId=${event.eventId}`,
+        `Failed to notify on GameAddedToEvent eventId=${eventId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -332,27 +347,29 @@ export class EventNotificationListener {
     event: OccurrenceStatusChangedEvent,
     type: NotificationType,
   ): Promise<void> {
+    const { id: occurrenceId, eventId } = event.after;
+
     try {
       const [eventRecord, occurrence] = await Promise.all([
         this.db.event.findUnique({
-          where: { id: event.eventId },
+          where: { id: eventId },
           select: { title: true, createdById: true },
         }),
         this.db.eventOccurrence.findUnique({
-          where: { id: event.occurrenceId },
+          where: { id: occurrenceId },
           select: { label: true, startDate: true },
         }),
       ]);
 
       if (!eventRecord || !occurrence) {
         return this.logger.warn(
-          `Event or occurrence not found for OccurrenceStatusChanged notification, eventId=${event.eventId}, occurrenceId=${event.occurrenceId}`,
+          `Event or occurrence not found for OccurrenceStatusChanged notification, eventId=${eventId}, occurrenceId=${occurrenceId}`,
         );
       }
 
       // Only notify attendees who voted on this occurrence
       const voters = await this.db.eventAvailabilityVote.findMany({
-        where: { occurrenceId: event.occurrenceId },
+        where: { occurrenceId },
         select: {
           attendeeId: true,
           attendee: {
@@ -369,9 +386,9 @@ export class EventNotificationListener {
           userId: v.attendee.userId!,
           type,
           payload: {
-            eventId: event.eventId,
+            eventId,
             eventTitle: eventRecord.title,
-            occurrenceId: event.occurrenceId,
+            occurrenceId,
             occurrenceLabel: occurrence.label,
           },
         }));
@@ -381,7 +398,7 @@ export class EventNotificationListener {
       }
     } catch (err) {
       this.logger.error(
-        `Failed to notify occurrence change occurrenceId=${event.occurrenceId}`,
+        `Failed to notify occurrence change occurrenceId=${occurrenceId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }

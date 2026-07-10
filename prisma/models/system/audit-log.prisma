@@ -1,0 +1,65 @@
+/// Persisted audit trail row (issue #57 Phase 2). Written exclusively by the
+/// audit listener in @bge/audit-log; there is no mutation API. Rows are
+/// soft-deleted by the retention sweep (`deletedAt`), never updated.
+model AuditLog {
+  id String @id @default(cuid(2))
+
+  /// Raw EventEmitter2 event name as received by the onAny listener.
+  event String
+
+  /// Serialized Actor union — full fidelity, including plugin trigger chains.
+  /// Unattributed emissions (no CLS scope at handle time) are recorded as
+  /// { kind: 'system', reason: 'audit:unattributed-event' } and surfaced to
+  /// admins via notification; they never blend into genuine system work.
+  actor Json
+
+  /// Denormalized from `actor` for indexed filtering — Prisma JSON path
+  /// filters can't use an index, scalar columns serve the admin queries.
+  actorKind String @map("actor_kind")
+
+  /// Owning userId when the (trigger-resolved) actor variant carries one.
+  actorUserId String? @map("actor_user_id")
+
+  /// MutationAction: 'create' | 'update' | 'delete' (future plugin verbs allowed).
+  action String
+
+  /// Domain model name (ResourceType value by convention) + primary key.
+  subject   String
+  subjectId String @map("subject_id")
+
+  /// EventSource from CLS: 'http' | 'grpc' | 'queue' | 'ws' | 'system'.
+  /// Null when the emission had no populated CLS scope (unattributed).
+  source        String?
+  correlationId String? @map("correlation_id")
+
+  /// { before, after } snapshots, post-@AuditExclude redaction.
+  payload Json
+
+  /// Start of the emitting step's unit of work (per-step duration = occurredAt - initiatedAt).
+  initiatedAt DateTime @map("initiated_at") @db.Timestamptz(3)
+
+  /// Moment the mutation completed (event construction). UIs sort by this.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+
+  /// Audit-listener insertion time — pipeline debugging only.
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  /// Retention soft-delete stamp set by the sweep; reads filter on null.
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(3)
+
+  // `action` and `source` are exposed as filters but carry no index on
+  // purpose: both are tiny closed vocabularies (3-6 values), so the planner
+  // does better walking the occurredAt (sort) index than a low-selectivity
+  // bitmap. Revisit only if real query plans say otherwise.
+  @@index([subject, subjectId])
+  @@index([actorKind, occurredAt])
+  @@index([actorUserId, occurredAt])
+  // Every read path (admin list + retention sweep) filters deletedAt IS NULL
+  // then ranges/sorts on occurredAt, so lead with deletedAt: the live-row
+  // prefix stays contiguous instead of walking dead rows in a bare occurredAt
+  // index. Supersedes a standalone [occurredAt].
+  @@index([deletedAt, occurredAt])
+  @@index([correlationId])
+  @@index([event, occurredAt])
+  @@map("audit_logs")
+}

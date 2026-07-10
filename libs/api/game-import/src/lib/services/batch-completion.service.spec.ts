@@ -1,3 +1,4 @@
+import { MutationEvent } from '@bge/actor-context';
 import { DatabaseService, JobStatus } from '@bge/database';
 import { WebhookEventType } from '@bge/webhooks';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -79,6 +80,11 @@ describe('ImportBatchCompletionService', () => {
         data: expect.objectContaining({ batchId: 'batch-1', status: ImportBatchStatus.PartiallyCompleted }),
       }),
     );
+
+    // Aggregate signal: deliberately a plain payload, not a MutationEvent —
+    // the audit listener ignores it (each Job transition is audited itself).
+    const batchCall = events.emit.mock.calls.find(([name]) => name === ImportEvents.BatchComplete);
+    expect(batchCall![1]).not.toBeInstanceOf(MutationEvent);
   });
 
   it('never throws into the caller when the query fails', async () => {

@@ -1,3 +1,4 @@
+import { SystemActorScope } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
 import { pingWithRetry, walkDir } from '@bge/utils';
 import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
@@ -5,10 +6,11 @@ import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/commo
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
 import * as path from 'node:path';
-import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS, GATEWAY_DISABLED_EVENT } from './constants/gateway-registry.constants';
+import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
+import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
-import type { GatewayConfigEvent, GatewayConnectionOptions, GatewayDisabledEvent } from './interfaces';
+import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import { hashGatewayConfig } from './utils/hash-config';
 
 interface CachedClient {
@@ -55,6 +57,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     private readonly credentialsFactory: GatewayCredentialsFactory,
     private readonly configEvents: GatewayConfigEventsService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly systemActorScope: SystemActorScope,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -258,7 +261,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   async reportFailure(
     gatewayId: string,
     error: unknown,
-    reason: GatewayDisabledEvent['reason'] = 'repeated_call_failure',
+    reason: GatewayAutoDisableReason = 'repeated_call_failure',
   ): Promise<void> {
     const now = new Date();
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -293,49 +296,64 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
    * Race-safe: the DB update is conditional on enabled=true, so when
    * multiple processes hit the threshold concurrently only the first
    * succeeded write fires the notification.
+   *
+   * Runs inside a `system` actor scope: auto-disable is system-initiated
+   * failure tracking with no user in CLS, and the audit listener would flag
+   * a bare emission as unattributed.
    */
   private async disableGateway(
     gatewayId: string,
     track: FailureTrack,
-    reason: GatewayDisabledEvent['reason'],
+    reason: GatewayAutoDisableReason,
   ): Promise<void> {
-    const result = await this.db.gameGateway.updateMany({
-      where: { id: gatewayId, enabled: true },
-      data: { enabled: false },
+    const initiatedAt = new Date();
+
+    await this.systemActorScope.run('gateway-registry:auto-disable', async () => {
+      const result = await this.db.gameGateway.updateMany({
+        where: { id: gatewayId, enabled: true },
+        data: { enabled: false },
+      });
+
+      // Always tear down locally — regardless of whether this process won the
+      // write race, the gateway should not be used here anymore.
+      this.disconnect(gatewayId);
+      this.failures.delete(gatewayId);
+
+      if (result.count === 0) {
+        this.logger.warn(`Gateway ${gatewayId} was already disabled by another process; skipping notification`);
+        return;
+      }
+
+      // We won the race — publish for other processes and emit notification.
+      const event: GatewayConfigEvent = {
+        gatewayId,
+        configHash: '',
+        changeType: 'disabled',
+        timestamp: Date.now(),
+      };
+      await this.configEvents.publish(event);
+
+      // The conditional write proves enabled was true before this update.
+      this.eventEmitter.emit(
+        GatewayDisabledEvent.eventName,
+        new GatewayDisabledEvent(
+          { id: gatewayId, enabled: true },
+          { id: gatewayId, enabled: false },
+          {
+            reason,
+            consecutiveFailures: track.consecutiveFailures,
+            firstFailureAt: track.firstFailureAt,
+            lastFailureAt: track.lastFailureAt,
+            lastError: track.lastError,
+          },
+          initiatedAt,
+        ),
+      );
+
+      this.logger.error(
+        `Gateway ${gatewayId} auto-disabled after ${track.consecutiveFailures} consecutive failures (reason=${reason}). Admin notification emitted.`,
+      );
     });
-
-    // Always tear down locally — regardless of whether this process won the
-    // write race, the gateway should not be used here anymore.
-    this.disconnect(gatewayId);
-    this.failures.delete(gatewayId);
-
-    if (result.count === 0) {
-      this.logger.warn(`Gateway ${gatewayId} was already disabled by another process; skipping notification`);
-      return;
-    }
-
-    // We won the race — publish for other processes and emit notification.
-    const event: GatewayConfigEvent = {
-      gatewayId,
-      configHash: '',
-      changeType: 'disabled',
-      timestamp: Date.now(),
-    };
-    await this.configEvents.publish(event);
-
-    const disabledEvent: GatewayDisabledEvent = {
-      gatewayId,
-      reason,
-      consecutiveFailures: track.consecutiveFailures,
-      firstFailureAt: track.firstFailureAt,
-      lastFailureAt: track.lastFailureAt,
-      lastError: track.lastError,
-    };
-    this.eventEmitter.emit(GATEWAY_DISABLED_EVENT, disabledEvent);
-
-    this.logger.error(
-      `Gateway ${gatewayId} auto-disabled after ${track.consecutiveFailures} consecutive failures (reason=${reason}). Admin notification emitted.`,
-    );
   }
 
   /**

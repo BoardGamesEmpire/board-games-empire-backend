@@ -1,9 +1,10 @@
-import { DatabaseService, InitiatorType, JobStatus } from '@bge/database';
+import { DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
 import { WebhookEventType } from '@bge/webhooks';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
-import { ImportEvents, JobNames } from '../constants/queue.constants';
+import { JobNames } from '../constants/queue.constants';
+import { ImportJobCompletedEvent, ImportJobFailedEvent } from '../events/import.events';
 import type { GameImportJobPayload, ImportJobResult } from '../interfaces/import-job.interface';
 import { ImportBatchCompletionService } from '../services/batch-completion.service';
 import { ExpansionSpawnerService } from '../services/expansion-spawner.service';
@@ -74,7 +75,7 @@ describe('GameImportProcessor', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('processes a base game inside the actor scope and emits JobCompleted', async () => {
+  it('processes a base game inside the actor scope and emits an ImportJobCompletedEvent', async () => {
     const platformGames = [{ platformId: 'plat-1', platformGameId: 'pg-1' }];
     const result: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames };
     gameUpsert.upsert.mockResolvedValue(result);
@@ -86,10 +87,26 @@ describe('GameImportProcessor', () => {
       expect.any(Function),
     );
     expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'ext-1' }), 'bgg');
-    expect(events.emit).toHaveBeenCalledWith(
-      ImportEvents.JobCompleted,
-      expect.objectContaining({ jobId: 'job-1', gameId: 'game-1', isExpansion: false, userId: 'user-7', platformGames }),
-    );
+
+    const completedCall = events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName);
+    expect(completedCall).toBeDefined();
+    const completed = completedCall![1] as ImportJobCompletedEvent;
+    expect(completed).toBeInstanceOf(ImportJobCompletedEvent);
+    expect(completed.action).toBe('update');
+    expect(completed.subject).toBe(ResourceType.Job);
+    expect(completed.subjectId).toBe('job-1');
+    expect(completed.before).toEqual({ id: 'job-1', status: JobStatus.Running });
+    expect(completed.after).toEqual({ id: 'job-1', status: JobStatus.Completed, gameId: 'game-1' });
+    expect(completed).toMatchObject({
+      batchId: 'batch-1',
+      gatewayId: 'bgg',
+      externalId: 'ext-1',
+      isExpansion: false,
+      gameTitle: 'Catan',
+      platformGames,
+    });
+    // The acting user rides CLS, never the payload.
+    expect(completed).not.toHaveProperty('userId');
     expect(returned).toBe(result);
   });
 
@@ -141,7 +158,7 @@ describe('GameImportProcessor', () => {
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
     expect(gameUpsert.upsert).toHaveBeenCalled(); // idempotent persist still ran
-    expect(events.emit).not.toHaveBeenCalledWith(ImportEvents.JobCompleted, expect.anything());
+    expect(events.emit).not.toHaveBeenCalledWith(ImportJobCompletedEvent.eventName, expect.anything());
     expect(batchCompletion.checkAndEmit).not.toHaveBeenCalled();
   });
 
@@ -169,10 +186,11 @@ describe('GameImportProcessor', () => {
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
-    expect(events.emit).toHaveBeenCalledWith(
-      ImportEvents.JobCompleted,
-      expect.objectContaining({ jobId: 'job-1', sourceCreated: false }),
-    );
+    const completedCall = events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName);
+    expect(completedCall).toBeDefined();
+    const completed = completedCall![1] as ImportJobCompletedEvent;
+    expect(completed.subjectId).toBe('job-1');
+    expect(completed.sourceCreated).toBe(false);
     expect(events.emit).not.toHaveBeenCalledWith(WebhookEventType.GameImported, expect.anything());
   });
 
@@ -227,16 +245,23 @@ describe('GameImportProcessor', () => {
           result: { errorCode: 'INTERNAL_ERROR', error: 'The import failed due to an internal error.' },
         },
       });
-      expect(events.emit).toHaveBeenCalledWith(
-        ImportEvents.JobFailed,
-        expect.objectContaining({
-          jobId: 'job-1',
-          errorCode: 'INTERNAL_ERROR',
-          error: 'The import failed due to an internal error.',
-          isExpansion: false,
-          userId: 'user-7',
-        }),
-      );
+
+      const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
+      expect(failedCall).toBeDefined();
+      const failed = failedCall![1] as ImportJobFailedEvent;
+      expect(failed).toBeInstanceOf(ImportJobFailedEvent);
+      expect(failed.action).toBe('update');
+      expect(failed.subject).toBe(ResourceType.Job);
+      expect(failed.subjectId).toBe('job-1');
+      expect(failed.before).toEqual({ id: 'job-1' }); // prior status unknown at the shared emit point — identity only
+      // after carries the sanitized classification persisted to Job.result.
+      expect(failed.after).toEqual({
+        id: 'job-1',
+        status: JobStatus.Failed,
+        result: { errorCode: 'INTERNAL_ERROR', error: 'The import failed due to an internal error.' },
+      });
+      expect(failed.isExpansion).toBe(false);
+      expect(failed).not.toHaveProperty('userId');
       expect(batchCompletion.checkAndEmit).toHaveBeenCalledWith('batch-1');
     });
 
@@ -291,20 +316,16 @@ describe('GameImportProcessor', () => {
         }),
       );
       // The in-process event (consumed by the owner-facing notification
-      // listener) now also carries only the sanitized classification — the
-      // raw message with the internal host never reaches it; it lives solely
-      // in the Job.error column and operator logs.
-      expect(events.emit).toHaveBeenCalledWith(
-        ImportEvents.JobFailed,
-        expect.objectContaining({
-          errorCode: 'INTERNAL_ERROR',
-          error: 'The import failed due to an internal error.',
-        }),
-      );
-      expect(events.emit).not.toHaveBeenCalledWith(
-        ImportEvents.JobFailed,
-        expect.objectContaining({ error: expect.stringContaining('10.0.4.12') }),
-      );
+      // listener and the audit listener) also carries only the sanitized
+      // classification — the raw message with the internal host never reaches
+      // it; it lives solely in the Job.error column and operator logs.
+      const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
+      const failed = failedCall![1] as ImportJobFailedEvent;
+      expect(failed.after.result).toEqual({
+        errorCode: 'INTERNAL_ERROR',
+        error: 'The import failed due to an internal error.',
+      });
+      expect(JSON.stringify(failed)).not.toContain('10.0.4.12');
     });
 
     it('skips events when the row is already terminal (fetch side marked it first)', async () => {
