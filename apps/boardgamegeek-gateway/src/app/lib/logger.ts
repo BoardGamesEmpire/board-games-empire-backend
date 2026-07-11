@@ -1,12 +1,3 @@
-import { bootstrapLogging } from '@bge/logger';
+import { createGatewayLogger } from '@bge/gateway-host';
 
-const baseLogger = bootstrapLogging({ serviceName: 'bge-gateway-bgg' });
-
-/**
- * `component: 'bootstrap'`-tagged child for pre-Nest log lines,
- * shutdown handlers, and the `bootstrap().catch(...)` failure path
- * in `main.ts`. Shares the same transport as `baseLogger`.
- */
-const bootstrapLogger = baseLogger.child({ component: 'bootstrap' });
-
-export { baseLogger, bootstrapLogger };
+export const { baseLogger, bootstrapLogger } = createGatewayLogger('bge-gateway-bgg');

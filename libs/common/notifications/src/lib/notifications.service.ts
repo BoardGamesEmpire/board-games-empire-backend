@@ -1,7 +1,16 @@
-import { DatabaseService } from '@bge/database';
+import { DatabaseService, NotificationType } from '@bge/database';
 import { Injectable, Logger } from '@nestjs/common';
 import { InputJsonValue } from '@prisma/client/runtime/client';
 import type { CreateNotificationInput, NotificationPayload, UnreadNotificationDto } from './interfaces';
+
+/**
+ * Upper bound on rows returned by {@link NotificationsService.getUnread}. The
+ * endpoint is unpaginated and polled, and there is no unread-pruning, so a
+ * dormant account can accumulate thousands of unread rows; without a cap every
+ * poll would fetch all of them. 100 most-recent is plenty for a notification
+ * tray.
+ */
+const MAX_UNREAD_NOTIFICATIONS = 100;
 
 @Injectable()
 export class NotificationsService {
@@ -9,17 +18,17 @@ export class NotificationsService {
 
   constructor(private readonly db: DatabaseService) {}
 
-  async create(input: CreateNotificationInput): Promise<void> {
+  async create<T extends NotificationType>(input: CreateNotificationInput<T>): Promise<void> {
     await this.db.notification.create({
       data: {
         userId: input.userId,
         type: input.type,
-        payload: input.payload ?? {},
+        payload: input.payload as unknown as InputJsonValue,
       },
     });
   }
 
-  async createMany(inputs: CreateNotificationInput[]): Promise<void> {
+  async createMany<T extends NotificationType>(inputs: CreateNotificationInput<T>[]): Promise<void> {
     this.logger.debug(`Creating ${inputs.length} notifications`);
 
     if (!inputs.length) {
@@ -30,7 +39,7 @@ export class NotificationsService {
       data: inputs.map((i) => ({
         userId: i.userId,
         type: i.type,
-        payload: i.payload as InputJsonValue,
+        payload: i.payload as unknown as InputJsonValue,
       })),
     });
   }
@@ -39,18 +48,22 @@ export class NotificationsService {
     const notifications = await this.db.notification.findMany({
       where: { userId, read: false },
       orderBy: { createdAt: 'desc' },
+      take: MAX_UNREAD_NOTIFICATIONS,
       select: { id: true, type: true, read: true, payload: true, createdAt: true },
     });
 
     this.logger.debug(`Found ${notifications.length} unread notifications for user ${userId}`);
 
+    // The (type, payload) pairing is written together by `create()`, so it is
+    // sound — but the compiler can't prove the correlation from a JSON column,
+    // so assert the discriminated-union shape once here.
     return notifications.map((notification) => ({
       id: notification.id,
       type: notification.type,
       read: notification.read,
-      payload: notification.payload as NotificationPayload,
+      payload: notification.payload as unknown as NotificationPayload,
       createdAt: notification.createdAt,
-    }));
+    })) as UnreadNotificationDto[];
   }
 
   async markRead(userId: string, notificationIds: string[]): Promise<void> {

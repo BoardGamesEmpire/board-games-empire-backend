@@ -1,8 +1,7 @@
-import { DEFAULT_MAX_OFFSET, TransformBoolean } from '@bge/shared';
-import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
-export class SearchStartDto {
+export class SearchStartDto extends CappedPaginationQueryDto(100) {
   @IsUUID()
   correlationId!: string;
 
@@ -39,19 +38,8 @@ export class SearchStartDto {
   @IsString()
   locale?: string;
 
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  @Type(() => Number)
-  limit?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(DEFAULT_MAX_OFFSET)
-  @Type(() => Number)
-  offset?: number;
+  // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
+  // are inherited from CappedPaginationQueryDto — see #17.
 }
 
 export class SearchCancelDto {

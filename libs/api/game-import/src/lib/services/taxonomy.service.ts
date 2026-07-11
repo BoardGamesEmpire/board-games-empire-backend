@@ -1,7 +1,28 @@
-import { DatabaseService, isPrismaUniqueConstraintError } from '@bge/database';
+import { DatabaseService, isPrismaUniqueConstraintError, Prisma } from '@bge/database';
 import type { CategoryData, FamilyData, MechanicData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toSlug } from '../utils/slug';
+
+/**
+ * Per-entity Prisma wiring for the shared dedup pipeline. Mechanic, Category,
+ * and Family run the identical algorithm and differ only in these closures
+ * (delegate + composite-key field names), so each supplies its own while the
+ * control flow lives once in {@link TaxonomyUpsertService.resolve}.
+ */
+interface TaxonomyResolver {
+  /** Human label used in the fuzzy-match debug log. */
+  label: string;
+  /** Canonical table for the pg_trgm fuzzy lookup (a constant identifier — injection-safe). */
+  table: Prisma.Sql;
+  /** Step 1: gateway alias exact match (gatewayId + externalId) → canonical id. */
+  findAlias(): Promise<string | undefined>;
+  /** Step 2/4-recovery: canonical slug exact match → id. */
+  findBySlug(slug: string): Promise<string | undefined>;
+  /** Step 4: create the canonical record + its gateway alias → new id. */
+  createCanonical(slug: string): Promise<string>;
+  /** Attach the gateway alias to an already-resolved canonical id (steps 2 & 3). */
+  upsertAlias(id: string): Promise<unknown>;
+}
 
 /**
  * Handles upsert + dedup for Mechanic, Category, and Family.
@@ -18,57 +39,147 @@ export class TaxonomyUpsertService {
 
   constructor(private readonly db: DatabaseService) {}
 
-  async upsertMechanic(data: MechanicData, gatewayId: string): Promise<string> {
-    const existing = await this.db.mechanicGatewayAlias.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      select: { mechanicId: true },
+  upsertMechanic(data: MechanicData, gatewayId: string): Promise<string> {
+    return this.resolve(data, {
+      label: 'Mechanic',
+      table: Prisma.raw('mechanics'),
+      findAlias: () =>
+        this.db.mechanicGatewayAlias
+          .findUnique({
+            where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+            select: { mechanicId: true },
+          })
+          .then((row) => row?.mechanicId),
+      findBySlug: (slug) =>
+        this.db.mechanic.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
+      createCanonical: (slug) =>
+        this.db.mechanic
+          .create({
+            data: {
+              name: data.name,
+              slug,
+              gatewayAliases: {
+                create: { gatewayId, externalId: data.externalId, externalName: data.name },
+              },
+            },
+            select: { id: true },
+          })
+          .then((row) => row.id),
+      upsertAlias: (mechanicId) =>
+        this.db.mechanicGatewayAlias.upsert({
+          where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+          create: { mechanicId, gatewayId, externalId: data.externalId, externalName: data.name },
+          update: {},
+        }),
     });
+  }
 
-    if (existing) {
-      return existing.mechanicId;
+  upsertCategory(data: CategoryData, gatewayId: string): Promise<string> {
+    return this.resolve(data, {
+      label: 'Category',
+      table: Prisma.raw('categories'),
+      findAlias: () =>
+        this.db.categoryGatewayAlias
+          .findUnique({
+            where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+            select: { categoryId: true },
+          })
+          .then((row) => row?.categoryId),
+      findBySlug: (slug) =>
+        this.db.category.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
+      createCanonical: (slug) =>
+        this.db.category
+          .create({
+            data: {
+              name: data.name,
+              slug,
+              gatewayAliases: {
+                create: { gatewayId, externalId: data.externalId, externalName: data.name },
+              },
+            },
+            select: { id: true },
+          })
+          .then((row) => row.id),
+      upsertAlias: (categoryId) =>
+        this.db.categoryGatewayAlias.upsert({
+          where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+          create: { categoryId, gatewayId, externalId: data.externalId, externalName: data.name },
+          update: {},
+        }),
+    });
+  }
+
+  upsertFamily(data: FamilyData, gatewayId: string): Promise<string> {
+    return this.resolve(data, {
+      label: 'Family',
+      table: Prisma.raw('families'),
+      findAlias: () =>
+        this.db.familyGatewayAlias
+          .findUnique({
+            where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+            select: { familyId: true },
+          })
+          .then((row) => row?.familyId),
+      findBySlug: (slug) =>
+        this.db.family.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
+      createCanonical: (slug) =>
+        this.db.family
+          .create({
+            data: {
+              name: data.name,
+              slug,
+              gatewayAliases: {
+                create: { gatewayId, externalId: data.externalId, externalName: data.name },
+              },
+            },
+            select: { id: true },
+          })
+          .then((row) => row.id),
+      upsertAlias: (familyId) =>
+        this.db.familyGatewayAlias.upsert({
+          where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
+          create: { familyId, gatewayId, externalId: data.externalId, externalName: data.name },
+          update: {},
+        }),
+    });
+  }
+
+  /**
+   * The shared 4-step dedup pipeline (cheapest first). Steps 1–3 short-circuit
+   * on the first match; step 4 creates the canonical record and recovers from a
+   * concurrent create race by re-reading the slug winner (mirrors the game and
+   * platform upsert paths).
+   */
+  private async resolve(data: { name: string }, resolver: TaxonomyResolver): Promise<string> {
+    const aliasId = await resolver.findAlias();
+    if (aliasId) {
+      return aliasId;
     }
 
     const slug = toSlug(data.name);
-    const bySlug = await this.db.mechanic.findUnique({ where: { slug }, select: { id: true } });
+    const bySlug = await resolver.findBySlug(slug);
     if (bySlug) {
-      await this.createMechanicAlias(bySlug.id, data, gatewayId);
-      return bySlug.id;
+      await resolver.upsertAlias(bySlug);
+      return bySlug;
     }
 
-    const fuzzy = await this.fuzzyFindMechanic(data.name);
+    const fuzzy = await this.fuzzyFind(resolver.table, data.name);
     if (fuzzy) {
-      this.logger.debug(`Mechanic fuzzy match: '${data.name}' → id=${fuzzy}`);
-      await this.createMechanicAlias(fuzzy, data, gatewayId);
+      this.logger.debug(`${resolver.label} fuzzy match: '${data.name}' → id=${fuzzy}`);
+      await resolver.upsertAlias(fuzzy);
       return fuzzy;
     }
 
     try {
-      const created = await this.db.mechanic.create({
-        data: {
-          name: data.name,
-          slug,
-          gatewayAliases: {
-            create: {
-              gatewayId,
-              externalId: data.externalId,
-              externalName: data.name,
-            },
-          },
-        },
-        select: { id: true },
-      });
-
-      return created.id;
+      return await resolver.createCanonical(slug);
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
-        // Another worker won the race — fetch the winner
-        const existing = await this.db.mechanic.findUnique({
-          where: { slug },
-          select: { id: true },
-        });
-
-        if (existing) {
-          return existing.id;
+        // Another worker won the race — fetch the winner and attach this
+        // gateway's alias so the step-1 fast-path resolves it next time.
+        const raced = await resolver.findBySlug(slug);
+        if (raced) {
+          await resolver.upsertAlias(raced);
+          return raced;
         }
       }
 
@@ -76,193 +187,14 @@ export class TaxonomyUpsertService {
     }
   }
 
-  private async fuzzyFindMechanic(name: string): Promise<string | undefined> {
-    const rows = await this.db.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM mechanics
+  private async fuzzyFind(table: Prisma.Sql, name: string): Promise<string | undefined> {
+    const rows = await this.db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM ${table}
       WHERE similarity(name, ${name}) > 0.85
         AND frozen_at IS NULL
       ORDER BY similarity(name, ${name}) DESC
       LIMIT 1
-    `;
+    `);
     return rows[0]?.id;
-  }
-
-  private createMechanicAlias(mechanicId: string, data: MechanicData, gatewayId: string) {
-    return this.db.mechanicGatewayAlias.upsert({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      create: {
-        mechanicId,
-        gatewayId,
-        externalId: data.externalId,
-        externalName: data.name,
-      },
-      update: {},
-    });
-  }
-
-  async upsertCategory(data: CategoryData, gatewayId: string): Promise<string> {
-    const existing = await this.db.categoryGatewayAlias.findUnique({
-      where: {
-        gatewayId_externalId: {
-          gatewayId,
-          externalId: data.externalId,
-        },
-      },
-      select: { categoryId: true },
-    });
-
-    if (existing) {
-      return existing.categoryId;
-    }
-
-    const slug = toSlug(data.name);
-    const bySlug = await this.db.category.findUnique({ where: { slug }, select: { id: true } });
-    if (bySlug) {
-      await this.createCategoryAlias(bySlug.id, data, gatewayId);
-      return bySlug.id;
-    }
-
-    const fuzzy = await this.fuzzyFindCategory(data.name);
-    if (fuzzy) {
-      this.logger.debug(`Category fuzzy match: '${data.name}' → id=${fuzzy}`);
-      await this.createCategoryAlias(fuzzy, data, gatewayId);
-      return fuzzy;
-    }
-
-    try {
-      const created = await this.db.category.create({
-        data: {
-          name: data.name,
-          slug,
-          gatewayAliases: {
-            create: {
-              gatewayId,
-              externalId: data.externalId,
-              externalName: data.name,
-            },
-          },
-        },
-        select: { id: true },
-      });
-
-      return created.id;
-    } catch (error) {
-      if (isPrismaUniqueConstraintError(error)) {
-        const existing = await this.db.category.findUnique({
-          where: { slug },
-          select: { id: true },
-        });
-
-        if (existing) {
-          return existing.id;
-        }
-      }
-
-      throw error;
-    }
-  }
-
-  private async fuzzyFindCategory(name: string): Promise<string | undefined> {
-    const rows = await this.db.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM categories
-      WHERE similarity(name, ${name}) > 0.85
-        AND frozen_at IS NULL
-      ORDER BY similarity(name, ${name}) DESC
-      LIMIT 1
-    `;
-    return rows[0]?.id;
-  }
-
-  private createCategoryAlias(categoryId: string, data: CategoryData, gatewayId: string) {
-    return this.db.categoryGatewayAlias.upsert({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      create: {
-        categoryId,
-        gatewayId,
-        externalId: data.externalId,
-        externalName: data.name,
-      },
-      update: {},
-    });
-  }
-
-  async upsertFamily(data: FamilyData, gatewayId: string): Promise<string> {
-    const existing = await this.db.familyGatewayAlias.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      select: { familyId: true },
-    });
-
-    if (existing) {
-      return existing.familyId;
-    }
-
-    const slug = toSlug(data.name);
-    const bySlug = await this.db.family.findUnique({ where: { slug }, select: { id: true } });
-    if (bySlug) {
-      await this.createFamilyAlias(bySlug.id, data, gatewayId);
-      return bySlug.id;
-    }
-
-    const fuzzy = await this.fuzzyFindFamily(data.name);
-    if (fuzzy) {
-      this.logger.debug(`Family fuzzy match: '${data.name}' → id=${fuzzy}`);
-      await this.createFamilyAlias(fuzzy, data, gatewayId);
-      return fuzzy;
-    }
-    try {
-      const created = await this.db.family.create({
-        data: {
-          name: data.name,
-          slug,
-          gatewayAliases: {
-            create: {
-              gatewayId,
-              externalId: data.externalId,
-              externalName: data.name,
-            },
-          },
-        },
-        select: { id: true },
-      });
-
-      return created.id;
-    } catch (error) {
-      if (isPrismaUniqueConstraintError(error)) {
-        const existing = await this.db.family.findUnique({
-          where: { slug },
-          select: { id: true },
-        });
-
-        if (existing) {
-          return existing.id;
-        }
-      }
-
-      throw error;
-    }
-  }
-
-  private async fuzzyFindFamily(name: string): Promise<string | undefined> {
-    const rows = await this.db.$queryRaw<Array<{ id: string }>>`
-      SELECT id FROM families
-      WHERE similarity(name, ${name}) > 0.85
-        AND frozen_at IS NULL
-      ORDER BY similarity(name, ${name}) DESC
-      LIMIT 1
-    `;
-    return rows[0]?.id;
-  }
-
-  private createFamilyAlias(familyId: string, data: FamilyData, gatewayId: string) {
-    return this.db.familyGatewayAlias.upsert({
-      where: { gatewayId_externalId: { gatewayId, externalId: data.externalId } },
-      create: {
-        familyId,
-        gatewayId,
-        externalId: data.externalId,
-        externalName: data.name,
-      },
-      update: {},
-    });
   }
 }

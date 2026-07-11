@@ -4,8 +4,8 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
-import { defer, EMPTY, from, merge, Observable, of } from 'rxjs';
-import { catchError, concatMap, endWith, filter, map, mergeMap, shareReplay, tap, throwIfEmpty } from 'rxjs/operators';
+import { defer, EMPTY, from, Observable, of } from 'rxjs';
+import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
 
 @Injectable()
 export class GameSearchService {
@@ -60,13 +60,17 @@ export class GameSearchService {
           locale: request.locale,
         }),
       ),
-      tap((response) =>
-        this.logger.debug(
-          `Received fetchGame response from gateway ${request.gatewayId} with status ${
-            response.status
-          } : ${JSON.stringify(response.game, null, 2)}`,
-        ),
-      ),
+      tap((response) => {
+        // Guard the pretty-print: JSON.stringify of a multi-KB game payload
+        // would otherwise run on every response even when debug is disabled.
+        if (Logger.isLevelEnabled('debug')) {
+          this.logger.debug(
+            `Received fetchGame response from gateway ${request.gatewayId} with status ${
+              response.status
+            } : ${JSON.stringify(response.game, null, 2)}`,
+          );
+        }
+      }),
       map((response: proto.FetchGameResponse) => ({
         ...response,
         gatewayId: request.gatewayId,
@@ -140,21 +144,17 @@ export class GameSearchService {
 
   private searchGateway(gatewayId: string, request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     const cacheKey = this.buildSearchCacheKey(gatewayId, request);
-    const cache$ = from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(shareReplay(1));
 
-    const cacheHit$ = cache$.pipe(
-      filter((cached) => cached !== undefined),
-      tap(() => this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`)),
-      mergeMap((cached) => this.emitCachedResults(gatewayId, request.correlationId, cached!)),
-    );
+    return from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(
+      mergeMap((cached) => {
+        if (cached !== undefined) {
+          this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
+          return this.emitCachedResults(gatewayId, request.correlationId, cached);
+        }
 
-    const cacheMiss$ = cache$.pipe(
-      filter((cached) => cached === undefined),
-      tap(() => this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`)),
-      mergeMap(() => this.fetchFromGateway(gatewayId, request, cacheKey)),
-    );
-
-    return merge(cacheHit$, cacheMiss$).pipe(
+        this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
+        return this.fetchFromGateway(gatewayId, request, cacheKey);
+      }),
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`Search failed for gateway ${gatewayId}: ${message}`);
@@ -230,17 +230,7 @@ export class GameSearchService {
         accumulated.push(result.game);
 
         // Async dedup check
-        return from(this.resolveDedup(gatewayId, result.game.externalId)).pipe(
-          mergeMap(({ inSystem, gameId }) =>
-            of<proto.SearchGameResult>({
-              ...base,
-              status: proto.ResultStatus.RESULT_STATUS_RESULT,
-              game: result.game,
-              inSystem,
-              gameId,
-            }),
-          ),
-        );
+        return this.toResultFrame(gatewayId, result.correlationId, result.game);
       }
 
       case proto.ResultStatus.RESULT_STATUS_SOURCE_DONE: {
@@ -299,20 +289,7 @@ export class GameSearchService {
     cached: proto.GameSearchData[],
   ): Observable<proto.SearchGameResult> {
     const resultFrames$ = from(cached).pipe(
-      mergeMap((game: proto.GameSearchData) =>
-        from(this.resolveDedup(gatewayId, game.externalId)).pipe(
-          mergeMap(({ inSystem, gameId }) =>
-            of<proto.SearchGameResult>({
-              correlationId,
-              gatewayId,
-              status: proto.ResultStatus.RESULT_STATUS_RESULT,
-              game,
-              inSystem,
-              gameId,
-            }),
-          ),
-        ),
-      ),
+      mergeMap((game: proto.GameSearchData) => this.toResultFrame(gatewayId, correlationId, game)),
     );
 
     return resultFrames$.pipe(
@@ -339,18 +316,7 @@ export class GameSearchService {
               return of<proto.SearchGameResult>({ correlationId, gatewayId, status: result.status });
             }
 
-            return from(this.resolveDedup(gatewayId, result.game.externalId)).pipe(
-              mergeMap(({ inSystem, gameId }) =>
-                of<proto.SearchGameResult>({
-                  correlationId,
-                  gatewayId,
-                  status: proto.ResultStatus.RESULT_STATUS_RESULT,
-                  game: result.game,
-                  inSystem,
-                  gameId,
-                }),
-              ),
-            );
+            return this.toResultFrame(gatewayId, correlationId, result.game);
           }),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -388,6 +354,31 @@ export class GameSearchService {
       status,
       message,
     });
+  }
+
+  /**
+   * Builds a RESULT_STATUS_RESULT frame for a single game, resolving its
+   * inSystem/gameId dedup metadata fresh (the cache never stores it — it
+   * changes over time). Shared by the live gateway stream, the cache-replay
+   * path, and fetchExpansions so the frame shape lives in exactly one place.
+   */
+  private toResultFrame(
+    gatewayId: string,
+    correlationId: string,
+    game: proto.GameSearchData,
+  ): Observable<proto.SearchGameResult> {
+    return from(this.resolveDedup(gatewayId, game.externalId)).pipe(
+      map(
+        ({ inSystem, gameId }): proto.SearchGameResult => ({
+          correlationId,
+          gatewayId,
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game,
+          inSystem,
+          gameId,
+        }),
+      ),
+    );
   }
 
   private resolveDedup(

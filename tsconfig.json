@@ -179,6 +179,9 @@
     },
     {
       "path": "./libs/api/audit-log"
+    },
+    {
+      "path": "./libs/api/gateway-host"
     }
   ]
 }

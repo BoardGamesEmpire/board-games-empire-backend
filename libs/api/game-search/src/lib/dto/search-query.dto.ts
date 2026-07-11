@@ -1,9 +1,9 @@
-import { DEFAULT_MAX_OFFSET, TransformBoolean } from '@bge/shared';
+import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform, Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 
-export class SearchQueryDto {
+export class SearchQueryDto extends CappedPaginationQueryDto(100) {
   @ApiProperty({ description: 'Search query string' })
   @IsString()
   query!: string;
@@ -35,19 +35,6 @@ export class SearchQueryDto {
   @IsString()
   locale?: string;
 
-  @ApiPropertyOptional({ description: 'Maximum results per gateway', default: 20 })
-  @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(100)
-  @Type(() => Number)
-  limit?: number;
-
-  @ApiPropertyOptional({ description: 'Offset for pagination', default: 0, maximum: DEFAULT_MAX_OFFSET })
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  @Max(DEFAULT_MAX_OFFSET)
-  @Type(() => Number)
-  offset?: number;
+  // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
+  // are inherited from CappedPaginationQueryDto — see #17.
 }

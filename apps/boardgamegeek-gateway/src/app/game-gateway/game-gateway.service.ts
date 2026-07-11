@@ -1,3 +1,4 @@
+import type { GatewayServiceHost } from '@bge/gateway-host';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -24,7 +25,7 @@ const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansio
 const EXPANSION_BATCH_TYPES = [BggThingType.BoardGameExpansion] as const;
 
 @Injectable()
-export class GameGatewayService {
+export class GameGatewayService implements GatewayServiceHost {
   private readonly logger = new Logger(GameGatewayService.name);
 
   constructor(private readonly bggService: BggService) {}

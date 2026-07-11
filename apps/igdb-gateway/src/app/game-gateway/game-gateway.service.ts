@@ -1,3 +1,4 @@
+import type { GatewayServiceHost } from '@bge/gateway-host';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -9,7 +10,7 @@ import { toGameData, toGameSearchData } from '../mappers/game.mapper';
 import { IgdbGame } from '../types';
 
 @Injectable()
-export class GameGatewayService {
+export class GameGatewayService implements GatewayServiceHost {
   private readonly logger = new Logger(GameGatewayService.name);
 
   constructor(private readonly igdbService: IGDBService) {}

@@ -1,10 +1,10 @@
-import { Action, ResourceType } from '@bge/database';
+import type { ResourceType } from '@bge/database';
 import { Injectable } from '@nestjs/common';
-import { WebhookEventType } from '../constants/webhook-event-types';
+import { WEBHOOK_EVENT_DESCRIPTORS, WebhookEventType } from '../constants/webhook-event-types';
 import type { WebhookEventDescriptor } from '../interfaces/webhook-event-descriptor.interface';
 
 /**
- * Code-defined catalogue of every webhook-eligible event. The keystone of the
+ * Injectable view over the code-defined event catalogue. The keystone of the
  * subsystem: it gates which emitted events the dispatcher acts on, supplies the
  * subject for the create-time CASL check, and (via `requiredAction`) sets the
  * grant a subscriber must hold.
@@ -13,50 +13,23 @@ import type { WebhookEventDescriptor } from '../interfaces/webhook-event-descrip
  * dispatcher/subscription service and (when wired) the worker-side dispatcher
  * resolve against the same table.
  *
- * Adding an event is two coordinated edits: a name in `WebhookEventType` + an
- * entry here, and an emit site that fires that name carrying a
- * `WebhookEmittableEvent`.
- *
- * Import lifecycle events use `Job` as their subject — the import Job row is
- * the thing a subscriber observes (gated by `read:job`); `GameImported` uses
- * `Game`, since by then the game exists and game read-visibility is the right
- * audience test.
+ * The descriptors are NOT hand-maintained here anymore: they are derived from
+ * the compiler-enforced `WEBHOOK_EVENT_DESCRIPTORS` (a `Record` over
+ * `WebhookEventType`), colocated with the wire names. That removes the old
+ * "second parallel edit" — a name with no descriptor is now a build error, not
+ * a silent dispatch no-op. Adding an event still needs an emit site that fires
+ * the name carrying a `WebhookEmittableEvent`.
  */
 @Injectable()
 export class WebhookEventRegistry {
   private readonly descriptors: ReadonlyMap<WebhookEventType, WebhookEventDescriptor> = new Map<
     WebhookEventType,
     WebhookEventDescriptor
-  >([
-    [
-      WebhookEventType.EventCreated,
-      { type: WebhookEventType.EventCreated, subject: ResourceType.Event, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.EventUpdated,
-      { type: WebhookEventType.EventUpdated, subject: ResourceType.Event, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.EventDeleted,
-      { type: WebhookEventType.EventDeleted, subject: ResourceType.Event, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.GameImported,
-      { type: WebhookEventType.GameImported, subject: ResourceType.Game, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.ImportJobStarted,
-      { type: WebhookEventType.ImportJobStarted, subject: ResourceType.Job, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.ImportJobFailed,
-      { type: WebhookEventType.ImportJobFailed, subject: ResourceType.Job, requiredAction: Action.read },
-    ],
-    [
-      WebhookEventType.ImportBatchCompleted,
-      { type: WebhookEventType.ImportBatchCompleted, subject: ResourceType.Job, requiredAction: Action.read },
-    ],
-  ]);
+  >(
+    (Object.entries(WEBHOOK_EVENT_DESCRIPTORS) as [WebhookEventType, (typeof WEBHOOK_EVENT_DESCRIPTORS)[WebhookEventType]][]).map(
+      ([type, meta]) => [type, { type, ...meta }],
+    ),
+  );
 
   /**
    * True when `name` is a registered, deliverable event type.

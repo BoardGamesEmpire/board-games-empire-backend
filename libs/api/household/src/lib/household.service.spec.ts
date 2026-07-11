@@ -55,6 +55,47 @@ describe('HouseholdService', () => {
     await expect(service.getHouseholdById('hh-1')).rejects.toThrow(NotFoundException);
   });
 
+  it('samples member games DB-side and fetches only the sampled rows', async () => {
+    db.household.findUnique.mockResolvedValue({
+      id: 'hh-1',
+      members: [
+        {
+          userId: 'member-1',
+          user: { id: 'member-1', username: 'm1' },
+          excludedFromHouseholds: [{ gameCollectionId: 'excluded-1' }],
+        },
+      ],
+    } as unknown as HouseholdWithMembers);
+    db.$queryRaw.mockResolvedValue([{ id: 'gc-1' }, { id: 'gc-2' }]);
+    db.gameCollection.findMany.mockResolvedValue([
+      { id: 'gc-1', platformGame: { id: 'pg-1', game: { id: 'g-1', title: 'A' } } },
+      { id: 'gc-2', platformGame: { id: 'pg-2', game: { id: 'g-2', title: 'B' } } },
+    ] as never);
+
+    const result = await service.getHouseholdById('hh-1');
+
+    // One bounded raw sample query...
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    // ...then a rich fetch scoped to only the sampled ids (never the full set).
+    expect(db.gameCollection.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ['gc-1', 'gc-2'] } } }),
+    );
+    expect(result.members[0].user.gameCollections).toHaveLength(2);
+  });
+
+  it('skips the rich fetch when a member has no sampled games', async () => {
+    db.household.findUnique.mockResolvedValue({
+      id: 'hh-1',
+      members: [{ userId: 'member-1', user: { id: 'member-1' }, excludedFromHouseholds: [] }],
+    } as unknown as HouseholdWithMembers);
+    db.$queryRaw.mockResolvedValue([]);
+
+    const result = await service.getHouseholdById('hh-1');
+
+    expect(db.gameCollection.findMany).not.toHaveBeenCalled();
+    expect(result.members[0].user.gameCollections).toEqual([]);
+  });
+
   it('create attributes the owner to the acting user (no userId param)', async () => {
     db.household.create.mockResolvedValue({ id: 'hh-1', createdById: 'user-1' } as Household);
 

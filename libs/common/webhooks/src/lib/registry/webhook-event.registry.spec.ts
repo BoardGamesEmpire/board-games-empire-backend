@@ -1,5 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
-import { WebhookEventType } from './../constants/webhook-event-types';
+import { WEBHOOK_EVENT_TYPES, WebhookEventType } from './../constants/webhook-event-types';
 import { WebhookEventRegistry } from './webhook-event.registry';
 
 describe('WebhookEventRegistry', () => {
@@ -68,6 +68,18 @@ describe('WebhookEventRegistry', () => {
     it('throws when any requested type is unregistered', () => {
       expect(() => registry.subjectsFor(['bogus.v1' as WebhookEventType])).toThrow();
     });
+  });
+
+  it('has a descriptor for every wire name — no silent no-op (single source of truth)', () => {
+    // WEBHOOK_EVENT_DESCRIPTORS is a Record<WebhookEventType, …>, so this holds
+    // by construction at compile time; asserting it at runtime documents the
+    // invariant and catches a broken derivation.
+    for (const type of WEBHOOK_EVENT_TYPES) {
+      expect(registry.has(type)).toBe(true);
+      expect(() => registry.require(type)).not.toThrow();
+    }
+
+    expect(registry.types().sort()).toEqual([...WEBHOOK_EVENT_TYPES].sort());
   });
 
   it('exposes exactly the v1 Event-domain and import-lifecycle types', () => {

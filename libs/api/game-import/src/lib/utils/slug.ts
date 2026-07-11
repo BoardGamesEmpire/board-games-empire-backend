@@ -1,6 +1,6 @@
 /**
  * Normalizes a display name to a lowercase, hyphenated slug suitable for
- * use as a unique key on Mechanic, Category, and Family records.
+ * use as a unique key on Mechanic, Category, Family, and Platform records.
  *
  * Steps:
  *  1. NFD decompose → strip combining diacritics (café → cafe)

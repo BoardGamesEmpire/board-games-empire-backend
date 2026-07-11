@@ -32,6 +32,7 @@ describe('GameSearchController', () => {
     gatewayIds: ['igdb-gw-1'],
     includeLocal: true,
     includeExternal: true,
+    offset: 0,
     ...overrides,
   });
 

@@ -176,70 +176,106 @@ export class GameUpsertService {
     return Array.from(platformGameMap, ([platformId, platformGameId]) => ({ platformId, platformGameId }));
   }
 
-  private async upsertMechanics(gameId: string, mechanics: GameData['mechanics'], gatewayId: string) {
-    for (const mechanic of mechanics) {
-      const mechanicId = await this.taxonomy.upsertMechanic(mechanic, gatewayId);
-      await this.db.gameMechanic.upsert({
-        where: { gameId_mechanicId: { gameId, mechanicId } },
-        create: { gameId, mechanicId },
-        update: {},
-      });
+  /**
+   * Resolves every item to its canonical id (concurrently), then bulk-inserts
+   * the game↔id join rows in a single createMany. The six taxonomy/person
+   * relations below share this exact shape and differ only in the resolver and
+   * the join delegate/composite key, so it lives here once; each wrapper
+   * supplies the resolver and a createMany over the resolved ids.
+   *
+   * skipDuplicates makes the insert idempotent, matching the old per-item
+   * upsert's no-op `update: {}` (the join rows carry no columns beyond the
+   * composite key, so an existing link never needs updating). This collapses
+   * the former per-item sequential resolve+upsert — ~N round trips per relation
+   * — into concurrent resolution plus one insert, so a large bulk import no
+   * longer serializes tens of thousands of join writes.
+   */
+  private async linkResolved<T>(
+    items: readonly T[],
+    resolveId: (item: T) => Promise<string>,
+    createLinks: (ids: string[]) => Promise<unknown>,
+  ): Promise<void> {
+    if (items.length === 0) {
+      return;
     }
+
+    const resolved = await Promise.all(items.map(resolveId));
+    // Two source aliases can resolve to the same canonical id; dedupe so the
+    // batch carries no in-statement duplicates.
+    const ids = [...new Set(resolved)];
+    await createLinks(ids);
   }
 
-  private async upsertCategories(gameId: string, categories: GameData['categories'], gatewayId: string) {
-    for (const category of categories) {
-      const categoryId = await this.taxonomy.upsertCategory(category, gatewayId);
-      await this.db.gameCategory.upsert({
-        where: { gameId_categoryId: { gameId, categoryId } },
-        create: { gameId, categoryId },
-        update: {},
-      });
-    }
+  private upsertMechanics(gameId: string, mechanics: GameData['mechanics'], gatewayId: string) {
+    return this.linkResolved(
+      mechanics,
+      (mechanic) => this.taxonomy.upsertMechanic(mechanic, gatewayId),
+      (mechanicIds) =>
+        this.db.gameMechanic.createMany({
+          data: mechanicIds.map((mechanicId) => ({ gameId, mechanicId })),
+          skipDuplicates: true,
+        }),
+    );
   }
 
-  private async upsertFamilies(gameId: string, families: GameData['families'], gatewayId: string) {
-    for (const family of families) {
-      const familyId = await this.taxonomy.upsertFamily(family, gatewayId);
-      await this.db.gameFamily.upsert({
-        where: { gameId_familyId: { gameId, familyId } },
-        create: { gameId, familyId },
-        update: {},
-      });
-    }
+  private upsertCategories(gameId: string, categories: GameData['categories'], gatewayId: string) {
+    return this.linkResolved(
+      categories,
+      (category) => this.taxonomy.upsertCategory(category, gatewayId),
+      (categoryIds) =>
+        this.db.gameCategory.createMany({
+          data: categoryIds.map((categoryId) => ({ gameId, categoryId })),
+          skipDuplicates: true,
+        }),
+    );
   }
 
-  private async upsertDesigners(gameId: string, designers: GameData['designers'], gatewayId: string) {
-    for (const designer of designers) {
-      const designerId = await this.persons.upsertDesigner(designer, gatewayId);
-      await this.db.gameDesigner.upsert({
-        where: { gameId_designerId: { gameId, designerId } },
-        create: { gameId, designerId },
-        update: {},
-      });
-    }
+  private upsertFamilies(gameId: string, families: GameData['families'], gatewayId: string) {
+    return this.linkResolved(
+      families,
+      (family) => this.taxonomy.upsertFamily(family, gatewayId),
+      (familyIds) =>
+        this.db.gameFamily.createMany({
+          data: familyIds.map((familyId) => ({ gameId, familyId })),
+          skipDuplicates: true,
+        }),
+    );
   }
 
-  private async upsertArtists(gameId: string, artists: GameData['artists'], gatewayId: string) {
-    for (const artist of artists) {
-      const artistId = await this.persons.upsertArtist(artist, gatewayId);
-      await this.db.gameArtist.upsert({
-        where: { gameId_artistId: { gameId, artistId } },
-        create: { gameId, artistId },
-        update: {},
-      });
-    }
+  private upsertDesigners(gameId: string, designers: GameData['designers'], gatewayId: string) {
+    return this.linkResolved(
+      designers,
+      (designer) => this.persons.upsertDesigner(designer, gatewayId),
+      (designerIds) =>
+        this.db.gameDesigner.createMany({
+          data: designerIds.map((designerId) => ({ gameId, designerId })),
+          skipDuplicates: true,
+        }),
+    );
   }
 
-  private async upsertPublishers(gameId: string, publishers: GameData['publishers'], gatewayId: string) {
-    for (const publisher of publishers) {
-      const publisherId = await this.persons.upsertPublisher(publisher, gatewayId);
-      await this.db.gamePublisher.upsert({
-        where: { gameId_publisherId: { gameId, publisherId } },
-        create: { gameId, publisherId },
-        update: {},
-      });
-    }
+  private upsertArtists(gameId: string, artists: GameData['artists'], gatewayId: string) {
+    return this.linkResolved(
+      artists,
+      (artist) => this.persons.upsertArtist(artist, gatewayId),
+      (artistIds) =>
+        this.db.gameArtist.createMany({
+          data: artistIds.map((artistId) => ({ gameId, artistId })),
+          skipDuplicates: true,
+        }),
+    );
+  }
+
+  private upsertPublishers(gameId: string, publishers: GameData['publishers'], gatewayId: string) {
+    return this.linkResolved(
+      publishers,
+      (publisher) => this.persons.upsertPublisher(publisher, gatewayId),
+      (publisherIds) =>
+        this.db.gamePublisher.createMany({
+          data: publisherIds.map((publisherId) => ({ gameId, publisherId })),
+          skipDuplicates: true,
+        }),
+    );
   }
 
   private async upsertDlc(gameId: string, dlcList: DlcData[], gatewayId: string): Promise<void> {
@@ -287,7 +323,15 @@ export class GameUpsertService {
     }
   }
 
-  private buildCreateInput(game: GameData): Prisma.GameCreateInput {
+  /**
+   * The 15 gateway-sourced scalar fields shared by the create and update
+   * paths. Kept as one source of truth so a new mapped field can't drift
+   * between insert and re-import. Returned as the inferred literal type
+   * (plain scalars) so it stays assignable to both GameCreateInput and
+   * GameUpdateInput — the only difference between the two paths is
+   * `visibility`, which is seeded on create but never reset on re-import.
+   */
+  private buildScalarInput(game: GameData) {
     return {
       title: game.title,
       contentType: toDbContentType(game.contentType),
@@ -304,28 +348,18 @@ export class GameUpsertService {
       averageRating: game.averageRating,
       bayesRating: game.bayesRating,
       ratingsCount: game.ratingsCount,
+    };
+  }
+
+  private buildCreateInput(game: GameData): Prisma.GameCreateInput {
+    return {
+      ...this.buildScalarInput(game),
       visibility: Visibility.Public,
     };
   }
 
   private buildUpdateInput(game: GameData): Prisma.GameUpdateInput {
-    return {
-      title: game.title,
-      contentType: toDbContentType(game.contentType),
-      description: game.description,
-      thumbnail: game.thumbnailUrl,
-      image: game.imageUrl,
-      publishYear: game.yearPublished,
-      minPlayers: game.minPlayers,
-      maxPlayers: game.maxPlayers,
-      minPlayTime: game.minPlaytime,
-      maxPlayTime: game.maxPlaytime,
-      minAge: game.minAge,
-      complexity: game.complexityWeight ? game.complexityWeight / 1000 : undefined,
-      averageRating: game.averageRating,
-      bayesRating: game.bayesRating,
-      ratingsCount: game.ratingsCount,
-    };
+    return this.buildScalarInput(game);
   }
 }
 
