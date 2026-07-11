@@ -174,9 +174,11 @@ export class TaxonomyUpsertService {
       return await resolver.createCanonical(slug);
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
-        // Another worker won the race — fetch the winner
+        // Another worker won the race — fetch the winner and attach this
+        // gateway's alias so the step-1 fast-path resolves it next time.
         const raced = await resolver.findBySlug(slug);
         if (raced) {
+          await resolver.upsertAlias(raced);
           return raced;
         }
       }

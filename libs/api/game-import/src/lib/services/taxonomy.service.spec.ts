@@ -88,17 +88,23 @@ describe('TaxonomyUpsertService', () => {
       );
     });
 
-    it('step 4 recovery: re-fetches the slug winner when create trips the unique constraint', async () => {
+    it('step 4 recovery: re-fetches the slug winner and links this alias to it', async () => {
       db.mechanicGatewayAlias.findUnique.mockResolvedValue(null as never);
       db.mechanic.findUnique
         .mockResolvedValueOnce(null as never) // initial slug miss
         .mockResolvedValueOnce({ id: 'mech-raced' } as never); // recovery re-fetch finds the winner
       db.$queryRaw.mockResolvedValue([] as never);
       db.mechanic.create.mockRejectedValue(uniqueViolation());
+      db.mechanicGatewayAlias.upsert.mockResolvedValue({} as never);
 
       const id = await service.upsertMechanic(mechanic(), GATEWAY_ID);
 
       expect(id).toBe('mech-raced');
+      // the loser must still record its (gatewayId, externalId) alias so the
+      // step-1 fast-path resolves it next time — not just return the winner
+      expect(db.mechanicGatewayAlias.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ mechanicId: 'mech-raced' }) }),
+      );
     });
 
     it('rethrows the unique error when the slug winner is still absent on re-fetch', async () => {
