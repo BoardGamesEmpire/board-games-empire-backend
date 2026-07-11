@@ -31,69 +31,81 @@ export class GameSearchService {
   }
 
   private searchLocal(dto: SearchQueryDto): Observable<WsGameSearchResult[]> {
-    const { query, limit = 20, offset = 0 } = dto;
+    return from(this.queryLocalGames(dto.query, dto.limit, dto.offset)).pipe(
+      catchError((err) => {
+        this.logger.error('Local search failed', err);
+        return of([]);
+      }),
+    );
+  }
 
+  /**
+   * Runs the local-DB title search and maps each row into a WsGameSearchResult.
+   * Shared by the REST search path ({@link searchLocal}) and the WS
+   * GameSearchGateway so the query/select and row→DTO mapping live in one place.
+   * Rejects on DB error; callers decide how to surface it (REST swallows to `[]`,
+   * WS emits a SearchError frame).
+   */
+  async queryLocalGames(query: string, limit = 20, offset = 0): Promise<WsGameSearchResult[]> {
     this.logger.debug(`Performing local search for query="${query}" with limit=${limit} and offset=${offset}`);
 
-    return from(
-      this.db.game.findMany({
-        where: {
-          deletedAt: null,
-          title: { contains: query, mode: 'insensitive' },
+    const games = await this.db.game.findMany({
+      where: {
+        deletedAt: null,
+        title: { contains: query, mode: 'insensitive' },
+      },
+
+      take: limit,
+      skip: offset,
+
+      select: {
+        id: true,
+        title: true,
+        contentType: true,
+        publishYear: true,
+        thumbnail: true,
+        averageRating: true,
+        minPlayers: true,
+        maxPlayers: true,
+
+        gameSources: {
+          select: { sourceUrl: true },
+          take: 1,
         },
 
-        take: limit,
-        skip: offset,
+        platformGames: {
+          select: {
+            id: true,
 
-        select: {
-          id: true,
-          title: true,
-          contentType: true,
-          publishYear: true,
-          thumbnail: true,
-          averageRating: true,
-          minPlayers: true,
-          maxPlayers: true,
+            platform: {
+              select: {
+                id: true,
+                name: true,
+                abbreviation: true,
+                platformType: true,
 
-          gameSources: {
-            select: { sourceUrl: true },
-            take: 1,
-          },
-
-          platformGames: {
-            select: {
-              id: true,
-
-              platform: {
-                select: {
-                  id: true,
-                  name: true,
-                  abbreviation: true,
-                  platformType: true,
-
-                  gatewayLinks: {
-                    select: {
-                      gatewayId: true,
-                      externalId: true,
-                    },
+                gatewayLinks: {
+                  select: {
+                    gatewayId: true,
+                    externalId: true,
                   },
                 },
               },
+            },
 
-              releases: {
-                select: {
-                  region: true,
-                  releaseDate: true,
-                  status: true,
+            releases: {
+              select: {
+                region: true,
+                releaseDate: true,
+                status: true,
 
-                  languages: {
-                    select: {
-                      language: {
-                        select: {
-                          code: true,
-                          abbreviation: true,
-                          name: true,
-                        },
+                languages: {
+                  select: {
+                    language: {
+                      select: {
+                        code: true,
+                        abbreviation: true,
+                        name: true,
                       },
                     },
                   },
@@ -102,55 +114,49 @@ export class GameSearchService {
             },
           },
         },
-      }),
-    ).pipe(
-      map((games) =>
-        games.map(
-          (game): WsGameSearchResult => ({
-            externalId: game.id,
-            title: game.title,
-            contentType: game.contentType,
-            yearPublished: game.publishYear ?? undefined,
-            thumbnailUrl: game.thumbnail || undefined,
-            sourceUrl: game.gameSources?.[0]?.sourceUrl || undefined,
-            averageRating: game.averageRating ?? undefined,
-            minPlayers: game.minPlayers ?? undefined,
-            maxPlayers: game.maxPlayers ?? undefined,
-            inSystem: true,
-            gameId: game.id,
+      },
+    });
 
-            platforms: game.platformGames.map((pg) => ({
-              externalId: pg.platform.id,
+    return games.map(
+      (game): WsGameSearchResult => ({
+        externalId: game.id,
+        title: game.title,
+        contentType: game.contentType,
+        yearPublished: game.publishYear ?? undefined,
+        thumbnailUrl: game.thumbnail || undefined,
+        sourceUrl: game.gameSources?.[0]?.sourceUrl || undefined,
+        averageRating: game.averageRating ?? undefined,
+        minPlayers: game.minPlayers ?? undefined,
+        maxPlayers: game.maxPlayers ?? undefined,
+        inSystem: true,
+        gameId: game.id,
+
+        platforms: game.platformGames?.map((pg) => ({
+          externalId: pg.platform.id,
+          name: pg.platform.name,
+          abbreviation: pg.platform.abbreviation ?? undefined,
+          platformType: pg.platform.platformType.toString(),
+        })),
+
+        availableReleases: game.platformGames?.flatMap((pg) =>
+          pg.releases.map((r) => ({
+            externalId: pg.platform.id,
+            platform: {
+              externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
               name: pg.platform.name,
               abbreviation: pg.platform.abbreviation ?? undefined,
               platformType: pg.platform.platformType.toString(),
+            },
+
+            status: r.status,
+            releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
+            languages: r.languages.map((l) => ({
+              iso6393: l.language.code,
+              iso6391: l.language.abbreviation ?? undefined,
+              name: l.language.name,
             })),
-
-            availableReleases: game.platformGames.flatMap((pg) =>
-              pg.releases.map((r) => ({
-                externalId: pg.platform.id,
-                platform: {
-                  externalId: pg.platform.gatewayLinks[0]?.externalId || undefined,
-                  name: pg.platform.name,
-                  abbreviation: pg.platform.abbreviation ?? undefined,
-                  platformType: pg.platform.platformType.toString(),
-                },
-
-                status: r.status,
-                releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
-                languages: r.languages.map((l) => ({
-                  iso6393: l.language.code,
-                  iso6391: l.language.abbreviation ?? undefined,
-                  name: l.language.name,
-                })),
-              })),
-            ),
-          }),
+          })),
         ),
-      ),
-      catchError((err) => {
-        this.logger.error('Local search failed', err);
-        return of([]);
       }),
     );
   }
@@ -206,41 +212,7 @@ export class GameSearchService {
               resultsBySource[source] = [];
             }
 
-            resultsBySource[source].push({
-              externalId: result.game.externalId,
-              title: result.game.title,
-              contentType: result.game.contentType.toString(),
-              yearPublished: result.game.yearPublished,
-              thumbnailUrl: result.game.thumbnailUrl,
-              sourceUrl: result.game.sourceUrl,
-              averageRating: result.game.averageRating,
-              minPlayers: result.game.minPlayers,
-              maxPlayers: result.game.maxPlayers,
-              baseGameExternalId: result.game.baseGameExternalId,
-              inSystem: result.inSystem ?? false,
-              gameId: result.gameId,
-
-              platforms: (result.game.availablePlatforms ?? []).map((p) => ({
-                externalId: p.externalId,
-                name: p.name,
-                abbreviation: p.abbreviation,
-                platformType: p.platformType.toString(),
-              })),
-
-              availableReleases: (result.game.availableReleases ?? []).map((r) => ({
-                externalId: r.externalId,
-                platform: {
-                  ...r.platform!,
-                },
-                status: r.status.toString(),
-                releaseDate: r.releaseDate,
-                languages: (r.languages ?? []).map((l) => ({
-                  iso6393: l.iso6393,
-                  iso6391: l.iso6391,
-                  name: l.name,
-                })),
-              })),
-            });
+            resultsBySource[source].push(this.mapProtoGame(result));
             break;
           }
 
@@ -268,6 +240,52 @@ export class GameSearchService {
       ...(Object.keys(errors).length > 0 && { errors }),
       ...(rateLimitedSources.length > 0 && { rateLimitedSources }),
       ...(unavailableSources.length > 0 && { unavailableSources }),
+    };
+  }
+
+  /**
+   * Maps a coordinator RESULT_STATUS_RESULT frame into a WsGameSearchResult.
+   * Shared by the REST {@link buildResponse} and the WS GameSearchGateway so the
+   * proto→DTO mapping lives in one place. The caller must have checked that
+   * `result.game` is present (RESULT_STATUS_RESULT).
+   */
+  mapProtoGame(result: SearchGameResult): WsGameSearchResult {
+    const game = result.game!;
+
+    return {
+      externalId: game.externalId,
+      title: game.title,
+      contentType: game.contentType.toString(),
+      yearPublished: game.yearPublished,
+      thumbnailUrl: game.thumbnailUrl,
+      sourceUrl: game.sourceUrl,
+      averageRating: game.averageRating,
+      minPlayers: game.minPlayers,
+      maxPlayers: game.maxPlayers,
+      baseGameExternalId: game.baseGameExternalId,
+      inSystem: result.inSystem ?? false,
+      gameId: result.gameId,
+
+      platforms: (game.availablePlatforms ?? []).map((p) => ({
+        externalId: p.externalId,
+        name: p.name,
+        abbreviation: p.abbreviation,
+        platformType: p.platformType.toString(),
+      })),
+
+      availableReleases: (game.availableReleases ?? []).map((r) => ({
+        externalId: r.externalId,
+        platform: {
+          ...r.platform!,
+        },
+        status: r.status.toString(),
+        releaseDate: r.releaseDate,
+        languages: (r.languages ?? []).map((l) => ({
+          iso6393: l.iso6393,
+          iso6391: l.iso6391,
+          name: l.name,
+        })),
+      })),
     };
   }
 }

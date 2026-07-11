@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { Action, ResourceType } from '@bge/database';
+import { Action, Prisma, ResourceType } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
   createMockAbilityService,
@@ -7,11 +7,14 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import type { CreateGameDto } from './dto';
 import { GameService } from './game.service';
 
 const COND = { id: 'sentinel-condition' };
+
+const dependentRecordNotFound = () =>
+  new Prisma.PrismaClientKnownRequestError('Record to fetch not found', { code: 'P2025', clientVersion: 'test' });
 
 describe('GameService', () => {
   let service: GameService;
@@ -43,8 +46,7 @@ describe('GameService', () => {
     );
   });
 
-  it('getGame → read', async () => {
-    db.game.count.mockResolvedValue(1);
+  it('getGame → read (single round trip on the happy path)', async () => {
     db.game.findUniqueOrThrow.mockResolvedValue({ id: 'game-1' } as Game);
 
     await service.getGame('game-1');
@@ -53,11 +55,22 @@ describe('GameService', () => {
     expect(db.game.findUniqueOrThrow).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: 'game-1', AND: [COND] }) }),
     );
+    // No pre-flight count: the read is one query when the row is visible.
+    expect(db.game.count).not.toHaveBeenCalled();
   });
 
   it('getGame throws NotFound when the row is absent', async () => {
+    db.game.findUniqueOrThrow.mockRejectedValue(dependentRecordNotFound());
     db.game.count.mockResolvedValue(0);
+
     await expect(service.getGame('game-1')).rejects.toThrow(NotFoundException);
+  });
+
+  it('getGame throws Forbidden when the row exists but is not readable', async () => {
+    db.game.findUniqueOrThrow.mockRejectedValue(dependentRecordNotFound());
+    db.game.count.mockResolvedValue(1);
+
+    await expect(service.getGame('game-1')).rejects.toThrow(ForbiddenException);
   });
 
   it('createGame does not filter by abilities', async () => {

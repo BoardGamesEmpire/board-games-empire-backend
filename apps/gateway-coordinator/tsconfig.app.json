@@ -28,7 +28,7 @@
   ],
   "references": [
     {
-      "path": "../../libs/common/utils/tsconfig.lib.json"
+      "path": "../../libs/api/gateway-host/tsconfig.lib.json"
     },
     {
       "path": "../../libs/queue/actor-context/tsconfig.lib.json"

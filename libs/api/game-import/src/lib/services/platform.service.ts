@@ -3,6 +3,7 @@ import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boa
 import { Injectable, Logger } from '@nestjs/common';
 import { toEditionKey, toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
 import { ReleaseGraphResolver } from './release-graph.resolver';
+import { toSlug } from '../utils/slug';
 
 export type PlatformGameMap = Map<string, string>;
 
@@ -37,7 +38,7 @@ export class PlatformUpsertService {
       return existing.platformId;
     }
 
-    const slug = this.toSlug(data.name);
+    const slug = toSlug(data.name);
     this.logger.debug(`Upserting platform ${data.name} (${gatewayId}:${data.externalId})`);
 
     // Platform may already exist under a different gateway link (e.g. Steam PC
@@ -391,12 +392,5 @@ export class PlatformUpsertService {
       hasRealtime: false,
       hasTutorial: false,
     };
-  }
-
-  private toSlug(name: string): string {
-    return name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
   }
 }

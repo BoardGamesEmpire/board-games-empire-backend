@@ -1,3 +1,4 @@
+import { isTrue } from '@bge/env';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { BggLinkType, BggNameType, BggThingType, DEFAULT_EDITION_KEY } from '../constants';
 import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../types';
@@ -71,17 +72,12 @@ function selectThingTitle(thing: Pick<BggThing, 'names'> & { name?: string; alte
 
 /**
  * BGG link `inbound` may surface as a boolean or the literal string
- * `'true'` depending on client-library JSON conversion. Treat both as
- * truthy.
+ * `'true'` depending on client-library JSON conversion. Delegates to the
+ * shared {@link isTrue} coercion so this stays a single-purpose named
+ * wrapper rather than a third copy of the literal-`'true'` logic.
  */
 export function isInbound(value: boolean | string | undefined): boolean {
-  if (typeof value === 'boolean') {
-    return value;
-  }
-  if (typeof value === 'string') {
-    return value.toLowerCase() === 'true';
-  }
-  return false;
+  return isTrue(value);
 }
 
 /**

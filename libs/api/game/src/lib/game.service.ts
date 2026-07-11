@@ -3,7 +3,6 @@ import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
-import assert from 'node:assert';
 import { CreateGameDto, UpdateGameDto } from './dto';
 
 @Injectable()
@@ -27,9 +26,6 @@ export class GameService {
 
   async getGame(id: string) {
     try {
-      const existing = await this.db.game.count({ where: { id } });
-      assert(existing > 0, new NotFoundException(`Game with ID ${id} not found`));
-
       return await this.db.game.findUniqueOrThrow({
         where: {
           id,
@@ -147,7 +143,16 @@ export class GameService {
       });
     } catch (error) {
       this.logger.error(`Error fetching game with id ${id}`, error);
+      // findUniqueOrThrow throws P2025 both when no game has this id AND when a
+      // game exists but the read conditions exclude it. Only on this error path
+      // do we spend a permission-agnostic count to tell 404 from 403 — the
+      // happy path stays a single round trip.
       if (isPrismaDependentRecordNotFoundError(error)) {
+        const exists = await this.db.game.count({ where: { id } });
+        if (exists === 0) {
+          throw new NotFoundException(`Game with ID ${id} not found`);
+        }
+
         throw new ForbiddenException("You don't have permission to view this resource.");
       }
 

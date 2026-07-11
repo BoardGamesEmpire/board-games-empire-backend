@@ -2,9 +2,11 @@ export function isTrue(value: unknown): boolean {
   return value?.toString().toLowerCase() === 'true';
 }
 
-export function splitTrimFilter<T = string>(value: string | T[], delimiter = ',') {
+export function splitTrimFilter<T = string>(value: string | T[], delimiter = ','): string[] {
   const content = typeof value === 'string' ? value.split(delimiter) : Array.isArray(value) ? value : [value];
-  return content.map((item) => item?.toString().trim()).filter((item) => item && item.length > 0);
+  return content
+    .map((item) => item?.toString().trim())
+    .filter((item): item is string => Boolean(item && item.length > 0));
 }
 
 export function removeUndefinedFields<T>(obj: T): T {

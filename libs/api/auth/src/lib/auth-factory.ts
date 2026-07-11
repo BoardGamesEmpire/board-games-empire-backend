@@ -3,6 +3,7 @@ import { passkey } from '@better-auth/passkey';
 import { prismaAdapter } from '@better-auth/prisma-adapter';
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
+import { isTrue, splitTrimFilter } from '@bge/env';
 import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -243,9 +244,9 @@ function buildOptions(configService?: ConfigService) {
 
   const envUrl = process.env.BETTER_AUTH_URL;
   const envSecret = process.env.BETTER_AUTH_SECRET;
-  const envOrigins = process.env.TRUSTED_ORIGINS?.split(',') || [];
-  const envEmailPass = process.env.USE_EMAIL_PASSWORD_AUTH === 'true';
-  const disableOriginCheck = process.env.DISABLE_ORIGIN_CHECK === 'true';
+  const envOrigins = splitTrimFilter(process.env.TRUSTED_ORIGINS ?? '');
+  const envEmailPass = isTrue(process.env.USE_EMAIL_PASSWORD_AUTH);
+  const disableOriginCheck = isTrue(process.env.DISABLE_ORIGIN_CHECK);
 
   return { hostUrl: envUrl, secret: envSecret, trusted: envOrigins, useEmailPass: envEmailPass, disableOriginCheck };
 }

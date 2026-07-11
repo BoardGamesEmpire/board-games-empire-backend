@@ -1,9 +1,9 @@
+import { GameGatewayController, GatewayServiceHost } from '@bge/gateway-host';
 import { Module } from '@nestjs/common';
-import { GameGatewayController } from './game-gateway.controller';
 import { GameGatewayService } from './game-gateway.service';
 
 @Module({
   controllers: [GameGatewayController],
-  providers: [GameGatewayService],
+  providers: [{ provide: GatewayServiceHost, useClass: GameGatewayService }],
 })
 export class GameGatewayModule {}

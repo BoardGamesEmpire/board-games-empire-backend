@@ -109,13 +109,33 @@ export class HouseholdService {
    * @todo refine game selection permissions
    */
   private async getSelectMemberGames(memberId: string, excludedCollectionIds: string[]) {
+    // Sample the 5 collection ids DB-side (ORDER BY random() LIMIT 5) rather
+    // than loading every owned row — with full game descriptions — into memory
+    // just to shuffle and slice. random() is also a uniform sample, unlike the
+    // former `sort(() => 0.5 - Math.random())`, which is biased and O(n log n).
+    const exclusion =
+      excludedCollectionIds.length > 0
+        ? Prisma.sql`AND id NOT IN (${Prisma.join(excludedCollectionIds)})`
+        : Prisma.empty;
+
+    const sampled = await this.db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+      SELECT id FROM game_collections
+      WHERE user_id = ${memberId}
+        AND deleted_at IS NULL
+        ${exclusion}
+      ORDER BY random()
+      LIMIT 5
+    `);
+
+    const sampledIds = sampled.map((row) => row.id);
+    if (sampledIds.length === 0) {
+      return { gameCollections: [], memberId };
+    }
+
+    // Fetch the rich shape for only the sampled rows (order is irrelevant for a
+    // random sample, so `id IN (...)` is fine).
     const gameCollections = await this.db.gameCollection.findMany({
-      where: {
-        userId: memberId,
-        id: { notIn: excludedCollectionIds },
-        // Removed (tombstoned) entries are no longer owned — never household-visible.
-        deletedAt: null,
-      },
+      where: { id: { in: sampledIds } },
       select: {
         id: true,
         platformGame: {
@@ -135,12 +155,8 @@ export class HouseholdService {
       },
     });
 
-    // Random sample of 5
-    const shuffled = gameCollections.sort(() => 0.5 - Math.random());
-    const selectGames = shuffled.slice(0, 5);
-
     return {
-      gameCollections: selectGames,
+      gameCollections,
       memberId,
     };
   }

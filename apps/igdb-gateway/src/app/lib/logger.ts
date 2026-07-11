@@ -1,6 +1,3 @@
-import { bootstrapLogging } from '@bge/logger';
+import { createGatewayLogger } from '@bge/gateway-host';
 
-const baseLogger = bootstrapLogging({ serviceName: 'bge-gateway-igdb' });
-const bootstrapLogger = baseLogger.child({ component: 'bootstrap' });
-
-export { baseLogger, bootstrapLogger };
+export const { baseLogger, bootstrapLogger } = createGatewayLogger('bge-gateway-igdb');

@@ -244,6 +244,56 @@ describe('GameUpsertService', () => {
       expect(db.game.update).toHaveBeenCalled();
     });
 
+    it('bulk-links resolved taxonomy/person ids to the game via createMany', async () => {
+      stubNewGameCreation('game-linked');
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+      taxonomyService.upsertMechanic.mockResolvedValue('mech-1');
+      personService.upsertDesigner.mockResolvedValue('designer-1');
+      db.gameMechanic.createMany.mockResolvedValue({ count: 1 } as never);
+      db.gameDesigner.createMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.upsert(
+        bggGameData({
+          mechanics: [{ externalId: 'm-1', name: 'Trading' }],
+          designers: [{ externalId: 'd-1', name: 'Klaus Teuber' }],
+        }),
+        GATEWAY_ID,
+      );
+
+      expect(taxonomyService.upsertMechanic).toHaveBeenCalledWith({ externalId: 'm-1', name: 'Trading' }, GATEWAY_ID);
+      expect(db.gameMechanic.createMany).toHaveBeenCalledWith({
+        data: [{ gameId: 'game-linked', mechanicId: 'mech-1' }],
+        skipDuplicates: true,
+      });
+      expect(db.gameDesigner.createMany).toHaveBeenCalledWith({
+        data: [{ gameId: 'game-linked', designerId: 'designer-1' }],
+        skipDuplicates: true,
+      });
+    });
+
+    it('dedupes ids that resolve to the same canonical before the createMany batch', async () => {
+      stubNewGameCreation('game-dedup');
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+      // Two distinct source aliases collapse to one canonical mechanic id.
+      taxonomyService.upsertMechanic.mockResolvedValue('mech-shared');
+      db.gameMechanic.createMany.mockResolvedValue({ count: 1 } as never);
+
+      await service.upsert(
+        bggGameData({
+          mechanics: [
+            { externalId: 'm-1', name: 'Trading' },
+            { externalId: 'm-2', name: 'Bartering' },
+          ],
+        }),
+        GATEWAY_ID,
+      );
+
+      expect(db.gameMechanic.createMany).toHaveBeenCalledWith({
+        data: [{ gameId: 'game-dedup', mechanicId: 'mech-shared' }],
+        skipDuplicates: true,
+      });
+    });
+
     it('skips Game update when frozen', async () => {
       stubExistingGame('game-frozen', true);
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);

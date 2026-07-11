@@ -7,7 +7,7 @@ import type {
   WsSearchResultPayload,
   WsSourceDonePayload,
 } from '@bge/game-search';
-import { SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
+import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { createTestingModuleWithDb, makeGame, makeGameWithSource, MockDatabaseService } from '@bge/testing';
 import {
   ContentType,
@@ -44,6 +44,10 @@ describe('GameSearchGateway', () => {
       overrideGuards: [AuthGuard],
       providers: [
         GameSearchGateway,
+        // Real GameSearchService: the gateway delegates its local query + proto
+        // mapping to it (bug #16). It shares the mock DatabaseService provided by
+        // createTestingModuleWithDb, so `db.game.findMany` assertions still hold.
+        GameSearchService,
         {
           provide: GatewayCoordinatorClientService,
           useValue: coordinator,

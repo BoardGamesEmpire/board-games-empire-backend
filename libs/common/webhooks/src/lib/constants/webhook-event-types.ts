@@ -1,3 +1,5 @@
+import { Action, ResourceType } from '@bge/database';
+
 /**
  * Webhook event taxonomy.
  *
@@ -33,6 +35,42 @@ export const WebhookEventType = {
 } as const;
 
 export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
+
+/** The routing/authorization facts a descriptor carries, minus its own name. */
+export type WebhookEventMeta = {
+  /** CASL subject the event concerns (drives the create-time + dispatch checks). */
+  readonly subject: ResourceType;
+  /** Grant a subscriber must hold to receive it — `read` (visibility) by default. */
+  readonly requiredAction: Action;
+};
+
+/**
+ * The single companion to {@link WebhookEventType}: every event's static
+ * routing/authorization facts, keyed by wire name.
+ *
+ * Typed `Record<WebhookEventType, …>`, so the compiler REQUIRES exactly one
+ * entry per event name — a name with no descriptor (or a descriptor with no
+ * name) is a build error, not the silent dispatch no-op it used to be when the
+ * registry maintained a hand-written parallel map. Adding an event is a name
+ * above plus a line here, kept in lockstep by the type system.
+ *
+ * `WebhookEventRegistry` is a thin, injectable view over this table.
+ *
+ * Import lifecycle events use `Job` as their subject — the import Job row is
+ * the thing a subscriber observes (gated by `read:job`); `GameImported` uses
+ * `Game`, since by then the game exists and game read-visibility is the right
+ * audience test. `requiredAction` defaults to `read` (visibility, not mutation,
+ * is the gate); override only for events exposing more sensitive material.
+ */
+export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMeta> = {
+  [WebhookEventType.EventCreated]: { subject: ResourceType.Event, requiredAction: Action.read },
+  [WebhookEventType.EventUpdated]: { subject: ResourceType.Event, requiredAction: Action.read },
+  [WebhookEventType.EventDeleted]: { subject: ResourceType.Event, requiredAction: Action.read },
+  [WebhookEventType.GameImported]: { subject: ResourceType.Game, requiredAction: Action.read },
+  [WebhookEventType.ImportJobStarted]: { subject: ResourceType.Job, requiredAction: Action.read },
+  [WebhookEventType.ImportJobFailed]: { subject: ResourceType.Job, requiredAction: Action.read },
+  [WebhookEventType.ImportBatchCompleted]: { subject: ResourceType.Job, requiredAction: Action.read },
+};
 
 /** Frozen list of every webhook-eligible event name. */
 export const WEBHOOK_EVENT_TYPES: readonly WebhookEventType[] = Object.freeze(Object.values(WebhookEventType));
