@@ -126,6 +126,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
         this.logger.error(
           `Failed to enqueue webhook delivery for subscription ${subscription.id} on "${eventType}" ` +
             `(subject ${event.subjectId}): ${err instanceof Error ? err.message : err}`,
+          err instanceof Error ? err.stack : undefined,
         );
       }
     }

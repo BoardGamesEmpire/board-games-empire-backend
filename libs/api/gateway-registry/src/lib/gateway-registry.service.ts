@@ -165,7 +165,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   disconnect(gatewayId: string): void {
     const cached = this.clients.get(gatewayId);
     if (!cached) {
-      this.logger.warn(`Attempted to disconnect gateway ${gatewayId} but no connection exists`);
+      // Not an error: gateways connect lazily, so an explicit disconnect RPC or
+      // the auto-disable teardown legitimately targets a gateway this instance
+      // never cached. Debug, not warn, to keep normal control flow quiet.
+      this.logger.debug(`Attempted to disconnect gateway ${gatewayId} but no connection exists`);
       return;
     }
 
