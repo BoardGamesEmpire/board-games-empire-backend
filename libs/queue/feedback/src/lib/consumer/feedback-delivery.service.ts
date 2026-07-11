@@ -100,6 +100,18 @@ export class FeedbackDeliveryService {
     // retries and race-free even if the same pair were somehow enqueued twice —
     // the DB constraint, not BullMQ serialization, is the backstop. `update: {}`
     // leaves an existing row (and its attempt counters) untouched.
+    //
+    // Known gap (dormant): if a pair is re-delivered *after* reaching a terminal
+    // state (possible across time — removeOnComplete frees the jobId, see the
+    // dispatcher) and the re-delivery then fails, `recordTerminalFailure` won't
+    // flip the row (it only touches `Pending`), so `lastError`/`attempts` update
+    // while the status stays `Submitted`/`Failed`. It cannot happen today: the
+    // only sink is the local one, which never fails. Deliberately NOT re-armed to
+    // `Pending` on every attempt — that would downgrade a genuinely-`Submitted`
+    // row (external artifact already created) and, if the re-delivery then stalls
+    // (see the processor's stalled-exhaustion gap), strand it as `Pending`. The
+    // correct fix arrives with fallible external sinks (#59): decide per-attempt
+    // authority there rather than blindly resetting status here.
     return this.db.feedbackSubmission.upsert({
       where: { feedbackReportId_sinkSlug: { feedbackReportId, sinkSlug } },
       create: { feedbackReportId, sinkSlug, status: FeedbackSubmissionStatus.Pending },
