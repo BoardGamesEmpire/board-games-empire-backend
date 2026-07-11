@@ -176,6 +176,35 @@ describe('GatewayRegistryService', () => {
       expect(proxy.close).toHaveBeenCalledTimes(1);
     });
 
+    it('discards the freshly-connected client when a config-change event arrives during the ping', async () => {
+      const proxy = makeProxy({ ping: jest.fn() });
+      // `create` is overloaded; its return type doesn't unify with ClientGrpcProxy
+      // (rxjs generic variance), so route the mock value through `never`.
+      jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(proxy as never);
+
+      // Gate the ping so we can inject an 'updated' event while connect() is suspended.
+      let releasePing!: () => void;
+      const pingPending = new Promise<void>((resolve) => (releasePing = resolve));
+      (pingWithRetry as jest.Mock).mockImplementation(async () => {
+        await pingPending;
+        return { status: 'SERVING' };
+      });
+
+      const connecting = service.connect(connectOpts);
+
+      // Mid-connect: nothing is cached yet, so the old 'updated' branch (guarded
+      // by `cached &&`) no-oped and the in-flight connect went on to cache a
+      // client for the now-superseded config. The generation bump must
+      // invalidate it — the same guarantee as the disabled case.
+      await dispatch({ gatewayId: 'bgg', configHash: 'new-hash', changeType: 'updated', timestamp: 0 });
+
+      releasePing();
+      await connecting;
+
+      expect(service.isConnected('bgg')).toBe(false);
+      expect(proxy.close).toHaveBeenCalledTimes(1);
+    });
+
     it('caches the client normally when nothing invalidates it during connect', async () => {
       const proxy = makeProxy({ ping: jest.fn() });
       // `create` is overloaded; its return type doesn't unify with ClientGrpcProxy

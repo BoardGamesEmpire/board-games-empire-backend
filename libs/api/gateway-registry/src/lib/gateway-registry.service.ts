@@ -448,9 +448,25 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // 'created' → nothing cached yet (lazy connect handles first use).
-    // 'updated' → invalidate only when the config actually changed.
-    if (cached && cached.configHash !== event.configHash) {
+    // 'created' → nothing cached yet (lazy connect handles first use), and no
+    //   in-flight connect can be stale (the gateway did not exist before), so
+    //   the connect generation is left untouched.
+    // 'updated' → the config changed. Bump the connect generation so an
+    //   in-flight connect() building the now-superseded config discards its
+    //   result instead of caching it — the same mid-connect race the
+    //   disabled/deleted branch guards, where nothing is cached yet but a
+    //   connect may be mid-ping and about to cache a client for the stale
+    //   config (served until the next event). Skip the bump only when this
+    //   process already holds the current config, where nothing stale can be
+    //   in flight. Then drop any stale cached client so the next call
+    //   reconnects from current config.
+    const configChanged = !cached || cached.configHash !== event.configHash;
+
+    if (event.changeType === 'updated' && configChanged) {
+      this.bumpConnectGeneration(event.gatewayId);
+    }
+
+    if (cached && configChanged) {
       this.logger.log(
         `Gateway ${event.gatewayId} config changed (hash ${cached.configHash} → ${event.configHash}); invalidating local client`,
       );

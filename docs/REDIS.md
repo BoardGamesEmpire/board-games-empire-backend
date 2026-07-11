@@ -97,12 +97,12 @@ REDIS_DATABASE=0
 # Sockets → Valkey
 REDIS_WEBSOCKET_HOST=valkey.internal
 REDIS_WEBSOCKET_PORT=6379
-REDIS_WEBSOCKET_DATABASE=0
+REDIS_WEBSOCKET_DATABASE=1
 
 # Queue → Dragonfly
 REDIS_BULLMQ_HOST=dragonfly.internal
 REDIS_BULLMQ_PORT=6379
-REDIS_BULLMQ_DATABASE=1
+REDIS_BULLMQ_DATABASE=2
 ```
 
 Note that database indices need not match across servers — each connection's
