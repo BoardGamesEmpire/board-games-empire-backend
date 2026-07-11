@@ -18,8 +18,8 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 ## Phase 2 — feedback module completes
 
-9. Feedback module (#77) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.
-10. #70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.
+9. ~~Feedback module (#77) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.~~ Completed in #77: `@bge/feedback` (`POST /feedback/reports`, persistence, server-side redaction, retention sweep, permission-based feedback bans, `feedback.report.submitted` event, and the `FeedbackSubmission` audit model). The report shape generalized beyond bugs to `Bug | Crash | FeatureRequest`.
+10. ~~#70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.~~ Completed: new `@bge/queue-feedback` lib — `FeedbackSink` contract (`submit`, optional category filter, deferred `syncStatus`), `FeedbackSinkRegistry` (index-by-slug, fail-loud), bundled `LocalDatabaseSink`, and BullMQ fan-out (producer in the API — which gained a `BullModule` root — consumer on `ActorAwareWorkerHost` in the worker) with one `FeedbackSubmission` per (report, sink), per-sink failure isolation, and a `@@unique([feedbackReportId, sinkSlug])` backstop. See [docs/FEEDBACK.md](FEEDBACK.md). Deferred to follow-up issues: per-household sink selection + `HouseholdFeedbackSinkConfig` (blocked on #59), sink auto-disable, `syncStatus()` implementation, and a reaper for stalled-`Pending` submissions.
 
 ## Phase 3 — plugin loader (extraction, not invention)
 
