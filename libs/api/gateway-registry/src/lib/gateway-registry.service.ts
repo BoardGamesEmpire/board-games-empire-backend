@@ -50,6 +50,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   // In-flight lazy connects, keyed by gatewayId, so concurrent callers for the
   // same gateway share one connect attempt instead of stampeding the gateway.
   private readonly connecting = new Map<string, Promise<void>>();
+  // Per-gateway invalidation counter. connect() captures this before its async
+  // ping and refuses to cache the freshly-built client if it changed meanwhile
+  // — closing the race where a 'disabled'/'deleted' event arrives mid-connect,
+  // finds nothing cached to tear down, and connect() then caches a client for a
+  // gateway that is no longer valid (served indefinitely until the next event).
+  private readonly connectGeneration = new Map<string, number>();
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(
@@ -68,15 +74,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     await this.configUpdateUnsubscribe?.();
 
     for (const cached of this.clients.values()) {
-      try {
-        cached.proxy.close();
-      } catch (err) {
-        this.logger.warn(`Error closing client for ${cached.gatewayId}: ${err instanceof Error ? err.message : err}`);
-      }
+      this.closeProxy(cached.gatewayId, cached.proxy);
     }
     this.clients.clear();
     this.failures.clear();
     this.connecting.clear();
+    this.connectGeneration.clear();
   }
 
   /**
@@ -92,6 +95,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`Replacing existing connection for gateway ${options.gatewayId}`);
       this.disconnect(options.gatewayId);
     }
+
+    // Snapshot the invalidation counter before the async ping. If a
+    // 'disabled'/'deleted' event bumps it while we await, we must discard the
+    // client we're about to cache rather than serve a now-invalid gateway.
+    const generation = this.connectGeneration.get(options.gatewayId) ?? 0;
 
     this.logger.log(`Connecting to gateway ${options.gatewayId} at ${url} with auth type ${options.authType}`);
     const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
@@ -121,6 +129,21 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
         `Successfully connected to gateway ${options.gatewayId} at ${url}. Response: ${JSON.stringify(response)}`,
       );
 
+      // A 'disabled'/'deleted' event may have arrived while we awaited the ping.
+      // If so, this gateway must not be cached here — discard the freshly-built
+      // client instead of leaving a live connection to an invalidated gateway.
+      // Return (do not throw): throwing would route through the catch below and
+      // wrongly count a legitimate invalidation as a connection failure. The
+      // caller (resolveProxy) then sees no cached client and treats the gateway
+      // as unavailable, which is correct.
+      if ((this.connectGeneration.get(options.gatewayId) ?? 0) !== generation) {
+        this.logger.warn(
+          `Gateway ${options.gatewayId} was invalidated while connecting; discarding the new client`,
+        );
+        this.closeProxy(options.gatewayId, proxy);
+        return;
+      }
+
       this.clients.set(options.gatewayId, {
         gatewayId: options.gatewayId,
         proxy,
@@ -142,17 +165,25 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   disconnect(gatewayId: string): void {
     const cached = this.clients.get(gatewayId);
     if (!cached) {
-      this.logger.warn(`Attempted to disconnect gateway ${gatewayId} but no connection exists`);
+      // Not an error: gateways connect lazily, so an explicit disconnect RPC or
+      // the auto-disable teardown legitimately targets a gateway this instance
+      // never cached. Debug, not warn, to keep normal control flow quiet.
+      this.logger.debug(`Attempted to disconnect gateway ${gatewayId} but no connection exists`);
       return;
     }
 
+    this.closeProxy(gatewayId, cached.proxy);
+    this.clients.delete(gatewayId);
+    this.logger.log(`Gateway ${gatewayId} disconnected`);
+  }
+
+  /** Best-effort proxy teardown — never throws, just logs a close failure. */
+  private closeProxy(gatewayId: string, proxy: ClientGrpcProxy): void {
     try {
-      cached.proxy.close();
+      proxy.close();
     } catch (err) {
       this.logger.warn(`Error closing client for ${gatewayId}: ${err instanceof Error ? err.message : err}`);
     }
-    this.clients.delete(gatewayId);
-    this.logger.log(`Gateway ${gatewayId} disconnected`);
   }
 
   /**
@@ -229,6 +260,15 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       authType: gateway.authType,
       authParameters: gateway.authParameters ?? undefined,
     });
+  }
+
+  /**
+   * Advances the invalidation counter for a gateway. Any connect() that
+   * captured an earlier value will refuse to cache its result — see the
+   * generation check in {@link connect}.
+   */
+  private bumpConnectGeneration(gatewayId: string): void {
+    this.connectGeneration.set(gatewayId, (this.connectGeneration.get(gatewayId) ?? 0) + 1);
   }
 
   isConnected(gatewayId: string): boolean {
@@ -376,6 +416,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
 
     // Disable / delete events invalidate regardless of hash.
     if (event.changeType === 'disabled' || event.changeType === 'deleted') {
+      // Bump first, unconditionally: even with nothing cached yet, an in-flight
+      // connect() may be mid-ping and about to cache a client. Bumping the
+      // generation makes that connect discard its result instead of serving a
+      // disabled/deleted gateway indefinitely.
+      this.bumpConnectGeneration(event.gatewayId);
       if (cached) {
         this.logger.log(`Gateway ${event.gatewayId} ${event.changeType} elsewhere; invalidating local client`);
         this.disconnect(event.gatewayId);
@@ -406,9 +451,25 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // 'created' → nothing cached yet (lazy connect handles first use).
-    // 'updated' → invalidate only when the config actually changed.
-    if (cached && cached.configHash !== event.configHash) {
+    // 'created' → nothing cached yet (lazy connect handles first use), and no
+    //   in-flight connect can be stale (the gateway did not exist before), so
+    //   the connect generation is left untouched.
+    // 'updated' → the config changed. Bump the connect generation so an
+    //   in-flight connect() building the now-superseded config discards its
+    //   result instead of caching it — the same mid-connect race the
+    //   disabled/deleted branch guards, where nothing is cached yet but a
+    //   connect may be mid-ping and about to cache a client for the stale
+    //   config (served until the next event). Skip the bump only when this
+    //   process already holds the current config, where nothing stale can be
+    //   in flight. Then drop any stale cached client so the next call
+    //   reconnects from current config.
+    const configChanged = !cached || cached.configHash !== event.configHash;
+
+    if (event.changeType === 'updated' && configChanged) {
+      this.bumpConnectGeneration(event.gatewayId);
+    }
+
+    if (cached && configChanged) {
       this.logger.log(
         `Gateway ${event.gatewayId} config changed (hash ${cached.configHash} → ${event.configHash}); invalidating local client`,
       );

@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -26,7 +26,7 @@ export class EventController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Event))
   @Get()
-  getEvents(@Query() pagination: PaginationQueryDto) {
+  getEvents(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.eventService.getEvents(pagination)).pipe(map((events) => ({ events })));
   }
 

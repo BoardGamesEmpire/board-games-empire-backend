@@ -2,7 +2,9 @@ import type { Actor, ActorContextInit, AuditContextInternalService } from '@bge/
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { Metadata } from '@grpc/grpc-js';
 import { BadRequestException, type CallHandler, type ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { firstValueFrom, of } from 'rxjs';
+import { SKIP_ACTOR_CONTEXT_KEY } from '../decorators/skip-actor-context.decorator';
 import { GrpcInternalActorInterceptor, validateActorShape } from './grpc-internal-actor.interceptor';
 
 interface MockAuditContext {
@@ -42,8 +44,14 @@ const buildCallHandler = (): jest.Mocked<CallHandler> => ({
   handle: jest.fn(() => of('next-result')),
 });
 
-const buildInterceptor = (auditContext: MockAuditContext): GrpcInternalActorInterceptor =>
-  new GrpcInternalActorInterceptor(auditContext as unknown as AuditContextInternalService);
+const buildReflector = (skip = false): Reflector =>
+  ({ getAllAndOverride: jest.fn().mockReturnValue(skip) }) as unknown as Reflector;
+
+const buildInterceptor = (
+  auditContext: MockAuditContext,
+  reflector: Reflector = buildReflector(),
+): GrpcInternalActorInterceptor =>
+  new GrpcInternalActorInterceptor(auditContext as unknown as AuditContextInternalService, reflector);
 
 describe('GrpcInternalActorInterceptor', () => {
   describe('happy path — actor extraction', () => {
@@ -207,6 +215,32 @@ describe('GrpcInternalActorInterceptor', () => {
 
       expect(() => interceptor.intercept(buildRpcExecutionContext(metadata), buildCallHandler())).toThrow(
         BadRequestException,
+      );
+    });
+  });
+
+  describe('@SkipActorContext exemption', () => {
+    it('bypasses actor extraction and passes through to next.handle() for a marked handler', async () => {
+      const auditContext = buildMockAuditContext();
+      const reflector = buildReflector(true);
+      const interceptor = buildInterceptor(auditContext, reflector);
+      const next = buildCallHandler();
+      // A health probe: no x-bge-actor metadata at all. Without the exemption
+      // this would throw UnauthorizedException.
+      const result = interceptor.intercept(buildRpcExecutionContext(buildMetadata()), next);
+      await firstValueFrom(result);
+
+      expect(reflector.getAllAndOverride).toHaveBeenCalledWith(SKIP_ACTOR_CONTEXT_KEY, expect.any(Array));
+      expect(auditContext.runWith).not.toHaveBeenCalled();
+      expect(next.handle).toHaveBeenCalledTimes(1);
+    });
+
+    it('still enforces actor context for handlers that are NOT marked', () => {
+      const auditContext = buildMockAuditContext();
+      const interceptor = buildInterceptor(auditContext, buildReflector(false));
+
+      expect(() => interceptor.intercept(buildRpcExecutionContext(buildMetadata()), buildCallHandler())).toThrow(
+        UnauthorizedException,
       );
     });
   });

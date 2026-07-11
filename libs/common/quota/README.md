@@ -36,7 +36,7 @@ Net effect — the "painless" path: set **one** `Server` (or per-scope) default 
 ### Soft / hard / enforced
 
 - `enforced: false` — master off switch; the row is ignored (unlimited) without deleting it.
-- `softOverage: true` — warn-but-allow: the write proceeds and a `quota.soft_overage.v1` event fires on **every** over-limit check.
+- `softOverage: true` — warn-but-allow: the write proceeds and a `quota.soft_overage.v1` event fires on **every** over-limit call. `check()` emits it eagerly (read path); the transactional `consume()` gate does **not** emit — it returns the warning on `result.softOverages` so the caller emits it via `quota.emitSoftOverages(...)` after commit, and it never fires for a rolled-back write.
 - `softOverage: false` (default) — hard block: `check()` returns `allowed: false`.
 
 ---
@@ -105,11 +105,12 @@ interface QuotaCheckResult {
   limit: bigint | null; // limit at the binding scope
   softOverage: boolean;
   constraints: readonly QuotaConstraint[]; // per-scope breakdown
+  softOverages: readonly QuotaSoftOverageEvent[]; // soft caps crossed, ready to emit
 }
 ```
 
-- No row anywhere → `{ allowed: true, scope: null, limit: null, constraints: [] }`.
-- Soft overage → `allowed: true`, but a `quota.soft_overage.v1` event was emitted.
+- No row anywhere → `{ allowed: true, scope: null, limit: null, constraints: [], softOverages: [] }`.
+- Soft overage → `allowed: true`; the warning(s) ride on `result.softOverages`. `check()` has already emitted them; a `consume()` caller emits them with `quota.emitSoftOverages(result.softOverages)` after its transaction commits.
 - A `check()` for a **pending** resource (registered but not yet measurable — see below) **throws**. This is deliberate: no write path should be enforcing a resource that has no usage provider yet.
 
 ---
@@ -195,10 +196,10 @@ private async countOwnedGames(_scope: QuotaScope, scopeId: string): Promise<bigi
 
 Emitted on `EventEmitter2`:
 
-| Event                   | Constant                  | When                                      |
-| ----------------------- | ------------------------- | ----------------------------------------- |
-| `quota.updated.v1`      | `QuotaEvents.Updated`     | a cap is created/changed (auditable)      |
-| `quota.soft_overage.v1` | `QuotaEvents.SoftOverage` | every `check()` that crosses a soft limit |
+| Event                   | Constant                  | When                                                                                  |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------- |
+| `quota.updated.v1`      | `QuotaEvents.Updated`     | a cap is created/changed (auditable)                                                  |
+| `quota.soft_overage.v1` | `QuotaEvents.SoftOverage` | over-limit soft call — `check()` emits eagerly; `consume()` caller emits after commit |
 
 Payloads carry `bigint` fields as strings and surface `scopeId` as `null` for defaults. The full change history with actor lives in the audit log (#57) via the auditable `quota.updated.v1` event — the `createdById` / `updatedById` row columns are current-state attribution, not a history substitute.
 
@@ -238,7 +239,7 @@ await expect(service.check('storage_bytes', 1n, { userId: 'user_1' })).resolves.
 
 ## API surface
 
-- `QuotaService` — `check`, `getQuotas`, `setQuota`
+- `QuotaService` — `check`, `consume`, `emitSoftOverages`, `getQuotas`, `setQuota`
 - `QuotaResourceRegistry` — `has`, `require`, `requireUsage`, `keys`
 - `QuotaExceededException` — `402`, carries the binding constraint (bigints as strings)
 - Constants — `QUOTA_RESOURCES`, `QuotaResource`, `isQuotaResource`, `DEFAULT_SCOPE_ID`, `QuotaEvents`

@@ -62,7 +62,10 @@ export class QuotaService {
       return this.unconstrained();
     }
 
-    return this.evaluate(this.databaseService, resource, usage, applicable, amount);
+    // Read path — no transaction to roll back, so warn eagerly (warn-every).
+    const result = await this.evaluate(this.databaseService, resource, usage, applicable, amount);
+    this.emitSoftOverages(result.softOverages);
+    return result;
   }
 
   /**
@@ -106,6 +109,9 @@ export class QuotaService {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(${key})`;
     }
 
+    // Runs inside the caller's transaction — do NOT emit here. Any soft-overage
+    // warnings ride back on `result.softOverages`; the caller emits them via
+    // `emitSoftOverages` after commit, so they never fire for a rolled-back write.
     return this.evaluate(tx, resource, usage, applicable, amount);
   }
 
@@ -139,7 +145,12 @@ export class QuotaService {
     return applicable;
   }
 
-  /** Measures usage (via `executor`), builds constraints, emits soft-overage, picks the binding. */
+  /**
+   * Measures usage (via `executor`), builds constraints, collects soft-overage
+   * warnings, and picks the binding. It does NOT emit: emission is the caller's
+   * to time. `check()` emits immediately; `consume()` hands the warnings back so
+   * the caller emits them after its transaction commits (see `QuotaCheckResult`).
+   */
   private async evaluate(
     executor: QuotaExecutor,
     resource: QuotaResource,
@@ -161,16 +172,19 @@ export class QuotaService {
       };
     });
 
-    for (const violation of constraints.filter((c) => c.exceeded && c.softOverage)) {
-      this.eventEmitter.emit(QuotaEvents.SoftOverage, {
-        scope: violation.scope,
-        scopeId: toPublicScopeId(violation.scopeId),
-        resource,
-        currentUsage: violation.currentUsage.toString(),
-        attemptedAmount: amount.toString(),
-        limit: violation.limit.toString(),
-      } satisfies QuotaSoftOverageEvent);
-    }
+    const softOverages = constraints
+      .filter((c) => c.exceeded && c.softOverage)
+      .map(
+        (violation) =>
+          ({
+            scope: violation.scope,
+            scopeId: toPublicScopeId(violation.scopeId),
+            resource,
+            currentUsage: violation.currentUsage.toString(),
+            attemptedAmount: amount.toString(),
+            limit: violation.limit.toString(),
+          }) satisfies QuotaSoftOverageEvent,
+      );
 
     const hardViolations = constraints.filter((c) => c.exceeded && !c.softOverage);
     const binding = this.pickBinding(hardViolations.length > 0 ? hardViolations : constraints);
@@ -182,7 +196,20 @@ export class QuotaService {
       limit: binding.limit,
       softOverage: binding.softOverage,
       constraints,
+      softOverages,
     };
+  }
+
+  /**
+   * Emits the soft-overage warnings a `check()`/`consume()` collected.
+   * `check()` calls this itself (read path). A `consume()` caller MUST call it
+   * only AFTER its transaction commits — the warnings describe usage a rollback
+   * would undo. No-op on an empty list.
+   */
+  emitSoftOverages(events: readonly QuotaSoftOverageEvent[]): void {
+    for (const event of events) {
+      this.eventEmitter.emit(QuotaEvents.SoftOverage, event);
+    }
   }
 
   /** Stable signed-64-bit key for pg_advisory_xact_lock(bigint). A collision only
@@ -412,6 +439,14 @@ export class QuotaService {
   }
 
   private unconstrained(): QuotaCheckResult {
-    return { allowed: true, scope: null, currentUsage: null, limit: null, softOverage: false, constraints: [] };
+    return {
+      allowed: true,
+      scope: null,
+      currentUsage: null,
+      limit: null,
+      softOverage: false,
+      constraints: [],
+      softOverages: [],
+    };
   }
 }

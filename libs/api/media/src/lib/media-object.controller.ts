@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
   Body,
@@ -86,7 +86,7 @@ export class MediaObjectController {
 
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
   @Get()
-  list(@Query() pagination: PaginationQueryDto) {
+  list(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.media.list(pagination)).pipe(map((items) => ({ media: items.map(toMediaObjectResponse) })));
   }
 

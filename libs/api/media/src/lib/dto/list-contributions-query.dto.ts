@@ -1,9 +1,9 @@
 import { MediaContributionStatus } from '@bge/database';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional } from 'class-validator';
 
-export class ListContributionsQueryDto extends PaginationQueryDto {
+export class ListContributionsQueryDto extends DefaultPaginationQueryDto {
   @ApiPropertyOptional({ enum: MediaContributionStatus })
   @IsOptional()
   @IsEnum(MediaContributionStatus)

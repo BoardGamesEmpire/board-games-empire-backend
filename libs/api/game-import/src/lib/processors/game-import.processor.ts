@@ -1,5 +1,6 @@
 import { DatabaseService, JobStatus, Prisma } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
+import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
@@ -191,70 +192,74 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
 
     // Reconstruct the originating actor's CLS scope so the failure DB write and
     // the JobFailed event are attributed to the user who triggered the import,
-    // mirroring the successful path in processJob.
-    return this.runInActorScope(job, async () => {
-      this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);
+    // mirroring the successful path in processJob. Guarded so an error in the
+    // bookkeeping/emit path can't escape this `failed` listener as an unhandled
+    // rejection and crash the worker (taking down every in-flight job with it).
+    await guardWorkerEvent(this.logger, `game import job ${jobId} terminal-failure handling`, () =>
+      this.runInActorScope(job, async () => {
+        this.logger.error(`Import job failed: jobId=${jobId}`, error.stack);
 
-      const sanitized = sanitizeImportError(error, 'persist');
-      const persistedFailure: PersistedJobFailure = { errorCode: sanitized.code, error: sanitized.message };
+        const sanitized = sanitizeImportError(error, 'persist');
+        const persistedFailure: PersistedJobFailure = { errorCode: sanitized.code, error: sanitized.message };
 
-      // Guarded transition: this event also fires for deferred cascade
-      // failures (failParentOnFailure re-queues the parent with a `defa`
-      // marker and the worker fails it here). When the fetch processor
-      // already marked this row Failed with the real gateway error, skip —
-      // don't overwrite it with the vaguer "child ... failed" message or
-      // re-emit events for an already-terminal job.
-      //
-      // `error` (raw, DB column only) is for operator debugging via direct
-      // DB access. `result` (sanitized) is what GET /games/import/:batchId
-      // — deliberately not owner-scoped — actually returns; the raw column
-      // must never be serialized into that response.
-      const transitioned = await this.db.job.updateMany({
-        where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
-        data: {
-          status: JobStatus.Failed,
-          error: error.message,
-          result: persistedFailure as unknown as Prisma.InputJsonValue,
-        },
-      });
-
-      if (transitioned.count === 0) {
-        return;
-      }
-
-      // Base failure: cancel any still-Pending expansion rows this base
-      // spawned. In the common cases the base never persisted, so no expansion
-      // rows exist and this is a no-op — but it guarantees the batch can't hang
-      // Running forever on orphaned children (e.g. a crash after row creation
-      // but before their flows enqueued, with retries then exhausted).
-      //
-      // Deliberately scoped to Pending only: an expansion already Running when
-      // this sweep fires is left alone and proceeds to its own guarded
-      // markRunning/markCompleted normally — it was never a cancellation
-      // target, not "healing" from one. Conversely, a Pending row this sweep
-      // does cancel is safe from resurrection: markRunning/markCompleted only
-      // transition rows still in [Pending, Running], so they silently no-op
-      // against an already-Cancelled row instead of overwriting it.
-      if (job.name === JobNames.GameImport) {
-        const cancellation: PersistedJobFailure = {
-          errorCode: ImportErrorCode.BaseImportFailed,
-          error: importErrorMessage(ImportErrorCode.BaseImportFailed),
-        };
-        await this.db.job.updateMany({
-          where: { parentJobId: jobId, status: JobStatus.Pending },
-          data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
+        // Guarded transition: this event also fires for deferred cascade
+        // failures (failParentOnFailure re-queues the parent with a `defa`
+        // marker and the worker fails it here). When the fetch processor
+        // already marked this row Failed with the real gateway error, skip —
+        // don't overwrite it with the vaguer "child ... failed" message or
+        // re-emit events for an already-terminal job.
+        //
+        // `error` (raw, DB column only) is for operator debugging via direct
+        // DB access. `result` (sanitized) is what GET /games/import/:batchId
+        // — deliberately not owner-scoped — actually returns; the raw column
+        // must never be serialized into that response.
+        const transitioned = await this.db.job.updateMany({
+          where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
+          data: {
+            status: JobStatus.Failed,
+            error: error.message,
+            result: persistedFailure as unknown as Prisma.InputJsonValue,
+          },
         });
-      }
 
-      emitJobFailedEvents(
-        this.events,
-        { jobId, batchId, externalId, gatewayId, isExpansion: job.name === JobNames.ExpansionImport },
-        sanitized,
-        initiatedAt,
-      );
+        if (transitioned.count === 0) {
+          return;
+        }
 
-      await this.batchCompletion.checkAndEmit(batchId);
-    });
+        // Base failure: cancel any still-Pending expansion rows this base
+        // spawned. In the common cases the base never persisted, so no expansion
+        // rows exist and this is a no-op — but it guarantees the batch can't hang
+        // Running forever on orphaned children (e.g. a crash after row creation
+        // but before their flows enqueued, with retries then exhausted).
+        //
+        // Deliberately scoped to Pending only: an expansion already Running when
+        // this sweep fires is left alone and proceeds to its own guarded
+        // markRunning/markCompleted normally — it was never a cancellation
+        // target, not "healing" from one. Conversely, a Pending row this sweep
+        // does cancel is safe from resurrection: markRunning/markCompleted only
+        // transition rows still in [Pending, Running], so they silently no-op
+        // against an already-Cancelled row instead of overwriting it.
+        if (job.name === JobNames.GameImport) {
+          const cancellation: PersistedJobFailure = {
+            errorCode: ImportErrorCode.BaseImportFailed,
+            error: importErrorMessage(ImportErrorCode.BaseImportFailed),
+          };
+          await this.db.job.updateMany({
+            where: { parentJobId: jobId, status: JobStatus.Pending },
+            data: { status: JobStatus.Cancelled, result: cancellation as unknown as Prisma.InputJsonValue },
+          });
+        }
+
+        emitJobFailedEvents(
+          this.events,
+          { jobId, batchId, externalId, gatewayId, isExpansion: job.name === JobNames.ExpansionImport },
+          sanitized,
+          initiatedAt,
+        );
+
+        await this.batchCompletion.checkAndEmit(batchId);
+      }),
+    );
   }
 
   /**

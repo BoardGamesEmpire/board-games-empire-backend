@@ -42,13 +42,19 @@ export class FriendshipService {
    *   acting user.
    *
    * The reject-or-repurpose decision is a check-then-act that cannot be atomic
-   * on its own, so the write is an `upsert` keyed on the unique `pairKey`: the
-   * database serializes concurrent opposite-direction requests onto one row
-   * (`INSERT … ON CONFLICT DO UPDATE`), and any residual unique collision is
-   * mapped to a 409 rather than surfacing as a raw 500. The whole operation is
-   * gated by `create` authority (reactivation is a new request, not an edit of
-   * someone's existing row — the `pairKey` can only match a row the acting user
-   * is already part of), so it deliberately does not apply update-scoping.
+   * on its own, so the write is an `upsert` keyed on the unique `pairKey`, but
+   * its `where` also pins the row to the two repurposable statuses
+   * (`Declined`/`Withdrawn`). This makes the reactivation decision atomic rather
+   * than trusting the possibly-stale switch above: if a concurrent request has
+   * moved the row to `Pending`/`Accepted`/`Blocked` since we read it, the update
+   * branch no longer matches, Prisma falls through to `create`, and the
+   * `pairKey` unique constraint is hit — mapped to a 409 instead of silently
+   * clobbering that row's status back to `Pending`. The unique collision on a
+   * genuine concurrent create (neither side saw a row) is mapped the same way.
+   * The whole operation is gated by `create` authority (reactivation is a new
+   * request, not an edit of someone's existing row — the `pairKey` can only
+   * match a row the acting user is already part of), so it deliberately does not
+   * apply update-scoping.
    */
   async create({ addresseeId, message }: CreateFriendRequestDto) {
     const requesterId = this.abilityService.getActingUserId();
@@ -89,7 +95,10 @@ export class FriendshipService {
 
     try {
       return await this.db.friendship.upsert({
-        where: { pairKey },
+        // The status filter guards the update branch: it only reactivates a row
+        // still in a repurposable state, so a concurrently-created Pending or a
+        // just-set Blocked/Accepted row can't be silently flipped back.
+        where: { pairKey, status: { in: [FriendshipStatus.Declined, FriendshipStatus.Withdrawn] } },
         create: { ...requestData, pairKey },
         update: { ...requestData, respondedAt: null },
         include: this.participantInclude,

@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { CACHE_MANAGER, Cache } from '@nestjs/cache-manager';
 import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -27,7 +27,7 @@ export class HouseholdController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get()
-  getHouseholdsForUser(@Query() pagination: PaginationQueryDto) {
+  getHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.householdService.getHouseholdsForUser(pagination)).pipe(map((households) => ({ households })));
   }
 

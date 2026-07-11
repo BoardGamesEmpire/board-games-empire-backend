@@ -1,4 +1,11 @@
-import { ContentType, DatabaseService, ExpansionType, Prisma, Visibility } from '@bge/database';
+import {
+  ContentType,
+  DatabaseService,
+  ExpansionType,
+  isPrismaUniqueConstraintError,
+  Prisma,
+  Visibility,
+} from '@bge/database';
 import { DlcData, type GameData, ContentType as ProtoContentType } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
@@ -65,48 +72,79 @@ export class GameUpsertService {
     gameData: GameData,
     gatewayId: string,
   ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
-    const existingSource = await this.db.gameSource.findUnique({
-      where: { gatewayId_externalId: { gatewayId, externalId: gameData.externalId } },
-      select: { gameId: true, game: { select: { id: true, frozenAt: true } } },
-    });
-
+    const existingSource = await this.findGameSource(gatewayId, gameData.externalId);
     if (existingSource) {
-      const { game } = existingSource;
-      if (game.frozenAt) {
-        this.logger.debug(`Skipped update for frozen game id=${game.id}`);
-      } else {
-        await this.db.game.update({
-          where: { id: game.id },
-          data: this.buildUpdateInput(gameData),
-        });
-      }
-
-      return {
-        gameId: game.id,
-        gameCreated: false,
-        sourceCreated: false,
-      };
+      return this.applyExistingGameUpdate(existingSource.game, gameData);
     }
 
-    const game = await this.db.game.create({
-      data: {
-        ...this.buildCreateInput(gameData),
-        gameSources: {
-          create: {
-            gatewayId,
-            externalId: gameData.externalId,
-            sourceUrl: gameData.sourceUrl,
+    try {
+      const game = await this.db.game.create({
+        data: {
+          ...this.buildCreateInput(gameData),
+          gameSources: {
+            create: {
+              gatewayId,
+              externalId: gameData.externalId,
+              sourceUrl: gameData.sourceUrl,
+            },
           },
         },
-      },
-      select: { id: true },
-    });
+        select: { id: true },
+      });
 
-    this.logger.debug(`Created game id=${game.id} externalId=${gameData.externalId}`);
+      this.logger.debug(`Created game id=${game.id} externalId=${gameData.externalId}`);
+      return {
+        gameId: game.id,
+        gameCreated: true,
+        sourceCreated: true,
+      };
+    } catch (error) {
+      // A concurrent duplicate import can win the race between our findUnique
+      // and this create, tripping the GameSource(gatewayId, externalId) unique
+      // constraint (the only unique on this write — Game itself has none).
+      // Recover like TaxonomyUpsertService: re-fetch the winner and fall
+      // through to the update path, so the losing job reports success for a
+      // game that IS now in the system instead of failing terminally and
+      // notifying the user ImportFailed (import jobs are single-attempt).
+      if (isPrismaUniqueConstraintError(error)) {
+        const raced = await this.findGameSource(gatewayId, gameData.externalId);
+        if (raced) {
+          this.logger.debug(
+            `Concurrent import race for externalId=${gameData.externalId}; recovered game id=${raced.game.id}`,
+          );
+          return this.applyExistingGameUpdate(raced.game, gameData);
+        }
+      }
+
+      throw error;
+    }
+  }
+
+  private findGameSource(gatewayId: string, externalId: string) {
+    return this.db.gameSource.findUnique({
+      where: { gatewayId_externalId: { gatewayId, externalId } },
+      select: { gameId: true, game: { select: { id: true, frozenAt: true } } },
+    });
+  }
+
+  /** Applies the re-import update path to an already-persisted game (skipping frozen rows). */
+  private async applyExistingGameUpdate(
+    game: { id: string; frozenAt: Date | null },
+    gameData: GameData,
+  ): Promise<{ gameId: string; gameCreated: boolean; sourceCreated: boolean }> {
+    if (game.frozenAt) {
+      this.logger.debug(`Skipped update for frozen game id=${game.id}`);
+    } else {
+      await this.db.game.update({
+        where: { id: game.id },
+        data: this.buildUpdateInput(gameData),
+      });
+    }
+
     return {
       gameId: game.id,
-      gameCreated: true,
-      sourceCreated: true,
+      gameCreated: false,
+      sourceCreated: false,
     };
   }
 

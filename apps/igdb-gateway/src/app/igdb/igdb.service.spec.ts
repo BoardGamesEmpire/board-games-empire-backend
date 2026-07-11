@@ -4,20 +4,22 @@ import { Http } from '@status/codes';
 import { AxiosError, AxiosHeaders } from 'axios';
 import { firstValueFrom } from 'rxjs';
 import type { IgdbGame } from '../types';
-import { IGDB_CLIENT } from './constants';
+import { IGDB_CLIENT_FACTORY } from './constants';
 import { IgdbAuthService } from './igdb-auth.service';
-import { IGDBService, type IgdbRequest } from './igdb.service';
+import { IGDBService, type IgdbClientFactory, type IgdbRequest } from './igdb.service';
 import type { IGDBClient } from './interfaces/';
 
 describe('IGDBService', () => {
   let service: IGDBService;
   let mockClient: jest.Mocked<Pick<IGDBClient, 'request'>>;
+  let clientFactory: jest.MockedFunction<IgdbClientFactory>;
   let mockAuthService: jest.Mocked<IgdbAuthService>;
 
   const MOCK_GAMES: IgdbGame[] = [{ id: 1, name: 'Hades' }];
 
   beforeEach(async () => {
     mockClient = { request: jest.fn() };
+    clientFactory = jest.fn().mockReturnValue(mockClient) as jest.MockedFunction<IgdbClientFactory>;
 
     mockAuthService = {
       fetchAccessToken: jest.fn().mockResolvedValue({
@@ -30,7 +32,7 @@ describe('IGDBService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         IGDBService,
-        { provide: IGDB_CLIENT, useValue: mockClient },
+        { provide: IGDB_CLIENT_FACTORY, useValue: clientFactory },
         { provide: IgdbAuthService, useValue: mockAuthService },
         {
           provide: ConfigService,
@@ -45,6 +47,11 @@ describe('IGDBService', () => {
     }).compile();
 
     service = module.get<IGDBService>(IGDBService);
+
+    // Seed the initial access token as the app lifecycle would, then reset the
+    // auth mock so per-test refresh assertions start from zero.
+    await service.onModuleInit();
+    mockAuthService.fetchAccessToken.mockClear();
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -54,6 +61,29 @@ describe('IGDBService', () => {
       const request = makeRequest(MOCK_GAMES);
       await firstValueFrom(service.call(request));
       expect(request).toHaveBeenCalledWith(mockClient);
+    });
+
+    it('builds the client with the current access token', async () => {
+      await firstValueFrom(service.call(makeRequest(MOCK_GAMES)));
+      expect(clientFactory).toHaveBeenCalledWith('new-token');
+    });
+
+    it('builds a fresh client per call so concurrent requests cannot share builder state', async () => {
+      const clientsSeen: IGDBClient[] = [];
+      clientFactory.mockImplementation(
+        () => ({ request: jest.fn().mockResolvedValue({ data: MOCK_GAMES }) }) as unknown as IGDBClient,
+      );
+
+      const request: IgdbRequest<IgdbGame[]> = jest.fn(async (client) => {
+        clientsSeen.push(client);
+        return MOCK_GAMES;
+      });
+
+      await Promise.all([firstValueFrom(service.call(request)), firstValueFrom(service.call(request))]);
+
+      expect(clientFactory).toHaveBeenCalledTimes(2);
+      expect(clientsSeen).toHaveLength(2);
+      expect(clientsSeen[0]).not.toBe(clientsSeen[1]);
     });
 
     it('resolves with the value returned by the request function', async () => {

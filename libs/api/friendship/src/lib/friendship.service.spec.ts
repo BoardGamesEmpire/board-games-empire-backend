@@ -90,9 +90,14 @@ describe('FriendshipService', () => {
       await service.create({ addresseeId: OTHER });
 
       // Upsert is keyed on the canonical pair key and reactivates via the update
-      // branch; an omitted message resets to null (not left unchanged).
+      // branch; an omitted message resets to null (not left unchanged). The
+      // where pins the row to a repurposable status so a concurrent write can't
+      // be clobbered (see the guard test below).
       const call = db.friendship.upsert.mock.calls[0][0];
-      expect(call.where).toEqual({ pairKey: [ME, OTHER].sort().join(':') });
+      expect(call.where).toEqual({
+        pairKey: [ME, OTHER].sort().join(':'),
+        status: { in: [FriendshipStatus.Declined, FriendshipStatus.Withdrawn] },
+      });
       expect(call.update).toEqual(
         expect.objectContaining({
           requesterId: ME,
@@ -123,6 +128,25 @@ describe('FriendshipService', () => {
       db.friendship.upsert.mockRejectedValue(uniqueViolation());
 
       await expect(service.create({ addresseeId: OTHER })).rejects.toThrow(ConflictException);
+    });
+
+    // Regression: the pre-check runs on a stale snapshot, so the upsert's update
+    // branch must only fire on a row still Declined/Withdrawn. Pinning the where
+    // to those statuses means a row a concurrent request moved to
+    // Pending/Accepted/Blocked no longer matches — it falls through to create and
+    // the pairKey unique constraint yields a 409 instead of a silent status flip.
+    it('restricts the upsert update branch to repurposable statuses', async () => {
+      db.user.findUnique.mockResolvedValue(acceptingUser as never);
+      db.friendship.findUnique.mockResolvedValue(null);
+      db.friendship.upsert.mockResolvedValue(friendship());
+
+      await service.create({ addresseeId: OTHER });
+
+      const call = db.friendship.upsert.mock.calls[0][0];
+      expect(call.where).toEqual({
+        pairKey: [ME, OTHER].sort().join(':'),
+        status: { in: [FriendshipStatus.Declined, FriendshipStatus.Withdrawn] },
+      });
     });
   });
 

@@ -1,6 +1,7 @@
 import { DatabaseService, JobStatus, Prisma } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
+import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
@@ -111,7 +112,17 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
       this.logger.log(`${job.name} jobId=${jobId} externalId=${externalId} — fetch complete`);
       return response.game;
     } catch (err) {
-      await this.gatewayRegistry.reportFailure(gatewayId, err);
+      // A clean "no game found" (the NotFoundException thrown above) means the
+      // gateway answered correctly — the external id simply doesn't exist there.
+      // That is a HEALTHY interaction, not a gateway failure: counting it toward
+      // auto-disable would let a handful of bad ids (retried per BullMQ attempts)
+      // trip the failure threshold and disable a perfectly healthy gateway for
+      // every user. Only genuine call/transport errors feed failure tracking.
+      if (err instanceof NotFoundException) {
+        this.gatewayRegistry.reportSuccess(gatewayId);
+      } else {
+        await this.gatewayRegistry.reportFailure(gatewayId, err);
+      }
       throw err;
     }
   }
@@ -134,54 +145,63 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
     const initiatedAt = new Date();
 
     // Attribute the failure DB write to the originating actor, mirroring the
-    // CLS scope opened around the successful fetch path in processJob.
-    await this.runInActorScope(job, async () => {
-      this.logger.error(`${job.name} jobId=${jobId} failed permanently`, error.stack);
+    // CLS scope opened around the successful fetch path in processJob. Guarded
+    // so an error in the bookkeeping/emit path can't escape this `failed`
+    // listener as an unhandled rejection and crash the worker.
+    await guardWorkerEvent(this.logger, `game fetch job ${jobId} terminal-failure handling`, () =>
+      this.runInActorScope(job, async () => {
+        this.logger.error(`${job.name} jobId=${jobId} failed permanently`, error.stack);
 
-      const isExpansion = job.name === JobNames.ExpansionFetch;
-      const sanitized = sanitizeImportError(error, 'fetch');
-      const persistedFailure: PersistedJobFailure = { errorCode: sanitized.code, error: sanitized.message };
+        const isExpansion = job.name === JobNames.ExpansionFetch;
+        const sanitized = sanitizeImportError(error, 'fetch');
+        const persistedFailure: PersistedJobFailure = { errorCode: sanitized.code, error: sanitized.message };
 
-      // Guarded transition: this Job row is shared with the parent import
-      // job, whose deferred cascade failure (failParentOnFailure sets a
-      // `defa` marker and re-queues it) fires GameImportProcessor.onFailed
-      // in another process — possibly before this handler's write lands.
-      // Whichever handler wins the Pending/Running → Failed transition
-      // emits the failure events; the loser must not double-emit.
-      //
-      // `error` (raw, DB column only) is for operator debugging via direct
-      // DB access. `result` (sanitized) is what GET /games/import/:batchId
-      // — deliberately not owner-scoped — actually returns.
-      const transitioned = await this.db.job.updateMany({
-        where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
-        data: {
-          status: JobStatus.Failed,
-          error: error.message,
-          result: persistedFailure as unknown as Prisma.InputJsonValue,
-        },
-      });
-
-      if (transitioned.count === 0) {
-        // The import-side cascade handler won the race: it already persisted
-        // its sanitized {errorCode,error} to Job.result AND emitted the
-        // webhook / notification off it. Backfill ONLY the raw Job.error
-        // column (operator/debug) with the real gateway error — deliberately
-        // NOT result. Rewriting the classification here (fetch → GATEWAY_ERROR
-        // over the winner's INTERNAL_ERROR) would make the REST status
-        // endpoint disagree with the already-emitted webhook/notification,
-        // breaking the guarantee that every external surface shares one
-        // classification. Consistency wins over the marginally more accurate
-        // code; the real cause is preserved in Job.error for operators.
-        await this.db.job.updateMany({
-          where: { id: jobId, status: JobStatus.Failed },
-          data: { error: error.message },
+        // Guarded transition: this Job row is shared with the parent import
+        // job, whose deferred cascade failure (failParentOnFailure sets a
+        // `defa` marker and re-queues it) fires GameImportProcessor.onFailed
+        // in another process — possibly before this handler's write lands.
+        // Whichever handler wins the Pending/Running → Failed transition
+        // emits the failure events; the loser must not double-emit.
+        //
+        // `error` (raw, DB column only) is for operator debugging via direct
+        // DB access. `result` (sanitized) is what GET /games/import/:batchId
+        // — deliberately not owner-scoped — actually returns.
+        const transitioned = await this.db.job.updateMany({
+          where: { id: jobId, status: { in: [JobStatus.Pending, JobStatus.Running] } },
+          data: {
+            status: JobStatus.Failed,
+            error: error.message,
+            result: persistedFailure as unknown as Prisma.InputJsonValue,
+          },
         });
-        return;
-      }
 
-      emitJobFailedEvents(this.events, { jobId, batchId, gatewayId, externalId, isExpansion }, sanitized, initiatedAt);
+        if (transitioned.count === 0) {
+          // The import-side cascade handler won the race: it already persisted
+          // its sanitized {errorCode,error} to Job.result AND emitted the
+          // webhook / notification off it. Backfill ONLY the raw Job.error
+          // column (operator/debug) with the real gateway error — deliberately
+          // NOT result. Rewriting the classification here (fetch → GATEWAY_ERROR
+          // over the winner's INTERNAL_ERROR) would make the REST status
+          // endpoint disagree with the already-emitted webhook/notification,
+          // breaking the guarantee that every external surface shares one
+          // classification. Consistency wins over the marginally more accurate
+          // code; the real cause is preserved in Job.error for operators.
+          await this.db.job.updateMany({
+            where: { id: jobId, status: JobStatus.Failed },
+            data: { error: error.message },
+          });
+          return;
+        }
 
-      await this.batchCompletion.checkAndEmit(batchId);
-    });
+        emitJobFailedEvents(
+          this.events,
+          { jobId, batchId, gatewayId, externalId, isExpansion },
+          sanitized,
+          initiatedAt,
+        );
+
+        await this.batchCompletion.checkAndEmit(batchId);
+      }),
+    );
   }
 }

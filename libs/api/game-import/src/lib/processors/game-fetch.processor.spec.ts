@@ -6,7 +6,7 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
-import { of } from 'rxjs';
+import { of, throwError } from 'rxjs';
 import { JobNames } from '../constants/queue.constants';
 import { ImportJobFailedEvent, ImportJobStartedEvent } from '../events/import.events';
 import type { GameFetchJobPayload } from '../interfaces/import-job.interface';
@@ -124,11 +124,22 @@ describe('GameFetchProcessor', () => {
       expect(events.emit).not.toHaveBeenCalled();
     });
 
-    it('throws NotFound and reports failure when the gateway returns no game', async () => {
+    it('treats a clean "no game found" as a healthy interaction — throws NotFound, reports success, never a failure', async () => {
+      // The gateway answered correctly; the id just doesn't exist there. This
+      // must NOT count toward auto-disable, or a few bad ids would disable a
+      // healthy gateway for everyone.
       fetchGame.mockReturnValue(of({ game: undefined, message: 'nope' }));
 
       await expect(processor.process(makeJob())).rejects.toBeInstanceOf(NotFoundException);
-      expect(gatewayRegistry.reportFailure).toHaveBeenCalledWith('bgg', expect.any(NotFoundException));
+      expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
+      expect(gatewayRegistry.reportSuccess).toHaveBeenCalledWith('bgg');
+    });
+
+    it('reports a genuine gateway/transport error as a failure (feeds auto-disable)', async () => {
+      fetchGame.mockReturnValue(throwError(() => new Error('14 UNAVAILABLE')));
+
+      await expect(processor.process(makeJob())).rejects.toThrow('14 UNAVAILABLE');
+      expect(gatewayRegistry.reportFailure).toHaveBeenCalledWith('bgg', expect.any(Error));
       expect(gatewayRegistry.reportSuccess).not.toHaveBeenCalled();
     });
 

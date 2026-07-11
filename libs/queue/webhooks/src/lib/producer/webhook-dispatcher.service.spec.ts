@@ -173,4 +173,24 @@ describe('WebhookDispatcherService', () => {
     db.webhookSubscription.findMany.mockRejectedValue(new Error('db down'));
     await expect(dispatch(WebhookEventType.EventCreated, event())).resolves.toBeUndefined();
   });
+
+  it('isolates a failed enqueue so the remaining subscribers still receive the event', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([
+      { id: 'sub-1', createdById: 'owner-1' },
+      { id: 'sub-2', createdById: 'owner-2' },
+      { id: 'sub-3', createdById: 'owner-3' },
+    ] as WebhookSubscription[]);
+    // sub-2's enqueue fails (transient Redis blip); sub-1 and sub-3 must still enqueue.
+    queue.add
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('redis blip'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(dispatch(WebhookEventType.EventCreated, event())).resolves.toBeUndefined();
+
+    // All three were attempted — the failure of sub-2 did not abort the loop.
+    expect(queue.add).toHaveBeenCalledTimes(3);
+    const attempted = queue.add.mock.calls.map(([, job]) => job.subscriptionId);
+    expect(attempted).toEqual(['sub-1', 'sub-2', 'sub-3']);
+  });
 });

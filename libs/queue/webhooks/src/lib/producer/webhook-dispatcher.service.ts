@@ -101,19 +101,41 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     // the owner — memoize per createdById so an owner with multiple matching
     // subscriptions costs one ability build + one visibility query, not one each.
     const visibilityCache = new Map<string, boolean>();
+    let failures = 0;
+
     for (const subscription of subscriptions) {
-      const visible = await this.visibleTo(
-        subscription.createdById,
-        descriptor.subject,
-        event.subjectId,
-        visibilityCache,
-      );
+      // Isolate each subscription: a single failed enqueue (e.g. a transient
+      // Redis blip on queue.add) or visibility lookup must NOT abort the fan-out
+      // and silently strip the event from every subscriber later in the list.
+      // Log the one that failed and carry on so deliveries are independent.
+      try {
+        const visible = await this.visibleTo(
+          subscription.createdById,
+          descriptor.subject,
+          event.subjectId,
+          visibilityCache,
+        );
 
-      if (!visible) {
-        continue;
+        if (!visible) {
+          continue;
+        }
+
+        await this.enqueue(subscription.id, eventType, event, actor);
+      } catch (err) {
+        failures += 1;
+        this.logger.error(
+          `Failed to enqueue webhook delivery for subscription ${subscription.id} on "${eventType}" ` +
+            `(subject ${event.subjectId}): ${err instanceof Error ? err.message : err}`,
+          err instanceof Error ? err.stack : undefined,
+        );
       }
+    }
 
-      await this.enqueue(subscription.id, eventType, event, actor);
+    if (failures > 0) {
+      this.logger.warn(
+        `Webhook fan-out for "${eventType}" (subject ${event.subjectId}): ` +
+          `${failures}/${subscriptions.length} deliveries failed to enqueue and were dropped`,
+      );
     }
   }
 

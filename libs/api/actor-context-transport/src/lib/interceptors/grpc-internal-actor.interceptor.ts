@@ -34,13 +34,15 @@
  * inherit. `next.handle().subscribe(subscriber)` runs inside `runWith`
  * so AsyncLocalStorage propagates to async emissions downstream.
  */
-import { type Actor, type ActorContextInit } from '@bge/actor-context';
+import { type Actor, type ActorContextInit, AuditContextInternalService } from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { resolveCorrelationId } from '@bge/utils';
 import type { Metadata } from '@grpc/grpc-js';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
 import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { Observable } from 'rxjs';
+import { SKIP_ACTOR_CONTEXT_KEY } from '../decorators/skip-actor-context.decorator';
 import { ActorInterceptor } from './actor.interceptor';
 
 /**
@@ -69,7 +71,26 @@ export class GrpcInternalActorInterceptor extends ActorInterceptor {
   protected readonly executionContextType = 'rpc';
   protected override readonly auditSource = 'grpc';
 
+  constructor(
+    auditContext: AuditContextInternalService,
+    private readonly reflector: Reflector,
+  ) {
+    super(auditContext);
+  }
+
   intercept(executionContext: ExecutionContext, next: CallHandler): Observable<unknown> {
+    // Handlers marked @SkipActorContext (e.g. the health `Check` RPC) legitimately
+    // arrive without actor metadata from infra probes; bypass enforcement rather
+    // than reject them with UNAUTHENTICATED.
+    const skip = this.reflector.getAllAndOverride<boolean>(SKIP_ACTOR_CONTEXT_KEY, [
+      executionContext.getHandler(),
+      executionContext.getClass(),
+    ]);
+    if (skip) {
+      this.logger.debug('Handler marked @SkipActorContext; bypassing actor extraction');
+      return next.handle();
+    }
+
     const rawContext = executionContext.switchToRpc().getContext<{ metadata?: Metadata } | Metadata>();
     const metadata = this.unwrap(rawContext);
 

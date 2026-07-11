@@ -66,6 +66,19 @@ export const GAME_FETCH_FIELDS = [
 ] as const;
 
 /**
+ * Escapes a user-supplied search term for the apicalypse `search "<q>"` clause.
+ *
+ * The builder interpolates the raw string between double quotes, so an
+ * unescaped `"` closes the string early — turning a valid query into an IGDB
+ * 400 (and, worse, allowing arbitrary apicalypse clauses to be injected).
+ * Backslashes are escaped first so the quote-escaping backslash can't itself
+ * be consumed.
+ */
+function escapeSearchQuery(query: string): string {
+  return query.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+/**
  * Search IGDB for games matching a query string.
  *
  * `version_parent = null` excludes alternate versions (regional, GOTY, etc.)
@@ -74,7 +87,7 @@ export const GAME_FETCH_FIELDS = [
  */
 export function searchGamesRequest(query: string, limit = 20, offset = 0, locale?: string): IgdbRequest<IgdbGame[]> {
   return (client: IGDBClient) => {
-    const builder = client.fields(GAME_SEARCH_FIELDS).search(query);
+    const builder = client.fields(GAME_SEARCH_FIELDS).search(escapeSearchQuery(query));
     return includeLanguageFilter(builder, locale, `version_parent = null & game_type != ${GameType.Update}`)
       .limit(limit)
       .offset(offset)
@@ -83,25 +96,27 @@ export function searchGamesRequest(query: string, limit = 20, offset = 0, locale
   };
 }
 
+/**
+ * Applies the mandatory `whereQuery` (e.g. `id = '...'`) and, when a locale
+ * resolves to known IGDB language IDs, an additional language-support filter.
+ *
+ * The `whereQuery` is always preserved: an unmapped locale (e.g. 'fr-CA',
+ * 'en-AU') simply contributes no language clause. Previously an empty language
+ * result short-circuited and dropped `whereQuery` entirely, which let the
+ * mandatory id/parent_game filter fall away — fetching an arbitrary game or
+ * returning up to 50 unrelated expansions.
+ */
 function includeLanguageFilter(builder: IGDBClient, locale?: string, whereQuery?: string): IGDBClient {
-  if (!locale) {
-    if (whereQuery) {
-      return builder.where(whereQuery);
-    }
+  const languageIds = locale ? resolveLanguageIds(locale) : [];
 
-    return builder;
+  const clauses = [whereQuery];
+  if (languageIds.length > 0) {
+    clauses.push(`(language_supports.language = (${languageIds.join(',')}) | language_supports.language = null)`);
   }
 
-  const languageIds = resolveLanguageIds(locale);
-  if (languageIds.length === 0) {
-    return builder;
-  }
+  const where = clauses.filter(Boolean).join(' & ');
 
-  return builder.where(
-    `${whereQuery ? `${whereQuery} & ` : ''}(language_supports.language = (${languageIds.join(
-      ',',
-    )}) | language_supports.language = null)`,
-  );
+  return where ? builder.where(where) : builder;
 }
 
 /**

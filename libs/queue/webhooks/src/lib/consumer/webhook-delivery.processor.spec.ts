@@ -86,5 +86,16 @@ describe('WebhookDeliveryProcessor', () => {
       await processor.onFailed(job, error);
       expect(delivery.recordTerminalFailure).toHaveBeenCalledWith('sub-1', error);
     });
+
+    it('does not reject when terminal bookkeeping throws (must not crash the worker)', async () => {
+      // recordTerminalFailure rethrows non-P2025 DB errors; BullMQ attaches this
+      // handler raw and discards its promise, so a rejection here would surface
+      // as an unhandled rejection and terminate the worker process.
+      delivery.recordTerminalFailure.mockRejectedValue(new Error('db down'));
+
+      await expect(
+        processor.onFailed(makeJob({ attempts: 5, attemptsMade: 5 }), new Error('gateway down')),
+      ).resolves.toBeUndefined();
+    });
   });
 });

@@ -162,13 +162,17 @@ function toGameReleaseDataList(
   return Array.from(byPlatform.values()).map(({ platform, entries }) => {
     const worldwide = entries.find((e) => e.region === Region.Worldwide);
     const primaryEntry = worldwide ?? entries.reduce((a, b) => ((a.date ?? Infinity) < (b.date ?? Infinity) ? a : b));
-    const releaseDate = primaryEntry.date ? toIsoDate(primaryEntry.date) : primaryEntry.human;
+    // proto release_date is contractually ISO 8601 (see GameReleaseData). IGDB's
+    // `human` field is a free-form string ("2020 Q3", "TBD") that would produce
+    // an Invalid Date downstream and fail the whole import, so drop it when
+    // there's no precise unix timestamp — the field is optional.
+    const releaseDate = primaryEntry.date ? toIsoDate(primaryEntry.date) : undefined;
 
     const localizations: proto.LocalizationData[] = entries
       .filter((e) => e.region !== undefined)
       .map((e) => ({
         region: toRegionData(e.region!),
-        releaseDate: e.date ? toIsoDate(e.date) : e.human,
+        releaseDate: e.date ? toIsoDate(e.date) : undefined,
       }));
 
     return {
