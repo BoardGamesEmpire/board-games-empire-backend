@@ -18,13 +18,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../../common/webhooks/tsconfig.lib.json"
+      "path": "../../common/utils/tsconfig.lib.json"
     },
     {
       "path": "../../proto/gateway/tsconfig.lib.json"
     },
     {
-      "path": "../../queue/actor-context/tsconfig.lib.json"
+      "path": "../../common/webhooks/tsconfig.lib.json"
     },
     {
       "path": "../gateway-registry/tsconfig.lib.json"
@@ -45,13 +45,13 @@
       "path": "../../common/notifications/tsconfig.lib.json"
     },
     {
+      "path": "../../queue/actor-context/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/actor-context/tsconfig.lib.json"
     },
     {
       "path": "../../database/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/env/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

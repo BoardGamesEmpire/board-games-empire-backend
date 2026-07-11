@@ -1,4 +1,4 @@
-import { GameSource } from '@bge/database';
+import { GameSource, Prisma } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData } from '@boardgamesempire/proto-gateway';
 import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';
@@ -8,6 +8,9 @@ import { PersonUpsertService } from './person.service';
 import type { PlatformGameMap } from './platform.service';
 import { PlatformUpsertService } from './platform.service';
 import { TaxonomyUpsertService } from './taxonomy.service';
+
+const uniqueViolation = () =>
+  new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' });
 
 describe('GameUpsertService', () => {
   let service: GameUpsertService;
@@ -248,6 +251,53 @@ describe('GameUpsertService', () => {
       await service.upsert(bggGameData(), GATEWAY_ID);
 
       expect(db.game.update).not.toHaveBeenCalled();
+    });
+
+    it('recovers from a concurrent-import unique race by re-fetching the winner and updating it', async () => {
+      // First lookup misses (no source yet); a concurrent job then wins the
+      // create race, so our create trips the GameSource unique constraint; the
+      // recovery re-fetch finds the winner.
+      db.gameSource.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ gameId: 'game-raced', game: { id: 'game-raced', frozenAt: null } } as never);
+      db.game.create.mockRejectedValue(uniqueViolation());
+      db.game.update.mockResolvedValue({ id: 'game-raced' } as never);
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+
+      const result = await service.upsert(bggGameData(), GATEWAY_ID);
+
+      expect(result).toMatchObject({ gameId: 'game-raced', gameCreated: false, sourceCreated: false });
+      expect(db.game.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'game-raced' } }));
+    });
+
+    it('recovers a frozen raced game without updating it', async () => {
+      db.gameSource.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ gameId: 'game-raced', game: { id: 'game-raced', frozenAt: new Date() } } as never);
+      db.game.create.mockRejectedValue(uniqueViolation());
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+
+      const result = await service.upsert(bggGameData(), GATEWAY_ID);
+
+      expect(result).toMatchObject({ gameId: 'game-raced', gameCreated: false });
+      expect(db.game.update).not.toHaveBeenCalled();
+    });
+
+    it('rethrows the unique-constraint error when the raced source is still absent on re-fetch', async () => {
+      const err = uniqueViolation();
+      db.gameSource.findUnique.mockResolvedValue(null); // both lookups miss
+      db.game.create.mockRejectedValue(err);
+
+      await expect(service.upsert(bggGameData(), GATEWAY_ID)).rejects.toBe(err);
+    });
+
+    it('rethrows non-unique create failures without attempting recovery', async () => {
+      const boom = new Error('connection reset');
+      db.gameSource.findUnique.mockResolvedValue(null);
+      db.game.create.mockRejectedValue(boom);
+
+      await expect(service.upsert(bggGameData(), GATEWAY_ID)).rejects.toBe(boom);
+      expect(db.gameSource.findUnique).toHaveBeenCalledTimes(1); // no recovery re-fetch
     });
   });
 

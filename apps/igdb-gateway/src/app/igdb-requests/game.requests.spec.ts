@@ -22,6 +22,20 @@ describe('GameRequests', () => {
       expect(client.search).toHaveBeenCalledWith('Hades');
     });
 
+    it('escapes double quotes so the apicalypse search string stays valid', async () => {
+      const client = buildMockClient();
+      // The builder wraps the term as search "<q>"; an unescaped " would close
+      // the string early and produce an IGDB 400.
+      await searchGamesRequest('Frog "Detective"')(client);
+      expect(client.search).toHaveBeenCalledWith('Frog \\"Detective\\"');
+    });
+
+    it('escapes backslashes before quotes so the escape cannot be consumed', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('a\\"b')(client);
+      expect(client.search).toHaveBeenCalledWith('a\\\\\\"b');
+    });
+
     it('uses the default limit of 20', async () => {
       const client = buildMockClient();
       await searchGamesRequest('Hades')(client);
@@ -58,6 +72,21 @@ describe('GameRequests', () => {
       const client = buildMockClient(games);
       const result = await searchGamesRequest('Hades')(client);
       expect(result).toEqual(games);
+    });
+
+    it('appends a language filter for a mapped locale', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'en-US')(client);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & (language_supports.language = (7) | language_supports.language = null)',
+      );
+    });
+
+    it('keeps the base filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'fr-CA')(client);
+      // An unmapped locale must not drop the mandatory version_parent/game_type filter.
+      expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
     });
   });
 
@@ -113,6 +142,21 @@ describe('GameRequests', () => {
       const result = await fetchGameRequest('1942')(client);
       expect(result).toEqual(games);
     });
+
+    it('retains the id filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942', 'fr-CA')(client);
+      // Dropping the id filter here would fetch an arbitrary game, not game 1942.
+      expect(client.where).toHaveBeenCalledWith(`id = '1942'`);
+    });
+
+    it('combines the id filter with a mapped locale language filter', async () => {
+      const client = buildMockClient();
+      await fetchGameRequest('1942', 'en-US')(client);
+      expect(client.where).toHaveBeenCalledWith(
+        `id = '1942' & (language_supports.language = (7) | language_supports.language = null)`,
+      );
+    });
   });
 
   describe('fetchExpansionsRequest', () => {
@@ -153,6 +197,13 @@ describe('GameRequests', () => {
       const client = buildMockClient(games);
       const result = await fetchExpansionsRequest('1942')(client);
       expect(result).toEqual(games);
+    });
+
+    it('retains the parent_game/version_parent filter when the locale is unmapped', async () => {
+      const client = buildMockClient();
+      await fetchExpansionsRequest('1942', 'en-AU')(client);
+      // Dropping this filter would return up to 50 unrelated games.
+      expect(client.where).toHaveBeenCalledWith(`(parent_game = '1942' | version_parent = '1942')`);
     });
   });
 });

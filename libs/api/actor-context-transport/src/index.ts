@@ -1,4 +1,5 @@
 export { ActorContextTransportModule } from './lib/actor-context-transport.module';
+export { SKIP_ACTOR_CONTEXT_KEY, SkipActorContext } from './lib/decorators/skip-actor-context.decorator';
 export { WsActorInterceptor } from './lib/interceptors';
 export { GrpcInternalActorInterceptor } from './lib/interceptors/grpc-internal-actor.interceptor';
 export {

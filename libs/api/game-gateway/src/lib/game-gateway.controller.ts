@@ -1,7 +1,7 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, GameGateway, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -27,7 +27,7 @@ export class GameGatewayController {
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get()
-  getAll(@Query() pagination: PaginationQueryDto) {
+  getAll(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.gameGatewayService.getAll(pagination)).pipe(map((gateways) => ({ gateways })));
   }
 

@@ -41,7 +41,7 @@ describe('MediaObjectService', () => {
   let ability: MockAbilityService;
   let storage: jest.Mocked<Pick<StorageService, 'put' | 'get' | 'delete' | 'signedUrl'>>;
   let signer: jest.Mocked<Pick<MediaUrlSigner, 'verify'>>;
-  let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume'>>;
+  let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume' | 'emitSoftOverages'>>;
   let contributions: jest.Mocked<Pick<MediaContributionService, 'createContributionWithin'>>;
   let mediaLink: jest.Mocked<Pick<MediaLinkService, 'canLink'>>;
 
@@ -100,9 +100,14 @@ describe('MediaObjectService', () => {
       limit: null,
       softOverage: false,
       constraints: [],
+      softOverages: [],
     };
 
-    quota = { check: jest.fn().mockResolvedValue(allowed), consume: jest.fn().mockResolvedValue(allowed) };
+    quota = {
+      check: jest.fn().mockResolvedValue(allowed),
+      consume: jest.fn().mockResolvedValue(allowed),
+      emitSoftOverages: jest.fn(),
+    };
     const config = { getOrThrow: jest.fn().mockReturnValue({ signedUrlTtlSeconds: 300 }) };
 
     const ctx = await createTestingModuleWithDb({
@@ -192,6 +197,7 @@ describe('MediaObjectService', () => {
         limit: 100n,
         softOverage: false,
         constraints: [],
+        softOverages: [],
       });
 
       await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
@@ -218,6 +224,7 @@ describe('MediaObjectService', () => {
         limit: 100n,
         softOverage: false,
         constraints: [],
+        softOverages: [],
       });
 
       await expect(service.upload(file)).rejects.toBeInstanceOf(QuotaExceededException);
@@ -229,6 +236,35 @@ describe('MediaObjectService', () => {
         }),
       );
       expect(db.mediaObject.create).not.toHaveBeenCalled();
+    });
+
+    it('emits collected soft-overage warnings only after the row is persisted (post-commit hand-off)', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+      const warning = {
+        scope: QuotaScope.User,
+        scopeId: MOCK_ACTING_USER_ID,
+        resource: 'storage_bytes' as const,
+        currentUsage: '900',
+        attemptedAmount: '1234',
+        limit: '1000',
+      };
+      quota.consume.mockResolvedValue({
+        allowed: true,
+        scope: QuotaScope.User,
+        currentUsage: 900n,
+        limit: 1000n,
+        softOverage: true,
+        constraints: [],
+        softOverages: [warning],
+      });
+
+      await service.upload(file);
+
+      expect(quota.emitSoftOverages).toHaveBeenCalledWith([warning]);
+      const createOrder = db.mediaObject.create.mock.invocationCallOrder[0];
+      const emitOrder = (quota.emitSoftOverages as jest.Mock).mock.invocationCallOrder[0];
+      expect(emitOrder).toBeGreaterThan(createOrder); // never emitted before the write lands
     });
 
     it('probes and stores dimensions for an image upload', async () => {
@@ -302,6 +338,7 @@ describe('MediaObjectService', () => {
         limit: 100n,
         softOverage: false,
         constraints: [],
+        softOverages: [],
       });
 
       await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(QuotaExceededException);
@@ -326,6 +363,34 @@ describe('MediaObjectService', () => {
           driverKey: expect.stringMatching(new RegExp(`^users/${MOCK_ACTING_USER_ID}/`)),
         }),
       );
+    });
+
+    it('never emits soft-overage when the contribution rolls the tx back', async () => {
+      storage.put.mockResolvedValue(stored);
+      db.mediaObject.create.mockResolvedValue(row);
+      quota.consume.mockResolvedValue({
+        allowed: true,
+        scope: QuotaScope.User,
+        currentUsage: 900n,
+        limit: 1000n,
+        softOverage: true,
+        constraints: [],
+        softOverages: [
+          {
+            scope: QuotaScope.User,
+            scopeId: MOCK_ACTING_USER_ID,
+            resource: 'storage_bytes',
+            currentUsage: '900',
+            attemptedAmount: '1234',
+            limit: '1000',
+          },
+        ],
+      });
+      contributions.createContributionWithin.mockRejectedValueOnce(new ConflictException('dup'));
+
+      await expect(service.uploadAndContribute(file, contributeDto)).rejects.toBeInstanceOf(ConflictException);
+      // The write rolled back — the warning it would have raised must not fire.
+      expect(quota.emitSoftOverages).not.toHaveBeenCalled();
     });
   });
 

@@ -1,3 +1,4 @@
+import { SkipActorContext } from '@bge/actor-context-transport';
 import type * as proto from '@boardgamesempire/proto-gateway';
 import { CoordinatorServiceController, CoordinatorServiceControllerMethods } from '@boardgamesempire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
@@ -24,6 +25,10 @@ export class CoordinatorController implements CoordinatorServiceController {
     return this.coordinatorService.ping(request);
   }
 
+  // Health probes (k8s, load balancers, grpc_health_probe) call Check with no
+  // actor metadata; exempt it from the global GrpcInternalActorInterceptor so
+  // the probe doesn't come back UNAUTHENTICATED.
+  @SkipActorContext()
   check(request: proto.HealthCheckRequest): proto.HealthCheckResponse {
     return this.coordinatorService.healthCheck(request);
   }

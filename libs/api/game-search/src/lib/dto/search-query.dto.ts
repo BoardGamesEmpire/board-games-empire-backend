@@ -1,4 +1,4 @@
-import { TransformBoolean } from '@bge/shared';
+import { DEFAULT_MAX_OFFSET, TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
@@ -43,10 +43,11 @@ export class SearchQueryDto {
   @Type(() => Number)
   limit?: number;
 
-  @ApiPropertyOptional({ description: 'Offset for pagination', default: 0 })
+  @ApiPropertyOptional({ description: 'Offset for pagination', default: 0, maximum: DEFAULT_MAX_OFFSET })
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(DEFAULT_MAX_OFFSET)
   @Type(() => Number)
   offset?: number;
 }

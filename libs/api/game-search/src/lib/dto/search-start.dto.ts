@@ -1,4 +1,4 @@
-import { TransformBoolean } from '@bge/shared';
+import { DEFAULT_MAX_OFFSET, TransformBoolean } from '@bge/shared';
 import { Type } from 'class-transformer';
 import { IsArray, IsBoolean, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
@@ -49,6 +49,7 @@ export class SearchStartDto {
   @IsOptional()
   @IsInt()
   @Min(0)
+  @Max(DEFAULT_MAX_OFFSET)
   @Type(() => Number)
   offset?: number;
 }

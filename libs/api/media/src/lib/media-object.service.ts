@@ -9,6 +9,7 @@ import {
   Visibility,
 } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
+import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto } from '@bge/shared';
 import type { MediaConfig } from '@bge/storage';
@@ -63,11 +64,15 @@ export class MediaObjectService {
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength)); // early, non-atomic guard
 
     const prepared = await this.writeBytes(file, userId);
-    return this.withByteCompensation({ driverSlug: prepared.stored.driverSlug, driverKey: prepared.key }, () =>
-      this.db.$transaction((tx) =>
-        this.storeOwnedObjectWithin(tx, { ...prepared, userId, originalName: file.originalname ?? null }),
-      ),
+    const { media, softOverages } = await this.withByteCompensation(
+      { driverSlug: prepared.stored.driverSlug, driverKey: prepared.key },
+      () =>
+        this.db.$transaction((tx) =>
+          this.storeOwnedObjectWithin(tx, { ...prepared, userId, originalName: file.originalname ?? null }),
+        ),
     );
+    this.quota.emitSoftOverages(softOverages); // post-commit: never fires for a rolled-back upload
+    return media;
   }
 
   /**
@@ -89,26 +94,30 @@ export class MediaObjectService {
     await this.assertWithinStorageQuota(userId, BigInt(file.buffer.byteLength));
 
     const prepared = await this.writeBytes(file, userId);
-    return this.withByteCompensation({ driverSlug: prepared.stored.driverSlug, driverKey: prepared.key }, () =>
-      this.db.$transaction(async (tx) => {
-        const created = await this.storeOwnedObjectWithin(tx, {
-          ...prepared,
-          userId,
-          originalName: file.originalname ?? null,
-        });
-        const contribution = await this.contributions.createContributionWithin(
-          tx,
-          created.id,
-          dto,
-          ContributionOrigin.DirectUpload,
-          userId,
-        );
-        // Auto-approval flips ownerId + visibility in this same tx, so the create()
-        // result is stale — return the post-flip row.
-        const media = await tx.mediaObject.findUniqueOrThrow({ where: { id: created.id } });
-        return { media, contribution };
-      }),
+    const { result, softOverages } = await this.withByteCompensation(
+      { driverSlug: prepared.stored.driverSlug, driverKey: prepared.key },
+      () =>
+        this.db.$transaction(async (tx) => {
+          const stored = await this.storeOwnedObjectWithin(tx, {
+            ...prepared,
+            userId,
+            originalName: file.originalname ?? null,
+          });
+          const contribution = await this.contributions.createContributionWithin(
+            tx,
+            stored.media.id,
+            dto,
+            ContributionOrigin.DirectUpload,
+            userId,
+          );
+          // Auto-approval flips ownerId + visibility in this same tx, so the create()
+          // result is stale — return the post-flip row.
+          const media = await tx.mediaObject.findUniqueOrThrow({ where: { id: stored.media.id } });
+          return { result: { media, contribution }, softOverages: stored.softOverages };
+        }),
     );
+    this.quota.emitSoftOverages(softOverages); // post-commit: never fires for a rolled-back upload
+    return result;
   }
 
   /** Pre-transaction: allocate id/key, write bytes, probe dimensions. Caller compensates on later failure. */
@@ -125,7 +134,11 @@ export class MediaObjectService {
     return { id, key, stored, dimensions: this.probeImageDimensions(file) };
   }
 
-  /** In-transaction: atomically consume storage quota for the true stored size and create the owned (Private) row. */
+  /**
+   * In-transaction: atomically consume storage quota for the true stored size and create the owned (Private) row.
+   * Returns the created row plus any soft-overage warnings `consume()` collected — the caller MUST emit those via
+   * `quota.emitSoftOverages(...)` only after this transaction commits, never inside it (a rollback would undo the write).
+   */
   private async storeOwnedObjectWithin(
     tx: Prisma.TransactionClient,
     params: {
@@ -136,7 +149,7 @@ export class MediaObjectService {
       dimensions: { width: number; height: number } | null;
       originalName: string | null;
     },
-  ): Promise<MediaObject> {
+  ): Promise<{ media: MediaObject; softOverages: readonly QuotaSoftOverageEvent[] }> {
     const { id, key, userId, stored, dimensions, originalName } = params;
 
     const decision = await this.quota.consume('storage_bytes', stored.size, { userId }, tx);
@@ -150,7 +163,7 @@ export class MediaObjectService {
       );
     }
 
-    return tx.mediaObject.create({
+    const media = await tx.mediaObject.create({
       data: {
         id,
         ownerId: userId,
@@ -167,6 +180,8 @@ export class MediaObjectService {
         originalName: originalName ?? null,
       },
     });
+
+    return { media, softOverages: decision.softOverages };
   }
 
   /**

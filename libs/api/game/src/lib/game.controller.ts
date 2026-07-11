@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -30,7 +30,7 @@ export class GameController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
-  getGames(@Query() paginationQuery: PaginationQueryDto) {
+  getGames(@Query() paginationQuery: DefaultPaginationQueryDto) {
     return from(this.gameService.getGames(paginationQuery)).pipe(map((games) => ({ games })));
   }
 

@@ -8,7 +8,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { Session } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
-import { PaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { ImportStartDto } from './dto/import-start.dto';
 import { ImportBatchListResponseDto, ImportBatchStatusResponseDto } from './dto/import-status.dto';
 import { GameImportStatusService } from './services/import-status.service';
@@ -77,7 +77,7 @@ export class GameImportController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Job))
   @Get()
-  listImports(@Session() session: UserSession, @Query() pagination: PaginationQueryDto) {
+  listImports(@Session() session: UserSession, @Query() pagination: DefaultPaginationQueryDto) {
     return from(this.importStatus.listBatchesForUser(session.user.id, pagination));
   }
 

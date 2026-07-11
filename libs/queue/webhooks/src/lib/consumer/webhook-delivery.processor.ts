@@ -1,3 +1,4 @@
+import { guardWorkerEvent } from '@bge/utils';
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
@@ -41,7 +42,11 @@ export class WebhookDeliveryProcessor extends WorkerHost {
     }
 
     // Terminal: exhausted the attempt budget. One consecutive-failure increment
-    // per delivery, which may cross the auto-disable threshold.
-    await this.delivery.recordTerminalFailure(subscriptionId, error);
+    // per delivery, which may cross the auto-disable threshold. Guarded because
+    // recordTerminalFailure rethrows non-P2025 DB errors, and an unhandled
+    // rejection out of this `failed` listener would crash the whole worker.
+    await guardWorkerEvent(this.logger, `webhook delivery ${deliveryId} terminal-failure bookkeeping`, () =>
+      this.delivery.recordTerminalFailure(subscriptionId, error),
+    );
   }
 }

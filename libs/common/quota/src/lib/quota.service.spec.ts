@@ -117,14 +117,17 @@ describe('QuotaService', () => {
       const result = await service.check('storage_bytes', 1n, { userId: USER_ID });
 
       expect(result.allowed).toBe(true);
-      expect(emitter.emit).toHaveBeenCalledWith(QuotaEvents.SoftOverage, {
+      const event = {
         scope: QuotaScope.User,
         scopeId: USER_ID,
         resource: 'storage_bytes',
         currentUsage: '5',
         attemptedAmount: '1',
         limit: '5',
-      });
+      };
+      // The read path emits eagerly (nothing to roll back) and still returns it.
+      expect(emitter.emit).toHaveBeenCalledWith(QuotaEvents.SoftOverage, event);
+      expect(result.softOverages).toEqual([event]);
     });
 
     it('treats a disabled (enforced: false) row as unlimited even when over', async () => {
@@ -285,6 +288,51 @@ describe('QuotaService', () => {
         BadRequestException,
       );
       expect(tx.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('does NOT emit soft-overage inside the tx; returns it on the result for post-commit emission', async () => {
+      defineResource([QuotaScope.User], { [QuotaScope.User]: 5n });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 5n, softOverage: true }),
+      ]);
+
+      const result = await service.consume('storage_bytes', 1n, { userId: USER_ID }, tx);
+
+      expect(result.allowed).toBe(true);
+      // Emitting here would fire for a write the caller's tx may still roll back.
+      expect(emitter.emit).not.toHaveBeenCalled();
+      expect(result.softOverages).toEqual([
+        {
+          scope: QuotaScope.User,
+          scopeId: USER_ID,
+          resource: 'storage_bytes',
+          currentUsage: '5',
+          attemptedAmount: '1',
+          limit: '5',
+        },
+      ]);
+    });
+  });
+
+  describe('emitSoftOverages', () => {
+    const event = {
+      scope: QuotaScope.User,
+      scopeId: USER_ID,
+      resource: 'storage_bytes',
+      currentUsage: '5',
+      attemptedAmount: '1',
+      limit: '5',
+    } as const;
+
+    it('emits each collected event (the post-commit hand-off for consume callers)', () => {
+      service.emitSoftOverages([event]);
+      expect(emitter.emit).toHaveBeenCalledWith(QuotaEvents.SoftOverage, event);
+    });
+
+    it('is a no-op for an empty list', () => {
+      service.emitSoftOverages([]);
+      expect(emitter.emit).not.toHaveBeenCalled();
     });
   });
 

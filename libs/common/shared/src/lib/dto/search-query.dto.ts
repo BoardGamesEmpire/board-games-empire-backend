@@ -1,8 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MinLength } from 'class-validator';
-import { PaginationQueryDto } from './pagination-query.dto';
+import { DefaultPaginationQueryDto } from './capped-pagination-query.dto';
 
-export class SearchQueryDto extends PaginationQueryDto {
+export class SearchQueryDto extends DefaultPaginationQueryDto {
   @ApiProperty({ description: 'Search terms matched against resource fields', minLength: 2 })
   @IsString()
   @MinLength(2)

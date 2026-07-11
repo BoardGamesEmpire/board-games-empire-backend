@@ -1,4 +1,5 @@
 import type { QuotaScope } from '@bge/database';
+import type { QuotaSoftOverageEvent } from './quota-events.interface';
 
 /**
  * Scope targets a `check()` should consider beyond the ambient ones.
@@ -34,6 +35,13 @@ export interface QuotaConstraint {
  * constraint (the exceeded hard one with least headroom, else the tightest
  * constraint overall); they are null when no quota applied. `constraints` is
  * the full per-scope breakdown for callers that want it.
+ *
+ * `softOverages` are the ready-to-emit warnings for every soft cap this call
+ * crossed. `check()` emits them eagerly (read path — nothing to roll back) and
+ * still returns them for observability. `consume()` does NOT emit them: it runs
+ * inside the caller's transaction, so emitting there would fire for a write
+ * that may still roll back. A `consume()` caller must forward these to
+ * `QuotaService.emitSoftOverages(...)` AFTER its transaction commits.
  */
 export interface QuotaCheckResult {
   readonly allowed: boolean;
@@ -42,4 +50,5 @@ export interface QuotaCheckResult {
   readonly limit: bigint | null;
   readonly softOverage: boolean;
   readonly constraints: readonly QuotaConstraint[];
+  readonly softOverages: readonly QuotaSoftOverageEvent[];
 }

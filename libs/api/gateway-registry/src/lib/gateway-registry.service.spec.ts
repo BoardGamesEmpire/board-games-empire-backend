@@ -1,11 +1,20 @@
 import { SystemActorScope } from '@bge/actor-context';
 import { AuthType, DatabaseService } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
+import { pingWithRetry } from '@bge/utils';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import type { ClientGrpcProxy } from '@nestjs/microservices';
+import { ClientProxyFactory, type ClientGrpcProxy } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
 import { FAILURE_THRESHOLD } from './constants/gateway-registry.constants';
+
+// The mid-connect race test drives connect() end-to-end (no connect stub), so
+// the gRPC-touching helpers are mocked out. Every other test stubs connect()
+// entirely and never reaches these.
+jest.mock('@bge/utils', () => ({
+  pingWithRetry: jest.fn(),
+  walkDir: jest.fn(() => []),
+}));
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
@@ -126,6 +135,58 @@ describe('GatewayRegistryService', () => {
 
       await expect(service.getServiceClient('gone')).rejects.toThrow(/not available/);
       expect(connectSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('connect (mid-connect invalidation race)', () => {
+    const dispatch = (event: GatewayConfigEvent): Promise<void> =>
+      (service as unknown as { handleConfigUpdate(e: GatewayConfigEvent): Promise<void> }).handleConfigUpdate(event);
+
+    const connectOpts = {
+      gatewayId: 'bgg',
+      connectionUrl: 'http://gateway',
+      connectionPort: 50051,
+      authType: AuthType.None,
+    };
+
+    it('discards the freshly-connected client when a disable event arrives during the ping', async () => {
+      const proxy = makeProxy({ ping: jest.fn() });
+      // `create` is overloaded; its return type doesn't unify with ClientGrpcProxy
+      // (rxjs generic variance), so route the mock value through `never`.
+      jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(proxy as never);
+
+      // Gate the ping so we can inject a disable event while connect() is suspended.
+      let releasePing!: () => void;
+      const pingPending = new Promise<void>((resolve) => (releasePing = resolve));
+      (pingWithRetry as jest.Mock).mockImplementation(async () => {
+        await pingPending;
+        return { status: 'SERVING' };
+      });
+
+      const connecting = service.connect(connectOpts);
+
+      // Mid-connect: nothing is cached yet, so the old code's disconnect no-oped.
+      // The generation bump must still invalidate this in-flight connect.
+      await dispatch({ gatewayId: 'bgg', configHash: '', changeType: 'disabled', timestamp: 0 });
+
+      releasePing();
+      await connecting;
+
+      expect(service.isConnected('bgg')).toBe(false);
+      expect(proxy.close).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches the client normally when nothing invalidates it during connect', async () => {
+      const proxy = makeProxy({ ping: jest.fn() });
+      // `create` is overloaded; its return type doesn't unify with ClientGrpcProxy
+      // (rxjs generic variance), so route the mock value through `never`.
+      jest.spyOn(ClientProxyFactory, 'create').mockReturnValue(proxy as never);
+      (pingWithRetry as jest.Mock).mockResolvedValue({ status: 'SERVING' });
+
+      await service.connect(connectOpts);
+
+      expect(service.isConnected('bgg')).toBe(true);
+      expect(proxy.close).not.toHaveBeenCalled();
     });
   });
 
