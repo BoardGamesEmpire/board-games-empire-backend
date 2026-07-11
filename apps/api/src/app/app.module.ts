@@ -20,10 +20,11 @@ import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
-import { DbPoolMetricsRecorderModule } from '@bge/otel';
+import { createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
+import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { QuotasModule } from '@bge/quotas';
-import { CACHE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
@@ -31,6 +32,7 @@ import { UserModule } from '@bge/user';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvValkey from '@keyv/valkey';
+import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -39,6 +41,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import type { RedisClient } from 'bullmq';
 import type { Request } from 'express';
 import Keyv from 'keyv';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';
@@ -124,6 +127,19 @@ import { baseLogger } from './lib/logger';
       }),
     }),
 
+    // BullMQ root so this process can PRODUCE jobs. The feedback dispatcher
+    // (FeedbackQueueProducerModule) enqueues delivery jobs when a report is
+    // submitted here; the worker consumes them. Telemetry attaches at the root
+    // so producer spans participate in the queue-boundary trace. Depends on the
+    // QUEUE_REDIS_CLIENT provided by RedisModule above.
+    BullModule.forRootAsync({
+      inject: [QUEUE_REDIS_CLIENT],
+      useFactory: (queueClient: RedisClient) => ({
+        connection: queueClient,
+        telemetry: createBullMQTelemetry(),
+      }),
+    }),
+
     // Structured logging via pino, bridged to OpenTelemetry. `pinoHttp`
     // carries the OTel trace correlation mixin and conditionally
     // configures `pino-opentelemetry-transport` (active when
@@ -166,6 +182,10 @@ import { baseLogger } from './lib/logger';
     AuthModule,
     EventModule,
     FeedbackModule,
+    // Feedback sink fan-out PRODUCER: listens for feedback.report.submitted
+    // (emitted by FeedbackModule in this process) and enqueues one delivery job
+    // per matching sink. The worker runs the consumer.
+    FeedbackQueueProducerModule,
     FriendshipModule,
     GameCollectionModule,
     GameGatewayModule,

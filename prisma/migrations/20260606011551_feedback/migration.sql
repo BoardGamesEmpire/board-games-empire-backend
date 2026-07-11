@@ -131,7 +131,7 @@ CREATE INDEX "feedback_reports_user_id_idx" ON "feedback_reports"("user_id");
 CREATE UNIQUE INDEX "feedback_report_user_correlation_key_unique" ON "feedback_reports"("user_id", "correlation_key");
 
 -- CreateIndex
-CREATE INDEX "feedback_submissions_feedback_report_id_idx" ON "feedback_submissions"("feedback_report_id");
+CREATE UNIQUE INDEX "feedback_submissions_feedback_report_id_sink_slug_key" ON "feedback_submissions"("feedback_report_id", "sink_slug");
 
 -- CreateIndex
 CREATE INDEX "feedback_submissions_sink_slug_status_idx" ON "feedback_submissions"("sink_slug", "status");

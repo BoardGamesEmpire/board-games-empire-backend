@@ -5,6 +5,7 @@ import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
 import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
+import { FeedbackQueueConsumerModule } from '@bge/queue-feedback';
 import { WebhookQueueConsumerModule, WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
 import { StorageModule } from '@bge/storage';
@@ -135,6 +136,11 @@ import { baseLogger } from './lib/logger';
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,
     WebhookQueueConsumerModule,
+
+    // Feedback sink delivery CONSUMER: runs each (report, sink) job — resolves
+    // the sink, invokes submit(), and records the FeedbackSubmission outcome.
+    // The API produces these jobs (FeedbackQueueProducerModule).
+    FeedbackQueueConsumerModule,
 
     // Webhook domain providers + delivery-queue PRODUCER. The import
     // processor emits game.game.imported.v1 / game.import.failed.v1 /

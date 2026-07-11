@@ -62,6 +62,9 @@
       "path": "../../libs/api/quota/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/queue/feedback/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {
