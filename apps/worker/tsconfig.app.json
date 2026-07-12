@@ -31,10 +31,10 @@
       "path": "../../libs/common/webhooks/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/redis/tsconfig.lib.json"
+      "path": "../../libs/queue/webhooks/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/queue/webhooks/tsconfig.lib.json"
+      "path": "../../libs/queue/feedback/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/media/tsconfig.lib.json"
@@ -53,6 +53,9 @@
     },
     {
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {
       "path": "../../libs/storage/runtime/tsconfig.lib.json"

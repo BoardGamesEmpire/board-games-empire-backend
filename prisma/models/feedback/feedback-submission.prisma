@@ -19,8 +19,11 @@ model FeedbackSubmission {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  // One submission row per (report, sink): the DB backstop behind the delivery
+  // upsert, so a re-enqueue or interleaved retry can never spawn a duplicate.
+  // Also serves feedbackReportId-prefix lookups (so no separate index needed).
+  @@unique([feedbackReportId, sinkSlug])
   @@unique([sinkSlug, externalId])
-  @@index([feedbackReportId])
   @@index([sinkSlug, status])
   @@map("feedback_submissions")
 }

@@ -37,6 +37,7 @@ testem.log
 /typings
 private/*
 zenstack/
+.private/
 .env
 
 # System Files

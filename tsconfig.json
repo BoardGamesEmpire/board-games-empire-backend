@@ -182,6 +182,9 @@
     },
     {
       "path": "./libs/api/gateway-host"
+    },
+    {
+      "path": "./libs/queue/feedback"
     }
   ]
 }
