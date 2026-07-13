@@ -11,6 +11,7 @@ export async function systemSettingsSeed(prisma: PrismaClient, logger: Logger) {
     create: {
       identifier: crypto.randomUUID(),
       singleton: true,
+      name: 'Board Games Empire',
       allowPasswordResets: true,
       allowUserRegistration: true,
       allowUsernameChange: true,

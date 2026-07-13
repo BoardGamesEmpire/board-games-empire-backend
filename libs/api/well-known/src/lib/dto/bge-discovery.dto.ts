@@ -16,6 +16,13 @@ export type AuthStrategyDto = EmailAndPasswordStrategyDto | OidcStrategyDto;
  */
 export class BgeDiscoveryDto {
   /**
+   * Schema version of this discovery document. Clients parse known fields and
+   * ignore unknown ones gracefully; bumped only on a breaking shape change.
+   */
+  @ApiProperty({ description: 'Schema version of this discovery document', example: 1 })
+  wellKnownSchemaVersion!: number;
+
+  /**
    * The server's canonical base URL. Equivalent to the `issuer` in RFC 8414.
    * Clients can use this to confirm they are talking to the expected server.
    */
@@ -27,6 +34,38 @@ export class BgeDiscoveryDto {
     example: '550e8400-e29b-41d4-a716-446655440000',
   })
   bgeServerId!: string;
+
+  /**
+   * Human-readable server display name, shown in the client when a user is
+   * choosing which server to add.
+   */
+  @ApiProperty({
+    description: 'Human-readable server display name',
+    example: 'Board Games Empire',
+  })
+  name!: string;
+
+  /**
+   * Minimum semver client version this server accepts. Clients older than this
+   * refuse to proceed past server-add. Null means no minimum.
+   */
+  @ApiProperty({
+    description: 'Minimum client version accepted (semver). Null = no minimum. (bge_ extension)',
+    example: '0.1.0',
+    nullable: true,
+  })
+  bgeMinClientVersion!: string | null;
+
+  /**
+   * Maximum semver client version this server accepts. Clients newer than this
+   * refuse to proceed. Null means no maximum.
+   */
+  @ApiProperty({
+    description: 'Maximum client version accepted (semver). Null = no maximum. (bge_ extension)',
+    example: null,
+    nullable: true,
+  })
+  bgeMaxClientVersion!: string | null;
 
   /**
    * Device authorization endpoint per RFC 8628

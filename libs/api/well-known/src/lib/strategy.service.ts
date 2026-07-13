@@ -2,7 +2,8 @@ import { DatabaseService } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import assert from 'node:assert';
-import { AUTH_BASE_PATH } from './constants';
+import type { BgeIdentityConfig } from './configuration/bge-identity.config';
+import { AUTH_BASE_PATH, WELL_KNOWN_SCHEMA_VERSION } from './constants';
 import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
@@ -23,7 +24,14 @@ export class StrategyService {
     const settings = await this.db.systemSetting.findFirst();
     assert(settings, 'System settings not found in database');
 
+    dto.wellKnownSchemaVersion = WELL_KNOWN_SCHEMA_VERSION;
     dto.bgeServerId = settings.identifier;
+    dto.name = settings.name;
+
+    // client version compatibility bounds (empty config = no bound)
+    const identity = this.configService.get<BgeIdentityConfig>('bgeIdentity');
+    dto.bgeMinClientVersion = identity?.minClientVersion || null;
+    dto.bgeMaxClientVersion = identity?.maxClientVersion || null;
 
     // RFC 8414-aligned fields
     dto.issuer = issuer;
@@ -34,8 +42,7 @@ export class StrategyService {
     dto.bgeSessionEndpoint = `${authBase}/get-session`;
     dto.bgeSignOutEndpoint = `${authBase}/sign-out`;
 
-    // capability flags
-    // TODO: make configurable
+    // capability flags — always-on plugins (see auth-factory.ts)
     dto.bgePasskeySupported = true;
     dto.bgeTwoFactorSupported = true;
     dto.bgeAnonymousAuthSupported = true;

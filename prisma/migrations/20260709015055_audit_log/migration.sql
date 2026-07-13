@@ -7,6 +7,9 @@ ALTER TYPE "resource_types" ADD VALUE 'AuditLog';
 -- AlterTable
 ALTER TABLE "system_settings" ADD COLUMN     "audit_log_retention_days" INTEGER;
 
+-- AlterTable
+ALTER TABLE "system_settings" ADD COLUMN     "name" TEXT NOT NULL DEFAULT 'Board Games Empire';
+
 -- CreateTable
 CREATE TABLE "audit_logs" (
     "id" TEXT NOT NULL,
