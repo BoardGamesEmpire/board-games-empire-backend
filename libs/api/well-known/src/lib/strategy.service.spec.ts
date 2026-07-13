@@ -1,7 +1,7 @@
 import type { SystemSetting } from '@bge/database';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
-import { AUTH_BASE_PATH, AuthStrategyType } from './constants';
+import { AUTH_BASE_PATH, authPath, AuthStrategyType } from './constants';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
 import { transformKeysToSnakeCase } from './interceptors/snakecase.interceptor';
@@ -239,6 +239,11 @@ describe('StrategyService', () => {
     describe('root-relative endpoint invariant', () => {
       it('AUTH_BASE_PATH is root-relative (leading slash)', () => {
         expect(AUTH_BASE_PATH.startsWith('/')).toBe(true);
+      });
+
+      it('authPath normalizes a missing leading slash so output is always root-relative', () => {
+        expect(authPath('/device')).toBe(`${AUTH_BASE_PATH}/device`);
+        expect(authPath('device')).toBe(`${AUTH_BASE_PATH}/device`);
       });
 
       it('emits every BGE endpoint as a root-relative path; issuer + external URLs stay absolute', async () => {

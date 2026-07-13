@@ -20,11 +20,15 @@ export const AUTH_BASE_PATH = '/api/auth';
 /**
  * Build a root-relative BGE auth endpoint from a path segment. Centralizes the
  * relative-path contract so new endpoints can't accidentally drift back to
- * absolute URLs or lose the leading slash.
+ * absolute URLs or lose the leading slash. A missing leading slash is added, so
+ * `authPath('device')` and `authPath('/device')` both yield `/api/auth/device`.
  *
- * @param segment path beginning with a slash, e.g. `/get-session`
+ * @param segment endpoint segment, with or without a leading slash, e.g. `/get-session`
  */
-export const authPath = (segment: string): string => `${AUTH_BASE_PATH}${segment}`;
+export const authPath = (segment: string): string => {
+  const normalized = segment.startsWith('/') ? segment : `/${segment}`;
+  return `${AUTH_BASE_PATH}${normalized}`;
+};
 
 /**
  * Schema version of the /.well-known/bge-identity document. Clients parse
