@@ -11,7 +11,8 @@ import { SecurityTxtService } from './security-txt.service';
 import { StrategyService } from './strategy.service';
 import { WellKnownController } from './well-known.controller';
 
-const AUTH_BASE = 'https://api.example.com/api/auth';
+// Endpoints are emitted as root-relative paths; issuer stays absolute.
+const AUTH_BASE = '/api/auth';
 const ISSUER = 'https://api.example.com';
 
 function makeFullDiscovery(overrides: Partial<BgeDiscoveryDto> = {}): BgeDiscoveryDto {
@@ -23,7 +24,7 @@ function makeFullDiscovery(overrides: Partial<BgeDiscoveryDto> = {}): BgeDiscove
   dto.name = 'Test Server';
   dto.bgeMinClientVersion = null;
   dto.bgeMaxClientVersion = null;
-  dto.bgeAuthBaseUrl = AUTH_BASE;
+  dto.bgeAuthBasePath = AUTH_BASE;
   dto.bgeSessionEndpoint = `${AUTH_BASE}/get-session`;
   dto.bgeSignOutEndpoint = `${AUTH_BASE}/sign-out`;
   dto.bgePasskeySupported = true;

@@ -22,7 +22,7 @@ const DOCUMENTED_WIRE_KEYS = [
   'bge_min_client_version',
   'bge_max_client_version',
   'device_authorization_endpoint',
-  'bge_auth_base_url',
+  'bge_auth_base_path',
   'bge_session_endpoint',
   'bge_sign_out_endpoint',
   'bge_passkey_supported',
@@ -32,7 +32,9 @@ const DOCUMENTED_WIRE_KEYS = [
 ].sort();
 
 const BASE_ISSUER = 'https://api.example.com';
-const AUTH_BASE = `${BASE_ISSUER}${AUTH_BASE_PATH}`;
+// BGE endpoints are emitted as root-relative paths, so the expected base for
+// endpoint assertions is the path itself, independent of the issuer.
+const AUTH_BASE = AUTH_BASE_PATH;
 
 interface MockAuthConfig {
   url?: string;
@@ -110,7 +112,7 @@ describe('StrategyService', () => {
         expect(discovery.issuer).toBe(BASE_ISSUER);
       });
 
-      it('constructs deviceAuthorizationEndpoint from issuer + AUTH_BASE_PATH', async () => {
+      it('constructs deviceAuthorizationEndpoint as a relative path', async () => {
         const service = await createService({});
         const discovery = await service.getDiscovery();
 
@@ -119,11 +121,11 @@ describe('StrategyService', () => {
     });
 
     describe('BGE infrastructure endpoints', () => {
-      it('sets bgeAuthBaseUrl to issuer + AUTH_BASE_PATH', async () => {
+      it('sets bgeAuthBasePath to AUTH_BASE_PATH (relative)', async () => {
         const service = await createService({});
         const discovery = await service.getDiscovery();
 
-        expect(discovery.bgeAuthBaseUrl).toBe(AUTH_BASE);
+        expect(discovery.bgeAuthBasePath).toBe(AUTH_BASE);
       });
 
       it('sets bgeSessionEndpoint', async () => {
@@ -140,18 +142,18 @@ describe('StrategyService', () => {
         expect(discovery.bgeSignOutEndpoint).toBe(`${AUTH_BASE}/sign-out`);
       });
 
-      it('reflects a non-default issuer in all constructed URLs', async () => {
+      it('emits endpoints as relative paths, independent of the issuer', async () => {
         const customIssuer = 'https://bge.myserver.io';
         const service = await createService({ url: customIssuer });
 
         const discovery = await service.getDiscovery();
-        const expectedBase = `${customIssuer}${AUTH_BASE_PATH}`;
 
+        // issuer is the one absolute field; the endpoints stay relative
         expect(discovery.issuer).toBe(customIssuer);
-        expect(discovery.bgeAuthBaseUrl).toBe(expectedBase);
-        expect(discovery.bgeSessionEndpoint).toBe(`${expectedBase}/get-session`);
-        expect(discovery.bgeSignOutEndpoint).toBe(`${expectedBase}/sign-out`);
-        expect(discovery.deviceAuthorizationEndpoint).toBe(`${expectedBase}/device`);
+        expect(discovery.bgeAuthBasePath).toBe(AUTH_BASE_PATH);
+        expect(discovery.bgeSessionEndpoint).toBe(`${AUTH_BASE_PATH}/get-session`);
+        expect(discovery.bgeSignOutEndpoint).toBe(`${AUTH_BASE_PATH}/sign-out`);
+        expect(discovery.deviceAuthorizationEndpoint).toBe(`${AUTH_BASE_PATH}/device`);
       });
     });
 

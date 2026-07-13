@@ -9,14 +9,14 @@ export class EmailAndPasswordStrategyDto {
   signUpDisabled!: boolean;
 
   @ApiProperty({
-    description: 'Absolute endpoint for email/password sign-in. POST with { email, password }.',
-    example: 'https://api.example.com/api/auth/sign-in/email',
+    description: 'Relative endpoint for email/password sign-in. POST with { email, password }.',
+    example: '/api/auth/sign-in/email',
   })
   signInEndpoint!: string;
 
   @ApiProperty({
-    description: 'Absolute endpoint for email/password registration. Absent when signUpDisabled is true.',
-    example: 'https://api.example.com/api/auth/sign-up/email',
+    description: 'Relative endpoint for email/password registration. Absent when signUpDisabled is true.',
+    example: '/api/auth/sign-up/email',
     required: false,
   })
   signUpEndpoint?: string;

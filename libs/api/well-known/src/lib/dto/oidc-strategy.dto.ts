@@ -28,8 +28,8 @@ export class OidcStrategyDto {
    * redirect and code exchange via the genericOAuth plugin.
    */
   @ApiProperty({
-    description: 'Absolute endpoint to initiate the OAuth2 sign-in flow for this provider (POST)',
-    example: 'https://api.example.com/api/auth/sign-in/oauth2',
+    description: 'Relative endpoint to initiate the OAuth2 sign-in flow for this provider (POST)',
+    example: '/api/auth/sign-in/oauth2',
   })
   authorizationEndpoint!: string;
 }

@@ -10,7 +10,7 @@ describe('toSnakeCase()', () => {
     ['signUpDisabled', 'sign_up_disabled'],
     ['providerId', 'provider_id'],
     ['discoveryUrl', 'discovery_url'],
-    ['bgeAuthBaseUrl', 'bge_auth_base_url'],
+    ['bgeAuthBasePath', 'bge_auth_base_path'],
     ['bgePasskeySupported', 'bge_passkey_supported'],
     ['bgeTwoFactorSupported', 'bge_two_factor_supported'],
     ['bgeAnonymousAuthSupported', 'bge_anonymous_auth_supported'],
