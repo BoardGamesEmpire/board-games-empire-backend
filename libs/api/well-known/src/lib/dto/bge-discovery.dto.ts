@@ -73,7 +73,9 @@ export class BgeDiscoveryDto {
    * Device authorization endpoint per RFC 8628
    */
   @ApiProperty({
-    description: 'Device authorization endpoint (RFC 8628), relative path. Always available.',
+    description:
+      'Device authorization endpoint (RFC 8628 field name), as a root-relative path ' +
+      'resolved against `issuer`. Always available.',
     example: '/api/auth/device',
   })
   deviceAuthorizationEndpoint!: string;

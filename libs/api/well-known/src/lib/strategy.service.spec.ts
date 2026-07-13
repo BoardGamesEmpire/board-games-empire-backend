@@ -236,6 +236,41 @@ describe('StrategyService', () => {
       });
     });
 
+    describe('root-relative endpoint invariant', () => {
+      it('AUTH_BASE_PATH is root-relative (leading slash)', () => {
+        expect(AUTH_BASE_PATH.startsWith('/')).toBe(true);
+      });
+
+      it('emits every BGE endpoint as a root-relative path; issuer + external URLs stay absolute', async () => {
+        const service = await createService({ useEmailPasswordAuth: true, ...OIDC_CONFIG });
+        const discovery = await service.getDiscovery();
+
+        // issuer is the one absolute BGE field
+        expect(discovery.issuer).toMatch(/^https?:\/\//);
+
+        // every BGE-hosted endpoint is root-relative, never absolute
+        const relativePaths = [
+          discovery.deviceAuthorizationEndpoint,
+          discovery.bgeAuthBasePath,
+          discovery.bgeSessionEndpoint,
+          discovery.bgeSignOutEndpoint,
+        ];
+
+        for (const path of relativePaths) {
+          expect(path.startsWith('/')).toBe(true);
+          expect(path).not.toMatch(/^https?:\/\//);
+        }
+
+        const email = discovery.strategies[0] as EmailAndPasswordStrategyDto;
+        const oidc = discovery.strategies[1] as OidcStrategyDto;
+        expect(email.signInEndpoint.startsWith('/')).toBe(true);
+        expect(email.signUpEndpoint?.startsWith('/')).toBe(true);
+        expect(oidc.authorizationEndpoint.startsWith('/')).toBe(true);
+        // the external IdP discovery URL is intentionally absolute
+        expect(oidc.discoveryUrl).toMatch(/^https?:\/\//);
+      });
+    });
+
     describe('always-on capability flags', () => {
       it('reports bgePasskeySupported as true', async () => {
         const service = await createService({});

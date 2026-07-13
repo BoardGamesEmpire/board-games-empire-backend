@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import assert from 'node:assert';
 import type { BgeIdentityConfig } from './configuration/bge-identity.config';
-import { AUTH_BASE_PATH, WELL_KNOWN_SCHEMA_VERSION } from './constants';
+import { AUTH_BASE_PATH, authPath, WELL_KNOWN_SCHEMA_VERSION } from './constants';
 import { AuthStrategyDto, BgeDiscoveryDto } from './dto/bge-discovery.dto';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
@@ -32,16 +32,16 @@ export class StrategyService {
     dto.bgeMinClientVersion = identity?.minClientVersion || null;
     dto.bgeMaxClientVersion = identity?.maxClientVersion || null;
 
-    // RFC 8414-aligned fields. `issuer` is the absolute canonical base URL;
-    // every BGE endpoint below is a root-relative path the client resolves
-    // against it (or against its own configured server URL).
+    // RFC 8414-style field *names* — the values are BGE-specific, not RFC-compliant:
+    // `issuer` is the absolute canonical base URL, while every BGE endpoint below is
+    // a root-relative path clients resolve against it (or their configured server URL).
     dto.issuer = issuer;
-    dto.deviceAuthorizationEndpoint = `${AUTH_BASE_PATH}/device`;
+    dto.deviceAuthorizationEndpoint = authPath('/device');
 
     // infrastructure endpoints (relative paths)
     dto.bgeAuthBasePath = AUTH_BASE_PATH;
-    dto.bgeSessionEndpoint = `${AUTH_BASE_PATH}/get-session`;
-    dto.bgeSignOutEndpoint = `${AUTH_BASE_PATH}/sign-out`;
+    dto.bgeSessionEndpoint = authPath('/get-session');
+    dto.bgeSignOutEndpoint = authPath('/sign-out');
 
     // capability flags — always-on plugins (see auth-factory.ts)
     dto.bgePasskeySupported = true;
@@ -72,10 +72,10 @@ export class StrategyService {
 
     const dto = new EmailAndPasswordStrategyDto();
     dto.signUpDisabled = signUpDisabled;
-    dto.signInEndpoint = `${AUTH_BASE_PATH}/sign-in/email`;
+    dto.signInEndpoint = authPath('/sign-in/email');
 
     if (!signUpDisabled) {
-      dto.signUpEndpoint = `${AUTH_BASE_PATH}/sign-up/email`;
+      dto.signUpEndpoint = authPath('/sign-up/email');
     }
 
     return dto;
@@ -86,7 +86,7 @@ export class StrategyService {
     dto.providerId = this.configService.get<string>('auth.oidcProviderId') || 'default-oidc-provider';
     // discoveryUrl points at an external IdP, so it stays an absolute URL.
     dto.discoveryUrl = this.configService.getOrThrow<string>('auth.oidcWellKnownUrl');
-    dto.authorizationEndpoint = `${AUTH_BASE_PATH}/sign-in/oauth2`;
+    dto.authorizationEndpoint = authPath('/sign-in/oauth2');
     return dto;
   }
 
