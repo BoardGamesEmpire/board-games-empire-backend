@@ -17,6 +17,12 @@ function makeConfig(root: string): ConfigService {
     signedUrlTtlSeconds: 300,
     baseUrl: 'https://bge.test',
     streamPath: '/media-stream',
+    // Off keeps these general-behavior/contract tests identical to pre-mount-check
+    // behavior; the mount-check strategies have dedicated coverage in the faults spec.
+    mountCheck: 'off',
+    sentinelFile: '.bge-storage-sentinel',
+    probeTimeoutMs: 5000,
+    probeTimeoutFatalThreshold: 3,
   };
   return { getOrThrow: jest.fn().mockReturnValue(media) } as unknown as ConfigService;
 }
