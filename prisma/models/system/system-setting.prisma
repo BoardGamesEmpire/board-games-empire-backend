@@ -4,6 +4,11 @@ model SystemSetting {
   singleton  Boolean @unique @default(true)
   identifier String  @unique
 
+  /// Human-readable server display name, surfaced in the anonymous
+  /// /.well-known/bge-identity document so clients can label the server
+  /// when a user is choosing which server to add.
+  name String @map("name") @default("Board Games Empire")
+
   allowPasswordResets   Boolean @default(true) @map("allow_password_resets")
   allowUserRegistration Boolean @default(true) @map("allow_user_registration")
   allowUsernameChange   Boolean @default(true) @map("allow_username_change")

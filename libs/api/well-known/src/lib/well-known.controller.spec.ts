@@ -16,9 +16,13 @@ const ISSUER = 'https://api.example.com';
 
 function makeFullDiscovery(overrides: Partial<BgeDiscoveryDto> = {}): BgeDiscoveryDto {
   const dto = new BgeDiscoveryDto();
+  dto.wellKnownSchemaVersion = 1;
   dto.issuer = ISSUER;
   dto.deviceAuthorizationEndpoint = `${AUTH_BASE}/device`;
   dto.bgeServerId = crypto.randomUUID();
+  dto.name = 'Test Server';
+  dto.bgeMinClientVersion = null;
+  dto.bgeMaxClientVersion = null;
   dto.bgeAuthBaseUrl = AUTH_BASE;
   dto.bgeSessionEndpoint = `${AUTH_BASE}/get-session`;
   dto.bgeSignOutEndpoint = `${AUTH_BASE}/sign-out`;
@@ -95,7 +99,11 @@ describe('WellKnownController', () => {
 
       const result = await controller.getDiscovery();
 
+      expect(result.wellKnownSchemaVersion).toBe(1);
       expect(result.issuer).toBe(ISSUER);
+      expect(result.name).toBe('Test Server');
+      expect(result.bgeMinClientVersion).toBeNull();
+      expect(result.bgeMaxClientVersion).toBeNull();
       expect(result.bgePasskeySupported).toBe(true);
       expect(result.bgeTwoFactorSupported).toBe(true);
       expect(result.bgeAnonymousAuthSupported).toBe(true);

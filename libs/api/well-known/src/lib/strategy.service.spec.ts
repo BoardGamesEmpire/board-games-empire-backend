@@ -4,7 +4,32 @@ import { ConfigService } from '@nestjs/config';
 import { AUTH_BASE_PATH, AuthStrategyType } from './constants';
 import { EmailAndPasswordStrategyDto } from './dto/email-and-password-strategy.dto';
 import { OidcStrategyDto } from './dto/oidc-strategy.dto';
+import { transformKeysToSnakeCase } from './interceptors/snakecase.interceptor';
 import { StrategyService } from './strategy.service';
+
+/**
+ * The complete set of top-level keys the /.well-known/bge-identity document is
+ * documented to expose, in snake_case wire form. This is the published shape —
+ * adding a field to BgeDiscoveryDto without updating this list (or vice versa)
+ * fails the wire-shape lock test below. Guards against accidentally leaking new
+ * fields into the anonymous, pre-auth document.
+ */
+const DOCUMENTED_WIRE_KEYS = [
+  'well_known_schema_version',
+  'issuer',
+  'bge_server_id',
+  'name',
+  'bge_min_client_version',
+  'bge_max_client_version',
+  'device_authorization_endpoint',
+  'bge_auth_base_url',
+  'bge_session_endpoint',
+  'bge_sign_out_endpoint',
+  'bge_passkey_supported',
+  'bge_two_factor_supported',
+  'bge_anonymous_auth_supported',
+  'strategies',
+].sort();
 
 const BASE_ISSUER = 'https://api.example.com';
 const AUTH_BASE = `${BASE_ISSUER}${AUTH_BASE_PATH}`;
@@ -17,6 +42,8 @@ interface MockAuthConfig {
   oidcClientId?: string;
   oidcClientSecret?: string;
   oidcProviderId?: string;
+  minClientVersion?: string;
+  maxClientVersion?: string;
 }
 
 function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'get' | 'getOrThrow'> {
@@ -28,6 +55,10 @@ function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'ge
     'auth.oidcClientId': config.oidcClientId ?? '',
     'auth.oidcClientSecret': config.oidcClientSecret ?? '',
     'auth.oidcProviderId': config.oidcProviderId ?? '',
+    bgeIdentity: {
+      minClientVersion: config.minClientVersion ?? '',
+      maxClientVersion: config.maxClientVersion ?? '',
+    },
   };
 
   return {
@@ -46,6 +77,7 @@ function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'ge
 
 const MOCK_SYSTEM_SETTING = {
   identifier: 'test-server-id-00000000',
+  name: 'Test Server',
 };
 
 const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcWellKnownUrl' | 'oidcClientId' | 'oidcClientSecret'> = {
@@ -54,13 +86,16 @@ const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcWellKnownUrl' | 'oidcClientId' | 'o
   oidcClientSecret: 'test-client-secret',
 };
 
-async function createService(config: MockAuthConfig): Promise<StrategyService> {
+async function createService(
+  config: MockAuthConfig,
+  systemSetting: Partial<SystemSetting> = MOCK_SYSTEM_SETTING,
+): Promise<StrategyService> {
   const { module, db } = await createTestingModuleWithDb({
     providers: [StrategyService, { provide: ConfigService, useValue: buildMockConfigService(config) }],
   });
 
-  db.systemSetting.findFirst.mockResolvedValue(MOCK_SYSTEM_SETTING as SystemSetting);
-  db.systemSetting.findMany.mockResolvedValue([MOCK_SYSTEM_SETTING] as SystemSetting[]);
+  db.systemSetting.findFirst.mockResolvedValue(systemSetting as SystemSetting);
+  db.systemSetting.findMany.mockResolvedValue([systemSetting] as SystemSetting[]);
 
   return module.get(StrategyService);
 }
@@ -117,6 +152,85 @@ describe('StrategyService', () => {
         expect(discovery.bgeSessionEndpoint).toBe(`${expectedBase}/get-session`);
         expect(discovery.bgeSignOutEndpoint).toBe(`${expectedBase}/sign-out`);
         expect(discovery.deviceAuthorizationEndpoint).toBe(`${expectedBase}/device`);
+      });
+    });
+
+    describe('document compatibility + identity', () => {
+      it('sets wellKnownSchemaVersion to 1', async () => {
+        const service = await createService({});
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.wellKnownSchemaVersion).toBe(1);
+      });
+
+      it('sets bgeServerId from the system setting identifier', async () => {
+        const service = await createService({});
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeServerId).toBe(MOCK_SYSTEM_SETTING.identifier);
+      });
+
+      it('sets name from the system setting', async () => {
+        const service = await createService({});
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.name).toBe('Test Server');
+      });
+    });
+
+    describe('client version compatibility bounds', () => {
+      it('defaults both bounds to null when unconfigured', async () => {
+        const service = await createService({});
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeMinClientVersion).toBeNull();
+        expect(discovery.bgeMaxClientVersion).toBeNull();
+      });
+
+      it('advertises the configured minimum client version', async () => {
+        const service = await createService({ minClientVersion: '0.1.0' });
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeMinClientVersion).toBe('0.1.0');
+      });
+
+      it('advertises the configured maximum client version', async () => {
+        const service = await createService({ maxClientVersion: '2.0.0' });
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeMaxClientVersion).toBe('2.0.0');
+      });
+
+      it('treats an empty-string bound as no bound (null)', async () => {
+        const service = await createService({ minClientVersion: '', maxClientVersion: '' });
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeMinClientVersion).toBeNull();
+        expect(discovery.bgeMaxClientVersion).toBeNull();
+      });
+    });
+
+    describe('wire shape (published-contract lock)', () => {
+      it('exposes exactly the documented top-level keys — no extras — even fully populated', async () => {
+        const service = await createService({
+          useEmailPasswordAuth: true,
+          minClientVersion: '0.1.0',
+          maxClientVersion: '2.0.0',
+          ...OIDC_CONFIG,
+        });
+
+        const wire = transformKeysToSnakeCase(await service.getDiscovery()) as Record<string, unknown>;
+
+        expect(Object.keys(wire).sort()).toEqual(DOCUMENTED_WIRE_KEYS);
+      });
+
+      it('keeps null version bounds as present keys rather than dropping them', async () => {
+        const service = await createService({});
+
+        const wire = transformKeysToSnakeCase(await service.getDiscovery()) as Record<string, unknown>;
+
+        expect(wire).toHaveProperty('bge_min_client_version', null);
+        expect(wire).toHaveProperty('bge_max_client_version', null);
       });
     });
 

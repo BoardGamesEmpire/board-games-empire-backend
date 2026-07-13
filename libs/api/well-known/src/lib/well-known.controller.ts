@@ -26,7 +26,7 @@ export class WellKnownController {
    */
   @Get('bge-identity')
   @UseInterceptors(SnakeCaseInterceptor)
-  @Header('Cache-Control', 'public, max-age=3600')
+  @Header('Cache-Control', 'public, max-age=300')
   @ApiOkResponse({ type: BgeDiscoveryDto, description: 'BGE server identity and available auth strategies' })
   getDiscovery(): Promise<BgeDiscoveryDto> {
     return this.strategyService.getDiscovery();
@@ -36,7 +36,7 @@ export class WellKnownController {
   @UseInterceptors(SnakeCaseInterceptor)
   @HttpCode(204)
   @Header('Allow', 'GET, HEAD, OPTIONS')
-  @Header('Cache-Control', 'public, max-age=3600')
+  @Header('Cache-Control', 'public, max-age=300')
   @ApiNoContentResponse({ description: 'Supported methods for /.well-known/bge-identity' })
   getDiscoveryOptions(): void {
     // Intentionally empty — headers carry the response
