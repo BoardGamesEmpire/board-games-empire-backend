@@ -12,7 +12,9 @@ export type AuthStrategyDto = EmailAndPasswordStrategyDto | OidcStrategyDto;
  * they directly apply; BGE-specific extensions are prefixed with `bge`.
  *
  * Served at `/.well-known/bge-identity` with snake_case keys via
- * SnakeCaseInterceptor. All endpoints are absolute URLs.
+ * SnakeCaseInterceptor. `issuer` is the absolute canonical base URL; every BGE
+ * endpoint is a root-relative path the client resolves against its server URL.
+ * External references (e.g. an OIDC provider's discovery URL) remain absolute.
  */
 export class BgeDiscoveryDto {
   /**
@@ -71,38 +73,40 @@ export class BgeDiscoveryDto {
    * Device authorization endpoint per RFC 8628
    */
   @ApiProperty({
-    description: 'Device authorization endpoint (RFC 8628). Always available.',
-    example: 'https://api.example.com/api/auth/device',
+    description:
+      'Device authorization endpoint (RFC 8628 field name), as a root-relative path ' +
+      'resolved against `issuer`. Always available.',
+    example: '/api/auth/device',
   })
   deviceAuthorizationEndpoint!: string;
 
   /**
-   * The BetterAuth base URL. Useful for SDK integration and constructing
-   * any auth endpoint not listed explicitly in this document.
+   * The BetterAuth base path (relative). Useful for SDK integration and
+   * constructing any auth endpoint not listed explicitly in this document.
    */
   @ApiProperty({
-    description: 'BetterAuth base URL (bge_ extension)',
-    example: 'https://api.example.com/api/auth',
+    description: 'BetterAuth base path, relative (bge_ extension)',
+    example: '/api/auth',
   })
-  bgeAuthBaseUrl!: string;
+  bgeAuthBasePath!: string;
 
   /**
-   * Endpoint to retrieve the current user session.
+   * Endpoint to retrieve the current user session, relative path.
    * GET — returns session data if authenticated, 401 if not.
    */
   @ApiProperty({
-    description: 'Session retrieval endpoint (bge_ extension)',
-    example: 'https://api.example.com/api/auth/get-session',
+    description: 'Session retrieval endpoint, relative path (bge_ extension)',
+    example: '/api/auth/get-session',
   })
   bgeSessionEndpoint!: string;
 
   /**
-   * Endpoint to terminate the current session.
+   * Endpoint to terminate the current session, relative path.
    * POST — invalidates the session cookie / bearer token.
    */
   @ApiProperty({
-    description: 'Sign-out endpoint (bge_ extension)',
-    example: 'https://api.example.com/api/auth/sign-out',
+    description: 'Sign-out endpoint, relative path (bge_ extension)',
+    example: '/api/auth/sign-out',
   })
   bgeSignOutEndpoint!: string;
 
