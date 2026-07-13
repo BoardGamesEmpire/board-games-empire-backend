@@ -1,4 +1,5 @@
 import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
+import { bgeIdentityConfigValidationSchema } from '@bge/well-known';
 import Joi from 'joi';
 import cache, { cacheConfigValidationSchema } from './cache.config';
 import redisBullmq, { redisQueueConfigValidationSchema } from './redis-queue.config';
@@ -20,6 +21,7 @@ export const configuration = {
 };
 
 export const configurationValidationSchema = Joi.object({
+  ...bgeIdentityConfigValidationSchema,
   ...cacheConfigValidationSchema,
   ...mediaConfigValidationSchema,
   ...redisConfigValidationSchema,
