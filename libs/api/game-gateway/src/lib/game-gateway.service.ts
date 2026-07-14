@@ -4,7 +4,6 @@ import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } fro
 import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 
 @Injectable()
@@ -43,7 +42,7 @@ export class GameGatewayService {
       });
     } catch (error) {
       this.logger.error(`Error fetching game gateway with ID ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
         throw new NotFoundException(`Game gateway with ID ${id} not found or access denied.`);
       }
 
@@ -98,7 +97,7 @@ export class GameGatewayService {
       return gateway;
     } catch (error) {
       this.logger.error(`Error updating game gateway with ID ${gatewayId}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
         throw new ForbiddenException("You don't have permission to update this resource.");
       }
 

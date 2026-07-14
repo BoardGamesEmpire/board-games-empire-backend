@@ -7,7 +7,7 @@ import { PermissionsService } from './permissions.service';
 describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
-  let cache: jest.Mocked<Pick<Cache, 'get' | 'set'>>;
+  let cache: jest.Mocked<Pick<Cache, 'get' | 'set' | 'del'>>;
 
   beforeEach(async () => {
     const {
@@ -90,6 +90,10 @@ describe('PermissionsService', () => {
         expect.objectContaining({
           where: { id: 'user-1' },
           select: expect.objectContaining({
+            // Soft-deleted households must not contribute household-scoped grants.
+            householdMember: expect.objectContaining({
+              where: { household: { deletedAt: null } },
+            }),
             permissions: expect.objectContaining({
               where: { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
               select: expect.objectContaining({
@@ -182,6 +186,61 @@ describe('PermissionsService', () => {
           PermissionsService.CACHE_TTL_IN_MILLISECONDS,
         );
       });
+    });
+  });
+
+  describe('cache invalidation', () => {
+    it('userGraphCacheKey is the single source of truth for the key format', () => {
+      expect(PermissionsService.userGraphCacheKey('user-1')).toBe('bge:user:permissions:user-1');
+    });
+
+    it('invalidateUser deletes exactly that user graph key', async () => {
+      await service.invalidateUser('user-1');
+
+      expect(cache.del).toHaveBeenCalledTimes(1);
+      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+    });
+
+    it('invalidateUsers de-dupes and deletes one key per distinct user', async () => {
+      await service.invalidateUsers(['user-1', 'user-2', 'user-1']);
+
+      expect(cache.del).toHaveBeenCalledTimes(2);
+      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-2');
+    });
+
+    it('invalidateUsers no-ops on an empty set', async () => {
+      await service.invalidateUsers([]);
+
+      expect(cache.del).not.toHaveBeenCalled();
+    });
+
+    it('invalidateUsers drops nullish ids before evicting', async () => {
+      await service.invalidateUsers(['user-1', null, undefined, 'user-1']);
+
+      expect(cache.del).toHaveBeenCalledTimes(1);
+      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+    });
+
+    it('invalidateUser swallows a cache failure (best-effort; TTL is the backstop)', async () => {
+      cache.del.mockRejectedValueOnce(new Error('redis unreachable'));
+
+      await expect(service.invalidateUser('user-1')).resolves.toBeUndefined();
+    });
+
+    it('invalidateUsers evicts the rest when one eviction fails', async () => {
+      cache.del.mockRejectedValueOnce(new Error('redis unreachable'));
+
+      await expect(service.invalidateUsers(['user-1', 'user-2'])).resolves.toBeUndefined();
+      expect(cache.del).toHaveBeenCalledTimes(2);
+    });
+
+    it('invalidateUsers evicts every user across multiple bounded batches', async () => {
+      const ids = Array.from({ length: PermissionsService.EVICTION_BATCH_SIZE + 5 }, (_, i) => `user-${i}`);
+
+      await service.invalidateUsers(ids);
+
+      expect(cache.del).toHaveBeenCalledTimes(ids.length);
     });
   });
 });

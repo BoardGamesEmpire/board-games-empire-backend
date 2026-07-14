@@ -1,8 +1,7 @@
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
 import { CreateGameDto, UpdateGameDto } from './dto';
 
 @Injectable()
@@ -12,6 +11,7 @@ export class GameService {
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async getGames(pagination: PaginationQueryDto) {
@@ -164,7 +164,7 @@ export class GameService {
     const userId = this.abilityService.getActingUserId();
 
     try {
-      return await this.db.game.create({
+      const game = await this.db.game.create({
         data: {
           ...createGameDto,
 
@@ -175,6 +175,12 @@ export class GameService {
           },
         },
       });
+
+      // Creator gains create-derived grants (createdById-scoped); evict their
+      // cached ability graph so those resolve on their next request.
+      await this.permissions.invalidateUser(userId);
+
+      return game;
     } catch (error) {
       this.logger.error(`Error creating game`, error);
       throw error;
@@ -186,28 +192,33 @@ export class GameService {
       throw new BadRequestException('At least one field must be provided for update');
     }
 
+    const userId = this.abilityService.getActingUserId();
+
     try {
       const existing = await this.db.game.count({ where: { id } });
       if (existing === 0) {
         throw new NotFoundException(`Game with ID ${id} not found`);
       }
 
-      return await this.db.game.update({
+      const game = await this.db.game.update({
         where: {
           id,
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.update),
         },
         data: {
           ...updateGameDto,
-          updatedById: this.abilityService.getActingUserId(),
+          updatedById: userId,
         },
       });
+
+      // Updater may gain update-derived grants; evict their cached graph.
+      await this.permissions.invalidateUser(userId);
+
+      return game;
     } catch (error) {
       this.logger.error(`Error updating game with id ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new ForbiddenException("You don't have permission to update this resource.");
-        }
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this resource.");
       }
 
       throw error;

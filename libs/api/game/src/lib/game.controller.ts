@@ -1,11 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Body, Controller, Delete, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import type { Cache } from 'cache-manager';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { CreateGameDto, GameListResponseDto, UpdateGameDto } from './dto';
@@ -19,10 +17,7 @@ import { GameService } from './game.service';
 export class GameController {
   private readonly logger = new Logger(GameController.name);
 
-  constructor(
-    private readonly gameService: GameService,
-    @Inject(CACHE_MANAGER) private readonly cache: Cache,
-  ) {}
+  constructor(private readonly gameService: GameService) {}
 
   @ApiOperation({ summary: 'List games' })
   @ApiResponse({ status: Http.Ok, type: GameListResponseDto })
@@ -49,9 +44,9 @@ export class GameController {
   @Post()
   createGame(@Body() createGameDto: CreateGameDto) {
     return from(this.gameService.createGame(createGameDto)).pipe(
+      // The service creates the game and evicts the creator's permission graph.
       tap((game) => this.logger.log(`Game with ID ${game.id} created by user ${game.createdById}`)),
       map((game) => ({ game, message: 'Game created successfully' })),
-      tap(({ game }) => this.cache.del(`bge:user:permissions:${game.createdById}`)),
     );
   }
 
@@ -61,9 +56,9 @@ export class GameController {
   @Patch(':id')
   updateGame(@Param('id') id: string, @Body() updateGameDto: UpdateGameDto) {
     return from(this.gameService.updateGame(id, updateGameDto)).pipe(
+      // The service updates the game and evicts the updater's permission graph.
       tap((game) => this.logger.log(`Game with ID ${game.id} updated by user ${game.updatedById}`)),
       map((game) => ({ game, message: 'Game updated successfully' })),
-      tap(({ game }) => this.cache.del(`bge:user:permissions:${game.updatedById}`)),
     );
   }
 

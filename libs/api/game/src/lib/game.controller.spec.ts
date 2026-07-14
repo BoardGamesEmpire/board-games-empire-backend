@@ -1,7 +1,5 @@
 import type { PaginationQueryDto } from '@bge/shared';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { CACHE_MANAGER } from '@nestjs/cache-manager';
-import { Cache } from 'cache-manager';
 import { firstValueFrom } from 'rxjs';
 import type { CreateGameDto, UpdateGameDto } from './dto';
 import { GameController } from './game.controller';
@@ -12,7 +10,6 @@ const PAGINATION: PaginationQueryDto = { offset: 0, limit: 20 };
 describe('GameController', () => {
   let controller: GameController;
   let gameService: GameService;
-  let cacheService: Cache;
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
@@ -31,9 +28,8 @@ describe('GameController', () => {
     });
 
     gameService = module.get(GameService);
-    cacheService = module.get(CACHE_MANAGER);
 
-    controller = new GameController(gameService, cacheService);
+    controller = new GameController(gameService);
   });
 
   afterEach(() => jest.clearAllMocks());

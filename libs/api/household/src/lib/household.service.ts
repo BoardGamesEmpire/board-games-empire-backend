@@ -1,8 +1,15 @@
-import { Action, DatabaseService, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import {
+  Action,
+  DatabaseService,
+  InviteStatus,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
 import assert from 'node:assert';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 
@@ -13,12 +20,14 @@ export class HouseholdService {
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async getHouseholdById(id: string) {
     const household = await this.db.household.findUnique({
       where: {
         id,
+        deletedAt: null,
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
       include: {
@@ -72,6 +81,11 @@ export class HouseholdService {
     });
 
     if (!household) {
+      // The scoped read matched nothing: probe existence to distinguish a
+      // missing household (404) from one that exists but isn't visible (403).
+      if (await this.householdExists(id)) {
+        throw new ForbiddenException("You don't have permission to view this household.");
+      }
       throw new NotFoundException(`Household with id ${id} not found`);
     }
 
@@ -161,11 +175,21 @@ export class HouseholdService {
     };
   }
 
+  /**
+   * Cheap existence probe (excludes soft-deleted). Lets a caller distinguish a
+   * household that does not exist (→ 404) from one that exists but the actor may
+   * not read/mutate (→ 403) once a permission-scoped query returns nothing.
+   */
+  private async householdExists(id: string): Promise<boolean> {
+    const count = await this.db.household.count({ where: { id, deletedAt: null } });
+    return count > 0;
+  }
+
   async create(createHouseholdDto: CreateHouseholdDto) {
     const userId = this.abilityService.getActingUserId();
     const { languageId, ...rest } = createHouseholdDto;
 
-    return this.db.household.create({
+    const household = await this.db.household.create({
       data: {
         ...rest,
         language: languageId
@@ -198,6 +222,12 @@ export class HouseholdService {
         },
       },
     });
+
+    // The acting user just became a HouseholdOwner — evict their cached ability
+    // graph so the new household-scoped grants resolve on their next request.
+    await this.permissions.invalidateUser(userId);
+
+    return household;
   }
 
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
@@ -208,17 +238,14 @@ export class HouseholdService {
     const { languageId, ...rest } = updateHouseholdDto;
 
     try {
-      const existingHousehold = await this.db.household.count({
-        where: {
-          id,
-        },
-      });
-
-      assert(existingHousehold > 0, new NotFoundException(`Household with id ${id} not found or access denied.`));
+      // Existence first (→ 404); the scoped update below enforces permission
+      // (P2025 → 403). Keeps the two outcomes distinguishable.
+      assert(await this.householdExists(id), new NotFoundException(`Household with id ${id} not found`));
 
       return await this.db.household.update({
         where: {
           id,
+          deletedAt: null,
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
         },
         data: {
@@ -234,10 +261,8 @@ export class HouseholdService {
       });
     } catch (error) {
       this.logger.error(`Error updating household with id ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new ForbiddenException("You don't have permission to update this resource.");
-        }
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to update this resource.");
       }
 
       throw error;
@@ -247,6 +272,7 @@ export class HouseholdService {
   async getHouseholdsForUser(pagination: PaginationQueryDto) {
     return this.db.household.findMany({
       where: {
+        deletedAt: null,
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
 
@@ -293,25 +319,62 @@ export class HouseholdService {
   }
 
   /**
-   * @todo soft delete - also need to consider how this affects invites and game collection sharing
+   * Soft-delete: the row is retained (`deletedAt` stamped) and hidden from every
+   * read (`getHouseholdById`/`getHouseholdsForUser`/`updateHousehold` all filter
+   * `deletedAt: null`). Outstanding invites to the household are revoked in the
+   * same transaction so a stale token can never be accepted into a dead
+   * household. Members and game-collection shares are intentionally left in place
+   * — a soft delete is reversible and reads already exclude the household; hard
+   * cascade/cleanup is deferred to the (future) purge path.
    */
   async deleteHousehold(id: string) {
     try {
-      const count = await this.db.household.count({ where: { id } });
-      assert(count > 0, new NotFoundException(`Household with id ${id} not found`));
+      // Existence first (→ 404); the scoped update below enforces the delete
+      // policy (owner-only), and a non-matching `where` (→ P2025) maps to 403 —
+      // consistent with updateHousehold and GameService.delete/update.
+      assert(await this.householdExists(id), new NotFoundException(`Household with id ${id} not found`));
 
-      return await this.db.household.delete({
-        where: {
-          id,
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.delete),
-        },
+      const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
+        const household = await tx.household.update({
+          where: {
+            id,
+            deletedAt: null,
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.delete),
+          },
+          data: { deletedAt: new Date() },
+        });
+
+        // Outstanding invites to a dead household can never be accepted.
+        await tx.invite.updateMany({
+          where: {
+            householdId: id,
+            status: { in: [InviteStatus.Pending, InviteStatus.AwaitingApproval] },
+          },
+          data: { status: InviteStatus.Revoked },
+        });
+
+        // Member rows survive the soft delete; capture them so their cached
+        // ability graphs can be evicted (the household just left their surface).
+        const members = await tx.householdMember.findMany({
+          where: { householdId: id },
+          select: { userId: true },
+        });
+
+        return { household, memberUserIds: members.map((member) => member.userId) };
       });
+
+      // Evict every member's graph so stale Household* abilities don't linger for
+      // the cache TTL. The graph query also excludes soft-deleted memberships, so
+      // the rebuild omits this household even before the eviction lands.
+      await this.permissions.invalidateUsers(memberUserIds);
+
+      return household;
     } catch (error) {
       this.logger.error(`Error deleting household with id ${id}`, error);
-      if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        if (error.code === PrismaError.DependentRecordNotFound) {
-          throw new NotFoundException(`Household with id ${id} not found`);
-        }
+      // Existence was confirmed above, so a scoped-update miss means the actor
+      // isn't permitted to delete this household (owner-only) → 403.
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException("You don't have permission to delete this household.");
       }
 
       throw error;
