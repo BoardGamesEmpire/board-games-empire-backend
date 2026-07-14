@@ -18,20 +18,100 @@ export class PermissionsService {
    */
   static readonly MIN_CACHE_TTL_IN_MILLISECONDS = 5 * 1000;
 
+  /**
+   * Max concurrent cache evictions per batch in {@link invalidateUsers}. Bounds
+   * the burst of cache calls when a mutation touches many users at once.
+   */
+  static readonly EVICTION_BATCH_SIZE = 50;
+
   constructor(
     private readonly db: DatabaseService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
+  /**
+   * Cache key for a user's resolved permission graph. Single source of truth for
+   * the key format — both the writer ({@link getUserRoleGraph}) and every
+   * invalidation path go through here so the two can never drift.
+   */
+  static userGraphCacheKey(userId: string): string {
+    return `bge:user:permissions:${userId}`;
+  }
+
   async getUserRoleGraph(userId: string): Promise<UserWithRoles | null> {
     const userGraph = await this.getOrLoad(
-      `bge:user:permissions:${userId}`,
+      PermissionsService.userGraphCacheKey(userId),
       `user role graph for user ${userId}`,
       () => this.loadUserGraph(userId),
       (graph) => this.cacheTtlForGraph(graph),
     );
 
     return userGraph as UserWithRoles | null;
+  }
+
+  /**
+   * Evict one user's cached permission graph so their abilities are rebuilt from
+   * the DB on next resolution. MUST be called after any change to a user's
+   * grants — role assignment, household/event membership add/remove/role-change,
+   * invite acceptance — otherwise stale abilities persist up to the cache TTL
+   * ({@link CACHE_TTL_IN_MILLISECONDS}). The per-membership build in
+   * `AbilityFactory` means a membership change invalidates only the affected
+   * user, not the whole household.
+   */
+  async invalidateUser(userId: string | null | undefined): Promise<void> {
+    // Tolerate a nullish id (some entities carry a nullable created/updatedById):
+    // there is nothing to evict, so no-op rather than delete a garbage key.
+    if (!userId) {
+      return;
+    }
+
+    // Per-user success/failure is logged inside evictUserGraph (which swallows
+    // failures), so nothing is logged here — a summary would overstate success.
+    await this.evictUserGraph(userId);
+  }
+
+  /**
+   * Bulk counterpart to {@link invalidateUser} for mutations that change several
+   * users' grants at once (e.g. ownership transfer touches both parties, a
+   * household delete touches every member). De-dupes ids, drops nullish ids, and
+   * no-ops on an empty set.
+   *
+   * Evicts in fixed-size batches ({@link EVICTION_BATCH_SIZE}) to bound
+   * concurrency: a large user set (e.g. a bulk role change) can't burst hundreds
+   * of concurrent cache calls. {@link evictUserGraph} swallows per-user failures,
+   * so no batch rejects and one bad eviction can't abandon the rest.
+   */
+  async invalidateUsers(userIds: readonly (string | null | undefined)[]): Promise<void> {
+    const unique = [...new Set(userIds)].filter((userId): userId is string => Boolean(userId));
+    if (unique.length === 0) {
+      return;
+    }
+
+    for (let i = 0; i < unique.length; i += PermissionsService.EVICTION_BATCH_SIZE) {
+      const batch = unique.slice(i, i + PermissionsService.EVICTION_BATCH_SIZE);
+      await Promise.all(batch.map((userId) => this.evictUserGraph(userId)));
+    }
+
+    this.logger.debug(`Requested permission-graph invalidation for ${unique.length} user(s)`);
+  }
+
+  /**
+   * Best-effort eviction of a single user graph. A cache failure is logged and
+   * swallowed rather than thrown: the build-time `expiresAt` re-check and the
+   * graph TTL are the correctness backstop, so a transient cache outage degrades
+   * to "stale until TTL" instead of turning into an unhandled rejection that
+   * leaves the already-committed mutation reported as a failure. The debug line
+   * is logged only when the `del` call resolves without error — the cache API
+   * doesn't report whether a key was present, so it reflects a completed
+   * invalidation (the graph is now absent), not a confirmed prior cache hit.
+   */
+  private async evictUserGraph(userId: string): Promise<void> {
+    try {
+      await this.cache.del(PermissionsService.userGraphCacheKey(userId));
+      this.logger.debug(`Invalidated permission graph for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Failed to invalidate permission graph for user ${userId}`, error);
+    }
   }
 
   /**
@@ -132,6 +212,10 @@ export class PermissionsService {
         },
 
         householdMember: {
+          // A soft-deleted household must not contribute household-scoped grants:
+          // the row survives the (soft) delete, so exclude memberships whose
+          // household is gone or abilities would linger past a cache refresh.
+          where: { household: { deletedAt: null } },
           select: {
             householdId: true,
             role: {

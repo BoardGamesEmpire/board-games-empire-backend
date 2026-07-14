@@ -1,10 +1,9 @@
-import { DatabaseService, NotificationType, Prisma } from '@bge/database';
+import { DatabaseService, isPrismaDependentRecordNotFoundError, NotificationType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { StorageService } from '@bge/storage';
 import type { StorageLocator } from '@boardgamesempire/storage-contract';
 import { ObjectNotFoundError } from '@boardgamesempire/storage-contract';
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
 import type { PurgeContributionJob } from '../interfaces/purge-contribution-job.interface';
 
 @Injectable()
@@ -49,7 +48,7 @@ export class MediaContributionPurgeService {
       await this.db.mediaObject.delete({ where: { id: mediaObjectId } });
       return true;
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === PrismaError.DependentRecordNotFound) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
         return false; // another runner won the race — don't notify twice
       }
       throw error;

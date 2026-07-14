@@ -1,9 +1,10 @@
 import type { Game } from '@bge/database';
 import { Action, Prisma, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
+  MOCK_ACTING_USER_ID,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -20,13 +21,22 @@ describe('GameService', () => {
   let service: GameService;
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
+    permissions = {
+      invalidateUser: jest.fn().mockResolvedValue(undefined),
+      invalidateUsers: jest.fn().mockResolvedValue(undefined),
+    };
 
     const ctx = await createTestingModuleWithDb({
-      providers: [GameService, { provide: AbilityService, useValue: abilityService }],
+      providers: [
+        GameService,
+        { provide: AbilityService, useValue: abilityService },
+        { provide: PermissionsService, useValue: permissions },
+      ],
     });
 
     db = ctx.db;
@@ -73,15 +83,16 @@ describe('GameService', () => {
     await expect(service.getGame('game-1')).rejects.toThrow(ForbiddenException);
   });
 
-  it('createGame does not filter by abilities', async () => {
+  it('createGame does not filter by abilities and evicts the creator’s permission graph', async () => {
     db.game.create.mockResolvedValue({ id: 'game-1' } as Game);
 
     await service.createGame({ title: 'X' } as CreateGameDto);
 
     expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+    expect(permissions.invalidateUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
   });
 
-  it('updateGame → update', async () => {
+  it('updateGame → update, and evicts the updater’s permission graph', async () => {
     db.game.count.mockResolvedValue(1);
     db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
 
@@ -91,6 +102,7 @@ describe('GameService', () => {
     expect(db.game.update).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: 'game-1', AND: [COND] }) }),
     );
+    expect(permissions.invalidateUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
   });
 
   it('updateGame rejects an empty patch', async () => {

@@ -1,0 +1,175 @@
+# i18n String-Surface Inventory (#136)
+
+Phase 0 deliverable for the i18n epic (#135). Tagged inventory of every server-generated,
+human-readable string, classified in-scope vs out-of-scope, grouped by lib to parallelize the
+Phase 3 migration (#144).
+
+**Method:** repo-wide sweep of `libs/` and `apps/` (excluding `*.spec.ts`, `node_modules`, `dist`,
+`out-tsc`) for `throw new *Exception(...)`, class-validator messages, custom `ValidatorConstraint`
+`defaultMessage()`, and controller response `message:` fields. `Logger.*` output is excluded (logs
+stay English).
+
+## Confirmed scope (per epic)
+
+- **In:** API exception/error messages, validation messages, and server-generated human-readable
+  strings (incl. controller success `message:` bodies and the import client-safe copy map).
+- **Out:** notification bodies (rendered client-side from `type + payload`), domain content
+  (game descriptions etc. — own `languageId` relations), and all custom/domain **error classes**
+  (operator/developer-facing — see §5).
+
+---
+
+## 1. Headline findings
+
+1. **Validation is nearly free to localize.** Across 46 DTO/validator files there is exactly **one**
+   inline custom `message:` and **three** custom `ValidatorConstraint.defaultMessage()` strings.
+   Every other DTO uses class-validator's **built-in default messages** — `nestjs-i18n` overrides
+   those **centrally** (`I18nValidationPipe`), so Phase 2 does not need a per-DTO string grind.
+   No custom `exceptionFactory` exists anywhere.
+2. **New category: controller success messages.** ~42 hardcoded English `message:` strings returned
+   in success response bodies (e.g. `Game created successfully`). Not in the original exception count;
+   in scope.
+3. **~165 HTTP-exception throw sites**, but 19 live in `actor-context-transport` auth plumbing
+   (17 on internal service-to-service gRPC channels). Treat those as a **separate low-priority
+   bucket** — low end-user value.
+4. **Heavy duplication → far fewer keys than sites.** Many messages repeat verbatim
+   (permission-denied variants, `{Entity} not found`, `At least one field must be provided`). Collapse
+   into shared `common.*` keys (see §4).
+5. **All custom domain errors are out of scope.** Where storage/signature errors reach HTTP they are
+   already remapped to **generic English strings at the `libs/api/media` filter/controller sites**
+   (those mapping-site strings *are* in scope and counted under `media`).
+
+---
+
+## 2. Summary counts (in-scope)
+
+| Lib | Exception msgs | Success `message:` | Notes |
+|---|---:|---:|---|
+| libs/api/event | 32 | 21 | largest surface |
+| libs/api/media | 35 | 1 | + generic strings from StorageExceptionFilter mapping sites |
+| libs/api/friendship | 14 | 3 | |
+| libs/common/quota | 12 | — | incl. `QuotaExceededException` (msg centralized in ctor) + 1 validator msg |
+| libs/api/game | 8 | 3 | |
+| libs/api/webhook-subscription | 8 | 5 | 1 dynamic (caller-supplied) message |
+| libs/api/game-collection | 7 | 3 | |
+| libs/api/game-gateway | 6 | 0 | 2 dynamic `error.message` pass-throughs (see §6) |
+| libs/common/permissions | 5 | — | ForbiddenException only; custom error out of scope |
+| libs/api/household | 4 | 3 | |
+| libs/api/safe-http | 4 | — | + 2 custom-validator messages (admin) |
+| libs/api/game-import | 3 | 5 | worker context + `SAFE_MESSAGE` client-safe copy map |
+| libs/api/system-settings | 2 | — | operator-facing "run the seed" invariants |
+| libs/api/quota | 1 | 1 | |
+| libs/api/feedback | 1 | 1 | + 1 custom-validator message |
+| libs/api/language | 1 | — | |
+| libs/api/well-known | 1 | — | |
+| libs/api/gateway-registry | 1 | — | NotImplementedException |
+| libs/common/actor-context | 1 | — | `audit-context.service.ts:53` ForbiddenException |
+| **libs/api/actor-context-transport** | **19** | — | **LOW PRIORITY** — 2 HTTP, 17 internal gRPC |
+| **Totals** | **~165** | **~42** | |
+
+Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstraint` messages.
+
+---
+
+## 3. Phase 3 migration checklist (by lib)
+
+Ordered roughly by value/size. Each is an independent unit of work (good for parallel owners).
+
+- [ ] `libs/api/event` — 32 exceptions + 21 success messages (biggest; nomination/occurrence/attendee subtrees)
+- [ ] `libs/api/media` — 35 exceptions + StorageExceptionFilter/controller generic-string mapping sites
+- [ ] `libs/api/friendship` — 14 exceptions + 3 success
+- [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
+- [ ] `libs/api/game` — 8 exceptions + 3 success
+- [ ] `libs/api/webhook-subscription` — 7 literal exceptions + 5 success (handle 1 dynamic msg, §6)
+- [ ] `libs/api/game-collection` — 7 exceptions + 3 success
+- [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-throughs, §6)
+- [ ] `libs/common/permissions` — 5 ForbiddenException
+- [ ] `libs/api/household` — 4 exceptions + 3 success
+- [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
+- [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
+- [ ] `libs/api/system-settings` — 2 exceptions
+- [ ] `libs/api/quota` — 1 exception + 1 success
+- [ ] `libs/api/feedback` — 1 exception + 1 success + 1 custom-validator message
+- [ ] `libs/api/language` — 1 exception
+- [ ] `libs/api/well-known` — 1 exception
+- [ ] `libs/api/gateway-registry` — 1 exception
+- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:53`)
+- [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — 19 auth-plumbing exceptions (17 internal gRPC)
+
+---
+
+## 4. Recommended shared keys (dedup)
+
+These strings repeat across many libs — make them shared `common.*` keys, not per-site:
+
+- `common.forbidden.resource` — "You don't have permission to {action} this resource." (view/update/delete/remove) — appears in event, game, game-gateway, household, occurrence, …
+- `common.forbidden.action` — "You do not have permission to perform this action." (permissions guard ×2)
+- `common.forbidden.access` — "You don't have permission to access this resource." (permissions ×2)
+- `common.notFound.entity` — "{Entity} with id {id} not found" — friendship, household, language, safe-http, game, game-collection, game-gateway, webhook-subscription, event, media, feedback, quota
+- `common.badRequest.noFields` — "At least one field must be provided for update" — game, game-collection, game-gateway, household
+- `common.unauthorized.apiKey` — "Invalid API key" — actor-context-transport ×2
+
+---
+
+## 5. Out of scope (confirmed) — custom/domain error classes
+
+All operator/developer-facing. Where they touch HTTP they are remapped to generic English at the
+mapping site (which is in scope and counted under `media`). Do **not** translate these:
+
+- **Storage** (`libs/storage/*`): `StorageMisconfiguredError`, `DriverNotRegisteredError`,
+  `InvalidObjectKeyError`, `ObjectNotFoundError`, `SignatureInvalidError`, `SignatureExpiredError`,
+  `RangeError`, `ProbeTimeoutError`. StorageExceptionFilter → generic `503 Storage temporarily
+  unavailable`; signature/not-found remapped inside `media-object.service.ts` to
+  `Invalid signature` / `Signed URL has expired` / `Media not found` (those strings **are** in scope).
+- **secure-http** (`libs/common/secure-http`): `DnsResolutionError`, `SsrfRejectionError`,
+  `RedirectToDisallowedTargetError`, `RedirectLimitExceededError`, `RequestTimeoutError`,
+  `OutboundNetworkError`, `InvalidRequestUrlError` — never reach HTTP (outbound retry classification).
+- **queue** (`libs/queue/*`): `SinkNotRegisteredError`, `FeedbackSinkMisconfiguredError`,
+  `WebhookDeliveryFailedError` — worker/boot-time, never HTTP.
+- **actor-context** (`libs/common/actor-context`): `TypeError` + plain `Error` invariants — dev-facing.
+- **permissions**: `AbilityContextNotPrimedError` + plain `Error` — dev-facing.
+- **quota registry** (`libs/common/quota/.../registry`): 3 plain `Error` throws — internal.
+
+---
+
+## 6. Special-handling callouts
+
+- **Dynamic / non-literal messages** (need per-case decisions, not straight extraction):
+  - `webhook-subscription.service.ts:223` — `ForbiddenException(message)` where `message` is
+    caller-supplied via `requireAbilities(message)`; translate at the call sites, not here.
+  - `game-gateway.controller.ts:131,164` — response `message:` passes through raw caught
+    `error.message`. **Not just an i18n gap — a potential info leak.** Replace with a translated,
+    sanitized string.
+  - `grpc-internal-actor.interceptor.ts:143` — embeds `(error as Error).message` in a
+    BadRequestException; keep the interpolation arg, translate the frame.
+- **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor
+  (`Quota for "{resource}" exceeded at {scope} scope`) — one key, all throw sites inherit it.
+- **`SAFE_MESSAGE` map** (`game-import/src/lib/utils/sanitize-import-error.ts`) — 4 client-safe
+  strings already designed as user-facing copy; ideal first candidates
+  (`The requested game could not be found on the gateway.`, etc.).
+- **Concatenated literals:** several messages are built from 2 string fragments across lines
+  (event occurrence, well-known security.txt, safe-http wildcard, quota scope, game-import,
+  gateway-registry). Join into a single catalog entry.
+- **Worker-context throws** (`game-import` processors): thrown off the HTTP path; some are later
+  sanitized before reaching clients. Localize with an explicit `lang` when Phase 4 wires worker locale.
+- **`actor-context-transport` gRPC frames (17):** on internal service-to-service channels — technically
+  `HttpException` but rarely surfaced to end users. Lowest priority.
+
+---
+
+## 7. Validation messages (full list)
+
+| file:line | source | message |
+|---|---|---|
+| libs/common/quota/.../dto/set-quota.dto.ts:18 | inline `@IsNumberString` message | `limit must be a non-negative integer string` |
+| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()` | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes` |
+| libs/api/safe-http/.../dto/validators.ts:33 | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")` |
+| libs/api/safe-http/.../dto/validators.ts:71 | `IsCidrConstraint.defaultMessage()` | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
+
+Everything else = class-validator defaults → override centrally via `nestjs-i18n` in Phase 2 (#142).
+
+---
+
+*Full per-site message tables (every throw with exact text + interpolation args) were captured during
+the sweep and can be regenerated per lib on demand; the checklist in §3 plus the shared-key plan in §4
+is what Phase 3 owners work from.*

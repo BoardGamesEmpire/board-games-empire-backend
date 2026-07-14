@@ -12,8 +12,6 @@ describe('HouseholdController (no-Session delegation)', () => {
       'getHouseholdsForUser' | 'getHouseholdById' | 'create' | 'updateHousehold' | 'deleteHousehold'
     >
   >;
-  let cache: { del: jest.Mock };
-
   beforeEach(() => {
     service = {
       getHouseholdsForUser: jest.fn().mockResolvedValue([]),
@@ -22,8 +20,7 @@ describe('HouseholdController (no-Session delegation)', () => {
       updateHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
       deleteHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
     };
-    cache = { del: jest.fn() };
-    controller = new HouseholdController(service as never, cache as never);
+    controller = new HouseholdController(service as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -33,11 +30,10 @@ describe('HouseholdController (no-Session delegation)', () => {
     expect(service.getHouseholdsForUser).toHaveBeenCalledWith(PAGINATION);
   });
 
-  it('create forwards only the dto (no Session) and invalidates the owner cache from the returned createdById', async () => {
+  it('create forwards only the dto (no Session); cache invalidation is the service’s concern', async () => {
     await firstValueFrom(controller.create({ name: 'Home' } as never));
 
     expect(service.create).toHaveBeenCalledWith({ name: 'Home' });
-    expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
   });
 
   it('getById forwards only the id', async () => {
