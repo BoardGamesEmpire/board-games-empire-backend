@@ -188,6 +188,9 @@
     },
     {
       "path": "./libs/common/locale"
+    },
+    {
+      "path": "./libs/common/i18n"
     }
   ]
 }

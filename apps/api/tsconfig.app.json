@@ -83,6 +83,9 @@
       "path": "../../libs/api/language/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/i18n/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/household/tsconfig.lib.json"
     },
     {

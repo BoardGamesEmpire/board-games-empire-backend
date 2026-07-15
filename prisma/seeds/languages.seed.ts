@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@bge/database';
-import { displayName, nativeDisplayName, parseTag } from '@bge/locale';
+import { canonicalizeTag, displayName, nativeDisplayName, parseTag } from '@bge/locale';
 import type { Logger } from '@nestjs/common';
 
 // TODO: Expand i18n support
@@ -64,8 +64,37 @@ const curatedLanguages: CuratedLanguage[] = [
   { iso6393: 'zho', iso6391: 'zh', tags: ['zh', 'zh-Hans', 'zh-Hant'] },
 ];
 
+/**
+ * Guard the systemSupported set against the curated vocabulary: every entry
+ * must be a canonical BCP 47 tag (else the `systemSupportedTags.includes(...)`
+ * comparison below silently never matches) and must be a tag we actually seed
+ * (else the app would advertise a catalog locale with no backing LanguageTag
+ * row). This is #137's "verify every systemSupported language has the required
+ * tag," on the LanguageTag model. Whether a message catalog folder physically
+ * exists for each supported tag is asserted later, at loader time (#138).
+ */
+function assertSystemSupportedTags(curated: readonly CuratedLanguage[]) {
+  const seededTags = new Set(curated.flatMap((language) => language.tags));
+
+  for (const tag of systemSupportedTags) {
+    const canonical = canonicalizeTag(tag);
+    if (canonical === null) {
+      throw new Error(`languagesSeed: systemSupported tag '${tag}' is not a valid BCP 47 tag`);
+    }
+    if (canonical !== tag) {
+      throw new Error(`languagesSeed: systemSupported tag '${tag}' is not canonical (expected '${canonical}')`);
+    }
+
+    if (!seededTags.has(tag)) {
+      throw new Error(`languagesSeed: systemSupported tag '${tag}' is not in the curated vocabulary`);
+    }
+  }
+}
+
 export async function languagesSeed(prisma: PrismaClient, logger: Logger) {
   logger.log('Starting languages seed...');
+
+  assertSystemSupportedTags(curatedLanguages);
 
   let tagCount = 0;
 
