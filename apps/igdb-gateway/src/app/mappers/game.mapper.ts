@@ -447,8 +447,8 @@ function filterLocale(lang: IgdbLanguageEntry, languageIds: number[]): boolean {
 }
 
 /**
- * Deduplicates LanguageData by iso639_3 so en-US and en-GB don't both appear.
- * The first encountered entry wins — for display purposes they're equivalent.
+ * Deduplicates LanguageData by canonical tag. Distinct locales stay distinct
+ * (en-US and en-GB, zh-Hans and zh-Hant) — only true duplicates collapse.
  */
 function toLanguageDataList(languageEntries: IgdbLanguageEntry[]): proto.LanguageData[] {
   const seen = new Set<string>();
@@ -456,8 +456,9 @@ function toLanguageDataList(languageEntries: IgdbLanguageEntry[]): proto.Languag
 
   for (const entry of languageEntries) {
     const mapped = toLanguageData(entry);
-    if (mapped && !seen.has(mapped.iso6393)) {
-      seen.add(mapped.iso6393);
+    const key = mapped?.ietfTag;
+    if (mapped && key && !seen.has(key)) {
+      seen.add(key);
       result.push(mapped);
     }
   }

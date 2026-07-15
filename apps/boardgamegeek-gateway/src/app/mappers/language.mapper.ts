@@ -8,11 +8,12 @@ import type { BggLink } from '../types';
  * "German", "Korean"); this map resolves them to ISO 639-3 + 639-1.
  *
  * Coverage: the ~40 languages most commonly tagged on BGG releases.
- * Unknown languages are dropped at the mapper level — they would be
- * dropped by the import worker anyway (Language.findUnique by code).
  *
- * This map is gateway-internal. A future LanguageGatewayLink table will
- * replace it with a DB-backed lookup populated during gateway onboarding.
+ * This map is gateway-internal: it powers request-side locale translation
+ * (resolveLocaleLanguageNames) and seeds the host's LanguageGatewayLink
+ * rows via the ListLanguages capabilities interview. Host-side resolution
+ * of response languages happens against those link rows — unknown names
+ * are no longer dropped here silently; they surface as Unresolved links.
  */
 interface BggLanguage {
   readonly iso6393: string;
@@ -93,8 +94,8 @@ export function toLanguageData(link: BggLink): proto.LanguageData | null {
 
 /**
  * Filter and dedupe a link array down to recognized language entries.
- * Deduplication happens on iso6393 — multilingual editions sometimes
- * carry duplicate language links.
+ * Deduplication happens on the display name (BGG's native identity) —
+ * multilingual editions sometimes carry duplicate language links.
  */
 export function toLanguageDataList(links: readonly BggLink[]): proto.LanguageData[] {
   const seen = new Set<string>();
@@ -102,13 +103,28 @@ export function toLanguageDataList(links: readonly BggLink[]): proto.LanguageDat
 
   for (const link of links) {
     const mapped = toLanguageData(link);
-    if (mapped && !seen.has(mapped.iso6393)) {
-      seen.add(mapped.iso6393);
+    if (mapped && !seen.has(mapped.name)) {
+      seen.add(mapped.name);
       result.push(mapped);
     }
   }
 
   return result;
+}
+
+/**
+ * The full internal map as ListLanguages interview entries. BGG's native
+ * vocabulary is English display names, so `value` is the display name and
+ * `format` is NAME; the hand-curated ISO codes ride along as enrichments.
+ */
+export function toGatewayLanguageEntries(): proto.GatewayLanguageEntry[] {
+  return Object.entries(BGG_LANGUAGE_MAP).map(([bggName, lang]) => ({
+    value: bggName,
+    format: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+    iso6393: lang.iso6393,
+    iso6391: lang.iso6391,
+    name: lang.name,
+  }));
 }
 
 /**

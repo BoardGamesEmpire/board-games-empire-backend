@@ -25,17 +25,17 @@ describe('LanguageService', () => {
 
     it('omits the filter (undefined) when systemSupported is not provided', async () => {
       await service.getLanguages({} as LanguageQueryDto);
-      expect(whereOf()?.systemSupported).toBeUndefined();
+      expect(whereOf()?.tags).toBeUndefined();
     });
 
-    it('filters on true when systemSupported is true', async () => {
+    it('requires a supported tag when systemSupported is true', async () => {
       await service.getLanguages({ systemSupported: true } as LanguageQueryDto);
-      expect(whereOf()?.systemSupported).toBe(true);
+      expect(whereOf()?.tags).toEqual({ some: { systemSupported: true } });
     });
 
-    it('filters on false when systemSupported is false', async () => {
+    it('excludes languages with supported tags when systemSupported is false', async () => {
       await service.getLanguages({ systemSupported: false } as LanguageQueryDto);
-      expect(whereOf()?.systemSupported).toBe(false);
+      expect(whereOf()?.tags).toEqual({ none: { systemSupported: true } });
     });
   });
 });

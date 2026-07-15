@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
+import { LanguageLinkModule } from '@bge/language';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
@@ -20,6 +21,7 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
   imports: [
     AuditContextModule,
     DatabaseModule,
+    LanguageLinkModule,
     NotificationsServiceModule,
     // GamesImport: consumed here (GameImportProcessor) and produced (spawner).
     // GatewayFetch: producer only — the spawner enqueues expansion fetch jobs,

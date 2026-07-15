@@ -55,7 +55,7 @@ describe('GameGatewayService', () => {
       expect(typeof service.ping({}).timestampMs).toBe('bigint');
     });
 
-    it('declares language preferences (IETF BCP 47 + ISO 639-1 accepted, ISO 639-3 emitted)', () => {
+    it('declares language preferences (IETF BCP 47 + ISO 639-1 accepted, IETF BCP 47 emitted)', () => {
       const response = service.ping({});
 
       expect(response.languagePreferences).toEqual({
@@ -63,7 +63,7 @@ describe('GameGatewayService', () => {
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
         ],
-        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_3,
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
         passthroughRawLocale: false,
       } satisfies proto.GatewayLanguagePreferences);
     });

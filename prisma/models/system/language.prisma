@@ -1,21 +1,138 @@
+// A language in the curated core vocabulary (seeded) or auto-added from a
+// gateway capabilities interview. Groups its BCP 47 tags — all content and
+// preference associations live at the tag level (LanguageTag), not here.
 model Language {
   id String @id @default(cuid(2))
 
-  // ISO 639-1 two-letter code, if it exists. Not all languages have this.
-  abbreviation String? @unique @db.VarChar(2)
-
   // ISO 639-3 three-letter code. Every language has this.
-  code       String  @unique @db.VarChar(3)
+  iso6393 String @unique @db.VarChar(3)
+
+  // ISO 639-1 two-letter code, if it exists. Not all languages have this.
+  iso6391 String? @unique @db.VarChar(2)
+
+  // English display name: "Chinese". Locale-variant names ("Chinese
+  // (Traditional)") live on LanguageTag.
   name       String  @unique
   nativeName String? @map("native_name")
 
-  // Whether the application has i18n support for this language.
+  tags LanguageTag[]
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("languages")
+}
+
+// A canonical IETF BCP 47 language tag: "en", "en-US", "zh-Hant". This is the
+// system's preferred language identifier — releases, households, and user
+// preferences all reference tags. `tag` is stored in canonical case
+// (Intl.getCanonicalLocales) and is the public API identifier.
+model LanguageTag {
+  id String @id @default(cuid(2))
+
+  tag String @unique
+
+  // Decomposed subtags, for grouping and match diagnostics.
+  script String? @db.VarChar(4) // ISO 15924: "Hans", "Hant"
+  region String? @db.VarChar(3) // ISO 3166-1 alpha-2 or UN M49: "US", "419"
+
+  // Locale-level display names: "Chinese (Traditional)", "繁體中文".
+  name       String
+  nativeName String? @map("native_name")
+
+  // Whether the application has i18n support for this locale.
   systemSupported Boolean @default(false) @map("system_supported")
+
+  // Curated rows come from the seed; Gateway rows were auto-added from a
+  // gateway that supplied a valid BCP 47 tag.
+  source LanguageTagSource @default(Curated)
+
+  language   Language @relation(fields: [languageId], references: [id], onDelete: Cascade)
+  languageId String   @map("language_id")
 
   dlcReleases     GameReleaseDlcLanguage[]
   gameReleases    GameReleaseLanguage[]
+  gatewayLinks    LanguageGatewayLink[]
   households      Household[]
   userPreferences UserPreferences[]
 
-  @@map("languages")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([languageId])
+  @@map("language_tags")
+}
+
+enum LanguageTagSource {
+  Curated
+  Gateway
+
+  @@map("language_tag_sources")
+}
+
+// Maps a gateway-native language value (in the format that gateway declares:
+// a BCP 47 tag, an ISO code, or a bare display name like BGG's "Czech") to a
+// canonical LanguageTag. Populated by the gateway capabilities interview and
+// lazily by imports that encounter values the interview didn't cover.
+//
+// Rows with `tagId = null` are the curation worklist:
+//   Pending    — valid BCP 47, awaiting review (reviewGatewayLanguages on)
+//   Unresolved — could not be auto-resolved; needs manual curation
+//   Ignored    — explicitly dismissed; suppresses further warnings
+model LanguageGatewayLink {
+  id String @id @default(cuid(2))
+
+  // GameGateway.id — plain string by gateway-link convention (no FK).
+  gatewayId String @map("gateway_id")
+
+  // Gateway-native value, verbatim: "en-US", "eng", "Czech".
+  value  String
+  format LanguageCodeFormat
+
+  status LanguageLinkStatus @default(Unresolved)
+  origin LanguageLinkOrigin
+
+  tag   LanguageTag? @relation(fields: [tagId], references: [id])
+  tagId String?      @map("tag_id")
+
+  // Metadata the gateway supplied alongside the value, retained so a
+  // Pending/Unresolved link can be resolved later without re-interviewing.
+  suppliedIso6393    String? @map("supplied_iso6393") @db.VarChar(3)
+  suppliedIso6391    String? @map("supplied_iso6391") @db.VarChar(2)
+  suppliedName       String? @map("supplied_name")
+  suppliedNativeName String? @map("supplied_native_name")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([gatewayId, value, format])
+  @@index([status])
+  @@map("language_gateway_links")
+}
+
+// Mirrors proto LanguageCodeFormat (bge.gateway.v1).
+enum LanguageCodeFormat {
+  Iso6391
+  Iso6393
+  IetfBcp47
+  Name
+  NativeName
+
+  @@map("language_code_formats")
+}
+
+enum LanguageLinkStatus {
+  Resolved
+  Pending
+  Unresolved
+  Ignored
+
+  @@map("language_link_statuses")
+}
+
+enum LanguageLinkOrigin {
+  Interview
+  Import
+
+  @@map("language_link_origins")
 }

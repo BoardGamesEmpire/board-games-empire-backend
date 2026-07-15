@@ -18,6 +18,7 @@ const ESM_PACKAGES = [
   'axios',
   'better-auth',
   'better-call',
+  'iso-639-3',
   'jose',
   'kysely',
   'nanostores',

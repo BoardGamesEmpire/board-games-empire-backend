@@ -6,8 +6,8 @@ model Household {
   name        String
   image       String?
 
-  language   Language? @relation(fields: [languageId], references: [id])
-  languageId String?   @map("language_id")
+  languageTag   LanguageTag? @relation(fields: [languageTagId], references: [id])
+  languageTagId String?      @map("language_tag_id")
 
   createdBy   User   @relation("HouseholdsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")

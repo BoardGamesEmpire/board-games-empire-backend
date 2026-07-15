@@ -11,6 +11,7 @@ service GatewayService {
   rpc SearchGames(GatewaySearchRequest) returns (stream GatewaySearchResult);
   rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
   rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
+  rpc ListLanguages(ListLanguagesRequest) returns (ListLanguagesResponse);
 }
 
 message GatewayPingRequest {
@@ -50,6 +51,37 @@ message GatewayPingResponse {
   // gateways should still declare accurate values so existing clients
   // continue to work without changes when translation lands.
   GatewayLanguagePreferences language_preferences = 6;
+}
+
+message ListLanguagesRequest {
+  optional string correlation_id = 1;
+}
+
+// One language a gateway supports, in the gateway's native vocabulary.
+// Returned by ListLanguages during the host's capabilities interview and
+// upserted into LanguageGatewayLink rows.
+message GatewayLanguageEntry {
+  // The gateway-native value exactly as it appears in this gateway's
+  // LanguageData and accepted request parameters: "en-US" (IETF_BCP_47),
+  // "eng" (ISO_639_3), "English" (NAME).
+  string value = 1;
+
+  // How to interpret `value`.
+  LanguageCodeFormat format = 2;
+
+  // Optional enrichments — gateways fill only what they genuinely know.
+  // A valid ietf_tag lets the host auto-resolve (and, policy permitting,
+  // auto-add) the language without curation.
+  optional string ietf_tag = 3;
+  optional string iso6393 = 4;
+  optional string iso6391 = 5;
+  optional string name = 6;
+  optional string native_name = 7;
+}
+
+message ListLanguagesResponse {
+  string correlation_id = 1;
+  repeated GatewayLanguageEntry languages = 2;
 }
 
 message GatewaySearchRequest {

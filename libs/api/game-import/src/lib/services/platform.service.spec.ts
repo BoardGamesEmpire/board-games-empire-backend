@@ -1,5 +1,6 @@
 import type { GameRelease, PlatformGatewayLink } from '@bge/database';
 import { PlatformType } from '@bge/database';
+import { LanguageLinkService } from '@bge/language';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData, PlatformData } from '@boardgamesempire/proto-gateway';
 import * as proto from '@boardgamesempire/proto-gateway';
@@ -11,10 +12,17 @@ import { ReleaseGraphResolver } from './release-graph.resolver';
 describe('PlatformUpsertService', () => {
   let service: PlatformUpsertService;
   let db: MockDatabaseService;
+  let languageLinks: { resolveLanguageData: jest.Mock };
 
   beforeEach(async () => {
+    languageLinks = { resolveLanguageData: jest.fn() };
+
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      providers: [PlatformUpsertService, ReleaseGraphResolver],
+      providers: [
+        PlatformUpsertService,
+        ReleaseGraphResolver,
+        { provide: LanguageLinkService, useValue: languageLinks },
+      ],
     });
 
     service = module.get(PlatformUpsertService);
@@ -338,12 +346,12 @@ describe('PlatformUpsertService', () => {
       );
     });
 
-    it('upserts language associations for each release', async () => {
+    it('attaches resolved language tags for each release', async () => {
       const platformGameMap: PlatformGameMap = new Map([['platform-ps5', 'pg-ps5']]);
 
       stubExistingPlatformLink('platform-ps5');
       db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
-      db.language.upsert.mockResolvedValue({ id: 'lang-eng' } as never);
+      languageLinks.resolveLanguageData.mockResolvedValue('tag-en');
       db.gameReleaseLanguage.upsert.mockResolvedValue({} as never);
 
       await service.upsertReleases(
@@ -354,29 +362,31 @@ describe('PlatformUpsertService', () => {
             platform: consolePlatformData(),
             status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
             localizations: [],
-            languages: [{ iso6393: 'eng', iso6391: 'en', name: 'English' }],
+            languages: [{ ietfTag: 'en', iso6393: 'eng', iso6391: 'en', name: 'English' }],
           },
         ],
         'gw-igdb',
       );
 
-      expect(db.language.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: { code: 'eng' },
-        }),
-      );
+      expect(languageLinks.resolveLanguageData).toHaveBeenCalledWith('gw-igdb', {
+        ietfTag: 'en',
+        iso6393: 'eng',
+        iso6391: 'en',
+        name: 'English',
+      });
       expect(db.gameReleaseLanguage.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { releaseId_languageId: { releaseId: 'release-1', languageId: 'lang-eng' } },
+          where: { releaseId_languageTagId: { releaseId: 'release-1', languageTagId: 'tag-en' } },
         }),
       );
     });
 
-    it('skips languages with missing iso6393 code', async () => {
+    it('skips languages that do not resolve to a tag (pending/unresolved links)', async () => {
       const platformGameMap: PlatformGameMap = new Map([['platform-ps5', 'pg-ps5']]);
 
       stubExistingPlatformLink('platform-ps5');
       db.gameRelease.upsert.mockResolvedValue({ id: 'release-1' } as never);
+      languageLinks.resolveLanguageData.mockResolvedValue(null);
 
       await service.upsertReleases(
         platformGameMap,
@@ -386,13 +396,13 @@ describe('PlatformUpsertService', () => {
             platform: consolePlatformData(),
             status: proto.ReleaseStatus.RELEASE_STATUS_RELEASED,
             localizations: [],
-            languages: [{ iso6393: '', name: 'Unknown' } as never],
+            languages: [{ name: 'Klingon' }],
           },
         ],
         'gw-igdb',
       );
 
-      expect(db.language.upsert).not.toHaveBeenCalled();
+      expect(db.gameReleaseLanguage.upsert).not.toHaveBeenCalled();
     });
 
     it('is a no-op when releases list is empty', async () => {

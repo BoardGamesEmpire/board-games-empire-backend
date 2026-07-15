@@ -7,6 +7,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { canonicalizeTag } from '@bge/locale';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -37,9 +38,10 @@ export class HouseholdService {
           },
         },
 
-        language: {
+        languageTag: {
           select: {
             id: true,
+            tag: true,
             name: true,
           },
         },
@@ -185,17 +187,39 @@ export class HouseholdService {
     return count > 0;
   }
 
+  /**
+   * Resolves a client-supplied BCP 47 tag to the LanguageTag row id.
+   * 400 on syntactically invalid tags and on tags outside the vocabulary.
+   */
+  private async resolveLanguageTagId(tag: string | undefined): Promise<string | undefined> {
+    if (tag === undefined) {
+      return undefined;
+    }
+
+    const canonical = canonicalizeTag(tag);
+    assert(canonical, new BadRequestException(`'${tag}' is not a valid IETF BCP 47 language tag`));
+
+    const languageTag = await this.db.languageTag.findUnique({
+      where: { tag: canonical },
+      select: { id: true },
+    });
+    assert(languageTag, new BadRequestException(`Language tag '${canonical}' is not supported by this server`));
+
+    return languageTag.id;
+  }
+
   async create(createHouseholdDto: CreateHouseholdDto) {
     const userId = this.abilityService.getActingUserId();
-    const { languageId, ...rest } = createHouseholdDto;
+    const { language, ...rest } = createHouseholdDto;
+    const languageTagId = await this.resolveLanguageTagId(language);
 
     const household = await this.db.household.create({
       data: {
         ...rest,
-        language: languageId
+        languageTag: languageTagId
           ? {
               connect: {
-                id: languageId,
+                id: languageTagId,
               },
             }
           : undefined,
@@ -235,7 +259,8 @@ export class HouseholdService {
       throw new BadRequestException('At least one field must be provided for update');
     }
 
-    const { languageId, ...rest } = updateHouseholdDto;
+    const { language, ...rest } = updateHouseholdDto;
+    const languageTagId = await this.resolveLanguageTagId(language);
 
     try {
       // Existence first (→ 404); the scoped update below enforces permission
@@ -250,10 +275,10 @@ export class HouseholdService {
         },
         data: {
           ...rest,
-          language: languageId
+          languageTag: languageTagId
             ? {
                 connect: {
-                  id: languageId,
+                  id: languageTagId,
                 },
               }
             : undefined,
@@ -277,9 +302,10 @@ export class HouseholdService {
       },
 
       include: {
-        language: {
+        languageTag: {
           select: {
             id: true,
+            tag: true,
             name: true,
           },
         },

@@ -16,7 +16,13 @@ export interface WsPlatformData {
 }
 
 export interface WsLanguageData {
-  iso6393: string;
+  /**
+   * Canonical IETF BCP 47 tag ("en-US", "zh-Hant") — the system's preferred
+   * language identifier. Always present for local results; may be absent on
+   * results from gateways that only publish names or ISO codes.
+   */
+  tag?: string;
+  iso6393?: string;
   iso6391?: string;
   name: string;
 }

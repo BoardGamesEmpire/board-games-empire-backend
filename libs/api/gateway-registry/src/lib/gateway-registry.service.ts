@@ -10,6 +10,7 @@ import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-regist
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
+import { GatewayLanguageSyncService } from './gateway-language-sync.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import { hashGatewayConfig } from './utils/hash-config';
 
@@ -64,6 +65,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     private readonly configEvents: GatewayConfigEventsService,
     private readonly eventEmitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
+    private readonly languageSync: GatewayLanguageSyncService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -152,6 +154,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
 
       // Successful connect resets failure history.
       this.reportSuccess(options.gatewayId);
+
+      // Language capabilities interview — fire-and-forget so connect latency
+      // is unaffected. Internally throttled (daily) and never throws.
+      void this.languageSync.syncIfStale(options.gatewayId, gatewayServiceClient);
     } catch (err) {
       await this.reportFailure(options.gatewayId, err, 'repeated_connection_failure');
       throw err;
