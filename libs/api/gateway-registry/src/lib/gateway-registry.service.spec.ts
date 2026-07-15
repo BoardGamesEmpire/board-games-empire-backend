@@ -18,6 +18,7 @@ jest.mock('@bge/utils', () => ({
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
+import { GatewayLanguageSyncService } from './gateway-language-sync.service';
 import { GatewayRegistryService } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
 
@@ -79,6 +80,7 @@ describe('GatewayRegistryService', () => {
         { provide: DatabaseService, useValue: db },
         { provide: CACHE_REDIS_CLIENT, useValue: redisMock },
         { provide: SystemActorScope, useValue: systemActorScope },
+        { provide: GatewayLanguageSyncService, useValue: { syncIfStale: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 

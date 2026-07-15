@@ -1,4 +1,5 @@
 import { DatabaseService, PlatformType } from '@bge/database';
+import { LanguageLinkService } from '@bge/language';
 import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import { toEditionKey, toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
@@ -20,6 +21,7 @@ export class PlatformUpsertService {
 
   constructor(
     private readonly db: DatabaseService,
+    private readonly languageLinks: LanguageLinkService,
     private readonly releaseGraphResolver: ReleaseGraphResolver,
   ) {}
 
@@ -124,23 +126,18 @@ export class PlatformUpsertService {
   }
 
   /**
-   * Upserts a Language record on iso6393 (the stable key).
-   * Does not overwrite systemSupported — seeds own that flag.
+   * Resolves proto LanguageData to a canonical LanguageTag id through this
+   * gateway's LanguageGatewayLink rows (hybrid unknown-language policy).
+   * Returns null when the value is pending review, unresolved, or ignored —
+   * the association is skipped and a re-sync attaches it once curated.
    */
-  async upsertLanguage(data: LanguageData): Promise<string> {
-    const language = await this.db.language.upsert({
-      where: { code: data.iso6393 },
-      create: {
-        code: data.iso6393,
-        abbreviation: data.iso6391 ?? null,
-        name: data.name,
-        systemSupported: false,
-      },
-      update: {},
-      select: { id: true },
+  async resolveLanguageTag(data: LanguageData, gatewayId: string): Promise<string | null> {
+    return this.languageLinks.resolveLanguageData(gatewayId, {
+      ietfTag: data.ietfTag,
+      iso6393: data.iso6393,
+      iso6391: data.iso6391,
+      name: data.name,
     });
-
-    return language.id;
   }
 
   /**
@@ -187,7 +184,7 @@ export class PlatformUpsertService {
 
         releaseIdMap.set(editionKey, persisted.id);
 
-        await this.upsertReleaseLanguages(persisted.id, release.languages ?? []);
+        await this.upsertReleaseLanguages(persisted.id, release.languages ?? [], gatewayId);
       }
 
       await this.applyParentHierarchy(releaseIdMap, parentMap);
@@ -333,22 +330,24 @@ export class PlatformUpsertService {
   }
 
   /**
-   * Upserts language associations for a single release. Skips entries
-   * with missing iso6393 (the stable Language.code key).
+   * Upserts language-tag associations for a single release. Entries whose
+   * link is pending/unresolved are skipped (the link row records the
+   * encounter); resolved entries attach the canonical tag.
    */
-  private async upsertReleaseLanguages(releaseId: string, languages: readonly LanguageData[]): Promise<void> {
+  private async upsertReleaseLanguages(
+    releaseId: string,
+    languages: readonly LanguageData[],
+    gatewayId: string,
+  ): Promise<void> {
     for (const lang of languages) {
-      if (!lang.iso6393) {
-        this.logger.warn(
-          `Release ${releaseId} has language with missing iso6393 code, skipping: ${JSON.stringify(lang)}`,
-        );
+      const languageTagId = await this.resolveLanguageTag(lang, gatewayId);
+      if (!languageTagId) {
         continue;
       }
 
-      const languageId = await this.upsertLanguage(lang);
       await this.db.gameReleaseLanguage.upsert({
-        where: { releaseId_languageId: { releaseId, languageId } },
-        create: { releaseId, languageId },
+        where: { releaseId_languageTagId: { releaseId, languageTagId } },
+        create: { releaseId, languageTagId },
         update: {},
       });
     }

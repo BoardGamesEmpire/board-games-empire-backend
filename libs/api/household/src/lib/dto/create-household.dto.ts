@@ -22,8 +22,8 @@ export class CreateHouseholdDto {
   @IsString()
   image?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: "IETF BCP 47 language tag, e.g. 'en', 'pt-BR', 'zh-Hant'" })
   @IsOptional()
   @IsString()
-  languageId?: string;
+  language?: string;
 }

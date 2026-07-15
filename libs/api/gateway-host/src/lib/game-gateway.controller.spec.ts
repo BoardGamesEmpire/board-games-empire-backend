@@ -16,6 +16,7 @@ describe('GameGatewayController', () => {
       searchGames: jest.fn(),
       fetchGame: jest.fn(),
       fetchExpansions: jest.fn(),
+      listLanguages: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({

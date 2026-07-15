@@ -19,6 +19,7 @@ import {
   thingToGameData,
   thingToGameSearchData,
 } from '../mappers/game.mapper';
+import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import type { BggThing } from '../types';
 
 const FETCH_GAME_TYPES = [BggThingType.BoardGame, BggThingType.BoardGameExpansion] as const;
@@ -48,6 +49,13 @@ export class GameGatewayService implements GatewayServiceHost {
         passthroughRawLocale: false,
       },
     } satisfies proto.GatewayPingResponse;
+  }
+
+  listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse {
+    return {
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      languages: toGatewayLanguageEntries(),
+    } satisfies proto.ListLanguagesResponse;
   }
 
   healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse {

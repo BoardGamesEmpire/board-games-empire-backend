@@ -135,6 +135,8 @@ export function createMockDatabaseService(): MockDatabaseService {
     invite: mockDelegate(),
     job: mockDelegate(),
     language: mockDelegate(),
+    languageGatewayLink: mockDelegate(),
+    languageTag: mockDelegate(),
     mechanic: mockDelegate(),
     mechanicGatewayAlias: mockDelegate(),
     media: mockDelegate(),

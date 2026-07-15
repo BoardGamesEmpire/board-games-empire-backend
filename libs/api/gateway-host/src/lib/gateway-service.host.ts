@@ -24,4 +24,6 @@ export abstract class GatewayServiceHost {
   abstract fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse>;
 
   abstract fetchExpansions(request: proto.FetchExpansionsRequest): Observable<proto.GatewaySearchResult>;
+
+  abstract listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse;
 }

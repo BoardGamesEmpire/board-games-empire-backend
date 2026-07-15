@@ -62,6 +62,7 @@ function makeGateway(overrides: Partial<GameGateway> = {}): GameGateway {
     authParameters: null,
     usageCount: 0,
     lastUsed: null,
+    languagesSyncedAt: null,
     createdById: null,
     deletedAt: null,
     createdAt: new Date(),

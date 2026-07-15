@@ -185,6 +185,9 @@
     },
     {
       "path": "./libs/queue/feedback"
+    },
+    {
+      "path": "./libs/common/locale"
     }
   ]
 }

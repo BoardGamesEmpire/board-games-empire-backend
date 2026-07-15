@@ -7,6 +7,7 @@ import { catchError, endWith, filter, map, mergeMap, shareReplay, tap } from 'rx
 import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
 import { IGDBService } from '../igdb/igdb.service';
 import { toGameData, toGameSearchData } from '../mappers/game.mapper';
+import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { IgdbGame } from '../types';
 
 @Injectable()
@@ -27,9 +28,16 @@ export class GameGatewayService implements GatewayServiceHost {
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
         ],
-        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_3,
+        responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
         passthroughRawLocale: false,
       },
+    };
+  }
+
+  listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse {
+    return {
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      languages: toGatewayLanguageEntries(),
     };
   }
 

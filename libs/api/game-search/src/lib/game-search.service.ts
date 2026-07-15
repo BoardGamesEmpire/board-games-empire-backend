@@ -101,11 +101,16 @@ export class GameSearchService {
 
                 languages: {
                   select: {
-                    language: {
+                    languageTag: {
                       select: {
-                        code: true,
-                        abbreviation: true,
+                        tag: true,
                         name: true,
+                        language: {
+                          select: {
+                            iso6393: true,
+                            iso6391: true,
+                          },
+                        },
                       },
                     },
                   },
@@ -151,9 +156,10 @@ export class GameSearchService {
             status: r.status,
             releaseDate: r.releaseDate?.toISOString().split('T')[0] ?? undefined,
             languages: r.languages.map((l) => ({
-              iso6393: l.language.code,
-              iso6391: l.language.abbreviation ?? undefined,
-              name: l.language.name,
+              tag: l.languageTag.tag,
+              iso6393: l.languageTag.language.iso6393,
+              iso6391: l.languageTag.language.iso6391 ?? undefined,
+              name: l.languageTag.name,
             })),
           })),
         ),
@@ -281,6 +287,7 @@ export class GameSearchService {
         status: r.status.toString(),
         releaseDate: r.releaseDate,
         languages: (r.languages ?? []).map((l) => ({
+          tag: l.ietfTag,
           iso6393: l.iso6393,
           iso6391: l.iso6391,
           name: l.name,

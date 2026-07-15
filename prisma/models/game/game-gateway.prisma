@@ -24,6 +24,11 @@ model GameGateway {
   usageCount Int       @default(0) @map("usage_count")
   lastUsed   DateTime? @map("last_used") @db.Timestamptz(3)
 
+  // Last completed language capabilities interview (ListLanguages preload).
+  // Gates re-interviews to at most once per day — routine pings within the
+  // window skip the preload.
+  languagesSyncedAt DateTime? @map("languages_synced_at") @db.Timestamptz(3)
+
   gameSources            GameSource[]
   importActivities       ImportActivity[]
   userGatewayConnections UserGatewayConnection[]

@@ -10,11 +10,21 @@ export class LanguageService {
     const { limit = 20, offset = 0, ...filters } = languageDto;
     const actualLimit = Math.max(1, Math.min(limit, 50));
 
+    // systemSupported lives on LanguageTag: a language "is supported" when
+    // any of its tags is.
+    const supportedFilter =
+      filters.systemSupported === undefined
+        ? undefined
+        : filters.systemSupported
+          ? { some: { systemSupported: true } }
+          : { none: { systemSupported: true } };
+
     return this.db.language.findMany({
       where: {
         name: filters.name ? { contains: filters.name, mode: 'insensitive' } : undefined,
-        systemSupported: filters.systemSupported,
+        tags: supportedFilter,
       },
+      include: { tags: { orderBy: { tag: 'asc' } } },
       take: actualLimit,
       skip: offset,
     });
@@ -24,6 +34,7 @@ export class LanguageService {
     try {
       return await this.db.language.findUniqueOrThrow({
         where: { id },
+        include: { tags: { orderBy: { tag: 'asc' } } },
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {

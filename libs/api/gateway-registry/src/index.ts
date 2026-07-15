@@ -8,3 +8,5 @@ export * from './lib/gateway-registry.module';
 export * from './lib/gateway-registry.service';
 export * from './lib/interfaces';
 export * from './lib/utils/hash-config';
+export * from './lib/gateway-language-sync.service';
+export * from './lib/gateway-language-sync.scheduler';

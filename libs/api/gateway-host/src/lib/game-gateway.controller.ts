@@ -40,4 +40,9 @@ export class GameGatewayController implements proto.GatewayServiceController {
     this.logger.log(`FetchExpansions request received for baseExternalId: '${request.baseExternalId}'`);
     return this.gatewayService.fetchExpansions(request);
   }
+
+  listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse {
+    this.logger.log('ListLanguages request received');
+    return this.gatewayService.listLanguages(request);
+  }
 }

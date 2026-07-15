@@ -65,9 +65,10 @@ enum ReleaseStatus {
 
 // Format a gateway uses when emitting language codes in LanguageData and when
 // accepting locale parameters on inbound requests. Reflects the canonical
-// Language model: ISO 639-1 (`abbreviation`), ISO 639-3 (`code`), and IETF
-// BCP 47 (planned `ietfTag`). NAME and NATIVE_NAME are display-oriented
-// fallbacks for sources that publish only display strings (BGG).
+// language models: ISO 639-1 (`Language.iso6391`), ISO 639-3
+// (`Language.iso6393`), and IETF BCP 47 (`LanguageTag.tag` — the system's
+// preferred identifier). NAME and NATIVE_NAME are display-oriented fallbacks
+// for sources that publish only display strings (BGG).
 enum LanguageCodeFormat {
   LANGUAGE_CODE_FORMAT_UNSPECIFIED = 0;
 
@@ -125,17 +126,23 @@ message PlatformData {
   PlatformType platform_type = 4;
 }
 
-// ISO 639-3 (3-char code) is the stable identifier — not all languages have
-// an ISO 639-1 (2-char) code, so iso6391 is optional.
+// A language attached to gateway content. Gateways fill only the fields they
+// genuinely know — the host resolves entries to canonical LanguageTag rows
+// via LanguageGatewayLink, preferring ietf_tag, then iso6393, then name.
+// NAME-format sources (BGG) legitimately send name alone.
 message LanguageData {
   // "eng", "fra", "zho"
-  string iso6393 = 1;
+  optional string iso6393 = 1;
 
   // "en", "fr", "zh" — absent for minority languages
   optional string iso6391 = 2;
 
-  // "English", "French", "Chinese"
+  // "English", "French", "Chinese (Traditional)"
   string name = 3;
+
+  // Canonical IETF BCP 47 tag: "en-US", "zh-Hant". Preferred — it is the
+  // only field that can carry script/region distinctions.
+  optional string ietf_tag = 4;
 }
 
 // A region a game was localized for. region_code follows ISO 3166-1 alpha-2 for

@@ -7,7 +7,7 @@ model SystemSetting {
   /// Human-readable server display name, surfaced in the anonymous
   /// /.well-known/bge-identity document so clients can label the server
   /// when a user is choosing which server to add.
-  name String @map("name") @default("Board Games Empire")
+  name String @default("Board Games Empire") @map("name")
 
   allowPasswordResets   Boolean @default(true) @map("allow_password_resets")
   allowUserRegistration Boolean @default(true) @map("allow_user_registration")
@@ -23,6 +23,10 @@ model SystemSetting {
   /// Audit rows older than this are soft-deleted by the retention sweep.
   /// Null (the default) means unlimited retention — the sweep is a no-op.
   auditLogRetentionDays Int? @map("audit_log_retention_days")
+
+  /// When true, valid BCP 47 languages reported by gateways are held as
+  /// Pending links for admin review instead of being auto-added.
+  reviewGatewayLanguages Boolean @default(false) @map("review_gateway_languages")
 
   @@map("system_settings")
 }

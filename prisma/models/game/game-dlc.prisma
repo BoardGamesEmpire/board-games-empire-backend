@@ -62,10 +62,10 @@ model GameReleaseDlcLanguage {
   release   GameDlcRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
   releaseId String         @map("release_id")
 
-  language   Language @relation(fields: [languageId], references: [id])
-  languageId String   @map("language_id")
+  languageTag   LanguageTag @relation(fields: [languageTagId], references: [id])
+  languageTagId String      @map("language_tag_id")
 
-  @@unique([releaseId, languageId])
+  @@unique([releaseId, languageTagId])
   @@index([releaseId])
   @@map("game_release_dlc_languages")
 }
