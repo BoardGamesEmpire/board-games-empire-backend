@@ -55,7 +55,9 @@ describe('SupportedLocalesService', () => {
   });
 
   it('fails the boot when the fallback catalog itself is missing', async () => {
-    await expect(init(['de'], ['de'])).rejects.toThrow(/fallback locale 'en' has no loaded catalog/i);
+    await expect(init(['de'], ['de'])).rejects.toThrow(
+      new RegExp(`fallback locale '${FALLBACK_LOCALE}' has no loaded catalog`, 'i'),
+    );
   });
 
   it('excludes db tags shipping no catalog and warns', async () => {

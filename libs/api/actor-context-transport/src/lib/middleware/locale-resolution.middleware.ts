@@ -37,6 +37,10 @@ export class LocaleResolutionMiddleware implements NestMiddleware {
         const actor = this.auditContext.getActor();
         locale = await this.localeResolution.resolve({
           userId: actor ? actorUserId(actor) : null,
+          // `accept-language` is `string | undefined` on IncomingHttpHeaders —
+          // Node comma-joins repeated request headers (only `set-cookie` is an
+          // array), so no array normalization is needed and `resolve` parses
+          // the comma-separated list itself.
           acceptLanguage: req.headers['accept-language'],
         });
       } catch (error) {
