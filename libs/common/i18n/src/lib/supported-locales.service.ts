@@ -91,7 +91,13 @@ export class SupportedLocalesService implements OnModuleInit {
     }
 
     const dbTagsLower = new Set(dbTags.map((tag) => tag.toLowerCase()));
-    const catalogWithoutFlag = catalogs.filter((catalog) => !dbTagsLower.has(catalog.toLowerCase()));
+    // The fallback catalog is always a valid resolution target (see below), so
+    // it is never "unreachable" — exclude it from the drift warning even when
+    // the DB does not flag it systemSupported.
+    const catalogWithoutFlag = catalogs.filter(
+      (catalog) =>
+        !dbTagsLower.has(catalog.toLowerCase()) && catalog.toLowerCase() !== FALLBACK_LOCALE.toLowerCase(),
+    );
     if (catalogWithoutFlag.length > 0) {
       this.logger.warn(
         `Catalog(s) shipped but not flagged systemSupported, unreachable by resolution: ${catalogWithoutFlag.join(', ')}`,
@@ -103,6 +109,15 @@ export class SupportedLocalesService implements OnModuleInit {
         `No usable supported locales (db: [${dbTags.join(', ')}], catalogs: [${catalogs.join(', ')}]); falling back to '${FALLBACK_LOCALE}'`,
       );
       return [FALLBACK_LOCALE];
+    }
+
+    // FALLBACK_LOCALE is the guaranteed resolution floor — its catalog is
+    // asserted present above, and resolveCatalogLocale returns it whether or
+    // not it is a set member. Keep it in the set so getSupportedTags()' "always
+    // contains at least FALLBACK_LOCALE" contract holds even when the DB flags
+    // other locales but not the fallback tag.
+    if (!supported.some((tag) => tag.toLowerCase() === FALLBACK_LOCALE.toLowerCase())) {
+      return [FALLBACK_LOCALE, ...supported];
     }
 
     return supported;

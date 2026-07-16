@@ -164,8 +164,8 @@ export function resolveCatalogLocale(
 /**
  * Parse an `Accept-Language` header value into a prioritized list of language
  * ranges, ready for `lookupTag`/`resolveCatalogLocale`: sorted by descending
- * quality (ties keep header order — `Array.prototype.sort` is stable), with
- * `q=0` ranges ("not acceptable") dropped.
+ * quality (ties keep header order — `Array.prototype.sort` is stable since
+ * ES2019), with `q=0` ranges ("not acceptable") dropped.
  *
  * Deliberately forgiving, per the robustness principle: a malformed quality
  * value counts as `q=1`, empty items are skipped, and the `*` wildcard is

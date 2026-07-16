@@ -70,6 +70,13 @@ describe('SupportedLocalesService', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('de'));
   });
 
+  it(`always includes '${FALLBACK_LOCALE}' when the db flags other locales but not the fallback`, async () => {
+    const service = await init(['de', 'fr'], ['en', 'de', 'fr']);
+    expect(service.getSupportedTags()).toEqual([FALLBACK_LOCALE, 'de', 'fr']);
+    // The fallback catalog is always reachable, so it is not reported unreachable.
+    expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining(FALLBACK_LOCALE));
+  });
+
   it(`falls back to ['${FALLBACK_LOCALE}'] when the sets do not intersect`, async () => {
     const service = await init(['fr'], ['en']);
     expect(service.getSupportedTags()).toEqual([FALLBACK_LOCALE]);
