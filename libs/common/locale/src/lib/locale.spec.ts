@@ -6,9 +6,50 @@ import {
   maximizeTag,
   nameKey,
   nativeDisplayName,
+  parseAcceptLanguage,
   parseTag,
   resolveCatalogLocale,
 } from './locale';
+
+describe('parseAcceptLanguage', () => {
+  it('returns ranges sorted by descending quality', () => {
+    expect(parseAcceptLanguage('fr;q=0.8, en-US, de;q=0.9')).toEqual(['en-US', 'de', 'fr']);
+  });
+
+  it('keeps header order for equal qualities', () => {
+    expect(parseAcceptLanguage('fr, de, en')).toEqual(['fr', 'de', 'en']);
+    expect(parseAcceptLanguage('fr;q=0.5, de;q=0.5')).toEqual(['fr', 'de']);
+  });
+
+  it('drops q=0 ranges', () => {
+    expect(parseAcceptLanguage('en;q=0, fr')).toEqual(['fr']);
+  });
+
+  it('tolerates whitespace, uppercase Q, and malformed quality values', () => {
+    expect(parseAcceptLanguage(' en-US ; Q=0.9 ,fr')).toEqual(['fr', 'en-US']);
+    expect(parseAcceptLanguage('en;q=abc, fr;q=0.5')).toEqual(['en', 'fr']);
+    expect(parseAcceptLanguage('en;q=7, fr;q=0.5')).toEqual(['en', 'fr']);
+  });
+
+  it('passes the * wildcard through', () => {
+    expect(parseAcceptLanguage('en;q=0.8, *;q=0.1')).toEqual(['en', '*']);
+  });
+
+  it('skips empty items', () => {
+    expect(parseAcceptLanguage('en,,fr,')).toEqual(['en', 'fr']);
+  });
+
+  it('returns [] for missing or empty headers', () => {
+    expect(parseAcceptLanguage(undefined)).toEqual([]);
+    expect(parseAcceptLanguage(null)).toEqual([]);
+    expect(parseAcceptLanguage('')).toEqual([]);
+    expect(parseAcceptLanguage('   ')).toEqual([]);
+  });
+
+  it('feeds lookupTag as a prioritized range list', () => {
+    expect(lookupTag(parseAcceptLanguage('fr-CA;q=0.9, en-US;q=0.8'), ['en', 'es'])).toBe('en');
+  });
+});
 
 describe('canonicalizeTag', () => {
   it('normalizes casing to canonical form', () => {

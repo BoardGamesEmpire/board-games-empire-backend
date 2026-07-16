@@ -162,6 +162,42 @@ export function resolveCatalogLocale(
 }
 
 /**
+ * Parse an `Accept-Language` header value into a prioritized list of language
+ * ranges, ready for `lookupTag`/`resolveCatalogLocale`: sorted by descending
+ * quality (ties keep header order — `Array.prototype.sort` is stable since
+ * ES2019), with `q=0` ranges ("not acceptable") dropped.
+ *
+ * Deliberately forgiving, per the robustness principle: a malformed quality
+ * value counts as `q=1`, empty items are skipped, and the `*` wildcard is
+ * passed through (it matches no concrete tag in `lookupTag`, which lands on
+ * the caller's fallback — the correct outcome for "anything is fine").
+ * Returns `[]` for a missing/empty header.
+ */
+export function parseAcceptLanguage(header: string | null | undefined): string[] {
+  if (!header?.trim()) {
+    return [];
+  }
+
+  return header
+    .split(',')
+    .map((item) => {
+      const [range, ...params] = item.trim().split(';');
+      const qParam = params
+        .map((param) => param.trim().toLowerCase())
+        .find((param) => param.startsWith('q='))
+        ?.slice(2);
+
+      const parsed = qParam === undefined ? 1 : Number.parseFloat(qParam);
+      const q = Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 1;
+
+      return { range: range.trim(), q };
+    })
+    .filter(({ range, q }) => range.length > 0 && q > 0)
+    .sort((a, b) => b.q - a.q)
+    .map(({ range }) => range);
+}
+
+/**
  * RFC 4647 §3.3.1 basic filtering: all available tags that match the range —
  * equal to it, or extending it at a subtag boundary. "zh" matches "zh",
  * "zh-Hant", "zh-Hant-TW"; it does not match "zho". "*" matches everything.

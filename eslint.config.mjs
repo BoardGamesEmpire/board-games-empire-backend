@@ -16,6 +16,7 @@ export const restrictedImportPaths = {
       "AuditContextInternalService",
       "ACTOR_CLS_KEY",
       "CORRELATION_ID_CLS_KEY",
+      "LOCALE_CLS_KEY",
       "SOURCE_CLS_KEY"
     ],
     message:

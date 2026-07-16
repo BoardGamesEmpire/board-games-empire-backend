@@ -9,6 +9,7 @@ import type { Actor, EventSource } from '../types';
 export const ACTOR_CLS_KEY = 'actor-context:actor' as const;
 export const CORRELATION_ID_CLS_KEY = 'actor-context:correlationId' as const;
 export const SOURCE_CLS_KEY = 'actor-context:source' as const;
+export const LOCALE_CLS_KEY = 'actor-context:locale' as const;
 
 /**
  * Public, read-only accessor for actor + correlation context. Consumers
@@ -74,5 +75,15 @@ export class AuditContextService {
 
   getSource(): EventSource | null {
     return this.cls.get<EventSource | undefined>(SOURCE_CLS_KEY) ?? null;
+  }
+
+  /**
+   * Resolved catalog locale for the current request/job (a `systemSupported`
+   * `LanguageTag.tag`, e.g. `en`), or `null` when no entry seam has resolved
+   * one — non-HTTP seams populate it in #146/#147. Callers rendering
+   * translations should treat `null` as "use the fallback locale".
+   */
+  getLocale(): string | null {
+    return this.cls.get<string | undefined>(LOCALE_CLS_KEY) ?? null;
   }
 }
