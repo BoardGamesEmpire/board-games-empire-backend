@@ -46,7 +46,7 @@ export { SystemActorScope } from './lib/services/system-actor-scope.service';
 // this enforces "plugins have read-only access to CLS actor; cannot forge"
 // (issue #57). System code paths use SystemActorScope instead.
 export { AuditContextInternalService, type ActorContextInit } from './lib/services/audit-context-internal.service';
-export { ACTOR_CLS_KEY, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './lib/services/audit-context.service';
+export { ACTOR_CLS_KEY, CORRELATION_ID_CLS_KEY, LOCALE_CLS_KEY, SOURCE_CLS_KEY } from './lib/services/audit-context.service';
 
 // Module (registers reader + internal populator + system scope; ClsModule.forRoot
 // is the caller's responsibility).

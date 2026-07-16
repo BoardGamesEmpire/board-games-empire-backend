@@ -1,5 +1,10 @@
 import { AuditContextModule } from '@bge/actor-context';
-import { ActorContextTransportModule, HttpActorMiddleware, WsActorInterceptor } from '@bge/actor-context-transport';
+import {
+  ActorContextTransportModule,
+  HttpActorMiddleware,
+  LocaleResolutionMiddleware,
+  WsActorInterceptor,
+} from '@bge/actor-context-transport';
 import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
@@ -175,8 +180,10 @@ import { baseLogger } from './lib/logger';
     ActorContextTransportModule,
     AuditContextModule,
 
-    // i18n — global I18nService + en catalog. Resolver chain and worker
-    // wiring land in later epic phases (#140/#146).
+    // i18n — global I18nService + en catalog + locale resolution services.
+    // The request locale is resolved by LocaleResolutionMiddleware (below)
+    // and read back from CLS by the ClsLocaleResolver this module registers.
+    // Worker wiring lands in #146.
     I18nConfigModule,
 
     // Feature modules
@@ -236,10 +243,15 @@ import { baseLogger } from './lib/logger';
 })
 export class AppModule {
   configure(consumer: MiddlewareConsumer) {
-    // Order matters: HttpActorMiddleware populates the CLS actor, and
-    // AbilityContextMiddleware reads that actor to resolve and prime the
-    // per-request ability array. Both run before guards, so PoliciesGuard
-    // (which reads the primed abilities via AbilityService) sees them.
-    consumer.apply(ClsMiddleware, HttpActorMiddleware, AbilityContextMiddleware).forRoutes('*');
+    // Order matters: HttpActorMiddleware populates the CLS actor;
+    // LocaleResolutionMiddleware reads that actor (stored language
+    // preference) to resolve and store the request locale; and
+    // AbilityContextMiddleware reads the actor to resolve and prime the
+    // per-request ability array. All run before guards, so PoliciesGuard
+    // (which reads the primed abilities via AbilityService) sees them — and
+    // guard-thrown errors already carry a resolved locale (#142/#143).
+    consumer
+      .apply(ClsMiddleware, HttpActorMiddleware, LocaleResolutionMiddleware, AbilityContextMiddleware)
+      .forRoutes('*');
   }
 }

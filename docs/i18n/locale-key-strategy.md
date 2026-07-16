@@ -53,16 +53,35 @@ the tags whose `LanguageTag.systemSupported` flag is `true`. Today that set is `
 
 ## Fallback default
 
-The default catalog locale is **`en`**. Where the resolver chain reads it (env/config) and how
-`supported` is sourced at request time (a DB query for `systemSupported: true`) are owned by the
-locale resolver work in **#140**.
+The default catalog locale is **`en`**, as the `FALLBACK_LOCALE` constant in `@bge/i18n`
+(no env override) — it is the `nestjs-i18n` `fallbackLanguage`, the final step of the
+resolution chain, and the value the supported set degrades to on total drift.
+
+## Supported set at runtime (#140)
+
+`supported` is **not** queried per request. `SupportedLocalesService` (`@bge/i18n`) loads it
+once at boot: `LanguageTag.tag` values with `systemSupported: true`, **intersected** with the
+catalogs `I18nService` actually loaded from disk. Drift in either direction (flagged tag
+without a shipped catalog, shipped catalog without the flag) is warned at boot and the
+offending locale excluded — resolution can only yield locales that truly have catalogs. This
+is the runtime counterpart to the seed-time `assertSystemSupportedTags` guard, closing the
+"guard asserting a catalog folder physically exists" gap deferred from #138. The set changes
+only via seed/curation, so a redeploy picks up changes; revisit if #149 grows an admin
+mutation path.
+
+Resolution itself (`LocaleResolutionService`) happens once per request in HTTP middleware —
+stored user preference → `Accept-Language` → fallback, one RFC 4647 lookup over the
+prioritized ranges so an unsupported preference falls through rather than snapping to the
+fallback — and the result is stored in the CLS actor-context envelope. nestjs-i18n reads it
+back via a single `ClsLocaleResolver`. See issue #140 for the design rationale
+(middleware-time vs nestjs-i18n's post-guard interceptor).
 
 ## Deferred
 
-- **#138** — done on this branch: the `I18nModule` loader (`@bge/i18n` → `I18nConfigModule`)
-  and the initial `en` catalog now exist. A guard asserting a catalog folder physically exists
-  for *every* `systemSupported` tag is not yet wired.
-- **#139** — ship catalog folders as nx build assets. Done for the **api** app
-  (`apps/api/webpack.config.js`); the worker / gateway-worker globs are still pending.
-- **#140** — the request-time locale resolver chain + CLS-stored locale that consumes
-  `resolveCatalogLocale`.
+- **#138** — done: the `I18nModule` loader (`@bge/i18n` → `I18nConfigModule`) and the initial
+  `en` catalog exist.
+- **#139** — done: catalog folders ship as nx build assets for `api`, `worker`, and
+  `gateway-worker`.
+- **#140** — done: request-time resolution + CLS-stored locale, per above.
+- **#146/#147** — populate the CLS locale on the non-HTTP seams (queue jobs, gRPC metadata,
+  WS) and localize worker output.

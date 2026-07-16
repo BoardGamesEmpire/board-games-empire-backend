@@ -9,5 +9,16 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]
+  "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../locale/tsconfig.lib.json"
+    },
+    {
+      "path": "../../database/tsconfig.lib.json"
+    },
+    {
+      "path": "../actor-context/tsconfig.lib.json"
+    }
+  ]
 }

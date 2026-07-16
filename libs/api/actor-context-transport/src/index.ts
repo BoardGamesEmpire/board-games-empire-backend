@@ -7,3 +7,4 @@ export {
   injectActorContextMetadata,
 } from './lib/interceptors/grpc-outbound-actor-metadata.interceptor';
 export { API_KEY_HEADER, HttpActorMiddleware } from './lib/middleware/http-actor.middleware';
+export { LocaleResolutionMiddleware } from './lib/middleware/locale-resolution.middleware';
