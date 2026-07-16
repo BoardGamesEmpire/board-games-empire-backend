@@ -140,6 +140,28 @@ function truncateRange(range: string): string {
 }
 
 /**
+ * Resolve a caller's prioritized locale ranges (an Accept-Language list, a
+ * user's stored preference tag, etc.) to the message catalog we actually
+ * ship, falling back to `fallback` when none match.
+ *
+ * `supported` is the set of `systemSupported` LanguageTag.tag values; each is
+ * 1:1 with a catalog folder name (see docs/i18n/locale-key-strategy.md).
+ * Matching is RFC 4647 §3.4 lookup via `lookupTag` ("en-US" resolves to "en").
+ *
+ * On a match the result is one of `supported` — a canonical tag and a catalog
+ * folder name. When nothing matches, `fallback` is returned verbatim (never
+ * canonicalized); the caller is responsible for supplying a `fallback` that is
+ * itself a supported canonical tag / catalog folder (in practice `en`).
+ */
+export function resolveCatalogLocale(
+  requested: readonly string[],
+  supported: Iterable<string>,
+  fallback: string,
+): string {
+  return lookupTag(requested, supported) ?? fallback;
+}
+
+/**
  * RFC 4647 §3.3.1 basic filtering: all available tags that match the range —
  * equal to it, or extending it at a subtag boundary. "zh" matches "zh",
  * "zh-Hant", "zh-Hant-TW"; it does not match "zho". "*" matches everything.

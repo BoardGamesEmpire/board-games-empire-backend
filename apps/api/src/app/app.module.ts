@@ -16,6 +16,7 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
+import { I18nConfigModule } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
@@ -173,6 +174,10 @@ import { baseLogger } from './lib/logger';
 
     ActorContextTransportModule,
     AuditContextModule,
+
+    // i18n — global I18nService + en catalog. Resolver chain and worker
+    // wiring land in later epic phases (#140/#146).
+    I18nConfigModule,
 
     // Feature modules
     // Audit capture (onAny listener) + the admin read endpoint. The listener

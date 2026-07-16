@@ -7,6 +7,7 @@ import {
   nameKey,
   nativeDisplayName,
   parseTag,
+  resolveCatalogLocale,
 } from './locale';
 
 describe('canonicalizeTag', () => {
@@ -111,6 +112,28 @@ describe('filterTags', () => {
 
   it('returns empty for blank ranges', () => {
     expect(filterTags('', available)).toEqual([]);
+  });
+});
+
+describe('resolveCatalogLocale', () => {
+  const supported = ['en', 'en-GB', 'pt-BR', 'zh-Hant', 'zh'];
+
+  it('returns an exact match', () => {
+    expect(resolveCatalogLocale(['pt-BR'], supported, 'en')).toBe('pt-BR');
+  });
+
+  it('truncates to the closest supported catalog', () => {
+    expect(resolveCatalogLocale(['en-US'], supported, 'en')).toBe('en');
+    expect(resolveCatalogLocale(['zh-Hant-TW'], supported, 'en')).toBe('zh-Hant');
+  });
+
+  it('honors range priority order', () => {
+    expect(resolveCatalogLocale(['fr', 'en-GB'], supported, 'en')).toBe('en-GB');
+  });
+
+  it('falls back when nothing matches', () => {
+    expect(resolveCatalogLocale(['ja', 'ko'], supported, 'en')).toBe('en');
+    expect(resolveCatalogLocale([], supported, 'en')).toBe('en');
   });
 });
 
