@@ -48,6 +48,16 @@ describe('SupportedLocalesService', () => {
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
+  it('matches catalog folders to DB tags case-insensitively, keeping DB casing', async () => {
+    const service = await init(['en', 'pt-BR'], ['en', 'pt-br']);
+    expect(service.getSupportedTags()).toEqual(['en', 'pt-BR']);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails the boot when the fallback catalog itself is missing', async () => {
+    await expect(init(['de'], ['de'])).rejects.toThrow(/fallback locale 'en' has no loaded catalog/i);
+  });
+
   it('excludes db tags shipping no catalog and warns', async () => {
     const service = await init(['en', 'fr'], ['en']);
     expect(service.getSupportedTags()).toEqual(['en']);

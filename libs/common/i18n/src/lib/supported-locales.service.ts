@@ -13,7 +13,9 @@ import { FALLBACK_LOCALE } from './locale.constants';
  * catalog would resolve every key to the per-key fallback, silently; a
  * shipped catalog without the DB flag is unreachable. Both directions are
  * warned at boot; resolution only ever yields locales that truly have
- * catalogs.
+ * catalogs. A missing catalog for {@link FALLBACK_LOCALE} itself fails the
+ * boot — that is broken asset wiring (#139), and every degraded path here
+ * depends on the fallback being renderable.
  *
  * The set changes only via seed/curation, so there is no request-time DB
  * cost and no invalidation — a redeploy (which re-runs boot) picks up
@@ -44,6 +46,22 @@ export class SupportedLocalesService implements OnModuleInit {
 
   private async load(): Promise<readonly string[]> {
     const catalogs = this.i18n.getSupportedLanguages();
+    // Case-insensitive membership, matching @bge/locale's lookup semantics —
+    // a casing mismatch between a catalog folder and the canonical DB tag
+    // must not silently drop the locale (macOS's case-insensitive filesystem
+    // would mask exact-match bugs in dev that only surface on Linux).
+    const catalogByLower = new Map(catalogs.map((catalog) => [catalog.toLowerCase(), catalog]));
+
+    // Every degraded path below returns [FALLBACK_LOCALE], and nestjs-i18n
+    // renders raw keys for any locale without a catalog — if the fallback
+    // catalog itself is missing, nothing in the app can translate. That is
+    // an asset-wiring defect (#139), not runtime drift: fail the boot.
+    if (!catalogByLower.has(FALLBACK_LOCALE.toLowerCase())) {
+      throw new Error(
+        `Fallback locale '${FALLBACK_LOCALE}' has no loaded catalog (loaded: [${catalogs.join(', ')}]); ` +
+          `is the i18n assets glob wired for this app (#139)?`,
+      );
+    }
 
     let dbTags: string[];
     try {
@@ -61,18 +79,19 @@ export class SupportedLocalesService implements OnModuleInit {
       return [FALLBACK_LOCALE];
     }
 
-    const catalogSet = new Set(catalogs);
-    const supported = dbTags.filter((tag) => catalogSet.has(tag));
+    // The supported set keeps the DB (canonical) casing — it is what
+    // resolution returns and what the catalog folders are named after.
+    const supported = dbTags.filter((tag) => catalogByLower.has(tag.toLowerCase()));
 
-    const flaggedWithoutCatalog = dbTags.filter((tag) => !catalogSet.has(tag));
+    const flaggedWithoutCatalog = dbTags.filter((tag) => !catalogByLower.has(tag.toLowerCase()));
     if (flaggedWithoutCatalog.length > 0) {
       this.logger.warn(
         `LanguageTag(s) flagged systemSupported but shipping no catalog, excluded from resolution: ${flaggedWithoutCatalog.join(', ')}`,
       );
     }
 
-    const dbTagSet = new Set(dbTags);
-    const catalogWithoutFlag = catalogs.filter((catalog) => !dbTagSet.has(catalog));
+    const dbTagsLower = new Set(dbTags.map((tag) => tag.toLowerCase()));
+    const catalogWithoutFlag = catalogs.filter((catalog) => !dbTagsLower.has(catalog.toLowerCase()));
     if (catalogWithoutFlag.length > 0) {
       this.logger.warn(
         `Catalog(s) shipped but not flagged systemSupported, unreachable by resolution: ${catalogWithoutFlag.join(', ')}`,

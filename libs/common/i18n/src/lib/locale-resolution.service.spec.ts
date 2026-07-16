@@ -98,4 +98,68 @@ describe('LocaleResolutionService', () => {
       await expect(service.resolve({})).resolves.toBe('en');
     });
   });
+
+  describe('preference cache', () => {
+    let nowSpy: jest.SpyInstance;
+    let now: number;
+
+    beforeEach(() => {
+      now = 1_000_000;
+      nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    });
+
+    afterEach(() => {
+      nowSpy.mockRestore();
+    });
+
+    it('serves repeat lookups for a user from the cache within the TTL', async () => {
+      const db = buildDb({ tag: 'de' });
+      const service = new LocaleResolutionService(db, supportedLocales);
+
+      await expect(service.resolve({ userId: 'u1' })).resolves.toBe('de');
+      await expect(service.resolve({ userId: 'u1' })).resolves.toBe('de');
+
+      expect(db.userPreferences.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('caches the absence of a preference too', async () => {
+      const db = buildDb(null);
+      const service = new LocaleResolutionService(db, supportedLocales);
+
+      await service.resolve({ userId: 'u1', acceptLanguage: 'de' });
+      await service.resolve({ userId: 'u1', acceptLanguage: 'de' });
+
+      expect(db.userPreferences.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-queries once the TTL has elapsed', async () => {
+      const db = buildDb({ tag: 'de' });
+      const service = new LocaleResolutionService(db, supportedLocales);
+
+      await service.resolve({ userId: 'u1' });
+      now += LocaleResolutionService.PREFERENCE_TTL_MS + 1;
+      await service.resolve({ userId: 'u1' });
+
+      expect(db.userPreferences.findUnique).toHaveBeenCalledTimes(2);
+    });
+
+    it('serves the expired cached preference when the re-query fails', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      const findUnique = jest
+        .fn()
+        .mockResolvedValueOnce({ languageTag: { tag: 'de' } })
+        .mockRejectedValueOnce(new Error('connection refused'));
+      const db = { userPreferences: { findUnique } } as unknown as DatabaseService;
+      const service = new LocaleResolutionService(db, supportedLocales);
+
+      await expect(service.resolve({ userId: 'u1' })).resolves.toBe('de');
+      now += LocaleResolutionService.PREFERENCE_TTL_MS + 1;
+      await expect(service.resolve({ userId: 'u1' })).resolves.toBe('de');
+
+      expect(findUnique).toHaveBeenCalledTimes(2);
+      expect(warnSpy).toHaveBeenCalled();
+
+      warnSpy.mockRestore();
+    });
+  });
 });

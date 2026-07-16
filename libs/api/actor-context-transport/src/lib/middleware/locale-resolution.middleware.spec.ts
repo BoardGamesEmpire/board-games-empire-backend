@@ -81,13 +81,13 @@ describe('LocaleResolutionMiddleware', () => {
     expect(captured.nextArg).toBeUndefined();
   });
 
-  it.each<[string, Actor]>([
-    ['anonymous', { kind: 'anonymous', userId: 'u2' }],
-    ['apiKey', { kind: 'apiKey', apiKeyId: 'k1', userId: 'u3' }],
-  ])('passes the %s actor userId to resolution', async (_kind, actor) => {
+  it.each<[string, Actor, string]>([
+    ['anonymous', { kind: 'anonymous', userId: 'u2' }, 'u2'],
+    ['apiKey', { kind: 'apiKey', apiKeyId: 'k1', userId: 'u3' }, 'u3'],
+  ])('passes the %s actor userId to resolution', async (_kind, actor, userId) => {
     await run(buildRequest(), actor);
 
-    expect(resolutionMock.resolve).toHaveBeenCalledWith({ userId: actor.userId, acceptLanguage: undefined });
+    expect(resolutionMock.resolve).toHaveBeenCalledWith({ userId, acceptLanguage: undefined });
   });
 
   it('passes a null userId for unauthenticated requests', async () => {

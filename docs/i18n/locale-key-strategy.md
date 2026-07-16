@@ -8,7 +8,7 @@ model with the locale keys `nestjs-i18n` and its tooling expect, so Phase 1 modu
 
 The DB originally identified languages by ISO 639-3 (`Language.code`), while `nestjs-i18n`
 and most i18n tooling key catalogs by BCP 47 / ISO 639-1 folder names (`en`, `es`, `zh-Hant`).
-#137 was opened to pick and document that mapping. Its blocker, the language-model rework
+Issue #137 was opened to pick and document that mapping. Its blocker, the language-model rework
 (#37), has since landed (commit `f4c4bc1`) and **already resolves the ambiguity** — this doc
 ratifies the resulting convention rather than inventing a new one.
 
@@ -60,10 +60,12 @@ resolution chain, and the value the supported set degrades to on total drift.
 ## Supported set at runtime (#140)
 
 `supported` is **not** queried per request. `SupportedLocalesService` (`@bge/i18n`) loads it
-once at boot: `LanguageTag.tag` values with `systemSupported: true`, **intersected** with the
-catalogs `I18nService` actually loaded from disk. Drift in either direction (flagged tag
-without a shipped catalog, shipped catalog without the flag) is warned at boot and the
-offending locale excluded — resolution can only yield locales that truly have catalogs. This
+once at boot: `LanguageTag.tag` values with `systemSupported: true`, **intersected** (matching
+case-insensitively, keeping the canonical DB casing) with the catalogs `I18nService` actually
+loaded from disk. Drift in either direction (flagged tag without a shipped catalog, shipped
+catalog without the flag) is warned at boot and the offending locale excluded — resolution can
+only yield locales that truly have catalogs. A missing catalog for the fallback itself
+**fails the boot**: that is broken asset wiring (#139), not drift. This
 is the runtime counterpart to the seed-time `assertSystemSupportedTags` guard, closing the
 "guard asserting a catalog folder physically exists" gap deferred from #138. The set changes
 only via seed/curation, so a redeploy picks up changes; revisit if #149 grows an admin
@@ -73,8 +75,10 @@ Resolution itself (`LocaleResolutionService`) happens once per request in HTTP m
 stored user preference → `Accept-Language` → fallback, one RFC 4647 lookup over the
 prioritized ranges so an unsupported preference falls through rather than snapping to the
 fallback — and the result is stored in the CLS actor-context envelope. nestjs-i18n reads it
-back via a single `ClsLocaleResolver`. See issue #140 for the design rationale
-(middleware-time vs nestjs-i18n's post-guard interceptor).
+back via a single `ClsLocaleResolver`. The preference lookup is cached in-memory per instance
+(60s TTL, size-bounded), so the hot path costs one indexed query per user per window, not per
+request. See issue #140 for the design rationale (middleware-time vs nestjs-i18n's post-guard
+interceptor).
 
 ## Deferred
 
