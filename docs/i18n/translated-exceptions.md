@@ -1,0 +1,75 @@
+# Translated exceptions (#143)
+
+Error messages returned to API clients are localized at the edge. Services stay
+decoupled from `I18nService` — they throw a normal Nest exception naming a
+catalog **key**; a single global filter resolves it against the request's
+locale.
+
+## The pattern
+
+```ts
+import { t } from '@bge/i18n';
+import { NotFoundException } from '@nestjs/common';
+
+throw new NotFoundException(t('errors.language.not_found', { id }));
+```
+
+- Use the **standard Nest exception** for the status you want
+  (`NotFoundException` → 404, `BadRequestException` → 400, …). The exception
+  type still owns the status code.
+- Wrap the message in `t(key, args)`. `key` is type-checked against the
+  generated catalog types (`I18nPath`) — an unknown key fails `tsc` (see
+  [typed-keys.md](./typed-keys.md)).
+- `args` fill `{placeholder}`s in the catalog string
+  (`"Language with id {id} not found"`).
+
+Do **not** inject `I18nService` into services and translate there. The only
+component that touches translation is the filter.
+
+## How it resolves
+
+`t()` returns an `I18nMessage { key, args }`. Nest stores it as the exception's
+response body, and `I18nExceptionFilter` (registered globally via `APP_FILTER`
+in `apps/api`) recovers it and renders the normal Nest error shape:
+
+```jsonc
+{ "statusCode": 404, "message": "<translated>", "error": "Not Found" }
+```
+
+Locale comes from `AuditContextService.getLocale()` — the value the entry seam
+resolves into CLS **before guards run** — so guard-thrown errors (auth,
+throttling) are translated too. `I18nContext.current()` is intentionally not
+used: it is unset for exceptions thrown before nestjs-i18n's interceptor. If no
+locale is resolved, it degrades to `FALLBACK_LOCALE` (`en`).
+
+Exceptions **without** a `t()` payload pass straight through to Nest's default
+handling — nothing about existing error responses changes.
+
+### Observability trade-off
+
+Because the message is deferred, `t()` gives the exception an **object** response
+body with no string `.message`, so Nest sets `HttpException.message` to the
+generic class phrase (e.g. `"Not Found Exception"`). Anything that logs the raw
+thrown exception's `.message` before the edge filter runs (a Sentry breadcrumb,
+a pino error serializer) therefore records that generic phrase rather than the
+old inline string. The **client-facing** response is unaffected — it always
+carries the fully translated message. This is inherent to translating at the
+edge; if a call site needs a descriptive server-side log line, log it
+explicitly at the throw site.
+
+## Adding a new message
+
+1. Add the key to the right catalog file under
+   `libs/common/i18n/src/lib/i18n/en/` (e.g. `errors.json`), with
+   `{placeholder}`s for any interpolated values.
+2. Run `npm run i18n:generate` and commit the regenerated types.
+3. Throw with `t('your.new.key', { ...args })`.
+
+## Scope
+
+- **HTTP only.** WebSocket gateways keep their own filters; WS localization is
+  tracked in #180.
+- This issue (#143) establishes the pattern + filter and converts one exemplar
+  site (`language.service.ts`). Converting the remaining ~165 throw sites — and
+  collapsing repeated messages into shared `common.*` keys — is Phase 3 (#144);
+  see [string-inventory.md](./string-inventory.md) §4 for the shared-key plan.

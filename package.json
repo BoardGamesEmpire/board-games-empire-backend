@@ -21,6 +21,7 @@
     "db:seed": "prisma db seed",
     "dep-graph": "nx dep-graph",
     "e2e": "nx e2e",
+    "i18n:generate": "nx run @board-games-empire/i18n:generate-types",
     "format:check": "nx format:check",
     "format:write": "nx format:write",
     "format": "nx format:write",
