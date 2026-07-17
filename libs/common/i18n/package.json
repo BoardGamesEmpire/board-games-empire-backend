@@ -17,7 +17,27 @@
       "common",
       "i18n"
     ],
-    "name": "@board-games-empire/i18n"
+    "name": "@board-games-empire/i18n",
+    "targets": {
+      "generate-types": {
+        "executor": "nx:run-commands",
+        "cache": true,
+        "inputs": [
+          "{projectRoot}/src/lib/i18n/**/*.json",
+          {
+            "externalDependencies": [
+              "nestjs-i18n"
+            ]
+          }
+        ],
+        "outputs": [
+          "{projectRoot}/src/lib/generated/i18n.generated.ts"
+        ],
+        "options": {
+          "command": "nestjs-i18n -p libs/common/i18n/src/lib/i18n -o libs/common/i18n/src/lib/generated/i18n.generated.ts"
+        }
+      }
+    }
   },
   "dependencies": {}
 }

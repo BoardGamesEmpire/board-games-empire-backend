@@ -21,7 +21,7 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
-import { I18nConfigModule } from '@bge/i18n';
+import { I18nConfigModule, I18nExceptionFilter } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
@@ -42,7 +42,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { MiddlewareConsumer, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
@@ -221,6 +221,10 @@ import { baseLogger } from './lib/logger';
   ],
   controllers: [],
   providers: [
+    // Global edge filter: translates exceptions carrying a `t()` key against
+    // the request locale (#143). Non-i18n exceptions fall through unchanged.
+    { provide: APP_FILTER, useClass: I18nExceptionFilter },
+
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {
       provide: APP_INTERCEPTOR,

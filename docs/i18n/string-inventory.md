@@ -21,11 +21,17 @@ stay English).
 
 ## 1. Headline findings
 
-1. **Validation is nearly free to localize.** Across 46 DTO/validator files there is exactly **one**
-   inline custom `message:` and **three** custom `ValidatorConstraint.defaultMessage()` strings.
-   Every other DTO uses class-validator's **built-in default messages** — `nestjs-i18n` overrides
-   those **centrally** (`I18nValidationPipe`), so Phase 2 does not need a per-DTO string grind.
-   No custom `exceptionFactory` exists anywhere.
+1. **Validation localization requires per-decorator annotation (CORRECTED 2026-07-16).** Across 46
+   DTO/validator files there is exactly **one** inline custom `message:` and **three** custom
+   `ValidatorConstraint.defaultMessage()` strings. An earlier draft of this doc claimed
+   `I18nValidationPipe` overrides class-validator's built-in default messages **centrally** — that is
+   **wrong** (confirmed against nestjs-i18n v10.8.4 docs). `I18nValidationPipe` only translates
+   messages emitted via the `i18nValidationMessage<I18nTranslations>('validation.KEY')` marker on
+   **each decorator**; unannotated decorators keep emitting English defaults. So localizing validation
+   IS a per-DTO grind — annotating decorators across all ~46 files, plus a `validation.*` catalog
+   namespace. That annotation sweep is **Phase 3 work (#144)**; Phase 2 (#142) only installs the
+   machinery (swap the pipe, register `I18nValidationExceptionFilter`, seed the `validation.*` catalog,
+   document the convention). No custom `exceptionFactory` exists anywhere.
 2. **New category: controller success messages.** ~42 hardcoded English `message:` strings returned
    in success response bodies (e.g. `Game created successfully`). Not in the original exception count;
    in scope.
@@ -166,7 +172,10 @@ mapping site (which is in scope and counted under `media`). Do **not** translate
 | libs/api/safe-http/.../dto/validators.ts:33 | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")` |
 | libs/api/safe-http/.../dto/validators.ts:71 | `IsCidrConstraint.defaultMessage()` | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
 
-Everything else = class-validator defaults → override centrally via `nestjs-i18n` in Phase 2 (#142).
+Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
+(#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
+these requires adding `i18nValidationMessage<I18nTranslations>('validation.KEY')` to each decorator —
+tracked as Phase 3 work (#144).
 
 ---
 

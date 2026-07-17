@@ -51,5 +51,4 @@ Thumbs.db
 
 test-output
 
-.claude/worktrees
-.claude/settings.local.json
+.claude/

@@ -1,4 +1,5 @@
 import { DatabaseService, isPrismaDependentRecordNotFoundError } from '@bge/database';
+import { t } from '@bge/i18n';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { LanguageQueryDto } from './dto/language-query.dto';
 
@@ -38,7 +39,7 @@ export class LanguageService {
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(`Language with id ${id} not found`);
+        throw new NotFoundException(t('errors.language.not_found', { id }));
       }
 
       throw error;
