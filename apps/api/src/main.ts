@@ -7,7 +7,7 @@ import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
 import { AUTH_INSTANCE } from '@bge/auth';
-import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -15,6 +15,7 @@ import { DocumentBuilder, OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import { toNodeHandler } from 'better-auth/node';
 import compression from 'compression';
 import helmet from 'helmet';
+import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
@@ -43,8 +44,12 @@ async function bootstrap() {
   app.enable('trust proxy').set('etag', 'strong').set('x-powered-by', false);
 
   app
+    // I18nValidationPipe is ValidationPipe with an i18n-aware exceptionFactory:
+    // decorator messages tagged via `i18nValidationMessage` (see @bge/i18n) are
+    // resolved against the request locale by the I18nValidationExceptionFilter
+    // (app.module). Options are unchanged from the plain ValidationPipe; #142.
     .useGlobalPipes(
-      new ValidationPipe({
+      new I18nValidationPipe({
         forbidNonWhitelisted: true,
         transform: true,
         whitelist: true,

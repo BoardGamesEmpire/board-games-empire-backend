@@ -16,8 +16,15 @@ import { isI18nMessage } from './translatable';
  *
  * Scope is deliberately narrow:
  * - `@Catch(HttpException)` — plain (non-HTTP) errors keep Nest's default 500
- *   handling; `WsException`s are not `HttpException`s and stay with the
- *   gateway-scoped filters (WS localization is #180).
+ *   handling. `WsException`s are not `HttpException`s, and — independently of
+ *   `@Catch()` — a globally (`APP_FILTER`) registered filter is never invoked
+ *   with a WebSocket host at all: Nest's WS exception context overrides
+ *   `getGlobalMetadata()` to return `[]` (see `@nestjs/websockets`
+ *   `context/exception-filters-context.js`), so globals are excluded from the
+ *   WS path. WS localization stays with the gateway-scoped filters (#180). The
+ *   `host.getType() !== 'http'` guard below is thus belt-and-suspenders —
+ *   reachable only for an `rpc` host, which this app has no inbound transport
+ *   for.
  * - Any `HttpException` WITHOUT a `t()` payload is passed straight to
  *   `super.catch`, so every existing exception renders byte-identically to
  *   before this filter existed.

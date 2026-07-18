@@ -51,6 +51,7 @@ import type { RedisClient } from 'bullmq';
 import type { Request } from 'express';
 import Keyv from 'keyv';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';
+import { I18nValidationExceptionFilter } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
@@ -224,6 +225,16 @@ import { baseLogger } from './lib/logger';
     // Global edge filter: translates exceptions carrying a `t()` key against
     // the request locale (#143). Non-i18n exceptions fall through unchanged.
     { provide: APP_FILTER, useClass: I18nExceptionFilter },
+
+    // Validation errors (#142). `I18nValidationException` extends
+    // `HttpException`, so the catch-all filter above matches it too — this
+    // filter must win. Nest evaluates global (APP_FILTER) filters in REVERSE
+    // registration order, so declaring it AFTER I18nExceptionFilter makes it the
+    // first match for validation errors while the catch-all handles the rest.
+    // `detailedErrors: false` reproduces the pre-i18n body exactly:
+    // `{ statusCode, message: string[], error: 'Bad Request' }`.
+    // Do not reorder these two providers (locked by an integration test).
+    { provide: APP_FILTER, useValue: new I18nValidationExceptionFilter({ detailedErrors: false }) },
 
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {
