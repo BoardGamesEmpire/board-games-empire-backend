@@ -21,7 +21,7 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
-import { I18nConfigModule, I18nExceptionFilter } from '@bge/i18n';
+import { I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
@@ -235,6 +235,15 @@ import { baseLogger } from './lib/logger';
     // `{ statusCode, message: string[], error: 'Bad Request' }`.
     // Do not reorder these two providers (locked by an integration test).
     { provide: APP_FILTER, useValue: new I18nValidationExceptionFilter({ detailedErrors: false }) },
+
+    // Global edge interceptor: the success-path counterpart to
+    // I18nExceptionFilter. Translates `t()` markers embedded in success response
+    // bodies against the request locale (#144). Declared FIRST so it is the
+    // OUTERMOST interceptor — its response transform runs last on the way out,
+    // i.e. after UserAwareCacheInterceptor. The cache therefore stores the
+    // locale-independent markers and this interceptor renders them per request,
+    // so a cache hit is never pinned to the locale that first populated it.
+    { provide: APP_INTERCEPTOR, useClass: I18nResponseInterceptor },
 
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {

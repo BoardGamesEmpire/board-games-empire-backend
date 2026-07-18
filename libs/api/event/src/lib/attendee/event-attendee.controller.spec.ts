@@ -1,4 +1,5 @@
 import { EventAttendee, EventAttendeeGameList, EventParticipationStatus } from '@bge/database';
+import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -84,7 +85,7 @@ describe('EventAttendeeController', () => {
 
       expect(service.addAttendee).toHaveBeenCalledWith('event-1', dto);
       expect(result).toEqual({
-        message: 'Attendee added successfully',
+        message: t('success.attendee.added'),
         attendee: created,
       });
     });
@@ -99,7 +100,7 @@ describe('EventAttendeeController', () => {
 
       expect(service.removeAttendee).toHaveBeenCalledWith('event-1', 'att-del');
       expect(result).toEqual({
-        message: 'Attendee removed successfully',
+        message: t('success.attendee.removed'),
         attendee: removed,
       });
     });
@@ -119,7 +120,7 @@ describe('EventAttendeeController', () => {
 
       expect(service.updateStatus).toHaveBeenCalledWith('event-1', 'att-1', dto);
       expect(result).toEqual({
-        message: 'Attendee status updated',
+        message: t('success.attendee.status_updated'),
         attendee: updated,
       });
     });
@@ -147,7 +148,7 @@ describe('EventAttendeeController', () => {
       expect(service.addGameToList).toHaveBeenCalledWith('event-1', 'att-1', {
         collectionId: 'gc-1',
       });
-      expect(result).toEqual({ message: 'Game added to list', entry });
+      expect(result).toEqual({ message: t('success.attendee.game_added'), entry });
     });
   });
 
@@ -159,7 +160,7 @@ describe('EventAttendeeController', () => {
       const result = await firstValueFrom(controller.removeGameFromList('event-1', 'att-1', 'gl-del'));
 
       expect(service.removeGameFromList).toHaveBeenCalledWith('event-1', 'att-1', 'gl-del');
-      expect(result).toEqual({ message: 'Game removed from list', entry });
+      expect(result).toEqual({ message: t('success.attendee.game_removed'), entry });
     });
   });
 });

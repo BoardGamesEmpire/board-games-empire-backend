@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
@@ -51,7 +52,7 @@ export class EventController {
   createEvent(@Body() createEventDto: CreateEventDto) {
     return from(this.eventService.createEvent(createEventDto)).pipe(
       tap((event) => this.logger.log(`Event "${event.title}" (${event.id}) created by user ${event.createdById}`)),
-      map((event) => ({ message: 'Event created successfully', event })),
+      map((event) => ({ message: t('success.event.created'), event })),
     );
   }
 
@@ -66,7 +67,7 @@ export class EventController {
   updateEvent(@Param('id') id: string, @Body() updateEventDto: UpdateEventDto) {
     return from(this.eventService.updateEvent(id, updateEventDto)).pipe(
       map((event) => ({
-        message: `Event with ID ${id} updated successfully`,
+        message: t('success.event.updated', { id }),
         event,
       })),
     );
@@ -84,7 +85,7 @@ export class EventController {
     return from(this.eventService.deleteEvent(id)).pipe(
       tap((event) => this.logger.log(`Event ${id} deleted by user ${event.deletedById}`)),
       map((event) => ({
-        message: `Event with ID ${id} deleted successfully`,
+        message: t('success.event.deleted', { id }),
         event,
       })),
     );

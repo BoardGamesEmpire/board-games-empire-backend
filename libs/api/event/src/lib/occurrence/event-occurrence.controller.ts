@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -48,7 +49,7 @@ export class EventOccurrenceController {
   addOccurrence(@Param('eventId') eventId: string, @Body() dto: AddOccurrenceDto) {
     return from(this.occurrenceService.addOccurrence(eventId, dto)).pipe(
       tap((occ) => this.logger.log(`Occurrence ${occ.id} added to event ${eventId}`)),
-      map((occurrence) => ({ message: 'Occurrence added', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.added'), occurrence })),
     );
   }
 
@@ -63,7 +64,7 @@ export class EventOccurrenceController {
     @Body() dto: UpdateEventOccurrenceDto,
   ) {
     return from(this.occurrenceService.updateOccurrence(eventId, occurrenceId, dto)).pipe(
-      map((occurrence) => ({ message: 'Occurrence updated', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.updated'), occurrence })),
     );
   }
 
@@ -75,7 +76,7 @@ export class EventOccurrenceController {
   removeOccurrence(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.removeOccurrence(eventId, occurrenceId)).pipe(
       tap(() => this.logger.log(`Occurrence ${occurrenceId} removed from event ${eventId}`)),
-      map((occurrence) => ({ message: 'Occurrence removed', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.removed'), occurrence })),
     );
   }
 
@@ -86,7 +87,7 @@ export class EventOccurrenceController {
   @Post(':occurrenceId/confirm')
   confirm(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.confirmOccurrence(eventId, occurrenceId)).pipe(
-      map((occurrence) => ({ message: 'Occurrence confirmed', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.confirmed'), occurrence })),
     );
   }
 
@@ -97,7 +98,7 @@ export class EventOccurrenceController {
   @Post(':occurrenceId/decline')
   decline(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.declineOccurrence(eventId, occurrenceId)).pipe(
-      map((occurrence) => ({ message: 'Occurrence declined', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.declined'), occurrence })),
     );
   }
 
@@ -108,7 +109,7 @@ export class EventOccurrenceController {
   @Post(':occurrenceId/cancel')
   cancel(@Param('eventId') eventId: string, @Param('occurrenceId') occurrenceId: string) {
     return from(this.occurrenceService.cancelOccurrence(eventId, occurrenceId)).pipe(
-      map((occurrence) => ({ message: 'Occurrence cancelled', occurrence })),
+      map((occurrence) => ({ message: t('success.occurrence.cancelled'), occurrence })),
     );
   }
 
@@ -129,7 +130,7 @@ export class EventOccurrenceController {
           `User ${vote.attendeeId} submitted availability for occurrence ${occurrenceId} in event ${eventId}: ${dto.response}`,
         ),
       ),
-      map((vote) => ({ message: 'Availability recorded', vote })),
+      map((vote) => ({ message: t('success.occurrence.availability_recorded'), vote })),
     );
   }
 

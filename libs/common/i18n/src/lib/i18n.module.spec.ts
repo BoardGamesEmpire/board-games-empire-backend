@@ -32,11 +32,15 @@ describe('I18nConfigModule', () => {
   });
 
   it('resolves a key from the en catalog', () => {
-    expect(i18n.translate('common.at_least_one_field', { lang: 'en' })).toBe('At least one field must be provided');
+    expect(i18n.translate('common.at_least_one_field', { lang: 'en' })).toBe(
+      'At least one field must be provided for update',
+    );
   });
 
   it('falls back to en for an unsupported locale', () => {
-    expect(i18n.translate('common.at_least_one_field', { lang: 'fr' })).toBe('At least one field must be provided');
+    expect(i18n.translate('common.at_least_one_field', { lang: 'fr' })).toBe(
+      'At least one field must be provided for update',
+    );
   });
 
   it('loads the supported-locale set at boot', () => {

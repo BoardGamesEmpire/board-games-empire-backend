@@ -18,13 +18,16 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../../common/actor-context/tsconfig.lib.json"
-    },
-    {
       "path": "../../common/notifications/tsconfig.lib.json"
     },
     {
       "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/actor-context/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/i18n/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"

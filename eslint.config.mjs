@@ -24,6 +24,41 @@ export const restrictedImportPaths = {
   }
 };
 
+// #145: CI guardrail against NEW hardcoded user-facing strings in libs already
+// migrated by #144. These `no-restricted-syntax` selectors flag string/template
+// literals passed to a `*Exception(...)` constructor or used as a `message:`
+// value — both must instead carry a catalog key via `t()` (exceptions / success
+// bodies) or `i18nValidationMessage()` (validators). Opt-in PER LIB: a migrated
+// lib's own `eslint.config.mjs` imports this array into a `no-restricted-syntax`
+// rule scoped to its source, so the guardrail grows as #144 lands lib-by-lib and
+// never red-CIs a lib that hasn't been migrated yet. Genuinely non-user-facing
+// cases use an explicit `// eslint-disable-next-line no-restricted-syntax --
+// <reason>` escape hatch. `raw=/^['"]/` restricts to STRING literals (a numeric
+// status code as an exception arg is not flagged); namespaced callees
+// (`ns.FooException`) are a known gap — call sites here import exceptions directly.
+export const i18nHardcodedStringSelectors = [
+  {
+    selector: "NewExpression[callee.name=/Exception$/] > Literal[raw=/^['\"]/]",
+    message:
+      "Hardcoded user-facing string in an exception. Use a catalog key: throw new NotFoundException(t('errors.…', { … })). (#144/#145)",
+  },
+  {
+    selector: "NewExpression[callee.name=/Exception$/] > TemplateLiteral",
+    message:
+      "Hardcoded user-facing template string in an exception. Move the copy to a catalog key and interpolate via t('errors.…', { … }). (#144/#145)",
+  },
+  {
+    selector: "Property[key.name='message'] > Literal[raw=/^['\"]/]",
+    message:
+      "Hardcoded user-facing `message:` string. Use a catalog key: t('success.…') for response bodies or i18nValidationMessage('validation.…') on validators. (#144/#145)",
+  },
+  {
+    selector: "Property[key.name='message'] > TemplateLiteral",
+    message:
+      "Hardcoded user-facing `message:` template string. Move the copy to a catalog key and interpolate via t('…', { … }). (#144/#145)",
+  },
+];
+
 export default [
   ...nx.configs["flat/base"],
   ...nx.configs["flat/typescript"],

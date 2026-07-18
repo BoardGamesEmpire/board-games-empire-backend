@@ -1,4 +1,5 @@
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -150,10 +151,10 @@ export class GameService {
       if (isPrismaDependentRecordNotFoundError(error)) {
         const exists = await this.db.game.count({ where: { id } });
         if (exists === 0) {
-          throw new NotFoundException(`Game with ID ${id} not found`);
+          throw new NotFoundException(t('errors.game.not_found', { id }));
         }
 
-        throw new ForbiddenException("You don't have permission to view this resource.");
+        throw new ForbiddenException(t('common.forbidden.view'));
       }
 
       throw error;
@@ -189,7 +190,7 @@ export class GameService {
 
   async updateGame(id: string, updateGameDto: UpdateGameDto) {
     if (Object.keys(updateGameDto).length === 0) {
-      throw new BadRequestException('At least one field must be provided for update');
+      throw new BadRequestException(t('common.at_least_one_field'));
     }
 
     const userId = this.abilityService.getActingUserId();
@@ -197,7 +198,7 @@ export class GameService {
     try {
       const existing = await this.db.game.count({ where: { id } });
       if (existing === 0) {
-        throw new NotFoundException(`Game with ID ${id} not found`);
+        throw new NotFoundException(t('errors.game.not_found', { id }));
       }
 
       const game = await this.db.game.update({
@@ -218,7 +219,7 @@ export class GameService {
     } catch (error) {
       this.logger.error(`Error updating game with id ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
 
       throw error;
@@ -229,7 +230,7 @@ export class GameService {
     try {
       const existing = await this.db.game.count({ where: { id } });
       if (existing === 0) {
-        throw new NotFoundException(`Game with ID ${id} not found`);
+        throw new NotFoundException(t('errors.game.not_found', { id }));
       }
 
       // Tombstoned (removed) collection entries don't block deletion — only
@@ -243,7 +244,7 @@ export class GameService {
         },
       });
       if (collectionsCount > 0) {
-        throw new BadRequestException('Cannot delete game that is part of a collection');
+        throw new BadRequestException(t('errors.game.cannot_delete_in_collection'));
       }
 
       return await this.db.game.delete({
@@ -255,7 +256,7 @@ export class GameService {
     } catch (error) {
       this.logger.error(`Error deleting game with id ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to delete this resource.");
+        throw new ForbiddenException(t('common.forbidden.delete'));
       }
 
       throw error;

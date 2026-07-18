@@ -10,6 +10,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -89,7 +90,7 @@ export class EventService {
       },
     });
 
-    assert(event, new NotFoundException(`Event with ID ${id} not found`));
+    assert(event, new NotFoundException(t('errors.event.not_found', { id })));
     return event;
   }
 
@@ -229,7 +230,7 @@ export class EventService {
 
   async updateEvent(id: string, dto: UpdateEventDto): Promise<Event> {
     const initiatedAt = new Date();
-    assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
+    assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, householdId, ...fields } = dto;
@@ -239,7 +240,7 @@ export class EventService {
       const existing = await this.db.event.findUnique({
         where: { id, deletedAt: null },
       });
-      assert(existing, new NotFoundException(`Event with ID ${id} not found`));
+      assert(existing, new NotFoundException(t('errors.event.not_found', { id })));
 
       let householdRelation: { connect: { id: string } } | { disconnect: true } | undefined;
       if (householdId === null) {
@@ -281,7 +282,7 @@ export class EventService {
     } catch (error) {
       this.logger.error(`Error updating event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
 
       throw error;
@@ -295,7 +296,7 @@ export class EventService {
       const existing = await this.db.event.count({
         where: { id, deletedAt: null },
       });
-      assert(existing > 0, new NotFoundException(`Event with ID ${id} not found`));
+      assert(existing > 0, new NotFoundException(t('errors.event.not_found', { id })));
 
       const event = await this.db.event.update({
         where: {
@@ -320,7 +321,7 @@ export class EventService {
     } catch (error) {
       this.logger.error(`Error deleting event with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to delete this resource.");
+        throw new ForbiddenException(t('common.forbidden.delete'));
       }
 
       throw error;
@@ -329,7 +330,7 @@ export class EventService {
 
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {
     if (mode === EventSchedulingMode.Fixed && occurrences && occurrences.length > 1) {
-      throw new BadRequestException('Fixed scheduling mode allows at most one occurrence.');
+      throw new BadRequestException(t('errors.event.fixed_mode_single'));
     }
   }
 }

@@ -10,6 +10,7 @@ import {
   OccurrenceStatus,
   ResourceType,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -63,7 +64,7 @@ export class EventOccurrenceService {
       include: OCCURRENCE_INCLUDE,
     });
 
-    assert(occurrence, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
+    assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
     return occurrence;
   }
 
@@ -74,7 +75,7 @@ export class EventOccurrenceService {
       select: { id: true, schedulingMode: true },
     });
 
-    assert(event, new NotFoundException(`Event ${eventId} not found`));
+    assert(event, new NotFoundException(t('errors.event.not_found', { id: eventId })));
 
     if (event.schedulingMode === EventSchedulingMode.Fixed) {
       const existingCount = await this.db.eventOccurrence.count({
@@ -82,10 +83,7 @@ export class EventOccurrenceService {
       });
 
       if (existingCount >= 1) {
-        throw new BadRequestException(
-          'Fixed scheduling mode allows at most one occurrence. ' +
-            'Change the event scheduling mode to Poll or MultiDay first.',
-        );
+        throw new BadRequestException(t('errors.occurrence.fixed_mode_single'));
       }
     }
 
@@ -132,14 +130,14 @@ export class EventOccurrenceService {
     dto: UpdateEventOccurrenceDto,
   ): Promise<EventOccurrence> {
     const initiatedAt = new Date();
-    assert(Object.keys(dto).length > 0, new BadRequestException('At least one field must be provided for update'));
+    assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     // Full row (not just the id) so the update event can carry a before snapshot.
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
     });
 
-    assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
+    assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     try {
       const updated = await this.db.eventOccurrence.update({
@@ -173,7 +171,7 @@ export class EventOccurrenceService {
     } catch (error) {
       this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
       throw error;
     }
@@ -187,7 +185,7 @@ export class EventOccurrenceService {
       select: { id: true },
     });
 
-    assert(existing, new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`));
+    assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     try {
       return this.db.eventOccurrence.delete({
@@ -200,7 +198,7 @@ export class EventOccurrenceService {
     } catch (error) {
       this.logger.error(`Error removing occurrence ${occurrenceId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to remove this resource.");
+        throw new ForbiddenException(t('common.forbidden.remove'));
       }
       throw error;
     }
@@ -239,13 +237,16 @@ export class EventOccurrenceService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`);
+      throw new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId }));
     }
 
     if (!allowedFrom.includes(existing.status)) {
       throw new BadRequestException(
-        `Cannot transition from "${existing.status}" to "${newStatus}". ` +
-          `Allowed source statuses: ${allowedFrom.join(', ')}.`,
+        t('errors.occurrence.invalid_transition', {
+          from: existing.status,
+          to: newStatus,
+          allowed: allowedFrom.join(', '),
+        }),
       );
     }
 
@@ -280,7 +281,7 @@ export class EventOccurrenceService {
     } catch (error) {
       this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
 
       throw error;
@@ -300,12 +301,12 @@ export class EventOccurrenceService {
     });
 
     if (!occurrence) {
-      throw new NotFoundException(`Occurrence ${occurrenceId} not found for event ${eventId}`);
+      throw new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId }));
     }
 
     if (occurrence.status !== OccurrenceStatus.Proposed) {
       throw new BadRequestException(
-        `Availability votes are only accepted for Proposed occurrences. ` + `Current status: "${occurrence.status}".`,
+        t('errors.occurrence.availability_proposed_only', { status: occurrence.status }),
       );
     }
 

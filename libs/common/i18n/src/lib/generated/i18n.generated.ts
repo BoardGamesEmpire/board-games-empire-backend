@@ -7,16 +7,111 @@ import type { Path } from "nestjs-i18n";
 export type I18nTranslations = {
     "common": {
         "at_least_one_field": string;
+        "forbidden": {
+            "view": string;
+            "update": string;
+            "delete": string;
+            "remove": string;
+        };
     };
     "errors": {
         "language": {
             "not_found": string;
+        };
+        "game": {
+            "not_found": string;
+            "cannot_delete_in_collection": string;
+        };
+        "event": {
+            "not_found": string;
+            "not_attendee": string;
+            "fixed_mode_single": string;
+        };
+        "occurrence": {
+            "not_found": string;
+            "fixed_mode_single": string;
+            "invalid_transition": string;
+            "availability_proposed_only": string;
+        };
+        "attendee": {
+            "not_found": string;
+            "not_found_for_user": string;
+            "game_collection_entry_not_found": string;
+            "user_or_guest_required": string;
+            "already_attendee": string;
+            "forbidden_remove": string;
+            "forbidden_update": string;
+            "game_already_in_list": string;
+            "game_list_entry_not_found": string;
+            "forbidden_remove_game": string;
+            "game_from_other_collection": string;
+            "game_removed_from_collection": string;
+        };
+        "nomination": {
+            "not_found": string;
+            "host_only": string;
+            "supplied_from_not_found": string;
+            "supplied_from_mismatch": string;
+            "only_nominator_withdraw": string;
+            "cannot_withdraw_status": string;
+            "cannot_vote_status": string;
+            "cannot_resolve_status": string;
+            "cannot_decide_status": string;
+            "forbidden_withdraw": string;
+            "vote_failed": string;
+            "forbidden_resolve": string;
+            "invalid_resolution": string;
+            "forbidden_decide": string;
+            "direct_add_not_permitted": string;
+        };
+    };
+    "success": {
+        "game": {
+            "created": string;
+            "updated": string;
+            "deleted": string;
+        };
+        "event": {
+            "created": string;
+            "updated": string;
+            "deleted": string;
+        };
+        "occurrence": {
+            "added": string;
+            "updated": string;
+            "removed": string;
+            "confirmed": string;
+            "declined": string;
+            "cancelled": string;
+            "availability_recorded": string;
+        };
+        "attendee": {
+            "added": string;
+            "removed": string;
+            "status_updated": string;
+            "game_added": string;
+            "game_removed": string;
+        };
+        "nomination": {
+            "created": string;
+            "withdrawn": string;
+            "vote_recorded": string;
+            "resolved": string;
+            "approved": string;
+            "rejected": string;
+            "game_added": string;
         };
     };
     "validation": {
         "isString": string;
         "isBoolean": string;
         "isInt": string;
+        "isPositive": string;
+        "isIn": string;
+        "isEnum": string;
+        "isArray": string;
+        "isDate": string;
+        "isUrl": string;
         "isNotEmpty": string;
         "isEmail": string;
         "min": string;

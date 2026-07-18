@@ -6,6 +6,7 @@ export { ClsLocaleResolver } from './lib/cls-locale.resolver';
 export type { I18nPath, I18nTranslations } from './lib/generated/i18n.generated';
 export { I18nConfigModule } from './lib/i18n.module';
 export { I18nExceptionFilter } from './lib/i18n-exception.filter';
+export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';

@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -53,7 +54,7 @@ export class EventGameNominationController {
         this.logger.log(`Nomination ${nomination.id} created for event ${eventId} by ${nomination.nominatedById}`),
       ),
       map((nomination) => ({
-        message: 'Nomination created',
+        message: t('success.nomination.created'),
         nomination,
       })),
     );
@@ -71,7 +72,7 @@ export class EventGameNominationController {
         this.logger.log(`Nomination ${nominationId} withdrawn for event ${eventId} by ${nomination.nominatedById}`),
       ),
       map((nomination) => ({
-        message: 'Nomination withdrawn',
+        message: t('success.nomination.withdrawn'),
         nomination,
       })),
     );
@@ -85,7 +86,7 @@ export class EventGameNominationController {
   castVote(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string, @Body() dto: CastVoteDto) {
     return from(this.nominationService.castVote(eventId, nominationId, dto)).pipe(
       tap(() => this.logger.log(`Vote cast on nomination ${nominationId} for event ${eventId}: ${dto.voteType}`)),
-      map((vote) => ({ message: 'Vote recorded', vote })),
+      map((vote) => ({ message: t('success.nomination.vote_recorded'), vote })),
     );
   }
 
@@ -99,7 +100,7 @@ export class EventGameNominationController {
     return from(this.nominationService.resolveNomination(eventId, nominationId)).pipe(
       tap(({ resolution }) => this.logger.log(`Nomination ${nominationId} resolved: ${resolution.status}`)),
       map(({ nomination, resolution }) => ({
-        message: `Nomination resolved: ${resolution.status}`,
+        message: t('success.nomination.resolved', { status: resolution.status }),
         nomination,
         resolution,
       })),
@@ -114,7 +115,7 @@ export class EventGameNominationController {
   hostApprove(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
     return from(this.nominationService.hostApprove(eventId, nominationId)).pipe(
       map((nomination) => ({
-        message: 'Nomination approved',
+        message: t('success.nomination.approved'),
         nomination,
       })),
     );
@@ -128,7 +129,7 @@ export class EventGameNominationController {
   hostReject(@Param('eventId') eventId: string, @Param('nominationId') nominationId: string) {
     return from(this.nominationService.hostReject(eventId, nominationId)).pipe(
       map((nomination) => ({
-        message: 'Nomination rejected',
+        message: t('success.nomination.rejected'),
         nomination,
       })),
     );
@@ -147,7 +148,7 @@ export class EventGameNominationController {
         ),
       ),
       map((eventGame) => ({
-        message: 'Game added to event',
+        message: t('success.nomination.game_added'),
         eventGame,
       })),
     );
