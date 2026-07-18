@@ -13,6 +13,17 @@ export type I18nTranslations = {
             "not_found": string;
         };
     };
+    "validation": {
+        "isString": string;
+        "isBoolean": string;
+        "isInt": string;
+        "isNotEmpty": string;
+        "isEmail": string;
+        "min": string;
+        "max": string;
+        "minLength": string;
+        "maxLength": string;
+    };
 };
 /* prettier-ignore */
 export type I18nPath = Path<I18nTranslations>;

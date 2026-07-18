@@ -10,3 +10,4 @@ export { LocaleResolutionService, type LocaleResolutionInput } from './lib/local
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
 export { I18nMessage, isI18nMessage, t } from './lib/translatable';
+export { i18nValidationMessage, type I18nValidationPath } from './lib/validation-message';
