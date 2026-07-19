@@ -63,6 +63,10 @@ describe('StorageExceptionFilter', () => {
     filter.catch(new StorageUnavailableError('denied', { retryable: false }), host);
 
     expect(rendered().getStatus()).toBe(Http.ServiceUnavailable);
+    // The raw storage message ("denied") is never surfaced — generic localized copy only.
+    expect(message()).toBe('t:errors.storage.unavailable');
+    // ...and the raw error is retained as `cause` for server-side logs.
+    expect((rendered() as unknown as { cause?: unknown }).cause).toBeInstanceOf(StorageUnavailableError);
     expect(setHeader).not.toHaveBeenCalled();
   });
 
