@@ -1,22 +1,23 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString } from 'class-validator';
 
 export class NominateGameDto {
   @ApiProperty({ description: 'The PlatformGame to nominate (specific game + platform combination)' })
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   platformGameId!: string;
 
   @ApiProperty({
     description:
       'The EventAttendeeGameList entry that sources this game. ' + "Must exist in an attendee's available games list.",
   })
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   suppliedFromId!: string;
 
   @ApiPropertyOptional({
     description: 'Target a specific occurrence (MultiDay events). ' + 'Null = event-level nomination.',
   })
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   @IsOptional()
   occurrenceId?: string;
 }

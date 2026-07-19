@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -50,7 +51,7 @@ export class EventAttendeeController {
   addAttendee(@Param('eventId') eventId: string, @Body() dto: AddAttendeeDto) {
     return from(this.attendeeService.addAttendee(eventId, dto)).pipe(
       tap((attendee) => this.logger.log(`Attendee ${attendee.id} added to event ${eventId}`)),
-      map((attendee) => ({ message: 'Attendee added successfully', attendee })),
+      map((attendee) => ({ message: t('success.attendee.added'), attendee })),
     );
   }
 
@@ -65,7 +66,7 @@ export class EventAttendeeController {
     return from(this.attendeeService.removeAttendee(eventId, attendeeId)).pipe(
       tap(() => this.logger.log(`Attendee ${attendeeId} removed from event ${eventId}`)),
       map((attendee) => ({
-        message: 'Attendee removed successfully',
+        message: t('success.attendee.removed'),
         attendee,
       })),
     );
@@ -85,7 +86,7 @@ export class EventAttendeeController {
   ) {
     return from(this.attendeeService.updateStatus(eventId, attendeeId, dto)).pipe(
       map((attendee) => ({
-        message: 'Attendee status updated',
+        message: t('success.attendee.status_updated'),
         attendee,
       })),
     );
@@ -114,7 +115,7 @@ export class EventAttendeeController {
     @Body() dto: AddGameToListDto,
   ) {
     return from(this.attendeeService.addGameToList(eventId, attendeeId, dto)).pipe(
-      map((entry) => ({ message: 'Game added to list', entry })),
+      map((entry) => ({ message: t('success.attendee.game_added'), entry })),
     );
   }
 
@@ -132,7 +133,7 @@ export class EventAttendeeController {
     @Param('gameListId') gameListId: string,
   ) {
     return from(this.attendeeService.removeGameFromList(eventId, attendeeId, gameListId)).pipe(
-      map((entry) => ({ message: 'Game removed from list', entry })),
+      map((entry) => ({ message: t('success.attendee.game_removed'), entry })),
     );
   }
 }

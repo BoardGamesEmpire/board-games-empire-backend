@@ -9,6 +9,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import {
   BadRequestException,
@@ -68,7 +69,7 @@ export class EventAttendeeService {
     });
 
     if (!attendee) {
-      throw new NotFoundException(`Attendee ${attendeeId} not found for event ${eventId}`);
+      throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
     return attendee;
@@ -85,7 +86,7 @@ export class EventAttendeeService {
       include: ATTENDEE_INCLUDE,
     });
 
-    assert(attendee, new NotFoundException(`Attendee for user ${userId} not found for event ${eventId}`));
+    assert(attendee, new NotFoundException(t('errors.attendee.not_found_for_user', { userId, eventId })));
     return attendee;
   }
 
@@ -95,7 +96,7 @@ export class EventAttendeeService {
     const invitedByUserId = this.abilityService.getActingUserId();
 
     if (!dto.userId && !dto.guestName) {
-      throw new BadRequestException('Either userId or guestName must be provided.');
+      throw new BadRequestException(t('errors.attendee.user_or_guest_required'));
     }
 
     const inviter = await this.db.eventAttendee.findUnique({
@@ -144,7 +145,7 @@ export class EventAttendeeService {
       this.logger.error(`Error adding attendee to event ${eventId}`, error);
 
       if (isPrismaUniqueConstraintError(error)) {
-        throw new ConflictException(`User is already an attendee of this event.`);
+        throw new ConflictException(t('errors.attendee.already_attendee'));
       }
 
       throw error;
@@ -164,7 +165,7 @@ export class EventAttendeeService {
       select: { id: true, userId: true },
     });
 
-    assert(attendee, new NotFoundException(`Attendee ${attendeeId} not found for event ${eventId}`));
+    assert(attendee, new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId })));
 
     try {
       const deleted = await this.db.eventAttendee.delete({
@@ -193,7 +194,7 @@ export class EventAttendeeService {
     } catch (error) {
       this.logger.error(`Error removing attendee ${attendeeId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to remove this attendee.");
+        throw new ForbiddenException(t('errors.attendee.forbidden_remove'));
       }
       throw error;
     }
@@ -209,7 +210,7 @@ export class EventAttendeeService {
     });
 
     if (!existing) {
-      throw new NotFoundException(`Attendee ${attendeeId} not found for event ${eventId}`);
+      throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
     const rsvpDate =
@@ -244,7 +245,7 @@ export class EventAttendeeService {
     } catch (error) {
       this.logger.error(`Error updating status for attendee ${attendeeId} in event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this attendee.");
+        throw new ForbiddenException(t('errors.attendee.forbidden_update'));
       }
       throw error;
     }
@@ -304,16 +305,16 @@ export class EventAttendeeService {
         select: { userId: true, deletedAt: true },
       });
 
-      assert(collection, new NotFoundException(`Game collection entry ${dto.collectionId} not found.`));
+      assert(
+        collection,
+        new NotFoundException(t('errors.attendee.game_collection_entry_not_found', { collectionId: dto.collectionId })),
+      );
       assert(
         collection.userId === attendee.userId,
-        new ForbiddenException("Cannot add a game from another user's collection."),
+        new ForbiddenException(t('errors.attendee.game_from_other_collection')),
       );
       // A tombstoned entry is a game the attendee no longer owns.
-      assert(
-        !collection.deletedAt,
-        new BadRequestException('Cannot add a game that has been removed from the collection.'),
-      );
+      assert(!collection.deletedAt, new BadRequestException(t('errors.attendee.game_removed_from_collection')));
     }
 
     try {
@@ -362,7 +363,7 @@ export class EventAttendeeService {
       return entry;
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
-        throw new ConflictException("This game is already in the attendee's list.");
+        throw new ConflictException(t('errors.attendee.game_already_in_list'));
       }
 
       this.logger.error(`Error adding game to list for attendee ${attendeeId}`, error);
@@ -379,7 +380,7 @@ export class EventAttendeeService {
     });
 
     if (!entry) {
-      throw new NotFoundException(`Game list entry ${gameListId} not found for attendee ${attendeeId}.`);
+      throw new NotFoundException(t('errors.attendee.game_list_entry_not_found', { gameListId, attendeeId }));
     }
 
     try {
@@ -403,7 +404,7 @@ export class EventAttendeeService {
     } catch (error) {
       this.logger.error(`Error removing game ${gameListId} from attendee ${attendeeId} list`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to remove this game.");
+        throw new ForbiddenException(t('errors.attendee.forbidden_remove_game'));
       }
       throw error;
     }
@@ -419,7 +420,7 @@ export class EventAttendeeService {
     });
 
     if (!attendee) {
-      throw new NotFoundException(`Attendee ${attendeeId} not found for event ${eventId}`);
+      throw new NotFoundException(t('errors.attendee.not_found', { attendeeId, eventId }));
     }
 
     return attendee;

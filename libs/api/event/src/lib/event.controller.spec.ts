@@ -1,4 +1,5 @@
 import { Event } from '@bge/database';
+import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEvent } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -72,7 +73,7 @@ describe('EventController', () => {
 
       expect(service.createEvent).toHaveBeenCalledWith(dto);
       expect(result).toEqual({
-        message: 'Event created successfully',
+        message: t('success.event.created'),
         event: created,
       });
     });
@@ -88,7 +89,7 @@ describe('EventController', () => {
 
       expect(service.updateEvent).toHaveBeenCalledWith('ev-1', dto);
       expect(result).toEqual({
-        message: 'Event with ID ev-1 updated successfully',
+        message: t('success.event.updated', { id: 'ev-1' }),
         event: updated,
       });
     });
@@ -103,7 +104,7 @@ describe('EventController', () => {
 
       expect(service.deleteEvent).toHaveBeenCalledWith('ev-del');
       expect(result).toEqual({
-        message: 'Event with ID ev-del deleted successfully',
+        message: t('success.event.deleted', { id: 'ev-del' }),
         event: deleted,
       });
     });

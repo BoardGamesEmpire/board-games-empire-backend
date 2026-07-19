@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
@@ -46,7 +47,7 @@ export class GameController {
     return from(this.gameService.createGame(createGameDto)).pipe(
       // The service creates the game and evicts the creator's permission graph.
       tap((game) => this.logger.log(`Game with ID ${game.id} created by user ${game.createdById}`)),
-      map((game) => ({ game, message: 'Game created successfully' })),
+      map((game) => ({ game, message: t('success.game.created') })),
     );
   }
 
@@ -58,7 +59,7 @@ export class GameController {
     return from(this.gameService.updateGame(id, updateGameDto)).pipe(
       // The service updates the game and evicts the updater's permission graph.
       tap((game) => this.logger.log(`Game with ID ${game.id} updated by user ${game.updatedById}`)),
-      map((game) => ({ game, message: 'Game updated successfully' })),
+      map((game) => ({ game, message: t('success.game.updated') })),
     );
   }
 
@@ -69,7 +70,7 @@ export class GameController {
   deleteGame(@Param('id') id: string) {
     return from(this.gameService.deleteGame(id)).pipe(
       tap(() => this.logger.log(`Game with ID ${id} deleted`)),
-      map((game) => ({ message: 'Game deleted successfully', game })),
+      map((game) => ({ message: t('success.game.deleted'), game })),
     );
   }
 }

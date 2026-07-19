@@ -34,7 +34,7 @@ export class WellKnownController {
 
   @Options('bge-identity')
   @UseInterceptors(SnakeCaseInterceptor)
-  @HttpCode(204)
+  @HttpCode(Http.NoContent)
   @Header('Allow', 'GET, HEAD, OPTIONS')
   @Header('Cache-Control', 'public, max-age=300')
   @ApiNoContentResponse({ description: 'Supported methods for /.well-known/bge-identity' })

@@ -1,0 +1,37 @@
+{
+  "game": {
+    "created": "Game created successfully",
+    "updated": "Game updated successfully",
+    "deleted": "Game deleted successfully"
+  },
+  "event": {
+    "created": "Event created successfully",
+    "updated": "Event with ID {id} updated successfully",
+    "deleted": "Event with ID {id} deleted successfully"
+  },
+  "occurrence": {
+    "added": "Occurrence added",
+    "updated": "Occurrence updated",
+    "removed": "Occurrence removed",
+    "confirmed": "Occurrence confirmed",
+    "declined": "Occurrence declined",
+    "cancelled": "Occurrence cancelled",
+    "availability_recorded": "Availability recorded"
+  },
+  "attendee": {
+    "added": "Attendee added successfully",
+    "removed": "Attendee removed successfully",
+    "status_updated": "Attendee status updated",
+    "game_added": "Game added to list",
+    "game_removed": "Game removed from list"
+  },
+  "nomination": {
+    "created": "Nomination created",
+    "withdrawn": "Nomination withdrawn",
+    "vote_recorded": "Vote recorded",
+    "resolved": "Nomination resolved: {status}",
+    "approved": "Nomination approved",
+    "rejected": "Nomination rejected",
+    "game_added": "Game added to event"
+  }
+}

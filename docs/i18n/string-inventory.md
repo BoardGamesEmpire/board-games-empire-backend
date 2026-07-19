@@ -81,11 +81,19 @@ Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstr
 
 Ordered roughly by value/size. Each is an independent unit of work (good for parallel owners).
 
-- [ ] `libs/api/event` — 32 exceptions + 21 success messages (biggest; nomination/occurrence/attendee subtrees)
+- [x] `libs/api/event` — **DONE**. Actual surface was **~50 exceptions + 22 success** (not 32/21):
+  the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
+  in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
+  must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid undercounting. Copy
+  normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
+  `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
+  (en-only, no test asserts it — accepted).
 - [ ] `libs/api/media` — 35 exceptions + StorageExceptionFilter/controller generic-string mapping sites
 - [ ] `libs/api/friendship` — 14 exceptions + 3 success
 - [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
-- [ ] `libs/api/game` — 8 exceptions + 3 success
+- [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
+  success-response interceptor, catalog conventions, and #145 guardrail (see
+  [translated-responses.md](./translated-responses.md))
 - [ ] `libs/api/webhook-subscription` — 7 literal exceptions + 5 success (handle 1 dynamic msg, §6)
 - [ ] `libs/api/game-collection` — 7 exceptions + 3 success
 - [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-throughs, §6)

@@ -1,5 +1,51 @@
 {
   "language": {
     "not_found": "Language with id {id} not found"
+  },
+  "game": {
+    "not_found": "Game with ID {id} not found",
+    "cannot_delete_in_collection": "Cannot delete game that is part of a collection"
+  },
+  "event": {
+    "not_found": "Event with ID {id} not found",
+    "not_attendee": "You are not an attendee of this event.",
+    "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence."
+  },
+  "occurrence": {
+    "not_found": "Occurrence {occurrenceId} not found for event {eventId}",
+    "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence. Change the event scheduling mode to Poll or MultiDay first.",
+    "invalid_transition": "Cannot transition from \"{from}\" to \"{to}\". Allowed source statuses: {allowed}.",
+    "availability_proposed_only": "Availability votes are only accepted for Proposed occurrences. Current status: \"{status}\"."
+  },
+  "attendee": {
+    "not_found": "Attendee {attendeeId} not found for event {eventId}",
+    "not_found_for_user": "Attendee for user {userId} not found for event {eventId}",
+    "game_collection_entry_not_found": "Game collection entry {collectionId} not found.",
+    "user_or_guest_required": "Either userId or guestName must be provided.",
+    "already_attendee": "User is already an attendee of this event.",
+    "forbidden_remove": "You don't have permission to remove this attendee.",
+    "forbidden_update": "You don't have permission to update this attendee.",
+    "game_already_in_list": "This game is already in the attendee's list.",
+    "game_list_entry_not_found": "Game list entry {gameListId} not found for attendee {attendeeId}.",
+    "forbidden_remove_game": "You don't have permission to remove this game.",
+    "game_from_other_collection": "Cannot add a game from another user's collection.",
+    "game_removed_from_collection": "Cannot add a game that has been removed from the collection."
+  },
+  "nomination": {
+    "not_found": "Nomination {nominationId} not found for event {eventId}",
+    "host_only": "Only hosts can add games in HostOnly mode.",
+    "supplied_from_not_found": "Game list entry {suppliedFromId} not found for this event.",
+    "supplied_from_mismatch": "The suppliedFromId does not correspond to the nominated platformGameId.",
+    "only_nominator_withdraw": "Only the nominator can withdraw a nomination.",
+    "cannot_withdraw_status": "Cannot withdraw a nomination with status \"{status}\".",
+    "cannot_vote_status": "Cannot vote on a nomination with status \"{status}\".",
+    "cannot_resolve_status": "Cannot resolve a nomination with status \"{status}\".",
+    "cannot_decide_status": "Cannot approve/reject a nomination with status \"{status}\". Only nominations in AwaitingApproval status can be decided by the host.",
+    "forbidden_withdraw": "You don't have permission to withdraw this nomination.",
+    "vote_failed": "Failed to cast vote.",
+    "forbidden_resolve": "You don't have permission to resolve this nomination.",
+    "invalid_resolution": "Must be \"Approved\" or \"Rejected\".",
+    "forbidden_decide": "You don't have permission to decide on this nomination.",
+    "direct_add_not_permitted": "Direct game addition is not permitted in \"{mode}\" mode."
   }
 }

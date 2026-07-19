@@ -1,4 +1,5 @@
 import { AvailabilityResponse, EventAvailabilityVote, EventOccurrence, OccurrenceStatus } from '@bge/database';
+import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventOccurrence } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -88,7 +89,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.addOccurrence).toHaveBeenCalledWith('event-1', dto);
       expect(result).toEqual({
-        message: 'Occurrence added',
+        message: t('success.occurrence.added'),
         occurrence: created,
       });
     });
@@ -103,7 +104,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.updateOccurrence).toHaveBeenCalledWith('event-1', 'occ-1', { label: 'Updated' });
       expect(result).toEqual({
-        message: 'Occurrence updated',
+        message: t('success.occurrence.updated'),
         occurrence: updated,
       });
     });
@@ -118,7 +119,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.removeOccurrence).toHaveBeenCalledWith('event-1', 'occ-del');
       expect(result).toEqual({
-        message: 'Occurrence removed',
+        message: t('success.occurrence.removed'),
         occurrence: removed,
       });
     });
@@ -133,7 +134,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.confirmOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
       expect(result).toEqual({
-        message: 'Occurrence confirmed',
+        message: t('success.occurrence.confirmed'),
         occurrence: confirmed,
       });
     });
@@ -148,7 +149,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.declineOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
       expect(result).toEqual({
-        message: 'Occurrence declined',
+        message: t('success.occurrence.declined'),
         occurrence: declined,
       });
     });
@@ -163,7 +164,7 @@ describe('EventOccurrenceController', () => {
 
       expect(service.cancelOccurrence).toHaveBeenCalledWith('event-1', 'occ-1');
       expect(result).toEqual({
-        message: 'Occurrence cancelled',
+        message: t('success.occurrence.cancelled'),
         occurrence: cancelled,
       });
     });
@@ -187,7 +188,7 @@ describe('EventOccurrenceController', () => {
         response: AvailabilityResponse.Available,
       });
       expect(result).toEqual({
-        message: 'Availability recorded',
+        message: t('success.occurrence.availability_recorded'),
         vote,
       });
     });

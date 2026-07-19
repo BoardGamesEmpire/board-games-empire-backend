@@ -1,4 +1,5 @@
 import type { DatabaseService } from '@bge/database';
+import { t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 
@@ -13,7 +14,7 @@ export async function assertEventExists(db: DatabaseService, eventId: string): P
   });
 
   if (count === 0) {
-    throw new NotFoundException(`Event ${eventId} not found`);
+    throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
   }
 }
 
@@ -35,7 +36,7 @@ export async function resolveActingAttendeeId(
   });
 
   if (!attendee) {
-    throw new ForbiddenException('You are not an attendee of this event.');
+    throw new ForbiddenException(t('errors.event.not_attendee'));
   }
 
   return attendee.id;

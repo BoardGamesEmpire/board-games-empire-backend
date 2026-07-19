@@ -14,6 +14,7 @@ import {
   VoteQuorumType,
   VoteThresholdType,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -67,7 +68,7 @@ export class EventGameNominationService {
       include: NOMINATION_INCLUDE,
     });
 
-    assert(nomination, new NotFoundException(`Nomination ${nominationId} not found for event ${eventId}`));
+    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
     return nomination;
   }
 
@@ -77,7 +78,7 @@ export class EventGameNominationService {
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
     if (policy.gameAdditionMode === GameAdditionMode.HostOnly) {
-      throw new ForbiddenException('Only hosts can add games in HostOnly mode.');
+      throw new ForbiddenException(t('errors.nomination.host_only'));
     }
 
     const supplyEntry = await this.db.eventAttendeeGameList.findUnique({
@@ -90,11 +91,11 @@ export class EventGameNominationService {
     });
 
     if (supplyEntry?.attendee?.eventId !== eventId) {
-      throw new NotFoundException(`Game list entry ${dto.suppliedFromId} not found for this event.`);
+      throw new NotFoundException(t('errors.nomination.supplied_from_not_found', { suppliedFromId: dto.suppliedFromId }));
     }
 
     if (supplyEntry.collection.platformGameId !== dto.platformGameId) {
-      throw new BadRequestException('The suppliedFromId does not correspond to the nominated platformGameId.');
+      throw new BadRequestException(t('errors.nomination.supplied_from_mismatch'));
     }
 
     let initialStatus: NominationStatus;
@@ -174,16 +175,16 @@ export class EventGameNominationService {
       select: { id: true, nominatedById: true, status: true },
     });
 
-    assert(nomination, new NotFoundException(`Nomination ${nominationId} not found for event ${eventId}`));
+    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
     assert(
       nomination.nominatedById === attendeeId,
-      new ForbiddenException('Only the nominator can withdraw a nomination.'),
+      new ForbiddenException(t('errors.nomination.only_nominator_withdraw')),
     );
 
     const withdrawable: NominationStatus[] = [NominationStatus.Open, NominationStatus.AwaitingApproval];
     assert(
       withdrawable.includes(nomination.status),
-      new BadRequestException(`Cannot withdraw a nomination with status "${nomination.status}".`),
+      new BadRequestException(t('errors.nomination.cannot_withdraw_status', { status: nomination.status })),
     );
 
     try {
@@ -209,7 +210,7 @@ export class EventGameNominationService {
     } catch (error) {
       this.logger.error(`Error withdrawing nomination ${nominationId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to withdraw this nomination.");
+        throw new ForbiddenException(t('errors.nomination.forbidden_withdraw'));
       }
       throw error;
     }
@@ -223,10 +224,10 @@ export class EventGameNominationService {
       select: { id: true, status: true },
     });
 
-    assert(nomination, new NotFoundException(`Nomination ${nominationId} not found for event ${eventId}`));
+    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
     assert(
       nomination.status === NominationStatus.Open,
-      new BadRequestException(`Cannot vote on a nomination with status "${nomination.status}".`),
+      new BadRequestException(t('errors.nomination.cannot_vote_status', { status: nomination.status })),
     );
 
     try {
@@ -297,7 +298,7 @@ export class EventGameNominationService {
         error,
       });
 
-      throw new BadRequestException('Failed to cast vote.');
+      throw new BadRequestException(t('errors.nomination.vote_failed'));
     }
   }
 
@@ -317,10 +318,10 @@ export class EventGameNominationService {
       },
     });
 
-    assert(nomination, new NotFoundException(`Nomination ${nominationId} not found for event ${eventId}`));
+    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
     assert(
       nomination.status === NominationStatus.Open,
-      new BadRequestException(`Cannot resolve a nomination with status "${nomination.status}".`),
+      new BadRequestException(t('errors.nomination.cannot_resolve_status', { status: nomination.status })),
     );
 
     const policy = await this.getEffectivePolicy(eventId, nomination.occurrenceId ?? undefined);
@@ -359,7 +360,7 @@ export class EventGameNominationService {
     } catch (error) {
       this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to resolve this nomination.");
+        throw new ForbiddenException(t('errors.nomination.forbidden_resolve'));
       }
       throw error;
     }
@@ -380,7 +381,7 @@ export class EventGameNominationService {
   ): Promise<EventGameNomination> {
     const initiatedAt = new Date();
     if (decision !== NominationStatus.Approved && decision !== NominationStatus.Rejected) {
-      throw new BadRequestException('Must be "Approved" or "Rejected".');
+      throw new BadRequestException(t('errors.nomination.invalid_resolution'));
     }
 
     const nomination = await this.db.eventGameNomination.findUnique({
@@ -393,13 +394,10 @@ export class EventGameNominationService {
       },
     });
 
-    assert(nomination, new NotFoundException(`Nomination ${nominationId} not found for event ${eventId}`));
+    assert(nomination, new NotFoundException(t('errors.nomination.not_found', { nominationId, eventId })));
     assert(
       nomination.status === NominationStatus.AwaitingApproval,
-      new BadRequestException(
-        `Cannot approve/reject a nomination with status "${nomination.status}". ` +
-          'Only nominations in AwaitingApproval status can be decided by the host.',
-      ),
+      new BadRequestException(t('errors.nomination.cannot_decide_status', { status: nomination.status })),
     );
 
     try {
@@ -432,7 +430,7 @@ export class EventGameNominationService {
     } catch (error) {
       this.logger.error(`Error applying host decision ${decision} for nomination ${nominationId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to decide on this nomination.");
+        throw new ForbiddenException(t('errors.nomination.forbidden_decide'));
       }
       throw error;
     }
@@ -444,7 +442,7 @@ export class EventGameNominationService {
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
     if (policy.gameAdditionMode !== GameAdditionMode.Direct && policy.gameAdditionMode !== GameAdditionMode.HostOnly) {
-      throw new ForbiddenException(`Direct game addition is not permitted in "${policy.gameAdditionMode}" mode.`);
+      throw new ForbiddenException(t('errors.nomination.direct_add_not_permitted', { mode: policy.gameAdditionMode }));
     }
 
     const eventGame = await this.db.eventGame.create({
