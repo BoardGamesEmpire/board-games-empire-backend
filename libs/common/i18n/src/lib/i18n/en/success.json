@@ -36,5 +36,13 @@
   },
   "media_object": {
     "deleted": "Media object {id} deleted successfully"
+  },
+  "friendship": {
+    "created": "Friend request sent successfully",
+    "accepted": "Friendship accepted",
+    "declined": "Friendship declined",
+    "withdrawn": "Friendship withdrawn",
+    "blocked": "Friendship blocked",
+    "removed": "Friendship with ID {id} removed successfully"
   }
 }

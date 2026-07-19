@@ -1,4 +1,5 @@
 import { FriendshipStatus } from '@bge/database';
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
 
@@ -22,6 +23,6 @@ export class RespondFriendRequestDto {
     enum: RespondableFriendshipStatus,
     description: 'Accept/Decline (addressee), Withdraw (requester), or Block (either participant)',
   })
-  @IsEnum(RespondableFriendshipStatus)
+  @IsEnum(RespondableFriendshipStatus, { message: i18nValidationMessage('validation.isEnum') })
   status!: RespondableFriendshipStatus;
 }

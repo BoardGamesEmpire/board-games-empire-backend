@@ -81,5 +81,23 @@
   "upload": {
     "too_large": "File exceeds the {maxBytes}-byte limit",
     "invalid": "Invalid file upload"
+  },
+  "friendship": {
+    "not_found": "Friendship with ID {id} not found",
+    "self_request": "You cannot send a friend request to yourself",
+    "requests_disabled": "This user is not accepting friend requests",
+    "already_friends": "You are already friends with this user",
+    "already_pending": "A friend request is already pending between you and this user",
+    "cannot_request": "Unable to send a friend request to this user",
+    "already_exists": "A friend request already exists between you and this user",
+    "only_recipient_responds": "Only the recipient can respond to a friend request",
+    "not_pending": "This friend request is no longer pending",
+    "only_sender_withdraws": "Only the sender can withdraw a friend request",
+    "already_blocked": "This relationship is already blocked",
+    "cannot_remove_blocker": "You cannot remove a relationship that has blocked you",
+    "forbidden_modify": "You don't have permission to modify this friendship"
+  },
+  "user": {
+    "not_found": "User with ID {id} not found"
   }
 }

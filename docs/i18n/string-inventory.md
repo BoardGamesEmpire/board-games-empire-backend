@@ -58,7 +58,7 @@ stay English).
 | libs/api/game | 8 | 3 | |
 | libs/api/webhook-subscription | 8 | 5 | 1 dynamic (caller-supplied) message |
 | libs/api/game-collection | 7 | 3 | |
-| libs/api/game-gateway | 6 | 0 | 2 dynamic `error.message` pass-throughs (see §6) |
+| libs/api/game-gateway | 6 | 0 | 2 dynamic `error.message` pass-through (see §6) |
 | libs/common/permissions | 5 | — | ForbiddenException only; custom error out of scope |
 | libs/api/household | 4 | 3 | |
 | libs/api/safe-http | 4 | — | + 2 custom-validator messages (admin) |
@@ -84,7 +84,7 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [x] `libs/api/event` — **DONE**. Actual surface was **~50 exceptions + 22 success** (not 32/21):
   the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
   in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
-  must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid undercounting. Copy
+  must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
   normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
   `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
   (en-only, no test asserts it — accepted).
@@ -99,14 +99,20 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
   `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
   `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
-- [ ] `libs/api/friendship` — 14 exceptions + 3 success
+- [x] `libs/api/friendship` — **DONE**. Actual surface was **15 exceptions + 3 success** (inventory said
+  14): the sweep missed the `return new ForbiddenException(...)` in `mapMissingToForbidden` — a non-`throw`
+  construction, exactly the under count §3 warns about. No `assert()` throws in this lib. Added
+  `errors.user.not_found` (new shared key for the addressee lookup; other user-referencing libs can adopt
+  it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
+  `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
+  Logger line (`mapMissingToForbidden`) left English.
 - [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
 - [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
   success-response interceptor, catalog conventions, and #145 guardrail (see
   [translated-responses.md](./translated-responses.md))
 - [ ] `libs/api/webhook-subscription` — 7 literal exceptions + 5 success (handle 1 dynamic msg, §6)
 - [ ] `libs/api/game-collection` — 7 exceptions + 3 success
-- [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-throughs, §6)
+- [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-through, §6)
 - [ ] `libs/common/permissions` — 5 ForbiddenException
 - [ ] `libs/api/household` — 4 exceptions + 3 success
 - [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages

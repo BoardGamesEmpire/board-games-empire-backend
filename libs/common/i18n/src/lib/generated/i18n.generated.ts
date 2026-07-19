@@ -98,6 +98,24 @@ export type I18nTranslations = {
             "too_large": string;
             "invalid": string;
         };
+        "friendship": {
+            "not_found": string;
+            "self_request": string;
+            "requests_disabled": string;
+            "already_friends": string;
+            "already_pending": string;
+            "cannot_request": string;
+            "already_exists": string;
+            "only_recipient_responds": string;
+            "not_pending": string;
+            "only_sender_withdraws": string;
+            "already_blocked": string;
+            "cannot_remove_blocker": string;
+            "forbidden_modify": string;
+        };
+        "user": {
+            "not_found": string;
+        };
     };
     "success": {
         "game": {
@@ -137,6 +155,14 @@ export type I18nTranslations = {
         };
         "media_object": {
             "deleted": string;
+        };
+        "friendship": {
+            "created": string;
+            "accepted": string;
+            "declined": string;
+            "withdrawn": string;
+            "blocked": string;
+            "removed": string;
         };
     };
     "validation": {
