@@ -44,5 +44,15 @@
     "withdrawn": "Friendship withdrawn",
     "blocked": "Friendship blocked",
     "removed": "Friendship with ID {id} removed successfully"
+  },
+  "quota": {
+    "set": "Quota set"
+  },
+  "webhook_subscription": {
+    "created": "Webhook subscription created",
+    "updated": "Webhook subscription {id} updated",
+    "disabled": "Webhook subscription {id} disabled",
+    "reactivated": "Webhook subscription {id} re-activated",
+    "deleted": "Webhook subscription {id} deleted"
   }
 }

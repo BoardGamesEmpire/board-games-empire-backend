@@ -1,4 +1,5 @@
 import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
+import { I18nMessage, t } from '@bge/i18n';
 import { AbilityService, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
@@ -52,7 +53,7 @@ export class WebhookSubscriptionService {
    */
   async create(dto: CreateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     const userId = this.abilityService.getActingUserId();
-    const abilities = this.requireAbilities("You don't have permission to create webhook subscriptions");
+    const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_create'));
 
     this.assertTypesMatchResource(dto.eventTypes, dto.resourceType);
     this.assertCanReadSubjects(dto.eventTypes, abilities);
@@ -106,7 +107,7 @@ export class WebhookSubscriptionService {
     });
 
     if (!subscription) {
-      throw new NotFoundException(`Webhook subscription ${id} not found`);
+      throw new NotFoundException(t('errors.webhook_subscription.not_found', { id }));
     }
 
     return this.redact(subscription);
@@ -121,13 +122,13 @@ export class WebhookSubscriptionService {
    */
   async update(id: string, dto: UpdateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     if (Object.keys(dto).length === 0) {
-      throw new BadRequestException('At least one field must be provided');
+      throw new BadRequestException(t('common.at_least_one_field'));
     }
 
     const existing = await this.getById(id);
 
     if (dto.eventTypes) {
-      const abilities = this.requireAbilities("You don't have permission to change subscribed events");
+      const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_change_events'));
 
       this.assertTypesMatchResource(dto.eventTypes, existing.resourceType);
       this.assertCanReadSubjects(dto.eventTypes, abilities);
@@ -173,7 +174,7 @@ export class WebhookSubscriptionService {
    * creator can no longer reach.)
    */
   async reactivate(id: string): Promise<WebhookSubscriptionWithEventTypes> {
-    const abilities = this.requireAbilities("You don't have permission to reactivate this subscription");
+    const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
 
     const existing = await this.getById(id);
 
@@ -217,7 +218,7 @@ export class WebhookSubscriptionService {
    * vacuously true, so without this guard a principal with no abilities would
    * *pass* the subject checks.
    */
-  private requireAbilities(message: string): AppAbility[] {
+  private requireAbilities(message: I18nMessage): AppAbility[] {
     const abilities = this.abilityService.getCurrentAbilities();
     if (abilities.length === 0) {
       throw new ForbiddenException(message);
@@ -229,11 +230,13 @@ export class WebhookSubscriptionService {
     for (const type of types) {
       const descriptor = this.registry.get(type);
       if (!descriptor) {
-        throw new BadRequestException(`Unknown webhook event type "${type}"`);
+        throw new BadRequestException(t('errors.webhook_subscription.unknown_event_type', { type }));
       }
 
       if (descriptor.subject !== resourceType) {
-        throw new BadRequestException(`Event type "${type}" does not belong to resource "${resourceType}"`);
+        throw new BadRequestException(
+          t('errors.webhook_subscription.event_type_resource_mismatch', { type, resourceType }),
+        );
       }
     }
   }
@@ -245,7 +248,10 @@ export class WebhookSubscriptionService {
       const permitted = abilities.every((ability) => ability.can(descriptor.requiredAction, descriptor.subject));
       if (!permitted) {
         throw new ForbiddenException(
-          `You don't have ${descriptor.requiredAction} access to ${descriptor.subject} events`,
+          t('errors.webhook_subscription.forbidden_subject_access', {
+            action: descriptor.requiredAction,
+            subject: descriptor.subject,
+          }),
         );
       }
     }
@@ -258,7 +264,7 @@ export class WebhookSubscriptionService {
       });
 
       if (count === 0) {
-        throw new ForbiddenException(`You don't have access to household ${householdId}`);
+        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_household', { householdId }));
       }
     }
   }
@@ -271,7 +277,9 @@ export class WebhookSubscriptionService {
     for (const ability of abilities) {
       const visible = await this.visibility.isVisibleTo(resourceType, resourceId, ability);
       if (!visible) {
-        throw new ForbiddenException(`You don't have access to ${resourceType} ${resourceId}`);
+        throw new ForbiddenException(
+          t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }),
+        );
       }
     }
   }

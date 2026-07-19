@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { CreateWebhookSubscriptionDto, UpdateWebhookSubscriptionDto } from '@bge/webhooks';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
@@ -26,7 +27,7 @@ export class WebhookSubscriptionController {
   create(@Body() dto: CreateWebhookSubscriptionDto) {
     return from(this.subscriptions.create(dto)).pipe(
       tap((sub) => this.logger.log(`Webhook subscription ${sub.id} created`)),
-      map((subscription) => ({ message: 'Webhook subscription created', subscription })),
+      map((subscription) => ({ message: t('success.webhook_subscription.created'), subscription })),
     );
   }
 
@@ -55,7 +56,7 @@ export class WebhookSubscriptionController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateWebhookSubscriptionDto) {
     return from(this.subscriptions.update(id, dto)).pipe(
-      map((subscription) => ({ message: `Webhook subscription ${id} updated`, subscription })),
+      map((subscription) => ({ message: t('success.webhook_subscription.updated', { id }), subscription })),
     );
   }
 
@@ -66,7 +67,7 @@ export class WebhookSubscriptionController {
   @Post(':id/disable')
   disable(@Param('id') id: string) {
     return from(this.subscriptions.disable(id)).pipe(
-      map((subscription) => ({ message: `Webhook subscription ${id} disabled`, subscription })),
+      map((subscription) => ({ message: t('success.webhook_subscription.disabled', { id }), subscription })),
     );
   }
 
@@ -77,7 +78,7 @@ export class WebhookSubscriptionController {
   @Post(':id/reactivate')
   reactivate(@Param('id') id: string) {
     return from(this.subscriptions.reactivate(id)).pipe(
-      map((subscription) => ({ message: `Webhook subscription ${id} re-activated`, subscription })),
+      map((subscription) => ({ message: t('success.webhook_subscription.reactivated', { id }), subscription })),
     );
   }
 
@@ -89,7 +90,7 @@ export class WebhookSubscriptionController {
   remove(@Param('id') id: string) {
     return from(this.subscriptions.remove(id)).pipe(
       tap(() => this.logger.log(`Webhook subscription ${id} deleted`)),
-      map(() => ({ message: `Webhook subscription ${id} deleted` })),
+      map(() => ({ message: t('success.webhook_subscription.deleted', { id }) })),
     );
   }
 }

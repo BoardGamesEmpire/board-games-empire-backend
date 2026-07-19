@@ -116,6 +116,30 @@ export type I18nTranslations = {
         "user": {
             "not_found": string;
         };
+        "quota": {
+            "exceeded": string;
+            "check_amount_negative": string;
+            "consume_amount_negative": string;
+            "unknown_resource": string;
+            "scope_not_applicable": string;
+            "forbidden_manage": string;
+            "limit_required": string;
+            "server_no_target": string;
+            "household_not_found": string;
+            "household_member_not_found": string;
+            "limit_invalid": string;
+        };
+        "webhook_subscription": {
+            "not_found": string;
+            "forbidden_create": string;
+            "forbidden_change_events": string;
+            "forbidden_reactivate": string;
+            "unknown_event_type": string;
+            "event_type_resource_mismatch": string;
+            "forbidden_subject_access": string;
+            "forbidden_household": string;
+            "forbidden_instance": string;
+        };
     };
     "success": {
         "game": {
@@ -164,6 +188,16 @@ export type I18nTranslations = {
             "blocked": string;
             "removed": string;
         };
+        "quota": {
+            "set": string;
+        };
+        "webhook_subscription": {
+            "created": string;
+            "updated": string;
+            "disabled": string;
+            "reactivated": string;
+            "deleted": string;
+        };
     };
     "validation": {
         "isString": string;
@@ -182,6 +216,7 @@ export type I18nTranslations = {
         "minLength": string;
         "maxLength": string;
         "isNumberString": string;
+        "nonNegativeIntegerString": string;
     };
 };
 /* prettier-ignore */
