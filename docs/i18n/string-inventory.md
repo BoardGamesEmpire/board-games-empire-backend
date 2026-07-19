@@ -43,35 +43,35 @@ stay English).
    into shared `common.*` keys (see §4).
 5. **All custom domain errors are out of scope.** Where storage/signature errors reach HTTP they are
    already remapped to **generic English strings at the `libs/api/media` filter/controller sites**
-   (those mapping-site strings _are_ in scope and counted under `media`).
+   (those mapping-site strings *are* in scope and counted under `media`).
 
 ---
 
 ## 2. Summary counts (in-scope)
 
-| Lib                                  | Exception msgs | Success `message:` | Notes                                                                      |
-| ------------------------------------ | -------------: | -----------------: | -------------------------------------------------------------------------- |
-| libs/api/event                       |             32 |                 21 | largest surface                                                            |
-| libs/api/media                       |             35 |                  1 | + generic strings from StorageExceptionFilter mapping sites                |
-| libs/api/friendship                  |             14 |                  3 |                                                                            |
-| libs/common/quota                    |             12 |                  — | incl. `QuotaExceededException` (msg centralized in ctor) + 1 validator msg |
-| libs/api/game                        |              8 |                  3 |                                                                            |
-| libs/api/webhook-subscription        |              8 |                  5 | 1 dynamic (caller-supplied) message                                        |
-| libs/api/game-collection             |              7 |                  3 |                                                                            |
-| libs/api/game-gateway                |              6 |                  0 | 2 dynamic `error.message` pass-through (see §6)                            |
-| libs/common/permissions              |              5 |                  — | ForbiddenException only; custom error out of scope                         |
-| libs/api/household                   |              4 |                  3 |                                                                            |
-| libs/api/safe-http                   |              4 |                  — | + 2 custom-validator messages (admin)                                      |
-| libs/api/game-import                 |              3 |                  5 | worker context + `SAFE_MESSAGE` client-safe copy map                       |
-| libs/api/system-settings             |              2 |                  — | operator-facing "run the seed" invariants                                  |
-| libs/api/quota                       |              1 |                  1 |                                                                            |
-| libs/api/feedback                    |              1 |                  1 | + 1 custom-validator message                                               |
-| libs/api/language                    |              1 |                  — |                                                                            |
-| libs/api/well-known                  |              1 |                  — |                                                                            |
-| libs/api/gateway-registry            |              1 |                  — | NotImplementedException                                                    |
-| libs/common/actor-context            |              1 |                  — | `audit-context.service.ts:53` ForbiddenException                           |
-| **libs/api/actor-context-transport** |         **19** |                  — | **LOW PRIORITY** — 2 HTTP, 17 internal gRPC                                |
-| **Totals**                           |       **~165** |            **~42** |                                                                            |
+| Lib | Exception msgs | Success `message:` | Notes |
+|---|---:|---:|---|
+| libs/api/event | 32 | 21 | largest surface |
+| libs/api/media | 35 | 1 | + generic strings from StorageExceptionFilter mapping sites |
+| libs/api/friendship | 14 | 3 | |
+| libs/common/quota | 12 | — | incl. `QuotaExceededException` (msg centralized in ctor) + 1 validator msg |
+| libs/api/game | 8 | 3 | |
+| libs/api/webhook-subscription | 8 | 5 | 1 dynamic (caller-supplied) message |
+| libs/api/game-collection | 7 | 3 | |
+| libs/api/game-gateway | 6 | 0 | 2 dynamic `error.message` pass-through (see §6) |
+| libs/common/permissions | 5 | — | ForbiddenException only; custom error out of scope |
+| libs/api/household | 4 | 3 | |
+| libs/api/safe-http | 4 | — | + 2 custom-validator messages (admin) |
+| libs/api/game-import | 3 | 5 | worker context + `SAFE_MESSAGE` client-safe copy map |
+| libs/api/system-settings | 2 | — | operator-facing "run the seed" invariants |
+| libs/api/quota | 1 | 1 | |
+| libs/api/feedback | 1 | 1 | + 1 custom-validator message |
+| libs/api/language | 1 | — | |
+| libs/api/well-known | 1 | — | |
+| libs/api/gateway-registry | 1 | — | NotImplementedException |
+| libs/common/actor-context | 1 | — | `audit-context.service.ts:53` ForbiddenException |
+| **libs/api/actor-context-transport** | **19** | — | **LOW PRIORITY** — 2 HTTP, 17 internal gRPC |
+| **Totals** | **~165** | **~42** | |
 
 Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstraint` messages.
 
@@ -82,34 +82,34 @@ Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstr
 Ordered roughly by value/size. Each is an independent unit of work (good for parallel owners).
 
 - [x] `libs/api/event` — **DONE**. Actual surface was **~50 exceptions + 22 success** (not 32/21):
-      the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
-      in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
-      must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
-      normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
-      `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
-      (en-only, no test asserts it — accepted).
+  the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
+  in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
+  must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
+  normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
+  `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
+  (en-only, no test asserts it — accepted).
 - [x] `libs/api/media` — **DONE**. Real surface was **41 exceptions + 1 success** (inventory said
-      35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
-      (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
-      resolve `t()` markers via the shared `translateException` helper (`@bge/i18n`).
-      `MulterExceptionFilter` was narrowed from a bare `@Catch()` to `@Catch(MulterError)` (adds
-      `@types/multer`) — the old catch-all had been silently shadowing the **global** exception _and_
-      validation filters for the whole media-object controller (a latent #142 side-effect; validation
-      errors there now format correctly again). Fixed `storage-exception.filter.ts` passing the raw
-      `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
-      `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
-      `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
+  35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
+  (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
+  resolve `t()` markers via the shared `translateException` helper (`@bge/i18n`).
+  `MulterExceptionFilter` was narrowed from a bare `@Catch()` to `@Catch(MulterError)` (adds
+  `@types/multer`) — the old catch-all had been silently shadowing the **global** exception *and*
+  validation filters for the whole media-object controller (a latent #142 side-effect; validation
+  errors there now format correctly again). Fixed `storage-exception.filter.ts` passing the raw
+  `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
+  `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
+  `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
 - [x] `libs/api/friendship` — **DONE**. Actual surface was **15 exceptions + 3 success** (inventory said
-      14): the sweep missed the `return new ForbiddenException(...)` in `mapMissingToForbidden` — a non-`throw`
-      construction, exactly the under count §3 warns about. No `assert()` throws in this lib. Added
-      `errors.user.not_found` (new shared key for the addressee lookup; other user-referencing libs can adopt
-      it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
-      `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
-      Logger line (`mapMissingToForbidden`) left English.
+  14): the sweep missed the `return new ForbiddenException(...)` in `mapMissingToForbidden` — a non-`throw`
+  construction, exactly the under count §3 warns about. No `assert()` throws in this lib. Added
+  `errors.user.not_found` (new shared key for the addressee lookup; other user-referencing libs can adopt
+  it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
+  `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
+  Logger line (`mapMissingToForbidden`) left English.
 - [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
 - [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
-      success-response interceptor, catalog conventions, and #145 guardrail (see
-      [translated-responses.md](./translated-responses.md))
+  success-response interceptor, catalog conventions, and #145 guardrail (see
+  [translated-responses.md](./translated-responses.md))
 - [ ] `libs/api/webhook-subscription` — 7 literal exceptions + 5 success (handle 1 dynamic msg, §6)
 - [ ] `libs/api/game-collection` — 7 exceptions + 3 success
 - [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-through, §6)
@@ -149,7 +149,7 @@ mapping site (which is in scope and counted under `media`). Do **not** translate
 - **Storage** (`libs/storage/*`): `StorageMisconfiguredError`, `DriverNotRegisteredError`,
   `InvalidObjectKeyError`, `ObjectNotFoundError`, `SignatureInvalidError`, `SignatureExpiredError`,
   `RangeError`, `ProbeTimeoutError`. StorageExceptionFilter → generic `503 Storage temporarily
-unavailable`; signature/not-found remapped inside `media-object.service.ts` to
+  unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   `Invalid signature` / `Signed URL has expired` / `Media not found` (those strings **are** in scope).
 - **secure-http** (`libs/common/secure-http`): `DnsResolutionError`, `SsrfRejectionError`,
   `RedirectToDisallowedTargetError`, `RedirectLimitExceededError`, `RequestTimeoutError`,
@@ -189,12 +189,12 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 
 ## 7. Validation messages (full list)
 
-| file:line                                                       | source                                            | message                                                                                                                      |
-| --------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| libs/common/quota/.../dto/set-quota.dto.ts:18                   | inline `@IsNumberString` message                  | `limit must be a non-negative integer string`                                                                                |
-| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()`         | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes`                                                   |
-| libs/api/safe-http/.../dto/validators.ts:33                     | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")`                                    |
-| libs/api/safe-http/.../dto/validators.ts:71                     | `IsCidrConstraint.defaultMessage()`               | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
+| file:line | source | message |
+|---|---|---|
+| libs/common/quota/.../dto/set-quota.dto.ts:18 | inline `@IsNumberString` message | `limit must be a non-negative integer string` |
+| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()` | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes` |
+| libs/api/safe-http/.../dto/validators.ts:33 | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")` |
+| libs/api/safe-http/.../dto/validators.ts:71 | `IsCidrConstraint.defaultMessage()` | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
 
 Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
 (#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
@@ -203,6 +203,6 @@ tracked as Phase 3 work (#144).
 
 ---
 
-_Full per-site message tables (every throw with exact text + interpolation args) were captured during
+*Full per-site message tables (every throw with exact text + interpolation args) were captured during
 the sweep and can be regenerated per lib on demand; the checklist in §3 plus the shared-key plan in §4
-is what Phase 3 owners work from._
+is what Phase 3 owners work from.*
