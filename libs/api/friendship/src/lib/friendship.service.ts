@@ -7,6 +7,7 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import {
   BadRequestException,
@@ -60,7 +61,7 @@ export class FriendshipService {
     const requesterId = this.abilityService.getActingUserId();
 
     if (requesterId === addresseeId) {
-      throw new BadRequestException('You cannot send a friend request to yourself');
+      throw new BadRequestException(t('errors.friendship.self_request'));
     }
 
     const addressee = await this.db.user.findUnique({
@@ -69,23 +70,23 @@ export class FriendshipService {
     });
 
     if (!addressee) {
-      throw new NotFoundException(`User with id ${addresseeId} not found`);
+      throw new NotFoundException(t('errors.user.not_found', { id: addresseeId }));
     }
 
     // Absent preferences row → treat as the schema default (true).
     if (addressee.preferences?.allowFriendRequests === false) {
-      throw new ForbiddenException('This user is not accepting friend requests');
+      throw new ForbiddenException(t('errors.friendship.requests_disabled'));
     }
 
     const existing = await this.findBetween(requesterId, addresseeId);
 
     switch (existing?.status) {
       case FriendshipStatus.Accepted:
-        throw new BadRequestException('You are already friends with this user');
+        throw new BadRequestException(t('errors.friendship.already_friends'));
       case FriendshipStatus.Pending:
-        throw new BadRequestException('A friend request is already pending between you and this user');
+        throw new BadRequestException(t('errors.friendship.already_pending'));
       case FriendshipStatus.Blocked:
-        throw new ForbiddenException('Unable to send a friend request to this user');
+        throw new ForbiddenException(t('errors.friendship.cannot_request'));
     }
 
     const pairKey = FriendshipService.pairKey(requesterId, addresseeId);
@@ -105,7 +106,7 @@ export class FriendshipService {
       });
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
-        throw new ConflictException('A friend request already exists between you and this user');
+        throw new ConflictException(t('errors.friendship.already_exists'));
       }
       throw error;
     }
@@ -163,25 +164,25 @@ export class FriendshipService {
       case FriendshipStatus.Accepted:
       case FriendshipStatus.Declined:
         if (!isAddressee) {
-          throw new ForbiddenException('Only the recipient can respond to a friend request');
+          throw new ForbiddenException(t('errors.friendship.only_recipient_responds'));
         }
         if (friendship.status !== FriendshipStatus.Pending) {
-          throw new BadRequestException('This friend request is no longer pending');
+          throw new BadRequestException(t('errors.friendship.not_pending'));
         }
         break;
 
       case FriendshipStatus.Withdrawn:
         if (!isRequester) {
-          throw new ForbiddenException('Only the sender can withdraw a friend request');
+          throw new ForbiddenException(t('errors.friendship.only_sender_withdraws'));
         }
         if (friendship.status !== FriendshipStatus.Pending) {
-          throw new BadRequestException('This friend request is no longer pending');
+          throw new BadRequestException(t('errors.friendship.not_pending'));
         }
         break;
 
       case FriendshipStatus.Blocked:
         if (friendship.status === FriendshipStatus.Blocked) {
-          throw new BadRequestException('This relationship is already blocked');
+          throw new BadRequestException(t('errors.friendship.already_blocked'));
         }
         // Reorient so the acting user (the blocker) is the requester.
         data.requester = { connect: { id: userId } };
@@ -202,7 +203,7 @@ export class FriendshipService {
     const friendship = await this.getParticipantFriendship(id);
 
     if (friendship.status === FriendshipStatus.Blocked && friendship.requesterId !== userId) {
-      throw new ForbiddenException('You cannot remove a relationship that has blocked you');
+      throw new ForbiddenException(t('errors.friendship.cannot_remove_blocker'));
     }
 
     try {
@@ -242,7 +243,7 @@ export class FriendshipService {
     });
 
     if (!friendship) {
-      throw new NotFoundException(`Friendship with id ${id} not found`);
+      throw new NotFoundException(t('errors.friendship.not_found', { id }));
     }
 
     return friendship;
@@ -262,7 +263,7 @@ export class FriendshipService {
     this.logger.error(`Error mutating friendship with id ${id}`, error);
     // The scoped `where` matched no row the actor may modify.
     if (isPrismaDependentRecordNotFoundError(error)) {
-      return new ForbiddenException("You don't have permission to modify this friendship");
+      return new ForbiddenException(t('errors.friendship.forbidden_modify'));
     }
 
     return error instanceof Error ? error : new Error(String(error));
