@@ -23,8 +23,8 @@ function resolveEdgeLocale(auditContext: AuditContextService): string {
  * The single place the error path consults `I18nService`. If `exception` carries
  * a deferred {@link t} marker as its response body, returns a fresh standard
  * `HttpException` whose body is that marker translated against the request locale
- * (`{ statusCode, message, error }` — Nest's default shape, original status
- * preserved); otherwise returns `exception` untouched (referentially, so callers
+ * (`{ statusCode, message, error }` — Nest's default shape, original status and
+ * `cause` preserved); otherwise returns `exception` untouched (referentially, so callers
  * can `super.catch` it byte-for-byte as before).
  *
  * Shared by every edge component that renders exceptions itself: the global
@@ -45,5 +45,13 @@ export function translateException(
 
   const status = exception.getStatus();
   const message = i18n.translate(body.key, { lang: resolveEdgeLocale(auditContext), args: body.args });
-  return new HttpException({ statusCode: status, message, error: STATUS_CODES[status] ?? exception.name }, status);
+  // Carry the original `cause` across the re-issue so server-side context is not
+  // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
+  // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`,
+  // so markers thrown without a cause still render byte-identically.
+  return new HttpException(
+    { statusCode: status, message, error: STATUS_CODES[status] ?? exception.name },
+    status,
+    { cause: exception.cause },
+  );
 }

@@ -44,6 +44,9 @@ describe('StorageExceptionFilter', () => {
     // The raw storage message ("bucket users/42 is full") is never surfaced.
     expect(translate).toHaveBeenCalledWith('errors.storage.insufficient', expect.objectContaining({ lang: 'en' }));
     expect(message()).toBe('t:errors.storage.insufficient');
+    // ...but the raw error is retained as `cause` for server-side logs (the
+    // translated re-issue must not strip it).
+    expect((rendered() as unknown as { cause?: unknown }).cause).toBeInstanceOf(InsufficientStorageError);
     expect(setHeader).not.toHaveBeenCalled();
   });
 
@@ -52,6 +55,7 @@ describe('StorageExceptionFilter', () => {
 
     expect(rendered().getStatus()).toBe(Http.ServiceUnavailable);
     expect(translate).toHaveBeenCalledWith('errors.storage.unavailable', expect.objectContaining({ lang: 'en' }));
+    expect((rendered() as unknown as { cause?: unknown }).cause).toBeInstanceOf(StorageUnavailableError);
     expect(setHeader).toHaveBeenCalledWith({}, 'Retry-After', '30');
   });
 

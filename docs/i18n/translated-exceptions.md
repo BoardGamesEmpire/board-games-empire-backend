@@ -55,7 +55,12 @@ specific match. Such a filter must resolve markers itself: build the
 marker-carrying Nest exception, then hand it to the exported
 `translateException(exception, i18n, auditContext)` helper (the same core the
 global filter uses) before `super.catch`. Inject `I18nService` and
-`AuditContextService` for it.
+`AuditContextService` for it — and make sure the controller's **module** can
+resolve them. A filter bound by class (`@UseFilters(MyFilter)`) has its
+constructor dependencies resolved from the host module's injector, so a missing
+one fails at app **bootstrap**, not per-request. `I18nModule` (nestjs-i18n) is
+`@Global`, so `I18nService` is always in scope; `AuditContextModule` is **not**
+global, so the module must import it explicitly.
 
 ```ts
 // media StorageExceptionFilter — controller-scoped, so it translates itself
