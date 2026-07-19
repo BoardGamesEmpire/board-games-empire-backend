@@ -1,4 +1,5 @@
 import type { QuotaScope } from '@bge/database';
+import { t } from '@bge/i18n';
 import { HttpException } from '@nestjs/common';
 import { Http } from '@status/codes';
 import type { QuotaResource } from '../constants/quota-resource';
@@ -23,7 +24,9 @@ export class QuotaExceededException extends HttpException {
       {
         statusCode: Http.PaymentRequired,
         error: 'Quota Exceeded',
-        message: `Quota for "${resource}" exceeded at ${scope} scope`,
+        // Deferred marker: the I18nExceptionFilter translates this `message` in
+        // place at the edge, keeping the machine-readable fields below intact.
+        message: t('errors.quota.exceeded', { resource, scope }),
         resource,
         scope,
         limit: limit.toString(),

@@ -75,6 +75,34 @@ return super.catch(
 controller shadows the global exception *and* validation filters for every route
 on it, silently bypassing translation.
 
+### Structured bodies (a marker beside machine-readable fields)
+
+Most exceptions carry the `t()` marker *as the whole body*. A few carry
+machine-readable fields the client reads programmatically **alongside** the
+human message — e.g. `QuotaExceededException` returns `resource`, `scope`,
+`limit`, `currentUsage`, `attemptedAmount`, and a custom `error` label next to
+its `message`. For these, put the marker only on the `message` field:
+
+```ts
+// libs/common/quota QuotaExceededException — structured body, translatable message
+super(
+  {
+    statusCode: Http.PaymentRequired,
+    error: 'Quota Exceeded',
+    message: t('errors.quota.exceeded', { resource, scope }),
+    resource, scope, limit: limit.toString(), /* …currentUsage, attemptedAmount */
+  },
+  Http.PaymentRequired,
+);
+```
+
+`translateException` detects a body whose `message` is a marker and translates
+**just that field in place**, preserving every sibling field, the custom `error`
+label, the status, and the `cause`. (A whole-body marker, by contrast, is
+re-issued into Nest's default `{ statusCode, message, error }` shape.) The
+`error` field is not a `message`, so the #145 guardrail leaves it alone — it's a
+machine-readable label, not localized copy.
+
 ### Observability trade-off
 
 Because the message is deferred, `t()` gives the exception an **object** response

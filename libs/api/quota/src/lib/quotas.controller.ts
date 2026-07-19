@@ -1,4 +1,5 @@
 import { Action, QuotaScope, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { isQuotaResource, QuotaService, SetQuotaDto, toPublicScopeId } from '@bge/quota';
 import { BadRequestException, Body, Controller, Get, Param, ParseEnumPipe, Patch, UseGuards } from '@nestjs/common';
@@ -44,12 +45,12 @@ export class QuotasController {
     @Body() dto: SetQuotaDto,
   ) {
     if (!isQuotaResource(resource)) {
-      throw new BadRequestException(`Unknown quota resource "${resource}"`);
+      throw new BadRequestException(t('errors.quota.unknown_resource', { resource }));
     }
 
     const publicScopeId = toPublicScopeId(scopeId);
     return from(this.quotas.setQuota(scope, publicScopeId, resource, dto)).pipe(
-      map((quota) => ({ message: 'Quota set', quota })),
+      map((quota) => ({ message: t('success.quota.set'), quota })),
     );
   }
 }

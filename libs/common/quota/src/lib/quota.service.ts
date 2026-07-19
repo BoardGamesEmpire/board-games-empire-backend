@@ -1,4 +1,5 @@
 import { Action, DatabaseService, Prisma, Quota, QuotaScope, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -46,7 +47,7 @@ export class QuotaService {
    */
   async check(resource: QuotaResource, amount: bigint, ctx: QuotaCheckContext): Promise<QuotaCheckResult> {
     if (amount < 0n) {
-      throw new BadRequestException('check amount must be non-negative');
+      throw new BadRequestException(t('errors.quota.check_amount_negative'));
     }
 
     const definition = this.registry.require(resource);
@@ -86,7 +87,7 @@ export class QuotaService {
     tx: Prisma.TransactionClient,
   ): Promise<QuotaCheckResult> {
     if (amount < 0n) {
-      throw new BadRequestException('consume amount must be non-negative');
+      throw new BadRequestException(t('errors.quota.consume_amount_negative'));
     }
 
     const definition = this.registry.require(resource);
@@ -236,14 +237,17 @@ export class QuotaService {
     const actorId = this.abilityService.getActingUserId();
 
     if (!this.registry.has(resource)) {
-      throw new BadRequestException(`Unknown quota resource "${resource}"`);
+      throw new BadRequestException(t('errors.quota.unknown_resource', { resource }));
     }
 
     const definition = this.registry.require(resource);
     if (!definition.applicableScopes.includes(scope)) {
       throw new BadRequestException(
-        `Quota resource "${resource}" is not measured at ${scope} scope ` +
-          `(applicable: ${definition.applicableScopes.join(', ')})`,
+        t('errors.quota.scope_not_applicable', {
+          resource,
+          scope,
+          applicable: definition.applicableScopes.join(', '),
+        }),
       );
     }
 
@@ -256,7 +260,7 @@ export class QuotaService {
       householdId = await this.resolveHouseholdId(scope, scopeId);
     } catch (error) {
       if (error instanceof NotFoundException) {
-        throw new ForbiddenException("You don't have permission to manage this quota");
+        throw new ForbiddenException(t('errors.quota.forbidden_manage'));
       }
 
       throw error;
@@ -296,7 +300,7 @@ export class QuotaService {
       } else {
         const existing = await tx.quota.findUnique({ where: key, select: { id: true } });
         if (!existing) {
-          throw new BadRequestException('limit is required when creating a quota');
+          throw new BadRequestException(t('errors.quota.limit_required'));
         }
 
         row = await tx.quota.update({ where: { id: existing.id }, data: patch });
@@ -310,7 +314,7 @@ export class QuotaService {
       });
 
       if (authorized === 0) {
-        throw new ForbiddenException("You don't have permission to manage this quota");
+        throw new ForbiddenException(t('errors.quota.forbidden_manage'));
       }
 
       return row;
@@ -387,7 +391,7 @@ export class QuotaService {
 
   private assertScopeTargetCoherent(scope: QuotaScope, publicScopeId: string | null): void {
     if (scope === QuotaScope.Server && publicScopeId !== null) {
-      throw new BadRequestException('Server-scope quotas have no instance target');
+      throw new BadRequestException(t('errors.quota.server_no_target'));
     }
   }
 
@@ -404,7 +408,7 @@ export class QuotaService {
         });
 
         if (!household) {
-          throw new NotFoundException(`Household ${scopeId} not found`);
+          throw new NotFoundException(t('errors.quota.household_not_found', { scopeId }));
         }
 
         return scopeId;
@@ -417,7 +421,7 @@ export class QuotaService {
         });
 
         if (!member) {
-          throw new NotFoundException(`Household member ${scopeId} not found`);
+          throw new NotFoundException(t('errors.quota.household_member_not_found', { scopeId }));
         }
 
         return member.householdId;
@@ -432,7 +436,7 @@ export class QuotaService {
   /** Parse a decimal-string limit to a non-negative bigint; 400 on anything else. */
   private parseLimit(raw: string): bigint {
     if (!/^\d+$/.test(raw)) {
-      throw new BadRequestException(`limit must be a non-negative integer string (got "${raw}")`);
+      throw new BadRequestException(t('errors.quota.limit_invalid', { raw }));
     }
 
     return BigInt(raw);

@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsNumberString, IsOptional, IsString, MaxLength, ValidateIf } from 'class-validator';
 
@@ -15,22 +16,22 @@ export class SetQuotaDto {
     example: '5368709120',
   })
   @IsOptional()
-  @IsNumberString({ no_symbols: true }, { message: 'limit must be a non-negative integer string' })
+  @IsNumberString({ no_symbols: true }, { message: i18nValidationMessage('validation.nonNegativeIntegerString') })
   limit?: string;
 
   @ApiPropertyOptional({ description: 'Warn-but-allow instead of hard block. Defaults to false (hard block).' })
   @ValidateIf((dto: SetQuotaDto) => dto.softOverage !== undefined)
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   softOverage?: boolean;
 
   @ApiPropertyOptional({ description: 'Master switch. False disables the cap without deleting it. Defaults to true.' })
   @ValidateIf((dto: SetQuotaDto) => dto.enforced !== undefined)
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   enforced?: boolean;
 
   @ApiPropertyOptional({ description: 'Why this quota exists — UI reminder.' })
   @IsOptional()
-  @IsString()
-  @MaxLength(280)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(280, { message: i18nValidationMessage('validation.maxLength') })
   description?: string;
 }

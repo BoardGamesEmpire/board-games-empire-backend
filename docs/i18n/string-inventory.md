@@ -106,11 +106,24 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
   `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
   Logger line (`mapMissingToForbidden`) left English.
-- [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
+- [x] `libs/common/quota` — **DONE**. 11 service exceptions + `QuotaExceededException` ctor message + 1
+  validator msg. The exception carries machine-readable fields (`resource`/`scope`/`limit`/…) beside its
+  message, so `translateException` gained a branch that translates a marker nested in a structured body's
+  `message` field in place (see [translated-exceptions.md](./translated-exceptions.md) → Structured bodies).
+  The registry's 3 plain `Error` throws stay English (internal, not `*Exception`). Namespace `errors.quota.*`
+  / `success.quota.*` (import alias `@bge/quota`; the api lib is `@bge/quotas` — no collision). Added
+  `validation.nonNegativeIntegerString` (preserves the exact `@IsNumberString` copy via `{property}`).
 - [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
   success-response interceptor, catalog conventions, and #145 guardrail (see
   [translated-responses.md](./translated-responses.md))
-- [ ] `libs/api/webhook-subscription` — 7 literal exceptions + 5 success (handle 1 dynamic msg, §6)
+- [x] `libs/api/webhook-subscription` — **DONE**. 8 exceptions (7 literal + the 1 dynamic §6 msg) + 5 success.
+  The dynamic `requireAbilities(message)` was resolved at its 3 call sites (per §6): the helper's param
+  became `I18nMessage` and each caller passes a distinct `t()` key (`forbidden_create`/`forbidden_change_events`/
+  `forbidden_reactivate`). The empty-update throw reuses shared `common.at_least_one_field` (adds "for update"
+  — accurate, it's the update path). Namespace `errors.webhook_subscription.*` (9 keys) / `success.webhook_subscription.*`
+  (5 keys). Both specs needed ZERO edits (assert exception types / definedness, never strings). **DTOs are in a
+  separate lib (`@bge/webhooks` / `libs/common/webhooks`)** — bare decorators, no custom message literals, so no
+  guardrail trip; that lib's validator-annotation sweep is deferred to its own item.
 - [ ] `libs/api/game-collection` — 7 exceptions + 3 success
 - [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-through, §6)
 - [ ] `libs/common/permissions` — 5 ForbiddenException
@@ -118,7 +131,8 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
 - [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
 - [ ] `libs/api/system-settings` — 2 exceptions
-- [ ] `libs/api/quota` — 1 exception + 1 success
+- [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success
+  (`success.quota.set`). Controller spec updated to assert the `t()` marker.
 - [ ] `libs/api/feedback` — 1 exception + 1 success + 1 custom-validator message
 - [ ] `libs/api/language` — 1 exception
 - [ ] `libs/api/well-known` — 1 exception

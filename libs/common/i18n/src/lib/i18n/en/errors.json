@@ -99,5 +99,29 @@
   },
   "user": {
     "not_found": "User with ID {id} not found"
+  },
+  "quota": {
+    "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
+    "check_amount_negative": "check amount must be non-negative",
+    "consume_amount_negative": "consume amount must be non-negative",
+    "unknown_resource": "Unknown quota resource \"{resource}\"",
+    "scope_not_applicable": "Quota resource \"{resource}\" is not measured at {scope} scope (applicable: {applicable})",
+    "forbidden_manage": "You don't have permission to manage this quota",
+    "limit_required": "limit is required when creating a quota",
+    "server_no_target": "Server-scope quotas have no instance target",
+    "household_not_found": "Household {scopeId} not found",
+    "household_member_not_found": "Household member {scopeId} not found",
+    "limit_invalid": "limit must be a non-negative integer string (got \"{raw}\")"
+  },
+  "webhook_subscription": {
+    "not_found": "Webhook subscription {id} not found",
+    "forbidden_create": "You don't have permission to create webhook subscriptions",
+    "forbidden_change_events": "You don't have permission to change subscribed events",
+    "forbidden_reactivate": "You don't have permission to reactivate this subscription",
+    "unknown_event_type": "Unknown webhook event type \"{type}\"",
+    "event_type_resource_mismatch": "Event type \"{type}\" does not belong to resource \"{resourceType}\"",
+    "forbidden_subject_access": "You don't have {action} access to {subject} events",
+    "forbidden_household": "You don't have access to household {householdId}",
+    "forbidden_instance": "You don't have access to {resourceType} {resourceId}"
   }
 }

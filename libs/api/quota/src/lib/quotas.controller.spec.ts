@@ -1,4 +1,5 @@
 import { QuotaScope } from '@bge/database';
+import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { QuotaService, type QuotaView } from '@bge/quota';
 import { createTestingModuleWithDb, type TestingModuleWithDb } from '@bge/testing';
@@ -41,7 +42,8 @@ describe('QuotasController', () => {
     );
 
     expect(quotas.setQuota).toHaveBeenCalledWith(QuotaScope.Household, null, 'household_member_count', { limit: '8' });
-    expect(result).toEqual({ message: 'Quota set', quota: stubQuotaView() });
+    // The controller returns a deferred marker; the I18nResponseInterceptor renders it at the edge.
+    expect(result).toEqual({ message: t('success.quota.set'), quota: stubQuotaView() });
   });
 
   it('passes a concrete scopeId through unchanged', async () => {
