@@ -1,3 +1,4 @@
+import { t } from '@bge/i18n';
 import { IS_PUBLIC_KEY } from '@bge/shared';
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -33,7 +34,7 @@ export class PoliciesGuard implements CanActivate {
     // satisfy any policy: deny rather than vacuously pass `[].every(...)`.
     const abilities = this.abilityService.getCurrentAbilities();
     if (abilities.length === 0) {
-      throw new ForbiddenException('You do not have permission to perform this action.');
+      throw new ForbiddenException(t('common.forbidden.action'));
     }
 
     // Every ability must satisfy every handler. For an API key actor the array
@@ -46,7 +47,7 @@ export class PoliciesGuard implements CanActivate {
           `handler (${policyHandlers.length} handler(s) checked).`,
       );
 
-      throw new ForbiddenException('You do not have permission to perform this action.');
+      throw new ForbiddenException(t('common.forbidden.action'));
     }
 
     this.logger.debug('Access granted by PoliciesGuard');

@@ -24,6 +24,9 @@
       "path": "../shared/tsconfig.lib.json"
     },
     {
+      "path": "../i18n/tsconfig.lib.json"
+    },
+    {
       "path": "../actor-context/tsconfig.lib.json"
     },
     {

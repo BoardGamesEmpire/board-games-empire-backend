@@ -12,6 +12,8 @@ export type I18nTranslations = {
             "update": string;
             "delete": string;
             "remove": string;
+            "access": string;
+            "action": string;
         };
     };
     "errors": {
@@ -131,6 +133,9 @@ export type I18nTranslations = {
         };
         "user": {
             "not_found": string;
+        };
+        "api_key": {
+            "not_found_or_revoked": string;
         };
         "quota": {
             "exceeded": string;

@@ -147,7 +147,15 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   against existing `validation.{isString,isPositive,max,isBoolean,isIn}`; `UpdateGameGatewayDto` is
   `PartialType(CreateGameGatewayDto)` so it inherits the annotations. Both specs assert exception
   TYPES / DTO fields only — zero edits.
-- [ ] `libs/common/permissions` — 5 ForbiddenException
+- [x] `libs/common/permissions` — **DONE**. 5 ForbiddenException (surface matched inventory; no
+  `assert()` throws, no success bodies, no DTOs). Fully mechanical (no custom filters): the guard and
+  `AbilityService` throw `t()` markers caught by the global `I18nExceptionFilter`. Reused shared
+  `common.forbidden.access` (ability.service `getResourceConditionsForAbilities` ×2) and new
+  `common.forbidden.action` (policies.guard ×2 — "You do not have permission to perform this action.").
+  New `errors.api_key.not_found_or_revoked` for the one unique message (revoked/missing key on ability
+  resolution). No new validation keys. Both specs assert exception TYPES / delegation only (zero edits).
+  Guardrail enabled on `permissions/eslint.config.mjs`; `nx sync` added the i18n tsconfig ref (first
+  `@bge/i18n` import).
 - [ ] `libs/api/household` — 4 exceptions + 3 success
 - [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
 - [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success

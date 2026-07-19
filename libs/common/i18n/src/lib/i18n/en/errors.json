@@ -116,6 +116,9 @@
   "user": {
     "not_found": "User with ID {id} not found"
   },
+  "api_key": {
+    "not_found_or_revoked": "API key not found or has been revoked."
+  },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
     "check_amount_negative": "check amount must be non-negative",
