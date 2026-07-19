@@ -64,6 +64,40 @@ export type I18nTranslations = {
             "forbidden_decide": string;
             "direct_add_not_permitted": string;
         };
+        "media_object": {
+            "not_found": string;
+            "not_found_generic": string;
+            "unsupported_type": string;
+            "file_required": string;
+            "invalid_signature": string;
+            "signed_url_expired": string;
+        };
+        "contribution": {
+            "not_found": string;
+            "forbidden_contribute": string;
+            "forbidden_reclaim": string;
+            "already_exists": string;
+            "not_pending": string;
+            "only_rejected_reclaim": string;
+            "reclaim_window_closed": string;
+            "cannot_contribute_subject": string;
+        };
+        "media_link": {
+            "not_linkable": string;
+            "cannot_attach_kind": string;
+            "cannot_detach_type": string;
+            "cannot_link_subject": string;
+            "forbidden_attach": string;
+            "subject_not_found": string;
+        };
+        "storage": {
+            "unavailable": string;
+            "insufficient": string;
+        };
+        "upload": {
+            "too_large": string;
+            "invalid": string;
+        };
     };
     "success": {
         "game": {
@@ -101,6 +135,9 @@ export type I18nTranslations = {
             "rejected": string;
             "game_added": string;
         };
+        "media_object": {
+            "deleted": string;
+        };
     };
     "validation": {
         "isString": string;
@@ -118,6 +155,7 @@ export type I18nTranslations = {
         "max": string;
         "minLength": string;
         "maxLength": string;
+        "isNumberString": string;
     };
 };
 /* prettier-ignore */

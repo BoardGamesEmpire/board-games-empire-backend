@@ -1,3 +1,4 @@
+import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { NotificationsServiceModule } from '@bge/notifications-service';
 import { QuotaModule } from '@bge/quota';
@@ -13,7 +14,17 @@ import { MediaObjectService } from './media-object.service';
 import { MediaStreamController } from './media-stream.controller';
 
 @Module({
-  imports: [DatabaseModule, StorageModule, QuotaModule, ServicesModule, NotificationsServiceModule],
+  imports: [
+    DatabaseModule,
+    StorageModule,
+    QuotaModule,
+    ServicesModule,
+    NotificationsServiceModule,
+    // Supplies AuditContextService to the controller-scoped Storage/Multer
+    // exception filters, which read the request locale to translate their copy.
+    // No provider in this module injects it directly, so the need is easy to miss.
+    AuditContextModule,
+  ],
   controllers: [MediaStreamController, MediaObjectController, MediaContributionController],
   providers: [MediaObjectService, MediaContributionService, MediaLinkService, MediaContributionNotificationListener],
   exports: [MediaObjectService, MediaContributionService, MediaLinkService],

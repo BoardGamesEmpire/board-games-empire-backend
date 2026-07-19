@@ -45,6 +45,36 @@ locale is resolved, it degrades to `FALLBACK_LOCALE` (`en`).
 Exceptions **without** a `t()` payload pass straight through to Nest's default
 handling — nothing about existing error responses changes.
 
+### Controller-scoped filters
+
+The global `I18nExceptionFilter` only runs when no more-specific filter handles
+the exception first. A **controller-scoped** filter (`@UseFilters(...)`) that
+maps a lower-layer error and renders the response itself (via `super.catch`)
+therefore runs *instead of* the global filter — Nest invokes only the most
+specific match. Such a filter must resolve markers itself: build the
+marker-carrying Nest exception, then hand it to the exported
+`translateException(exception, i18n, auditContext)` helper (the same core the
+global filter uses) before `super.catch`. Inject `I18nService` and
+`AuditContextService` for it — and make sure the controller's **module** can
+resolve them. A filter bound by class (`@UseFilters(MyFilter)`) has its
+constructor dependencies resolved from the host module's injector, so a missing
+one fails at app **bootstrap**, not per-request. `I18nModule` (nestjs-i18n) is
+`@Global`, so `I18nService` is always in scope; `AuditContextModule` is **not**
+global, so the module must import it explicitly.
+
+```ts
+// media StorageExceptionFilter — controller-scoped, so it translates itself
+return super.catch(
+  translateException(new ServiceUnavailableException(t('errors.storage.unavailable')), this.i18n, this.auditContext),
+  host,
+);
+```
+
+`libs/api/media` does this for its storage/multer filters. Keep such filters
+**narrow** (`@Catch(SpecificError)`), never a bare `@Catch()`: a catch-all on a
+controller shadows the global exception *and* validation filters for every route
+on it, silently bypassing translation.
+
 ### Observability trade-off
 
 Because the message is deferred, `t()` gives the exception an **object** response

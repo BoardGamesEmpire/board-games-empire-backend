@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn, IsNotEmpty, IsNumberString, IsString } from 'class-validator';
 
@@ -7,25 +8,25 @@ import { IsIn, IsNotEmpty, IsNumberString, IsString } from 'class-validator';
  */
 export class StreamMediaQueryDto {
   @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   slug!: string;
 
   @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   key!: string;
 
   @ApiProperty({ enum: ['get'] })
-  @IsIn(['get'])
+  @IsIn(['get'], { message: i18nValidationMessage('validation.isIn') })
   op!: 'get';
 
   @ApiProperty({ description: 'Expiry as epoch seconds' })
-  @IsNumberString()
+  @IsNumberString(undefined, { message: i18nValidationMessage('validation.isNumberString') })
   exp!: string;
 
   @ApiProperty()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   sig!: string;
 }

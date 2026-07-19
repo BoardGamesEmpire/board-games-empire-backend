@@ -1,4 +1,5 @@
 import { Action, DatabaseService, Prisma, ResourceType, isPrismaForeignKeyConstraintError } from '@bge/database';
+import { t } from '@bge/i18n';
 import type { ModelResourceType } from '@bge/permissions';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
@@ -43,7 +44,7 @@ export class MediaLinkService {
       select: { id: true },
     });
     if (!accessible) {
-      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
 
     await this.assertSubjectReadable(target.subjectType, target.subjectId);
@@ -58,19 +59,17 @@ export class MediaLinkService {
   async attachWithin(tx: Prisma.TransactionClient, mediaObjectId: string, target: AttachTarget): Promise<LinkResult> {
     const media = await tx.mediaObject.findUnique({ where: { id: mediaObjectId }, select: { mimeType: true } });
     if (!media) {
-      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
 
     const kind = mediaKindForMime(media.mimeType);
     if (!kind) {
-      throw new BadRequestException(
-        `Media type '${media.mimeType}' is not linkable (video linkage is not yet supported)`,
-      );
+      throw new BadRequestException(t('errors.media_link.not_linkable', { mimeType: media.mimeType }));
     }
 
     const handler = LINK_HANDLERS[linkKey(target.subjectType, kind)];
     if (!handler) {
-      throw new BadRequestException(`Cannot attach ${kind} media to ${target.subjectType}`);
+      throw new BadRequestException(t('errors.media_link.cannot_attach_kind', { kind, subjectType: target.subjectType }));
     }
 
     const presentation = target.presentation ?? {};
@@ -97,7 +96,7 @@ export class MediaLinkService {
       };
     } catch (error) {
       if (isPrismaForeignKeyConstraintError(error)) {
-        throw new NotFoundException(`${target.subjectType} ${target.subjectId} not found`);
+        throw new NotFoundException(t('errors.media_link.subject_not_found', { subjectType: target.subjectType, subjectId: target.subjectId }));
       }
       throw error;
     }
@@ -115,7 +114,7 @@ export class MediaLinkService {
       select: { mimeType: true, media: { select: { id: true } } },
     });
     if (!media) {
-      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
 
     if (!media.media) {
@@ -125,7 +124,7 @@ export class MediaLinkService {
     const kind = mediaKindForMime(media.mimeType);
     const handler = kind ? LINK_HANDLERS[linkKey(target.subjectType, kind)] : undefined;
     if (!handler) {
-      throw new BadRequestException(`Cannot detach ${target.subjectType} media of this type`);
+      throw new BadRequestException(t('errors.media_link.cannot_detach_type', { subjectType: target.subjectType }));
     }
 
     await this.assertSubjectReadable(target.subjectType, target.subjectId);
@@ -148,11 +147,11 @@ export class MediaLinkService {
     } else if (subjectType === ResourceType.Event) {
       found = await this.db.event.findUnique({ where: { id: subjectId, AND }, select: { id: true } });
     } else {
-      throw new BadRequestException(`Media cannot be linked to ${subjectType}`);
+      throw new BadRequestException(t('errors.media_link.cannot_link_subject', { subjectType }));
     }
 
     if (!found) {
-      throw new ForbiddenException(`Cannot attach media to ${subjectType} ${subjectId}`);
+      throw new ForbiddenException(t('errors.media_link.forbidden_attach', { subjectType, subjectId }));
     }
   }
 }

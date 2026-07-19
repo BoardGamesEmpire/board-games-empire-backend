@@ -88,7 +88,17 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
   `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
   (en-only, no test asserts it — accepted).
-- [ ] `libs/api/media` — 35 exceptions + StorageExceptionFilter/controller generic-string mapping sites
+- [x] `libs/api/media` — **DONE**. Real surface was **41 exceptions + 1 success** (inventory said
+  35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
+  (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
+  resolve `t()` markers via the shared `translateException` helper (`@bge/i18n`).
+  `MulterExceptionFilter` was narrowed from a bare `@Catch()` to `@Catch(MulterError)` (adds
+  `@types/multer`) — the old catch-all had been silently shadowing the **global** exception *and*
+  validation filters for the whole media-object controller (a latent #142 side-effect; validation
+  errors there now format correctly again). Fixed `storage-exception.filter.ts` passing the raw
+  `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
+  `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
+  `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
 - [ ] `libs/api/friendship` — 14 exceptions + 3 success
 - [ ] `libs/common/quota` — 11 exceptions + `QuotaExceededException` ctor string + 1 validator msg
 - [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
