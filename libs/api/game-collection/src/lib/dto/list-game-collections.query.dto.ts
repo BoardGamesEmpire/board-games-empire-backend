@@ -1,4 +1,5 @@
 import { GameMedium } from '@bge/database';
+import { i18nValidationMessage } from '@bge/i18n';
 import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -18,7 +19,7 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
     default: false,
   })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
   includeDeleted?: boolean;
 
@@ -27,18 +28,18 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
     default: false,
   })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
   deletedOnly?: boolean;
 
   @ApiPropertyOptional({ enum: GameMedium, description: 'Filter by medium' })
   @IsOptional()
-  @IsEnum(GameMedium)
+  @IsEnum(GameMedium, { message: i18nValidationMessage('validation.isEnum') })
   medium?: GameMedium;
 
   @ApiPropertyOptional({ description: 'Return only favorites' })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
   favorite?: boolean;
 
@@ -48,7 +49,7 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
     description: 'Only entries updated at or after this time — delta-sync support (combine with includeDeleted)',
   })
   @IsOptional()
-  @IsDate()
+  @IsDate({ message: i18nValidationMessage('validation.isDate') })
   @Type(() => Date)
   updatedSince?: Date;
 }
@@ -57,6 +58,6 @@ export class ListGameCollectionsQueryDto extends GameCollectionPaginationQueryDt
 export class ListUserGameCollectionsQueryDto extends GameCollectionPaginationQueryDto {
   @ApiPropertyOptional({ enum: GameMedium, description: 'Filter by medium' })
   @IsOptional()
-  @IsEnum(GameMedium)
+  @IsEnum(GameMedium, { message: i18nValidationMessage('validation.isEnum') })
   medium?: GameMedium;
 }

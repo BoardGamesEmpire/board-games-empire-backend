@@ -22,6 +22,22 @@ export type I18nTranslations = {
             "not_found": string;
             "cannot_delete_in_collection": string;
         };
+        "game_collection": {
+            "not_found": string;
+            "release_platform_mismatch": string;
+        };
+        "platform_game": {
+            "not_found": string;
+        };
+        "game_release": {
+            "not_found": string;
+        };
+        "game_gateway": {
+            "not_found": string;
+            "not_found_or_denied": string;
+            "connect_failed": string;
+            "disconnect_failed": string;
+        };
         "event": {
             "not_found": string;
             "not_attendee": string;
@@ -146,6 +162,11 @@ export type I18nTranslations = {
             "created": string;
             "updated": string;
             "deleted": string;
+        };
+        "game_collection": {
+            "added": string;
+            "updated": string;
+            "removed": string;
         };
         "event": {
             "created": string;

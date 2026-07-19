@@ -6,6 +6,22 @@
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection"
   },
+  "game_collection": {
+    "not_found": "Collection entry with ID {id} not found",
+    "release_platform_mismatch": "Release {releaseId} does not belong to platform game {platformGameId}"
+  },
+  "platform_game": {
+    "not_found": "Platform game with ID {id} not found"
+  },
+  "game_release": {
+    "not_found": "Release with ID {id} not found"
+  },
+  "game_gateway": {
+    "not_found": "Game gateway with ID {id} not found.",
+    "not_found_or_denied": "Game gateway with ID {id} not found or access denied.",
+    "connect_failed": "Failed to connect to the game gateway.",
+    "disconnect_failed": "Failed to disconnect from the game gateway."
+  },
   "event": {
     "not_found": "Event with ID {id} not found",
     "not_attendee": "You are not an attendee of this event.",

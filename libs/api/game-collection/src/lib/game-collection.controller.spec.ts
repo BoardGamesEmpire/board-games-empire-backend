@@ -1,4 +1,5 @@
 import { GameMedium, GameRemovalReason } from '@bge/database';
+import { t } from '@bge/i18n';
 import { firstValueFrom } from 'rxjs';
 import { GameCollectionController } from './game-collection.controller';
 import { GameCollectionService } from './game-collection.service';
@@ -46,7 +47,7 @@ describe('GameCollectionController (delegation)', () => {
     const dto = { platformGameId: 'pg-1', medium: GameMedium.Physical };
     const result = await firstValueFrom(controller.addToCollection(dto));
     expect(service.addToCollection).toHaveBeenCalledWith(dto);
-    expect(result).toMatchObject({ collection: { id: 'gc-1' }, message: expect.any(String) });
+    expect(result).toMatchObject({ collection: { id: 'gc-1' }, message: t('success.game_collection.added') });
   });
 
   it('updateCollectionEntry forwards id and dto', async () => {

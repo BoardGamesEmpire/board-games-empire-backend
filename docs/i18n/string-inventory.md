@@ -124,8 +124,29 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   (5 keys). Both specs needed ZERO edits (assert exception types / definedness, never strings). **DTOs are in a
   separate lib (`@bge/webhooks` / `libs/common/webhooks`)** — bare decorators, no custom message literals, so no
   guardrail trip; that lib's validator-annotation sweep is deferred to its own item.
-- [ ] `libs/api/game-collection` — 7 exceptions + 3 success
-- [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-through, §6)
+- [x] `libs/api/game-collection` — **DONE**. Real surface was **8 exceptions + 3 success** (inventory
+  said 7): the sweep missed the `return new NotFoundException(...)` in `mapMissingToNotFound` — a
+  non-`throw` construction, exactly the under count §3 warns about. No `assert()` throws. Fully
+  mechanical (no custom filters): services throw `t()` markers to the global `I18nExceptionFilter`,
+  controller returns `t('success.game_collection.*')` markers. New per-entity namespaces
+  `errors.game_collection.{not_found,release_platform_mismatch}`, `errors.platform_game.not_found`,
+  `errors.game_release.not_found` (translatable nouns baked into the frame, only IDs interpolated);
+  reused shared `common.at_least_one_field`. `success.game_collection.{added,updated,removed}`. No new
+  validation keys — all 4 DTOs annotated against existing `validation.*`. Only the controller spec's
+  one `message: expect.any(String)` needed editing (→ `t()` marker, `toMatchObject` structural); the
+  service spec asserts exception TYPES only (zero edits). Guardrail enabled.
+- [x] `libs/api/game-gateway` — **DONE**. 6 service exceptions + fixed the 2 raw `error.message`
+  pass-through **info-leaks** (§6). No `assert()`, no success `message:` bodies. New per-entity
+  namespace `errors.game_gateway.{not_found,not_found_or_denied,connect_failed,disconnect_failed}`
+  (two distinct not-found messages: `getById` says "not found or access denied" — the ability-scoped
+  `findUniqueOrThrow` can't distinguish the two — while `update`/`delete` count first and say plain
+  "not found"). The controller's connect/disconnect `catchError` now returns a generic translated
+  marker (`connect_failed`/`disconnect_failed`) rendered by `I18nResponseInterceptor`; the raw
+  coordinator error stays server-side in the logger only. Reused `common.at_least_one_field` /
+  `common.forbidden.{update,delete}`. No new validation keys — `CreateGameGatewayDto` annotated
+  against existing `validation.{isString,isPositive,max,isBoolean,isIn}`; `UpdateGameGatewayDto` is
+  `PartialType(CreateGameGatewayDto)` so it inherits the annotations. Both specs assert exception
+  TYPES / DTO fields only — zero edits.
 - [ ] `libs/common/permissions` — 5 ForbiddenException
 - [ ] `libs/api/household` — 4 exceptions + 3 success
 - [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages

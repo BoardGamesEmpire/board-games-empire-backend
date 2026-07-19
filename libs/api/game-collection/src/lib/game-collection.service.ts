@@ -6,6 +6,7 @@ import {
   ResourceType,
   Visibility,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
@@ -115,7 +116,7 @@ export class GameCollectionService {
     });
 
     if (!collection) {
-      throw new NotFoundException(`Collection entry with ID ${id} not found`);
+      throw new NotFoundException(t('errors.game_collection.not_found', { id }));
     }
 
     return collection;
@@ -137,7 +138,7 @@ export class GameCollectionService {
       select: { id: true },
     });
     if (!platformGame) {
-      throw new NotFoundException(`Platform game with ID ${platformGameId} not found`);
+      throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
     }
 
     if (releaseId) {
@@ -157,7 +158,7 @@ export class GameCollectionService {
     } catch (error) {
       this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(`Platform game with ID ${platformGameId} not found`);
+        throw new NotFoundException(t('errors.platform_game.not_found', { id: platformGameId }));
       }
 
       throw error;
@@ -173,7 +174,7 @@ export class GameCollectionService {
   async update(id: string, dto: UpdateGameCollectionDto) {
     const data = pickDefined(dto);
     if (Object.keys(data).length === 0) {
-      throw new BadRequestException('At least one field must be provided for update');
+      throw new BadRequestException(t('common.at_least_one_field'));
     }
 
     // Only a release change needs a pre-read (the row's platform game); every
@@ -188,7 +189,7 @@ export class GameCollectionService {
       });
 
       if (!existing) {
-        throw new NotFoundException(`Collection entry with ID ${id} not found`);
+        throw new NotFoundException(t('errors.game_collection.not_found', { id }));
       }
 
       await this.assertReleaseBelongsTo(data.releaseId, existing.platformGameId);
@@ -241,7 +242,7 @@ export class GameCollectionService {
    */
   private mapMissingToNotFound(error: unknown, id: string) {
     if (isPrismaDependentRecordNotFoundError(error)) {
-      return new NotFoundException(`Collection entry with ID ${id} not found`);
+      return new NotFoundException(t('errors.game_collection.not_found', { id }));
     }
 
     this.logger.error(`Error mutating collection entry with id ${id}`, error);
@@ -255,11 +256,13 @@ export class GameCollectionService {
     });
 
     if (!release) {
-      throw new NotFoundException(`Release with ID ${releaseId} not found`);
+      throw new NotFoundException(t('errors.game_release.not_found', { id: releaseId }));
     }
 
     if (release.platformGameId !== platformGameId) {
-      throw new BadRequestException(`Release ${releaseId} does not belong to platform game ${platformGameId}`);
+      throw new BadRequestException(
+        t('errors.game_collection.release_platform_mismatch', { releaseId, platformGameId }),
+      );
     }
   }
 }

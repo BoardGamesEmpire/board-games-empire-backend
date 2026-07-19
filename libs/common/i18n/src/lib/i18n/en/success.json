@@ -4,6 +4,11 @@
     "updated": "Game updated successfully",
     "deleted": "Game deleted successfully"
   },
+  "game_collection": {
+    "added": "Game added to collection successfully",
+    "updated": "Collection entry updated successfully",
+    "removed": "Game removed from collection successfully"
+  },
   "event": {
     "created": "Event created successfully",
     "updated": "Event with ID {id} updated successfully",
