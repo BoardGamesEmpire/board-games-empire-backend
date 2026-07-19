@@ -4,20 +4,23 @@ import {
   StorageMisconfiguredError,
   StorageUnavailableError,
 } from '@boardgamesempire/storage-contract';
-import { ArgumentsHost, HttpException, Logger, ServiceUnavailableException } from '@nestjs/common';
+import { ArgumentsHost, HttpException, Logger } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { Http } from '@status/codes';
-import { InsufficientStorageException } from '../exceptions/insufficient-storage.exception';
 import { StorageExceptionFilter } from './storage-exception.filter';
 
 describe('StorageExceptionFilter', () => {
   let filter: StorageExceptionFilter;
   let superCatch: jest.SpyInstance;
   let setHeader: jest.Mock;
+  let translate: jest.Mock;
   let host: ArgumentsHost;
 
   beforeEach(() => {
-    filter = new StorageExceptionFilter();
+    // Echo the key back so tests can assert which catalog message was chosen —
+    // never the raw storage-error message (that would leak internal keys).
+    translate = jest.fn((key: string) => `t:${key}`);
+    filter = new StorageExceptionFilter({ translate } as never, { getLocale: () => 'en' } as never);
     superCatch = jest.spyOn(BaseExceptionFilter.prototype, 'catch').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     setHeader = jest.fn();
@@ -29,25 +32,33 @@ describe('StorageExceptionFilter', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  const mapped = (): HttpException => superCatch.mock.calls[0][0] as HttpException;
+  // The filter re-issues a standard HttpException after translating the marker,
+  // so we assert the resolved status/body handed to the base filter.
+  const rendered = (): HttpException => superCatch.mock.calls[0][0] as HttpException;
+  const message = (): unknown => (rendered().getResponse() as { message: unknown }).message;
 
-  it('maps InsufficientStorageError to 507 with no Retry-After', () => {
-    filter.catch(new InsufficientStorageError('full'), host);
-    expect(mapped()).toBeInstanceOf(InsufficientStorageException);
-    expect(mapped().getStatus()).toBe(Http.InsufficientStorage);
+  it('maps InsufficientStorageError to 507 with a generic localized message, no Retry-After', () => {
+    filter.catch(new InsufficientStorageError('bucket users/42 is full'), host);
+
+    expect(rendered().getStatus()).toBe(Http.InsufficientStorage);
+    // The raw storage message ("bucket users/42 is full") is never surfaced.
+    expect(translate).toHaveBeenCalledWith('errors.storage.insufficient', expect.objectContaining({ lang: 'en' }));
+    expect(message()).toBe('t:errors.storage.insufficient');
     expect(setHeader).not.toHaveBeenCalled();
   });
 
   it('maps a retryable StorageUnavailableError to 503 + Retry-After', () => {
     filter.catch(new StorageUnavailableError('io', { retryable: true }), host);
-    expect(mapped()).toBeInstanceOf(ServiceUnavailableException);
-    expect(mapped().getStatus()).toBe(Http.ServiceUnavailable);
+
+    expect(rendered().getStatus()).toBe(Http.ServiceUnavailable);
+    expect(translate).toHaveBeenCalledWith('errors.storage.unavailable', expect.objectContaining({ lang: 'en' }));
     expect(setHeader).toHaveBeenCalledWith({}, 'Retry-After', '30');
   });
 
   it('maps a non-retryable StorageUnavailableError to 503 without Retry-After', () => {
     filter.catch(new StorageUnavailableError('denied', { retryable: false }), host);
-    expect(mapped().getStatus()).toBe(Http.ServiceUnavailable);
+
+    expect(rendered().getStatus()).toBe(Http.ServiceUnavailable);
     expect(setHeader).not.toHaveBeenCalled();
   });
 
@@ -55,8 +66,9 @@ describe('StorageExceptionFilter', () => {
     'maps %s to 503 and logs critical',
     (exception) => {
       filter.catch(exception, host);
-      expect(mapped()).toBeInstanceOf(ServiceUnavailableException);
-      expect(mapped().getStatus()).toBe(Http.ServiceUnavailable);
+
+      expect(rendered().getStatus()).toBe(Http.ServiceUnavailable);
+      expect(message()).toBe('t:errors.storage.unavailable');
       expect(Logger.prototype.error).toHaveBeenCalled();
     },
   );

@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import {
@@ -55,7 +56,7 @@ export class MediaObjectController {
   @Post()
   upload(@UploadedFile() file?: UploadedMediaFile) {
     if (!file) {
-      throw new BadRequestException('A file is required under the "file" field');
+      throw new BadRequestException(t('errors.media_object.file_required'));
     }
 
     return from(this.media.upload(file)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
@@ -73,7 +74,7 @@ export class MediaObjectController {
   @Post('contribute')
   uploadAndContribute(@Body() dto: ContributeMediaDto, @UploadedFile() file?: UploadedMediaFile) {
     if (!file) {
-      throw new BadRequestException('A file is required under the "file" field');
+      throw new BadRequestException(t('errors.media_object.file_required'));
     }
 
     return from(this.media.uploadAndContribute(file, dto)).pipe(
@@ -106,7 +107,7 @@ export class MediaObjectController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return from(this.media.delete(id)).pipe(
-      map((media) => ({ message: `Media object ${id} deleted successfully`, media: toMediaObjectResponse(media) })),
+      map((media) => ({ message: t('success.media_object.deleted', { id }), media: toMediaObjectResponse(media) })),
     );
   }
 

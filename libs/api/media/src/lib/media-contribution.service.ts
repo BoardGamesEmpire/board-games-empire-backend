@@ -7,6 +7,7 @@ import {
   ResourceType,
   Visibility,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService, ModelResourceType } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import {
@@ -47,10 +48,10 @@ export class MediaContributionService {
       select: { ownerId: true },
     });
     if (!media) {
-      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
     if (media.ownerId !== actorId) {
-      throw new ForbiddenException('You may only contribute media you own');
+      throw new ForbiddenException(t('errors.contribution.forbidden_contribute'));
     }
 
     return this.db.$transaction((tx) =>
@@ -74,7 +75,7 @@ export class MediaContributionService {
   ): Promise<MediaContribution> {
     const media = await tx.mediaObject.findUnique({ where: { id: mediaObjectId }, select: { mimeType: true } });
     if (!media) {
-      throw new NotFoundException(`Media object ${mediaObjectId} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id: mediaObjectId }));
     }
 
     const existing = await tx.mediaContribution.findFirst({
@@ -82,11 +83,11 @@ export class MediaContributionService {
       select: { id: true, status: true },
     });
     if (existing) {
-      throw new ConflictException(`Media object ${mediaObjectId} already has a ${existing.status} contribution`);
+      throw new ConflictException(t('errors.contribution.already_exists', { id: mediaObjectId, status: existing.status }));
     }
 
     if (!this.mediaLink.canLink(media.mimeType, dto.subjectType)) {
-      throw new BadRequestException(`This media type can't be contributed to a ${dto.subjectType}`);
+      throw new BadRequestException(t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }));
     }
 
     const data = {
@@ -181,19 +182,19 @@ export class MediaContributionService {
     });
 
     if (!contribution) {
-      throw new NotFoundException(`Contribution ${contributionId} not found`);
+      throw new NotFoundException(t('errors.contribution.not_found', { id: contributionId }));
     }
 
     if (contribution.contributedById !== actorId) {
-      throw new ForbiddenException('You can only reclaim your own contribution');
+      throw new ForbiddenException(t('errors.contribution.forbidden_reclaim'));
     }
 
     if (contribution.status !== MediaContributionStatus.Rejected) {
-      throw new ConflictException(`Only a rejected contribution can be reclaimed (status: ${contribution.status})`);
+      throw new ConflictException(t('errors.contribution.only_rejected_reclaim', { status: contribution.status }));
     }
 
     if (contribution.reclaimDeadline && contribution.reclaimDeadline.getTime() < Date.now()) {
-      throw new ConflictException('The reclaim window has closed');
+      throw new ConflictException(t('errors.contribution.reclaim_window_closed'));
     }
 
     return this.db.mediaContribution.update({
@@ -236,11 +237,11 @@ export class MediaContributionService {
     });
 
     if (!contribution) {
-      throw new NotFoundException(`Contribution ${contributionId} not found`);
+      throw new NotFoundException(t('errors.contribution.not_found', { id: contributionId }));
     }
 
     if (contribution.status !== MediaContributionStatus.Pending) {
-      throw new ConflictException(`Contribution is not pending (status: ${contribution.status})`);
+      throw new ConflictException(t('errors.contribution.not_pending', { status: contribution.status }));
     }
 
     return contribution;

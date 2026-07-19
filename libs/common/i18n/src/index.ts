@@ -10,5 +10,6 @@ export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
+export { translateException } from './lib/translate-exception';
 export { I18nMessage, isI18nMessage, t } from './lib/translatable';
 export { i18nValidationMessage, type I18nValidationPath } from './lib/validation-message';

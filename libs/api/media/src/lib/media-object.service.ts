@@ -8,6 +8,7 @@ import {
   ResourceType,
   Visibility,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
@@ -57,7 +58,7 @@ export class MediaObjectService {
 
   async upload(file: UploadedMediaFile) {
     if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
-      throw new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`);
+      throw new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype }));
     }
 
     const userId = this.ability.getActingUserId();
@@ -83,11 +84,11 @@ export class MediaObjectService {
    */
   async uploadAndContribute(file: UploadedMediaFile, dto: ContributeMediaDto) {
     if (!ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)) {
-      throw new UnsupportedMediaTypeException(`Unsupported media type: ${file.mimetype}`);
+      throw new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype }));
     }
     // Fail fast before writing bytes: a type that can't link to the subject can never be approved.
     if (!this.mediaLink.canLink(file.mimetype, dto.subjectType)) {
-      throw new BadRequestException(`This media type can't be contributed to a ${dto.subjectType}`);
+      throw new BadRequestException(t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }));
     }
 
     const userId = this.ability.getActingUserId();
@@ -155,6 +156,7 @@ export class MediaObjectService {
     const decision = await this.quota.consume('storage_bytes', stored.size, { userId }, tx);
     if (!decision.allowed) {
       throw new QuotaExceededException(
+        // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
         'storage_bytes',
         decision.scope!,
         decision.limit!,
@@ -209,7 +211,7 @@ export class MediaObjectService {
     });
 
     if (!media) {
-      throw new NotFoundException(`Media object ${id} not found`);
+      throw new NotFoundException(t('errors.media_object.not_found', { id }));
     }
 
     return media;
@@ -256,7 +258,7 @@ export class MediaObjectService {
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(`Media object ${id} not found`);
+        throw new NotFoundException(t('errors.media_object.not_found', { id }));
       }
 
       throw error;
@@ -278,7 +280,7 @@ export class MediaObjectService {
     });
 
     if (!media) {
-      throw new ForbiddenException('Invalid signature'); // uniform with a bad sig — no existence oracle
+      throw new ForbiddenException(t('errors.media_object.invalid_signature')); // uniform with a bad sig — no existence oracle
     }
 
     try {
@@ -288,10 +290,10 @@ export class MediaObjectService {
       );
     } catch (error) {
       if (error instanceof SignatureExpiredError) {
-        throw new GoneException('Signed URL has expired');
+        throw new GoneException(t('errors.media_object.signed_url_expired'));
       }
       if (error instanceof SignatureInvalidError) {
-        throw new ForbiddenException('Invalid signature');
+        throw new ForbiddenException(t('errors.media_object.invalid_signature'));
       }
       throw error;
     }
@@ -305,10 +307,10 @@ export class MediaObjectService {
       // log it loud, but return the same 404 as missing bytes (no internals leaked).
       if (error instanceof DriverNotRegisteredError) {
         this.logger.error(`Media ${slug}/${key} references unregistered driver '${error.slug}'`, error);
-        throw new NotFoundException('Media not found');
+        throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
       if (error instanceof ObjectNotFoundError) {
-        throw new NotFoundException('Media not found');
+        throw new NotFoundException(t('errors.media_object.not_found_generic'));
       }
       throw error;
     }
@@ -337,7 +339,7 @@ export class MediaObjectService {
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(`Media object ${id} not found`);
+        throw new NotFoundException(t('errors.media_object.not_found', { id }));
       }
 
       throw error;
@@ -353,6 +355,7 @@ export class MediaObjectService {
     const result = await this.quota.check('storage_bytes', amount, { userId });
     if (!result.allowed) {
       // `allowed` is false only on a hard violation; the binding fields are then set.
+      // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
       throw new QuotaExceededException('storage_bytes', result.scope!, result.limit!, result.currentUsage!, amount);
     }
   }

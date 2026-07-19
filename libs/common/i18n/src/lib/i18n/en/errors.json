@@ -47,5 +47,39 @@
     "invalid_resolution": "Must be \"Approved\" or \"Rejected\".",
     "forbidden_decide": "You don't have permission to decide on this nomination.",
     "direct_add_not_permitted": "Direct game addition is not permitted in \"{mode}\" mode."
+  },
+  "media_object": {
+    "not_found": "Media object {id} not found",
+    "not_found_generic": "Media not found",
+    "unsupported_type": "Unsupported media type: {mimeType}",
+    "file_required": "A file is required under the \"file\" field",
+    "invalid_signature": "Invalid signature",
+    "signed_url_expired": "Signed URL has expired"
+  },
+  "contribution": {
+    "not_found": "Contribution {id} not found",
+    "forbidden_contribute": "You may only contribute media you own",
+    "forbidden_reclaim": "You can only reclaim your own contribution",
+    "already_exists": "Media object {id} already has a {status} contribution",
+    "not_pending": "Contribution is not pending (status: {status})",
+    "only_rejected_reclaim": "Only a rejected contribution can be reclaimed (status: {status})",
+    "reclaim_window_closed": "The reclaim window has closed",
+    "cannot_contribute_subject": "This media type can't be contributed to a {subjectType}"
+  },
+  "media_link": {
+    "not_linkable": "Media type '{mimeType}' is not linkable (video linkage is not yet supported)",
+    "cannot_attach_kind": "Cannot attach {kind} media to {subjectType}",
+    "cannot_detach_type": "Cannot detach {subjectType} media of this type",
+    "cannot_link_subject": "Media cannot be linked to {subjectType}",
+    "forbidden_attach": "Cannot attach media to {subjectType} {subjectId}",
+    "subject_not_found": "{subjectType} {subjectId} not found"
+  },
+  "storage": {
+    "unavailable": "Storage temporarily unavailable",
+    "insufficient": "Insufficient storage to store the uploaded file"
+  },
+  "upload": {
+    "too_large": "File exceeds the {maxBytes}-byte limit",
+    "invalid": "Invalid file upload"
   }
 }
