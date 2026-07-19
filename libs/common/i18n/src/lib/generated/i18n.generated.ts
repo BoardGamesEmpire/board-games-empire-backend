@@ -137,6 +137,11 @@ export type I18nTranslations = {
         "api_key": {
             "not_found_or_revoked": string;
         };
+        "household": {
+            "not_found": string;
+            "invalid_language_tag": string;
+            "language_tag_unsupported": string;
+        };
         "quota": {
             "exceeded": string;
             "check_amount_negative": string;
@@ -172,6 +177,11 @@ export type I18nTranslations = {
             "added": string;
             "updated": string;
             "removed": string;
+        };
+        "household": {
+            "created": string;
+            "updated": string;
+            "deleted": string;
         };
         "event": {
             "created": string;

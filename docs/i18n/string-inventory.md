@@ -156,7 +156,17 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   resolution). No new validation keys. Both specs assert exception TYPES / delegation only (zero edits).
   Guardrail enabled on `permissions/eslint.config.mjs`; `nx sync` added the i18n tsconfig ref (first
   `@bge/i18n` import).
-- [ ] `libs/api/household` — 4 exceptions + 3 success
+- [x] `libs/api/household` — **DONE**. Real surface was **9 exceptions + 3 success** (inventory said
+  4/3): the `throw new` sweep missed **4 `assert(cond, new *Exception(...))` throws** (3 not-found +
+  BCP 47 tag validation), exactly the under count §3 warns about. Fully mechanical (no custom filters).
+  New `errors.household.{not_found,invalid_language_tag,language_tag_unsupported}` (IDs / user-supplied
+  tags interpolated; not-found normalized to the "with ID {id}" frame). Reused shared
+  `common.forbidden.{view,update,delete}` (the view/delete throws' "this household" copy normalized to
+  the generic "this resource" — service spec asserts TYPES only) and `common.at_least_one_field`.
+  `success.household.{created,updated,deleted}` (updated/deleted keep the `{id}`). No new validation
+  keys — `CreateHouseholdDto` annotated against existing `validation.{isString,isEnum}`;
+  `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
+  TYPES / delegation only — zero edits. Guardrail enabled.
 - [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
 - [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
 - [ ] `libs/api/system-settings` — 2 exceptions

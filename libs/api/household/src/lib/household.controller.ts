@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
@@ -35,7 +36,7 @@ export class HouseholdController {
     return from(this.householdService.create(createHouseholdDto)).pipe(
       // The service resolves the acting user, creates the household, and evicts
       // that user's permission graph (they just became a HouseholdOwner).
-      map((household) => ({ message: 'Household created successfully', household })),
+      map((household) => ({ message: t('success.household.created'), household })),
     );
   }
 
@@ -55,7 +56,7 @@ export class HouseholdController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateHouseholdDto: UpdateHouseholdDto) {
     return from(this.householdService.updateHousehold(id, updateHouseholdDto)).pipe(
-      map((household) => ({ message: `Household with ID ${id} updated successfully`, household })),
+      map((household) => ({ message: t('success.household.updated', { id }), household })),
     );
   }
 
@@ -65,7 +66,7 @@ export class HouseholdController {
   @Delete(':id')
   delete(@Param('id') id: string) {
     return from(this.householdService.deleteHousehold(id)).pipe(
-      map((household) => ({ message: `Household with ID ${id} deleted successfully`, household })),
+      map((household) => ({ message: t('success.household.deleted', { id }), household })),
     );
   }
 }

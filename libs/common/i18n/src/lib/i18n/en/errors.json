@@ -119,6 +119,11 @@
   "api_key": {
     "not_found_or_revoked": "API key not found or has been revoked."
   },
+  "household": {
+    "not_found": "Household with ID {id} not found",
+    "invalid_language_tag": "'{tag}' is not a valid IETF BCP 47 language tag",
+    "language_tag_unsupported": "Language tag '{tag}' is not supported by this server"
+  },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
     "check_amount_negative": "check amount must be non-negative",

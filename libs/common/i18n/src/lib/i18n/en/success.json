@@ -9,6 +9,11 @@
     "updated": "Collection entry updated successfully",
     "removed": "Game removed from collection successfully"
   },
+  "household": {
+    "created": "Household created successfully",
+    "updated": "Household with ID {id} updated successfully",
+    "deleted": "Household with ID {id} deleted successfully"
+  },
   "event": {
     "created": "Event created successfully",
     "updated": "Event with ID {id} updated successfully",
