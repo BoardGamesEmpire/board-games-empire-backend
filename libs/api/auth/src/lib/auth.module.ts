@@ -9,7 +9,7 @@ import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
 import { authFactory } from './auth-factory';
 import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
-import { AUTH_INSTANCE } from './constants';
+import { AUTH_INSTANCE, MAX_REQUEST_BODY_BYTES } from './constants';
 import type { AuthType } from './interfaces';
 import { UserProvisioningListener } from './provisioning/user-provisioning.listener';
 import { UserProvisioningService } from './provisioning/user-provisioning.service';
@@ -23,7 +23,16 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
     // the user-created database hook (#57 emit-site migration).
     AuditContextModule,
     BetterAuthModule.forRootAsync({
-      useFactory: (auth: AuthType) => ({ auth }),
+      // better-auth re-adds the app-wide body parsers (Nest's are disabled in
+      // main.ts so better-auth can read raw bodies on its own routes). Cap them
+      // here — the only place the limit can be set. See MAX_REQUEST_BODY_BYTES.
+      useFactory: (auth: AuthType) => ({
+        auth,
+        bodyParser: {
+          json: { limit: MAX_REQUEST_BODY_BYTES },
+          urlencoded: { limit: MAX_REQUEST_BODY_BYTES },
+        },
+      }),
       imports: [AuthModule],
       inject: [AUTH_INSTANCE],
     }),

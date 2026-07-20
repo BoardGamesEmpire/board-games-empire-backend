@@ -5,10 +5,12 @@
  * `SystemSetting`. Hard transport/protocol limits live here because making
  * them runtime-mutable requires custom ThrottlerStorage / dynamic body parser
  * — gold-plating for v1.
+ *
+ * The 256 KB transport-layer cap the field caps below sit under is enforced
+ * globally at the app body-parser (`MAX_REQUEST_BODY_BYTES` in `@bge/auth`,
+ * wired into the better-auth JSON parser), not here — better-auth owns the
+ * parser lifecycle for the whole app.
  */
-
-/** 256 KB transport-layer cap. Enforced at the app body-parser. */
-export const FEEDBACK_MAX_BODY_BYTES = 256 * 1024;
 
 /** Field-level cap on the `message` string. */
 export const FEEDBACK_MAX_MESSAGE_LENGTH = 10_000;
@@ -44,9 +46,16 @@ export const FEEDBACK_MAX_REDACTED_FIELDS = 64;
  */
 export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
 
-/** Per-user throttle. TODO: migrate to SystemSetting once a dynamic
- * ThrottlerStorage exists in the codebase. */
-export const FEEDBACK_THROTTLE_LIMIT = 30;
+/**
+ * Tiered submission rate limits (issue #45), enforced per rolling hour. The
+ * per-user tier tracks the authenticated user; the per-IP tier tracks the
+ * source address. Both apply to every submission — whichever trips first wins.
+ *
+ * TODO: migrate to SystemSetting once a dynamic ThrottlerStorage exists in the
+ * codebase.
+ */
+export const FEEDBACK_USER_THROTTLE_LIMIT = 30;
+export const FEEDBACK_IP_THROTTLE_LIMIT = 100;
 export const FEEDBACK_THROTTLE_TTL_SECONDS = 60 * 60;
 
 /**

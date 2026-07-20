@@ -11,7 +11,7 @@ import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
-import { FeedbackModule } from '@bge/feedback';
+import { createUserThrottler, FeedbackModule } from '@bge/feedback';
 import { FriendshipModule } from '@bge/friendship';
 import { GameModule } from '@bge/game';
 import { GameCollectionModule } from '@bge/game-collection';
@@ -88,7 +88,10 @@ import { baseLogger } from './lib/logger';
     // during a transient Redis disconnect.
     ScheduleModule.forRoot(),
 
-    // Rate limiting
+    // Rate limiting. The `default` throttler tracks by IP and applies to every
+    // route; the `user` throttler tracks by authenticated user but stays inert
+    // unless a route opts in (feedback submission does — 30/user/hr + 100/IP/hr,
+    // issue #45).
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
@@ -98,6 +101,7 @@ import { baseLogger } from './lib/logger';
             ttl: config.getOrThrow<number>('throttle.ttl'),
             limit: config.getOrThrow<number>('throttle.limit'),
           },
+          createUserThrottler(config.getOrThrow<number>('throttle.ttl')),
         ],
       }),
     }),

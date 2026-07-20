@@ -3,20 +3,24 @@ import { t } from '@bge/i18n';
 import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
 import { Http } from '@status/codes';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { from, map, Observable, tap } from 'rxjs';
-import { FEEDBACK_THROTTLE_LIMIT, FEEDBACK_THROTTLE_TTL_SECONDS } from './constants/feedback.constants';
+import {
+  FEEDBACK_IP_THROTTLE_LIMIT,
+  FEEDBACK_THROTTLE_TTL_SECONDS,
+  FEEDBACK_USER_THROTTLE_LIMIT,
+} from './constants/feedback.constants';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
-import { FeedbackReportDto } from './dto/feedback-report.dto';
+import { FeedbackReceiptDto } from './dto/feedback-receipt.dto';
 import { FeedbackService } from './feedback.service';
+import { FeedbackSubmissionThrottle } from './throttling/feedback-throttler';
 
 interface SubmitFeedbackResponse {
   // Wire contract is a plain string; the return site assigns an I18nMessage marker
   // that I18nResponseInterceptor renders to a localized string before serialization.
   readonly message: string;
-  readonly feedbackReport: FeedbackReportDto;
+  readonly feedbackReport: FeedbackReceiptDto;
 }
 
 @ApiBearerAuth()
@@ -35,7 +39,11 @@ export class FeedbackController {
   @ApiResponse({ status: Http.Forbidden, description: 'Submission denied (insufficient permissions or feedback ban)' })
   @ApiResponse({ status: Http.TooManyRequests, description: 'Submission rate limit exceeded' })
   @CheckPolicies((ability: AppAbility) => ability.can(Action.create, ResourceType.FeedbackReport))
-  @Throttle({ default: { limit: FEEDBACK_THROTTLE_LIMIT, ttl: FEEDBACK_THROTTLE_TTL_SECONDS } })
+  @FeedbackSubmissionThrottle({
+    userLimit: FEEDBACK_USER_THROTTLE_LIMIT,
+    ipLimit: FEEDBACK_IP_THROTTLE_LIMIT,
+    ttl: FEEDBACK_THROTTLE_TTL_SECONDS,
+  })
   @HttpCode(Http.Created)
   @Post('reports')
   submitReport(
@@ -50,7 +58,7 @@ export class FeedbackController {
       ),
       map((report) => ({
         message: t('success.feedback.submitted') as unknown as string,
-        feedbackReport: FeedbackReportDto.fromEntity(report),
+        feedbackReport: FeedbackReceiptDto.fromEntity(report),
       })),
     );
   }
