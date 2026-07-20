@@ -12,28 +12,22 @@ import { t } from '@bge/i18n';
 import { AppAbility, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { ClsService } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
-import { FeedbackReportDto } from './dto/feedback-report.dto';
+import { FeedbackReceiptDto } from './dto/feedback-receipt.dto';
 import { FeedbackController } from './feedback.controller';
 import { FeedbackService } from './feedback.service';
 
 describe('FeedbackController', () => {
   let controller: FeedbackController;
   let feedback: jest.Mocked<Pick<FeedbackService, 'submit'>>;
-  let cls: jest.Mocked<Pick<ClsService, 'get'>>;
 
   beforeEach(async () => {
     feedback = { submit: jest.fn() };
-    cls = { get: jest.fn() };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FeedbackController],
-      providers: [
-        { provide: FeedbackService, useValue: feedback },
-        { provide: ClsService, useValue: cls },
-      ],
+      providers: [{ provide: FeedbackService, useValue: feedback }],
     })
       .overrideGuard(PoliciesGuard)
       .useValue({ canActivate: () => true })
@@ -56,9 +50,11 @@ describe('FeedbackController', () => {
       expect(result.message).toEqual(t('success.feedback.submitted'));
     });
 
-    it('shapes the response through FeedbackReportDto.fromEntity', async () => {
+    it('returns a minimal receipt (id + createdAt) and leaks no other report state', async () => {
+      const createdAt = new Date('2026-07-20T00:00:00.000Z');
       const created = stubReport({
         id: 'fb-shape-1',
+        createdAt,
         category: FeedbackCategory.FeatureRequest,
         deploymentRuntime: DeploymentRuntime.Kubernetes,
         deploymentVersion: '0.4.1',
@@ -71,15 +67,10 @@ describe('FeedbackController', () => {
         controller.submitReport(stubSession('user-1'), makeDto({ category: FeedbackCategory.FeatureRequest })),
       );
 
-      expect(result.feedbackReport).toBeInstanceOf(FeedbackReportDto);
-      expect(result.feedbackReport).toMatchObject({
-        id: 'fb-shape-1',
-        category: FeedbackCategory.FeatureRequest,
-        deploymentRuntime: DeploymentRuntime.Kubernetes,
-        deploymentVersion: '0.4.1',
-        userRedactedFields: ['email'],
-        redactionApplied: true,
-      });
+      expect(result.feedbackReport).toBeInstanceOf(FeedbackReceiptDto);
+      // Exactly { id, createdAt } — no status, redaction flags, deployment
+      // snapshot, or message must ride along on the submit response.
+      expect({ ...result.feedbackReport }).toEqual({ id: 'fb-shape-1', createdAt });
     });
 
     it('propagates service errors unchanged', async () => {
