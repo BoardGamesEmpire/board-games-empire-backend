@@ -6,6 +6,22 @@
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection"
   },
+  "game_collection": {
+    "not_found": "Collection entry with ID {id} not found",
+    "release_platform_mismatch": "Release {releaseId} does not belong to platform game {platformGameId}"
+  },
+  "platform_game": {
+    "not_found": "Platform game with ID {id} not found"
+  },
+  "game_release": {
+    "not_found": "Release with ID {id} not found"
+  },
+  "game_gateway": {
+    "not_found": "Game gateway with ID {id} not found.",
+    "not_found_or_denied": "Game gateway with ID {id} not found or access denied.",
+    "connect_failed": "Failed to connect to the game gateway.",
+    "disconnect_failed": "Failed to disconnect from the game gateway."
+  },
   "event": {
     "not_found": "Event with ID {id} not found",
     "not_attendee": "You are not an attendee of this event.",
@@ -100,6 +116,14 @@
   "user": {
     "not_found": "User with ID {id} not found"
   },
+  "api_key": {
+    "not_found_or_revoked": "API key not found or has been revoked."
+  },
+  "household": {
+    "not_found": "Household with ID {id} not found",
+    "invalid_language_tag": "'{tag}' is not a valid IETF BCP 47 language tag",
+    "language_tag_unsupported": "Language tag '{tag}' is not supported by this server"
+  },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
     "check_amount_negative": "check amount must be non-negative",
@@ -123,5 +147,30 @@
     "forbidden_subject_access": "You don't have {action} access to {subject} events",
     "forbidden_household": "You don't have access to household {householdId}",
     "forbidden_instance": "You don't have access to {resourceType} {resourceId}"
+  },
+  "safe_http": {
+    "no_policy": "No SafeHttp policy found. Run the seed script to create the default singleton row.",
+    "multiple_policies": "Multiple SafeHttp policy rows found. There can be only one — the database is in an invalid state.",
+    "policy_not_found": "SafeHttp policy with ID {id} not found",
+    "wildcard_in_strict_mode": "Wildcard entries are not permitted while strictMode is enabled. Either set strictMode to false or remove the wildcard entries. Offending: {detail}"
+  },
+  "game_import": {
+    "batch_not_found": "No import batch found for batchId={batchId}",
+    "failure": {
+      "not_found": "The requested game could not be found on the gateway.",
+      "gateway_error": "Fetching game data from the gateway failed.",
+      "internal_error": "The import failed due to an internal error.",
+      "base_import_failed": "Skipped because the base game import failed."
+    }
+  },
+  "system_settings": {
+    "not_found": "No system settings found! Run the seed script to create default settings.",
+    "multiple": "Multiple system settings found! There can be only one. Please fix the database."
+  },
+  "well_known": {
+    "security_txt_not_configured": "security.txt is not configured for this BGE instance. Set SECURITY_CONTACT to enable this endpoint."
+  },
+  "gateway_registry": {
+    "auth_type_not_implemented": "Auth type '{authType}' is not yet implemented. Gateway connection requires AuthType.None until this is implemented."
   }
 }

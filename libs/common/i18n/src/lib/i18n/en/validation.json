@@ -2,10 +2,15 @@
   "isString": "{property} must be a string",
   "isBoolean": "{property} must be a boolean value",
   "isInt": "{property} must be an integer number",
+  "isNumber": "{property} must be a number conforming to the specified constraints",
   "isPositive": "{property} must be a positive number",
   "isIn": "{property} must be one of the following values: {constraints.0}",
   "isEnum": "{property} must be one of the following values: {constraints.1}",
   "isArray": "{property} must be an array",
+  "isObject": "{property} must be an object",
+  "arrayMaxSize": "{property} must contain no more than {constraints.0} elements",
+  "isISO8601": "{property} must be a valid ISO 8601 date string",
+  "maxJsonBytes": "{property} exceeds the maximum serialized size of {constraints.0} UTF-8 bytes",
   "isDate": "{property} must be a Date instance",
   "isUrl": "{property} must be a URL address",
   "isNotEmpty": "{property} should not be empty",
@@ -14,6 +19,9 @@
   "max": "{property} must not be greater than {constraints.0}",
   "minLength": "{property} must be longer than or equal to {constraints.0} characters",
   "maxLength": "{property} must be shorter than or equal to {constraints.0} characters",
+  "isUUID": "{property} must be a UUID",
   "isNumberString": "{property} must be a number string",
-  "nonNegativeIntegerString": "{property} must be a non-negative integer string"
+  "nonNegativeIntegerString": "{property} must be a non-negative integer string",
+  "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
+  "isCidr": "Each entry must be a valid CIDR (e.g. \"10.0.0.0/8\" or \"fc00::/7\"). Single IPs require explicit prefix (e.g. \"10.0.0.5/32\")"
 }

@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import {
   registerDecorator,
   ValidationArguments,
@@ -49,9 +50,12 @@ export class MaxJsonBytesConstraint implements ValidatorConstraintInterface {
   }
 
   defaultMessage(args: ValidationArguments): string {
-    const [maxBytes] = args.constraints as [number];
-
-    return `${args.property} exceeds the maximum serialized size of ${maxBytes} UTF-8 bytes`;
+    // `i18nValidationMessage` JSON-serializes `args.value` into the encoded
+    // marker, but the value here is the (potentially oversized or even
+    // non-serializable — BigInt/circular) payload we just rejected, and the
+    // catalog string only interpolates `{property}` and `{constraints.0}`
+    // (maxBytes). Strip `value` so building the message can never throw.
+    return i18nValidationMessage('validation.maxJsonBytes')({ ...args, value: undefined });
   }
 }
 

@@ -1,3 +1,4 @@
+import { t } from '@bge/i18n';
 import { Controller, Get, Header, HttpCode, NotFoundException, Options, UseInterceptors } from '@nestjs/common';
 import { ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -61,9 +62,7 @@ export class WellKnownController {
     const body = this.securityTxtService.build(issuer);
 
     if (body === null) {
-      throw new NotFoundException(
-        'security.txt is not configured for this BGE instance. ' + 'Set SECURITY_CONTACT to enable this endpoint.',
-      );
+      throw new NotFoundException(t('errors.well_known.security_txt_not_configured'));
     }
 
     return body;

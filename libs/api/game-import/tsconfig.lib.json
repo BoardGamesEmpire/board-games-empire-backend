@@ -6,9 +6,7 @@
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": true,
     "forceConsistentCasingInFileNames": true,
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "target": "esnext",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
@@ -17,9 +15,7 @@
     "strictBindCallApply": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": [
-    "src/**/*.ts"
-  ],
+  "include": ["src/**/*.ts"],
   "references": [
     {
       "path": "../../common/utils/tsconfig.lib.json"
@@ -49,6 +45,9 @@
       "path": "../../common/notifications/tsconfig.lib.json"
     },
     {
+      "path": "../language/tsconfig.lib.json"
+    },
+    {
       "path": "../../queue/actor-context/tsconfig.lib.json"
     },
     {
@@ -58,13 +57,8 @@
       "path": "../../database/tsconfig.lib.json"
     },
     {
-      "path": "../language/tsconfig.lib.json"
+      "path": "../../common/i18n/tsconfig.lib.json"
     }
   ],
-  "exclude": [
-    "jest.config.ts",
-    "jest.config.cts",
-    "src/**/*.spec.ts",
-    "src/**/*.test.ts"
-  ]
+  "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]
 }

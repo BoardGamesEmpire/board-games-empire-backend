@@ -1,6 +1,7 @@
 import type { GameGateway } from '@bge/database';
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
+import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -43,7 +44,7 @@ export class GameGatewayService {
     } catch (error) {
       this.logger.error(`Error fetching game gateway with ID ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(`Game gateway with ID ${id} not found or access denied.`);
+        throw new NotFoundException(t('errors.game_gateway.not_found_or_denied', { id }));
       }
 
       throw error;
@@ -67,13 +68,13 @@ export class GameGatewayService {
 
   async update(gatewayId: string, updateGameGatewayDTO: UpdateGameGatewayDto): Promise<GameGateway> {
     if (Object.keys(updateGameGatewayDTO).length === 0) {
-      throw new BadRequestException('At least one field must be provided for update');
+      throw new BadRequestException(t('common.at_least_one_field'));
     }
 
     try {
       const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId } });
       if (existingGateway === 0) {
-        throw new NotFoundException(`Game gateway with ID ${gatewayId} not found.`);
+        throw new NotFoundException(t('errors.game_gateway.not_found', { id: gatewayId }));
       }
 
       const update: Prisma.GameGatewayUpdateInput = {
@@ -98,7 +99,7 @@ export class GameGatewayService {
     } catch (error) {
       this.logger.error(`Error updating game gateway with ID ${gatewayId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
 
       throw error;
@@ -112,7 +113,7 @@ export class GameGatewayService {
     try {
       const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId } });
       if (existingGateway === 0) {
-        throw new NotFoundException(`Game gateway with ID ${gatewayId} not found.`);
+        throw new NotFoundException(t('errors.game_gateway.not_found', { id: gatewayId }));
       }
 
       const gateway = await this.db.gameGateway.update({
@@ -128,7 +129,7 @@ export class GameGatewayService {
     } catch (error) {
       this.logger.error(`Error deleting game gateway with ID ${gatewayId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to delete this resource.");
+        throw new ForbiddenException(t('common.forbidden.delete'));
       }
 
       throw error;

@@ -8,6 +8,7 @@ import {
   ResourceType,
   type FeedbackReport,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { AppAbility, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
 import { Test, TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -52,7 +53,7 @@ describe('FeedbackController', () => {
 
       expect(feedback.submit).toHaveBeenCalledWith('user-42', expect.objectContaining({ message: 'Crash on load' }));
       expect(result.feedbackReport.id).toBe('fb-controller-1');
-      expect(result.message).toMatch(/submitted/i);
+      expect(result.message).toEqual(t('success.feedback.submitted'));
     });
 
     it('shapes the response through FeedbackReportDto.fromEntity', async () => {

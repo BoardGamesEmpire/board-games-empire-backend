@@ -1,5 +1,6 @@
 import { type Actor, AuditContextService, isApiKeyActor, isSystemActor, isUserActor } from '@bge/actor-context';
 import { Action } from '@bge/database';
+import { t } from '@bge/i18n';
 import { accessibleBy, type WhereInput } from '@casl/prisma';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
@@ -95,7 +96,7 @@ export class AbilityService {
     action: Action,
   ): WhereInput<TResource>[] {
     if (abilities.length === 0) {
-      throw new ForbiddenException("You don't have permission to access this resource.");
+      throw new ForbiddenException(t('common.forbidden.access'));
     }
 
     try {
@@ -106,7 +107,7 @@ export class AbilityService {
         error instanceof Error ? error.stack : String(error),
       );
 
-      throw new ForbiddenException("You don't have permission to access this resource.");
+      throw new ForbiddenException(t('common.forbidden.access'));
     }
   }
 
@@ -203,7 +204,7 @@ export class AbilityService {
 
     if (!apiKey) {
       this.logger.warn(`API key ${apiKeyId} resolved an actor but could not be loaded for ability resolution`);
-      throw new ForbiddenException('API key not found or has been revoked.');
+      throw new ForbiddenException(t('errors.api_key.not_found_or_revoked'));
     }
 
     return this.abilityFactory.createForApiKey(apiKey);

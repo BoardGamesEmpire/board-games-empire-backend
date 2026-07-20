@@ -1,4 +1,5 @@
 import { AuthType, Prisma } from '@bge/database';
+import { t } from '@bge/i18n';
 import { ChannelCredentials, credentials } from '@grpc/grpc-js';
 import { Injectable, NotImplementedException } from '@nestjs/common';
 
@@ -11,10 +12,7 @@ export class GatewayCredentialsFactory {
       }
 
       default: {
-        throw new NotImplementedException(
-          `Auth type '${authType}' is not yet implemented. ` +
-            `Gateway connection requires AuthType.None until this is implemented.`,
-        );
+        throw new NotImplementedException(t('errors.gateway_registry.auth_type_not_implemented', { authType }));
       }
     }
   }

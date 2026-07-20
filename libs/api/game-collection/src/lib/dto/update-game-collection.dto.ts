@@ -1,4 +1,5 @@
 import { Visibility } from '@bge/database';
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
@@ -26,30 +27,30 @@ import {
 export class UpdateGameCollectionDto {
   @ApiPropertyOptional({ description: 'Number of copies owned' })
   @ValidateIf((o) => o.quantity !== undefined)
-  @IsInt()
-  @IsPositive()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   quantity?: number;
 
   @ApiPropertyOptional({ description: 'Personal rating (1-10); null clears it', nullable: true })
   @IsOptional()
-  @IsInt()
-  @Min(1)
-  @Max(10)
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Max(10, { message: i18nValidationMessage('validation.max') })
   rating?: number | null;
 
   @ApiPropertyOptional({ description: 'Personal comment about the game; null clears it', nullable: true })
   @IsOptional()
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   comment?: string | null;
 
   @ApiPropertyOptional({ description: 'Whether the game is a favorite; null clears it', nullable: true })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   favorite?: boolean | null;
 
   @ApiPropertyOptional({ description: 'Whether the user would play the game again; null clears it', nullable: true })
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   playAgain?: boolean | null;
 
   @ApiPropertyOptional({
@@ -57,12 +58,12 @@ export class UpdateGameCollectionDto {
     nullable: true,
   })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   releaseId?: string | null;
 
   @ApiPropertyOptional({ enum: Visibility, description: 'Who may see this collection entry beyond the owner' })
   @ValidateIf((o) => o.visibility !== undefined)
-  @IsEnum(Visibility)
+  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
   visibility?: Visibility;
 }

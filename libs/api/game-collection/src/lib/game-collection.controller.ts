@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { NoCache } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
@@ -79,7 +80,7 @@ export class GameCollectionController {
   @Post()
   addToCollection(@Body() createGameCollectionDto: CreateGameCollectionDto) {
     return from(this.gameCollectionService.addToCollection(createGameCollectionDto)).pipe(
-      map((collection) => ({ collection, message: 'Game added to collection successfully' })),
+      map((collection) => ({ collection, message: t('success.game_collection.added') })),
     );
   }
 
@@ -93,7 +94,7 @@ export class GameCollectionController {
   @Patch(':id')
   updateCollectionEntry(@Param('id') id: string, @Body() updateGameCollectionDto: UpdateGameCollectionDto) {
     return from(this.gameCollectionService.update(id, updateGameCollectionDto)).pipe(
-      map((collection) => ({ collection, message: 'Collection entry updated successfully' })),
+      map((collection) => ({ collection, message: t('success.game_collection.updated') })),
     );
   }
 
@@ -112,7 +113,7 @@ export class GameCollectionController {
   @Delete(':id')
   removeFromCollection(@Param('id') id: string, @Query() query: RemoveGameCollectionQueryDto) {
     return from(this.gameCollectionService.remove(id, query)).pipe(
-      map((collection) => ({ collection, message: 'Game removed from collection successfully' })),
+      map((collection) => ({ collection, message: t('success.game_collection.removed') })),
     );
   }
 }

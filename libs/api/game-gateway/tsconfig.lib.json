@@ -36,6 +36,9 @@
       "path": "../gateway-coordinator-client/tsconfig.lib.json"
     },
     {
+      "path": "../../common/i18n/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     }
   ],

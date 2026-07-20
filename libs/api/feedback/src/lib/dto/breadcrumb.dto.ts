@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsISO8601, IsNotEmpty, IsObject, IsOptional, IsString } from 'class-validator';
 
@@ -32,29 +33,29 @@ export class BreadcrumbDto {
     description: 'When the underlying log record was emitted (ISO 8601, UTC).',
     example: '2026-06-13T10:00:00.000Z',
   })
-  @IsISO8601()
+  @IsISO8601({}, { message: i18nValidationMessage('validation.isISO8601') })
   timestamp!: string;
 
   @ApiProperty({
     enum: BreadcrumbLogLevel,
     description: 'Client log level, collapsed onto the five-level BGE scheme. camelCase wire form.',
   })
-  @IsEnum(BreadcrumbLogLevel)
+  @IsEnum(BreadcrumbLogLevel, { message: i18nValidationMessage('validation.isEnum') })
   level!: BreadcrumbLogLevel;
 
   @ApiProperty({
     description: 'Dotted hierarchical logger name (e.g. "bge.storage.sync_queue").',
     example: 'bge.storage.sync_queue',
   })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   loggerName!: string;
 
   @ApiProperty({
     description: 'Log message, post client-side email-pattern masking.',
   })
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   message!: string;
 
   @ApiPropertyOptional({
@@ -64,6 +65,6 @@ export class BreadcrumbDto {
     nullable: true,
   })
   @IsOptional()
-  @IsObject()
+  @IsObject({ message: i18nValidationMessage('validation.isObject') })
   sanitizedContext?: Record<string, unknown> | null;
 }

@@ -1,5 +1,6 @@
 import type { FeedbackReport, SystemSetting } from '@bge/database';
 import { DatabaseService, Prisma, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { DeploymentInfoService } from '@bge/services';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -155,7 +156,7 @@ export class FeedbackService {
     const user = await this.db.user.findUnique({ where: { id: userId }, select: { id: true } });
 
     if (user === null) {
-      throw new NotFoundException(`User ${userId} not found`);
+      throw new NotFoundException(t('errors.user.not_found', { id: userId }));
     }
 
     const permission = await this.findCreatePermission();

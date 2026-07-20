@@ -1,4 +1,5 @@
 import { DatabaseService, JobStatus, JobType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { NotFoundException } from '@nestjs/common';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { GameImportStatusService } from './import-status.service';
@@ -120,7 +121,10 @@ describe('GameImportStatusService', () => {
       expect.objectContaining({
         status: JobStatus.Failed,
         errorCode: 'GATEWAY_ERROR',
-        error: 'Fetching game data from the gateway failed.',
+        // Read-back translates from the machine-readable errorCode (not the
+        // English string persisted by the worker); I18nResponseInterceptor
+        // renders this marker to a locale-specific string pre-serialization.
+        error: t('errors.game_import.failure.gateway_error'),
       }),
     );
   });

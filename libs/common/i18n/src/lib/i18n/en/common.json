@@ -4,6 +4,8 @@
     "view": "You don't have permission to view this resource.",
     "update": "You don't have permission to update this resource.",
     "delete": "You don't have permission to delete this resource.",
-    "remove": "You don't have permission to remove this resource."
+    "remove": "You don't have permission to remove this resource.",
+    "access": "You don't have permission to access this resource.",
+    "action": "You do not have permission to perform this action."
   }
 }

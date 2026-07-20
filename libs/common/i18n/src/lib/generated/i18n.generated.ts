@@ -12,6 +12,8 @@ export type I18nTranslations = {
             "update": string;
             "delete": string;
             "remove": string;
+            "access": string;
+            "action": string;
         };
     };
     "errors": {
@@ -21,6 +23,22 @@ export type I18nTranslations = {
         "game": {
             "not_found": string;
             "cannot_delete_in_collection": string;
+        };
+        "game_collection": {
+            "not_found": string;
+            "release_platform_mismatch": string;
+        };
+        "platform_game": {
+            "not_found": string;
+        };
+        "game_release": {
+            "not_found": string;
+        };
+        "game_gateway": {
+            "not_found": string;
+            "not_found_or_denied": string;
+            "connect_failed": string;
+            "disconnect_failed": string;
         };
         "event": {
             "not_found": string;
@@ -116,6 +134,14 @@ export type I18nTranslations = {
         "user": {
             "not_found": string;
         };
+        "api_key": {
+            "not_found_or_revoked": string;
+        };
+        "household": {
+            "not_found": string;
+            "invalid_language_tag": string;
+            "language_tag_unsupported": string;
+        };
         "quota": {
             "exceeded": string;
             "check_amount_negative": string;
@@ -140,9 +166,44 @@ export type I18nTranslations = {
             "forbidden_household": string;
             "forbidden_instance": string;
         };
+        "safe_http": {
+            "no_policy": string;
+            "multiple_policies": string;
+            "policy_not_found": string;
+            "wildcard_in_strict_mode": string;
+        };
+        "game_import": {
+            "batch_not_found": string;
+            "failure": {
+                "not_found": string;
+                "gateway_error": string;
+                "internal_error": string;
+                "base_import_failed": string;
+            };
+        };
+        "system_settings": {
+            "not_found": string;
+            "multiple": string;
+        };
+        "well_known": {
+            "security_txt_not_configured": string;
+        };
+        "gateway_registry": {
+            "auth_type_not_implemented": string;
+        };
     };
     "success": {
         "game": {
+            "created": string;
+            "updated": string;
+            "deleted": string;
+        };
+        "game_collection": {
+            "added": string;
+            "updated": string;
+            "removed": string;
+        };
+        "household": {
             "created": string;
             "updated": string;
             "deleted": string;
@@ -198,15 +259,26 @@ export type I18nTranslations = {
             "reactivated": string;
             "deleted": string;
         };
+        "game_import": {
+            "enqueued": string;
+        };
+        "feedback": {
+            "submitted": string;
+        };
     };
     "validation": {
         "isString": string;
         "isBoolean": string;
         "isInt": string;
+        "isNumber": string;
         "isPositive": string;
         "isIn": string;
         "isEnum": string;
         "isArray": string;
+        "isObject": string;
+        "arrayMaxSize": string;
+        "isISO8601": string;
+        "maxJsonBytes": string;
         "isDate": string;
         "isUrl": string;
         "isNotEmpty": string;
@@ -215,8 +287,11 @@ export type I18nTranslations = {
         "max": string;
         "minLength": string;
         "maxLength": string;
+        "isUUID": string;
         "isNumberString": string;
         "nonNegativeIntegerString": string;
+        "isHostnameOrWildcard": string;
+        "isCidr": string;
     };
 };
 /* prettier-ignore */

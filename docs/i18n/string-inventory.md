@@ -124,20 +124,95 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   (5 keys). Both specs needed ZERO edits (assert exception types / definedness, never strings). **DTOs are in a
   separate lib (`@bge/webhooks` / `libs/common/webhooks`)** — bare decorators, no custom message literals, so no
   guardrail trip; that lib's validator-annotation sweep is deferred to its own item.
-- [ ] `libs/api/game-collection` — 7 exceptions + 3 success
-- [ ] `libs/api/game-gateway` — 6 exceptions (fix 2 raw `error.message` pass-through, §6)
-- [ ] `libs/common/permissions` — 5 ForbiddenException
-- [ ] `libs/api/household` — 4 exceptions + 3 success
-- [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
-- [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
-- [ ] `libs/api/system-settings` — 2 exceptions
+- [x] `libs/api/game-collection` — **DONE**. Real surface was **8 exceptions + 3 success** (inventory
+  said 7): the sweep missed the `return new NotFoundException(...)` in `mapMissingToNotFound` — a
+  non-`throw` construction, exactly the under count §3 warns about. No `assert()` throws. Fully
+  mechanical (no custom filters): services throw `t()` markers to the global `I18nExceptionFilter`,
+  controller returns `t('success.game_collection.*')` markers. New per-entity namespaces
+  `errors.game_collection.{not_found,release_platform_mismatch}`, `errors.platform_game.not_found`,
+  `errors.game_release.not_found` (translatable nouns baked into the frame, only IDs interpolated);
+  reused shared `common.at_least_one_field`. `success.game_collection.{added,updated,removed}`. No new
+  validation keys — all 4 DTOs annotated against existing `validation.*`. Only the controller spec's
+  one `message: expect.any(String)` needed editing (→ `t()` marker, `toMatchObject` structural); the
+  service spec asserts exception TYPES only (zero edits). Guardrail enabled.
+- [x] `libs/api/game-gateway` — **DONE**. 6 service exceptions + fixed the 2 raw `error.message`
+  pass-through **info-leaks** (§6). No `assert()`, no success `message:` bodies. New per-entity
+  namespace `errors.game_gateway.{not_found,not_found_or_denied,connect_failed,disconnect_failed}`
+  (two distinct not-found messages: `getById` says "not found or access denied" — the ability-scoped
+  `findUniqueOrThrow` can't distinguish the two — while `update`/`delete` count first and say plain
+  "not found"). The controller's connect/disconnect `catchError` now returns a generic translated
+  marker (`connect_failed`/`disconnect_failed`) rendered by `I18nResponseInterceptor`; the raw
+  coordinator error stays server-side in the logger only. Reused `common.at_least_one_field` /
+  `common.forbidden.{update,delete}`. No new validation keys — `CreateGameGatewayDto` annotated
+  against existing `validation.{isString,isPositive,max,isBoolean,isIn}`; `UpdateGameGatewayDto` is
+  `PartialType(CreateGameGatewayDto)` so it inherits the annotations. Both specs assert exception
+  TYPES / DTO fields only — zero edits.
+- [x] `libs/common/permissions` — **DONE**. 5 ForbiddenException (surface matched inventory; no
+  `assert()` throws, no success bodies, no DTOs). Fully mechanical (no custom filters): the guard and
+  `AbilityService` throw `t()` markers caught by the global `I18nExceptionFilter`. Reused shared
+  `common.forbidden.access` (ability.service `getResourceConditionsForAbilities` ×2) and new
+  `common.forbidden.action` (policies.guard ×2 — "You do not have permission to perform this action.").
+  New `errors.api_key.not_found_or_revoked` for the one unique message (revoked/missing key on ability
+  resolution). No new validation keys. Both specs assert exception TYPES / delegation only (zero edits).
+  Guardrail enabled on `permissions/eslint.config.mjs`; `nx sync` added the i18n tsconfig ref (first
+  `@bge/i18n` import).
+- [x] `libs/api/household` — **DONE**. Real surface was **9 exceptions + 3 success** (inventory said
+  4/3): the `throw new` sweep missed **4 `assert(cond, new *Exception(...))` throws** (3 not-found +
+  BCP 47 tag validation), exactly the under count §3 warns about. Fully mechanical (no custom filters).
+  New `errors.household.{not_found,invalid_language_tag,language_tag_unsupported}` (IDs / user-supplied
+  tags interpolated; not-found normalized to the "with ID {id}" frame). Reused shared
+  `common.forbidden.{view,update,delete}` (the view/delete throws' "this household" copy normalized to
+  the generic "this resource" — service spec asserts TYPES only) and `common.at_least_one_field`.
+  `success.household.{created,updated,deleted}` (updated/deleted keep the `{id}`). No new validation
+  keys — `CreateHouseholdDto` annotated against existing `validation.{isString,isEnum}`;
+  `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
+  TYPES / delegation only — zero edits. Guardrail enabled.
+- [x] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
+- [x] `libs/api/game-import` — **DONE**. Only 1 of the 3 exceptions is HTTP-facing
+  (`import-status.service.ts` batch lookup → `errors.game_import.batch_not_found`); the other two are
+  thrown inside BullMQ worker processors, caught by `sanitizeImportError`, and land only in `Job.error`
+  plus operator logs, so they stay English (both use string concatenation, so the #145 guardrail's
+  direct-literal selectors don't trip — no eslint-disable needed). The `SAFE_MESSAGE` map stays English
+  for worker-emitted surfaces (webhook/notification); only the REST read-back is localized —
+  `toJobDto` maps `errorCode → t(IMPORT_FAILURE_MESSAGE_KEYS[code])` behind `I18nResponseInterceptor`.
+  Deferred worker-side localization (notification + webhook) → new issue **#188**. Added
+  `errors.game_import.batch_not_found` + `errors.game_import.failure.*`, `success.game_import.enqueued`,
+  `validation.isUUID`. Both DTOs annotated.
+- [x] `libs/api/system-settings` — **DONE**. 2 exceptions (surface matched inventory; no `assert()`, no
+  success bodies). Operator-facing "run the seed" invariants →
+  `errors.system_settings.{not_found,multiple}` (mirrors the `safe_http.no_policy` / `multiple_policies`
+  singleton-invariant pattern). `UpdateSystemSettingsDto` annotated (`@IsBoolean` ×4, `@IsNumber`)
+  against existing `validation.isBoolean` + new `validation.isNumber`; `@IsOptional()` left unannotated.
+  Both specs are `should be defined` only (zero edits). Guardrail enabled; `nx sync` added the i18n
+  tsconfig ref (first `@bge/i18n` import).
 - [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success
   (`success.quota.set`). Controller spec updated to assert the `t()` marker.
-- [ ] `libs/api/feedback` — 1 exception + 1 success + 1 custom-validator message
-- [ ] `libs/api/language` — 1 exception
-- [ ] `libs/api/well-known` — 1 exception
-- [ ] `libs/api/gateway-registry` — 1 exception
-- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:53`)
+- [x] `libs/api/feedback` — **DONE**. 1 exception + 1 success + 1 custom-validator message. The
+  exception (`banUser` user-not-found) reuses the shared `errors.user.not_found` key. Success
+  `message:` → `success.feedback.submitted` (the `SubmitFeedbackResponse.message` type widened from
+  `string` to `I18nMessage`; the interceptor renders it to a string pre-serialization). The
+  `MaxJsonBytesConstraint.defaultMessage()` now returns `i18nValidationMessage('validation.maxJsonBytes')`
+  — but with `value` stripped from the args, because the factory JSON-serializes `args.value` and the
+  rejected payload may be oversized or non-serializable (BigInt/circular); the catalog string only uses
+  `{property}` + `{constraints.0}`. DTO annotation added `validation.{isObject,arrayMaxSize,isISO8601,maxJsonBytes}`.
+  The internal `findCreatePermission` plain `Error` stays English (§5). Controller spec updated to assert
+  the `t()` marker; validator spec unaffected (asserts booleans).
+- [x] `libs/api/language` — **DONE** (was the #143 exemplar; `errors.language.not_found` already
+  converted). This pass only enabled the #145 guardrail on its eslint config.
+- [x] `libs/api/well-known` — **DONE**. 1 exception (`getSecurityTxt` → `errors.well_known.security_txt_not_configured`;
+  concatenated literals joined into one catalog entry per §6). The `assert(settings, '…')` in
+  `strategy.service.ts` stays English — a `node:assert` invariant that surfaces as a generic 500, never a
+  client-facing body (§5). Controller spec's "descriptive message" test rewritten to assert the marker via
+  `getResponse()`.
+- [x] `libs/api/gateway-registry` — **DONE**. 1 exception (`GatewayCredentialsFactory` →
+  `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
+  (zero spec edits).
+- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:54`). **BLOCKED on a cycle:**
+  `@bge/i18n` already imports `AuditContextService` / `LOCALE_CLS_KEY` from `@bge/actor-context`, so
+  having `@bge/actor-context` import `t` from `@bge/i18n` forms a circular project reference that
+  `tsc --build` rejects. Needs the pure `t`/`translatable` primitive (no NestJS/actor-context deps)
+  extracted into a lower lib both can depend on before this one can migrate. The plain `Error` at
+  `audit-context.service.ts:44` stays English regardless (§5).
 - [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — 19 auth-plumbing exceptions (17 internal gRPC)
 
 ---

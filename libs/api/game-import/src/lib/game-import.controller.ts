@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Get, Logger, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -54,7 +55,7 @@ export class GameImportController {
       .pipe(
         tap((result) => this.logger.log(`Import enqueued: batchId=${result.batchId} baseJobId=${result.baseJobId}`)),
         map((result) => ({
-          message: 'Import enqueued',
+          message: t('success.game_import.enqueued'),
           batchId: result.batchId,
           baseJobId: result.baseJobId,
           expansionJobIds: result.expansionJobIds,

@@ -1,3 +1,4 @@
+import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
@@ -170,10 +171,17 @@ describe('WellKnownController', () => {
       await expect(controller.getSecurityTxt()).rejects.toThrow(NotFoundException);
     });
 
-    it('throws NotFoundException with a descriptive message', async () => {
+    it('throws NotFoundException carrying the security.txt i18n marker', async () => {
       securityTxtService.build.mockReturnValue(null);
 
-      await expect(controller.getSecurityTxt()).rejects.toThrow('SECURITY_CONTACT');
+      const error = await controller.getSecurityTxt().then(
+        () => {
+          throw new Error('expected getSecurityTxt to reject');
+        },
+        (e: NotFoundException) => e,
+      );
+      expect(error).toBeInstanceOf(NotFoundException);
+      expect(error.getResponse()).toEqual(t('errors.well_known.security_txt_not_configured'));
     });
 
     it('returns a plain string, not an object (no JSON serialization)', async () => {

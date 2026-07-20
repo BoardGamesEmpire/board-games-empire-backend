@@ -70,10 +70,14 @@ export class ImportJobStatusDto {
   errorCode?: ImportErrorCode;
 
   @ApiPropertyOptional({
+    type: String,
     description:
       'Sanitized, static failure message — present when status is Failed. This endpoint is not owner-scoped, ' +
-      'so it never returns the raw internal error text (see errorCode for machine-readable detail).',
+      'so it never returns the raw internal error text (see errorCode for machine-readable detail). Localized ' +
+      'per request from errorCode; the wire value is always a string.',
   })
+  // Wire contract is a plain string; toJobDto assigns an I18nMessage marker that
+  // I18nResponseInterceptor renders to a localized string before serialization.
   error?: string;
 
   @ApiPropertyOptional({ type: Date, nullable: true })

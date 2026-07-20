@@ -7,6 +7,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { t } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
@@ -86,9 +87,9 @@ export class HouseholdService {
       // The scoped read matched nothing: probe existence to distinguish a
       // missing household (404) from one that exists but isn't visible (403).
       if (await this.householdExists(id)) {
-        throw new ForbiddenException("You don't have permission to view this household.");
+        throw new ForbiddenException(t('common.forbidden.view'));
       }
-      throw new NotFoundException(`Household with id ${id} not found`);
+      throw new NotFoundException(t('errors.household.not_found', { id }));
     }
 
     const memberGamesPromises = household.members.map((member) =>
@@ -197,13 +198,13 @@ export class HouseholdService {
     }
 
     const canonical = canonicalizeTag(tag);
-    assert(canonical, new BadRequestException(`'${tag}' is not a valid IETF BCP 47 language tag`));
+    assert(canonical, new BadRequestException(t('errors.household.invalid_language_tag', { tag })));
 
     const languageTag = await this.db.languageTag.findUnique({
       where: { tag: canonical },
       select: { id: true },
     });
-    assert(languageTag, new BadRequestException(`Language tag '${canonical}' is not supported by this server`));
+    assert(languageTag, new BadRequestException(t('errors.household.language_tag_unsupported', { tag: canonical })));
 
     return languageTag.id;
   }
@@ -256,7 +257,7 @@ export class HouseholdService {
 
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
     if (Object.keys(updateHouseholdDto).length === 0) {
-      throw new BadRequestException('At least one field must be provided for update');
+      throw new BadRequestException(t('common.at_least_one_field'));
     }
 
     const { language, ...rest } = updateHouseholdDto;
@@ -265,7 +266,7 @@ export class HouseholdService {
     try {
       // Existence first (→ 404); the scoped update below enforces permission
       // (P2025 → 403). Keeps the two outcomes distinguishable.
-      assert(await this.householdExists(id), new NotFoundException(`Household with id ${id} not found`));
+      assert(await this.householdExists(id), new NotFoundException(t('errors.household.not_found', { id })));
 
       return await this.db.household.update({
         where: {
@@ -287,7 +288,7 @@ export class HouseholdService {
     } catch (error) {
       this.logger.error(`Error updating household with id ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to update this resource.");
+        throw new ForbiddenException(t('common.forbidden.update'));
       }
 
       throw error;
@@ -358,7 +359,7 @@ export class HouseholdService {
       // Existence first (→ 404); the scoped update below enforces the delete
       // policy (owner-only), and a non-matching `where` (→ P2025) maps to 403 —
       // consistent with updateHousehold and GameService.delete/update.
-      assert(await this.householdExists(id), new NotFoundException(`Household with id ${id} not found`));
+      assert(await this.householdExists(id), new NotFoundException(t('errors.household.not_found', { id })));
 
       const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
         const household = await tx.household.update({
@@ -400,7 +401,7 @@ export class HouseholdService {
       // Existence was confirmed above, so a scoped-update miss means the actor
       // isn't permitted to delete this household (owner-only) → 403.
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException("You don't have permission to delete this household.");
+        throw new ForbiddenException(t('common.forbidden.delete'));
       }
 
       throw error;

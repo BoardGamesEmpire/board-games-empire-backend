@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, GameGateway, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
@@ -125,10 +126,12 @@ export class GameGatewayController {
         connection_attempt: true,
       })),
       catchError((error) => {
+        // Log the raw coordinator error server-side, but never surface it to
+        // the client — return a generic, translated message instead (§6).
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
         return of({
           gateway,
-          connection_response: { success: false, message: error.message },
+          connection_response: { success: false, message: t('errors.game_gateway.connect_failed') },
           connection_attempt: true,
         });
       }),
@@ -158,10 +161,12 @@ export class GameGatewayController {
         disconnection_attempt: true,
       })),
       catchError((error) => {
+        // Log the raw coordinator error server-side, but never surface it to
+        // the client — return a generic, translated message instead (§6).
         this.logger.error(`Error disconnecting from gateway ${gateway.id}`, error);
         return of({
           gateway,
-          disconnection_response: { success: false, message: error.message },
+          disconnection_response: { success: false, message: t('errors.game_gateway.disconnect_failed') },
           disconnection_attempt: true,
         });
       }),
