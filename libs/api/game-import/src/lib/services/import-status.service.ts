@@ -167,7 +167,9 @@ export class GameImportStatusService {
       thumbnail: result?.thumbnail,
       platformGames: result?.platformGames,
       errorCode: result?.errorCode,
-      error: result?.errorCode ? t(IMPORT_FAILURE_MESSAGE_KEYS[result.errorCode]) : undefined,
+      // Marker cast to the DTO's string field: I18nResponseInterceptor renders it
+      // to a localized string before serialization, so the wire value is a string.
+      error: result?.errorCode ? (t(IMPORT_FAILURE_MESSAGE_KEYS[result.errorCode]) as unknown as string) : undefined,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
     };

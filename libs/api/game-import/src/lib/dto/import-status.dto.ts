@@ -1,5 +1,4 @@
 import { JobStatus } from '@bge/database';
-import type { I18nMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { ImportErrorCode } from '../utils/sanitize-import-error';
@@ -77,9 +76,9 @@ export class ImportJobStatusDto {
       'so it never returns the raw internal error text (see errorCode for machine-readable detail). Localized ' +
       'per request from errorCode; the wire value is always a string.',
   })
-  // Holds an I18nMessage marker until I18nResponseInterceptor renders it to a
-  // string pre-serialization (see the toJobDto read-back mapping).
-  error?: string | I18nMessage;
+  // Wire contract is a plain string; toJobDto assigns an I18nMessage marker that
+  // I18nResponseInterceptor renders to a localized string before serialization.
+  error?: string;
 
   @ApiPropertyOptional({ type: Date, nullable: true })
   startedAt?: Date | null;
