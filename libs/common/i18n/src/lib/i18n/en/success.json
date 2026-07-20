@@ -64,5 +64,8 @@
     "disabled": "Webhook subscription {id} disabled",
     "reactivated": "Webhook subscription {id} re-activated",
     "deleted": "Webhook subscription {id} deleted"
+  },
+  "game_import": {
+    "enqueued": "Import enqueued"
   }
 }

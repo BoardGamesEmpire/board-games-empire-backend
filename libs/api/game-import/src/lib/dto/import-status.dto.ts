@@ -1,4 +1,5 @@
 import { JobStatus } from '@bge/database';
+import type { I18nMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { ImportErrorCode } from '../utils/sanitize-import-error';
@@ -70,11 +71,15 @@ export class ImportJobStatusDto {
   errorCode?: ImportErrorCode;
 
   @ApiPropertyOptional({
+    type: String,
     description:
       'Sanitized, static failure message — present when status is Failed. This endpoint is not owner-scoped, ' +
-      'so it never returns the raw internal error text (see errorCode for machine-readable detail).',
+      'so it never returns the raw internal error text (see errorCode for machine-readable detail). Localized ' +
+      'per request from errorCode; the wire value is always a string.',
   })
-  error?: string;
+  // Holds an I18nMessage marker until I18nResponseInterceptor renders it to a
+  // string pre-serialization (see the toJobDto read-back mapping).
+  error?: string | I18nMessage;
 
   @ApiPropertyOptional({ type: Date, nullable: true })
   startedAt?: Date | null;

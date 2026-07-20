@@ -153,5 +153,14 @@
     "multiple_policies": "Multiple SafeHttp policy rows found. There can be only one — the database is in an invalid state.",
     "policy_not_found": "SafeHttp policy with ID {id} not found",
     "wildcard_in_strict_mode": "Wildcard entries are not permitted while strictMode is enabled. Either set strictMode to false or remove the wildcard entries. Offending: {detail}"
+  },
+  "game_import": {
+    "batch_not_found": "No import batch found for batchId={batchId}",
+    "failure": {
+      "not_found": "The requested game could not be found on the gateway.",
+      "gateway_error": "Fetching game data from the gateway failed.",
+      "internal_error": "The import failed due to an internal error.",
+      "base_import_failed": "Skipped because the base game import failed."
+    }
   }
 }

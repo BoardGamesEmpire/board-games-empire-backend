@@ -172,6 +172,15 @@ export type I18nTranslations = {
             "policy_not_found": string;
             "wildcard_in_strict_mode": string;
         };
+        "game_import": {
+            "batch_not_found": string;
+            "failure": {
+                "not_found": string;
+                "gateway_error": string;
+                "internal_error": string;
+                "base_import_failed": string;
+            };
+        };
     };
     "success": {
         "game": {
@@ -240,6 +249,9 @@ export type I18nTranslations = {
             "reactivated": string;
             "deleted": string;
         };
+        "game_import": {
+            "enqueued": string;
+        };
     };
     "validation": {
         "isString": string;
@@ -257,6 +269,7 @@ export type I18nTranslations = {
         "max": string;
         "minLength": string;
         "maxLength": string;
+        "isUUID": string;
         "isNumberString": string;
         "nonNegativeIntegerString": string;
         "isHostnameOrWildcard": string;

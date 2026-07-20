@@ -14,6 +14,7 @@
   "max": "{property} must not be greater than {constraints.0}",
   "minLength": "{property} must be longer than or equal to {constraints.0} characters",
   "maxLength": "{property} must be shorter than or equal to {constraints.0} characters",
+  "isUUID": "{property} must be a UUID",
   "isNumberString": "{property} must be a number string",
   "nonNegativeIntegerString": "{property} must be a non-negative integer string",
   "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
