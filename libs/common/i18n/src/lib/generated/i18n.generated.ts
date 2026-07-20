@@ -181,6 +181,10 @@ export type I18nTranslations = {
                 "base_import_failed": string;
             };
         };
+        "system_settings": {
+            "not_found": string;
+            "multiple": string;
+        };
     };
     "success": {
         "game": {
@@ -257,6 +261,7 @@ export type I18nTranslations = {
         "isString": string;
         "isBoolean": string;
         "isInt": string;
+        "isNumber": string;
         "isPositive": string;
         "isIn": string;
         "isEnum": string;

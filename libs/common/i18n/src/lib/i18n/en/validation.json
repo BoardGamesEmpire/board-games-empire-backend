@@ -2,6 +2,7 @@
   "isString": "{property} must be a string",
   "isBoolean": "{property} must be a boolean value",
   "isInt": "{property} must be an integer number",
+  "isNumber": "{property} must be a number conforming to the specified constraints",
   "isPositive": "{property} must be a positive number",
   "isIn": "{property} must be one of the following values: {constraints.0}",
   "isEnum": "{property} must be one of the following values: {constraints.1}",

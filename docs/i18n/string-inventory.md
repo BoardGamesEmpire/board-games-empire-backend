@@ -168,8 +168,23 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
   TYPES / delegation only — zero edits. Guardrail enabled.
 - [x] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
-- [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
-- [ ] `libs/api/system-settings` — 2 exceptions
+- [x] `libs/api/game-import` — **DONE**. Only 1 of the 3 exceptions is HTTP-facing
+  (`import-status.service.ts` batch lookup → `errors.game_import.batch_not_found`); the other two are
+  thrown inside BullMQ worker processors, caught by `sanitizeImportError`, and land only in `Job.error`
+  plus operator logs, so they stay English (both use string concatenation, so the #145 guardrail's
+  direct-literal selectors don't trip — no eslint-disable needed). The `SAFE_MESSAGE` map stays English
+  for worker-emitted surfaces (webhook/notification); only the REST read-back is localized —
+  `toJobDto` maps `errorCode → t(IMPORT_FAILURE_MESSAGE_KEYS[code])` behind `I18nResponseInterceptor`.
+  Deferred worker-side localization (notification + webhook) → new issue **#188**. Added
+  `errors.game_import.batch_not_found` + `errors.game_import.failure.*`, `success.game_import.enqueued`,
+  `validation.isUUID`. Both DTOs annotated.
+- [x] `libs/api/system-settings` — **DONE**. 2 exceptions (surface matched inventory; no `assert()`, no
+  success bodies). Operator-facing "run the seed" invariants →
+  `errors.system_settings.{not_found,multiple}` (mirrors the `safe_http.no_policy` / `multiple_policies`
+  singleton-invariant pattern). `UpdateSystemSettingsDto` annotated (`@IsBoolean` ×4, `@IsNumber`)
+  against existing `validation.isBoolean` + new `validation.isNumber`; `@IsOptional()` left unannotated.
+  Both specs are `should be defined` only (zero edits). Guardrail enabled; `nx sync` added the i18n
+  tsconfig ref (first `@bge/i18n` import).
 - [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success
   (`success.quota.set`). Controller spec updated to assert the `t()` marker.
 - [ ] `libs/api/feedback` — 1 exception + 1 success + 1 custom-validator message

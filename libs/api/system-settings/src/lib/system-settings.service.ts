@@ -1,4 +1,5 @@
 import { DatabaseService, SystemSetting } from '@bge/database';
+import { t } from '@bge/i18n';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
 
@@ -14,11 +15,11 @@ export class SystemSettingsService {
   async getSystemSettings(): Promise<SystemSetting> {
     const settings = await this.db.systemSetting.findMany();
     if (settings.length === 0) {
-      throw new NotFoundException('No system settings found! Run the seed script to create default settings.');
+      throw new NotFoundException(t('errors.system_settings.not_found'));
     }
 
     if (settings.length > 1) {
-      throw new ConflictException('Multiple system settings found! There can be only one. Please fix the database.');
+      throw new ConflictException(t('errors.system_settings.multiple'));
     }
 
     return settings[0];

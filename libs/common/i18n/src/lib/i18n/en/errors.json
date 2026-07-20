@@ -162,5 +162,9 @@
       "internal_error": "The import failed due to an internal error.",
       "base_import_failed": "Skipped because the base game import failed."
     }
+  },
+  "system_settings": {
+    "not_found": "No system settings found! Run the seed script to create default settings.",
+    "multiple": "Multiple system settings found! There can be only one. Please fix the database."
   }
 }
