@@ -166,5 +166,11 @@
   "system_settings": {
     "not_found": "No system settings found! Run the seed script to create default settings.",
     "multiple": "Multiple system settings found! There can be only one. Please fix the database."
+  },
+  "well_known": {
+    "security_txt_not_configured": "security.txt is not configured for this BGE instance. Set SECURITY_CONTACT to enable this endpoint."
+  },
+  "gateway_registry": {
+    "auth_type_not_implemented": "Auth type '{authType}' is not yet implemented. Gateway connection requires AuthType.None until this is implemented."
   }
 }

@@ -187,11 +187,32 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   tsconfig ref (first `@bge/i18n` import).
 - [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success
   (`success.quota.set`). Controller spec updated to assert the `t()` marker.
-- [ ] `libs/api/feedback` — 1 exception + 1 success + 1 custom-validator message
-- [ ] `libs/api/language` — 1 exception
-- [ ] `libs/api/well-known` — 1 exception
-- [ ] `libs/api/gateway-registry` — 1 exception
-- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:53`)
+- [x] `libs/api/feedback` — **DONE**. 1 exception + 1 success + 1 custom-validator message. The
+  exception (`banUser` user-not-found) reuses the shared `errors.user.not_found` key. Success
+  `message:` → `success.feedback.submitted` (the `SubmitFeedbackResponse.message` type widened from
+  `string` to `I18nMessage`; the interceptor renders it to a string pre-serialization). The
+  `MaxJsonBytesConstraint.defaultMessage()` now returns `i18nValidationMessage('validation.maxJsonBytes')`
+  — but with `value` stripped from the args, because the factory JSON-serializes `args.value` and the
+  rejected payload may be oversized or non-serializable (BigInt/circular); the catalog string only uses
+  `{property}` + `{constraints.0}`. DTO annotation added `validation.{isObject,arrayMaxSize,isISO8601,maxJsonBytes}`.
+  The internal `findCreatePermission` plain `Error` stays English (§5). Controller spec updated to assert
+  the `t()` marker; validator spec unaffected (asserts booleans).
+- [x] `libs/api/language` — **DONE** (was the #143 exemplar; `errors.language.not_found` already
+  converted). This pass only enabled the #145 guardrail on its eslint config.
+- [x] `libs/api/well-known` — **DONE**. 1 exception (`getSecurityTxt` → `errors.well_known.security_txt_not_configured`;
+  concatenated literals joined into one catalog entry per §6). The `assert(settings, '…')` in
+  `strategy.service.ts` stays English — a `node:assert` invariant that surfaces as a generic 500, never a
+  client-facing body (§5). Controller spec's "descriptive message" test rewritten to assert the marker via
+  `getResponse()`.
+- [x] `libs/api/gateway-registry` — **DONE**. 1 exception (`GatewayCredentialsFactory` →
+  `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
+  (zero spec edits).
+- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:54`). **BLOCKED on a cycle:**
+  `@bge/i18n` already imports `AuditContextService` / `LOCALE_CLS_KEY` from `@bge/actor-context`, so
+  having `@bge/actor-context` import `t` from `@bge/i18n` forms a circular project reference that
+  `tsc --build` rejects. Needs the pure `t`/`translatable` primitive (no NestJS/actor-context deps)
+  extracted into a lower lib both can depend on before this one can migrate. The plain `Error` at
+  `audit-context.service.ts:44` stays English regardless (§5).
 - [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — 19 auth-plumbing exceptions (17 internal gRPC)
 
 ---

@@ -67,5 +67,8 @@
   },
   "game_import": {
     "enqueued": "Import enqueued"
+  },
+  "feedback": {
+    "submitted": "Feedback report submitted successfully"
   }
 }

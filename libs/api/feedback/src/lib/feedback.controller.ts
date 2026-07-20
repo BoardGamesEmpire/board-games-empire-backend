@@ -1,4 +1,5 @@
 import { Action, ResourceType } from '@bge/database';
+import { type I18nMessage, t } from '@bge/i18n';
 import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
@@ -12,7 +13,9 @@ import { FeedbackReportDto } from './dto/feedback-report.dto';
 import { FeedbackService } from './feedback.service';
 
 interface SubmitFeedbackResponse {
-  readonly message: string;
+  // `I18nMessage` marker is rendered to a string by `I18nResponseInterceptor`
+  // before serialization; the wire contract stays a plain string.
+  readonly message: I18nMessage;
   readonly feedbackReport: FeedbackReportDto;
 }
 
@@ -46,7 +49,7 @@ export class FeedbackController {
         ),
       ),
       map((report) => ({
-        message: 'Feedback report submitted successfully',
+        message: t('success.feedback.submitted'),
         feedbackReport: FeedbackReportDto.fromEntity(report),
       })),
     );

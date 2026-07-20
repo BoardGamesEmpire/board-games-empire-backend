@@ -185,6 +185,12 @@ export type I18nTranslations = {
             "not_found": string;
             "multiple": string;
         };
+        "well_known": {
+            "security_txt_not_configured": string;
+        };
+        "gateway_registry": {
+            "auth_type_not_implemented": string;
+        };
     };
     "success": {
         "game": {
@@ -256,6 +262,9 @@ export type I18nTranslations = {
         "game_import": {
             "enqueued": string;
         };
+        "feedback": {
+            "submitted": string;
+        };
     };
     "validation": {
         "isString": string;
@@ -266,6 +275,10 @@ export type I18nTranslations = {
         "isIn": string;
         "isEnum": string;
         "isArray": string;
+        "isObject": string;
+        "arrayMaxSize": string;
+        "isISO8601": string;
+        "maxJsonBytes": string;
         "isDate": string;
         "isUrl": string;
         "isNotEmpty": string;

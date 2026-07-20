@@ -1,4 +1,5 @@
 import { FeedbackCategory, FeedbackContext, FeedbackSeverity } from '@bge/database';
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -38,16 +39,16 @@ export class CreateFeedbackReportDto {
     enum: FeedbackCategory,
     description: 'What kind of report this is.',
   })
-  @IsEnum(FeedbackCategory)
+  @IsEnum(FeedbackCategory, { message: i18nValidationMessage('validation.isEnum') })
   category!: FeedbackCategory;
 
   @ApiProperty({
     description: 'Free-form report body. Length-capped at the field level; transport-capped at 256 KB.',
     maxLength: FEEDBACK_MAX_MESSAGE_LENGTH,
   })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(FEEDBACK_MAX_MESSAGE_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @MaxLength(FEEDBACK_MAX_MESSAGE_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   message!: string;
 
   @ApiPropertyOptional({
@@ -56,15 +57,15 @@ export class CreateFeedbackReportDto {
     maxLength: FEEDBACK_MAX_STACK_TRACE_LENGTH,
   })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(FEEDBACK_MAX_STACK_TRACE_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
+  @MaxLength(FEEDBACK_MAX_STACK_TRACE_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   stackTrace?: string;
 
   @ApiPropertyOptional({ description: 'Short title; surfaced as the GitHub issue title when forwarded.' })
   @IsOptional()
-  @IsString()
-  @MaxLength(FEEDBACK_MAX_TITLE_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(FEEDBACK_MAX_TITLE_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   title?: string;
 
   @ApiPropertyOptional({
@@ -73,7 +74,7 @@ export class CreateFeedbackReportDto {
     description: 'Client- vs server-side scope. Drives sink routing once external drivers exist.',
   })
   @IsOptional()
-  @IsEnum(FeedbackContext)
+  @IsEnum(FeedbackContext, { message: i18nValidationMessage('validation.isEnum') })
   context?: FeedbackContext;
 
   @ApiPropertyOptional({
@@ -83,25 +84,25 @@ export class CreateFeedbackReportDto {
   @ValidateIf(
     (dto: CreateFeedbackReportDto) => dto.severity !== undefined || SEVERITY_REQUIRED_CATEGORIES.has(dto.category),
   )
-  @IsEnum(FeedbackSeverity)
+  @IsEnum(FeedbackSeverity, { message: i18nValidationMessage('validation.isEnum') })
   severity?: FeedbackSeverity;
 
   @ApiPropertyOptional({ description: 'Submitting client app version (e.g. "0.4.1").' })
   @IsOptional()
-  @IsString()
-  @MaxLength(FEEDBACK_MAX_APP_VERSION_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(FEEDBACK_MAX_APP_VERSION_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   appVersion?: string;
 
   @ApiPropertyOptional({ description: 'Submitting platform (e.g. "android", "ios", "web", "desktop").' })
   @IsOptional()
-  @IsString()
-  @MaxLength(FEEDBACK_MAX_PLATFORM_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(FEEDBACK_MAX_PLATFORM_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   platform?: string;
 
   @ApiPropertyOptional({ description: 'BCP-47 locale (e.g. "en-US").' })
   @IsOptional()
-  @IsString()
-  @MaxLength(FEEDBACK_MAX_LOCALE_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(FEEDBACK_MAX_LOCALE_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   locale?: string;
 
   @ApiPropertyOptional({
@@ -110,7 +111,7 @@ export class CreateFeedbackReportDto {
     additionalProperties: true,
   })
   @IsOptional()
-  @IsObject()
+  @IsObject({ message: i18nValidationMessage('validation.isObject') })
   deviceInfo?: Record<string, unknown>;
 
   @ApiPropertyOptional({
@@ -119,7 +120,7 @@ export class CreateFeedbackReportDto {
       'Client-emitted breadcrumb ring (post sanitization; see the Dart `BreadcrumbBuffer`). Aggregate size capped at FEEDBACK_BREADCRUMBS_MAX_BYTES UTF-8 bytes.',
   })
   @IsOptional()
-  @IsArray()
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @ValidateNested({ each: true })
   @Type(() => BreadcrumbDto)
   @MaxJsonBytes(FEEDBACK_BREADCRUMBS_MAX_BYTES)
@@ -130,8 +131,8 @@ export class CreateFeedbackReportDto {
     maxLength: FEEDBACK_MAX_CORRELATION_KEY_LENGTH,
   })
   @IsOptional()
-  @IsString()
-  @MaxLength(FEEDBACK_MAX_CORRELATION_KEY_LENGTH)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MaxLength(FEEDBACK_MAX_CORRELATION_KEY_LENGTH, { message: i18nValidationMessage('validation.maxLength') })
   correlationKey?: string;
 
   @ApiPropertyOptional({
@@ -139,8 +140,8 @@ export class CreateFeedbackReportDto {
     description: 'Field paths the client redacted before submission. Sets redactionApplied=true server-side.',
   })
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  @ArrayMaxSize(FEEDBACK_MAX_REDACTED_FIELDS)
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.isString') })
+  @ArrayMaxSize(FEEDBACK_MAX_REDACTED_FIELDS, { message: i18nValidationMessage('validation.arrayMaxSize') })
   userRedactedFields?: string[];
 }

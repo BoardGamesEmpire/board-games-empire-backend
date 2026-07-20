@@ -18,10 +18,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/services/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
-      "path": "../../common/services/tsconfig.lib.json"
+      "path": "../../common/i18n/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"
