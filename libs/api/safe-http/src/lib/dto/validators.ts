@@ -1,6 +1,8 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { parseCidr } from '@bge/secure-http';
 import {
   registerDecorator,
+  type ValidationArguments,
   type ValidationOptions,
   ValidatorConstraint,
   type ValidatorConstraintInterface,
@@ -30,8 +32,8 @@ export class IsHostnameOrWildcardConstraint implements ValidatorConstraintInterf
     return isFQDN(candidate, { require_tld: false, allow_underscores: false });
   }
 
-  defaultMessage(): string {
-    return 'Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")';
+  defaultMessage(args: ValidationArguments): string {
+    return i18nValidationMessage('validation.isHostnameOrWildcard')(args);
   }
 }
 
@@ -68,8 +70,8 @@ export class IsCidrConstraint implements ValidatorConstraintInterface {
     return parseCidr(value) !== null;
   }
 
-  defaultMessage(): string {
-    return 'Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")';
+  defaultMessage(args: ValidationArguments): string {
+    return i18nValidationMessage('validation.isCidr')(args);
   }
 }
 

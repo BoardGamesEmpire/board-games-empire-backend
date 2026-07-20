@@ -166,6 +166,12 @@ export type I18nTranslations = {
             "forbidden_household": string;
             "forbidden_instance": string;
         };
+        "safe_http": {
+            "no_policy": string;
+            "multiple_policies": string;
+            "policy_not_found": string;
+            "wildcard_in_strict_mode": string;
+        };
     };
     "success": {
         "game": {
@@ -253,6 +259,8 @@ export type I18nTranslations = {
         "maxLength": string;
         "isNumberString": string;
         "nonNegativeIntegerString": string;
+        "isHostnameOrWildcard": string;
+        "isCidr": string;
     };
 };
 /* prettier-ignore */

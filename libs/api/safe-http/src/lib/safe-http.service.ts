@@ -1,5 +1,6 @@
 import { actorUserId, AuditContextService } from '@bge/actor-context';
 import { DatabaseService, type SafeHttpPolicy } from '@bge/database';
+import { t } from '@bge/i18n';
 import { SafeHttpPolicyEventsService } from '@bge/secure-http';
 import { BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { UpdateSafeHttpPolicyDto } from './dto/update-safe-http-policy.dto';
@@ -23,12 +24,10 @@ export class SafeHttpService {
     const rows = await this.db.safeHttpPolicy.findMany();
 
     if (rows.length === 0) {
-      throw new NotFoundException('No SafeHttp policy found. Run the seed script to create the default singleton row.');
+      throw new NotFoundException(t('errors.safe_http.no_policy'));
     }
     if (rows.length > 1) {
-      throw new ConflictException(
-        'Multiple SafeHttp policy rows found. There can be only one — the database is in an invalid state.',
-      );
+      throw new ConflictException(t('errors.safe_http.multiple_policies'));
     }
 
     return rows[0];
@@ -51,7 +50,7 @@ export class SafeHttpService {
   async updatePolicy(id: string, dto: UpdateSafeHttpPolicyDto): Promise<SafeHttpPolicy> {
     const existing = await this.db.safeHttpPolicy.findUnique({ where: { id } });
     if (!existing) {
-      throw new NotFoundException(`SafeHttp policy ${id} not found`);
+      throw new NotFoundException(t('errors.safe_http.policy_not_found', { id }));
     }
 
     // Normalize hostname casing before validation and persistence. The
@@ -119,10 +118,6 @@ export class SafeHttpService {
 
     const detail = offenders.map((o) => `${o.field}: [${o.entries.join(', ')}]`).join('; ');
 
-    throw new BadRequestException(
-      `Wildcard entries are not permitted while strictMode is enabled. ` +
-        `Either set strictMode to false or remove the wildcard entries. ` +
-        `Offending: ${detail}`,
-    );
+    throw new BadRequestException(t('errors.safe_http.wildcard_in_strict_mode', { detail }));
   }
 }

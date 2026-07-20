@@ -167,7 +167,7 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
   keys — `CreateHouseholdDto` annotated against existing `validation.{isString,isEnum}`;
   `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
   TYPES / delegation only — zero edits. Guardrail enabled.
-- [ ] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
+- [x] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
 - [ ] `libs/api/game-import` — 3 (worker) exceptions + `SAFE_MESSAGE` map + 1 success
 - [ ] `libs/api/system-settings` — 2 exceptions
 - [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success

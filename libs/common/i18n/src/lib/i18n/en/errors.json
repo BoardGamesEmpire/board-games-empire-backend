@@ -147,5 +147,11 @@
     "forbidden_subject_access": "You don't have {action} access to {subject} events",
     "forbidden_household": "You don't have access to household {householdId}",
     "forbidden_instance": "You don't have access to {resourceType} {resourceId}"
+  },
+  "safe_http": {
+    "no_policy": "No SafeHttp policy found. Run the seed script to create the default singleton row.",
+    "multiple_policies": "Multiple SafeHttp policy rows found. There can be only one — the database is in an invalid state.",
+    "policy_not_found": "SafeHttp policy with ID {id} not found",
+    "wildcard_in_strict_mode": "Wildcard entries are not permitted while strictMode is enabled. Either set strictMode to false or remove the wildcard entries. Offending: {detail}"
   }
 }

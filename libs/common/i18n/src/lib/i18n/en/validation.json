@@ -15,5 +15,7 @@
   "minLength": "{property} must be longer than or equal to {constraints.0} characters",
   "maxLength": "{property} must be shorter than or equal to {constraints.0} characters",
   "isNumberString": "{property} must be a number string",
-  "nonNegativeIntegerString": "{property} must be a non-negative integer string"
+  "nonNegativeIntegerString": "{property} must be a non-negative integer string",
+  "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
+  "isCidr": "Each entry must be a valid CIDR (e.g. \"10.0.0.0/8\" or \"fc00::/7\"). Single IPs require explicit prefix (e.g. \"10.0.0.5/32\")"
 }
