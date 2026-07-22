@@ -40,6 +40,9 @@
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/gateway/game-search/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/testing/tsconfig.lib.json"
     },
     {
@@ -49,7 +52,7 @@
       "path": "../../libs/common/otel/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/gateway-registry/tsconfig.lib.json"
+      "path": "../../libs/gateway/driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/env/tsconfig.lib.json"

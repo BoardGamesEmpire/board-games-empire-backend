@@ -92,7 +92,7 @@
       "path": "../../libs/common/health/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/gateway-registry/tsconfig.lib.json"
+      "path": "../../libs/gateway/driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/game-search/tsconfig.lib.json"

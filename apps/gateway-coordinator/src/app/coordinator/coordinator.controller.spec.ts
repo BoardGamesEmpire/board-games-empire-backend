@@ -1,7 +1,7 @@
+import { GatewayGameSearchService } from '@bge/gateway-game-search';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { CoordinatorController } from './coordinator.controller';
 import { CoordinatorService } from './coordinator.service';
-import { GameSearchService } from './game-search.service';
 import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 
 describe('CoordinatorController', () => {
@@ -21,12 +21,12 @@ describe('CoordinatorController', () => {
           } satisfies Partial<jest.Mocked<CoordinatorService>>,
         },
         {
-          provide: GameSearchService,
+          provide: GatewayGameSearchService,
           useValue: {
             searchGames: jest.fn(),
             fetchGame: jest.fn(),
             fetchExpansions: jest.fn(),
-          } satisfies Partial<jest.Mocked<GameSearchService>>,
+          } satisfies Partial<jest.Mocked<GatewayGameSearchService>>,
         },
         {
           provide: GameImportEnqueuerService,

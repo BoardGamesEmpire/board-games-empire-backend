@@ -7,7 +7,7 @@
     "emitDeclarationOnly": true,
     "forceConsistentCasingInFileNames": true,
     "types": ["node"],
-    "target": "es2021",
+    "target": "esnext",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     "strictNullChecks": true,
@@ -18,25 +18,13 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
-      "path": "../../common/utils/tsconfig.lib.json"
-    },
-    {
       "path": "../../proto/gateway/tsconfig.lib.json"
     },
     {
-      "path": "../../common/testing/tsconfig.lib.json"
-    },
-    {
-      "path": "../language/tsconfig.lib.json"
+      "path": "../driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../common/redis/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/actor-context/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/i18n/tsconfig.lib.json"
     },
     {
       "path": "../../database/tsconfig.lib.json"

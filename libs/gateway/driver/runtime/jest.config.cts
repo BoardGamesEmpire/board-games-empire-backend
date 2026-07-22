@@ -9,7 +9,7 @@ swcJestConfig.swcrc = false;
 
 module.exports = {
   displayName: '@board-games-empire/gateway-registry',
-  preset: '../../../jest.preset.js',
+  preset: '../../../../jest.preset.js',
   testEnvironment: 'node',
   transform: {
     '^.+\\.[tj]s$': ['@swc/jest', swcJestConfig],

@@ -207,7 +207,9 @@
     "libs/common/*",
     "libs/proto/gateway",
     "libs/queue/*",
-    "libs/storage/*"
+    "libs/storage/*",
+    "libs/gateway/driver/*",
+    "libs/gateway/*"
   ],
   "nx": {
     "includedScripts": [],

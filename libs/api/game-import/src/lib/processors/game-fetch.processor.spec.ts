@@ -17,7 +17,7 @@ describe('GameFetchProcessor', () => {
   let processor: GameFetchProcessor;
   let db: { job: { updateMany: jest.Mock; update: jest.Mock; findFirst: jest.Mock } };
   let gatewayRegistry: jest.Mocked<
-    Pick<GatewayRegistryService, 'getServiceClient' | 'reportSuccess' | 'reportFailure'>
+    Pick<GatewayRegistryService, 'resolve' | 'reportSuccess' | 'reportFailure'>
   >;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -56,7 +56,7 @@ describe('GameFetchProcessor', () => {
     };
     fetchGame = jest.fn();
     gatewayRegistry = {
-      getServiceClient: jest.fn().mockResolvedValue({ fetchGame }),
+      resolve: jest.fn().mockResolvedValue({ fetchGame }),
       reportSuccess: jest.fn(),
       reportFailure: jest.fn().mockResolvedValue(undefined),
     };

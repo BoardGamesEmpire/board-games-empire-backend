@@ -103,9 +103,6 @@
       "path": "./apps/worker"
     },
     {
-      "path": "./libs/api/gateway-registry"
-    },
-    {
       "path": "./apps/gateway-worker-e2e"
     },
     {
@@ -191,6 +188,18 @@
     },
     {
       "path": "./libs/common/i18n"
+    },
+    {
+      "path": "./libs/gateway/driver/contract"
+    },
+    {
+      "path": "./libs/gateway/driver/contract-testing"
+    },
+    {
+      "path": "./libs/gateway/driver/runtime"
+    },
+    {
+      "path": "./libs/gateway/game-search"
     }
   ]
 }

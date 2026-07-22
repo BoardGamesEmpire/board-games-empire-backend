@@ -1,5 +1,6 @@
 import { DatabaseModule } from '@bge/database';
 import { FlowProducerNames, QueueNames } from '@bge/game-import';
+import { GatewayGameSearchModule } from '@bge/gateway-game-search';
 import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
 import KeyvValkey from '@keyv/valkey';
 import { BullModule } from '@nestjs/bullmq';
@@ -7,7 +8,6 @@ import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { CoordinatorController } from './coordinator.controller';
 import { CoordinatorService } from './coordinator.service';
-import { GameSearchService } from './game-search.service';
 import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 
 @Module({
@@ -23,8 +23,9 @@ import { GameImportEnqueuerService } from './services/game-import-enqueuer.servi
 
     BullModule.registerQueue({ name: QueueNames.GamesImport }, { name: QueueNames.GatewayFetch }),
     BullModule.registerFlowProducer({ name: FlowProducerNames.GamesImport }),
+    GatewayGameSearchModule,
   ],
   controllers: [CoordinatorController],
-  providers: [CoordinatorService, GameSearchService, GameImportEnqueuerService],
+  providers: [CoordinatorService, GameImportEnqueuerService],
 })
 export class CoordinatorModule {}
