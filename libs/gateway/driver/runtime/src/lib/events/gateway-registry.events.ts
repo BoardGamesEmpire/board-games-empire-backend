@@ -10,10 +10,14 @@ import { GATEWAY_DISABLED_EVENT } from '../constants/gateway-registry.constants'
  * is a transport concern and stays interface-based.
  */
 
-/** Which failure path tripped the auto-disable threshold. */
+/**
+ * Which failure path tripped the auto-disable threshold.
+ */
 export type GatewayAutoDisableReason = 'repeated_connection_failure' | 'repeated_call_failure';
 
-/** Failure-tracking context carried for admin notifications — not row state. */
+/**
+ * Failure-tracking context carried for admin notifications — not row state.
+ */
 export interface GatewayAutoDisableFailure {
   readonly reason: GatewayAutoDisableReason;
   readonly consecutiveFailures: number;

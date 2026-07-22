@@ -27,7 +27,7 @@
       "path": "../../common/webhooks/tsconfig.lib.json"
     },
     {
-      "path": "../gateway-registry/tsconfig.lib.json"
+      "path": "../../gateway/driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../common/shared/tsconfig.lib.json"

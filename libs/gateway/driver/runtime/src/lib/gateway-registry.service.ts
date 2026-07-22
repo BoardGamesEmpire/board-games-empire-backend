@@ -1,23 +1,31 @@
 import { SystemActorScope } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
-import { pingWithRetry, walkDir } from '@bge/utils';
-import { GatewayServiceClient, PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
+import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ClientGrpcProxy, ClientProxyFactory, Transport } from '@nestjs/microservices';
-import * as path from 'node:path';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
-import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
+import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
 import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayLanguageSyncService } from './gateway-language-sync.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import { hashGatewayConfig } from './utils/hash-config';
 
-interface CachedClient {
+/**
+ * How a cached driver entered the routing table. Config-update events from
+ * Redis describe remote GameGateway rows; an in-process driver placed via
+ * `register()` ('registered') has its own lifecycle and must not be torn
+ * down by those events (see handleConfigUpdate). 'remote' drivers came from
+ * `connect()` and do react to config changes.
+ */
+type DriverOrigin = 'remote' | 'registered';
+
+interface CachedDriver {
   gatewayId: string;
-  proxy: ClientGrpcProxy;
+  driver: GameGatewayDriver;
   configHash: string;
+  origin: DriverOrigin;
 }
 
 interface FailureTrack {
@@ -27,10 +35,20 @@ interface FailureTrack {
   lastError: string;
 }
 
+/** Max time to wait for all driver dispose() calls during shutdown. */
+export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
+
 /**
- * Manages gRPC client lifecycle for gateway connections. Used by both the
- * coordinator (for synchronous RPC routing) and the gateway-worker (for
- * async fetch processing).
+ * Routes gateway ids to live {@link GameGatewayDriver} instances (#193).
+ * Used by both the coordinator (for synchronous RPC routing) and the
+ * gateway-worker (for async fetch processing).
+ *
+ * Transport lives behind the driver port: remote gateways resolve lazily
+ * through `RemoteGatewayDriverFactory` (ping-verified gRPC), and in-process
+ * drivers arrive via {@link register} — the seam #59's DataGateway plugin
+ * registrations use. Everything below the port is transport-agnostic:
+ * failure tracking, auto-disable, and config-event invalidation treat an
+ * in-process driver exactly like a remote one.
  *
  * State authority for GameGateway rows lives in the coordinator. Other
  * processes treat this service as a read-side: they react to config-update
@@ -46,22 +64,22 @@ interface FailureTrack {
 @Injectable()
 export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(GatewayRegistryService.name);
-  private readonly clients = new Map<string, CachedClient>();
+  private readonly clients = new Map<string, CachedDriver>();
   private readonly failures = new Map<string, FailureTrack>();
   // In-flight lazy connects, keyed by gatewayId, so concurrent callers for the
   // same gateway share one connect attempt instead of stampeding the gateway.
   private readonly connecting = new Map<string, Promise<void>>();
   // Per-gateway invalidation counter. connect() captures this before its async
-  // ping and refuses to cache the freshly-built client if it changed meanwhile
+  // ping and refuses to cache the freshly-built driver if it changed meanwhile
   // — closing the race where a 'disabled'/'deleted' event arrives mid-connect,
-  // finds nothing cached to tear down, and connect() then caches a client for a
+  // finds nothing cached to tear down, and connect() then caches a driver for a
   // gateway that is no longer valid (served indefinitely until the next event).
   private readonly connectGeneration = new Map<string, number>();
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(
     private readonly db: DatabaseService,
-    private readonly credentialsFactory: GatewayCredentialsFactory,
+    private readonly remoteDriverFactory: RemoteGatewayDriverFactory,
     private readonly configEvents: GatewayConfigEventsService,
     private readonly eventEmitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
@@ -75,9 +93,21 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.configUpdateUnsubscribe?.();
 
-    for (const cached of this.clients.values()) {
-      this.closeProxy(cached.gatewayId, cached.proxy);
-    }
+    // Await teardown so async dispose() work (flushing, closing handles)
+    // completes — bounded by a timeout so a misbehaving driver can't hang
+    // process shutdown. disposeDriver never rejects, so allSettled is
+    // belt-and-suspenders; clearing the timer avoids delaying a fast exit.
+    const disposals = Promise.allSettled(
+      Array.from(this.clients.values()).map((cached) => this.disposeDriver(cached.gatewayId, cached.driver)),
+    );
+
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, DRIVER_DISPOSE_TIMEOUT_MS);
+    });
+    await Promise.race([disposals, timeout]);
+    clearTimeout(timer);
+
     this.clients.clear();
     this.failures.clear();
     this.connecting.clear();
@@ -85,14 +115,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Establishes (or re-establishes) a connection to the specified gateway.
-   * Verifies via ping before storing. Existing connections are closed and
-   * replaced. Failures during connect contribute to the failure-tracking
-   * counter that can trigger auto-disable.
+   * Establishes (or re-establishes) a connection to the specified remote
+   * gateway. The factory verifies via ping before a driver exists. Existing
+   * drivers are disposed and replaced. Failures during connect contribute to
+   * the failure-tracking counter that can trigger auto-disable.
    */
   async connect(options: GatewayConnectionOptions): Promise<void> {
-    const url = `${options.connectionUrl}:${options.connectionPort}`;
-
     if (this.clients.has(options.gatewayId)) {
       this.logger.log(`Replacing existing connection for gateway ${options.gatewayId}`);
       this.disconnect(options.gatewayId);
@@ -100,64 +128,31 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
 
     // Snapshot the invalidation counter before the async ping. If a
     // 'disabled'/'deleted' event bumps it while we await, we must discard the
-    // client we're about to cache rather than serve a now-invalid gateway.
+    // driver we're about to cache rather than serve a now-invalid gateway.
     const generation = this.connectGeneration.get(options.gatewayId) ?? 0;
 
-    this.logger.log(`Connecting to gateway ${options.gatewayId} at ${url} with auth type ${options.authType}`);
-    const protoPaths = walkDir(path.join(__dirname, 'proto'), /\.proto$/, [/(^|[/\\])coordinator([/\\]|$)/]);
-
     try {
-      const channelCredentials = this.credentialsFactory.create(options.authType, options.authParameters);
-      const proxy = ClientProxyFactory.create({
-        transport: Transport.GRPC,
-        options: {
-          url,
-          package: PROTO_PACKAGE_NAME,
-          protoPath: protoPaths,
-          loader: {
-            includeDirs: [path.join(__dirname, 'proto')],
-            arrays: true,
-            longs: String,
-            enums: String,
-          },
-          credentials: channelCredentials,
-        },
-      }) as ClientGrpcProxy;
-
-      const gatewayServiceClient = proxy.getService<GatewayServiceClient>('GatewayService');
-      const response = await pingWithRetry(gatewayServiceClient, options.gatewayId, this.logger);
-
-      this.logger.log(
-        `Successfully connected to gateway ${options.gatewayId} at ${url}. Response: ${JSON.stringify(response)}`,
-      );
+      const driver = await this.remoteDriverFactory.create(options);
 
       // A 'disabled'/'deleted' event may have arrived while we awaited the ping.
       // If so, this gateway must not be cached here — discard the freshly-built
-      // client instead of leaving a live connection to an invalidated gateway.
+      // driver instead of leaving a live connection to an invalidated gateway.
       // Return (do not throw): throwing would route through the catch below and
       // wrongly count a legitimate invalidation as a connection failure. The
-      // caller (resolveProxy) then sees no cached client and treats the gateway
-      // as unavailable, which is correct.
+      // caller (resolve) then sees no cached driver and treats the gateway as
+      // unavailable, which is correct.
       if ((this.connectGeneration.get(options.gatewayId) ?? 0) !== generation) {
-        this.logger.warn(
-          `Gateway ${options.gatewayId} was invalidated while connecting; discarding the new client`,
-        );
-        this.closeProxy(options.gatewayId, proxy);
+        this.logger.warn(`Gateway ${options.gatewayId} was invalidated while connecting; discarding the new client`);
+        this.disposeDriver(options.gatewayId, driver);
         return;
       }
 
-      this.clients.set(options.gatewayId, {
-        gatewayId: options.gatewayId,
-        proxy,
-        configHash: hashGatewayConfig(options),
-      });
-
-      // Successful connect resets failure history.
-      this.reportSuccess(options.gatewayId);
+      this.register(options.gatewayId, driver, hashGatewayConfig(options), 'remote');
 
       // Language capabilities interview — fire-and-forget so connect latency
-      // is unaffected. Internally throttled (daily) and never throws.
-      void this.languageSync.syncIfStale(options.gatewayId, gatewayServiceClient);
+      // is unaffected. Internally throttled (daily) and never throws. The
+      // driver satisfies the client parameter structurally (it IS the port).
+      void this.languageSync.syncIfStale(options.gatewayId, driver);
     } catch (err) {
       await this.reportFailure(options.gatewayId, err, 'repeated_connection_failure');
       throw err;
@@ -165,7 +160,30 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Disconnects and removes the cached client for a gateway. Safe to call
+   * Places a driver into the routing table under the given gateway id and
+   * resets its failure history. Remote connects land here after ping
+   * verification; in-process DataGateway plugin registrations (#59) call it
+   * directly — from that point on, routing, failure tracking, and
+   * auto-disable are identical for both.
+   */
+  register(gatewayId: string, driver: GameGatewayDriver, configHash = '', origin: DriverOrigin = 'registered'): void {
+    // Last write wins, but never silently: a driver losing the cache slot to a
+    // racing connect (eager bootstrap vs. lazy resolve for the same gateway)
+    // must have its transport torn down, or its gRPC channel leaks. Skip when
+    // re-registering the identical instance.
+    const existing = this.clients.get(gatewayId);
+    if (existing && existing.driver !== driver) {
+      this.disposeDriver(gatewayId, existing.driver);
+    }
+
+    this.clients.set(gatewayId, { gatewayId, driver, configHash, origin });
+
+    // A freshly-registered driver starts with a clean failure slate.
+    this.reportSuccess(gatewayId);
+  }
+
+  /**
+   * Disposes and removes the cached driver for a gateway. Safe to call
    * for unknown gatewayIds.
    */
   disconnect(gatewayId: string): void {
@@ -178,40 +196,42 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    this.closeProxy(gatewayId, cached.proxy);
+    this.disposeDriver(gatewayId, cached.driver);
     this.clients.delete(gatewayId);
     this.logger.log(`Gateway ${gatewayId} disconnected`);
   }
 
-  /** Best-effort proxy teardown — never throws, just logs a close failure. */
-  private closeProxy(gatewayId: string, proxy: ClientGrpcProxy): void {
+  /**
+   * Best-effort driver teardown. Never throws and never rejects: dispose() is
+   * `void | Promise<void>` on the port, so async teardown — e.g. a #59
+   * in-process plugin closing handles — is awaited internally and its failure
+   * logged rather than surfacing as an unhandledRejection. The returned
+   * promise always resolves once teardown settles, so an async caller
+   * (onModuleDestroy) can await it while sync callers fire-and-forget safely.
+   */
+  private async disposeDriver(gatewayId: string, driver: GameGatewayDriver): Promise<void> {
     try {
-      proxy.close();
+      await driver.dispose();
     } catch (err) {
-      this.logger.warn(`Error closing client for ${gatewayId}: ${err instanceof Error ? err.message : err}`);
+      this.logger.warn(`Error disposing driver for ${gatewayId}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
   /**
-   * Resolves a gateway's gRPC service client, lazily establishing the
-   * connection on a cache miss by loading the gateway's config from the DB
-   * (the source of truth). Concurrent callers for the same gateway share a
-   * single in-flight connect, so a burst of jobs for a newly-added gateway
-   * triggers one connect — not a ping stampede.
+   * Resolves a gateway's driver, lazily establishing the remote connection on
+   * a cache miss by loading the gateway's config from the DB (the source of
+   * truth). Concurrent callers for the same gateway share a single in-flight
+   * connect, so a burst of jobs for a newly-added gateway triggers one
+   * connect — not a ping stampede.
    *
    * Throws if the gateway is absent, disabled, or soft-deleted in the DB, or
    * if the connection (ping) fails. Connection failures feed the same
    * auto-disable tracking as any other failed interaction.
    */
-  async getServiceClient(gatewayId: string): Promise<GatewayServiceClient> {
-    const proxy = await this.resolveProxy(gatewayId);
-    return proxy.getService<GatewayServiceClient>('GatewayService');
-  }
-
-  private async resolveProxy(gatewayId: string): Promise<ClientGrpcProxy> {
+  async resolve(gatewayId: string): Promise<GameGatewayDriver> {
     const cached = this.clients.get(gatewayId);
     if (cached) {
-      return cached.proxy;
+      return cached.driver;
     }
 
     await this.ensureConnected(gatewayId);
@@ -221,7 +241,16 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       // connect() resolved without populating the cache — defensive guard.
       throw new Error(`No connection established for gateway ${gatewayId}.`);
     }
-    return connected.proxy;
+    return connected.driver;
+  }
+
+  /**
+   * @deprecated Phase-0 alias for {@link resolve} (#193). A driver IS a
+   * `GatewayServiceClient` structurally, so existing call sites keep working;
+   * migrate them to `resolve()` opportunistically and drop this in Phase 1.
+   */
+  async getServiceClient(gatewayId: string): Promise<GatewayServiceClient> {
+    return this.resolve(gatewayId);
   }
 
   /**
@@ -287,7 +316,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Reports a successful interaction with a gateway. Clears any in-progress
-   * failure tracking. Callers should invoke this on successful gRPC calls
+   * failure tracking. Callers should invoke this on successful calls
    * to prevent stale failures from accumulating toward the disable threshold.
    */
   reportSuccess(gatewayId: string): void {
@@ -298,7 +327,8 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
    * Reports a failed interaction with a gateway. Failures within the rolling
    * window accumulate; reaching FAILURE_THRESHOLD triggers auto-disable.
    * Callers in processors and other consumers should invoke this on failed
-   * gRPC calls.
+   * calls — the tracking is transport-agnostic, so an in-process driver
+   * throwing repeatedly auto-disables exactly like a dead remote.
    *
    * The `reason` argument distinguishes connection-time failures from
    * call-time failures for the admin notification — same threshold logic,
@@ -405,8 +435,8 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   /**
    * Handles incoming config-update events from other processes.
    *
-   * The registry connects lazily (see getServiceClient), so for most events
-   * the correct local action is simply to drop any stale cached client; the
+   * The registry connects lazily (see resolve), so for most events the
+   * correct local action is simply to drop any stale cached driver; the
    * next call re-establishes the connection from current DB config:
    *  - 'disabled' / 'deleted': invalidate unconditionally — the gateway must
    *    not be used here, and a lazy reconnect would (correctly) refuse it.
@@ -415,15 +445,32 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
    *
    * 'reconnect-requested' is the exception: it is an explicit, low-frequency
    * operator/system signal to re-establish the connection now, so we drop any
-   * existing client and eagerly reconnect rather than waiting for next use.
+   * existing driver and eagerly reconnect rather than waiting for next use.
    */
   private async handleConfigUpdate(event: GatewayConfigEvent): Promise<void> {
     const cached = this.clients.get(event.gatewayId);
 
+    // In-process drivers (registered via register(), e.g. #59 DataGateway
+    // plugins) own their own config lifecycle. A GameGateway 'updated' or
+    // 'reconnect-requested' event describes a REMOTE connection row; acting on
+    // it here would disconnect the plugin driver and send the next resolve()
+    // to connectFromDb, which can only build a RemoteGatewayDriver — silently
+    // swapping the plugin out with no way back. Admin intent still wins:
+    // 'disabled'/'deleted' fall through and tear down any origin.
+    if (
+      cached?.origin === 'registered' &&
+      (event.changeType === 'updated' || event.changeType === 'reconnect-requested')
+    ) {
+      this.logger.debug(
+        `Ignoring '${event.changeType}' config event for registered in-process driver ${event.gatewayId}`,
+      );
+      return;
+    }
+
     // Disable / delete events invalidate regardless of hash.
     if (event.changeType === 'disabled' || event.changeType === 'deleted') {
       // Bump first, unconditionally: even with nothing cached yet, an in-flight
-      // connect() may be mid-ping and about to cache a client. Bumping the
+      // connect() may be mid-ping and about to cache a driver. Bumping the
       // generation makes that connect discard its result instead of serving a
       // disabled/deleted gateway indefinitely.
       this.bumpConnectGeneration(event.gatewayId);
@@ -435,7 +482,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // Explicit reconnect request: drop any existing client and re-establish
+    // Explicit reconnect request: drop any existing driver and re-establish
     // now (regardless of hash). Eager here is safe — it's operator/system
     // initiated and low-frequency, so no ping-storm concern.
     if (event.changeType === 'reconnect-requested') {
@@ -464,10 +511,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
     //   in-flight connect() building the now-superseded config discards its
     //   result instead of caching it — the same mid-connect race the
     //   disabled/deleted branch guards, where nothing is cached yet but a
-    //   connect may be mid-ping and about to cache a client for the stale
+    //   connect may be mid-ping and about to cache a driver for the stale
     //   config (served until the next event). Skip the bump only when this
     //   process already holds the current config, where nothing stale can be
-    //   in flight. Then drop any stale cached client so the next call
+    //   in flight. Then drop any stale cached driver so the next call
     //   reconnects from current config.
     const configChanged = !cached || cached.configHash !== event.configHash;
 

@@ -31,19 +31,19 @@
       "path": "../../libs/common/webhooks/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/redis/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/queue/webhooks/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/otel/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/gateway-registry/tsconfig.lib.json"
+      "path": "../../libs/gateway/driver/runtime/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/game-import/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/env/tsconfig.lib.json"
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"
@@ -55,7 +55,7 @@
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/env/tsconfig.lib.json"
+      "path": "../../libs/common/redis/tsconfig.lib.json"
     }
   ]
 }

@@ -1,4 +1,4 @@
-import baseConfig, { i18nHardcodedStringSelectors } from '../../../eslint.config.mjs';
+import baseConfig, { i18nHardcodedStringSelectors } from '../../../../eslint.config.mjs';
 
 export default [
   ...baseConfig,

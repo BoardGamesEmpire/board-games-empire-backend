@@ -96,10 +96,10 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
     // must not also be reported as a call failure. A missing/disabled gateway
     // or failed connect throws here, failing the job for BullMQ to retry — by
     // which time a newly-added gateway may have become connectable.
-    const client = await this.gatewayRegistry.getServiceClient(gatewayId);
+    const driver = await this.gatewayRegistry.resolve(gatewayId);
 
     try {
-      const response = await firstValueFrom(client.fetchGame({ correlationId, externalId, locale }));
+      const response = await firstValueFrom(driver.fetchGame({ correlationId, externalId, locale }));
 
       if (!response.game) {
         throw new NotFoundException(

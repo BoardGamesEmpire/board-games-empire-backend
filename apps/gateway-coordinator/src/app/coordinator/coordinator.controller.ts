@@ -1,4 +1,5 @@
 import { SkipActorContext } from '@bge/actor-context-transport';
+import { GatewayGameSearchService } from '@bge/gateway-game-search';
 import type * as proto from '@boardgamesempire/proto-gateway';
 import { CoordinatorServiceController, CoordinatorServiceControllerMethods } from '@boardgamesempire/proto-gateway';
 import { Controller, Logger } from '@nestjs/common';
@@ -6,7 +7,6 @@ import type { Observable } from 'rxjs';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { CoordinatorService } from './coordinator.service';
-import { GameSearchService } from './game-search.service';
 import { GameImportEnqueuerService } from './services/game-import-enqueuer.service';
 
 @CoordinatorServiceControllerMethods()
@@ -16,7 +16,7 @@ export class CoordinatorController implements CoordinatorServiceController {
 
   constructor(
     private readonly coordinatorService: CoordinatorService,
-    private readonly gameSearchService: GameSearchService,
+    private readonly gameSearchService: GatewayGameSearchService,
     private readonly gameImportEnqueuer: GameImportEnqueuerService,
   ) {}
 

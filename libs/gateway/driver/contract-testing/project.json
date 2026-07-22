@@ -1,0 +1,9 @@
+{
+  "name": "gateway-driver-contract-testing",
+  "$schema": "../../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/gateway/driver/contract-testing/src",
+  "projectType": "library",
+  "tags": ["gateway", "driver", "publish", "testing"],
+  "// targets": "to see all targets run: nx show project gateway-driver-contract-testing --web",
+  "targets": {}
+}

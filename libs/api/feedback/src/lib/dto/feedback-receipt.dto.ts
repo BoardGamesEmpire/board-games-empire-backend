@@ -1,4 +1,4 @@
-import { FeedbackReport } from '@bge/database';
+import type { FeedbackReport } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**

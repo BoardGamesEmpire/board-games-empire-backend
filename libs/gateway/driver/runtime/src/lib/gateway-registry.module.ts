@@ -3,6 +3,7 @@ import { DatabaseModule } from '@bge/database';
 import { LanguageLinkModule } from '@bge/language';
 import { Global, Module } from '@nestjs/common';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
+import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
 import { GatewayConfigEventsModule } from './gateway-config-events.module';
 import { GatewayLanguageSyncScheduler } from './gateway-language-sync.scheduler';
 import { GatewayLanguageSyncService } from './gateway-language-sync.service';
@@ -10,10 +11,11 @@ import { GatewayRegistryBootstrapService } from './gateway-registry.bootstrap.se
 import { GatewayRegistryService } from './gateway-registry.service';
 
 /**
- * Full gateway connection management. Apps that need to call gateways
+ * Full gateway driver management (#193). Apps that need to call gateways
  * (coordinator, gateway-worker) import this. Internally composes the
  * `GatewayConfigEventsModule` for pub/sub primitives and adds:
- *   - `GatewayRegistryService`: gRPC client lifecycle + failure tracking
+ *   - `GatewayRegistryService`: driver routing + failure tracking
+ *   - `RemoteGatewayDriverFactory`: ping-verified gRPC transport adapter
  *   - `GatewayCredentialsFactory`: auth-type-based ChannelCredentials
  *   - `GatewayRegistryBootstrapService`: eager-connect at app startup
  *
@@ -33,9 +35,10 @@ import { GatewayRegistryService } from './gateway-registry.service';
     GatewayCredentialsFactory,
     GatewayLanguageSyncScheduler,
     GatewayLanguageSyncService,
-    GatewayRegistryService,
     GatewayRegistryBootstrapService,
+    GatewayRegistryService,
+    RemoteGatewayDriverFactory,
   ],
-  exports: [GatewayCredentialsFactory, GatewayRegistryService],
+  exports: [GatewayCredentialsFactory, GatewayRegistryService, RemoteGatewayDriverFactory],
 })
 export class GatewayRegistryModule {}
