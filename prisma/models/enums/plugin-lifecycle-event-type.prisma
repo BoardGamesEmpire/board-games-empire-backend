@@ -1,0 +1,18 @@
+/// Persisted event kind for plugin_lifecycle_events.
+/// Bijective with the PluginEvent routing-key enum in @bge/plugin
+/// (PLUGIN_EVENT_TO_LIFECYCLE_TYPE + spec).
+enum PluginLifecycleEventType {
+  Installed
+  Enabled
+  Disabled
+  Uninstalled
+  ConfigUpdated
+  UpdateCheckCompleted
+  UpdatePending
+  UpdateApproved
+  UpdateRejected
+  LoadFailed
+  GrantCreated
+  GrantRejected
+  UnitDisabled
+}

@@ -1,0 +1,7 @@
+/// Installation scope of a plugin (#59): Server plugins are singletons
+/// operated by the server admin; Household plugins are enabled per
+/// household with per-household config (HouseholdPlugin rows).
+enum PluginScope {
+  Server
+  Household
+}

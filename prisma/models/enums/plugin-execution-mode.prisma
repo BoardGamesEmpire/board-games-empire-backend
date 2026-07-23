@@ -1,0 +1,8 @@
+/// Isolation tier (#197): InProcess loads the plugin in the API process;
+/// Worker (future) runs it out-of-process with RPC shims behind the same
+/// PluginContext contract. Manifest `executionMode` is the author's hint;
+/// this column is the admin-overridable effective mode.
+enum PluginExecutionMode {
+  InProcess
+  Worker
+}

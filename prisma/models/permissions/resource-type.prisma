@@ -11,6 +11,12 @@ enum ResourceType {
   Quota
   Job
 
+  // ─── Plugin ─────────────────────────────────────────────
+  Plugin
+  PluginGrant
+  HouseholdPlugin
+  PluginLifecycleEvent
+
   // ─── User ───────────────────────────────────────────────
   User
   UserProfile

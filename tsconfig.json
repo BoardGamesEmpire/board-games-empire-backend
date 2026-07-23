@@ -200,6 +200,12 @@
     },
     {
       "path": "./libs/gateway/game-search"
+    },
+    {
+      "path": "./libs/plugin/manifest"
+    },
+    {
+      "path": "./libs/plugin/plugin"
     }
   ]
 }

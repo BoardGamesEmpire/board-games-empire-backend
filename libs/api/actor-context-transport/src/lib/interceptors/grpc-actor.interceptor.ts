@@ -41,8 +41,7 @@ export const GATEWAY_ID_METADATA_KEY = 'x-bge-gateway-id' as const;
  * The `next.handle().subscribe(subscriber)` call happens *inside* `runWith`
  * so AsyncLocalStorage context propagates to all async emissions downstream.
  *
- * User API keys are intentionally not supported over gRPC per the locked
- * decision.
+ * User API keys are intentionally not supported over gRPC.
  */
 @Injectable()
 export class GrpcActorInterceptor extends ActorInterceptor {

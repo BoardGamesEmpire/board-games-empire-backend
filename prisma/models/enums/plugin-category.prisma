@@ -1,0 +1,18 @@
+/// Full category vocabulary lands now even though only DataGateway has a
+/// concrete interface — enum values are cheap, enum
+/// migrations are churn. Mirrors PLUGIN_CATEGORIES in @bge/plugin-manifest
+/// (kebab-case manifest values); the bijection is asserted by spec in
+/// @bge/plugin so the two vocabularies cannot drift.
+enum PluginCategory {
+  DataGateway
+  NotificationChannel
+  StorageDriver
+  MediaIntegration
+  FeedbackSink
+  AnalyticsSink
+  Observability
+  BackupSink
+  CalendarSync
+  RecommendationEngine
+  EventHook
+}
