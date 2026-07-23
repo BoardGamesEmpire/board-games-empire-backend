@@ -11,10 +11,10 @@
       "dependsOn": ["build"],
       "outputs": ["{projectRoot}/dist-schema/plugin-manifest.v1.json"],
       "options": {
-        "command": "node libs/plugin/manifest/dist/bin/emit-json-schema.js libs/plugin/manifest/dist-schema/plugin-manifest.v1.json"
+        "command": "node {projectRoot}/dist/bin/emit-json-schema.js"
       },
       "metadata": {
-        "description": "Emit the plugin-manifest JSON Schema artifact (D-L) to dist-schema/ — deliberately outside the build target's cached dist/ so cache restoration cannot clobber it. CI publication at its $id URL is #206."
+        "description": "Emit the plugin-manifest JSON Schema artifact to dist-schema/ — deliberately outside the build target's cached dist/ so cache restoration cannot clobber it. The bin resolves its output relative to its own compiled location, so the artifact lands correctly regardless of invocation cwd. CI publication at its $id URL is #206."
       }
     }
   }
