@@ -32,9 +32,10 @@ model PluginGrant {
 
   status PluginGrantStatus
 
-  /// Actor who made the decision (admin / household admin / user). Plain
-  /// String id, no FK — decisions must survive principal deletion.
-  grantedById String? @map("granted_by_id")
+  /// Actor who made the decision — decision-neutral, populated for both
+  /// Granted and Denied rows (admin / household admin / user). Plain String
+  /// id, no FK — decisions must survive principal deletion.
+  decidedById String? @map("decided_by_id")
 
   /// Manifest version the consent text was shown from — escalation
   /// comparison (#59 update flow) diffs against this.
