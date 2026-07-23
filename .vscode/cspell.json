@@ -55,6 +55,7 @@
     "GRAC",
     "Hoster",
     "IGDB",
+    "injective",
     "iovalkey",
     "jfrazx",
     "kubelet",
@@ -113,5 +114,8 @@
     "willsoto",
     "yearpublished",
     "zenstackhq"
+  ],
+  "ignoreWords": [
+    "swcrc"
   ]
 }

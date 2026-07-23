@@ -1,0 +1,8 @@
+/// Consent-unit scope for a permission decision (#59 consent-unit model).
+/// Distinct from PluginScope: a Household-scoped plugin can still request
+/// User-consentable permissions.
+enum PluginGrantScope {
+  Server
+  Household
+  User
+}

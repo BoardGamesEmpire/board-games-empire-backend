@@ -1,0 +1,9 @@
+{
+  "name": "plugin-manifest",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/plugin/manifest/src",
+  "projectType": "library",
+  "tags": ["plugins", "publish"],
+  "// targets": "to see all targets run: nx show project plugin-manifest --web",
+  "targets": {}
+}

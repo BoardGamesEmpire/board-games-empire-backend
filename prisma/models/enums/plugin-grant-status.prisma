@@ -1,0 +1,7 @@
+/// Decision polarity for a PluginGrant row (#59/#60 durable-denial model).
+/// NO ROW means pending / never asked; a Denied row is an explicit, durable
+/// rejection. Ability resolution intersects Granted rows only.
+enum PluginGrantStatus {
+  Granted
+  Denied
+}

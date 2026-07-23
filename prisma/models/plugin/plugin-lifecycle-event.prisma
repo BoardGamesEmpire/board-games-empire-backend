@@ -1,0 +1,54 @@
+/// Durable plugin provenance timeline. Written synchronously by the
+/// Phase B lifecycle listener alongside the AuditLog row the same
+/// MutationEvent produces — the double-write is INTENTIONAL:
+/// AuditLog is swept by retention and shaped as {before,after} diffs;
+/// this table is never swept and carries event-specific payloads
+/// (provenance, granted permissions, npm-audit findings, error detail).
+///
+/// No relations ON PURPOSE: rows must survive plugin uninstall and
+/// principal deletion, hence the denormalized pluginSlug and plain-String
+/// actor columns (AuditLog precedent). There is no mutation API and no
+/// retention sweep; writes come only from the lifecycle listener.
+model PluginLifecycleEvent {
+  id String @id @default(cuid(2))
+
+  /// Plugin row id at emission time — NOT an FK; survives uninstall.
+  pluginId String @map("plugin_id")
+
+  /// Denormalized slug so the timeline stays readable after uninstall.
+  pluginSlug String @map("plugin_slug")
+
+  event PluginLifecycleEventType
+
+  /// Serialized Actor union (full fidelity), same convention as AuditLog.
+  actor Json
+
+  /// Denormalized from `actor` for indexed filtering.
+  actorKind   String  @map("actor_kind")
+  actorUserId String? @map("actor_user_id")
+
+  correlationId String? @map("correlation_id")
+
+  /// Manifest version in effect for the event, when applicable.
+  manifestVersion String? @map("manifest_version")
+
+  /// Consent-unit coordinates for grant/unit events; null otherwise.
+  /// scopeId here MAY be null (unlike PluginGrant) — no uniqueness rides it.
+  scopeType PluginGrantScope? @map("scope_type")
+  scopeId   String?           @map("scope_id")
+
+  /// Event-specific context: provenance + grants + audit findings on
+  /// Installed, error detail on LoadFailed, escalation slug on UnitDisabled…
+  payload Json @default("{}")
+
+  /// Mutation completion time (event construction) — UIs sort by this.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(3)
+
+  /// Listener insertion time — pipeline debugging only.
+  recordedAt DateTime @default(now()) @map("recorded_at") @db.Timestamptz(3)
+
+  /// Per-plugin timeline (admin UI) and event-kind dashboards (#67).
+  @@index([pluginId, occurredAt])
+  @@index([event, occurredAt])
+  @@map("plugin_lifecycle_events")
+}

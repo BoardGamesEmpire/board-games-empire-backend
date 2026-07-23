@@ -1,0 +1,92 @@
+/// An installed plugin — a first-class PRINCIPAL with its own granted
+/// authority (#59), not a delegation of the installing user's permissions.
+/// Rows are created by the install pipeline (#59 Phase C / #84) or seeded
+/// for `bundled` plugins that ship with BGE (#61, #194).
+///
+/// Actor/provenance columns (`installedById`) are plain String ids, not FK
+/// relations, per the AuditLog precedent: provenance must survive principal
+/// deletion, and this file must not fan edits into the auth domain models.
+model Plugin {
+  id String @id @default(cuid(2))
+
+  /// Manifest slug — globally unique install identity (one version of a
+  /// plugin per server; updates replace in place via the pending_* columns).
+  slug String @unique
+
+  /// Currently ACTIVE manifest version (semver).
+  version String
+
+  category PluginCategory
+  scope    PluginScope
+
+  /// Effective isolation tier — seeded from the manifest hint, admin-overridable (#197).
+  executionMode PluginExecutionMode @default(InProcess) @map("execution_mode")
+
+  /// Server-level kill switch. Registries refuse to serve disabled plugins
+  /// (`PluginDisabledError`); household enablement layers under this via
+  /// HouseholdPlugin.enabled.
+  enabled Boolean @default(false)
+
+  /// Ships with BGE core (#61/#194): no tarball, no provenance columns,
+  /// uninstall blocked (disable only), upgraded with BGE itself.
+  bundled Boolean @default(false)
+
+  /// Ingress provenance (#84). Null for `bundled` and manual-upload installs
+  /// (upload keeps the checksum but has no source URL).
+  installedFromUrl String? @map("installed_from_url")
+
+  /// SHA-256 of the installed tarball. Nullable ONLY because bundled plugins
+  /// have no tarball — the install pipeline enforces the invariant
+  /// `bundled = false ⇒ installedSha256 IS NOT NULL` (#59 Phase C).
+  installedSha256 String? @map("installed_sha256")
+
+  /// PluginRegistrySource.slug the artifact was discovered through (#84);
+  /// null for direct URL / manual-upload installs. Plain String by design —
+  /// registry sources are config-ish rows and installs must survive their
+  /// removal.
+  registrySlug String? @map("registry_slug")
+
+  /// Full validated manifest of the ACTIVE version.
+  manifestJson Json @map("manifest_json")
+
+  /// Server-scope plugin configuration (shape governed by manifest
+  /// config.schema). Household-scope config lives on HouseholdPlugin.config.
+  config Json @default("{}")
+
+  /// Boot-time load failure flags (#59 boot flow): failed plugins are
+  /// skipped, surfaced in diagnostics (#79), and the server continues.
+  loadFailed Boolean @default(false) @map("load_failed")
+  loadError  String? @map("load_error")
+
+  installedById String?  @map("installed_by_id")
+  installedAt   DateTime @default(now()) @map("installed_at") @db.Timestamptz(3)
+
+  /// Update polling opt-in (#84): defaults off — self-hosted deployments
+  /// should not phone external infrastructure without an explicit choice.
+  updateCheckEnabled Boolean   @default(false) @map("update_check_enabled")
+  lastUpdateCheckAt  DateTime? @map("last_update_check_at") @db.Timestamptz(3)
+
+  /// Latest release surfaced by the update check under the effective
+  /// channel floor (#84), plus its channel and any security advisory text.
+  latestKnownVersion String? @map("latest_known_version")
+  latestKnownChannel String? @map("latest_known_channel")
+  securityAdvisory   String? @map("security_advisory")
+
+  /// Staged update awaiting consent (#59 update flow): validated but not
+  /// active. Cleared on approve (columns promote) or reject (discarded).
+  pendingVersion      String? @map("pending_version")
+  pendingManifestJson Json?   @map("pending_manifest_json")
+  pendingSha256       String? @map("pending_sha256")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  grants           PluginGrant[]
+  householdPlugins HouseholdPlugin[]
+
+  /// Category registries list/serve by category and enablement.
+  @@index([category, enabled])
+  /// Diagnostics surface (#79): failed-load listing.
+  @@index([loadFailed])
+  @@map("plugins")
+}

@@ -1,0 +1,55 @@
+/// One consent DECISION per (plugin, consent unit, permission) — the single
+/// store for plugin permission decisions across all scopes (#59, supersedes
+/// #60's separate denial storage).
+///
+/// Semantics: NO ROW = pending / never asked. status=Denied is a durable,
+/// first-class rejection ("rejection is durable", #59 escalation model).
+/// Decision changes UPDATE the row in place and emit
+/// plugin.grant_created / plugin.grant_rejected lifecycle events; ability
+/// resolution (#60 PluginAbilityFactory) intersects Granted rows only.
+model PluginGrant {
+  id String @id @default(cuid(2))
+
+  pluginId String @map("plugin_id")
+  plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  scopeType PluginGrantScope @map("scope_type")
+
+  /// Consent-unit id: Household.id or User.id per scopeType. Server-scope
+  /// rows store the EMPTY-STRING SENTINEL (default) rather than NULL:
+  /// Postgres unique indexes treat NULLs as distinct, which would make the
+  /// four-column uniqueness below unenforceable for Server rows, and Prisma
+  /// has no NULLS NOT DISTINCT support. Service-layer code never touches
+  /// the sentinel — PluginGrantService (Phase C) owns scope addressing.
+  /// A CHECK constraint `(scope_type <> 'Server') => (scope_id <> '')` lands
+  /// with PluginGrantService in Phase C (hand-authored migration SQL — Prisma
+  /// cannot express raw CHECK constraints) so the database itself rejects
+  /// empty non-Server scopeIds rather than trusting caller discipline.
+  scopeId String @default("") @map("scope_id")
+
+  /// Permission being decided — plugin-namespaced or core slug.
+  permissionSlug String @map("permission_slug")
+
+  status PluginGrantStatus
+
+  /// Actor who made the decision — decision-neutral, populated for both
+  /// Granted and Denied rows (admin / household admin / user). Plain String
+  /// id, no FK — decisions must survive principal deletion.
+  decidedById String? @map("decided_by_id")
+
+  /// Manifest version the consent text was shown from — escalation
+  /// comparison (#59 update flow) diffs against this.
+  manifestVersion String @map("manifest_version")
+
+  /// When the current status was decided (updated on polarity flips).
+  decidedAt DateTime @map("decided_at") @db.Timestamptz(3)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  /// One decision row per (plugin, unit, permission) — upsert target.
+  @@unique([pluginId, scopeType, scopeId, permissionSlug])
+  /// Ability resolution: all decisions for a plugin's operating unit.
+  @@index([pluginId, scopeType, scopeId])
+  @@map("plugin_grants")
+}

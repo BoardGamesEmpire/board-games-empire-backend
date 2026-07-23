@@ -142,10 +142,12 @@
     "redis": "5.12.1",
     "reflect-metadata": "0.2.2",
     "rxjs": "7.8.2",
+    "semver": "7.8.5",
     "socket.io": "4.8.3",
     "socket.io-redis-adapter": "8.4.6",
     "surrogate": "1.9.2",
-    "undici": "8.5.0"
+    "undici": "8.5.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@bufbuild/buf": "1.71.0",
@@ -175,6 +177,7 @@
     "@types/mustache": "^4.2.6",
     "@types/node": "^25.5.0",
     "@types/pg": "^8.20.0",
+    "@types/semver": "7.7.1",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "10.1.8",
     "foreman": "^3.0.1",
@@ -209,7 +212,8 @@
     "libs/queue/*",
     "libs/storage/*",
     "libs/gateway/driver/*",
-    "libs/gateway/*"
+    "libs/gateway/*",
+    "libs/plugin/*"
   ],
   "nx": {
     "includedScripts": [],

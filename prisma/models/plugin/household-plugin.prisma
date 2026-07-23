@@ -1,0 +1,33 @@
+/// Per-household enablement + configuration for Household-scoped plugins
+/// (#59 consent-unit model). A row exists once a household enables the
+/// plugin; absence means never enabled there.
+///
+/// `householdId` is a plain String id (no FK relation) to keep this file
+/// from fanning edits into the household domain models — cleanup on
+/// household deletion is owned by the uninstall/household-delete flows,
+/// consistent with the AuditLog precedent.
+model HouseholdPlugin {
+  id String @id @default(cuid(2))
+
+  householdId String @map("household_id")
+
+  pluginId String @map("plugin_id")
+  plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  /// Household-level switch, layered UNDER Plugin.enabled: serving requires
+  /// both. Flipped to false by the escalation auto-disable path
+  /// (HouseholdPluginUnitDisabledEvent) when a required permission at this
+  /// consent scope has not been accepted (#59).
+  enabled Boolean @default(true)
+
+  /// Household-scope plugin configuration (manifest config.schema governs
+  /// the shape; requiresHouseholdConfig gates first enable).
+  config Json @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([householdId, pluginId])
+  @@index([pluginId])
+  @@map("household_plugins")
+}
