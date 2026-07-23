@@ -146,6 +146,10 @@ describe('validatePluginManifest', () => {
       expect(() => validatePluginManifest(manifest(), { ...options, defaultLocale: 'de_DE' })).toThrow(RangeError);
     });
 
+    it('throws RangeError on a malformed bgeVersion option — server misconfiguration, not a manifest issue', () => {
+      expect(() => validatePluginManifest(manifest(), { ...options, bgeVersion: 'not-a-version' })).toThrow(RangeError);
+    });
+
     it('rejects malformed BCP 47 locale keys', () => {
       const error = expectRejection(
         manifest({ description: { en: 'Fine.', 'de_DE!': 'Kaputt' } }),

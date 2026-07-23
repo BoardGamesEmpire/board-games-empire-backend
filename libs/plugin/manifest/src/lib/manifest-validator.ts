@@ -152,6 +152,12 @@ export const validatePluginManifest = (
     );
   }
 
+  if (valid(options.bgeVersion) === null) {
+    throw new RangeError(
+      `ManifestValidationOptions.bgeVersion '${options.bgeVersion}' is not a valid semver version — server/build misconfiguration, not a manifest issue`,
+    );
+  }
+
   if (!isWellFormedBcp47(options.defaultLocale)) {
     throw new RangeError(
       `ManifestValidationOptions.defaultLocale '${options.defaultLocale}' is not a well-formed BCP 47 tag — server misconfiguration, not a manifest issue`,

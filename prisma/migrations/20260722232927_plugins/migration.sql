@@ -139,6 +139,15 @@ CREATE INDEX "plugins_category_enabled_idx" ON "plugins"("category", "enabled");
 -- CreateIndex
 CREATE INDEX "plugins_load_failed_idx" ON "plugins"("load_failed");
 
+-- CheckConstraint
+-- Enforces the empty-string scope_id sentinel is reserved for Server-scope
+-- rows only: Household/User grants must carry a real consent-unit id. Prisma
+-- cannot express CHECK constraints in the schema, so it is added here by hand
+-- (see prisma/models/plugin/plugin-grant.prisma). Pairs with the four-column
+-- unique index above, which relies on the sentinel to enforce one Server row
+-- per (plugin, permission).
+ALTER TABLE "plugin_grants" ADD CONSTRAINT "plugin_grants_non_server_scope_id_not_empty" CHECK ("scope_type" = 'Server' OR "scope_id" <> '');
+
 -- AddForeignKey
 ALTER TABLE "household_plugins" ADD CONSTRAINT "household_plugins_plugin_id_fkey" FOREIGN KEY ("plugin_id") REFERENCES "plugins"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

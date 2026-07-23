@@ -56,17 +56,26 @@ export interface ResolvedLocalizedString {
 }
 
 /**
- * Resolution chain: exact tag → base language (`de-AT` → `de`) → default
- * locale → first defined entry. The final step exists only for defensive
- * completeness on unvalidated input; validator-passed manifests always
- * carry the default locale, so resolution is total for them.
+ * Resolution chain: exact tag → base language (`de-AT` → `de`) → other
+ * regional variant of the language → default locale → first defined entry.
+ * The final step exists only for defensive completeness on unvalidated
+ * input; validator-passed manifests always carry the default locale, so
+ * resolution is total for them.
  */
 export const resolveLocalizedStringDetailed = (
   value: LocalizedString,
   options: ResolveLocaleOptions,
 ): ResolvedLocalizedString => {
   if (typeof value === 'string') {
-    return { value, locale: options.defaultLocale, usedFallback: false };
+    // Bare string is shorthand for the default locale; it's a fallback for any
+    // requester whose locale isn't the default (canonical comparison).
+    const usedFallback = !(
+      isWellFormedBcp47(options.locale) &&
+      isWellFormedBcp47(options.defaultLocale) &&
+      canonicalizeLocale(options.locale) === canonicalizeLocale(options.defaultLocale)
+    );
+
+    return { value, locale: options.defaultLocale, usedFallback };
   }
 
   const canonicalEntries = new Map<string, { readonly original: string; readonly text: string }>();
@@ -118,6 +127,11 @@ export const resolveLocalizedStringDetailed = (
         return { value: entry.text, locale: canonical, usedFallback: true };
       }
     }
+  }
+
+  const defaultHit = lookup(options.defaultLocale);
+  if (defaultHit !== undefined) {
+    return { ...defaultHit, usedFallback: true };
   }
 
   const [first] = canonicalEntries.entries();
