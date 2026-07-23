@@ -50,7 +50,7 @@ CREATE TABLE "plugin_grants" (
     "scope_id" TEXT NOT NULL DEFAULT '',
     "permission_slug" TEXT NOT NULL,
     "status" "PluginGrantStatus" NOT NULL,
-    "granted_by_id" TEXT,
+    "decided_by_id" TEXT,
     "manifest_version" TEXT NOT NULL,
     "decided_at" TIMESTAMPTZ(3) NOT NULL,
     "created_at" TIMESTAMPTZ(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
