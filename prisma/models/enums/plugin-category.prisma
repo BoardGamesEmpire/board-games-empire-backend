@@ -1,6 +1,6 @@
 /// Full category vocabulary lands now even though only DataGateway has a
 /// concrete interface — enum values are cheap, enum
-/// migrations are churn. Mirrors PLUGIN_CATEGORIES in @bge/plugin-manifest
+/// migrations are churn. Mirrors PLUGIN_CATEGORIES in @boardgamesempire/plugin-manifest
 /// (kebab-case manifest values); the bijection is asserted by spec in
 /// @bge/plugin so the two vocabularies cannot drift.
 enum PluginCategory {

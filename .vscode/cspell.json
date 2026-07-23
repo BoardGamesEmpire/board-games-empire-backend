@@ -1,6 +1,14 @@
 {
   "version": "0.2",
-  "ignorePaths": ["node_modules", ".git", ".vscode", "package-lock.json", "package.json", "tsconfig.json", "*.sql"],
+  "ignorePaths": [
+    "node_modules",
+    ".git",
+    ".vscode",
+    "package-lock.json",
+    "package.json",
+    "tsconfig.json",
+    "*.sql"
+  ],
   "words": [
     "aaguid",
     "apicalypse",
@@ -47,6 +55,7 @@
     "GRAC",
     "Hoster",
     "IGDB",
+    "injective",
     "iovalkey",
     "jfrazx",
     "kubelet",
@@ -106,5 +115,7 @@
     "yearpublished",
     "zenstackhq"
   ],
-  "ignoreWords": ["swcrc"]
+  "ignoreWords": [
+    "swcrc"
+  ]
 }

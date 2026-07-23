@@ -1,5 +1,5 @@
 import { PluginCategory } from '@bge/database';
-import { PLUGIN_CATEGORIES, type PluginCategoryValue } from '@boardgamesempire/plugin-manifest';
+import type { PluginCategoryValue } from '@boardgamesempire/plugin-manifest';
 
 /**
  * Manifest category (kebab-case, the `@boardgamesempire/plugin-manifest`
