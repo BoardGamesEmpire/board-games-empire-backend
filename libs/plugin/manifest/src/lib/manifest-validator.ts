@@ -60,6 +60,23 @@ const FQDN_PATTERN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(
 const CORE_PERMISSION_SLUG_PATTERN = /^[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)+$/;
 const PLUGIN_NAMESPACE_PATTERN = /^plugin:/;
 
+/**
+ * Structural (zod) paths rendered in the same bracket notation the semantic
+ * pass emits (`permissions.checks[0].slug`, not `permissions.checks.0.slug`)
+ * so CLI/UI consumers can highlight fields with one parser.
+ */
+const formatIssuePath = (segments: ReadonlyArray<PropertyKey>): string => {
+  const path = segments.reduce<string>((accumulated, segment) => {
+    if (typeof segment === 'number') {
+      return `${accumulated}[${segment}]`;
+    }
+
+    return accumulated === '' ? String(segment) : `${accumulated}.${String(segment)}`;
+  }, '');
+
+  return path === '' ? '<root>' : path;
+};
+
 interface LocalizedField {
   readonly path: string;
   readonly value: LocalizedString;
@@ -128,7 +145,7 @@ export const validatePluginManifest = (
       parsed.error.issues.map(
         (issue): ManifestIssue => ({
           code: ManifestErrorCode.SCHEMA_INVALID,
-          path: issue.path.map(String).join('.') || '<root>',
+          path: formatIssuePath(issue.path),
           message: issue.message,
         }),
       ),

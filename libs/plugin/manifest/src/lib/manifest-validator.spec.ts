@@ -99,6 +99,16 @@ describe('validatePluginManifest', () => {
         ManifestErrorCode.SCHEMA_INVALID,
       );
     });
+
+    it('renders structural paths in the same bracket notation as semantic issues', () => {
+      const input = manifest();
+      const error = expectRejection(
+        { ...input, topics: [{ ...at(input.topics, 0), payloadSchemaVersion: 0 }] },
+        ManifestErrorCode.SCHEMA_INVALID,
+      );
+
+      expect(error.issues.some((issue) => issue.path === 'topics[0].payloadSchemaVersion')).toBe(true);
+    });
   });
 
   describe('version and compatibility', () => {
