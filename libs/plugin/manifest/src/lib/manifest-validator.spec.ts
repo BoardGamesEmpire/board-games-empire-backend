@@ -199,6 +199,23 @@ describe('validatePluginManifest', () => {
       expectRejection(input, ManifestErrorCode.PERMISSION_CHECK_UNDECLARED);
     });
 
+    it.each([
+      'read:public_content',
+      'create:feedback_report',
+      'read:event_occurrence',
+      'update:event_attendee:status:self',
+      'manage:quota:household_member',
+    ])("accepts core permission slug '%s' (underscore segments, matching the seeded vocabulary)", (slug) => {
+      const input = manifest();
+      input.permissions.checks = [
+        { slug, required: false, reason: `Requests the seeded ${slug} permission for its digest.` },
+      ];
+
+      const result = validatePluginManifest(input, options);
+
+      expect(result.externalPermissionChecks).toEqual([slug]);
+    });
+
     it('rejects a check slug that matches no known shape', () => {
       const input = manifest();
       input.permissions.checks = [

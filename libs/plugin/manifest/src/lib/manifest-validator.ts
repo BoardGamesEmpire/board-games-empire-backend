@@ -49,7 +49,15 @@ export interface ManifestValidationOptions {
  */
 const FQDN_PATTERN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(?:xn--[a-z0-9-]{2,59}|[a-z]{2,63})$/;
 
-const CORE_PERMISSION_SLUG_PATTERN = /^[a-z][a-z0-9-]*:[a-z][a-z0-9:-]*$/;
+// Core permission slug shape, matched against the seeded `Permission.slug`
+// vocabulary (prisma/seeds/roles-permissions.seed.ts): a verb segment plus
+// one or more colon-delimited segments, each lowercase and allowing interior
+// `_`/`-` (e.g. `read:public_content`, `update:event_occurrence:confirm`).
+// Existence in the Permission table is a Phase C install-pipeline check; this
+// only gates the SHAPE so a plugin-namespaced slug isn't misfiled as core.
+// `plugin:`-prefixed slugs are routed by PLUGIN_NAMESPACE_PATTERN before this
+// is consulted, so the leading segment can never collide with the namespace.
+const CORE_PERMISSION_SLUG_PATTERN = /^[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)+$/;
 const PLUGIN_NAMESPACE_PATTERN = /^plugin:/;
 
 interface LocalizedField {

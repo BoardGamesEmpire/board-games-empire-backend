@@ -21,6 +21,10 @@ model PluginGrant {
   /// four-column uniqueness below unenforceable for Server rows, and Prisma
   /// has no NULLS NOT DISTINCT support. Service-layer code never touches
   /// the sentinel — PluginGrantService (Phase C) owns scope addressing.
+  /// A CHECK constraint `(scope_type <> 'Server') => (scope_id <> '')` lands
+  /// with PluginGrantService in Phase C (hand-authored migration SQL — Prisma
+  /// cannot express raw CHECK constraints) so the database itself rejects
+  /// empty non-Server scopeIds rather than trusting caller discipline.
   scopeId String @default("") @map("scope_id")
 
   /// Permission being decided — plugin-namespaced or core slug.
