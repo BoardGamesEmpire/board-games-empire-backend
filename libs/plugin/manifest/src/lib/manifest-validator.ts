@@ -10,6 +10,7 @@ import {
   pluginPermissionPrefix,
   pluginQueuePrefix,
   pluginTablePrefix,
+  RESERVED_PLUGIN_SLUGS,
 } from './constants.js';
 import {
   ManifestErrorCode,
@@ -126,7 +127,8 @@ const isTrivialReason = (text: string, minLength: number): boolean => {
 /**
  * Full manifest validation: structural (zod) pass mapped to `SCHEMA_INVALID`
  * issues, then the semantic second pass covering #59 install-validation
- * steps 2–9. Collect-all by design — every issue in one throw.
+ * steps 2–9 plus the Phase A audit rules (D-J scope coherence, D-K slug
+ * reservation). Collect-all by design — every issue in one throw.
  *
  * Deliberately NOT here (they need the database or the tarball and belong to
  * the install pipeline, Phase C / #84): `declares[]` collision against the
@@ -191,6 +193,28 @@ export const validatePluginManifest = (
     );
   }
 
+  // ── slug reservation (D-K) ─────────────────────────────────────────
+  if (RESERVED_PLUGIN_SLUGS.has(manifest.slug)) {
+    push(
+      ManifestErrorCode.SLUG_RESERVED,
+      'slug',
+      `'${manifest.slug}' is reserved: 'plugin.${manifest.slug}.*' emit namespaces would be ambiguous against the 'plugin.*' lifecycle routing keys for wildcard listeners`,
+    );
+  }
+
+  // ── scope coherence (D-J) ────────────────────────────────────────
+  // Per-check consentScope coherence lives in the checks loop below. Topics
+  // are deliberately EXEMPT: topic subscription is a per-user opt-in at the
+  // topic runtime (#196), never a PluginGrant, so a household/user-scoped
+  // topic on a server-scope plugin has no missing consent surface.
+  if (manifest.scope === 'server' && manifest.config.requiresHouseholdConfig) {
+    push(
+      ManifestErrorCode.SCOPE_INCOHERENT,
+      'config.requiresHouseholdConfig',
+      'A server-scope plugin has no HouseholdPlugin enable/config surface to collect household configuration',
+    );
+  }
+
   const canonicalDefaultLocale = canonicalizeLocale(options.defaultLocale);
   // ── localization (issue "Localization rules") ──────────────────────────
   for (const field of collectLocalizedFields(manifest)) {
@@ -251,6 +275,14 @@ export const validatePluginManifest = (
     const consentScope = check.consentScope ?? 'server';
 
     permissionChecks.push({ ...check, consentScope });
+
+    if (manifest.scope === 'server' && consentScope !== 'server') {
+      push(
+        ManifestErrorCode.SCOPE_INCOHERENT,
+        `${path}.consentScope`,
+        `'${check.slug}' requests '${consentScope}'-scope consent, but a server-scope plugin has no per-unit enable surface to collect it (D-J)`,
+      );
+    }
 
     if (PLUGIN_NAMESPACE_PATTERN.test(check.slug)) {
       if (!check.slug.startsWith(ownPrefix)) {

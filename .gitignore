@@ -39,6 +39,7 @@ private/*
 zenstack/
 .private/
 .env
+dist-schema/
 
 # System Files
 .DS_Store

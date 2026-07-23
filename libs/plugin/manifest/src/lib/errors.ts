@@ -1,6 +1,7 @@
 /**
  * Rejection-class taxonomy for manifest validation (#59 "Validation at
- * install" steps 2–9. One code per class so the install endpoint, the
+ * install" steps 2–9), plus the Phase A audit rules scope coherence
+ * and slug reservation. One code per class so the install endpoint, the
  * author CLI (#84), and the test matrix all speak the same vocabulary.
  * Structural (zod) failures map to `SCHEMA_INVALID` with the zod path/message
  * preserved per issue.
@@ -33,6 +34,8 @@ export enum ManifestErrorCode {
   SCHEDULE_NAME_DUPLICATE = 'SCHEDULE_NAME_DUPLICATE',
   SCHEDULE_NAME_INVALID = 'SCHEDULE_NAME_INVALID',
   SCHEMA_INVALID = 'SCHEMA_INVALID',
+  SCOPE_INCOHERENT = 'SCOPE_INCOHERENT',
+  SLUG_RESERVED = 'SLUG_RESERVED',
   TOPIC_NAME_DUPLICATE = 'TOPIC_NAME_DUPLICATE',
   UPDATE_CHECK_URL_INVALID = 'UPDATE_CHECK_URL_INVALID',
   VERSION_INVALID = 'VERSION_INVALID',

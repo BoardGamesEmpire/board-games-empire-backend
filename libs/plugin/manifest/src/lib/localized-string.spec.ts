@@ -1,5 +1,9 @@
-import { z } from 'zod';
-import { canonicalizeLocale, isWellFormedBcp47, resolveLocalizedString, resolveLocalizedStringDetailed } from './localized-string.js';
+import {
+  canonicalizeLocale,
+  isWellFormedBcp47,
+  resolveLocalizedString,
+  resolveLocalizedStringDetailed,
+} from './localized-string.js';
 
 describe('localized-string', () => {
   describe('isWellFormedBcp47', () => {
@@ -90,7 +94,9 @@ describe('localized-string', () => {
     });
 
     it('throws when no entry is well-formed', () => {
-      expect(() => resolveLocalizedStringDetailed({ de_DE: 'kaputt' }, { ...defaults, locale: 'de' })).toThrow(RangeError);
+      expect(() => resolveLocalizedStringDetailed({ de_DE: 'kaputt' }, { ...defaults, locale: 'de' })).toThrow(
+        RangeError,
+      );
     });
   });
 

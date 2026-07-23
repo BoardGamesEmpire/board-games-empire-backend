@@ -3,7 +3,7 @@ import { PLUGIN_MANIFEST_JSON_SCHEMA_ID } from './constants.js';
 import { pluginManifestSchema } from './manifest.schema.js';
 
 /**
- * JSON Schema artifact for `manifest.json` (D-C).
+ * JSON Schema artifact for `manifest.json`.
  *
  * Uses zod v4's native `z.toJSONSchema` instead of the `zod-to-json-schema`
  * package the amendment named — one dependency fewer and first-party
@@ -25,3 +25,13 @@ export const buildPluginManifestJsonSchema = (): Record<string, unknown> => {
       'are enforced server-side and by bge-plugin validate, not expressible in JSON Schema.',
   };
 };
+
+/**
+ * Canonical on-disk serialization of the artifact (D-L): 2-space indent,
+ * trailing newline, key order as built. The `emit-json-schema` Nx target
+ * writes EXACTLY this string to `dist-schema/plugin-manifest.v1.json`; the parity
+ * spec asserts it round-trips to the builder output, so bin wrapper and
+ * tests share one serialization path.
+ */
+export const renderPluginManifestJsonSchemaArtifact = (): string =>
+  `${JSON.stringify(buildPluginManifestJsonSchema(), null, 2)}\n`;

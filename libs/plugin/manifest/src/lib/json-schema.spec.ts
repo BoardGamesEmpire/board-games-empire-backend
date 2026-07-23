@@ -1,5 +1,5 @@
 import { PLUGIN_CATEGORIES, PLUGIN_MANIFEST_JSON_SCHEMA_ID, PLUGIN_SLUG_PATTERN } from './constants.js';
-import { buildPluginManifestJsonSchema } from './json-schema.js';
+import { buildPluginManifestJsonSchema, renderPluginManifestJsonSchemaArtifact } from './json-schema.js';
 
 interface JsonSchemaObjectShape {
   readonly $id?: string;
@@ -37,5 +37,20 @@ describe('buildPluginManifestJsonSchema', () => {
   it('preserves structural rules in the artifact (no refinement loss): slug pattern and category enum survive', () => {
     expect(schema.properties?.['slug']?.pattern).toBe(PLUGIN_SLUG_PATTERN.source);
     expect(schema.properties?.['category']?.enum).toEqual([...PLUGIN_CATEGORIES]);
+  });
+});
+
+describe('renderPluginManifestJsonSchemaArtifact (D-L parity)', () => {
+  it('round-trips to exactly the builder output — the emitted file IS the builder result', () => {
+    expect(JSON.parse(renderPluginManifestJsonSchemaArtifact())).toEqual(buildPluginManifestJsonSchema());
+  });
+
+  it('is deterministic across calls with a stable serialization shape (2-space indent, trailing newline)', () => {
+    const first = renderPluginManifestJsonSchemaArtifact();
+    const second = renderPluginManifestJsonSchemaArtifact();
+
+    expect(first).toBe(second);
+    expect(first.startsWith('{\n  "')).toBe(true);
+    expect(first.endsWith('}\n')).toBe(true);
   });
 });

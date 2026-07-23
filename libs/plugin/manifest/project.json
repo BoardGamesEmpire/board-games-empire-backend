@@ -5,5 +5,17 @@
   "projectType": "library",
   "tags": ["plugins", "publish"],
   "// targets": "to see all targets run: nx show project plugin-manifest --web",
-  "targets": {}
+  "targets": {
+    "emit-json-schema": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build"],
+      "outputs": ["{projectRoot}/dist-schema/plugin-manifest.v1.json"],
+      "options": {
+        "command": "node libs/plugin/manifest/dist/bin/emit-json-schema.js libs/plugin/manifest/dist-schema/plugin-manifest.v1.json"
+      },
+      "metadata": {
+        "description": "Emit the plugin-manifest JSON Schema artifact (D-L) to dist-schema/ — deliberately outside the build target's cached dist/ so cache restoration cannot clobber it. CI publication at its $id URL is #206."
+      }
+    }
+  }
 }
