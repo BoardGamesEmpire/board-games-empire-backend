@@ -481,7 +481,9 @@ describe('validatePluginManifest', () => {
 
   describe('warnings (non-fatal author guidance)', () => {
     it('warns on a required permission at household/user consent scope (D16)', () => {
-      const input = manifest();
+      // Household-scope manifest: on a SERVER-scope plugin this combination is
+      // now a SCOPE_INCOHERENT error (D-J), and warnings only surface on success.
+      const input = manifest({ scope: 'household' });
       input.permissions.declares = [...input.permissions.declares, 'plugin:demo-sink:calendar:write'];
       input.permissions.checks = [
         ...input.permissions.checks,
@@ -501,6 +503,104 @@ describe('validatePluginManifest', () => {
           path: 'permissions.checks[2]',
         }),
       ]);
+    });
+  });
+
+  describe('scope coherence (D-J)', () => {
+    it.each(['household', 'user'] as const)(
+      "rejects a server-scope plugin requesting '%s'-consentable permission — no per-unit enable surface exists to collect that consent",
+      (consentScope) => {
+        const input = manifest();
+        input.permissions.checks = [
+          {
+            slug: 'feedback:read',
+            required: false,
+            reason: 'Reads submitted feedback to compose the weekly digest.',
+            consentScope,
+          },
+        ];
+
+        const error = expectRejection(input, ManifestErrorCode.SCOPE_INCOHERENT);
+
+        expect(error.issues.some((issue) => issue.path === 'permissions.checks[0].consentScope')).toBe(true);
+      },
+    );
+
+    it('rejects requiresHouseholdConfig on a server-scope plugin with the offending path', () => {
+      const error = expectRejection(
+        manifest({ config: { requiresHouseholdConfig: true } }),
+        ManifestErrorCode.SCOPE_INCOHERENT,
+      );
+
+      expect(error.issues.some((issue) => issue.path === 'config.requiresHouseholdConfig')).toBe(true);
+    });
+
+    it('accepts per-unit consent scopes and household config on a household-scope plugin (coherence control)', () => {
+      const input = manifest({ scope: 'household', config: { requiresHouseholdConfig: true } });
+      input.permissions.checks = [
+        ...input.permissions.checks,
+        {
+          slug: 'read:public_content',
+          required: false,
+          reason: 'Shows public content excerpts inside per-user digests.',
+          consentScope: 'user',
+        },
+      ];
+
+      const result = validatePluginManifest(input, options);
+
+      expect(result.permissionChecks[2]?.consentScope).toBe('user');
+    });
+
+    it('does NOT reject household/user-scoped topics on a server-scope plugin — topic subscription is a per-user opt-in (#196), not a PluginGrant', () => {
+      // The baseline fixture is exactly this shape (scope 'server', user topic)
+      // and stays valid by design.
+      const result = validatePluginManifest(manifest(), options);
+
+      expect(result.manifest.topics[0]?.scope).toBe('user');
+    });
+  });
+
+  describe('slug reservation (D-K)', () => {
+    /** Rebuilds every slug-namespaced field so ONLY the reservation rule is exercised. */
+    const manifestWithSlug = (slug: string): PluginManifest =>
+      manifest({
+        slug,
+        permissions: {
+          declares: [`plugin:${slug}:digest:manage`],
+          checks: [
+            {
+              slug: `plugin:${slug}:digest:manage`,
+              required: true,
+              reason: { en: 'Stores and manages the digest configuration it owns.' },
+              consentScope: 'server',
+            },
+          ],
+        },
+        events: { subscribes: [], emits: [`plugin.${slug}.digest-sent`] },
+        jobs: { queues: [`plugin:${slug}:digest`], schedules: [] },
+        storage: {
+          ownTables: [`plugin_${slug.replace(/-/g, '_')}_digests`],
+          readsCore: [],
+          writesCore: [],
+        },
+      });
+
+    it.each(['installed', 'load-failed', 'grant-created', 'config-updated'])(
+      "rejects the reserved slug '%s' with the offending path and ONLY the reservation issue",
+      (slug) => {
+        const error = expectRejection(manifestWithSlug(slug), ManifestErrorCode.SLUG_RESERVED);
+
+        expect(error.issues).toEqual([
+          expect.objectContaining({ code: ManifestErrorCode.SLUG_RESERVED, path: 'slug' }),
+        ]);
+      },
+    );
+
+    it("accepts a similar but unreserved slug ('installer')", () => {
+      const result = validatePluginManifest(manifestWithSlug('installer'), options);
+
+      expect(result.manifest.slug).toBe('installer');
     });
   });
 

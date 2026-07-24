@@ -34,12 +34,18 @@ export const describePluginRegistryContract = <TInstance>(
     });
 
     describe('register', () => {
-      it('registers enabled by default', () => {
+      it('registers DISABLED by default (D-M: fail-safe, matching Plugin.enabled @default(false))', () => {
         registry.register('alpha', options.createInstance(1));
 
         expect(registry.has('alpha')).toBe(true);
-        expect(registry.isEnabled('alpha')).toBe(true);
+        expect(registry.isEnabled('alpha')).toBe(false);
         expect(registry.size).toBe(1);
+      });
+
+      it('honors an explicit enabled registration', () => {
+        registry.register('alpha', options.createInstance(1), { enabled: true });
+
+        expect(registry.isEnabled('alpha')).toBe(true);
       });
 
       it('honors an explicit disabled registration', () => {
@@ -90,11 +96,17 @@ export const describePluginRegistryContract = <TInstance>(
     });
 
     describe('resolve (serving path)', () => {
-      it('returns an enabled instance', () => {
+      it('returns an explicitly enabled instance', () => {
         const instance = options.createInstance(1);
-        registry.register('alpha', instance);
+        registry.register('alpha', instance, { enabled: true });
 
         expect(registry.resolve('alpha')).toBe(instance);
+      });
+
+      it('throws PluginDisabledError for a DEFAULT registration — enablement must be explicit (D-M)', () => {
+        registry.register('alpha', options.createInstance(1));
+
+        expect(() => registry.resolve('alpha')).toThrow(PluginDisabledError);
       });
 
       it('throws PluginNotRegisteredError for an unknown slug', () => {
@@ -111,7 +123,7 @@ export const describePluginRegistryContract = <TInstance>(
     describe('enablement', () => {
       it('setEnabled flips serving behavior both ways', () => {
         const instance = options.createInstance(1);
-        registry.register('alpha', instance);
+        registry.register('alpha', instance, { enabled: true });
 
         registry.setEnabled('alpha', false);
         expect(() => registry.resolve('alpha')).toThrow(PluginDisabledError);
@@ -133,9 +145,9 @@ export const describePluginRegistryContract = <TInstance>(
 
     describe('list', () => {
       beforeEach(() => {
-        registry.register('alpha', options.createInstance(1));
+        registry.register('alpha', options.createInstance(1), { enabled: true });
         registry.register('beta', options.createInstance(2), { enabled: false });
-        registry.register('gamma', options.createInstance(3));
+        registry.register('gamma', options.createInstance(3), { enabled: true });
       });
 
       it('returns every entry in insertion order with enablement flags', () => {

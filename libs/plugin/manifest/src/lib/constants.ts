@@ -12,6 +12,32 @@
 /** Kebab-case, 3–64 chars, must start with a letter. */
 export const PLUGIN_SLUG_PATTERN = /^[a-z][a-z0-9-]{2,63}$/;
 
+/**
+ * Slugs a plugin may NOT claim : the kebab-cased suffixes of the
+ * lifecycle routing keys (`PluginEvent` in `@bge/plugin`). A plugin slugged
+ * `installed` would emit under `plugin.installed.*`, making wildcard
+ * listeners on the `plugin.` prefix ambiguous between lifecycle traffic and
+ * plugin-emitted domain events. Maintained by hand here because this lib is
+ * framework-free and `@bge/plugin` depends on it, not vice versa; the drift
+ * spec in `@bge/plugin` (`reserved-slugs.spec.ts`) asserts exact equality
+ * with the `PluginEvent` vocabulary so the two cannot diverge silently.
+ */
+export const RESERVED_PLUGIN_SLUGS: ReadonlySet<string> = new Set([
+  'installed',
+  'enabled',
+  'disabled',
+  'uninstalled',
+  'config-updated',
+  'update-check-completed',
+  'update-pending',
+  'update-approved',
+  'update-rejected',
+  'load-failed',
+  'grant-created',
+  'grant-rejected',
+  'unit-disabled',
+]);
+
 /** Manifest categories — mirrors the Prisma `PluginCategory` enum (bijection spec in `@bge/plugin`). */
 export const PLUGIN_CATEGORIES = [
   'data-gateway',
@@ -66,7 +92,8 @@ export const DEFAULT_MIN_REASON_LENGTH = 12;
  * blunt — reason quality beyond this is a registry-review concern (#84),
  * not a validator concern (#60 out-of-scope note).
  */
-export const LOW_EFFORT_REASON_PATTERN = /^(?:n\/?a|todo|tbd|test(?:ing)?|reason|because|placeholder|lorem(?:\s+ipsum)?.*|x+|\.+|-+)$/i;
+export const LOW_EFFORT_REASON_PATTERN =
+  /^(?:n\/?a|todo|tbd|test(?:ing)?|reason|because|placeholder|lorem(?:\s+ipsum)?.*|x+|\.+|-+)$/i;
 
 /** `$id` stamped on the generated JSON Schema artifact consumed by `bge-plugin validate` (#84). */
 export const PLUGIN_MANIFEST_JSON_SCHEMA_ID = 'https://boardgamesempire.dev/schemas/plugin-manifest/v1.json';

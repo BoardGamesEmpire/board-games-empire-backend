@@ -11,7 +11,10 @@ export interface PluginRegistryEntry<TInstance> {
 
 export interface RegisterOptions {
   /**
-   * Initial enablement; defaults to `true` (a freshly loaded plugin is servable unless told otherwise).
+   * Initial enablement; defaults to `false` (D-M) — fail-safe: nothing is
+   * servable without an explicit enable, matching `Plugin.enabled
+   * @default(false)`. The Phase B loader passes the persisted flag
+   * explicitly; the default only guards direct/manual registrations.
    */
   readonly enabled?: boolean;
 }
@@ -60,7 +63,7 @@ export abstract class BasePluginRegistry<TInstance> {
       throw new DuplicatePluginRegistrationError(this.registryName, slug);
     }
 
-    this.entries.set(slug, { instance, enabled: options.enabled ?? true });
+    this.entries.set(slug, { instance, enabled: options.enabled ?? false });
   }
 
   /** Removes the entry entirely (uninstall path). Unknown slug is a wiring bug — throws. */
