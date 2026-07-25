@@ -149,6 +149,8 @@ export function createMockDatabaseService(): MockDatabaseService {
     platform: mockDelegate(),
     platformGame: mockDelegate(),
     platformGatewayLink: mockDelegate(),
+    plugin: mockDelegate(),
+    pluginLifecycleEvent: mockDelegate(),
     publisher: mockDelegate(),
     publisherGatewayLink: mockDelegate(),
     quota: mockDelegate(),

@@ -1,4 +1,4 @@
-import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegisteredError } from './registry.errors.js';
+import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegisteredError } from './registry.errors';
 
 /**
  * One registry row as exposed by `list()`.

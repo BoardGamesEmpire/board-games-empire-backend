@@ -1,6 +1,6 @@
 import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
-import { PluginEvent } from './constants.js';
+import { PluginEvent } from './constants';
 import {
   GrantedPermissionRecord,
   HouseholdPluginConfigUpdatedEvent,
@@ -14,7 +14,7 @@ import {
   PluginProvenance,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
-} from './plugin.events.js';
+} from './plugin.events';
 
 const initiatedAt = new Date('2026-07-22T10:00:00.000Z');
 

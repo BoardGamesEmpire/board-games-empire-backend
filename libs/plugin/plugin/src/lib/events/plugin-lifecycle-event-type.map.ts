@@ -1,5 +1,5 @@
 import { PluginLifecycleEventType } from '@bge/database';
-import { PluginEvent } from './constants.js';
+import { PluginEvent } from './constants';
 
 /**
  * Routing key → persisted enum for the dedicated `plugin_lifecycle_events`

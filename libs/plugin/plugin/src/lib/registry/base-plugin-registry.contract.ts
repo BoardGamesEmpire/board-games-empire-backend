@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from '@jest/globals';
-import { BasePluginRegistry } from './base-plugin-registry.js';
-import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegisteredError } from './registry.errors.js';
+import { BasePluginRegistry } from './base-plugin-registry';
+import { DuplicatePluginRegistrationError, PluginDisabledError, PluginNotRegisteredError } from './registry.errors';
 
 export interface PluginRegistryContractOptions<TInstance> {
   /** Fresh, empty registry per test. */

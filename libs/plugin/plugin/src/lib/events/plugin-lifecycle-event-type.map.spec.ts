@@ -1,6 +1,6 @@
 import { PluginLifecycleEventType } from '@bge/database';
-import { PluginEvent } from './constants.js';
-import { PLUGIN_EVENT_TO_LIFECYCLE_TYPE } from './plugin-lifecycle-event-type.map.js';
+import { PluginEvent } from './constants';
+import { PLUGIN_EVENT_TO_LIFECYCLE_TYPE } from './plugin-lifecycle-event-type.map';
 
 describe('PLUGIN_EVENT_TO_LIFECYCLE_TYPE', () => {
   it('maps every PluginEvent routing key', () => {
