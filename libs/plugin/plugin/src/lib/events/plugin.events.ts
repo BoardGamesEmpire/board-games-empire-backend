@@ -2,10 +2,10 @@ import { MutationEvent } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginGrant } from '@bge/database';
 import { ResourceType } from '@bge/database';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
-import { PluginEvent } from './constants.js';
+import { PluginEvent } from './constants';
 
 /**
- * Plugin lifecycle events (#59, decision D-A as refined during Phase A).
+ * Plugin lifecycle events (#59).
  *
  * Every lifecycle transition IS a row mutation on `Plugin`,
  * `HouseholdPlugin`, or `PluginGrant`, so these extend `MutationEvent` and

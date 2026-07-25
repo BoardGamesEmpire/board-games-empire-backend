@@ -1,5 +1,5 @@
 import { PLUGIN_SLUG_PATTERN, RESERVED_PLUGIN_SLUGS } from '@boardgamesempire/plugin-manifest';
-import { PluginEvent } from './constants.js';
+import { PluginEvent } from './constants';
 
 /**
  * D-K drift spec: `RESERVED_PLUGIN_SLUGS` is maintained by hand in the

@@ -5,13 +5,21 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": false,
+    "emitDecoratorMetadata": true,
     "forceConsistentCasingInFileNames": true,
+    "experimentalDecorators": true,
     "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../manifest/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/redis/tsconfig.lib.json"
     },
     {
       "path": "../../common/actor-context/tsconfig.lib.json"

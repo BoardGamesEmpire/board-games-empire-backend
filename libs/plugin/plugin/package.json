@@ -21,7 +21,11 @@
   "dependencies": {
     "@bge/database": "^0.0.1",
     "@bge/actor-context": "^0.0.1",
+    "@bge/redis": "^0.0.1",
     "@boardgamesempire/plugin-manifest": "^0.0.1",
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/event-emitter": "^3.0.0",
+    "@nestjs/schedule": "^6.0.0",
     "tslib": "^2.3.0"
   }
 }

@@ -1,11 +1,11 @@
-import { describePluginRegistryContract } from './base-plugin-registry.contract.js';
-import { BasePluginRegistry } from './base-plugin-registry.js';
+import { BasePluginRegistry } from './base-plugin-registry';
+import { describePluginRegistryContract } from './base-plugin-registry.contract';
 import {
   DuplicatePluginRegistrationError,
   PluginDisabledError,
   PluginNotRegisteredError,
   PluginRegistryError,
-} from './registry.errors.js';
+} from './registry.errors';
 
 interface TestDriver {
   readonly seed: number;

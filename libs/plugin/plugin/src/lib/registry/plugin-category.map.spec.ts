@@ -1,6 +1,6 @@
 import { PluginCategory } from '@bge/database';
 import { PLUGIN_CATEGORIES } from '@boardgamesempire/plugin-manifest';
-import { MANIFEST_CATEGORY_TO_PRISMA, PRISMA_CATEGORY_TO_MANIFEST } from './plugin-category.map.js';
+import { MANIFEST_CATEGORY_TO_PRISMA, PRISMA_CATEGORY_TO_MANIFEST } from './plugin-category.map';
 
 describe('MANIFEST_CATEGORY_TO_PRISMA', () => {
   it('maps every manifest category (total over PLUGIN_CATEGORIES)', () => {
