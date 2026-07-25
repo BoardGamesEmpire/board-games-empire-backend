@@ -1,5 +1,6 @@
 import { DatabaseService, Plugin, PluginCategory, PluginScope } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { Logger } from '@nestjs/common';
 import { PluginConfigEventsService, type PluginConfigReloadHandler } from './plugin-config-events.service';
 import { PluginConfigService } from './plugin-config.service';
 
@@ -61,10 +62,30 @@ describe('PluginConfigService', () => {
       expect(service.snapshotFor('demo-sink')).toEqual({});
     });
 
-    it('normalizes an array config to the empty snapshot', () => {
-      service.prime('demo-sink', ['a', 'b']);
+    it('normalizes an array config to the empty snapshot and reports it as an array, not an object', () => {
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
 
-      expect(service.snapshotFor('demo-sink')).toEqual({});
+      try {
+        service.prime('demo-sink', ['a', 'b']);
+
+        expect(service.snapshotFor('demo-sink')).toEqual({});
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('(got array)'));
+      } finally {
+        errorSpy.mockRestore();
+      }
+    });
+
+    it('normalizes a null config and reports it as null', () => {
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      try {
+        service.prime('demo-sink', null);
+
+        expect(service.snapshotFor('demo-sink')).toEqual({});
+        expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('(got null)'));
+      } finally {
+        errorSpy.mockRestore();
+      }
     });
   });
 

@@ -75,13 +75,22 @@ describe('PluginDirectoryResolverService', () => {
   it('throws PluginDirectoryLayoutError when manifest.json is missing', async () => {
     await scaffold(pluginsRoot, 'no-manifest', ['package.json']);
 
-    await expect(resolver.resolve('no-manifest', false)).rejects.toThrow(/missing manifest\.json/);
+    await expect(resolver.resolve('no-manifest', false)).rejects.toThrow(/manifest\.json .* is missing or not/);
   });
 
   it('throws PluginDirectoryLayoutError when package.json is missing', async () => {
     await scaffold(pluginsRoot, 'no-descriptor', ['manifest.json']);
 
-    await expect(resolver.resolve('no-descriptor', false)).rejects.toThrow(/missing package\.json/);
+    await expect(resolver.resolve('no-descriptor', false)).rejects.toThrow(/package\.json .* is missing or not/);
+  });
+
+  it('rejects a DIRECTORY named manifest.json rather than deferring to an opaque read error', async () => {
+    const dir = join(pluginsRoot, 'manifest-is-a-dir');
+    await mkdir(join(dir, 'manifest.json'), { recursive: true });
+    await writeFile(join(dir, 'package.json'), '{}');
+
+    await expect(resolver.resolve('manifest-is-a-dir', false)).rejects.toBeInstanceOf(PluginDirectoryLayoutError);
+    await expect(resolver.resolve('manifest-is-a-dir', false)).rejects.toThrow(/not a regular file/);
   });
 
   it('rejects a slug that fails the manifest slug pattern before touching the filesystem', async () => {

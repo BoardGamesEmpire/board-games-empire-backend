@@ -1,6 +1,6 @@
 import { PLUGIN_SLUG_PATTERN } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
-import { access, stat } from 'node:fs/promises';
+import { stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import { MODULE_OPTIONS_TOKEN } from '../plugin-module.options';
@@ -56,11 +56,17 @@ export class PluginDirectoryResolverService {
     return { slug, rootDir, manifestPath, packageJsonPath, bundled };
   }
 
+  /**
+   * Asserts a REGULAR FILE, not mere existence: a directory (or socket, or
+   * dangling symlink) named `manifest.json` would satisfy `access()` and
+   * then fail downstream with an opaque read error instead of a layout
+   * diagnosis attributed to the plugin.
+   */
   private async assertFile(slug: string, path: string, filename: string): Promise<void> {
-    try {
-      await access(path);
-    } catch {
-      throw new PluginDirectoryLayoutError(slug, `missing ${filename} at directory root`);
+    const entry = await stat(path).catch(() => null);
+
+    if (entry === null || !entry.isFile()) {
+      throw new PluginDirectoryLayoutError(slug, `${filename} at directory root is missing or not a regular file`);
     }
   }
 }

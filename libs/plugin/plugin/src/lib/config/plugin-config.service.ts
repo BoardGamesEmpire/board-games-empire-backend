@@ -103,10 +103,24 @@ export class PluginConfigService implements OnModuleInit {
    */
   private normalize(slug: string, config: unknown): Readonly<Record<string, unknown>> {
     if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-      this.logger.error(`Plugin '${slug}' config is not an object (got ${typeof config}) — serving empty config`);
+      this.logger.error(
+        `Plugin '${slug}' config is not an object (got ${describeType(config)}) — serving empty config`,
+      );
       return EMPTY_CONFIG;
     }
 
     return Object.freeze({ ...(config as Record<string, unknown>) });
   }
+}
+
+/**
+ * Operator-facing type label. `typeof` collapses `null` and arrays into
+ * 'object', which is exactly the diagnosis an operator staring at a bad
+ * `Plugin.config` row needs distinguished.
+ */
+function describeType(value: unknown): string {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+
+  return typeof value;
 }
