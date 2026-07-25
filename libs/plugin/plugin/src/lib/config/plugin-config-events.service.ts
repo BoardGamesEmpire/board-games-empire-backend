@@ -68,10 +68,11 @@ export class PluginConfigEventsService implements OnModuleDestroy {
       throw new Error('PluginConfigEventsService already has an active subscription');
     }
 
-    this.subscriberConnection = this.redis.duplicate();
-    await this.subscriberConnection.subscribe(PLUGIN_CONFIG_UPDATE_CHANNEL);
+    const connection = this.redis.duplicate();
 
-    this.subscriberConnection.on('message', (channel: string, message: string) => {
+    // Attached BEFORE subscribing so no message can land in the window
+    // between the subscription taking effect and the listener existing.
+    connection.on('message', (channel: string, message: string) => {
       if (channel !== PLUGIN_CONFIG_UPDATE_CHANNEL) return;
 
       void (async (): Promise<void> => {
@@ -89,6 +90,20 @@ export class PluginConfigEventsService implements OnModuleDestroy {
         }
       })();
     });
+
+    try {
+      await connection.subscribe(PLUGIN_CONFIG_UPDATE_CHANNEL);
+    } catch (err) {
+      // A failed subscribe must not leave the instance stuck: without this
+      // the field would stay set and every retry would report an active
+      // subscription that does not exist. Discard the dead connection and
+      // let the caller decide whether to retry.
+      await connection.quit().catch(() => undefined);
+      throw err;
+    }
+
+    // Only now is the subscription real — publish the field last.
+    this.subscriberConnection = connection;
 
     this.logger.log(`Subscribed to ${PLUGIN_CONFIG_UPDATE_CHANNEL}`);
 

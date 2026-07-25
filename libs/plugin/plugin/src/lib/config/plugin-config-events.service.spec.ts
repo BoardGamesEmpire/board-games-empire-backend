@@ -118,6 +118,43 @@ describe('PluginConfigEventsService', () => {
       expect(handler).toHaveBeenCalledTimes(1);
     });
 
+    it('attaches the message handler before subscribing so no message can be missed', async () => {
+      const order: string[] = [];
+      subscriber.on.mockImplementation(() => {
+        order.push('on');
+        return subscriber;
+      });
+      subscriber.subscribe.mockImplementation(async () => {
+        order.push('subscribe');
+        return 1;
+      });
+
+      await service.subscribe(jest.fn());
+
+      expect(order).toEqual(['on', 'subscribe']);
+    });
+
+    it('rethrows a failed subscribe, quits the dead connection, and leaves the instance retryable', async () => {
+      subscriber.subscribe.mockRejectedValueOnce(new Error('redis down'));
+
+      await expect(service.subscribe(jest.fn())).rejects.toThrow('redis down');
+      expect(subscriber.quit).toHaveBeenCalledTimes(1);
+
+      // No stuck state: a later attempt must be able to establish a real subscription.
+      await expect(service.subscribe(jest.fn())).resolves.toBeInstanceOf(Function);
+    });
+
+    it('does not leave a subscriber to tear down when subscribe failed', async () => {
+      subscriber.subscribe.mockRejectedValueOnce(new Error('redis down'));
+
+      await expect(service.subscribe(jest.fn())).rejects.toThrow('redis down');
+      subscriber.quit.mockClear();
+
+      await service.onModuleDestroy();
+
+      expect(subscriber.quit).not.toHaveBeenCalled();
+    });
+
     it('rejects a second subscription on the same instance', async () => {
       await service.subscribe(jest.fn());
 
