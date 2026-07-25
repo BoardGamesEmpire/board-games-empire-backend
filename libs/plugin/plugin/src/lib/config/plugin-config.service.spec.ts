@@ -49,6 +49,28 @@ describe('PluginConfigService', () => {
       expect(Object.isFrozen(snapshot)).toBe(true);
     });
 
+    it('deep-freezes nested objects and arrays, not just the top level', () => {
+      service.prime('demo-sink', { nested: { deep: { value: 1 } }, list: [{ item: 1 }] });
+      const snapshot = service.snapshotFor('demo-sink') as {
+        nested: { deep: { value: number } };
+        list: { item: number }[];
+      };
+
+      expect(Object.isFrozen(snapshot.nested)).toBe(true);
+      expect(Object.isFrozen(snapshot.nested.deep)).toBe(true);
+      expect(Object.isFrozen(snapshot.list)).toBe(true);
+      expect(Object.isFrozen(snapshot.list[0])).toBe(true);
+    });
+
+    it('clones the source: mutating the original row object cannot alter a live snapshot', () => {
+      const source = { nested: { value: 'original' } };
+      service.prime('demo-sink', source);
+
+      source.nested.value = 'mutated';
+
+      expect(service.snapshotFor('demo-sink')).toEqual({ nested: { value: 'original' } });
+    });
+
     it('serves the frozen empty config for an unknown slug', () => {
       const snapshot = service.snapshotFor('never-primed');
 

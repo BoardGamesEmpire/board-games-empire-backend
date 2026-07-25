@@ -109,7 +109,22 @@ export class PluginConfigService implements OnModuleInit {
       return EMPTY_CONFIG;
     }
 
-    return Object.freeze({ ...(config as Record<string, unknown>) });
+    try {
+      // Deep clone: the value arrives as a Prisma Json tree whose nested
+      // objects would otherwise be shared with the caller's row object, so a
+      // shallow spread leaves nested state reachable and mutable.
+      const cloned = structuredClone(config) as Record<string, unknown>;
+
+      return deepFreeze(cloned);
+    } catch (err) {
+      this.logger.error(
+        `Plugin '${slug}' config could not be cloned — serving empty config: ${
+          err instanceof Error ? err.message : err
+        }`,
+      );
+
+      return EMPTY_CONFIG;
+    }
   }
 }
 
@@ -123,4 +138,34 @@ function describeType(value: unknown): string {
   if (Array.isArray(value)) return 'array';
 
   return typeof value;
+}
+
+/**
+ * Recursively freezes a JSON tree. `Object.freeze` is shallow, so a
+ * shallow-frozen snapshot still lets a plugin mutate nested objects and
+ * arrays in place — which would corrupt every subsequent read of that
+ * plugin's snapshot until the next refresh, violating the read-only
+ * contract `PluginConfigAccessor` advertises. Snapshots are keyed per
+ * plugin, so the reachable blast radius is one plugin's own config rather
+ * than another plugin's, but a mutable "immutable" snapshot is a bug
+ * regardless of radius.
+ */
+function deepFreeze<T>(value: T): T {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      deepFreeze(item);
+    }
+
+    return Object.freeze(value);
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    for (const nested of Object.values(value)) {
+      deepFreeze(nested);
+    }
+
+    return Object.freeze(value);
+  }
+
+  return value;
 }

@@ -10,6 +10,7 @@ export * from './lib/lifecycle/plugin-lifecycle.listener';
 export * from './lib/loader/entrypoint-resolver';
 export * from './lib/loader/installed-plugin-directory';
 export * from './lib/loader/loader.errors';
+export * from './lib/loader/path-containment';
 export * from './lib/loader/plugin-definition';
 export * from './lib/loader/plugin-directory-resolver.service';
 export * from './lib/loader/plugin-instance-registry';

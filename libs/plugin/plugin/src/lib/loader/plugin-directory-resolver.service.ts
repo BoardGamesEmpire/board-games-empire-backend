@@ -10,6 +10,7 @@ import {
   type InstalledPluginDirectory,
 } from './installed-plugin-directory';
 import { PluginDirectoryLayoutError, PluginDirectoryNotFoundError } from './loader.errors';
+import { isContained, realpathOrNull } from './path-containment';
 
 /**
  * Maps a `Plugin` row to its on-disk `InstalledPluginDirectory`. Two roots:
@@ -39,34 +40,60 @@ export class PluginDirectoryResolverService {
       );
     }
 
-    const root = resolve(bundled ? this.options.bundledRoot : this.options.pluginsRoot);
-    const rootDir = join(root, slug);
+    const configuredRoot = resolve(bundled ? this.options.bundledRoot : this.options.pluginsRoot);
+    const realRoot = await realpathOrNull(configuredRoot);
 
-    const rootStat = await stat(rootDir).catch(() => null);
+    if (realRoot === null) {
+      throw new PluginDirectoryLayoutError(slug, `configured plugin root '${configuredRoot}' cannot be resolved`);
+    }
+
+    const rootStat = await stat(join(realRoot, slug)).catch(() => null);
+
     if (rootStat === null || !rootStat.isDirectory()) {
-      throw new PluginDirectoryNotFoundError(slug, rootDir);
+      throw new PluginDirectoryNotFoundError(slug, join(realRoot, slug));
+    }
+
+    // The plugin directory itself may be a symlink; a link out of the
+    // configured root would otherwise let every subsequent layout check pass
+    // against a host location.
+    const rootDir = await realpathOrNull(join(realRoot, slug));
+
+    if (rootDir === null || !isContained(realRoot, rootDir)) {
+      throw new PluginDirectoryLayoutError(slug, `directory resolves outside the configured plugin root ${realRoot}`);
     }
 
     const manifestPath = join(rootDir, PLUGIN_MANIFEST_FILENAME);
     const packageJsonPath = join(rootDir, PLUGIN_PACKAGE_JSON_FILENAME);
 
-    await this.assertFile(slug, manifestPath, PLUGIN_MANIFEST_FILENAME);
-    await this.assertFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME);
+    await this.assertContainedFile(slug, manifestPath, PLUGIN_MANIFEST_FILENAME, rootDir);
+    await this.assertContainedFile(slug, packageJsonPath, PLUGIN_PACKAGE_JSON_FILENAME, rootDir);
 
     return { slug, rootDir, manifestPath, packageJsonPath, bundled };
   }
 
   /**
-   * Asserts a REGULAR FILE, not mere existence: a directory (or socket, or
-   * dangling symlink) named `manifest.json` would satisfy `access()` and
-   * then fail downstream with an opaque read error instead of a layout
-   * diagnosis attributed to the plugin.
+   * Asserts a REGULAR FILE that provably lives inside the plugin directory.
+   *
+   * Existence alone is insufficient on both axes. `access()` would accept a
+   * directory named `manifest.json`, deferring the diagnosis to an opaque
+   * read error downstream. And `stat()` follows symlinks, so a
+   * `package.json` linked to a host path would satisfy a naive check and
+   * then be read and parsed by the loader — whose JSON parse errors are
+   * persisted verbatim into `Plugin.loadError`, making a plugin author's
+   * layout a weak read primitive against host files. Containment is
+   * therefore asserted against `realpath`, matching the entrypoint guard.
    */
-  private async assertFile(slug: string, path: string, filename: string): Promise<void> {
+  private async assertContainedFile(slug: string, path: string, filename: string, rootDir: string): Promise<void> {
     const entry = await stat(path).catch(() => null);
 
     if (entry === null || !entry.isFile()) {
       throw new PluginDirectoryLayoutError(slug, `${filename} at directory root is missing or not a regular file`);
+    }
+
+    const realPath = await realpathOrNull(path);
+
+    if (realPath === null || !isContained(rootDir, realPath)) {
+      throw new PluginDirectoryLayoutError(slug, `${filename} resolves outside the plugin directory`);
     }
   }
 }

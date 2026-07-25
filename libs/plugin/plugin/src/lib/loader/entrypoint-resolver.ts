@@ -1,6 +1,6 @@
-import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { PluginEntrypointError } from './loader.errors';
+import { isContained, realpathOrNull } from './path-containment';
 
 /**
  * The subset of `package.json` the loader reads. Everything else in the
@@ -138,22 +138,19 @@ export async function assertResolvedEntrypointContained(
   entrypointPath: string,
   rootDir: string,
 ): Promise<string> {
-  const realRoot = await realpath(resolve(rootDir)).catch(() => {
+  const realRoot = await realpathOrNull(resolve(rootDir));
+
+  if (realRoot === null) {
     throw new PluginEntrypointError(slug, `plugin root '${rootDir}' cannot be resolved`);
-  });
+  }
 
-  const realEntrypoint = await realpath(entrypointPath).catch(() => {
+  const realEntrypoint = await realpathOrNull(entrypointPath);
+
+  if (realEntrypoint === null) {
     throw new PluginEntrypointError(slug, `entrypoint '${entrypointPath}' does not exist`);
-  });
+  }
 
-  const relativeToRoot = relative(realRoot, realEntrypoint);
-
-  if (
-    relativeToRoot === '' ||
-    relativeToRoot === '..' ||
-    relativeToRoot.startsWith(`..${sep}`) ||
-    isAbsolute(relativeToRoot)
-  ) {
+  if (!isContained(realRoot, realEntrypoint)) {
     throw new PluginEntrypointError(slug, `entrypoint '${entrypointPath}' resolves outside the plugin directory`);
   }
 
