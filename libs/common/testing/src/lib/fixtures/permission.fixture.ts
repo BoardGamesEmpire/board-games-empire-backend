@@ -1,5 +1,5 @@
 import type { Permission } from '@bge/database';
-import { Action } from '@bge/database';
+import { Action, RiskLevel } from '@bge/database';
 import { sequence } from './sequence.js';
 
 export function makePermission(overrides: Partial<Permission> = {}): Permission {
@@ -8,6 +8,7 @@ export function makePermission(overrides: Partial<Permission> = {}): Permission 
     id: `perm-${n}`,
     action: Action.read,
     subject: 'Game',
+    riskLevel: RiskLevel.Low,
     fields: [],
     conditions: null,
     inverted: false,

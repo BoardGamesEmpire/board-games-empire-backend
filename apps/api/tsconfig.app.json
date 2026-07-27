@@ -65,6 +65,9 @@
       "path": "../../libs/queue/feedback/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/plugin/plugin/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/permissions/tsconfig.lib.json"
     },
     {
