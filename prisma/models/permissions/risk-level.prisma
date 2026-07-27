@@ -1,0 +1,22 @@
+/// Consent-surface risk classification for a Permission (#60). Drives how
+/// prominently a permission request is rendered on plugin install/update
+/// consent surfaces and whether the Critical+required second-factor gate
+/// fires (#59 install-validation steps 13–14).
+///
+/// Canonical rubric (#60):
+/// - Critical: mutating auth/roles/permissions, user PII at scale, audit
+///   log mutation, security-control mutation
+/// - High: cross-household reads, user listing, household membership
+///   management, audit log read access, mass notification send
+/// - Medium: cross-user-within-household reads, financial/transaction data
+/// - Low: scoped reads within the actor's own context, household-scoped
+///   writes to user-owned resources
+///
+/// Classification is seed-declared (prisma/seeds/roles-permissions.seed.ts,
+/// authoritative on re-run); admin reclassification is out of scope (#60).
+enum RiskLevel {
+  Low
+  Medium
+  High
+  Critical
+}

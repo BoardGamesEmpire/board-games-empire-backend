@@ -1,5 +1,44 @@
-import { Action, PrismaClient, ResourceType, SystemRole } from '@bge/database';
+import type { Permission, Prisma, Role } from '@bge/database';
+import { Action, PrismaClient, ResourceType, RiskLevel, SystemRole } from '@bge/database';
 import type { Logger } from '@nestjs/common';
+
+/**
+ * One entry in the seeded permission catalog.
+ *
+ * `riskLevel` is REQUIRED at the type level: the compiler — not a runtime
+ * check — guarantees that no seeded permission relies on the schema default
+ * (#60). Omitting a classification on a new entry fails the build. The
+ * `@default(Low)` on the Prisma column exists only for rows created outside
+ * this seed (plugin-declared permissions; their classification is decided in
+ * #59 Phase C).
+ */
+interface PermissionSeedDefinition {
+  action: Action;
+
+  /**
+   * ResourceType for domain permissions; literal 'all' for the global wildcards.
+   */
+  subject: ResourceType | 'all';
+
+  /**
+   * Stable code-side identifier, e.g. 'read:game'.
+   */
+  slug: string;
+
+  /**
+   * Consent-surface risk classification (#60 canonical rubric).
+   */
+  riskLevel: RiskLevel;
+
+  reason: string;
+
+  /**
+   * Mustache-templated ABAC conditions, rendered by the ability factory.
+   */
+  conditions?: Prisma.InputJsonObject;
+
+  fields?: string[];
+}
 
 /**
  * Initialize default roles and permissions
@@ -23,20 +62,45 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     ],
   };
 
-  const permissionsToCreate = [
+  const permissionsToCreate: PermissionSeedDefinition[] = [
     // --- Global Admin/Owner ---
-    { action: Action.manage, subject: 'all', slug: 'manage:all', reason: 'Unrestricted access for Owner' },
-    { action: Action.manage, subject: 'all', slug: 'manage:content:moderate', reason: 'Moderate app content' },
-    { action: Action.read, subject: 'all', slug: 'read:public_content', reason: 'View public content' },
+    {
+      action: Action.manage,
+      subject: 'all',
+      slug: 'manage:all',
+      riskLevel: RiskLevel.Critical,
+      reason: 'Unrestricted access for Owner',
+    },
+    {
+      action: Action.manage,
+      subject: 'all',
+      slug: 'manage:content:moderate',
+      riskLevel: RiskLevel.Critical,
+      reason: 'Moderate app content',
+    },
+    {
+      action: Action.read,
+      subject: 'all',
+      slug: 'read:public_content',
+      riskLevel: RiskLevel.Low,
+      reason: 'View public content',
+    },
 
     // --- App Level / User ---
     // TODO: consider the ability to block other users from viewing your profile, etc.
-    { action: Action.read, subject: ResourceType.UserProfile, slug: 'read:user:profile', reason: 'View user profiles' },
+    {
+      action: Action.read,
+      subject: ResourceType.UserProfile,
+      slug: 'read:user:profile',
+      riskLevel: RiskLevel.High,
+      reason: 'View user profiles',
+    },
     {
       action: Action.update,
       subject: ResourceType.UserProfile,
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:user:profile:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Update own profile',
     },
 
@@ -47,6 +111,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Friendship,
       conditions: { requesterId: '{{ user.id }}' },
       slug: 'create:friendship',
+      riskLevel: RiskLevel.Low,
       reason: 'Send a friend request',
     },
     {
@@ -54,6 +119,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Friendship,
       conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
       slug: 'read:friendships:own',
+      riskLevel: RiskLevel.Low,
       reason: 'View your own friendships and requests',
     },
     {
@@ -61,6 +127,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Friendship,
       conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
       slug: 'update:friendship:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Respond to, withdraw, or block a friendship you are part of',
     },
     {
@@ -68,6 +135,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Friendship,
       conditions: { OR: [{ requesterId: '{{ user.id }}' }, { addresseeId: '{{ user.id }}' }] },
       slug: 'delete:friendship:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Remove a friendship you are part of',
     },
     // Friend visibility: read resources exposed to friends by their owner.
@@ -76,6 +144,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Event,
       conditions: { visibility: 'Friends', createdBy: acceptedFriendOfActingUser },
       slug: 'read:event:friends',
+      riskLevel: RiskLevel.Medium,
       reason: "View a friend's friends-visible events",
     },
     {
@@ -83,20 +152,52 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Household,
       conditions: { visibility: 'Friends', members: { some: { user: acceptedFriendOfActingUser } } },
       slug: 'read:households:friends',
+      riskLevel: RiskLevel.Medium,
       reason: "View a friend's friends-visible households",
     },
 
     // --- Games ---
-    { action: Action.read, subject: ResourceType.Game, slug: 'read:game', reason: 'View games' },
-    { action: Action.read, subject: ResourceType.Job, slug: 'read:job', reason: 'View import/system job status' },
-    { action: Action.create, subject: ResourceType.Game, slug: 'create:game', reason: 'Create games' },
-    { action: Action.update, subject: ResourceType.Game, slug: 'update:game', reason: 'Update games' },
-    { action: Action.delete, subject: ResourceType.Game, slug: 'delete:game', reason: 'Delete games' },
+    {
+      action: Action.read,
+      subject: ResourceType.Game,
+      slug: 'read:game',
+      riskLevel: RiskLevel.Low,
+      reason: 'View games',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Job,
+      slug: 'read:job',
+      riskLevel: RiskLevel.Medium,
+      reason: 'View import/system job status',
+    },
+    {
+      action: Action.create,
+      subject: ResourceType.Game,
+      slug: 'create:game',
+      riskLevel: RiskLevel.Low,
+      reason: 'Create games',
+    },
+    {
+      action: Action.update,
+      subject: ResourceType.Game,
+      slug: 'update:game',
+      riskLevel: RiskLevel.High,
+      reason: 'Update games',
+    },
+    {
+      action: Action.delete,
+      subject: ResourceType.Game,
+      slug: 'delete:game',
+      riskLevel: RiskLevel.High,
+      reason: 'Delete games',
+    },
 
     {
       action: Action.update,
       subject: ResourceType.Game,
       slug: 'update:game:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Update own games',
       conditions: { createdById: '{{ user.id }}' },
     },
@@ -104,6 +205,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.delete,
       subject: ResourceType.Game,
       slug: 'delete:game:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Delete own games',
       conditions: { createdById: '{{ user.id }}' },
     },
@@ -113,24 +215,28 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.PlatformGame,
       slug: 'read:platform_game',
+      riskLevel: RiskLevel.Low,
       reason: 'View platform-specific game entries',
     },
     {
       action: Action.create,
       subject: ResourceType.PlatformGame,
       slug: 'create:platform_game',
+      riskLevel: RiskLevel.Medium,
       reason: 'Create a platform-specific game entry (import pipelines)',
     },
     {
       action: Action.update,
       subject: ResourceType.PlatformGame,
       slug: 'update:platform_game',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update platform-specific game capabilities or overrides',
     },
     {
       action: Action.delete,
       subject: ResourceType.PlatformGame,
       slug: 'delete:platform_game',
+      riskLevel: RiskLevel.Medium,
       reason: 'Remove a platform-specific game entry',
     },
 
@@ -139,24 +245,28 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.Platform,
       slug: 'read:platform',
+      riskLevel: RiskLevel.Low,
       reason: 'View platforms',
     },
     {
       action: Action.create,
       subject: ResourceType.Platform,
       slug: 'create:platform',
+      riskLevel: RiskLevel.Medium,
       reason: 'Create platforms',
     },
     {
       action: Action.update,
       subject: ResourceType.Platform,
       slug: 'update:platform',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update platforms',
     },
     {
       action: Action.delete,
       subject: ResourceType.Platform,
       slug: 'delete:platform',
+      riskLevel: RiskLevel.Medium,
       reason: 'Delete platforms',
     },
 
@@ -165,42 +275,49 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventOccurrence,
       slug: 'read:event_occurrence',
+      riskLevel: RiskLevel.Medium,
       reason: 'View event occurrences',
     },
     {
       action: Action.create,
       subject: ResourceType.EventOccurrence,
       slug: 'create:event_occurrence',
+      riskLevel: RiskLevel.Medium,
       reason: 'Add occurrences to an event',
     },
     {
       action: Action.update,
       subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update occurrence details (label, date, location)',
     },
     {
       action: Action.delete,
       subject: ResourceType.EventOccurrence,
       slug: 'delete:event_occurrence',
+      riskLevel: RiskLevel.Medium,
       reason: 'Remove an occurrence from an event',
     },
     {
       action: Action.update,
       subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:confirm',
+      riskLevel: RiskLevel.Medium,
       reason: 'Confirm a proposed occurrence (Proposed → Confirmed)',
     },
     {
       action: Action.update,
       subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:decline',
+      riskLevel: RiskLevel.Medium,
       reason: 'Decline a proposed occurrence (Proposed → Declined)',
     },
     {
       action: Action.update,
       subject: ResourceType.EventOccurrence,
       slug: 'update:event_occurrence:cancel',
+      riskLevel: RiskLevel.Medium,
       reason: 'Cancel a confirmed occurrence (Confirmed → Cancelled)',
     },
 
@@ -209,6 +326,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventAvailabilityVote,
       slug: 'read:event_availability_vote',
+      riskLevel: RiskLevel.Medium,
       reason: 'View availability votes and summary',
     },
     {
@@ -216,6 +334,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventAvailabilityVote,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:event_availability_vote',
+      riskLevel: RiskLevel.Low,
       reason: 'Submit or update your availability vote on a proposed occurrence',
     },
 
@@ -225,6 +344,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventAttendee,
       conditions: { event: { id: '{{ eventId }}' } },
       slug: 'read:event_attendee',
+      riskLevel: RiskLevel.Medium,
       reason: 'View event attendees',
     },
     {
@@ -233,6 +353,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       fields: ['status', 'notes'],
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:event_attendee:status:self',
+      riskLevel: RiskLevel.Low,
       reason: 'Update own RSVP status',
     },
     {
@@ -241,6 +362,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       fields: ['status', 'notes'],
       conditions: { event: { id: '{{ eventId }}' } },
       slug: 'update:event_attendee:status',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update any attendee status within an event (host-managed)',
     },
 
@@ -249,12 +371,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventGameNomination,
       slug: 'read:event_game_nomination',
+      riskLevel: RiskLevel.Medium,
       reason: 'View game nominations',
     },
     {
       action: Action.create,
       subject: ResourceType.EventGameNomination,
       slug: 'create:event_game_nomination',
+      riskLevel: RiskLevel.Low,
       reason: 'Nominate a game for the event',
     },
     {
@@ -262,24 +386,28 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventGameNomination,
       conditions: { nominatedBy: { userId: '{{ user.id }}' } },
       slug: 'update:event_game_nomination:withdraw',
+      riskLevel: RiskLevel.Low,
       reason: 'Withdraw your own nomination',
     },
     {
       action: Action.update,
       subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:resolve',
+      riskLevel: RiskLevel.Medium,
       reason: 'Resolve a nomination (tally votes)',
     },
     {
       action: Action.update,
       subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:approve',
+      riskLevel: RiskLevel.Medium,
       reason: 'Approve a nomination (HostApproval mode)',
     },
     {
       action: Action.update,
       subject: ResourceType.EventGameNomination,
       slug: 'update:event_game_nomination:reject',
+      riskLevel: RiskLevel.Medium,
       reason: 'Reject a nomination (HostApproval mode)',
     },
 
@@ -288,6 +416,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventGameVote,
       slug: 'read:event_game_vote',
+      riskLevel: RiskLevel.Medium,
       reason: 'View game nomination votes',
     },
     {
@@ -295,6 +424,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventGameVote,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:event_game_vote',
+      riskLevel: RiskLevel.Low,
       reason: 'Cast or update your vote on a nomination',
     },
 
@@ -303,18 +433,21 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventGame,
       slug: 'read:event_game',
+      riskLevel: RiskLevel.Low,
       reason: 'View the event game lineup',
     },
     {
       action: Action.create,
       subject: ResourceType.EventGame,
       slug: 'create:event_game',
+      riskLevel: RiskLevel.Medium,
       reason: 'Directly add a game to the event lineup',
     },
     {
       action: Action.delete,
       subject: ResourceType.EventGame,
       slug: 'delete:event_game',
+      riskLevel: RiskLevel.Medium,
       reason: 'Remove a game from the event lineup',
     },
 
@@ -323,6 +456,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventAttendeeGameList,
       slug: 'read:attendee_game_list',
+      riskLevel: RiskLevel.Medium,
       reason: "View an attendee's available game list",
     },
     {
@@ -330,6 +464,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventAttendeeGameList,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'create:attendee_game_list',
+      riskLevel: RiskLevel.Low,
       reason: 'Add a game to your own available game list',
     },
     {
@@ -337,12 +472,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventAttendeeGameList,
       conditions: { attendee: { userId: '{{ user.id }}' } },
       slug: 'delete:attendee_game_list',
+      riskLevel: RiskLevel.Low,
       reason: 'Remove a game from your own available game list',
     },
     {
       action: Action.manage,
       subject: ResourceType.EventAttendeeGameList,
       slug: 'manage:attendee_game_list',
+      riskLevel: RiskLevel.Medium,
       reason: "Manage any attendee's available game list",
     },
 
@@ -351,12 +488,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.EventPolicy,
       slug: 'read:event_policy',
+      riskLevel: RiskLevel.Low,
       reason: 'View event policy configuration',
     },
     {
       action: Action.update,
       subject: ResourceType.EventPolicy,
       slug: 'update:event_policy',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update event policy configuration',
     },
 
@@ -379,6 +518,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'read:game_collection',
+      riskLevel: RiskLevel.Low,
       reason: 'View your own game collection',
     },
     // Row visible when the owner shares a household with the acting user, the
@@ -411,6 +551,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'read:game_collection:household',
+      riskLevel: RiskLevel.Medium,
       reason: 'View collections shared with your household',
     },
     // Row visible to accepted friends of the owner when the owner's
@@ -431,6 +572,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'read:game_collection:friends',
+      riskLevel: RiskLevel.Medium,
       reason: "View your friends' collections",
     },
     {
@@ -438,6 +580,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.GameCollection,
       conditions: { deletedAt: null, visibility: 'Public' },
       slug: 'read:game_collection:public',
+      riskLevel: RiskLevel.Low,
       reason: 'View public collections',
     },
     {
@@ -445,6 +588,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'create:game_collection',
+      riskLevel: RiskLevel.Low,
       reason: 'Add game to collection',
     },
     {
@@ -452,6 +596,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'update:game_collection',
+      riskLevel: RiskLevel.Low,
       reason: 'Update game in collection',
     },
     {
@@ -459,6 +604,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.GameCollection,
       conditions: { userId: '{{ user.id }}' },
       slug: 'delete:game_collection',
+      riskLevel: RiskLevel.Low,
       reason: 'Remove game from collection',
     },
 
@@ -467,29 +613,39 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.GameGateway,
       slug: 'read:game_gateway',
+      riskLevel: RiskLevel.High,
       reason: 'View game gateway connections',
     },
     {
       action: Action.create,
       subject: ResourceType.GameGateway,
       slug: 'create:game_gateway',
+      riskLevel: RiskLevel.High,
       reason: 'Create game gateway connections',
     },
     {
       action: Action.update,
       subject: ResourceType.GameGateway,
       slug: 'update:game_gateway',
+      riskLevel: RiskLevel.High,
       reason: 'Update game gateway connections',
     },
     {
       action: Action.delete,
       subject: ResourceType.GameGateway,
       slug: 'delete:game_gateway',
+      riskLevel: RiskLevel.High,
       reason: 'Delete game gateway connections',
     },
 
     // --- Households ---
-    { action: Action.create, subject: ResourceType.Household, slug: 'create:household', reason: 'Create a household' },
+    {
+      action: Action.create,
+      subject: ResourceType.Household,
+      slug: 'create:household',
+      riskLevel: RiskLevel.Low,
+      reason: 'Create a household',
+    },
     {
       action: Action.read,
       subject: ResourceType.Household,
@@ -497,6 +653,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         members: { some: { userId: '{{ user.id }}' } },
       },
       slug: 'read:households',
+      riskLevel: RiskLevel.Low,
       reason: 'View households',
     },
     {
@@ -506,6 +663,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         id: '{{ householdId }}',
       },
       slug: 'read:household',
+      riskLevel: RiskLevel.Low,
       reason: 'View household details',
     },
 
@@ -518,6 +676,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         members: { some: { userId: '{{ user.id }}' } },
       },
       slug: 'update:household',
+      riskLevel: RiskLevel.Low,
       reason: 'Update a household',
     },
     {
@@ -533,6 +692,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'delete:household',
+      riskLevel: RiskLevel.Medium,
       reason: 'Delete a household',
     },
     {
@@ -548,6 +708,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'manage:household_member',
+      riskLevel: RiskLevel.High,
       reason: 'Manage household members',
     },
     {
@@ -563,6 +724,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'create:household_role',
+      riskLevel: RiskLevel.High,
       reason: 'Create household roles',
     },
 
@@ -580,6 +742,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'create:household_invite',
+      riskLevel: RiskLevel.Medium,
       reason: 'Invite to household',
     },
 
@@ -591,17 +754,25 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         householdId: '{{ householdId }}',
       },
       slug: 'create:household_member:join',
+      riskLevel: RiskLevel.Medium,
       reason: 'Join household',
     },
 
     // --- Events ---
-    { action: Action.create, subject: ResourceType.Event, slug: 'create:event', reason: 'Create an event' },
+    {
+      action: Action.create,
+      subject: ResourceType.Event,
+      slug: 'create:event',
+      riskLevel: RiskLevel.Low,
+      reason: 'Create an event',
+    },
 
     // TODO household specific event permissions? i.e read:household_event etc
     {
       action: Action.read,
       subject: ResourceType.Event,
       slug: 'read:event',
+      riskLevel: RiskLevel.High,
       reason: 'View any event (moderation/admin)',
     },
     {
@@ -612,6 +783,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         attendees: { some: { userId: '{{ user.id }}' } },
       },
       slug: 'read:event:participant',
+      riskLevel: RiskLevel.Low,
       reason: 'View an event you attend',
     },
     {
@@ -627,6 +799,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'update:event',
+      riskLevel: RiskLevel.Low,
       reason: 'Update an event',
     },
     {
@@ -634,6 +807,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Event,
       conditions: { createdById: '{{ user.id }}' },
       slug: 'delete:event',
+      riskLevel: RiskLevel.Low,
       reason: 'Delete an event as creator',
     },
 
@@ -642,6 +816,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.delete,
       subject: ResourceType.Event,
       slug: 'delete:event:moderate',
+      riskLevel: RiskLevel.High,
       reason: 'Delete any event as moderator',
     },
 
@@ -660,6 +835,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'update:event:status:cancel-event',
+      riskLevel: RiskLevel.Low,
       reason: 'Cancel an event',
     },
 
@@ -679,6 +855,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'update:event:status:archive-event',
+      riskLevel: RiskLevel.Low,
       reason: 'Archive a cancelled event',
     },
     {
@@ -696,6 +873,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         },
       },
       slug: 'create:event_invite',
+      riskLevel: RiskLevel.Low,
       reason: 'Invite to event',
     },
     {
@@ -703,6 +881,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.EventAttendee,
       conditions: { eventId: '{{ eventId }}' },
       slug: 'manage:event_attendee',
+      riskLevel: RiskLevel.Medium,
       reason: 'Manage event participants',
     },
 
@@ -711,42 +890,49 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.create,
       subject: ResourceType.GamePlayResult,
       slug: 'create:play_record',
+      riskLevel: RiskLevel.Low,
       reason: 'Create a play record',
     },
     {
       action: Action.read,
       subject: ResourceType.GamePlaySession,
       slug: 'read:game_play_session',
+      riskLevel: RiskLevel.Medium,
       reason: 'View a game session',
     },
     {
       action: Action.create,
       subject: ResourceType.GamePlaySession,
       slug: 'create:game_play_session',
+      riskLevel: RiskLevel.Low,
       reason: 'Create a game session',
     },
     {
       action: Action.update,
       subject: ResourceType.GamePlaySession,
       slug: 'update:game_play_session',
+      riskLevel: RiskLevel.Medium,
       reason: 'Update a game session',
     },
     {
       action: Action.delete,
       subject: ResourceType.GamePlaySession,
       slug: 'delete:game_play_session',
+      riskLevel: RiskLevel.Medium,
       reason: 'Delete a game session',
     },
     {
       action: Action.create,
       subject: ResourceType.SessionPlayer,
       slug: 'create:session_player:join',
+      riskLevel: RiskLevel.Low,
       reason: 'Join a game session',
     },
     {
       action: Action.create,
       subject: ResourceType.SessionPlayer,
       slug: 'create:session_player:observer:join',
+      riskLevel: RiskLevel.Low,
       reason: 'Join a game session as observer',
     },
 
@@ -756,6 +942,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.create,
       subject: ResourceType.RuleVariant,
       slug: 'create:rule_variant',
+      riskLevel: RiskLevel.Low,
       reason: 'Create rule variant',
     },
     {
@@ -765,6 +952,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         createdById: '{{ user.id }}',
       },
       slug: 'update:rule_variant',
+      riskLevel: RiskLevel.Low,
       reason: 'Update rule variant',
     },
     {
@@ -774,17 +962,25 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         createdById: '{{ user.id }}',
       },
       slug: 'delete:rule_variant',
+      riskLevel: RiskLevel.Low,
       reason: 'Delete rule variant',
     },
 
     // --- Media ---
-    { action: Action.create, subject: ResourceType.Media, slug: 'create:media:upload', reason: 'Upload media' },
+    {
+      action: Action.create,
+      subject: ResourceType.Media,
+      slug: 'create:media:upload',
+      riskLevel: RiskLevel.Low,
+      reason: 'Upload media',
+    },
 
     // ─── MediaObject ────────────────────────────────────────
     {
       action: Action.create,
       subject: ResourceType.MediaObject,
       slug: 'create:media_object',
+      riskLevel: RiskLevel.Low,
       reason: 'Upload a media object',
     },
     {
@@ -792,6 +988,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaObject,
       conditions: { ownerId: '{{ user.id }}' },
       slug: 'read:media_object:own',
+      riskLevel: RiskLevel.Low,
       reason: 'View own media objects',
     },
     {
@@ -799,6 +996,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaObject,
       conditions: { visibility: 'Public' },
       slug: 'read:media_object:public',
+      riskLevel: RiskLevel.Low,
       reason: 'View public media objects',
     },
     {
@@ -806,6 +1004,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaObject,
       conditions: { ownerId: '{{ user.id }}' },
       slug: 'update:media_object:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Update own media objects (publish/unpublish, attach/detach)',
     },
     {
@@ -813,6 +1012,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaObject,
       conditions: { ownerId: '{{ user.id }}' },
       slug: 'delete:media_object:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Delete own media objects',
     },
 
@@ -822,6 +1022,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaContribution,
       conditions: { contributedById: '{{ user.id }}' },
       slug: 'create:media_contribution',
+      riskLevel: RiskLevel.Low,
       reason: 'Contribute own media to a game or event',
     },
     {
@@ -829,18 +1030,21 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.MediaContribution,
       conditions: { contributedById: '{{ user.id }}' },
       slug: 'update:media_contribution:reclaim',
+      riskLevel: RiskLevel.Low,
       reason: 'Reclaim own contribution before its deadline',
     },
     {
       action: Action.read,
       subject: ResourceType.MediaContribution,
       slug: 'read:media_contribution',
+      riskLevel: RiskLevel.Medium,
       reason: 'View contributions for moderation',
     },
     {
       action: Action.update,
       subject: ResourceType.MediaContribution,
       slug: 'update:media_contribution:moderate',
+      riskLevel: RiskLevel.Medium,
       reason: 'Approve or reject media contributions',
     },
 
@@ -849,6 +1053,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.create,
       subject: ResourceType.UserGameCustomization,
       slug: 'create:user_game_customization',
+      riskLevel: RiskLevel.Low,
       reason: 'Create customization',
     },
     {
@@ -858,6 +1063,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         userId: '{{ user.id }}',
       },
       slug: 'update:user_game_customization',
+      riskLevel: RiskLevel.Low,
       reason: 'Update customization',
     },
     {
@@ -867,6 +1073,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         userId: '{{ user.id }}',
       },
       slug: 'delete:user_game_customization',
+      riskLevel: RiskLevel.Low,
       reason: 'Delete customization',
     },
 
@@ -875,6 +1082,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.create,
       subject: ResourceType.FeedbackReport,
       slug: 'create:feedback_report',
+      riskLevel: RiskLevel.Low,
       reason: 'Submit a feedback report',
     },
     {
@@ -882,30 +1090,35 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.FeedbackReport,
       conditions: { userId: '{{ user.id }}' },
       slug: 'read:feedback_report:own',
+      riskLevel: RiskLevel.Low,
       reason: 'Read own feedback reports',
     },
     {
       action: Action.read,
       subject: ResourceType.FeedbackReport,
       slug: 'read:feedback_report',
+      riskLevel: RiskLevel.High,
       reason: 'Read any feedback report',
     },
     {
       action: Action.delete,
       subject: ResourceType.FeedbackReport,
       slug: 'delete:feedback_report',
+      riskLevel: RiskLevel.High,
       reason: 'Hard-delete a feedback report (separate from retention sweep)',
     },
     {
       action: Action.manage,
       subject: ResourceType.FeedbackReport,
       slug: 'manage:feedback_report',
+      riskLevel: RiskLevel.High,
       reason: 'Full administrative control over feedback reports',
     },
     {
       action: Action.read,
       subject: ResourceType.FeedbackSinkDispatch,
       slug: 'read:feedback_sink_dispatch',
+      riskLevel: RiskLevel.Medium,
       reason: 'Read sink-dispatch audit trail',
     },
 
@@ -914,12 +1127,14 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.SafeHttpPolicy,
       slug: 'read:safe_http_policy',
+      riskLevel: RiskLevel.Medium,
       reason: 'View the outbound HTTP SSRF policy',
     },
     {
       action: Action.manage,
       subject: ResourceType.SafeHttpPolicy,
       slug: 'manage:safe_http_policy',
+      riskLevel: RiskLevel.Critical,
       reason:
         'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
     },
@@ -930,6 +1145,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.WebhookSubscription,
       conditions: { createdById: '{{ user.id }}' },
       slug: 'manage:webhook_subscription:own',
+      riskLevel: RiskLevel.Medium,
       reason: 'Manage own webhook subscriptions',
     },
     {
@@ -937,6 +1153,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.WebhookSubscription,
       conditions: { createdById: '{{ user.id }}' },
       slug: 'read:webhook_subscription:own',
+      riskLevel: RiskLevel.Low,
       reason: 'View own webhook subscriptions',
     },
 
@@ -946,17 +1163,31 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       action: Action.read,
       subject: ResourceType.AuditLog,
       slug: 'read:audit_log',
+      riskLevel: RiskLevel.High,
       reason: 'View the persisted audit trail',
     },
 
     // --- Quotas ─────────────────────────────────────────────
-    { action: Action.manage, subject: ResourceType.Quota, slug: 'manage:quota', reason: 'Manage operational quotas' },
-    { action: Action.read, subject: ResourceType.Quota, slug: 'read:quota', reason: 'View operational quotas' },
+    {
+      action: Action.manage,
+      subject: ResourceType.Quota,
+      slug: 'manage:quota',
+      riskLevel: RiskLevel.High,
+      reason: 'Manage operational quotas',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Quota,
+      slug: 'read:quota',
+      riskLevel: RiskLevel.Medium,
+      reason: 'View operational quotas',
+    },
     {
       action: Action.read,
       subject: ResourceType.Quota,
       conditions: { householdId: '{{ householdId }}' },
       slug: 'read:quota:household',
+      riskLevel: RiskLevel.Low,
       reason: "View this household's own and per-member quota caps",
     },
     {
@@ -964,11 +1195,12 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Quota,
       conditions: { scope: 'HouseholdMember', householdId: '{{ householdId }}' },
       slug: 'manage:quota:household_member',
+      riskLevel: RiskLevel.Low,
       reason: 'Sub-allocate member quotas within own household',
     },
   ];
 
-  const permissionsBySlug: Record<string, any> = {};
+  const permissionsBySlug: Record<string, Permission> = {};
   for (const perm of permissionsToCreate) {
     const created = await prisma.permission.upsert({
       where: { slug: perm.slug },
@@ -978,6 +1210,10 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         fields: perm.fields || [],
         conditions: perm.conditions ? perm.conditions : {},
         reason: perm.reason,
+        // Seed is authoritative: reclassification overwrites on re-run (#60 —
+        // the admin reclassification flow is out of scope, so seed-wins is
+        // the only writer).
+        riskLevel: perm.riskLevel,
       },
       create: {
         action: perm.action,
@@ -985,6 +1221,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         fields: perm.fields || [],
         conditions: perm.conditions ? perm.conditions : {},
         reason: perm.reason,
+        riskLevel: perm.riskLevel,
         slug: perm.slug,
       },
     });
@@ -1022,7 +1259,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     { name: SystemRole.EventSpectator, description: 'Read-only observer for an event' },
   ];
 
-  const rolesByName: Record<string, any> = {};
+  const rolesByName: Record<string, Role> = {};
   for (const roleData of rolesToCreate) {
     const created = await prisma.role.upsert({
       where: { name: roleData.name },

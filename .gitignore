@@ -5,6 +5,14 @@ dist
 tmp
 out-tsc
 
+# data directory - ignore everything except .gitkeep
+data/**
+!data/**/
+!data/**/.gitkeep
+
+# generated files - ignore everything
+**/generated/*
+
 # dependencies
 node_modules
 
@@ -53,3 +61,4 @@ Thumbs.db
 test-output
 
 .claude/
+

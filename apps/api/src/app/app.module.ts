@@ -21,13 +21,14 @@ import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
 import { HealthModule } from '@bge/health';
 import { HouseholdModule } from '@bge/household';
-import { I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor } from '@bge/i18n';
+import { FALLBACK_LOCALE, I18nConfigModule, I18nExceptionFilter, I18nResponseInterceptor } from '@bge/i18n';
 import { LanguageModule } from '@bge/language';
 import { MediaModule } from '@bge/media';
 import { MetricsModule } from '@bge/metrics';
 import { NotificationsModule } from '@bge/notifications';
 import { createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
+import { PluginModule } from '@bge/plugin';
 import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
@@ -56,6 +57,7 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
+import { BGE_VERSION } from './generated/bge-version';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
 
@@ -217,6 +219,29 @@ import { baseLogger } from './lib/logger';
     MetricsModule,
     NotificationsModule,
     PermissionsModule,
+
+    // Plugin runtime (#59 Phase B), wired per #212: boot loader, per-plugin
+    // contexts, config hot-reload (rides CACHE_REDIS_CLIENT, same tier as the
+    // SafeHttpPolicy and gateway-config channels), and the lifecycle
+    // provenance listener (onAny — independent of the emitter's `wildcard`
+    // setting). Host prerequisites — global CLS, EventEmitterModule,
+    // RedisModule, global DatabaseService, ScheduleModule — are all mounted
+    // above. With zero installed plugins the boot pass is a clean no-op; a
+    // missing root only surfaces per-plugin through the quarantine path.
+    PluginModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        pluginsRoot: config.getOrThrow<string>('plugins.pluginsRoot'),
+        bundledRoot: config.getOrThrow<string>('plugins.bundledRoot'),
+        // Build-time codegen constant (api `generate` target) — the version
+        // is a property of the artifact, not of the environment it runs in.
+        bgeVersion: BGE_VERSION,
+        // Manifest localization bottoms out where the request-time resolver
+        // chain does — the shipped-catalog fallback, not a separate knob.
+        defaultLocale: FALLBACK_LOCALE,
+      }),
+    }),
+
     QuotasModule,
     SafeHttpModule,
     SystemSettingsModule,

@@ -3,11 +3,17 @@ model Permission {
 
   action     Action
   subject    String // e.g., 'Game', 'User', 'all'
-  fields     String[] // Optional: e.g., '["title", "content"]'
+  fields      String[] // Optional: e.g., '["title", "content"]'
   conditions Json? // ABAC magic: { ownerId: '{{ user.id }}' } – templated
   inverted   Boolean  @default(false)
   reason     String? // Audit trail: "Owner-only update"
   slug       String   @unique // stable code-side identifier e.g. 'game:read'
+
+  /// Consent-surface risk classification (#60). The seed assigns an explicit
+  /// level to every core permission and never relies on this default — it
+  /// exists only for rows created outside the seed (plugin-declared
+  /// permissions; their classification is decided in #59 Phase C).
+  riskLevel RiskLevel @default(Low) @map("risk_level")
 
   apiKeyScopes    ApiKeyScope[]
   rolePermissions RolePermission[]
