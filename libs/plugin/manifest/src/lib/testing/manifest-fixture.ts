@@ -39,10 +39,11 @@ export const buildPluginManifest = (overrides: PluginManifestOverrides = {}): Pl
       },
     ],
     permissions: {
-      declares: ['plugin:demo-sink:digest:manage'],
+      // Bare form — the plugin|demo-sink|… envelope is generated.
+      declares: ['manage:digest'],
       checks: [
         {
-          slug: 'plugin:demo-sink:digest:manage',
+          slug: 'manage:digest',
           required: true,
           reason: { en: 'Stores and manages the digest configuration it owns.' },
           consentScope: 'server',

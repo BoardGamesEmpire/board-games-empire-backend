@@ -63,6 +63,29 @@ describe('validatePluginManifest', () => {
 
       expect(result.externalPermissionChecks).toEqual(['feedback:read']);
     });
+
+    it('resolves check routing on normalized checks: declared bare slugs expand, core slugs pass through', () => {
+      const result = validatePluginManifest(manifest(), options);
+
+      expect(result.permissionChecks[0]).toEqual(
+        expect.objectContaining({
+          slug: 'manage:digest',
+          origin: 'plugin',
+          canonicalSlug: 'plugin|demo-sink|manage:digest',
+        }),
+      );
+      expect(result.permissionChecks[1]).toEqual(
+        expect.objectContaining({ slug: 'feedback:read', origin: 'core', canonicalSlug: 'feedback:read' }),
+      );
+    });
+
+    it('expands every declares entry into declaredPermissions — the PluginPermission seed input', () => {
+      const result = validatePluginManifest(manifest(), options);
+
+      expect(result.declaredPermissions).toEqual([
+        { bareSlug: 'manage:digest', canonicalSlug: 'plugin|demo-sink|manage:digest' },
+      ]);
+    });
   });
 
   describe('structural rejection (SCHEMA_INVALID)', () => {
@@ -129,6 +152,19 @@ describe('validatePluginManifest', () => {
 
       expect(result.manifest.bgeCompat).toBe('>=0.1.0');
     });
+
+    it('skips the satisfaction check (but not range-shape validation) when enforceBgeCompat is false', () => {
+      const result = validatePluginManifest(manifest({ bgeCompat: '>=9.0.0' }), {
+        ...options,
+        enforceBgeCompat: false,
+      });
+
+      expect(result.manifest.bgeCompat).toBe('>=9.0.0');
+      expectRejection(manifest({ bgeCompat: '>=not-a-version' }), ManifestErrorCode.BGE_COMPAT_INVALID_RANGE, {
+        ...options,
+        enforceBgeCompat: false,
+      });
+    });
   });
 
   describe('localization rules', () => {
@@ -167,50 +203,83 @@ describe('validatePluginManifest', () => {
     });
   });
 
-  describe('permission namespacing', () => {
-    it('rejects a declares entry outside the plugin namespace', () => {
+  describe('permission grammar & routing', () => {
+    it('rejects a declares entry whose first segment is not an Action verb (structural)', () => {
       expectRejection(
         manifest({ permissions: { declares: ['game:read'], checks: [] } }),
-        ManifestErrorCode.PERMISSION_DECLARE_NAMESPACE,
+        ManifestErrorCode.SCHEMA_INVALID,
       );
     });
 
-    it('rejects a declares entry that is only the bare prefix', () => {
+    it('rejects a legacy plugin:-prefixed declares entry — the envelope is generated, never written', () => {
       expectRejection(
-        manifest({ permissions: { declares: ['plugin:demo-sink:'], checks: [] } }),
-        ManifestErrorCode.PERMISSION_DECLARE_NAMESPACE,
+        manifest({ permissions: { declares: ['plugin:demo-sink:digest:manage'], checks: [] } }),
+        ManifestErrorCode.SCHEMA_INVALID,
+      );
+    });
+
+    it('rejects a declares entry carrying the | delimiter (structural)', () => {
+      expectRejection(
+        manifest({ permissions: { declares: ['plugin|demo-sink|manage:digest'], checks: [] } }),
+        ManifestErrorCode.SCHEMA_INVALID,
       );
     });
 
     it('rejects duplicate declares entries', () => {
       expectRejection(
         manifest({
-          permissions: { declares: ['plugin:demo-sink:digest:manage', 'plugin:demo-sink:digest:manage'], checks: [] },
+          permissions: { declares: ['manage:digest', 'manage:digest'], checks: [] },
         }),
         ManifestErrorCode.PERMISSION_DECLARE_DUPLICATE,
       );
     });
 
-    it('rejects a check in another plugin namespace', () => {
+    it('rejects a legacy plugin:-prefixed check slug with migration guidance instead of misrouting it as core', () => {
       const input = manifest();
       input.permissions.checks = [
         { slug: 'plugin:other-plugin:secrets:read', required: false, reason: 'Reads the other plugin secrets store.' },
       ];
 
-      expectRejection(input, ManifestErrorCode.PERMISSION_CHECK_FOREIGN_NAMESPACE);
+      const error = expectRejection(input, ManifestErrorCode.PERMISSION_CHECK_SHAPE);
+
+      expect(error.issues.some((issue) => issue.message.includes('envelope is generated'))).toBe(true);
     });
 
-    it('rejects an own-namespace check that was never declared', () => {
+    it('rejects a check slug carrying the canonical | envelope — checks reference bare or core slugs only', () => {
+      const input = manifest();
+      input.permissions.checks = [
+        { slug: 'plugin|demo-sink|manage:digest', required: false, reason: 'Hand-wrote the generated envelope.' },
+      ];
+
+      expectRejection(input, ManifestErrorCode.PERMISSION_CHECK_SHAPE);
+    });
+
+    it('routes a bare-shaped check absent from declares into the core partition (existence checked at install)', () => {
       const input = manifest();
       input.permissions.checks = [
         {
-          slug: 'plugin:demo-sink:undeclared:thing',
+          slug: 'read:undeclared_thing',
           required: false,
-          reason: 'Uses a permission it forgot to declare.',
+          reason: 'Uses a permission it may have forgotten to declare.',
         },
       ];
 
-      expectRejection(input, ManifestErrorCode.PERMISSION_CHECK_UNDECLARED);
+      const result = validatePluginManifest(input, options);
+
+      expect(result.externalPermissionChecks).toEqual(['read:undeclared_thing']);
+      expect(result.permissionChecks[0]?.origin).toBe('core');
+    });
+
+    it('a declared bare slug shadows an identically named core slug — the check routes to the plugin catalog', () => {
+      const input = manifest({ permissions: { declares: ['read:game'], checks: [] } });
+      input.permissions.checks = [
+        { slug: 'read:game', required: false, reason: 'References its own declared read:game catalog entry.' },
+      ];
+
+      const result = validatePluginManifest(input, options);
+
+      expect(result.permissionChecks[0]?.canonicalSlug).toBe('plugin|demo-sink|read:game');
+      expect(result.externalPermissionChecks).toEqual([]);
     });
 
     it.each([
@@ -484,11 +553,11 @@ describe('validatePluginManifest', () => {
       // Household-scope manifest: on a SERVER-scope plugin this combination is
       // now a SCOPE_INCOHERENT error (D-J), and warnings only surface on success.
       const input = manifest({ scope: 'household' });
-      input.permissions.declares = [...input.permissions.declares, 'plugin:demo-sink:calendar:write'];
+      input.permissions.declares = [...input.permissions.declares, 'update:calendar'];
       input.permissions.checks = [
         ...input.permissions.checks,
         {
-          slug: 'plugin:demo-sink:calendar:write',
+          slug: 'update:calendar',
           required: true,
           reason: 'Writes digest reminders to the household calendar.',
           consentScope: 'household',
@@ -567,10 +636,12 @@ describe('validatePluginManifest', () => {
       manifest({
         slug,
         permissions: {
-          declares: [`plugin:${slug}:digest:manage`],
+          // Bare form is slug-independent by construction — the
+          // envelope regenerates from whatever slug is under test.
+          declares: ['manage:digest'],
           checks: [
             {
-              slug: `plugin:${slug}:digest:manage`,
+              slug: 'manage:digest',
               required: true,
               reason: { en: 'Stores and manages the digest configuration it owns.' },
               consentScope: 'server',

@@ -21,10 +21,10 @@ model PluginGrant {
   /// four-column uniqueness below unenforceable for Server rows, and Prisma
   /// has no NULLS NOT DISTINCT support. Service-layer code never touches
   /// the sentinel — PluginGrantService (Phase C) owns scope addressing.
-  /// A CHECK constraint `(scope_type <> 'Server') => (scope_id <> '')` lands
-  /// with PluginGrantService in Phase C (hand-authored migration SQL — Prisma
-  /// cannot express raw CHECK constraints) so the database itself rejects
-  /// empty non-Server scopeIds rather than trusting caller discipline.
+  /// A CHECK constraint `(scope_type <> 'Server') => (scope_id <> '')` is
+  /// enforced in the database (hand-authored migration SQL — Prisma cannot
+  /// express raw CHECK constraints) so empty non-Server scopeIds are
+  /// rejected rather than trusted to caller discipline.
   scopeId String @default("") @map("scope_id")
 
   /// Permission being decided — plugin-namespaced or core slug.
@@ -40,6 +40,13 @@ model PluginGrant {
   /// Manifest version the consent text was shown from — escalation
   /// comparison (#59 update flow) diffs against this.
   manifestVersion String @map("manifest_version")
+
+  /// `riskLevel` of the permission AT DECISION TIME. Makes the
+  /// server-gating "risk escalated" comparison detectable: current risk >
+  /// decidedRiskLevel for a still-requested granted slug means the unit
+  /// consented under a weaker classification (including seed
+  /// reclassification, which propagates on re-seed per #60).
+  decidedRiskLevel RiskLevel @map("decided_risk_level")
 
   /// When the current status was decided (updated on polarity flips).
   decidedAt DateTime @map("decided_at") @db.Timestamptz(3)

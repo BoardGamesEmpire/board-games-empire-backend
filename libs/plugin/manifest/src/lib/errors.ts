@@ -1,7 +1,13 @@
 /**
  * Rejection-class taxonomy for manifest validation (#59 "Validation at
  * install" steps 2–9), plus the Phase A audit rules scope coherence
- * and slug reservation. One code per class so the install endpoint, the
+ * and slug reservation. The Phase A namespace codes
+ * (PERMISSION_DECLARE_NAMESPACE, PERMISSION_CHECK_FOREIGN_NAMESPACE,
+ * PERMISSION_CHECK_UNDECLARED) were retired with the bare-slug grammar: the
+ * envelope is generated so declares cannot mis-prefix, cross-plugin checks
+ * are inexpressible, and a bare check absent from declares routes to the core
+ * partition (its existence check at install, C2, carries a
+ * did-you-forget-to-declare hint). One code per class so the install endpoint, the
  * author CLI (#84), and the test matrix all speak the same vocabulary.
  * Structural (zod) failures map to `SCHEMA_INVALID` with the zod path/message
  * preserved per issue.
@@ -23,11 +29,8 @@ export enum ManifestErrorCode {
   OWN_TABLE_DUPLICATE = 'OWN_TABLE_DUPLICATE',
   OWN_TABLE_PREFIX = 'OWN_TABLE_PREFIX',
   PERMISSION_CHECK_DUPLICATE = 'PERMISSION_CHECK_DUPLICATE',
-  PERMISSION_CHECK_FOREIGN_NAMESPACE = 'PERMISSION_CHECK_FOREIGN_NAMESPACE',
   PERMISSION_CHECK_SHAPE = 'PERMISSION_CHECK_SHAPE',
-  PERMISSION_CHECK_UNDECLARED = 'PERMISSION_CHECK_UNDECLARED',
   PERMISSION_DECLARE_DUPLICATE = 'PERMISSION_DECLARE_DUPLICATE',
-  PERMISSION_DECLARE_NAMESPACE = 'PERMISSION_DECLARE_NAMESPACE',
   QUEUE_DUPLICATE = 'QUEUE_DUPLICATE',
   QUEUE_NAMESPACE = 'QUEUE_NAMESPACE',
   REASON_TRIVIAL = 'REASON_TRIVIAL',

@@ -5,4 +5,5 @@ export * from './lib/localized-string.js';
 export * from './lib/manifest-validator.js';
 export * from './lib/manifest.schema.js';
 export * from './lib/manifest.types.js';
+export * from './lib/plugin-permission-slug.js';
 export * from './lib/testing/manifest-fixture.js';

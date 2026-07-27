@@ -7,6 +7,7 @@ import {
   PluginLifecycleEvent,
   PluginLifecycleEventType,
   ResourceType,
+  RiskLevel,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -18,6 +19,7 @@ import {
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
   PluginGrantCreatedEvent,
+  PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginLoadFailedEvent,
   PluginUpdateCheckCompletedEvent,
@@ -192,6 +194,7 @@ describe('PluginLifecycleListener', () => {
           permissionSlug: 'plugin.demo-sink.send',
           status: PluginGrantStatus.Granted,
           manifestVersion: '1.2.3',
+          decidedRiskLevel: RiskLevel.Low,
         },
         initiatedAt,
       );
@@ -208,7 +211,11 @@ describe('PluginLifecycleListener', () => {
           scopeType: PluginGrantScope.Server,
           scopeId: null,
           manifestVersion: '1.2.3',
-          payload: { permissionSlug: 'plugin.demo-sink.send', status: PluginGrantStatus.Granted },
+          payload: {
+            permissionSlug: 'plugin.demo-sink.send',
+            status: PluginGrantStatus.Granted,
+            decidedRiskLevel: RiskLevel.Low,
+          },
         }),
       );
     });
@@ -224,6 +231,7 @@ describe('PluginLifecycleListener', () => {
           permissionSlug: 'plugin.x.y',
           status: PluginGrantStatus.Granted,
           manifestVersion: '1.0.0',
+          decidedRiskLevel: RiskLevel.Low,
         },
         initiatedAt,
       );
@@ -237,6 +245,41 @@ describe('PluginLifecycleListener', () => {
           pluginSlug: 'unknown',
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
+        }),
+      );
+    });
+
+    it('persists a GrantRevoked row from the BEFORE snapshot with the reason — the deleted grant leaves only this record (#211)', async () => {
+      const event = new PluginGrantRevokedEvent(
+        {
+          id: 'grant-1',
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-1',
+          permissionSlug: 'read:public_content',
+          status: PluginGrantStatus.Granted,
+          manifestVersion: '1.2.3',
+          decidedRiskLevel: RiskLevel.Medium,
+        },
+        'membership-removed',
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.GrantRevoked, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.GrantRevoked,
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-1',
+          manifestVersion: '1.2.3',
+          payload: {
+            permissionSlug: 'read:public_content',
+            decidedRiskLevel: RiskLevel.Medium,
+            reason: 'membership-removed',
+          },
         }),
       );
     });

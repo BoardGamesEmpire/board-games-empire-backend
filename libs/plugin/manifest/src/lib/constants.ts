@@ -35,6 +35,7 @@ export const RESERVED_PLUGIN_SLUGS: ReadonlySet<string> = new Set([
   'load-failed',
   'grant-created',
   'grant-rejected',
+  'grant-revoked',
   'unit-disabled',
 ]);
 
@@ -62,6 +63,29 @@ export type PluginConsentScopeValue = (typeof PLUGIN_CONSENT_SCOPES)[number];
 
 export const PLUGIN_EXECUTION_MODES = ['in-process', 'worker'] as const;
 export type PluginExecutionModeValue = (typeof PLUGIN_EXECUTION_MODES)[number];
+
+/**
+ * Permission action verbs — mirrors the Prisma `Action` enum (drift spec in
+ * `@bge/plugin`, same pattern as `PLUGIN_CATEGORIES`). Load-bearing:
+ * a bare declared slug MUST lead with one of these so `PluginAbilityFactory`
+ * can turn an own-namespace grant into a CASL `(action, subject)` rule
+ * deterministically.
+ */
+export const PERMISSION_ACTION_VERBS = ['create', 'read', 'update', 'delete', 'manage'] as const;
+export type PermissionActionVerb = (typeof PERMISSION_ACTION_VERBS)[number];
+
+/**
+ * Bare plugin-declared permission slug: `<action>:<subject>[:...]` —
+ * an `Action` verb, then one or more core-grammar segments. Authors write
+ * ONLY this form; the `plugin|<pluginSlug>|<bare>` envelope is generated
+ * (`expandPluginPermissionSlug`), which deletes the Phase A prefix-
+ * misspelling rejection class outright. Structural (in the zod schema and
+ * therefore the published JSON Schema artifact), not semantic — the verb
+ * list is configuration-independent.
+ */
+export const BARE_PLUGIN_PERMISSION_SLUG_PATTERN = new RegExp(
+  `^(?:${PERMISSION_ACTION_VERBS.join('|')}):[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)*$`,
+);
 
 /** Feature / topic / schedule identifier segments: kebab-case. */
 export const IDENTIFIER_PATTERN = /^[a-z][a-z0-9-]*$/;
@@ -98,8 +122,11 @@ export const LOW_EFFORT_REASON_PATTERN =
 /** `$id` stamped on the generated JSON Schema artifact consumed by `bge-plugin validate` (#84). */
 export const PLUGIN_MANIFEST_JSON_SCHEMA_ID = 'https://boardgamesempire.dev/schemas/plugin-manifest/v1.json';
 
-/** Prefix helpers keep the namespacing rules in one place. */
-export const pluginPermissionPrefix = (slug: string): string => `plugin:${slug}:`;
+/**
+ * Prefix helpers keep the namespacing rules in one place. Permission slugs
+ * are deliberately absent: their envelope is GENERATED, never author-written
+ * — see `plugin-permission-slug.ts`.
+ */
 export const pluginQueuePrefix = (slug: string): string => `plugin:${slug}:`;
 export const pluginEmitPrefix = (slug: string): string => `plugin.${slug}.`;
 export const pluginTablePrefix = (slug: string): string => `plugin_${slug.replace(/-/g, '_')}_`;

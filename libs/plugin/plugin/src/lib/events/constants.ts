@@ -22,6 +22,7 @@ export enum PluginEvent {
   LoadFailed = 'plugin.load_failed',
   GrantCreated = 'plugin.grant_created',
   GrantRejected = 'plugin.grant_rejected',
+  GrantRevoked = 'plugin.grant_revoked',
   UnitDisabled = 'plugin.unit_disabled',
 }
 

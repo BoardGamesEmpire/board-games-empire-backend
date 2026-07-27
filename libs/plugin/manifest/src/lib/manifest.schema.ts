@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  BARE_PLUGIN_PERMISSION_SLUG_PATTERN,
   CORE_MODEL_NAME_PATTERN,
   EVENT_SUBSCRIBE_PATTERN,
   IDENTIFIER_PATTERN,
@@ -71,7 +72,20 @@ export const pluginManifestSchema = z.strictObject({
   description: localizedStringSchema,
   features: z.array(pluginFeatureDeclarationSchema),
   permissions: z.strictObject({
-    declares: z.array(z.string().min(3)),
+    /**
+     * BARE slugs only (`<action>:<subject>[:...]`) — the
+     * `plugin|<slug>|<bare>` envelope is generated at validation/activation,
+     * never author-written. Structural so the published JSON Schema artifact
+     * carries the grammar for authors and `bge-plugin validate` (#84).
+     */
+    declares: z.array(
+      z
+        .string()
+        .regex(
+          BARE_PLUGIN_PERMISSION_SLUG_PATTERN,
+          "must be a bare '<action>:<subject>' slug (Action verb first; the plugin| envelope is generated, never written)",
+        ),
+    ),
     checks: z.array(pluginPermissionRequestSchema),
   }),
   events: z.strictObject({
