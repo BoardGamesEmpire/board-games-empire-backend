@@ -257,7 +257,10 @@ export class PluginLoadFailedEvent extends MutationEvent<Plugin> {
 }
 
 type PluginGrantSnapshot = Readonly<
-  Pick<PluginGrant, 'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'manifestVersion'>
+  Pick<
+    PluginGrant,
+    'id' | 'pluginId' | 'scopeType' | 'scopeId' | 'permissionSlug' | 'status' | 'manifestVersion' | 'decidedRiskLevel'
+  >
 >;
 
 /**
@@ -292,6 +295,38 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
   constructor(before: PluginGrantSnapshot | null, after: PluginGrantSnapshot, initiatedAt: Date) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
+  }
+}
+
+/**
+ * Why an authority-loss revocation fired (#211). Carried on the event
+ * and persisted into the lifecycle row payload — the grant row itself is
+ * DELETED (delete-to-pending), so this is the only durable record of why.
+ */
+export type PluginGrantRevocationReason = 'membership-removed' | 'role-demoted' | 'user-deleted' | 'household-deleted';
+
+/**
+ * A grant was revoked because the authority that justified it lapsed
+ * (#211 eager revoke): the row is deleted, returning the unit to pending —
+ * delete-shaped, never a decision flip. Distinct from
+ * `PluginGrantRejectedEvent`, which records a decision somebody MADE.
+ */
+export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
+  static readonly eventName = PluginEvent.GrantRevoked;
+
+  declare readonly before: PluginGrantSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.PluginGrant;
+  readonly subjectId: string;
+
+  constructor(
+    before: PluginGrantSnapshot,
+    public readonly reason: PluginGrantRevocationReason,
+    initiatedAt: Date,
+  ) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
   }
 }
 

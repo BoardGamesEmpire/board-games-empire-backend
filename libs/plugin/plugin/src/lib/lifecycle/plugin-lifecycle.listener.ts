@@ -10,6 +10,7 @@ import {
   PluginConfigUpdatedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
+  PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginLoadFailedEvent,
   PluginUpdateCheckCompletedEvent,
@@ -189,6 +190,23 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
       };
     }
 
+    if (event instanceof PluginGrantRevokedEvent) {
+      return {
+        pluginId: event.before.pluginId,
+        pluginSlug: null,
+        scopeType: event.before.scopeType,
+        scopeId: event.before.scopeId === '' ? null : event.before.scopeId,
+        manifestVersion: event.before.manifestVersion,
+        // The grant row is gone (delete-to-pending, #211): the lifecycle row
+        // is the only durable record of what was revoked and why.
+        payload: {
+          permissionSlug: event.before.permissionSlug,
+          decidedRiskLevel: event.before.decidedRiskLevel,
+          reason: event.reason,
+        },
+      };
+    }
+
     if (event instanceof PluginGrantCreatedEvent || event instanceof PluginGrantRejectedEvent) {
       return {
         pluginId: event.after.pluginId,
@@ -199,7 +217,15 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         // the readable form is null.
         scopeId: event.after.scopeId === '' ? null : event.after.scopeId,
         manifestVersion: event.after.manifestVersion,
-        payload: { permissionSlug: event.after.permissionSlug, status: event.after.status },
+        // decidedRiskLevel rides every grant lifecycle row, not just revocations:
+        // the risk a unit consented under is the comparison input for update-time
+        // escalation, and reconstructing it later from the seed catalog would read
+        // TODAY's classification rather than the one shown at decision time.
+        payload: {
+          permissionSlug: event.after.permissionSlug,
+          status: event.after.status,
+          decidedRiskLevel: event.after.decidedRiskLevel,
+        },
       };
     }
 

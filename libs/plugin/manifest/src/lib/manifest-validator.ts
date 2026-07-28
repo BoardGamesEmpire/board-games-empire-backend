@@ -7,7 +7,6 @@ import {
   LOW_EFFORT_REASON_PATTERN,
   OWN_TABLE_SUFFIX_PATTERN,
   pluginEmitPrefix,
-  pluginPermissionPrefix,
   pluginQueuePrefix,
   pluginTablePrefix,
   RESERVED_PLUGIN_SLUGS,
@@ -21,7 +20,13 @@ import {
 } from './errors.js';
 import { canonicalizeLocale, isWellFormedBcp47, LocalizedString } from './localized-string.js';
 import { pluginManifestSchema } from './manifest.schema.js';
-import type { NormalizedPermissionRequest, PluginManifest, PluginManifestValidationResult } from './manifest.types.js';
+import type {
+  DeclaredPluginPermission,
+  NormalizedPermissionRequest,
+  PluginManifest,
+  PluginManifestValidationResult,
+} from './manifest.types.js';
+import { expandPluginPermissionSlug, PLUGIN_PERMISSION_DELIMITER } from './plugin-permission-slug.js';
 
 export interface ManifestValidationOptions {
   /**
@@ -38,6 +43,16 @@ export interface ManifestValidationOptions {
    * Minimum trimmed length for permission `reason` values.
    */
   readonly minReasonLength?: number;
+
+  /**
+   * When false, the bgeCompat SATISFACTION check is skipped (the range's
+   * shape is still validated). Consent-time re-validation uses this
+   * (`PluginGrantService`): whether the plugin can LOAD under the current
+   * BGE is irrelevant to recording a decision about it, and a BGE upgrade
+   * past a plugin's declared range must not make its grants undecidable —
+   * not even a denial could be recorded otherwise. Default true.
+   */
+  readonly enforceBgeCompat?: boolean;
 }
 
 /**
@@ -55,11 +70,15 @@ const FQDN_PATTERN = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+(
 // one or more colon-delimited segments, each lowercase and allowing interior
 // `_`/`-` (e.g. `read:public_content`, `update:event_occurrence:confirm`).
 // Existence in the Permission table is a Phase C install-pipeline check; this
-// only gates the SHAPE so a plugin-namespaced slug isn't misfiled as core.
-// `plugin:`-prefixed slugs are routed by PLUGIN_NAMESPACE_PATTERN before this
-// is consulted, so the leading segment can never collide with the namespace.
+// only gates the SHAPE. Check routing runs first: a check slug present in
+// `declares` (bare form) is an OWN check and never reaches this pattern.
 const CORE_PERMISSION_SLUG_PATTERN = /^[a-z][a-z0-9_-]*(?::[a-z][a-z0-9_-]*)+$/;
-const PLUGIN_NAMESPACE_PATTERN = /^plugin:/;
+
+// The retired Phase A convention had authors hand-write `plugin:<slug>:`
+// prefixes; a manifest still carrying that shape gets a migration-guidance
+// rejection rather than a silent misroute into the core partition (which
+// `plugin:demo:x` would otherwise pattern-match).
+const LEGACY_PLUGIN_NAMESPACE_PATTERN = /^plugin:/;
 
 /**
  * Structural (zod) paths rendered in the same bracket notation the semantic
@@ -144,13 +163,11 @@ export const validatePluginManifest = (
 
   if (!parsed.success) {
     throw new PluginManifestValidationError(
-      parsed.error.issues.map(
-        (issue): ManifestIssue => ({
-          code: ManifestErrorCode.SCHEMA_INVALID,
-          path: formatIssuePath(issue.path),
-          message: issue.message,
-        }),
-      ),
+      parsed.error.issues.map((issue): ManifestIssue => ({
+        code: ManifestErrorCode.SCHEMA_INVALID,
+        path: formatIssuePath(issue.path),
+        message: issue.message,
+      })),
     );
   }
 
@@ -174,7 +191,7 @@ export const validatePluginManifest = (
     issues.push({ code, path, message });
   };
 
-  // ── version / bgeCompat ────────────────────────────────────────────────
+  // ── version / bgeCompat ────────────────────────────────────────────
   if (valid(manifest.version) === null) {
     push(ManifestErrorCode.VERSION_INVALID, 'version', `'${manifest.version}' is not a valid semver version`);
   }
@@ -185,7 +202,10 @@ export const validatePluginManifest = (
       'bgeCompat',
       `'${manifest.bgeCompat}' is not a valid semver range`,
     );
-  } else if (!satisfies(options.bgeVersion, manifest.bgeCompat, { includePrerelease: true })) {
+  } else if (
+    (options.enforceBgeCompat ?? true) &&
+    !satisfies(options.bgeVersion, manifest.bgeCompat, { includePrerelease: true })
+  ) {
     push(
       ManifestErrorCode.BGE_COMPAT_UNSATISFIED,
       'bgeCompat',
@@ -193,7 +213,7 @@ export const validatePluginManifest = (
     );
   }
 
-  // ── slug reservation (D-K) ─────────────────────────────────────────
+  // ── slug reservation ─────────────────────────────────
   if (RESERVED_PLUGIN_SLUGS.has(manifest.slug)) {
     push(
       ManifestErrorCode.SLUG_RESERVED,
@@ -202,7 +222,7 @@ export const validatePluginManifest = (
     );
   }
 
-  // ── scope coherence (D-J) ────────────────────────────────────────
+  // ── scope coherence (D-J) ──────────────────────────────────
   // Per-check consentScope coherence lives in the checks loop below. Topics
   // are deliberately EXEMPT: topic subscription is a per-user opt-in at the
   // topic runtime (#196), never a PluginGrant, so a household/user-scoped
@@ -216,7 +236,7 @@ export const validatePluginManifest = (
   }
 
   const canonicalDefaultLocale = canonicalizeLocale(options.defaultLocale);
-  // ── localization (issue "Localization rules") ──────────────────────────
+  // ── localization (issue "Localization rules") ─────────────────────────
   for (const field of collectLocalizedFields(manifest)) {
     if (typeof field.value === 'string') {
       continue;
@@ -243,19 +263,10 @@ export const validatePluginManifest = (
     }
   }
 
-  // ── permissions.declares namespacing (#59 step 3) ──────────────────────
-  const ownPrefix = pluginPermissionPrefix(manifest.slug);
-
-  manifest.permissions.declares.forEach((slug, index) => {
-    if (!slug.startsWith(ownPrefix) || slug.length === ownPrefix.length) {
-      push(
-        ManifestErrorCode.PERMISSION_DECLARE_NAMESPACE,
-        `permissions.declares[${index}]`,
-        `'${slug}' must be namespaced under '${ownPrefix}'`,
-      );
-    }
-  });
-
+  // ── permissions.declares (#59 step 3) ───────────────────────────────
+  // Bare-slug shape is STRUCTURAL (zod pattern → published JSON Schema);
+  // only duplication remains semantic. Expansion to the canonical
+  // `plugin|<slug>|<bare>` envelope happens here, in the one shared helper.
   eachDuplicate(manifest.permissions.declares, (slug, index) => {
     push(
       ManifestErrorCode.PERMISSION_DECLARE_DUPLICATE,
@@ -264,7 +275,12 @@ export const validatePluginManifest = (
     );
   });
 
-  // ── permissions.checks ─────────────────────────────────────────────────
+  const declaredPermissions: DeclaredPluginPermission[] = manifest.permissions.declares.map((bareSlug) => ({
+    bareSlug,
+    canonicalSlug: expandPluginPermissionSlug(manifest.slug, bareSlug),
+  }));
+
+  // ── permissions.checks ──────────────────────────────────────────
   const declared = new Set(manifest.permissions.declares);
   const featureNames = new Set(manifest.features.map((feature) => feature.name));
   const externalPermissionChecks: string[] = [];
@@ -274,7 +290,36 @@ export const validatePluginManifest = (
     const path = `permissions.checks[${index}]`;
     const consentScope = check.consentScope ?? 'server';
 
-    permissionChecks.push({ ...check, consentScope });
+    // Check routing: membership in `declares` is authoritative — a declared
+    // bare slug SHADOWS an identically named core slug for this manifest
+    // (the plugin controls its own catalog; needing both means renaming the
+    // declared one). A bare-shaped check absent from `declares` routes to
+    // the core partition; if the author simply forgot to declare it, the
+    // install-time existence check (C2) fails loudly with a
+    // did-you-mean-to-declare hint.
+    if (declared.has(check.slug)) {
+      permissionChecks.push({
+        ...check,
+        consentScope,
+        origin: 'plugin',
+        canonicalSlug: expandPluginPermissionSlug(manifest.slug, check.slug),
+      });
+    } else if (check.slug.includes(PLUGIN_PERMISSION_DELIMITER) || LEGACY_PLUGIN_NAMESPACE_PATTERN.test(check.slug)) {
+      push(
+        ManifestErrorCode.PERMISSION_CHECK_SHAPE,
+        `${path}.slug`,
+        `'${check.slug}' — write bare '<action>:<subject>' slugs; the 'plugin|' envelope is generated at activation and the Phase A 'plugin:' prefix convention is retired. Cross-plugin permission checks are not expressible.`,
+      );
+    } else if (!CORE_PERMISSION_SLUG_PATTERN.test(check.slug)) {
+      push(
+        ManifestErrorCode.PERMISSION_CHECK_SHAPE,
+        `${path}.slug`,
+        `'${check.slug}' is neither a declared bare slug nor shaped like a core permission slug (e.g. 'read:game')`,
+      );
+    } else {
+      externalPermissionChecks.push(check.slug);
+      permissionChecks.push({ ...check, consentScope, origin: 'core', canonicalSlug: check.slug });
+    }
 
     if (manifest.scope === 'server' && consentScope !== 'server') {
       push(
@@ -282,30 +327,6 @@ export const validatePluginManifest = (
         `${path}.consentScope`,
         `'${check.slug}' requests '${consentScope}'-scope consent, but a server-scope plugin has no per-unit enable surface to collect it (D-J)`,
       );
-    }
-
-    if (PLUGIN_NAMESPACE_PATTERN.test(check.slug)) {
-      if (!check.slug.startsWith(ownPrefix)) {
-        push(
-          ManifestErrorCode.PERMISSION_CHECK_FOREIGN_NAMESPACE,
-          `${path}.slug`,
-          `'${check.slug}' targets another plugin's namespace; cross-plugin permission checks are not supported`,
-        );
-      } else if (!declared.has(check.slug)) {
-        push(
-          ManifestErrorCode.PERMISSION_CHECK_UNDECLARED,
-          `${path}.slug`,
-          `'${check.slug}' is in this plugin's namespace but missing from permissions.declares`,
-        );
-      }
-    } else if (!CORE_PERMISSION_SLUG_PATTERN.test(check.slug)) {
-      push(
-        ManifestErrorCode.PERMISSION_CHECK_SHAPE,
-        `${path}.slug`,
-        `'${check.slug}' is neither plugin-namespaced nor shaped like a core permission slug (e.g. 'game:read')`,
-      );
-    } else {
-      externalPermissionChecks.push(check.slug);
     }
 
     if (check.feature !== undefined && !featureNames.has(check.feature)) {
@@ -358,7 +379,7 @@ export const validatePluginManifest = (
     },
   );
 
-  // ── features ───────────────────────────────────────────────────────────
+  // ── features ──────────────────────────────────────────────────────
   eachDuplicate(
     manifest.features.map((feature) => feature.name),
     (name, index) => {
@@ -366,7 +387,7 @@ export const validatePluginManifest = (
     },
   );
 
-  // ── network.outboundDomains (#59 step 6) ───────────────────────────────
+  // ── network.outboundDomains (#59 step 6) ──────────────────────────────
   if (manifest.network.outboundDomains !== 'configured') {
     manifest.network.outboundDomains.forEach((domain, index) => {
       if (!FQDN_PATTERN.test(domain)) {
@@ -387,7 +408,7 @@ export const validatePluginManifest = (
     });
   }
 
-  // ── topics (#196 manifest surface) ─────────────────────────────────────
+  // ── topics (#196 manifest surface) ──────────────────────────────────
   eachDuplicate(
     manifest.topics.map((topic) => topic.name),
     (name, index) => {
@@ -399,7 +420,7 @@ export const validatePluginManifest = (
     },
   );
 
-  // ── events ─────────────────────────────────────────────────────────────
+  // ── events ───────────────────────────────────────────────────────
   const emitPrefix = pluginEmitPrefix(manifest.slug);
 
   eachDuplicate(manifest.events.subscribes, (pattern, index) => {
@@ -430,7 +451,7 @@ export const validatePluginManifest = (
     }
   });
 
-  // ── jobs ───────────────────────────────────────────────────────────────
+  // ── jobs ─────────────────────────────────────────────────────────
   const queuePrefix = pluginQueuePrefix(manifest.slug);
 
   manifest.jobs.queues.forEach((queue, index) => {
@@ -497,7 +518,7 @@ export const validatePluginManifest = (
     push(ManifestErrorCode.OWN_TABLE_DUPLICATE, `storage.ownTables[${index}]`, `'${table}' listed more than once`);
   });
 
-  // ── updateCheck (#84 opt-in polling) ───────────────────────────────────
+  // ── updateCheck (#84 opt-in polling) ─────────────────────────────────
   if (manifest.updateCheck !== undefined) {
     let parsedUrl: URL | null = null;
 
@@ -520,5 +541,5 @@ export const validatePluginManifest = (
     throw new PluginManifestValidationError(issues);
   }
 
-  return { manifest, permissionChecks, externalPermissionChecks, warnings };
+  return { manifest, permissionChecks, declaredPermissions, externalPermissionChecks, warnings };
 };

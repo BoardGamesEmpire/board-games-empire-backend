@@ -1,8 +1,8 @@
 # Gateway & Plugin Architecture Roadmap
 
-Tracking doc for epic [#192](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/192) — port/adapter hybrid, plugin loader, scoped consent, registry channels. Full decision log (D1–D16) lives in the epic body; the 2026-07-22 review decisions (D-A–D-I, durable denial, loader↔distribution boundary, marketplace deferral) and the 2026-07-23 Phase A audit decisions (D-J–D-P) live as amendment comments on #59/#84 pending manual fold-in.
+Tracking doc for epic [#192](https://github.com/BoardGamesEmpire/board-games-empire-backend/issues/192) — port/adapter hybrid, plugin loader, scoped consent, registry channels. Full decision log (D1–D16) lives in the epic body; the dated review decisions live as amendment comments pending manual fold-in: 2026-07-22 (D-A–D-I, durable denial, loader↔distribution boundary, marketplace deferral), 2026-07-23 (Phase A audit D-J–D-M, Phase B D-N–D-P), 2026-07-24 (D-Q–D-T), 2026-07-26 (D-U ability context, D-V delegation model, `bgeVersion` codegen notes), 2026-07-27 (Phase C: D-W permission grammar, D-X `decidedRiskLevel`, D-Y installer boundary, D-Z endpoints + admin slugs, D-AA grant semantics) — all on #59; publisher-identity deferral on #84; delete-to-pending revocation on #211.
 
-**Current focus: → #59 Phase B** \_(Phase A merged; the Phase A audit patch — D-J–D-M — rides PR `#___`. ⚠️ #60's `riskLevel` schema+seed slice SLIPPED wave 1: it is now the only external blocker for #59 Phase C and should land in parallel with Phase B.)\_
+**Current focus: → #59 Phase C** _(Phases A & B merged and audited; #60's `riskLevel` slice + #212 module wiring merged 2026-07-27 — no external blockers remain. Phase C lands as four PRs, C1 first.)_
 
 ## Recommended order
 
@@ -12,15 +12,18 @@ Check items off as PRs merge. Ordering rationale in the notes column; paralleliz
 
 - [x] **#193 — GameGatewayDriver port + registry + RemoteGatewayDriver** _(delivered by PR #203, 2026-07-22 — PR wasn't linked, closed manually)_
       First deliberately: zero external behavior change, small blast radius, and it produced the registry that #59's `DataGateway` category extends (and that `BasePluginRegistry` generalizes). Coordinator untouched externally (Phase 0).
-- [ ] **#60 — Permission risk classification + selective grants** _(reconciled 2026-07-22: denial storage superseded by #59's `PluginGrant` status model; status 2026-07-23: the `riskLevel` slice did NOT land ahead of Phase A as planned — it is now the sole external blocker for #59 Phase C install steps 13–14 and must merge before Phase C starts; it does not gate Phase B)_
-      The `riskLevel` enum + seed slice is tiny and landable in parallel with #59 Phase B. `PluginAbilityFactory`, install-response enrichment, and feature-state land after #59 Phases A–B.
-- [ ] **#59 — Plugin loader** _(amended 2026-07-22: locked decisions D-A–D-I, `PluginGrant` durable denial, pipeline interfaces; amended 2026-07-23: Phase A audit — D-J scope coherence, D-K reserved slugs, D-L JSON-Schema emit target, D-M registry fail-safe default, Phase B decisions D-N entrypoint contract / D-O bundled branch / D-P post-commit lifecycle write — see issue comments)_
-      Lands as ≥3 PRs per decision D-I:
-      **Phase A ✓ (merged)** — data model + validation, no runtime: `Plugin`/`HouseholdPlugin`/`PluginGrant`/`PluginLifecycleEvent` schema, `@boardgamesempire/plugin-manifest` (zod source of truth → generated JSON Schema artifact, collect-all semantic validator, localization resolution), `@bge/plugin` (`BasePluginRegistry` + contract suite, lifecycle event classes riding the #57 audit pipeline). Audit patch (D-J–D-M) in PR `#___`.
-      **Phase B (current)** — runtime: loader boot path, CLS plugin actor, `PluginContext` factory contract (D-B; entrypoint resolution per D-N), lifecycle listener → `plugin_lifecycle_events` (post-commit, D-P) + discovery-cache invalidation, config pub/sub reload, bundled in-tree resolution branch without seeds (D-O).
-      **Phase C** — install/update consent: pipeline steps owned here (manifest validation, static analysis via es-module-lexer + meriyah, installer authority, grant seeding), escalation comparison, pending staging, per-unit disable/re-enable, `scope_id` CHECK constraint + `bundled ⇒ sha256` invariant. Coordinates with #60's `PluginAbilityFactory`; **blocked on #60's `riskLevel` slice**.
-- [ ] **#84 — Plugin distribution** _(amended 2026-07-22: `PluginRegistrySource` model + `PluginRegistryClient` interface defined; multi-registry implementation deferred post-alpha — alpha ships the single seeded, non-deletable `bge-official` source)_
-      Implements the distribution-owned pipeline steps against #59's `PluginInstallPipelineStep` contracts (ingress, SHA-256, extraction, npm audit, atomic move). Independently landable after #59 Phase A. Registry repo (`bge-plugin-registry`) scaffolding included.
+- [ ] **#60 — Permission risk classification + selective grants** _(the `riskLevel` slice — enum, migration, explicit classification of all 123 seeded permissions with compile-time enforcement — MERGED 2026-07-27 alongside #212, unblocking #59 Phase C; remaining scope: `PluginAbilityFactory` [needs #59 C1 + #68's `resolveForActor` dispatch], install-response risk enrichment, feature-state surface)_
+- [ ] **#59 — Plugin loader** _(decision log: D-A–D-I 2026-07-22; D-J–D-P 2026-07-23; D-Q–D-T 2026-07-24; D-U/D-V 2026-07-26; D-W–D-AA 2026-07-27 — see issue comments)_
+      Lands as phased PRs per decision D-I:
+      **Phase A ✓ (merged)** — data model + validation, no runtime: `Plugin`/`HouseholdPlugin`/`PluginGrant`/`PluginLifecycleEvent` schema, `@boardgamesempire/plugin-manifest` (zod source of truth → generated JSON Schema artifact, collect-all semantic validator, localization resolution), `@bge/plugin` (`BasePluginRegistry` + contract suite, lifecycle event classes riding the #57 audit pipeline). Audit patch (D-J–D-M) delivered by PR #207.
+      **Phase B ✓ (merged, PR #208)** — runtime: loader boot path (quarantine-and-continue per D-Q), CLS plugin actor (`PluginActorScope`), `PluginContext` factory contract (D-B; entrypoint resolution per D-N), lifecycle listener → `plugin_lifecycle_events` (post-commit, D-P; `onAny` dispatch), config pub/sub hot-reload (D-S), bundled in-tree resolution branch without seeds (D-O). Audited 2026-07-26: all deliverables verified; deviations spun out as #212 (module wiring — since merged) and #213 (discovery-cache invalidation — deferred until a discovery-contributing surface exists). Host wiring: `bgeVersion` is a build-time codegen constant (`generate` Nx target, gitignored output), not an env var.
+      **Phase C (current)** — install/update consent, four PRs:
+      **C1 (in progress)** — `PluginPermission` catalog + D-W grammar (bare author slugs, generated `plugin|<slug>|<bare>` envelope via the shared `expandPluginPermissionSlug` helper), `PluginGrant.decidedRiskLevel` (D-X), `PluginGrantService` (grant-time authority checks per D-AA, `manage:plugin*` hard exclusion + wildcard-subject block per D-Z, delete-to-pending revocation write path per #211, `plugin.grant_revoked` lifecycle event).
+      **C2** — install pipeline steps + `PluginInstallerService` (consent/DB half per D-Y: manifest re-validation, step-3 DB half + declares collision, static analysis via `es-module-lexer` + `meriyah` [D-E], installer authority, denial list, Critical second factor, transactional persist + grant seeding); `bundled ⇒ sha256` invariant enforced at this seam. The `scope_id` CHECK constraint (invariant 1) already landed with the Phase A fix (`81ae215`).
+      **C3** — update-escalation comparison (risk escalation detectable via `decidedRiskLevel`), pending staging, per-unit disable/re-enable.
+      **C4** — consent-collection endpoints (household enable/disable/config, grant decide, update approve/reject, server enable/disable/uninstall — ingress endpoints stay with #84) + admin permission seeds (`manage:plugin` Critical, `read:plugin` Medium, `manage:plugin:household` Medium, `read:plugin:household` Low).
+- [ ] **#84 — Plugin distribution** _(amended 2026-07-22: `PluginRegistrySource` model + `PluginRegistryClient` interface defined; multi-registry implementation deferred post-alpha — alpha ships the single seeded, non-deletable `bge-official` source. Amended 2026-07-27: publisher-scoped plugin identity deferred here from the #59 Phase C pass — the D-W envelope inherits any future publisher-scoped slug grammar through the single expansion helper.)_
+      Implements the distribution-owned pipeline steps against #59's contracts (ingress, SHA-256, extraction, npm audit, atomic move) and wraps C2's `PluginInstallerService` per D-Y. Independently landable after #59 Phase A. Registry repo (`bge-plugin-registry`) scaffolding included.
 
 ### Wave 2 — gateways become plugins (ordered after wave 1)
 
@@ -39,6 +42,8 @@ Check items off as PRs merge. Ordering rationale in the notes column; paralleliz
 
 ### Backlog / design track
 
+- [ ] **#211 — Eager grant revocation on authority loss** _(opened 2026-07-26; deps: #59 C1 — the revocation write path and `plugin.grant_revoked` event land there; this issue owns the authority-change listeners. Semantics locked 2026-07-27: delete-to-pending, D-AA)_
+- [ ] **#213 — Plugin lifecycle → discovery-cache invalidation** _(opened 2026-07-26; deferred from Phase B until a discovery-contributing plugin surface exists — #78/#76 consumers via #194/#61)_
 - [ ] **#204 — Plugin-owned table DDL & migration strategy** _(opened 2026-07-22; deps: #59, #84)_
       Activates the D-H-inert `storage.ownTables` declaration. Leading candidate: host-executed declarative SQL migrations from the tarball (Flyway-style, per-plugin schema or `plugin_<slug>_` prefix), with the host KV store as the zero-ceremony default. Decision to be locked before implementation.
 - [ ] **#206 — Publish plugin-manifest JSON Schema artifact at its `$id` URL** _(opened 2026-07-23; deps: #59 Phase A patch (emit target), #84 release pipeline)_
@@ -55,6 +60,8 @@ Check items off as PRs merge. Ordering rationale in the notes column; paralleliz
       │    ├─▶ #84 ─▶ #194 ─▶ #195
       │    ├─▶ #196
       │    ├─▶ #197
+      │    ├─▶ #211 (C1-dependent listeners)
+      │    ├─▶ #213 ◀─ (#194/#61 discovery surfaces)
       │    ├─▶ #204 ◀─ #84     #61 (backlog: #59, #100/#101)
       │    └─▶ #206 ◀─ #84
       └─▶ #200        #201 (backlog: #193, #194, #196)
@@ -63,4 +70,4 @@ Check items off as PRs merge. Ordering rationale in the notes column; paralleliz
 ## Status legend
 
 - Unchecked = not started · strike-through title = descoped · add `(in PR #___)` inline when work is up for review
-- 2026-07 amendments to #59/#84 live as dated issue comments (API body edits mangle code fences); latest: 2026-07-23 Phase A audit on #59. Fold into the bodies on next manual edit. #60's body IS current (rewritten 2026-07-22; 2026-07-23 status flag is a comment).
+- 2026-07 amendments to #59/#84/#211 live as dated issue comments (API body edits mangle code fences); latest: 2026-07-27 Phase C decisions (D-W–D-AA) on #59. Fold into the bodies on next manual edit. #60's body IS current (rewritten 2026-07-22; later status flags are comments).

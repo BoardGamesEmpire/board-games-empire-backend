@@ -1,8 +1,11 @@
 import { AuditContextModule } from '@bge/actor-context';
+import { DatabaseModule } from '@bge/database';
 import { Module } from '@nestjs/common';
 import { PluginConfigEventsService } from './config/plugin-config-events.service';
 import { PluginConfigService } from './config/plugin-config.service';
 import { PluginContextFactory } from './context/plugin-context.factory';
+import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
+import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginLifecycleListener } from './lifecycle/plugin-lifecycle.listener';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
@@ -25,12 +28,11 @@ import { ConfigurableModuleClass } from './plugin-module.options';
  * - `@bge/redis` providing `CACHE_REDIS_CLIENT` — config hot-reload rides
  *   the cache connection tier, same placement as the SafeHttpPolicy and
  *   gateway-config channels.
- * - `DatabaseService` (globally provided, per the repo convention).
  * - `ScheduleModule.forRoot()` where the config-refresh interval backstop
  *   should fire (api/worker); elsewhere the decorator is inert.
  */
 @Module({
-  imports: [AuditContextModule],
+  imports: [AuditContextModule, DatabaseModule],
   providers: [
     { provide: PLUGIN_MODULE_IMPORTER, useClass: DynamicImportPluginModuleImporter },
     PluginDirectoryResolverService,
@@ -38,9 +40,11 @@ import { ConfigurableModuleClass } from './plugin-module.options';
     PluginContextFactory,
     PluginConfigEventsService,
     PluginConfigService,
+    PluginGrantAuthorityService,
+    PluginGrantService,
     PluginLifecycleListener,
     PluginLoaderService,
   ],
-  exports: [PluginInstanceRegistry, PluginConfigService, PluginContextFactory],
+  exports: [PluginInstanceRegistry, PluginConfigService, PluginContextFactory, PluginGrantService],
 })
 export class PluginModule extends ConfigurableModuleClass {}

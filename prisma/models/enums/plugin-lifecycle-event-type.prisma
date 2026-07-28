@@ -14,5 +14,6 @@ enum PluginLifecycleEventType {
   LoadFailed
   GrantCreated
   GrantRejected
+  GrantRevoked
   UnitDisabled
 }

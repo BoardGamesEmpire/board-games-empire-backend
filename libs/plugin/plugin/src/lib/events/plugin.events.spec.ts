@@ -1,5 +1,5 @@
 import { MutationEvent } from '@bge/actor-context';
-import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
+import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { PluginEvent } from './constants';
 import {
   GrantedPermissionRecord,
@@ -10,6 +10,7 @@ import {
   PluginDisabledEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
+  PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginProvenance,
   PluginUninstalledEvent,
@@ -26,7 +27,7 @@ const provenance: PluginProvenance = {
 
 const grantedPermissions: readonly GrantedPermissionRecord[] = [
   {
-    slug: 'plugin:demo-sink:digest:manage',
+    slug: 'plugin|demo-sink|manage:digest',
     required: true,
     consentScope: 'server',
     reason: 'Stores and manages the digest configuration.',
@@ -159,9 +160,10 @@ describe('plugin lifecycle events', () => {
       pluginId: 'plg_1',
       scopeType: PluginGrantScope.Household,
       scopeId: 'hh_1',
-      permissionSlug: 'plugin:demo-sink:calendar:write',
+      permissionSlug: 'plugin|demo-sink|update:calendar',
       status: PluginGrantStatus.Granted,
       manifestVersion: '1.2.0',
+      decidedRiskLevel: RiskLevel.Low,
     };
 
     it('first decision is create-shaped', () => {
@@ -190,6 +192,16 @@ describe('plugin lifecycle events', () => {
       expect(event.after.status).toBe(PluginGrantStatus.Denied);
       expect(PluginGrantRejectedEvent.eventName).toBe(PluginEvent.GrantRejected);
     });
+
+    it('revocation is delete-shaped and carries the authority-loss reason (#211)', () => {
+      const event = new PluginGrantRevokedEvent(grantRow, 'membership-removed', initiatedAt);
+
+      expect(event.action).toBe('delete');
+      expect(event.after).toBeNull();
+      expect(event.reason).toBe('membership-removed');
+      expect(event.before.decidedRiskLevel).toBe(RiskLevel.Low);
+      expect(PluginGrantRevokedEvent.eventName).toBe(PluginEvent.GrantRevoked);
+    });
   });
 
   describe('HouseholdPluginUnitDisabledEvent', () => {
@@ -197,11 +209,11 @@ describe('plugin lifecycle events', () => {
       const event = new HouseholdPluginUnitDisabledEvent(
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true },
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: false },
-        'plugin:demo-sink:calendar:write',
+        'plugin|demo-sink|update:calendar',
         initiatedAt,
       );
 
-      expect(event.requiredPermissionSlug).toBe('plugin:demo-sink:calendar:write');
+      expect(event.requiredPermissionSlug).toBe('plugin|demo-sink|update:calendar');
       expect(event.action).toBe('update');
       expect(HouseholdPluginUnitDisabledEvent.eventName).toBe(PluginEvent.UnitDisabled);
     });

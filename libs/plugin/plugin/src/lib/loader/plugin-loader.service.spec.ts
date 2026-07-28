@@ -102,7 +102,7 @@ describe('PluginLoaderService', () => {
     pluginActorScope = {
       run: jest.fn(<T>(_pluginId: string, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
-    validateMock.mockReturnValue({ manifest, permissionChecks: [], externalPermissionChecks: [], warnings: [] });
+    validateMock.mockReturnValue({ manifest, permissionChecks: [], declaredPermissions: [], externalPermissionChecks: [], warnings: [] });
 
     loader = new PluginLoaderService(
       db as unknown as DatabaseService,
