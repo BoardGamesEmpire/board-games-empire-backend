@@ -205,7 +205,13 @@
       "path": "./libs/plugin/manifest"
     },
     {
-      "path": "./libs/plugin/plugin"
+      "path": "./libs/plugin/contract"
+    },
+    {
+      "path": "./libs/plugin/contract-testing"
+    },
+    {
+      "path": "./libs/plugin/runtime"
     }
   ]
 }
