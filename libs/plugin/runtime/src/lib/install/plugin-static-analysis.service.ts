@@ -7,6 +7,13 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { PluginStaticAnalysisUnavailableError } from './install.errors';
 import {
+  MODULE_PARSE_OPTIONS,
+  PARSER_CAPABILITY_PROBES,
+  probeParserCapabilities,
+  resolvedParserVersion,
+  SCRIPT_PARSE_OPTIONS,
+} from './parser-capabilities';
+import {
   isGatingFinding,
   MAX_ADVISORY_FINDINGS,
   MAX_GATING_EXAMPLES_PER_SPECIFIER,
@@ -20,19 +27,6 @@ import {
 const SCANNABLE_EXTENSIONS = ['.js', '.mjs', '.cjs'] as const;
 const NODE_MODULES = 'node_modules';
 const LOCKFILE_NAME = 'package-lock.json';
-
-/**
- * Both the modern and legacy option keys are passed on every parse.
- * `sourceType` is meriyah 7's API; `module` is 1.x's, retained (deprecated)
- * in 7. Passing only `sourceType` against a hoisted 1.x parses ESM in script
- * mode, which fails on the first `import` and degrades EVERY file to a
- * parse-failure warning — silently, since a failed parse is a warning by
- * design. Passing both is correct on either major (1.x honours the legacy
- * key), and `assertParserSanity` refuses to analyze at all for a build that
- * honours neither, rather than quietly losing coverage.
- */
-const MODULE_PARSE_OPTIONS = { sourceType: 'module', module: true } as const;
-const SCRIPT_PARSE_OPTIONS = { sourceType: 'script', module: false } as const;
 
 /**
  * `package.json` fields whose entries the AUTHOR explicitly chose and which
@@ -190,25 +184,36 @@ export class PluginStaticAnalysisService {
   }
 
   /**
-   * Probe that the resolved parser actually honours module parsing, run
-   * before the first scan and REFUSING to analyze when it fails. Proceeding
-   * would mean every ESM file degrades to `parse-failure`, `require()`
-   * inside ESM goes unscreened, and the lexer-failure fallback is lost —
-   * partial coverage presenting as a completed scan, which is the one report
-   * this service must never produce. Success is cached; failure is not, so a
-   * broken environment throws on every attempt rather than once.
+   * Probe that the resolved parser can handle every syntax class the AST
+   * pass depends on, run before the first scan and REFUSING to analyze when
+   * any probe fails (#219 / D-AM). A capability gap means each file using
+   * that syntax degrades to `parse-failure`, its `require()` calls go
+   * unscreened, and the lexer-failure fallback is lost for it — partial
+   * coverage presenting as a completed scan, which is the one report this
+   * service must never produce.
+   *
+   * Module parsing alone was probed originally, and that certified a stale
+   * meriyah 1.x which then failed on optional chaining, `??=`, private
+   * fields, static blocks, and top-level await — most real 2026 plugin
+   * code. The probe set now exercises those classes explicitly; see
+   * `PARSER_CAPABILITY_PROBES` for the verified partition. Success is
+   * cached; failure is not, so a broken environment throws on every attempt
+   * rather than once.
    */
   private assertParserSanity(): void {
     if (this.parserChecked) {
       return;
     }
 
-    try {
-      parseAst("import probe from 'probe';", MODULE_PARSE_OPTIONS);
-    } catch {
-      throw new PluginStaticAnalysisUnavailableError();
+    const failedCapabilities = probeParserCapabilities();
+
+    if (failedCapabilities.length > 0) {
+      throw new PluginStaticAnalysisUnavailableError(failedCapabilities, resolvedParserVersion());
     }
 
+    this.logger.debug(
+      `meriyah ${resolvedParserVersion()} passed all ${PARSER_CAPABILITY_PROBES.length} parser capability probes`,
+    );
     this.parserChecked = true;
   }
 
