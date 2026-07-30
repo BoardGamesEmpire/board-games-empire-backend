@@ -1,6 +1,7 @@
 import { MutationEvent } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 import {
   GrantedPermissionRecord,
   HouseholdPluginConfigUpdatedEvent,
@@ -11,6 +12,7 @@ import {
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
+  PluginInstallAuditContext,
   PluginInstalledEvent,
   PluginProvenance,
   PluginUninstalledEvent,
@@ -38,6 +40,10 @@ const auditFindings: readonly NpmAuditFinding[] = [
   { module: 'left-pad', severity: 'high', advisoryUrl: 'https://github.com/advisories/GHSA-xxxx' },
 ];
 
+const staticAnalysis: readonly StaticAnalysisFinding[] = [
+  { file: 'index.js', kind: 'esm-import', specifier: 'node:fs', severity: 'warning', scanScope: 'default' },
+];
+
 describe('plugin lifecycle events', () => {
   describe('PluginInstalledEvent', () => {
     const event = new PluginInstalledEvent(
@@ -50,9 +56,13 @@ describe('plugin lifecycle events', () => {
         enabled: false,
         bundled: false,
       },
-      provenance,
-      grantedPermissions,
-      auditFindings,
+      {
+        provenance,
+        grantedPermissions,
+        auditFindings,
+        staticAnalysis,
+        acknowledgedForbiddenImports: ['axios'],
+      },
       initiatedAt,
     );
 
@@ -64,11 +74,43 @@ describe('plugin lifecycle events', () => {
       expect(PluginInstalledEvent.eventName).toBe(PluginEvent.Installed);
     });
 
-    it('carries provenance, grants, and audit findings as context (off the snapshots)', () => {
+    it('carries provenance, grants, and findings as context (off the snapshots)', () => {
       expect(event.provenance).toEqual(provenance);
       expect(event.grantedPermissions).toEqual(grantedPermissions);
       expect(event.auditFindings).toEqual(auditFindings);
+      expect(event.staticAnalysis).toEqual(staticAnalysis);
       expect(event.after).not.toHaveProperty('provenance');
+    });
+
+    it('records the forbidden imports the installing admin accepted (#59 D-AJ)', () => {
+      expect(event.acknowledgedForbiddenImports).toEqual(['axios']);
+    });
+
+    it('flattens the context object onto the event — consumers read fields, not a nested bag', () => {
+      const context: PluginInstallAuditContext = {
+        provenance,
+        grantedPermissions,
+        auditFindings: null,
+        staticAnalysis: [],
+        acknowledgedForbiddenImports: [],
+      };
+      const clean = new PluginInstalledEvent(
+        {
+          id: 'plg_2',
+          slug: 'clean-sink',
+          version: '2.0.0',
+          category: 'FeedbackSink',
+          scope: 'Server',
+          enabled: false,
+          bundled: true,
+        },
+        context,
+        initiatedAt,
+      );
+
+      expect(clean).not.toHaveProperty('context');
+      expect(clean.auditFindings).toBeNull();
+      expect(clean.acknowledgedForbiddenImports).toEqual([]);
     });
 
     it('locks initiatedAt and stamps occurredAt at construction', () => {

@@ -36,8 +36,8 @@ import {
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 
-/** The empty-string uniqueness sentinel Server-scope rows store (see plugin-grant.prisma). */
-const SERVER_SCOPE_SENTINEL = '' as const;
+/** The empty-string uniqueness sentinel Server-scope rows store (see plugin-grant.prisma). Shared with the installer's grant seeding. */
+export const SERVER_SCOPE_SENTINEL = '' as const;
 
 const CONSENT_SCOPE_TO_GRANT_SCOPE: Readonly<Record<PluginConsentScopeValue, PluginGrantScope>> = {
   server: PluginGrantScope.Server,

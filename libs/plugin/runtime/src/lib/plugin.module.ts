@@ -6,6 +6,8 @@ import { PluginConfigService } from './config/plugin-config.service';
 import { PluginContextFactory } from './context/plugin-context.factory';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
 import { PluginGrantService } from './grants/plugin-grant.service';
+import { PluginInstallerService } from './install/plugin-installer.service';
+import { PluginStaticAnalysisService } from './install/plugin-static-analysis.service';
 import { PluginLifecycleListener } from './lifecycle/plugin-lifecycle.listener';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
 import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
@@ -42,9 +44,17 @@ import { ConfigurableModuleClass } from './plugin-module.options';
     PluginConfigService,
     PluginGrantAuthorityService,
     PluginGrantService,
+    PluginInstallerService,
     PluginLifecycleListener,
     PluginLoaderService,
+    PluginStaticAnalysisService,
   ],
-  exports: [PluginInstanceRegistry, PluginConfigService, PluginContextFactory, PluginGrantService],
+  exports: [
+    PluginInstanceRegistry,
+    PluginConfigService,
+    PluginContextFactory,
+    PluginGrantService,
+    PluginInstallerService,
+  ],
 })
 export class PluginModule extends ConfigurableModuleClass {}

@@ -135,9 +135,15 @@ describe('PluginLifecycleListener', () => {
           enabled: false,
           bundled: false,
         },
-        provenance,
-        [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
-        null,
+        {
+          provenance,
+          grantedPermissions: [
+            { slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' },
+          ],
+          auditFindings: null,
+          staticAnalysis: [],
+          acknowledgedForbiddenImports: [],
+        },
         initiatedAt,
       );
 
@@ -159,6 +165,8 @@ describe('PluginLifecycleListener', () => {
           payload: expect.objectContaining({
             provenance,
             auditFindings: null,
+            staticAnalysis: [],
+            acknowledgedForbiddenImports: [],
           }),
         }),
       );
