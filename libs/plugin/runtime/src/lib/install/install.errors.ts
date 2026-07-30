@@ -105,25 +105,32 @@ export class PluginInstallCriticalConfirmationError extends Error {
 }
 
 /**
- * The resolved meriyah build cannot parse ESM with either the modern
- * (`sourceType`) or legacy (`module`) option key, so the AST pass would
- * degrade: every ESM file records `parse-failure` instead of being walked,
- * `require()` calls inside ESM files go unscreened, and the lexer-failure
- * fallback is gone. Screening of script-parseable CJS files would survive,
- * but a gate running at partial coverage while its report reads as complete
- * is the one outcome static analysis must never produce — so the analyzer
- * refuses to run instead of proceeding on a log line. Known cause: a hoisted
- * meriyah 1.x shadowing the pinned 7.x (1.x honours the legacy key, so this
- * fires only for a build that honours neither).
+ * The resolved meriyah build failed one or more parser capability probes
+ * (#219 / D-AM), so the AST pass would degrade: every file using syntax the
+ * build cannot parse records `parse-failure` instead of being walked, its
+ * `require()` calls go unscreened, and the lexer-failure fallback is gone
+ * for it. Whatever screening survives, a gate running at partial coverage
+ * while its report reads as complete is the one outcome static analysis
+ * must never produce — so the analyzer refuses to run instead of proceeding
+ * on a log line. Known cause: a stale meriyah major shadowing the pinned
+ * one — 1.x honours the legacy `module` option key and parses a bare
+ * import, which is why the probe exercises the modern syntax classes real
+ * plugin code uses rather than module parsing alone.
  */
 export class PluginStaticAnalysisUnavailableError extends Error {
   override readonly name = 'PluginStaticAnalysisUnavailableError';
 
-  constructor() {
+  constructor(
+    /** Capability probe names the resolved parser failed. */
+    public readonly failedCapabilities: readonly string[],
+    /** The resolved parser's self-reported version; `'unknown'` when the build exports none. */
+    public readonly parserVersion: string,
+  ) {
     super(
-      'Static analysis is unavailable: the resolved meriyah build cannot parse ESM, so install screening would run ' +
-        'at partial coverage while reporting a complete scan. Check the dependency tree for a meriyah build ' +
-        'shadowing the pinned major before installing plugins.',
+      `Static analysis is unavailable: the resolved meriyah build (version ${parserVersion}) failed ` +
+        `${failedCapabilities.length} parser capability probe(s) [${failedCapabilities.join(', ')}], so install ` +
+        'screening would run at partial coverage while reporting a complete scan. Check the dependency tree for a ' +
+        'meriyah build shadowing the pinned major before installing plugins.',
     );
   }
 }
