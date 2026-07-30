@@ -9,10 +9,11 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 /**
  * Isolated from the main analyzer spec on purpose: that suite runs the REAL
  * parsers because the service's value is what they actually surface, while
- * this one substitutes meriyah to stand in for the environments the
+ * this one substitutes the parser to exercise the environments the
  * capability probe exists to refuse (#219 / D-AM) — a build that honours
- * neither module option key, and the stale major that honours the keys but
- * chokes on modern syntax.
+ * neither module option key, and the genuine stale major (required from its
+ * nesting in the dependency tree) that honours the keys but chokes on
+ * modern syntax.
  */
 type MeriyahModule = typeof import('meriyah');
 type ParseImplementation = MeriyahModule['parse'];
@@ -30,13 +31,23 @@ jest.mock('meriyah', () => ({
 }));
 
 /**
- * The syntax classes a meriyah 1.x rejects, as a source-text predicate. The
- * partition it produces over `PARSER_CAPABILITY_PROBES` — everything fails
- * except `esm-module-parsing` and `dynamic-import` — matches the published
- * 1.9.15 exactly (verified against the real package), so the simulation is
- * faithful without vendoring a second meriyah major into the tree.
+ * The REAL meriyah 1.9.15 — the stale major #219 is about — required from
+ * where the dependency tree actually keeps it: nested under `jackson-js`
+ * (via `bgg-ts-client`), which is what freed the root slot for the pinned
+ * 7.x. Running the guard against the genuine article instead of a
+ * simulation keeps the spec's claims about 1.x behaviour unfakeable —
+ * notably that 1.x parses optional chaining ONLY behind its `next` flag,
+ * which the service never passes. If this require ever fails, `jackson-js`
+ * stopped nesting a 1.x meriyah; delete the stale-major cases below along
+ * with it — the guard they exercise is covered structurally by the
+ * total-incapability suite either way.
  */
-const MODERN_SYNTAX = /\?\.|\?\?=|\|\|=|&&=|#|static\s*\{|\bawait\b|import\.meta/;
+interface LegacyParserModule {
+  readonly parse: (source: string, options?: object) => unknown;
+  readonly version: string;
+}
+
+const legacyMeriyah = jest.requireActual<LegacyParserModule>('jackson-js/node_modules/meriyah');
 
 const LEGACY_FLOOR_CAPABILITIES = ['esm-module-parsing', 'dynamic-import'] as const;
 
@@ -59,6 +70,14 @@ describe('PluginStaticAnalysisService parser guard', () => {
 
   afterEach(async () => {
     await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it('the legacy floor names real probes — a rename must restate the empirical claim, not silently reshape it', () => {
+    const capabilities = new Set(PARSER_CAPABILITY_PROBES.map((probe) => probe.capability));
+
+    for (const capability of LEGACY_FLOOR_CAPABILITIES) {
+      expect(capabilities).toContain(capability);
+    }
   });
 
   describe('a build that honours neither module option key', () => {
@@ -111,16 +130,10 @@ describe('PluginStaticAnalysisService parser guard', () => {
     });
   });
 
-  describe('a stale major that parses plain imports but fails modern syntax — the #219 scenario', () => {
+  describe('the stale major that parses plain imports but fails modern syntax — the #219 scenario', () => {
     beforeEach(() => {
-      mockedVersion = '1.9.15';
-      parseImplementation = ((source, options) => {
-        if (MODERN_SYNTAX.test(source)) {
-          throw new SyntaxError('Unexpected token');
-        }
-
-        return actualMeriyah.parse(source, options);
-      }) as ParseImplementation;
+      mockedVersion = legacyMeriyah.version;
+      parseImplementation = ((source, options) => legacyMeriyah.parse(source, options)) as ParseImplementation;
     });
 
     it('is refused: passing the legacy floor is not capability for a full scan', async () => {
@@ -130,14 +143,12 @@ describe('PluginStaticAnalysisService parser guard', () => {
 
       expect(failure).toBeInstanceOf(PluginStaticAnalysisUnavailableError);
 
-      const unavailable = failure as PluginStaticAnalysisUnavailableError;
+      const expectedFailed = PARSER_CAPABILITY_PROBES.map((probe) => probe.capability).filter(
+        (capability) => !(LEGACY_FLOOR_CAPABILITIES as readonly string[]).includes(capability),
+      );
 
-      for (const capability of LEGACY_FLOOR_CAPABILITIES) {
-        expect(unavailable.failedCapabilities).not.toContain(capability);
-      }
-
-      expect(unavailable.failedCapabilities).toHaveLength(
-        PARSER_CAPABILITY_PROBES.length - LEGACY_FLOOR_CAPABILITIES.length,
+      expect([...(failure as PluginStaticAnalysisUnavailableError).failedCapabilities].sort()).toEqual(
+        [...expectedFailed].sort(),
       );
     });
 
