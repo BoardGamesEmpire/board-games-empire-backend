@@ -34,7 +34,7 @@ export class PluginInstallManifestError extends Error {
   }
 }
 
-/** The installer is not a server admin (D-AD). `manage:plugin` guard enforcement arrives with the C4 seeds. */
+/** The installer is not a server admin. `manage:plugin` guard enforcement arrives with the C4 seeds. */
 export class PluginInstallAuthorityError extends Error {
   override readonly name = 'PluginInstallAuthorityError';
 
@@ -98,8 +98,32 @@ export class PluginInstallCriticalConfirmationError extends Error {
     public readonly receivedSlugs: readonly string[],
   ) {
     super(
-      `Plugin '${slug}' requires explicit confirmation of ${expectedSlugs.length} Critical required permission(s): ` +
-        `expected exact re-entry of [${expectedSlugs.join(', ')}], received [${receivedSlugs.join(', ')}]`,
+      `Plugin '${slug}' requires explicit confirmation of ${expectedSlugs.length} Critical permission(s) this ` +
+        `install will grant: expected exact re-entry of [${expectedSlugs.join(', ')}], received [${receivedSlugs.join(', ')}]`,
+    );
+  }
+}
+
+/**
+ * The resolved meriyah build cannot parse ESM with either the modern
+ * (`sourceType`) or legacy (`module`) option key, so the AST pass would
+ * degrade: every ESM file records `parse-failure` instead of being walked,
+ * `require()` calls inside ESM files go unscreened, and the lexer-failure
+ * fallback is gone. Screening of script-parseable CJS files would survive,
+ * but a gate running at partial coverage while its report reads as complete
+ * is the one outcome static analysis must never produce — so the analyzer
+ * refuses to run instead of proceeding on a log line. Known cause: a hoisted
+ * meriyah 1.x shadowing the pinned 7.x (1.x honours the legacy key, so this
+ * fires only for a build that honours neither).
+ */
+export class PluginStaticAnalysisUnavailableError extends Error {
+  override readonly name = 'PluginStaticAnalysisUnavailableError';
+
+  constructor() {
+    super(
+      'Static analysis is unavailable: the resolved meriyah build cannot parse ESM, so install screening would run ' +
+        'at partial coverage while reporting a complete scan. Check the dependency tree for a meriyah build ' +
+        'shadowing the pinned major before installing plugins.',
     );
   }
 }

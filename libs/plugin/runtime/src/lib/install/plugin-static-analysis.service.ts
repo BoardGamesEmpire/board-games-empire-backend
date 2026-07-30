@@ -5,6 +5,7 @@ import { init, parse as parseEsm } from 'es-module-lexer';
 import { parse as parseAst, type ESTree } from 'meriyah';
 import { readdir, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { PluginStaticAnalysisUnavailableError } from './install.errors';
 import {
   isGatingFinding,
   MAX_ADVISORY_FINDINGS,
@@ -26,8 +27,9 @@ const LOCKFILE_NAME = 'package-lock.json';
  * in 7. Passing only `sourceType` against a hoisted 1.x parses ESM in script
  * mode, which fails on the first `import` and degrades EVERY file to a
  * parse-failure warning — silently, since a failed parse is a warning by
- * design. Passing both is correct on either major, and `assertParserSanity`
- * turns a mismatch into a loud error rather than a quiet loss of coverage.
+ * design. Passing both is correct on either major (1.x honours the legacy
+ * key), and `assertParserSanity` refuses to analyze at all for a build that
+ * honours neither, rather than quietly losing coverage.
  */
 const MODULE_PARSE_OPTIONS = { sourceType: 'module', module: true } as const;
 const SCRIPT_PARSE_OPTIONS = { sourceType: 'script', module: false } as const;
@@ -188,28 +190,26 @@ export class PluginStaticAnalysisService {
   }
 
   /**
-   * One-time probe that the resolved parser actually honours module parsing.
-   * A version mismatch here loses CJS `require()` screening and the ESM
-   * fallback entirely, and the failure mode is a report full of
-   * `parse-failure` warnings that looks like a merely unusual plugin — so it
-   * gets an explicit error naming the likely cause.
+   * Probe that the resolved parser actually honours module parsing, run
+   * before the first scan and REFUSING to analyze when it fails. Proceeding
+   * would mean every ESM file degrades to `parse-failure`, `require()`
+   * inside ESM goes unscreened, and the lexer-failure fallback is lost —
+   * partial coverage presenting as a completed scan, which is the one report
+   * this service must never produce. Success is cached; failure is not, so a
+   * broken environment throws on every attempt rather than once.
    */
   private assertParserSanity(): void {
     if (this.parserChecked) {
       return;
     }
 
-    this.parserChecked = true;
-
     try {
       parseAst("import probe from 'probe';", MODULE_PARSE_OPTIONS);
     } catch {
-      this.logger.error(
-        'The resolved meriyah build cannot parse ESM with the options this service passes, so every file will ' +
-          'degrade to a parse-failure warning and require() screening will not run. Check the dependency tree for a ' +
-          'hoisted meriyah 1.x shadowing the pinned 7.x.',
-      );
+      throw new PluginStaticAnalysisUnavailableError();
     }
+
+    this.parserChecked = true;
   }
 
   private unreadableDirectoryFindings(
