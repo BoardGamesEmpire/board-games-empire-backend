@@ -1,5 +1,6 @@
 export * from './lib/constants.js';
 export * from './lib/errors.js';
+export * from './lib/forbidden-specifiers.js';
 export * from './lib/json-schema.js';
 export * from './lib/localized-string.js';
 export * from './lib/manifest-validator.js';

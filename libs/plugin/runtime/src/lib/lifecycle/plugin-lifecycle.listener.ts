@@ -164,6 +164,11 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
           provenance: event.provenance,
           grantedPermissions: event.grantedPermissions,
           auditFindings: event.auditFindings,
+          staticAnalysis: event.staticAnalysis,
+          // Whether an admin waved a forbidden import through, and which
+          // ones, is a question asked of this table directly — not one to
+          // reconstruct from which findings can coexist with an install.
+          acknowledgedForbiddenImports: event.acknowledgedForbiddenImports,
         },
       };
     }

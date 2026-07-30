@@ -3,6 +3,7 @@ import type { HouseholdPlugin, Plugin, PluginGrant } from '@bge/database';
 import { ResourceType } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
+import type { StaticAnalysisFinding } from '../install/static-analysis.types';
 
 /**
  * Plugin lifecycle events (#59).
@@ -49,6 +50,37 @@ type PluginInstalledSnapshot = Readonly<
   Pick<Plugin, 'id' | 'slug' | 'version' | 'category' | 'scope' | 'enabled' | 'bundled'>
 >;
 
+/**
+ * The install-specific context an installed event carries beyond the row
+ * snapshot. A single object rather than a growing positional tail: the
+ * pipeline has already added static-analysis findings and the override
+ * record, and #84's npm audit step extends this shape too — each of those
+ * would otherwise be another argument nobody can read at the call site.
+ * Reads stay flat (`event.provenance`), so consumers are unaffected.
+ */
+export interface PluginInstallAuditContext {
+  /** Ingress provenance — context for the lifecycle table, not row state. */
+  readonly provenance: PluginProvenance;
+  /** Server-consentable permissions granted by the installing admin. */
+  readonly grantedPermissions: readonly GrantedPermissionRecord[];
+  /** npm advisory findings acknowledged at install, `null` when no lockfile was present (#84). */
+  readonly auditFindings: readonly NpmAuditFinding[] | null;
+  /** Everything static analysis reported: warnings, deep-scan advisories, and any overridden forbidden imports. */
+  readonly staticAnalysis: readonly StaticAnalysisFinding[];
+  /**
+   * Forbidden import specifiers the installing admin explicitly accepted to
+   * get past the static-analysis gate — empty on an ordinary install.
+   *
+   * Recorded as its own field rather than left to be inferred from the
+   * presence of forbidden findings above: "was this install overridden, and
+   * what exactly was waved through" is a question an operator will ask of
+   * the lifecycle table directly, and reconstructing it from a rule about
+   * which findings can coexist with an installed row is the same implicit
+   * reconstruction `decidedRiskLevel` exists to avoid on grant rows.
+   */
+  readonly acknowledgedForbiddenImports: readonly string[];
+}
+
 export class PluginInstalledEvent extends MutationEvent<Plugin> {
   static readonly eventName = PluginEvent.Installed;
 
@@ -58,18 +90,20 @@ export class PluginInstalledEvent extends MutationEvent<Plugin> {
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
-  constructor(
-    after: PluginInstalledSnapshot,
-    /** Ingress provenance — context for the lifecycle table, not row state. */
-    public readonly provenance: PluginProvenance,
-    /** Server-consentable permissions granted by the installing admin (#59 install step 13). */
-    public readonly grantedPermissions: readonly GrantedPermissionRecord[],
-    /** npm advisory findings acknowledged at install, `null` when no lockfile was present (#84). */
-    public readonly auditFindings: readonly NpmAuditFinding[] | null,
-    initiatedAt: Date,
-  ) {
+  readonly provenance: PluginProvenance;
+  readonly grantedPermissions: readonly GrantedPermissionRecord[];
+  readonly auditFindings: readonly NpmAuditFinding[] | null;
+  readonly staticAnalysis: readonly StaticAnalysisFinding[];
+  readonly acknowledgedForbiddenImports: readonly string[];
+
+  constructor(after: PluginInstalledSnapshot, context: PluginInstallAuditContext, initiatedAt: Date) {
     super(null, after, initiatedAt);
     this.subjectId = after.id;
+    this.provenance = context.provenance;
+    this.grantedPermissions = context.grantedPermissions;
+    this.auditFindings = context.auditFindings;
+    this.staticAnalysis = context.staticAnalysis;
+    this.acknowledgedForbiddenImports = context.acknowledgedForbiddenImports;
   }
 }
 
