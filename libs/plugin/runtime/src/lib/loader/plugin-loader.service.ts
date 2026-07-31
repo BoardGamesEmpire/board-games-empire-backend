@@ -72,7 +72,10 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * `quarantine()` and force-disable a perfectly healthy plugin).
    */
   async loadAllEnabled(): Promise<void> {
-    const plugins = await this.db.plugin.findMany({ where: { enabled: true } });
+    // `uninstalledAt: null` is belt-and-braces with the D-AS invariant that
+    // uninstall force-disables: the tombstone predicate every C3+ query
+    // carries is cheapest to keep locally true rather than provably implied.
+    const plugins = await this.db.plugin.findMany({ where: { enabled: true, uninstalledAt: null } });
 
     this.logger.log(`Loading ${plugins.length} enabled plugin(s)`);
 
@@ -94,6 +97,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
   private async loadOne(plugin: Plugin): Promise<void> {
     const manifest = this.validateManifest(plugin);
     const directory = await this.directories.resolve(plugin.slug, plugin.bundled);
+    const diskVersion = await this.readDiskVersion(directory.manifestPath);
     const descriptor = await this.readPackageDescriptor(plugin.slug, directory.packageJsonPath);
     const entrypoint = resolvePluginEntrypoint(plugin.slug, descriptor, directory.rootDir);
     // Symlink-aware containment re-check: the lexical check inside
@@ -125,14 +129,55 @@ export class PluginLoaderService implements OnApplicationBootstrap {
       { enabled: true },
     );
 
-    if (plugin.loadFailed) {
-      // A previously quarantined plugin was explicitly re-enabled and now
-      // loads cleanly — clear the stale failure flags.
+    // A restart clears `restartRequired` only when the code on disk is
+    // actually the activated version. Advisory, never fatal: the directory
+    // resolver exposes ONE path per plugin, so a pending update's files
+    // legitimately occupy that path before anyone approves it — quarantining
+    // on a mismatch would force-disable a healthy plugin awaiting consent,
+    // and for a bundled plugin (whose path is BGE's own) that is
+    // unavoidable rather than exceptional. A staged-file location is #84's
+    // to define; until it exists, the honest posture is to load the plugin
+    // and refuse to claim the restart happened.
+    const diskMatchesRow = diskVersion === plugin.version;
+    const clearRestartRequired = plugin.restartRequired && diskMatchesRow;
+
+    if (plugin.restartRequired && !diskMatchesRow) {
+      this.logger.warn(
+        `Plugin '${plugin.slug}' expected v${plugin.version} on disk but found ` +
+          `${diskVersion === null ? 'an unreadable manifest' : `v${diskVersion}`}; loaded it anyway and left ` +
+          'restartRequired set — the activated version is not the code now running',
+      );
+    }
+
+    if (plugin.loadFailed || clearRestartRequired) {
+      // One recovery write for both self-healing flags.
       await this.db.plugin.update({
         where: { id: plugin.id },
-        data: { loadFailed: false, loadError: null },
+        data: {
+          ...(plugin.loadFailed ? { loadFailed: false, loadError: null } : {}),
+          ...(clearRestartRequired ? { restartRequired: false } : {}),
+        },
       });
-      this.logger.log(`Plugin '${plugin.slug}' recovered from a prior load failure`);
+
+      if (plugin.loadFailed) {
+        this.logger.log(`Plugin '${plugin.slug}' recovered from a prior load failure`);
+      }
+
+      if (clearRestartRequired) {
+        this.logger.log(`Plugin '${plugin.slug}' v${plugin.version} loaded post-update — restartRequired cleared`);
+      }
+    }
+  }
+
+  /** The version named by the on-disk manifest, or `null` when it is missing, unreadable, or not a string. */
+  private async readDiskVersion(manifestPath: string): Promise<string | null> {
+    try {
+      const parsed: unknown = JSON.parse(await readFile(manifestPath, 'utf8'));
+      const version = typeof parsed === 'object' && parsed !== null ? (parsed as { version?: unknown }).version : null;
+
+      return typeof version === 'string' ? version : null;
+    } catch {
+      return null;
     }
   }
 

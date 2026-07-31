@@ -292,11 +292,12 @@ describe('PluginLifecycleListener', () => {
       );
     });
 
-    it('persists a UnitDisabled row with the escalated permission slug', async () => {
+    it('persists a UnitDisabled row with the escalated permission slugs and manifest version', async () => {
       const event = new HouseholdPluginUnitDisabledEvent(
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true },
-        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: false },
-        'plugin.demo-sink.escalated',
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
+        ['plugin|demo-sink|update:calendar'],
+        '1.3.0',
         initiatedAt,
       );
       db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
@@ -309,7 +310,8 @@ describe('PluginLifecycleListener', () => {
           event: PluginLifecycleEventType.UnitDisabled,
           scopeType: PluginGrantScope.Household,
           scopeId: 'household-1',
-          payload: { requiredPermissionSlug: 'plugin.demo-sink.escalated' },
+          manifestVersion: '1.3.0',
+          payload: { requiredPermissionSlugs: ['plugin|demo-sink|update:calendar'] },
         }),
       );
     });

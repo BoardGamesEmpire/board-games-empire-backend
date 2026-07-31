@@ -14,6 +14,7 @@ import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
 import { PluginLoaderService } from './loader/plugin-loader.service';
 import { DynamicImportPluginModuleImporter, PLUGIN_MODULE_IMPORTER } from './loader/plugin-module-importer';
 import { ConfigurableModuleClass } from './plugin-module.options';
+import { PluginUpdateService } from './update/plugin-update.service';
 
 /**
  * The plugin runtime (#59 Phase B): boot loader, per-plugin contexts,
@@ -48,6 +49,7 @@ import { ConfigurableModuleClass } from './plugin-module.options';
     PluginLifecycleListener,
     PluginLoaderService,
     PluginStaticAnalysisService,
+    PluginUpdateService,
   ],
   exports: [
     PluginInstanceRegistry,
@@ -55,6 +57,7 @@ import { ConfigurableModuleClass } from './plugin-module.options';
     PluginContextFactory,
     PluginGrantService,
     PluginInstallerService,
+    PluginUpdateService,
   ],
 })
 export class PluginModule extends ConfigurableModuleClass {}

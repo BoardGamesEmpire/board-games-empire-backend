@@ -6,6 +6,7 @@ import {
   GrantedPermissionRecord,
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginUnitEnabledEvent,
   NpmAuditFinding,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
@@ -247,17 +248,36 @@ describe('plugin lifecycle events', () => {
   });
 
   describe('HouseholdPluginUnitDisabledEvent', () => {
-    it('carries the escalated permission slug as context', () => {
+    it('carries the escalated permission slugs and manifest version as context; enabled is untouched (D-AO)', () => {
       const event = new HouseholdPluginUnitDisabledEvent(
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true },
-        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: false },
-        'plugin|demo-sink|update:calendar',
+        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
+        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
+        ['plugin|demo-sink|update:calendar', 'calendar:read'],
+        '1.3.0',
         initiatedAt,
       );
 
-      expect(event.requiredPermissionSlug).toBe('plugin|demo-sink|update:calendar');
+      expect(event.requiredPermissionSlugs).toEqual(['plugin|demo-sink|update:calendar', 'calendar:read']);
+      expect(event.manifestVersion).toBe('1.3.0');
+      expect(event.after.enabled).toBe(true);
       expect(event.action).toBe('update');
       expect(HouseholdPluginUnitDisabledEvent.eventName).toBe(PluginEvent.UnitDisabled);
+    });
+  });
+
+  describe('HouseholdPluginUnitEnabledEvent', () => {
+    it('carries the clearing decision as context (D-AR/D-AU)', () => {
+      const event = new HouseholdPluginUnitEnabledEvent(
+        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
+        { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
+        'calendar:read',
+        '1.3.0',
+        initiatedAt,
+      );
+
+      expect(event.grantedPermissionSlug).toBe('calendar:read');
+      expect(event.manifestVersion).toBe('1.3.0');
+      expect(HouseholdPluginUnitEnabledEvent.eventName).toBe(PluginEvent.UnitEnabled);
     });
   });
 

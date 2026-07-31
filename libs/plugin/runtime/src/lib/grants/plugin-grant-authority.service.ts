@@ -45,9 +45,9 @@ export class PluginGrantAuthorityService {
   /**
    * User-scope decisions (household-agnostic): beyond being the decider
    * themself (checked by the caller), the user must belong to at least one
-   * household where the plugin is enabled — consent travels with the user
-   * across qualifying households, and #211's eager revoke fires when the
-   * LAST qualifying association ends.
+   * household where the plugin is enabled and not consent-suspended —
+   * consent travels with the user across qualifying households, and #211's
+   * eager revoke fires when the LAST qualifying association ends.
    */
   async hasQualifyingHouseholdForPlugin(userId: string, pluginId: string): Promise<boolean> {
     const memberships = await this.db.householdMember.findMany({
@@ -62,7 +62,11 @@ export class PluginGrantAuthorityService {
     const qualifying = await this.db.householdPlugin.findFirst({
       where: {
         pluginId,
+        // The serving predicate in full (#59 C3): a unit suspended pending
+        // consent is not running the plugin, so it cannot anchor a
+        // user-scope decision about it.
         enabled: true,
+        suspendedForConsent: false,
         householdId: { in: memberships.map((membership) => membership.householdId) },
       },
       select: { id: true },

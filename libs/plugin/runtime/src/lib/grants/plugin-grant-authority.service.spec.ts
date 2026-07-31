@@ -52,7 +52,7 @@ describe('PluginGrantAuthorityService', () => {
   });
 
   describe('hasQualifyingHouseholdForPlugin (household-agnostic user grants)', () => {
-    it('is true when any membership household has the plugin ENABLED', async () => {
+    it('is true when any membership household has the plugin ENABLED and not consent-suspended', async () => {
       db.householdMember.findMany.mockResolvedValue([
         { householdId: 'hh_1' },
         { householdId: 'hh_2' },
@@ -60,8 +60,16 @@ describe('PluginGrantAuthorityService', () => {
       db.householdPlugin.findFirst.mockResolvedValue({ id: 'hp_1' } as HouseholdPlugin);
 
       await expect(service.hasQualifyingHouseholdForPlugin('user-1', 'plg_1')).resolves.toBe(true);
+      // The serving predicate in full (#59 C3): a unit suspended pending
+      // consent is not running the plugin, so it cannot anchor a user-scope
+      // decision about it.
       expect(db.householdPlugin.findFirst).toHaveBeenCalledWith({
-        where: { pluginId: 'plg_1', enabled: true, householdId: { in: ['hh_1', 'hh_2'] } },
+        where: {
+          pluginId: 'plg_1',
+          enabled: true,
+          suspendedForConsent: false,
+          householdId: { in: ['hh_1', 'hh_2'] },
+        },
         select: { id: true },
       });
     });
@@ -73,7 +81,7 @@ describe('PluginGrantAuthorityService', () => {
       expect(db.householdPlugin.findFirst).not.toHaveBeenCalled();
     });
 
-    it('is false when memberships exist but none has the plugin enabled', async () => {
+    it('is false when memberships exist but none has the plugin enabled and unsuspended', async () => {
       db.householdMember.findMany.mockResolvedValue([{ householdId: 'hh_1' }] as HouseholdMember[]);
       db.householdPlugin.findFirst.mockResolvedValue(null);
 

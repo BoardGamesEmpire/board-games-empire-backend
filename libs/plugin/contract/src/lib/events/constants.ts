@@ -24,6 +24,7 @@ export enum PluginEvent {
   GrantRejected = 'plugin.grant_rejected',
   GrantRevoked = 'plugin.grant_revoked',
   UnitDisabled = 'plugin.unit_disabled',
+  UnitEnabled = 'plugin.unit_enabled',
 }
 
 /**

@@ -68,7 +68,9 @@ describe('PluginLoaderService', () => {
     const rootDir = join(workDir, slug);
     await mkdir(join(rootDir, 'dist'), { recursive: true });
     await writeFile(join(rootDir, 'package.json'), JSON.stringify({ exports: './dist/index.js' }));
-    await writeFile(join(rootDir, 'manifest.json'), '{}');
+    // The C3 disk-version containment check (D-AT) compares this against
+    // Plugin.version — the scaffold must describe the version the row claims.
+    await writeFile(join(rootDir, 'manifest.json'), JSON.stringify({ slug, version: '1.2.3' }));
     await writeFile(join(rootDir, 'dist', 'index.js'), '// entrypoint');
 
     return {
@@ -139,7 +141,7 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true } });
+      expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true, uninstalledAt: null } });
       expect(validateMock).toHaveBeenCalledWith(row.manifestJson, { bgeVersion: '0.1.0', defaultLocale: 'en' });
       expect(importer.importModule).toHaveBeenCalledWith(join(workDir, row.slug, 'dist', 'index.js'));
       expect(factory).toHaveBeenCalledWith(context);

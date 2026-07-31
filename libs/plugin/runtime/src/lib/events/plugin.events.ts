@@ -4,6 +4,7 @@ import { ResourceType } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 import type { StaticAnalysisFinding } from '../install/static-analysis.types';
+import type { UpdateEscalation } from '../update/update-escalation.types';
 
 /**
  * Plugin lifecycle events (#59).
@@ -235,6 +236,10 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
     after: PluginUpdateStagingSnapshot,
     /** Checksum of the staged tarball; `null` for bundled upgrades. */
     public readonly pendingSha256: string | null,
+    /** What escalated — WHY this update needed staged consent (D-AP). Context for the lifecycle row and the C4 surface. */
+    public readonly escalations: readonly UpdateEscalation[],
+    /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version (D-AJ parity). */
+    public readonly acknowledgedForbiddenImports: readonly string[],
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);
@@ -251,7 +256,18 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
-  constructor(before: PluginUpdateStagingSnapshot, after: PluginUpdateStagingSnapshot, initiatedAt: Date) {
+  constructor(
+    before: PluginUpdateStagingSnapshot,
+    after: PluginUpdateStagingSnapshot,
+    /**
+     * Server-consentable permissions this approval granted — the update's
+     * NEW checks, seeded on activation. Approval IS the consent act, so the
+     * record rides the event the same way install's seed rides
+     * `plugin.installed`; per-grant events are deliberately not emitted.
+     */
+    public readonly grantedPermissions: readonly GrantedPermissionRecord[],
+    initiatedAt: Date,
+  ) {
     super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
@@ -337,7 +353,19 @@ export class PluginGrantRejectedEvent extends MutationEvent<PluginGrant> {
  * and persisted into the lifecycle row payload — the grant row itself is
  * DELETED (delete-to-pending), so this is the only durable record of why.
  */
-export type PluginGrantRevocationReason = 'membership-removed' | 'role-demoted' | 'user-deleted' | 'household-deleted';
+export type PluginGrantRevocationReason =
+  | 'membership-removed'
+  | 'role-demoted'
+  | 'user-deleted'
+  | 'household-deleted'
+  /** The declaring plugin's update removed the permission from `declares[]` — the D-AF catalog diff deleted its grants. */
+  | 'permission-removed'
+  /**
+   * An update moved the permission to a different consent scope, so the
+   * decision recorded at the OLD scope no longer authorizes anything — the
+   * principal that made it does not own the permission any more.
+   */
+  | 'consent-scope-changed';
 
 /**
  * A grant was revoked because the authority that justified it lapsed
@@ -364,27 +392,66 @@ export class PluginGrantRevokedEvent extends MutationEvent<PluginGrant> {
   }
 }
 
-type HouseholdPluginEnablementSnapshot = Readonly<Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled'>>;
+type HouseholdPluginSuspensionSnapshot = Readonly<
+  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
+>;
 
 /**
- * A consent unit was auto-disabled because an update promoted a permission
- * to required at its consent scope and the unit has not accepted (#59
- * consent-unit escalation semantics).
+ * A consent unit was SUSPENDED because an update escalated a permission to
+ * required at its consent scope and the unit has not accepted (#59
+ * consent-unit escalation semantics). Suspension is explicit state
+ * (`suspendedForConsent`, D-AO), never an `enabled` flip — the admin's
+ * prior intent survives, and late acceptance restores exactly it (D-AR).
+ * The escalating slugs and manifest version ride the event: the lifecycle
+ * row is the durable "why", per D-A.
  */
 export class HouseholdPluginUnitDisabledEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitDisabled;
 
-  declare readonly before: HouseholdPluginEnablementSnapshot;
-  declare readonly after: HouseholdPluginEnablementSnapshot;
+  declare readonly before: HouseholdPluginSuspensionSnapshot;
+  declare readonly after: HouseholdPluginSuspensionSnapshot;
 
   readonly subject = ResourceType.HouseholdPlugin;
   readonly subjectId: string;
 
   constructor(
-    before: HouseholdPluginEnablementSnapshot,
-    after: HouseholdPluginEnablementSnapshot,
-    /** The escalated permission that forced the disable — context for the notification listener. */
-    public readonly requiredPermissionSlug: string,
+    before: HouseholdPluginSuspensionSnapshot,
+    after: HouseholdPluginSuspensionSnapshot,
+    /** Every escalated required-at-scope permission the unit has not accepted — one suspension, however many slugs forced it. */
+    public readonly requiredPermissionSlugs: readonly string[],
+    /** The manifest version whose escalation suspended the unit. */
+    public readonly manifestVersion: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/**
+ * Late acceptance re-enabled a suspended unit (D-AR): a `Granted` decision
+ * cleared the last outstanding required-at-scope permission, so
+ * `PluginGrantService.decide()` lifted the suspension in the same flow —
+ * the consent act is the re-enable trigger by definition. Own routing key,
+ * symmetric with `UnitDisabled` (D-AU): listeners for consent-suspension
+ * transitions must not have to filter server kill-switch flips.
+ */
+export class HouseholdPluginUnitEnabledEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.UnitEnabled;
+
+  declare readonly before: HouseholdPluginSuspensionSnapshot;
+  declare readonly after: HouseholdPluginSuspensionSnapshot;
+
+  readonly subject = ResourceType.HouseholdPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: HouseholdPluginSuspensionSnapshot,
+    after: HouseholdPluginSuspensionSnapshot,
+    /** The decision that cleared the last outstanding requirement. */
+    public readonly grantedPermissionSlug: string,
+    /** The active manifest version whose requirements are now fully consented. */
+    public readonly manifestVersion: string,
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);
