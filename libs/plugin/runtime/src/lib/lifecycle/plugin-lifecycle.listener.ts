@@ -7,12 +7,14 @@ import { PLUGIN_EVENT_TO_LIFECYCLE_TYPE } from '../events/plugin-lifecycle-event
 import {
   HouseholdPluginConfigUpdatedEvent,
   HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginUnitEnabledEvent,
   PluginConfigUpdatedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginLoadFailedEvent,
+  PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   PluginUpdatePendingEvent,
 } from '../events/plugin.events';
@@ -190,8 +192,22 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
-        manifestVersion: null,
-        payload: { requiredPermissionSlug: event.requiredPermissionSlug },
+        manifestVersion: event.manifestVersion,
+        // The escalating slugs are the durable "why" for this suspension —
+        // the notification listener and the #67 timeline read them from
+        // here, never from a mutable column (D-AO).
+        payload: { requiredPermissionSlugs: event.requiredPermissionSlugs },
+      };
+    }
+
+    if (event instanceof HouseholdPluginUnitEnabledEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.Household,
+        scopeId: event.after.householdId,
+        manifestVersion: event.manifestVersion,
+        payload: { grantedPermissionSlug: event.grantedPermissionSlug },
       };
     }
 
@@ -251,12 +267,29 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
     if (event instanceof PluginUpdatePendingEvent) {
       return {
         ...this.pluginRowIdentity(event.after),
-        payload: { pendingVersion: event.after.pendingVersion, pendingSha256: event.pendingSha256 },
+        payload: {
+          pendingVersion: event.after.pendingVersion,
+          pendingSha256: event.pendingSha256,
+          // What escalated and what the staging admin waved through — the
+          // consent record for WHY approval was demanded (D-AP/D-AJ).
+          escalations: event.escalations,
+          acknowledgedForbiddenImports: event.acknowledgedForbiddenImports,
+        },
+      };
+    }
+
+    if (event instanceof PluginUpdateApprovedEvent) {
+      return {
+        ...this.pluginRowIdentity(event.after),
+        // Approval is the consent act for the update's new server checks;
+        // per-grant events are deliberately not emitted (install parity),
+        // so this payload is where the seed's provenance lives.
+        payload: { grantedPermissions: event.grantedPermissions },
       };
     }
 
     // Remaining Plugin-subject events (Enabled, Disabled, Uninstalled,
-    // ConfigUpdated, UpdateApproved, UpdateRejected): id + slug live on
+    // ConfigUpdated, UpdateRejected): id + slug live on
     // whichever snapshot is non-null; no extra context payload.
     const snapshot = (event.after ?? event.before) as { id?: unknown; slug?: unknown };
 

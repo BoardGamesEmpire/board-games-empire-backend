@@ -2,9 +2,9 @@ import {
   DatabaseService,
   PluginGrantScope,
   PluginGrantStatus,
+  RiskLevel,
   type Plugin,
   type PluginGrant,
-  type RiskLevel,
 } from '@bge/database';
 import {
   parsePluginPermissionSlug,
@@ -17,6 +17,7 @@ import {
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
+  HouseholdPluginUnitEnabledEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
@@ -34,12 +35,14 @@ import {
   PluginGrantUnknownPermissionError,
 } from './grant.errors';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
+import { riskCovers } from './risk-ordering';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 
 /** The empty-string uniqueness sentinel Server-scope rows store (see plugin-grant.prisma). Shared with the installer's grant seeding. */
 export const SERVER_SCOPE_SENTINEL = '' as const;
 
-const CONSENT_SCOPE_TO_GRANT_SCOPE: Readonly<Record<PluginConsentScopeValue, PluginGrantScope>> = {
+/** Manifest consent scope → grant scope. Shared with the C3 update path's scope-move handling. */
+export const CONSENT_SCOPE_TO_GRANT_SCOPE: Readonly<Record<PluginConsentScopeValue, PluginGrantScope>> = {
   server: PluginGrantScope.Server,
   household: PluginGrantScope.Household,
   user: PluginGrantScope.User,
@@ -105,7 +108,7 @@ export class PluginGrantService {
   async decide(input: PluginGrantDecisionInput): Promise<PluginGrantDecisionResult> {
     const initiatedAt = new Date();
     const plugin = await this.loadPlugin(input.pluginId);
-    const check = this.resolveRequestedCheck(plugin, input.permissionSlug);
+    const { check, validated } = this.resolveRequestedCheck(plugin, input.permissionSlug);
 
     this.assertScopeCoherence(check, input);
     const scopeId = this.normalizeScopeId(input);
@@ -179,7 +182,158 @@ export class PluginGrantService {
     );
     this.emitter.emit(EventClass.eventName, event);
 
+    // Late acceptance re-enables (D-AR): a CHANGED Household `Granted`
+    // decision is the only transition that can clear a consent suspension,
+    // so the check rides the decision itself rather than a sweeper.
+    if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.Household) {
+      await this.maybeReenableSuspendedUnit(plugin, validated, scopeId, check, initiatedAt);
+    }
+
     return { grant: outcome.after, changed: true };
+  }
+
+  /**
+   * Clear a unit's `suspendedForConsent` once the household's consent state
+   * satisfies the ACTIVE manifest, and emit `plugin.unit_enabled`
+   * (D-AR/D-AU). Evaluated on every changed Household grant rather than only
+   * on escalated slugs — self-healing: if an intervening update removed a
+   * requirement, the next consent still lifts a suspension that no longer
+   * has outstanding slugs.
+   *
+   * "Satisfies" MUST mean the same thing here as in the update's suspension
+   * pass, or a unit oscillates: suspended by activation, then cleared by an
+   * unrelated consent that never addressed what suspended it. So a slug is
+   * outstanding when it is required and ungranted, OR when it is granted at
+   * a `decidedRiskLevel` that no longer covers today's catalog risk (D-X) —
+   * presence of a `Granted` row is not consent at a risk nobody was shown.
+   *
+   * Failures are logged, never thrown: the decision above is already
+   * committed and emitted, and making a caller retry a recorded consent
+   * because the re-enable bookkeeping hiccuped would be worse than a unit
+   * that stays suspended until its next decision re-runs this check.
+   */
+  private async maybeReenableSuspendedUnit(
+    plugin: Plugin,
+    validated: PluginManifestValidationResult,
+    householdId: string,
+    check: NormalizedPermissionRequest,
+    initiatedAt: Date,
+  ): Promise<void> {
+    try {
+      const unit = await this.db.householdPlugin.findUnique({
+        where: { householdId_pluginId: { householdId, pluginId: plugin.id } },
+      });
+
+      if (unit === null || !unit.suspendedForConsent) {
+        return;
+      }
+
+      const householdChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'household');
+
+      if (householdChecks.length > 0 && !(await this.householdConsentSatisfied(plugin, householdId, householdChecks))) {
+        return;
+      }
+
+      // Guarded update, not a blind write: a concurrent decision may have
+      // cleared the suspension already, and only the writer that actually
+      // flipped the row emits.
+      const cleared = await this.db.householdPlugin.updateMany({
+        where: { id: unit.id, suspendedForConsent: true },
+        data: { suspendedForConsent: false, suspendedAt: null },
+      });
+
+      if (cleared.count !== 1) {
+        return;
+      }
+
+      const snapshot = (suspendedForConsent: boolean) => ({
+        id: unit.id,
+        householdId: unit.householdId,
+        pluginId: unit.pluginId,
+        enabled: unit.enabled,
+        suspendedForConsent,
+      });
+
+      this.emitter.emit(
+        HouseholdPluginUnitEnabledEvent.eventName,
+        new HouseholdPluginUnitEnabledEvent(
+          snapshot(true),
+          snapshot(false),
+          check.canonicalSlug,
+          plugin.version,
+          initiatedAt,
+        ),
+      );
+      this.logger.log(
+        `Household '${householdId}' re-enabled for plugin '${plugin.slug}': consent for '${check.canonicalSlug}' ` +
+          'cleared the last outstanding required permission (D-AR late acceptance)',
+      );
+    } catch (err) {
+      this.logger.error(
+        `Re-enable check failed for household '${householdId}' / plugin '${plugin.slug}' — the grant decision is ` +
+          `committed; the unit stays suspended until its next decision re-runs this check: ${
+            err instanceof Error ? err.message : err
+          }`,
+      );
+    }
+  }
+
+  /**
+   * Does this household's consent state satisfy every household-scope check
+   * of the active manifest? Required checks need a `Granted` row; any check
+   * that HAS one needs its recorded risk to still cover the catalog's
+   * current classification. Mirrors the update service's suspension
+   * predicate exactly — the two must agree or suspensions bounce.
+   */
+  private async householdConsentSatisfied(
+    plugin: Plugin,
+    householdId: string,
+    householdChecks: readonly NormalizedPermissionRequest[],
+  ): Promise<boolean> {
+    const granted = await this.db.pluginGrant.findMany({
+      where: {
+        pluginId: plugin.id,
+        scopeType: PluginGrantScope.Household,
+        scopeId: householdId,
+        status: PluginGrantStatus.Granted,
+        permissionSlug: { in: householdChecks.map((check) => check.canonicalSlug) },
+      },
+      select: { permissionSlug: true, decidedRiskLevel: true },
+    });
+    const decidedBySlug = new Map(granted.map((row) => [row.permissionSlug, row.decidedRiskLevel]));
+
+    // Plugin-declared rows are locked to an explicit Low (D-W); core risk is
+    // today's classification, read fresh rather than reconstructed.
+    const coreSlugs = householdChecks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
+    const coreRisks =
+      coreSlugs.length === 0
+        ? []
+        : await this.db.permission.findMany({
+            where: { slug: { in: coreSlugs } },
+            select: { slug: true, riskLevel: true },
+          });
+    const currentRiskBySlug = new Map(coreRisks.map((row) => [row.slug, row.riskLevel]));
+
+    for (const check of householdChecks) {
+      const decidedRiskLevel = decidedBySlug.get(check.canonicalSlug);
+
+      if (decidedRiskLevel === undefined) {
+        if (check.required) {
+          return false;
+        }
+
+        continue;
+      }
+
+      const currentRiskLevel =
+        check.origin === 'plugin' ? RiskLevel.Low : (currentRiskBySlug.get(check.canonicalSlug) ?? RiskLevel.Low);
+
+      if (!riskCovers(decidedRiskLevel, currentRiskLevel)) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -300,7 +454,10 @@ export class PluginGrantService {
    * would record consent against a version the shown permissions did not
    * come from, making the escalation comparison meaningless.
    */
-  private resolveRequestedCheck(plugin: Plugin, permissionSlug: string): NormalizedPermissionRequest {
+  private resolveRequestedCheck(
+    plugin: Plugin,
+    permissionSlug: string,
+  ): { readonly check: NormalizedPermissionRequest; readonly validated: PluginManifestValidationResult } {
     let validated: PluginManifestValidationResult;
 
     try {
@@ -341,7 +498,7 @@ export class PluginGrantService {
       );
     }
 
-    return check;
+    return { check, validated };
   }
 
   private assertScopeCoherence(check: NormalizedPermissionRequest, input: PluginGrantDecisionInput): void {

@@ -11,7 +11,6 @@ import {
 } from '@bge/database';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
 import {
-  parsePluginPermissionSlug,
   PluginManifestValidationError,
   resolveLocalizedString,
   validatePluginManifest,
@@ -23,11 +22,17 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
-import { isPluginAdministrationSlug } from '../grants/plugin-admin-permissions';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { SERVER_SCOPE_SENTINEL } from '../grants/plugin-grant.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
+import {
+  collectForbiddenPermissionViolations,
+  collectWildcardSubjectViolations,
+  compareExactReentry,
+  criticalConfirmationExpectation,
+  resolveForbiddenSpecifierAcknowledgement,
+} from './consent-gates';
 import {
   PluginInstallAuthorityError,
   PluginInstallConflictError,
@@ -232,45 +237,21 @@ export class PluginInstallerService {
 
   /**
    * Categorical exclusions on the plugin's OWN vocabulary, mirroring C1's
-   * grant-time rule at the earlier seam: a declared bare slug that mimics
-   * the plugin-administration vocabulary or claims the `'all'` subject is
-   * rejected before anything is persisted — every grant for it would fail
-   * anyway, so the install must not create an unsatisfiable consent surface.
-   * `declares[]` entries are screened even when never checked: an excluded
-   * catalog row has no legitimate reading either.
+   * grant-time rule at the earlier seam (shared with the C3 update path via
+   * `consent-gates.ts` — two drifting copies of a security invariant is how
+   * version 2 becomes the smuggling path). Throws on the FIRST violation:
+   * every grant for it would fail anyway, so the install must not create an
+   * unsatisfiable consent surface.
    */
   private assertNoForbiddenPluginPermissions(validated: PluginManifestValidationResult): void {
-    for (const check of validated.permissionChecks) {
-      // Pattern-based on purpose (see plugin-admin-permissions.ts): the
-      // refusal must not depend on the C4 seed rows existing, so it runs
-      // BEFORE the core-permission existence lookup.
-      if (check.origin === 'core' && isPluginAdministrationSlug(check.canonicalSlug)) {
-        throw new PluginInstallForbiddenPermissionError(
-          validated.manifest.slug,
-          check.canonicalSlug,
-          'is plugin-administration authority — granted to a plugin it is a self-escalation loop',
-        );
-      }
-    }
+    const [violation] = collectForbiddenPermissionViolations(validated);
 
-    for (const declared of validated.declaredPermissions) {
-      const parsed = parsePluginPermissionSlug(declared.canonicalSlug);
-
-      if (isPluginAdministrationSlug(parsed.bareSlug)) {
-        throw new PluginInstallForbiddenPermissionError(
-          validated.manifest.slug,
-          declared.canonicalSlug,
-          'mimics the plugin-administration vocabulary — the hard exclusion applies to the bare form',
-        );
-      }
-
-      if (parsed.subjectPath === 'all' || parsed.subjectPath.startsWith('all:')) {
-        throw new PluginInstallForbiddenPermissionError(
-          validated.manifest.slug,
-          declared.canonicalSlug,
-          "claims the 'all' subject — a naive CASL mapping would read it as wildcard authority",
-        );
-      }
+    if (violation !== undefined) {
+      throw new PluginInstallForbiddenPermissionError(
+        validated.manifest.slug,
+        violation.permissionSlug,
+        violation.detail,
+      );
     }
   }
 
@@ -299,18 +280,14 @@ export class PluginInstallerService {
     validated: PluginManifestValidationResult,
     corePermissions: ReadonlyMap<string, Permission>,
   ): void {
-    for (const check of validated.permissionChecks) {
-      if (check.origin !== 'core') {
-        continue;
-      }
+    const [violation] = collectWildcardSubjectViolations(validated, corePermissions);
 
-      if (corePermissions.get(check.canonicalSlug)?.subject === 'all') {
-        throw new PluginInstallForbiddenPermissionError(
-          validated.manifest.slug,
-          check.canonicalSlug,
-          "carries the wildcard 'all' subject — never grantable to a plugin, same rule AbilityFactory applies to direct assignment",
-        );
-      }
+    if (violation !== undefined) {
+      throw new PluginInstallForbiddenPermissionError(
+        validated.manifest.slug,
+        violation.permissionSlug,
+        violation.detail,
+      );
     }
   }
 
@@ -339,21 +316,12 @@ export class PluginInstallerService {
     corePermissions: ReadonlyMap<string, Permission>,
     confirmed: readonly string[],
   ): void {
-    const expected = serverChecks
-      .filter(
-        (check) =>
-          check.origin === 'core' && corePermissions.get(check.canonicalSlug)?.riskLevel === RiskLevel.Critical,
-      )
-      .map((check) => check.canonicalSlug)
-      .sort();
+    const expected = criticalConfirmationExpectation(serverChecks, corePermissions);
+    const reentry = compareExactReentry(expected, confirmed);
 
-    const received = [...confirmed].sort();
-
-    if (expected.length === received.length && expected.every((slug, index) => slug === received[index])) {
-      return;
+    if (!reentry.exact) {
+      throw new PluginInstallCriticalConfirmationError(validated.manifest.slug, reentry.expected, reentry.received);
     }
-
-    throw new PluginInstallCriticalConfirmationError(validated.manifest.slug, expected, received);
   }
 
   /**
@@ -378,18 +346,7 @@ export class PluginInstallerService {
     gating: readonly StaticAnalysisFinding[],
     acknowledged: readonly string[],
   ): readonly string[] {
-    // Forbidden findings always carry a specifier (only the unscreenable
-    // kinds are specifier-less, and those are warnings), so the filter is a
-    // type narrowing rather than a behavioral one.
-    const reported = [
-      ...new Set(
-        gating.map((finding) => finding.specifier).filter((specifier): specifier is string => specifier !== null),
-      ),
-    ].sort();
-    const received = [...new Set(acknowledged)].sort();
-
-    const unacknowledged = reported.filter((specifier) => !received.includes(specifier));
-    const unexpected = received.filter((specifier) => !reported.includes(specifier));
+    const { reported, unacknowledged, unexpected } = resolveForbiddenSpecifierAcknowledgement(gating, acknowledged);
 
     if (unexpected.length > 0) {
       throw new PluginInstallStaticAnalysisError(pluginSlug, gating, unacknowledged, unexpected);

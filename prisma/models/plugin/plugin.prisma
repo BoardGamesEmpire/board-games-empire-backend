@@ -74,9 +74,26 @@ model Plugin {
 
   /// Staged update awaiting consent (#59 update flow): validated but not
   /// active. Cleared on approve (columns promote) or reject (discarded).
-  pendingVersion      String? @map("pending_version")
-  pendingManifestJson Json?   @map("pending_manifest_json")
-  pendingSha256       String? @map("pending_sha256")
+  pendingVersion      String?   @map("pending_version")
+  pendingManifestJson Json?     @map("pending_manifest_json")
+  pendingSha256       String?   @map("pending_sha256")
+  /// When the pending update was staged (D-AN) — the "waiting since" the
+  /// admin surface and #79 diagnostics sort on; `updatedAt` moves on any
+  /// row touch and cannot serve.
+  pendingSince        DateTime? @map("pending_since") @db.Timestamptz(3)
+
+  /// An update ACTIVATED in the DB but the running instance still executes
+  /// the prior code (D-AT). Set by activation, cleared by the loader's
+  /// success path on the boot that loads the matching version — self-healing
+  /// by construction, queryable by #79 without a loader RPC surface.
+  restartRequired Boolean @default(false) @map("restart_required")
+
+  /// D-AS tombstone: uninstall clears grants and the PluginPermission
+  /// catalog but keeps the row (and unit config, unless purged) so a
+  /// reinstall restores per-unit settings. Every serving/consent/update
+  /// query carries `uninstalledAt IS NULL`; the installer clears the
+  /// tombstone on reinstall (#59 C4).
+  uninstalledAt DateTime? @map("uninstalled_at") @db.Timestamptz(3)
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
