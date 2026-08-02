@@ -47,7 +47,7 @@ describe('compareForEscalations', () => {
     expect(result.blockedByDenial).toEqual([]);
     expect(result.householdReconsentSlugs).toEqual([]);
     expect(result.serverRiskEscalatedSlugs).toEqual([]);
-    expect(result.userRiskEscalatedSlugs).toEqual([]);
+    expect(result.userReconsentSlugs).toEqual([]);
   });
 
   describe('permission escalations', () => {
@@ -87,6 +87,32 @@ describe('compareForEscalations', () => {
       ]);
       expect(result.serverGating).toBe(false);
       expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+    });
+
+    it('routes a new REQUIRED user check to the user re-consent set without server-gating (#225 parity)', () => {
+      const result = compare({ next: view({ checks: [check('read:user_calendar', 'user', true)] }) });
+
+      expect(result.serverGating).toBe(false);
+      expect(result.householdReconsentSlugs).toEqual([]);
+      expect(result.userReconsentSlugs).toEqual(['read:user_calendar']);
+    });
+
+    it('excludes a new OPTIONAL user check from the re-consent set', () => {
+      const result = compare({ next: view({ checks: [check('read:user_calendar', 'user', false)] }) });
+
+      expect(result.userReconsentSlugs).toEqual([]);
+    });
+
+    it('flags a required promotion at user scope into the re-consent set', () => {
+      const result = compare({
+        active: view({ checks: [check('read:user_calendar', 'user', false)] }),
+        next: view({ checks: [check('read:user_calendar', 'user', true)] }),
+      });
+
+      expect(result.escalations).toEqual([
+        { kind: 'permission-promoted-to-required', slug: 'read:user_calendar', consentScope: 'user' },
+      ]);
+      expect(result.userReconsentSlugs).toEqual(['read:user_calendar']);
     });
 
     it('treats a required demotion and a removed check as narrowings', () => {
@@ -166,7 +192,7 @@ describe('compareForEscalations', () => {
       expect(result.householdReconsentSlugs).toEqual([]);
     });
 
-    it('records a USER-scope escalation without gating or suspending — no enablement row to act on yet', () => {
+    it('routes a USER-scope escalation to the user units, not the server admin (#225)', () => {
       const result = compare({
         active: view({ checks: [check('read:public_content', 'user')] }),
         next: view({ checks: [check('read:public_content', 'user')] }),
@@ -182,7 +208,7 @@ describe('compareForEscalations', () => {
 
       expect(result.serverGating).toBe(false);
       expect(result.householdReconsentSlugs).toEqual([]);
-      expect(result.userRiskEscalatedSlugs).toEqual(['read:public_content']);
+      expect(result.userReconsentSlugs).toEqual(['read:public_content']);
     });
 
     it('ignores a DENIED row whose risk rose — a refusal confers nothing to re-consent or re-stamp', () => {
@@ -232,6 +258,78 @@ describe('compareForEscalations', () => {
 
       expect(result.serverGating).toBe(false);
       expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+    });
+
+    it('does NOT also route a stale OLD-scope grant as a risk escalation — the scope change subsumes it', () => {
+      const result = compare({
+        active: view({ checks: [check('calendar:read', 'household', true)] }),
+        next: view({ checks: [check('calendar:read', 'user', true)] }),
+        grants: [
+          grant({
+            permissionSlug: 'calendar:read',
+            scopeType: PluginGrantScope.Household,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      // Suspending the household would strand it: the permission is no
+      // longer a household check, so decide() refuses a household decision
+      // on it and the unit could never clear its own suspension.
+      expect(result.householdReconsentSlugs).toEqual([]);
+      expect(result.userReconsentSlugs).toEqual(['calendar:read']);
+      expect(result.escalations).not.toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));
+    });
+
+    it('does not gate the server admin on a stale SERVER grant for a permission moving away from server scope', () => {
+      const result = compare({
+        active: view({ checks: [check('calendar:read', 'server', true)] }),
+        next: view({ checks: [check('calendar:read', 'user', true)] }),
+        grants: [
+          grant({
+            permissionSlug: 'calendar:read',
+            scopeType: PluginGrantScope.Server,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      // Activation deletes that grant as scope-moved; re-approving it would
+      // ask the admin to re-consent to something they are about to stop owning.
+      expect(result.serverGating).toBe(false);
+      expect(result.serverRiskEscalatedSlugs).toEqual([]);
+      expect(result.userReconsentSlugs).toEqual(['calendar:read']);
+    });
+
+    it('still routes a risk escalation normally when the consent scope did NOT change', () => {
+      const result = compare({
+        active: view({ checks: [check('calendar:read', 'household', true)] }),
+        next: view({ checks: [check('calendar:read', 'household', true)] }),
+        grants: [
+          grant({
+            permissionSlug: 'calendar:read',
+            scopeType: PluginGrantScope.Household,
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ],
+        currentRiskBySlug: new Map([['calendar:read', RiskLevel.High]]),
+      });
+
+      expect(result.householdReconsentSlugs).toEqual(['calendar:read']);
+      expect(result.escalations).toContainEqual(expect.objectContaining({ kind: 'risk-escalated' }));
+    });
+
+    it('sends a required permission moving to USER consent to the user units (#225 parity)', () => {
+      const result = compare({
+        active: view({ checks: [check('read:user_calendar', 'household', true)] }),
+        next: view({ checks: [check('read:user_calendar', 'user', true)] }),
+      });
+
+      expect(result.serverGating).toBe(false);
+      expect(result.householdReconsentSlugs).toEqual([]);
+      expect(result.userReconsentSlugs).toEqual(['read:user_calendar']);
     });
 
     it('reports the move ONCE when the scope change coincides with a required promotion', () => {

@@ -1,4 +1,4 @@
-import { Action, Permission, ResourceType } from '@bge/database';
+import { Action, Permission, ResourceType, RiskLevel } from '@bge/database';
 import { subject } from '@casl/ability';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
@@ -560,6 +560,7 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
     fields: [],
     conditions: {},
     inverted: false,
+    riskLevel: RiskLevel.Low,
     reason: null,
     slug: `slug-${Math.random()}`,
     createdAt: new Date(),

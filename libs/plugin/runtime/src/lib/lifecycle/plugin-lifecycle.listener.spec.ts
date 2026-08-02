@@ -23,6 +23,8 @@ import {
   PluginInstalledEvent,
   PluginLoadFailedEvent,
   PluginUpdateCheckCompletedEvent,
+  UserPluginUnitDisabledEvent,
+  UserPluginUnitEnabledEvent,
   type PluginProvenance,
 } from '../events/plugin.events';
 import { PluginLifecycleListener, UNATTRIBUTED_LIFECYCLE_ACTOR } from './plugin-lifecycle.listener';
@@ -312,6 +314,54 @@ describe('PluginLifecycleListener', () => {
           scopeId: 'household-1',
           manifestVersion: '1.3.0',
           payload: { requiredPermissionSlugs: ['plugin|demo-sink|update:calendar'] },
+        }),
+      );
+    });
+
+    it('persists a USER UnitDisabled row with User scope coordinates — the class, not the routing key, is the scope (#225)', async () => {
+      const event = new UserPluginUnitDisabledEvent(
+        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
+        ['read:user_digest'],
+        '1.3.0',
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.UnitDisabled, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UnitDisabled,
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-1',
+          manifestVersion: '1.3.0',
+          payload: { requiredPermissionSlugs: ['read:user_digest'] },
+        }),
+      );
+    });
+
+    it('persists a USER UnitEnabled row carrying the clearing decision (#225)', async () => {
+      const event = new UserPluginUnitEnabledEvent(
+        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
+        { id: 'up-1', userId: 'user-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        'read:user_digest',
+        '1.3.0',
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.UnitEnabled, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.UnitEnabled,
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-1',
+          manifestVersion: '1.3.0',
+          payload: { grantedPermissionSlug: 'read:user_digest' },
         }),
       );
     });

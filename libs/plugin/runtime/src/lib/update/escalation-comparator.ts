@@ -43,6 +43,7 @@ export interface EscalationComparatorInput {
 export const compareForEscalations = (input: EscalationComparatorInput): UpdateEscalationComparison => {
   const escalations: UpdateEscalation[] = [];
   const activeChecks = new Map(input.active.checks.map((check) => [check.canonicalSlug, check]));
+  const scopeChangedSlugs = new Set<string>();
 
   for (const check of input.next.checks) {
     const previous = activeChecks.get(check.canonicalSlug);
@@ -58,6 +59,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
 
     if (check.consentScope !== previous.consentScope) {
+      scopeChangedSlugs.add(check.canonicalSlug);
       escalations.push({
         kind: 'consent-scope-changed',
         slug: check.canonicalSlug,
@@ -87,6 +89,19 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
 
   for (const grant of input.grants) {
     if (!nextSlugs.has(grant.permissionSlug)) {
+      continue;
+    }
+
+    // A scope change subsumes a simultaneous risk escalation, exactly as it
+    // subsumes a required promotion above. The grant whose risk went stale
+    // belongs to the OLD scope's principal, and activation deletes it
+    // (delete-to-pending) — routing it would suspend units that are no
+    // longer the deciding principal and CANNOT become one: decide() rejects
+    // an off-scope decision (PluginGrantConsentScopeMismatchError), so a
+    // unit suspended this way has no action available to clear itself. The
+    // scope change already forces consent from scratch at the new scope,
+    // where it is stamped at today's risk.
+    if (scopeChangedSlugs.has(grant.permissionSlug)) {
       continue;
     }
 
@@ -149,7 +164,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
 
   const householdReconsentSlugs: string[] = [];
   const serverRiskEscalatedSlugs: string[] = [];
-  const userRiskEscalatedSlugs: string[] = [];
+  const userReconsentSlugs: string[] = [];
 
   for (const escalation of escalations) {
     if (
@@ -162,13 +177,22 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
       continue;
     }
 
-    if (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.Server) {
-      serverRiskEscalatedSlugs.push(escalation.slug);
+    // Full household parity (#225): user-scope units re-consent on the same
+    // four transitions household units do. Risk escalation qualifies
+    // regardless of `required` — consent given for a Low permission is not
+    // consent for the Critical one it became.
+    if (
+      (escalation.kind === 'new-permission' && escalation.consentScope === 'user' && escalation.required) ||
+      (escalation.kind === 'permission-promoted-to-required' && escalation.consentScope === 'user') ||
+      (escalation.kind === 'consent-scope-changed' && escalation.to === 'user' && escalation.required) ||
+      (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.User)
+    ) {
+      userReconsentSlugs.push(escalation.slug);
       continue;
     }
 
-    if (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.User) {
-      userRiskEscalatedSlugs.push(escalation.slug);
+    if (escalation.kind === 'risk-escalated' && escalation.scopeType === PluginGrantScope.Server) {
+      serverRiskEscalatedSlugs.push(escalation.slug);
     }
   }
 
@@ -178,7 +202,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     blockedByDenial,
     householdReconsentSlugs,
     serverRiskEscalatedSlugs,
-    userRiskEscalatedSlugs,
+    userReconsentSlugs,
   };
 };
 

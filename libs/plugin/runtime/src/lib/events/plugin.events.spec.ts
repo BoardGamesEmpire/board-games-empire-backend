@@ -18,6 +18,8 @@ import {
   PluginProvenance,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
+  UserPluginUnitDisabledEvent,
+  UserPluginUnitEnabledEvent,
 } from './plugin.events';
 
 const initiatedAt = new Date('2026-07-22T10:00:00.000Z');
@@ -278,6 +280,43 @@ describe('plugin lifecycle events', () => {
       expect(event.grantedPermissionSlug).toBe('calendar:read');
       expect(event.manifestVersion).toBe('1.3.0');
       expect(HouseholdPluginUnitEnabledEvent.eventName).toBe(PluginEvent.UnitEnabled);
+    });
+  });
+
+  describe('UserPluginUnitDisabledEvent', () => {
+    it('shares the UnitDisabled routing key with the household class and disambiguates on subject (#225)', () => {
+      const event = new UserPluginUnitDisabledEvent(
+        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
+        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
+        ['read:user_digest'],
+        '1.3.0',
+        initiatedAt,
+      );
+
+      expect(event.requiredPermissionSlugs).toEqual(['read:user_digest']);
+      expect(event.manifestVersion).toBe('1.3.0');
+      // The user's enabled intent survives the suspension (D-AO parity).
+      expect(event.after.enabled).toBe(true);
+      expect(event.action).toBe('update');
+      expect(event.subject).toBe('UserPlugin');
+      expect(UserPluginUnitDisabledEvent.eventName).toBe(PluginEvent.UnitDisabled);
+    });
+  });
+
+  describe('UserPluginUnitEnabledEvent', () => {
+    it('carries the clearing decision as context (D-AR at user scope, #225)', () => {
+      const event = new UserPluginUnitEnabledEvent(
+        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
+        { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
+        'read:user_digest',
+        '1.3.0',
+        initiatedAt,
+      );
+
+      expect(event.grantedPermissionSlug).toBe('read:user_digest');
+      expect(event.manifestVersion).toBe('1.3.0');
+      expect(event.subject).toBe('UserPlugin');
+      expect(UserPluginUnitEnabledEvent.eventName).toBe(PluginEvent.UnitEnabled);
     });
   });
 

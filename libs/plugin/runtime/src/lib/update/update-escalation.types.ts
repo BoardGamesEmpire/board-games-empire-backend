@@ -122,10 +122,14 @@ export interface UpdateEscalationComparison {
    */
   readonly serverRiskEscalatedSlugs: readonly string[];
   /**
-   * User-scope slugs whose risk escalated. Recorded but NOT acted on: there
-   * is no `UserPlugin` enablement row to suspend, so per-user re-consent
-   * arrives with that model (#59 C4+). Surfaced so activation can say so
-   * out loud rather than continuing on stale consent silently.
+   * User-scope slugs a user must decide again before their unit may keep
+   * serving — the exact user-scope mirror of `householdReconsentSlugs`
+   * (#225): newly required, promoted to required, risk-escalated above the
+   * risk the user consented under (D-X), or newly moved to user consent. On
+   * activation every `UserPlugin` unit lacking a covering `Granted` row for
+   * all of these is suspended (D-AO) until late acceptance re-enables it
+   * (D-AR). Users with no enablement row are unaffected — no row means not
+   * enabled, so there is nothing to suspend.
    */
-  readonly userRiskEscalatedSlugs: readonly string[];
+  readonly userReconsentSlugs: readonly string[];
 }

@@ -8,6 +8,7 @@ import {
   type Permission,
   type Plugin,
   type PluginGrant,
+  type UserPlugin,
 } from '@bge/database';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
 import {
@@ -27,6 +28,7 @@ import {
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
   PluginUpdateRejectedEvent,
+  UserPluginUnitDisabledEvent,
   type GrantedPermissionRecord,
   type PluginGrantRevocationReason,
 } from '../events/plugin.events';
@@ -70,7 +72,8 @@ import {
  * ingress metadata needs to ride an update.
  */
 export type PluginUpdateProvenance =
-  { readonly bundled: true } | { readonly bundled: false; readonly pendingSha256: string };
+  | { readonly bundled: true }
+  | { readonly bundled: false; readonly pendingSha256: string };
 
 export interface PluginUpdateStageInput {
   /** The NEW version's resolved directory — placed by #84 (or the bundled resolver); this service never touches a tarball (D-Y/D-AN). */
@@ -115,6 +118,13 @@ export interface PluginUpdateRejectInput {
   readonly rejectorId: string;
 }
 
+/** One unit activation decided to suspend, with the slugs that forced it. */
+interface SuspensionCandidate<TUnit> {
+  readonly before: TUnit;
+  readonly after: TUnit;
+  readonly outstanding: readonly string[];
+}
+
 interface ActivationOutcome {
   readonly plugin: Plugin;
   readonly seededGrants: readonly PluginGrant[];
@@ -123,11 +133,9 @@ interface ActivationOutcome {
   readonly scopeMovedGrants: readonly PluginGrant[];
   /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (D-X). */
   readonly reStampedGrants: readonly PluginGrant[];
-  readonly suspendedUnits: readonly {
-    readonly before: HouseholdPlugin;
-    readonly after: HouseholdPlugin;
-    readonly outstanding: readonly string[];
-  }[];
+  readonly suspendedHouseholdUnits: readonly SuspensionCandidate<HouseholdPlugin>[];
+  /** User units suspended pending re-consent — the household pass's exact user-scope mirror (#225). */
+  readonly suspendedUserUnits: readonly SuspensionCandidate<UserPlugin>[];
 }
 
 /**
@@ -155,9 +163,11 @@ interface ActivationOutcome {
  * updating several plugins in one sitting must not bounce the server N
  * times. A real teardown path arrives with #197's worker mode.
  *
- * User-scope suspension awaits a `UserPlugin` enablement model — user-scope
- * checks compare and gate identically, but there is no per-user enablement
- * row to suspend yet, so activation records nothing for them (#59 C4+).
+ * User-scope escalations suspend `UserPlugin` units exactly as household
+ * escalations suspend `HouseholdPlugin` units (#225) — same batched shape,
+ * same guarded write, same D-AR late-acceptance re-enable. Users with no
+ * enablement row are untouched: no row means not enabled, so there is
+ * nothing to suspend.
  */
 @Injectable()
 export class PluginUpdateService {
@@ -244,7 +254,6 @@ export class PluginUpdateService {
         `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
           `(no server-gating escalation); restart required to load the new code`,
       );
-      this.warnUnactionableUserEscalations(plugin.slug, comparison);
 
       return {
         plugin: outcome.plugin,
@@ -394,9 +403,9 @@ export class PluginUpdateService {
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
         `${outcome.seededGrants.length} server grant(s) seeded, ${outcome.reStampedGrants.length} re-stamped, ` +
         `${outcome.revokedGrants.length + outcome.scopeMovedGrants.length} revoked, ` +
-        `${outcome.suspendedUnits.length} unit(s) suspended pending consent; restart required`,
+        `${outcome.suspendedHouseholdUnits.length} household and ${outcome.suspendedUserUnits.length} user ` +
+        `unit(s) suspended pending consent; restart required`,
     );
-    this.warnUnactionableUserEscalations(plugin.slug, comparison);
 
     return { plugin: outcome.plugin, comparison, seededGrants: outcome.seededGrants };
   }
@@ -669,10 +678,10 @@ export class PluginUpdateService {
    * `approve()`: promote the pending state, apply the D-AF `declares[]`
    * catalog diff (insert added rows, revoke and delete grants on removed
    * declares with `'permission-removed'` provenance, delete the rows),
-   * seed the approval's server grants, suspend household units lacking
-   * consent on required-at-scope escalations (D-AO), and set
-   * `restartRequired` (D-AT). Events are collected inside and emitted by
-   * the caller AFTER commit.
+   * seed the approval's server grants, suspend household AND user units
+   * lacking consent on their scope's re-consent escalations (D-AO, #225),
+   * and set `restartRequired` (D-AT). Events are collected inside and
+   * emitted by the caller AFTER commit.
    */
   private async activate(
     plugin: Plugin,
@@ -809,14 +818,19 @@ export class PluginUpdateService {
         },
       });
 
-      let suspendedUnits: { before: HouseholdPlugin; after: HouseholdPlugin; outstanding: readonly string[] }[] = [];
+      // TODAY's risk per requested slug, shared by both suspension passes:
+      // the covering test must read one classification or the two scopes
+      // could disagree about the same slug.
+      const currentRisk = this.currentRiskBySlug(next, corePermissions);
+
+      // Fixed query count regardless of how many units run the plugin: one
+      // unit read, one grant read, one write per scope. A per-unit loop put
+      // this transaction's duration on the number of installs, and exceeding
+      // the interactive-transaction timeout would roll back the whole
+      // update — failing an activation because the plugin was POPULAR.
+      let suspendedHouseholdUnits: SuspensionCandidate<HouseholdPlugin>[] = [];
 
       if (comparison.householdReconsentSlugs.length > 0) {
-        // Fixed query count regardless of how many households run the plugin:
-        // one unit read, one grant read, one write. A per-unit loop put this
-        // transaction's duration on the number of installs, and exceeding the
-        // interactive-transaction timeout would roll back the whole update —
-        // failing an activation because the plugin was POPULAR.
         const units = await tx.householdPlugin.findMany({
           where: { pluginId: plugin.id, suspendedForConsent: false },
         });
@@ -837,71 +851,87 @@ export class PluginUpdateService {
             select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
           });
 
-          const currentRisk = this.currentRiskBySlug(next, corePermissions);
-          const candidates: { before: HouseholdPlugin; after: HouseholdPlugin; outstanding: readonly string[] }[] = [];
-          const decidedByHousehold = new Map<string, Map<string, RiskLevel>>();
+          const candidates = this.suspensionCandidates({
+            units,
+            scopeIdOf: (unit) => unit.householdId,
+            suspend: (unit) => ({ ...unit, suspendedForConsent: true, suspendedAt: initiatedAt }),
+            granted,
+            reconsentSlugs: comparison.householdReconsentSlugs,
+            currentRisk,
+          });
 
-          for (const row of granted) {
-            const slugs = decidedByHousehold.get(row.scopeId) ?? new Map<string, RiskLevel>();
-            slugs.set(row.permissionSlug, row.decidedRiskLevel);
-            decidedByHousehold.set(row.scopeId, slugs);
-          }
-
-          for (const unit of units) {
-            const decided = decidedByHousehold.get(unit.householdId) ?? new Map<string, RiskLevel>();
-            const outstanding = comparison.householdReconsentSlugs.filter((slug) => {
-              const decidedRiskLevel = decided.get(slug);
-
-              // Outstanding unless the unit has a Granted row AND the risk it
-              // consented under still covers today's classification.
-              return (
-                decidedRiskLevel === undefined || !riskCovers(decidedRiskLevel, currentRisk.get(slug) ?? RiskLevel.Low)
-              );
-            });
-
-            if (outstanding.length === 0) {
-              continue;
-            }
-
-            candidates.push({
-              before: unit,
-              // Constructed, not read back — `updateMany` sets exactly these
-              // two fields. The admin's `enabled` intent is deliberately
-              // untouched (D-AO).
-              after: { ...unit, suspendedForConsent: true, suspendedAt: initiatedAt },
-              outstanding,
-            });
-          }
-
-          suspendedUnits = candidates;
-
-          if (candidates.length > 0) {
-            const written = await tx.householdPlugin.updateMany({
-              where: { id: { in: candidates.map((entry) => entry.before.id) }, suspendedForConsent: false },
-              data: { suspendedForConsent: true, suspendedAt: initiatedAt },
-            });
-
-            if (written.count !== candidates.length) {
-              // The write is guarded on `suspendedForConsent: false`, so a
-              // concurrent writer can suspend a row between the read above and
-              // this statement. Read back to learn which rows THIS statement
-              // flipped — emitting a suspension event for a transition that
-              // did not occur would put a lifecycle row on the timeline
-              // claiming this activation suspended a unit it never touched.
-              // Same shape as revokeForAuthorityLoss's survivor read-back.
-              const flipped = await tx.householdPlugin.findMany({
-                where: { id: { in: candidates.map((entry) => entry.before.id) }, suspendedAt: initiatedAt },
+          suspendedHouseholdUnits = await this.applySuspension(
+            candidates,
+            (ids) =>
+              tx.householdPlugin.updateMany({
+                where: { id: { in: [...ids] }, suspendedForConsent: false },
+                data: { suspendedForConsent: true, suspendedAt: initiatedAt },
+              }),
+            (ids) =>
+              tx.householdPlugin.findMany({
+                where: { id: { in: [...ids] }, suspendedAt: initiatedAt },
                 select: { id: true },
-              });
-              const flippedIds = new Set(flipped.map((row) => row.id));
-
-              suspendedUnits = candidates.filter((entry) => flippedIds.has(entry.before.id));
-            }
-          }
+              }),
+          );
         }
       }
 
-      return { plugin: updated, seededGrants, revokedGrants, scopeMovedGrants, reStampedGrants, suspendedUnits };
+      // The user-scope mirror (#225): identical shape against `UserPlugin`.
+      // Users with no enablement row never appear in the unit read — no row
+      // means not enabled, so there is nothing to suspend.
+      let suspendedUserUnits: SuspensionCandidate<UserPlugin>[] = [];
+
+      if (comparison.userReconsentSlugs.length > 0) {
+        const units = await tx.userPlugin.findMany({
+          where: { pluginId: plugin.id, suspendedForConsent: false },
+        });
+
+        if (units.length > 0) {
+          const granted = await tx.pluginGrant.findMany({
+            where: {
+              pluginId: plugin.id,
+              scopeType: PluginGrantScope.User,
+              scopeId: { in: units.map((unit) => unit.userId) },
+              status: PluginGrantStatus.Granted,
+              permissionSlug: { in: [...comparison.userReconsentSlugs] },
+            },
+            select: { scopeId: true, permissionSlug: true, decidedRiskLevel: true },
+          });
+
+          const candidates = this.suspensionCandidates({
+            units,
+            scopeIdOf: (unit) => unit.userId,
+            suspend: (unit) => ({ ...unit, suspendedForConsent: true, suspendedAt: initiatedAt }),
+            granted,
+            reconsentSlugs: comparison.userReconsentSlugs,
+            currentRisk,
+          });
+
+          suspendedUserUnits = await this.applySuspension(
+            candidates,
+            (ids) =>
+              tx.userPlugin.updateMany({
+                where: { id: { in: [...ids] }, suspendedForConsent: false },
+                data: { suspendedForConsent: true, suspendedAt: initiatedAt },
+              }),
+            (ids) =>
+              tx.userPlugin.findMany({
+                where: { id: { in: [...ids] }, suspendedAt: initiatedAt },
+                select: { id: true },
+              }),
+          );
+        }
+      }
+
+      return {
+        plugin: updated,
+        seededGrants,
+        revokedGrants,
+        scopeMovedGrants,
+        reStampedGrants,
+        suspendedHouseholdUnits,
+        suspendedUserUnits,
+      };
     });
   }
 
@@ -951,12 +981,25 @@ export class PluginUpdateService {
       );
     }
 
-    for (const unit of outcome.suspendedUnits) {
+    for (const unit of outcome.suspendedHouseholdUnits) {
       this.emitter.emit(
         HouseholdPluginUnitDisabledEvent.eventName,
         new HouseholdPluginUnitDisabledEvent(
-          this.unitSnapshot(unit.before),
-          this.unitSnapshot(unit.after),
+          this.householdUnitSnapshot(unit.before),
+          this.householdUnitSnapshot(unit.after),
+          unit.outstanding,
+          next.manifest.version,
+          initiatedAt,
+        ),
+      );
+    }
+
+    for (const unit of outcome.suspendedUserUnits) {
+      this.emitter.emit(
+        UserPluginUnitDisabledEvent.eventName,
+        new UserPluginUnitDisabledEvent(
+          this.userUnitSnapshot(unit.before),
+          this.userUnitSnapshot(unit.after),
           unit.outstanding,
           next.manifest.version,
           initiatedAt,
@@ -966,22 +1009,83 @@ export class PluginUpdateService {
   }
 
   /**
-   * User-scope risk escalations have nowhere to go until a `UserPlugin`
-   * enablement row exists to suspend (#59 C4+). Said out loud rather than
-   * dropped: the alternative is continuing on consent given for a lower risk
-   * with no trace that anyone noticed.
+   * Which units of one scope owe a fresh decision under this activation —
+   * the pure half of the suspension pass, shared by the household and user
+   * blocks in `activate()` so the covering predicate cannot drift between
+   * scopes. A slug is outstanding unless the unit has a Granted row AND the
+   * risk it consented under still covers today's classification (D-X).
    */
-  private warnUnactionableUserEscalations(slug: string, comparison: UpdateEscalationComparison): void {
-    if (comparison.userRiskEscalatedSlugs.length === 0) {
-      return;
+  private suspensionCandidates<TUnit>(args: {
+    readonly units: readonly TUnit[];
+    readonly scopeIdOf: (unit: TUnit) => string;
+    /** Constructed, not read back — the write sets exactly the suspension fields; `enabled` intent is untouched (D-AO). */
+    readonly suspend: (unit: TUnit) => TUnit;
+    readonly granted: readonly {
+      readonly scopeId: string;
+      readonly permissionSlug: string;
+      readonly decidedRiskLevel: RiskLevel;
+    }[];
+    readonly reconsentSlugs: readonly string[];
+    readonly currentRisk: ReadonlyMap<string, RiskLevel>;
+  }): SuspensionCandidate<TUnit>[] {
+    const decidedByUnit = new Map<string, Map<string, RiskLevel>>();
+
+    for (const row of args.granted) {
+      const slugs = decidedByUnit.get(row.scopeId) ?? new Map<string, RiskLevel>();
+      slugs.set(row.permissionSlug, row.decidedRiskLevel);
+      decidedByUnit.set(row.scopeId, slugs);
     }
 
-    this.logger.warn(
-      `Plugin '${slug}' has ${comparison.userRiskEscalatedSlugs.length} user-scope permission(s) whose risk rose ` +
-        `above the level their holders consented to (${comparison.userRiskEscalatedSlugs.join(', ')}). Per-user ` +
-        're-consent is not yet implementable — there is no UserPlugin enablement row to suspend — so those grants ' +
-        'remain in force at their recorded risk. Tracked for #59 C4.',
-    );
+    const candidates: SuspensionCandidate<TUnit>[] = [];
+
+    for (const unit of args.units) {
+      const decided = decidedByUnit.get(args.scopeIdOf(unit)) ?? new Map<string, RiskLevel>();
+      const outstanding = args.reconsentSlugs.filter((slug) => {
+        const decidedRiskLevel = decided.get(slug);
+
+        return (
+          decidedRiskLevel === undefined || !riskCovers(decidedRiskLevel, args.currentRisk.get(slug) ?? RiskLevel.Low)
+        );
+      });
+
+      if (outstanding.length > 0) {
+        candidates.push({ before: unit, after: args.suspend(unit), outstanding });
+      }
+    }
+
+    return candidates;
+  }
+
+  /**
+   * Guarded suspension write + survivor read-back, shared by both scopes.
+   * The write is guarded on `suspendedForConsent: false`, so a concurrent
+   * writer can suspend a row between the candidate read and this statement.
+   * On a count mismatch, read back which rows THIS statement flipped —
+   * emitting a suspension event for a transition that did not occur would
+   * put a lifecycle row on the timeline claiming this activation suspended
+   * a unit it never touched. Same shape as revokeForAuthorityLoss's
+   * survivor read-back.
+   */
+  private async applySuspension<TUnit extends { readonly id: string }>(
+    candidates: readonly SuspensionCandidate<TUnit>[],
+    write: (ids: readonly string[]) => Promise<{ count: number }>,
+    readBackFlipped: (ids: readonly string[]) => Promise<readonly { readonly id: string }[]>,
+  ): Promise<SuspensionCandidate<TUnit>[]> {
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const ids = candidates.map((entry) => entry.before.id);
+    const written = await write(ids);
+
+    if (written.count === candidates.length) {
+      return [...candidates];
+    }
+
+    const flipped = await readBackFlipped(ids);
+    const flippedIds = new Set(flipped.map((row) => row.id));
+
+    return candidates.filter((entry) => flippedIds.has(entry.before.id));
   }
 
   private stagingSnapshot(plugin: Plugin) {
@@ -990,9 +1094,15 @@ export class PluginUpdateService {
     return { id, slug, version, pendingVersion };
   }
 
-  private unitSnapshot(unit: HouseholdPlugin) {
+  private householdUnitSnapshot(unit: HouseholdPlugin) {
     const { id, householdId, pluginId, enabled, suspendedForConsent } = unit;
 
     return { id, householdId, pluginId, enabled, suspendedForConsent };
+  }
+
+  private userUnitSnapshot(unit: UserPlugin) {
+    const { id, userId, pluginId, enabled, suspendedForConsent } = unit;
+
+    return { id, userId, pluginId, enabled, suspendedForConsent };
   }
 }

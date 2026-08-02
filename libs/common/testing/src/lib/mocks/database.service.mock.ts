@@ -166,6 +166,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     systemSetting: mockDelegate(),
     user: mockDelegate(),
     userPermission: mockDelegate(),
+    userPlugin: mockDelegate(),
     userPreferences: mockDelegate(),
     userProfile: mockDelegate(),
     userRole: mockDelegate(),

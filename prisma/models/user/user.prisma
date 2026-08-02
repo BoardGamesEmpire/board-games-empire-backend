@@ -37,6 +37,7 @@ model User {
   mediaContributionsReviewed MediaContribution[]     @relation("MediaContributionReviewer")
   lists                      List[]
   gatewayConnections         UserGatewayConnection[]
+  userPlugins                UserPlugin[]
   householdMember            HouseholdMember[]
   webhookSubscriptions       WebhookSubscription[]   @relation("WebhookSubscriptionsCreated")
 
