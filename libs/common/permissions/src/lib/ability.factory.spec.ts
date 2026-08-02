@@ -475,6 +475,223 @@ describe('AbilityFactory', () => {
       });
     });
   });
+
+  /**
+   * Rendering + scoping guards for the household-member authorization rules
+   * introduced/corrected in #155. These assert two distinct things:
+   *
+   * 1. Flat, single-model conditions (`read:household_member`) are checked with
+   *    in-memory `can()` — reliable, because no relation traversal is involved.
+   * 2. Relation-traversing conditions (`read:household_member:friends`, the
+   *    corrected `manage:household_member`) are asserted STRUCTURALLY on the
+   *    rendered rule. In-memory CASL checks against relation clauses silently
+   *    pass/fail depending on whether the relation happens to be loaded, so an
+   *    `expect(...can(...))` there would be a false signal; the real evaluation
+   *    happens in Prisma via `accessibleBy`. What matters here is that the
+   *    template renders and that the field paths are the ones Prisma will accept.
+   */
+  describe('household member rules (#155)', () => {
+    // Mirrors the seeded relational clause meaning "this User node is an
+    // accepted friend of the acting user".
+    const ACCEPTED_FRIEND_OF_ACTING_USER = {
+      OR: [
+        { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
+        { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
+      ],
+    };
+
+    const readHouseholdMember = () =>
+      makePermission({
+        action: Action.read,
+        subject: ResourceType.HouseholdMember,
+        slug: 'read:household_member',
+        conditions: { householdId: '{{ householdId }}' },
+      });
+
+    const readHouseholdMemberFriends = () =>
+      makePermission({
+        action: Action.read,
+        subject: ResourceType.HouseholdMember,
+        slug: 'read:household_member:friends',
+        conditions: {
+          household: { visibility: 'Friends', members: { some: { user: ACCEPTED_FRIEND_OF_ACTING_USER } } },
+        },
+      });
+
+    const manageHouseholdMember = () =>
+      makePermission({
+        action: Action.manage,
+        subject: ResourceType.HouseholdMember,
+        slug: 'manage:household_member',
+        conditions: {
+          householdId: '{{ householdId }}',
+          household: {
+            members: {
+              some: {
+                userId: '{{ user.id }}',
+                role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+              },
+            },
+          },
+        },
+      });
+
+    /** A user whose only authority comes from household memberships. */
+    const memberOf = (roleName: string, householdIds: string[], permissions = [readHouseholdMember()]) =>
+      makeUser({
+        id: 'user-1',
+        householdMember: householdIds.map((householdId) => ({
+          householdId,
+          role: makeRole(roleName, permissions),
+        })),
+      });
+
+    /** Every string leaf in a rendered condition tree, for empty-value detection. */
+    function stringLeaves(value: unknown, acc: string[] = []): string[] {
+      if (typeof value === 'string') {
+        acc.push(value);
+      } else if (Array.isArray(value)) {
+        value.forEach((item) => stringLeaves(item, acc));
+      } else if (value !== null && typeof value === 'object') {
+        Object.values(value).forEach((item) => stringLeaves(item, acc));
+      }
+
+      return acc;
+    }
+
+    describe('read:household_member — membership scoping', () => {
+      it('renders {{ householdId }} from the membership context, not the user context', () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        expect(ability.rules.at(-1)?.conditions).toEqual({ householdId: 'hh-1' });
+      });
+
+      it('permits reading a member row of a household the actor belongs to', () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { id: 'm-1', householdId: 'hh-1' }))).toBe(true);
+      });
+
+      it("denies reading another household's member rows (the #155 acceptance criterion)", () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { id: 'm-9', householdId: 'hh-2' }))).toBe(false);
+      });
+
+      it('denies every member row for a user with no household memberships', () => {
+        const ability = factory.createForUser(makeUser({ id: 'stranger' }));
+
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { id: 'm-1', householdId: 'hh-1' }))).toBe(false);
+      });
+
+      it('emits one independently-scoped rule per membership (multi-household actor)', () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1', 'hh-2']));
+
+        expect(ability.rules).toHaveLength(2);
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-1' }))).toBe(true);
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-2' }))).toBe(true);
+        expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-3' }))).toBe(false);
+      });
+
+      it.each(['HouseholdOwner', 'HouseholdAdmin', 'HouseholdMember', 'HouseholdGuest'])(
+        'scopes identically regardless of which household role carries the grant (%s)',
+        (roleName) => {
+          const ability = factory.createForUser(memberOf(roleName, ['hh-1']));
+
+          expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-1' }))).toBe(true);
+          expect(ability.can(Action.read, asEntity('HouseholdMember', { householdId: 'hh-2' }))).toBe(false);
+        },
+      );
+
+      it('does not leak the grant onto a different subject type', () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        expect(ability.can(Action.read, asEntity('Household', { id: 'hh-1' }))).toBe(false);
+      });
+    });
+
+    describe('read:household_member:friends — relation-scoped rendering', () => {
+      it('renders the acting user id into both friendship directions', () => {
+        // Assigned to the base User role, so it renders against the user-only
+        // context — there is no membership to supply {{ householdId }}.
+        const user = makeUser({ id: 'user-42', roles: [makeRole('User', [readHouseholdMemberFriends()])] });
+
+        const ability = factory.createForUser(user);
+
+        expect(ability.rules.at(-1)?.conditions).toEqual({
+          household: {
+            visibility: 'Friends',
+            members: {
+              some: {
+                user: {
+                  OR: [
+                    { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+                    { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+                  ],
+                },
+              },
+            },
+          },
+        });
+      });
+
+      it('traverses to the household through the `household` relation, never a top-level field', () => {
+        const user = makeUser({ id: 'user-42', roles: [makeRole('User', [readHouseholdMemberFriends()])] });
+
+        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+
+        // HouseholdMember has no `visibility`/`members` of its own — those live
+        // on Household. A regression to the flat shape would make Prisma throw.
+        expect(conditions).toHaveProperty('household');
+        expect(conditions).not.toHaveProperty('visibility');
+        expect(conditions).not.toHaveProperty('members');
+      });
+
+      it('renders every template variable to a non-empty value', () => {
+        const user = makeUser({ id: 'user-42', roles: [makeRole('User', [readHouseholdMemberFriends()])] });
+
+        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+
+        // Mustache resolves an unknown variable to an EMPTY STRING rather than
+        // leaving a `{{ … }}` marker behind, so scanning for markers cannot
+        // detect an out-of-context variable. An empty string leaf is the actual
+        // symptom: a rule referencing `{{ householdId }}` from a base-role
+        // (user-only) context degrades silently into a match-nothing clause.
+        // Fail-loud rendering is tracked in #234.
+        expect(stringLeaves(conditions)).not.toContain('');
+      });
+    });
+
+    describe('manage:household_member — corrected relation path', () => {
+      it('scopes the role check through `household.members`, not a top-level `members` field', () => {
+        const user = memberOf('HouseholdOwner', ['hh-1'], [manageHouseholdMember()]);
+
+        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+
+        expect(conditions).toEqual({
+          householdId: 'hh-1',
+          household: {
+            members: {
+              some: {
+                userId: 'user-1',
+                role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+              },
+            },
+          },
+        });
+        // Guards the defect fixed in #155: `members` is not a HouseholdMember field.
+        expect(conditions).not.toHaveProperty('members');
+      });
+
+      it('pins management authority to the granting household only', () => {
+        const user = memberOf('HouseholdOwner', ['hh-1'], [manageHouseholdMember()]);
+
+        const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
+
+        expect(conditions).toMatchObject({ householdId: 'hh-1' });
+      });
+    });
+  });
 });
 
 function makePermissionStub(
