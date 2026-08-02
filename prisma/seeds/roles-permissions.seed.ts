@@ -700,16 +700,42 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.HouseholdMember,
       conditions: {
         householdId: '{{ householdId }}',
-        members: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+        // Defense-in-depth only: the `{{ householdId }}` pin already scopes to
+        // households where the actor holds the granting role. The relation path
+        // must go through `household` — HouseholdMember has no `members` field.
+        household: {
+          members: {
+            some: {
+              userId: '{{ user.id }}',
+              role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+            },
           },
         },
       },
       slug: 'manage:household_member',
       riskLevel: RiskLevel.High,
       reason: 'Manage household members',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.HouseholdMember,
+      conditions: { householdId: '{{ householdId }}' },
+      slug: 'read:household_member',
+      riskLevel: RiskLevel.Low,
+      reason: 'View the member roster of a household you belong to',
+    },
+    // Roster readability follows household readability: a friend can already
+    // read the full member list through getHouseholdById's embed under
+    // read:households:friends, so the sub-resource grants the same visibility.
+    {
+      action: Action.read,
+      subject: ResourceType.HouseholdMember,
+      conditions: {
+        household: { visibility: 'Friends', members: { some: { user: acceptedFriendOfActingUser } } },
+      },
+      slug: 'read:household_member:friends',
+      riskLevel: RiskLevel.Medium,
+      reason: "View the member roster of a friend's friends-visible household",
     },
     {
       action: Action.create,
@@ -734,10 +760,12 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Invite,
       conditions: {
         householdId: '{{ householdId }}',
-        members: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+        household: {
+          members: {
+            some: {
+              userId: '{{ user.id }}',
+              role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+            },
           },
         },
       },
@@ -1363,6 +1391,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:friendship:own',
     'read:event:friends',
     'read:households:friends',
+    'read:household_member:friends',
 
     // game
     'create:game',
@@ -1448,6 +1477,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:game_collection',
     'read:household',
     'read:households',
+    'read:household_member',
     'update:event_game_nomination:resolve',
     'update:event_occurrence:cancel',
     'update:event_occurrence:confirm',
@@ -1483,6 +1513,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game_nomination',
     'read:event_game_vote',
     'read:event_game',
+    'read:household_member',
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
@@ -1498,6 +1529,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event:participant',
     'read:game_play_session',
     'read:household',
+    'read:household_member',
     'read:households',
   ]);
 

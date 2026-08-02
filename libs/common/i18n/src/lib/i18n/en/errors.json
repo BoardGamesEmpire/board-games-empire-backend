@@ -122,6 +122,7 @@
   "household": {
     "not_found": "Household with ID {id} not found",
     "invalid_language_tag": "'{tag}' is not a valid IETF BCP 47 language tag",
+    "member_not_found": "Member with ID {memberId} not found in household {householdId}",
     "language_tag_unsupported": "Language tag '{tag}' is not supported by this server"
   },
   "quota": {

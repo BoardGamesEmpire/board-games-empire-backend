@@ -14,6 +14,7 @@ import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
+import { assertHouseholdExists, householdExists } from './household-access.helpers';
 
 @Injectable()
 export class HouseholdService {
@@ -86,7 +87,7 @@ export class HouseholdService {
     if (!household) {
       // The scoped read matched nothing: probe existence to distinguish a
       // missing household (404) from one that exists but isn't visible (403).
-      if (await this.householdExists(id)) {
+      if (await householdExists(this.db, id)) {
         throw new ForbiddenException(t('common.forbidden.view'));
       }
       throw new NotFoundException(t('errors.household.not_found', { id }));
@@ -179,16 +180,6 @@ export class HouseholdService {
   }
 
   /**
-   * Cheap existence probe (excludes soft-deleted). Lets a caller distinguish a
-   * household that does not exist (→ 404) from one that exists but the actor may
-   * not read/mutate (→ 403) once a permission-scoped query returns nothing.
-   */
-  private async householdExists(id: string): Promise<boolean> {
-    const count = await this.db.household.count({ where: { id, deletedAt: null } });
-    return count > 0;
-  }
-
-  /**
    * Resolves a client-supplied BCP 47 tag to the LanguageTag row id.
    * 400 on syntactically invalid tags and on tags outside the vocabulary.
    */
@@ -266,7 +257,7 @@ export class HouseholdService {
     try {
       // Existence first (→ 404); the scoped update below enforces permission
       // (P2025 → 403). Keeps the two outcomes distinguishable.
-      assert(await this.householdExists(id), new NotFoundException(t('errors.household.not_found', { id })));
+      await assertHouseholdExists(this.db, id);
 
       return await this.db.household.update({
         where: {
@@ -359,7 +350,7 @@ export class HouseholdService {
       // Existence first (→ 404); the scoped update below enforces the delete
       // policy (owner-only), and a non-matching `where` (→ P2025) maps to 403 —
       // consistent with updateHousehold and GameService.delete/update.
-      assert(await this.householdExists(id), new NotFoundException(t('errors.household.not_found', { id })));
+      await assertHouseholdExists(this.db, id);
 
       const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
         const household = await tx.household.update({

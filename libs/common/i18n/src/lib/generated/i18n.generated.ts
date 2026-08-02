@@ -140,6 +140,7 @@ export type I18nTranslations = {
         "household": {
             "not_found": string;
             "invalid_language_tag": string;
+            "member_not_found": string;
             "language_tag_unsupported": string;
         };
         "quota": {
