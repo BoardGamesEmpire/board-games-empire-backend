@@ -35,6 +35,25 @@ export class PluginGrantPluginNotFoundError extends Error {
 }
 
 /**
+ * The plugin the decision targets is tombstoned (D-AS): an uninstalled
+ * plugin is not a decision target at ANY scope — its grants were cleared on
+ * uninstall, and recording new consent against a row the loader will never
+ * serve would manufacture authority for nothing (#225).
+ */
+export class PluginGrantPluginTombstonedError extends Error {
+  override readonly name = 'PluginGrantPluginTombstonedError';
+
+  constructor(
+    public readonly pluginSlug: string,
+    public readonly uninstalledAt: Date,
+  ) {
+    super(
+      `Plugin '${pluginSlug}' was uninstalled at ${uninstalledAt.toISOString()} and cannot accept consent decisions`,
+    );
+  }
+}
+
+/**
  * The permission cannot be decided for this plugin: not requested by its
  * manifest, or (fail-loud) missing its backing catalog row.
  */

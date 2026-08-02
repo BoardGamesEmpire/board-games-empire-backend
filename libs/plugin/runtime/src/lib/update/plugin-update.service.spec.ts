@@ -10,6 +10,7 @@ import {
   type Permission,
   type Plugin,
   type PluginGrant,
+  type UserPlugin,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
@@ -24,6 +25,7 @@ import {
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
   PluginUpdateRejectedEvent,
+  UserPluginUnitDisabledEvent,
 } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginStaticAnalysisService } from '../install/plugin-static-analysis.service';
@@ -185,6 +187,7 @@ describe('PluginUpdateService', () => {
       makeGrant({ id: 'grant-2', permissionSlug: 'plugin|demo-sink|manage:digest', decidedRiskLevel: RiskLevel.Low }),
     ]);
     db.householdPlugin.findMany.mockResolvedValue([]);
+    db.userPlugin.findMany.mockResolvedValue([]);
     db.plugin.update.mockResolvedValue(makePlugin());
     // The staging write is conditional on the pending slot still being empty,
     // so it goes through updateMany rather than update.
@@ -884,6 +887,169 @@ describe('PluginUpdateService', () => {
       });
       expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitDisabledEvent.eventName, expect.anything());
+    });
+  });
+
+  /**
+   * The household pass's exact user-scope mirror (#225): same batched
+   * candidate/write/read-back shape against `UserPlugin`, driven by
+   * `userReconsentSlugs`. Household coverage above owns the full matrix;
+   * these assert the mirrored wiring plus the two behaviors unique to the
+   * scope — user escalations never server-gate, and rowless users are
+   * untouched by construction.
+   */
+  describe('user-scope suspension (D-AO at user scope, #225)', () => {
+    const makeUserUnit = (overrides: Partial<UserPlugin> = {}): UserPlugin => ({
+      id: 'up-1',
+      userId: 'user-1',
+      pluginId: 'plugin-1',
+      enabled: true,
+      config: {},
+      suspendedForConsent: false,
+      suspendedAt: null,
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      ...overrides,
+    });
+
+    // A required user check on the (server-scope) fixture is legal under
+    // D-J as narrowed by #225 — UserPlugin is the per-user enable surface
+    // at any plugin scope.
+    const nextWithUserCheck = (): PluginManifest =>
+      nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'read:user_digest',
+              required: true,
+              reason: { en: 'Reads the digest each member curated for themselves.' },
+              consentScope: 'user' as const,
+            },
+          ],
+        },
+      });
+
+    beforeEach(() => {
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:user_digest', subject: 'digest', riskLevel: RiskLevel.Low } as Permission,
+      ]);
+    });
+
+    it('a new required user check does NOT server-gate: the update activates in place and suspends uncovered user units', async () => {
+      db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
+      db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
+      // stage(): compare() → immediate activation (nothing server-gates, so
+      // serverChecksToSeed never runs) → activate() reads user grants.
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([
+          makeGrant(),
+          makeGrant({
+            id: 'grant-2',
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]) // compare()
+        .mockResolvedValueOnce([]); // activate() – user grants for the unit
+      await writeManifest(nextWithUserCheck());
+
+      const result = await service.stage(input());
+
+      expect(result.activated).toBe(true);
+      expect(result.comparison.serverGating).toBe(false);
+      expect(result.comparison.userReconsentSlugs).toEqual(['read:user_digest']);
+      expect(db.userPlugin.findMany).toHaveBeenCalledWith({
+        where: { pluginId: 'plugin-1', suspendedForConsent: false },
+      });
+      expect(db.pluginGrant.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            scopeType: PluginGrantScope.User,
+            scopeId: { in: ['user-1'] },
+            status: PluginGrantStatus.Granted,
+          }),
+        }),
+      );
+      expect(db.userPlugin.updateMany).toHaveBeenCalledTimes(1);
+      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['up-1'] }, suspendedForConsent: false },
+        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        UserPluginUnitDisabledEvent.eventName,
+        expect.objectContaining({
+          requiredPermissionSlugs: ['read:user_digest'],
+          manifestVersion: '1.3.0',
+          after: expect.objectContaining({ userId: 'user-1', suspendedForConsent: true }),
+        }),
+      );
+    });
+
+    it('does not suspend a unit whose Granted row still covers the current risk — and rowless users never enter the pass', async () => {
+      db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([
+          makeGrant(),
+          makeGrant({
+            id: 'grant-2',
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]) // compare()
+        .mockResolvedValueOnce([
+          makeGrant({
+            id: 'grant-u1',
+            scopeType: PluginGrantScope.User,
+            scopeId: 'user-1',
+            permissionSlug: 'read:user_digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]); // activate() – user grants for the unit
+      await writeManifest(nextWithUserCheck());
+
+      await service.stage(input());
+
+      // The unit query is the whole universe: users with no UserPlugin row
+      // never appear, so nothing rowless can be suspended by construction.
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitDisabledEvent.eventName, expect.anything());
+    });
+
+    it('suspends a unit holding a STALE Granted row — presence is not consent at the new risk (D-X)', async () => {
+      // Active AND next both request the user check; only the catalog risk
+      // moved (Low → High) above the risk the user consented under.
+      const shared = nextWithUserCheck();
+      const activeWithUserCheck = buildPluginManifest({ permissions: { ...shared.permissions } });
+      db.plugin.findUnique.mockResolvedValue(
+        makePlugin({ manifestJson: activeWithUserCheck as unknown as Prisma.JsonValue }),
+      );
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'read:user_digest', subject: 'digest', riskLevel: RiskLevel.High } as Permission,
+      ]);
+      const staleUserGrant = makeGrant({
+        id: 'grant-u1',
+        scopeType: PluginGrantScope.User,
+        scopeId: 'user-1',
+        permissionSlug: 'read:user_digest',
+        decidedRiskLevel: RiskLevel.Low,
+      });
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([makeGrant(), staleUserGrant]) // compare()
+        .mockResolvedValueOnce([staleUserGrant]); // activate() – user grants
+      db.userPlugin.findMany.mockResolvedValue([makeUserUnit()]);
+      db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
+      await writeManifest(shared);
+
+      const result = await service.stage(input());
+
+      expect(result.comparison.userReconsentSlugs).toEqual(['read:user_digest']);
+      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['up-1'] }, suspendedForConsent: false },
+        data: { suspendedForConsent: true, suspendedAt: expect.any(Date) },
+      });
     });
   });
 

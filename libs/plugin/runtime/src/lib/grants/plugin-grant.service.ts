@@ -21,6 +21,7 @@ import {
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
   PluginGrantRevokedEvent,
+  UserPluginUnitEnabledEvent,
   type PluginGrantRevocationReason,
 } from '../events/plugin.events';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
@@ -30,13 +31,14 @@ import {
   PluginGrantExclusionError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
+  PluginGrantPluginTombstonedError,
   PluginGrantScopeIdError,
   PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
 } from './grant.errors';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
-import { riskCovers } from './risk-ordering';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
+import { riskCovers } from './risk-ordering';
 
 /** The empty-string uniqueness sentinel Server-scope rows store (see plugin-grant.prisma). Shared with the installer's grant seeding. */
 export const SERVER_SCOPE_SENTINEL = '' as const;
@@ -77,7 +79,8 @@ export interface PluginGrantRevocationInput {
 
 /**
  * The consent write path (#59 Phase C1). Owns every `PluginGrant` mutation:
- * per-unit decisions (grant/deny with grant-time authority verification)
+ * per-unit decisions (grant/deny with grant-time authority verification),
+ * the user enablement anchor a Granted user-scope decision creates (#225),
  * and authority-loss revocation (delete-to-pending, #211).
  * Reads for ability resolution deliberately live elsewhere —
  * `PermissionsService` queries `PluginGrant` directly, keeping the
@@ -113,7 +116,7 @@ export class PluginGrantService {
     this.assertScopeCoherence(check, input);
     const scopeId = this.normalizeScopeId(input);
     const decidedRiskLevel = await this.resolveRiskLevel(plugin, check);
-    await this.assertDeciderAuthority(input, plugin, scopeId);
+    await this.assertDeciderAuthority(input, scopeId);
 
     const uniqueWhere = {
       pluginId_scopeType_scopeId_permissionSlug: {
@@ -167,6 +170,24 @@ export class PluginGrantService {
         update: decisionFields,
       });
 
+      // The consent act IS the enabling act (#225): a Granted user-scope
+      // decision ensures the user's enablement anchor exists, atomically
+      // with the decision — committing consent without the row would leave
+      // a user who consented but is not enabled, a state only another
+      // decision could heal. The update arm is deliberately empty: the row
+      // may exist suspended or user-disabled, and consent never writes
+      // `enabled` or clears a suspension here (D-AO parity — the D-AR
+      // re-enable path below owns that transition, with its own predicate).
+      // A Denied decision creates no row: a refusal confers no enablement,
+      // and the durable denial already lives on the grant row itself.
+      if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
+        await tx.userPlugin.upsert({
+          where: { userId_pluginId: { userId: scopeId, pluginId: plugin.id } },
+          create: { userId: scopeId, pluginId: plugin.id },
+          update: {},
+        });
+      }
+
       return { unchanged: false, before: existing, after: written };
     });
 
@@ -182,11 +203,16 @@ export class PluginGrantService {
     );
     this.emitter.emit(EventClass.eventName, event);
 
-    // Late acceptance re-enables (D-AR): a CHANGED Household `Granted`
+    // Late acceptance re-enables (D-AR): a CHANGED unit-scope `Granted`
     // decision is the only transition that can clear a consent suspension,
-    // so the check rides the decision itself rather than a sweeper.
-    if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.Household) {
-      await this.maybeReenableSuspendedUnit(plugin, validated, scopeId, check, initiatedAt);
+    // so the check rides the decision itself rather than a sweeper. Same
+    // shape at both unit scopes (#225).
+    if (input.status === PluginGrantStatus.Granted) {
+      if (input.scopeType === PluginGrantScope.Household) {
+        await this.maybeReenableSuspendedHousehold(plugin, validated, scopeId, check, initiatedAt);
+      } else if (input.scopeType === PluginGrantScope.User) {
+        await this.maybeReenableSuspendedUser(plugin, validated, scopeId, check, initiatedAt);
+      }
     }
 
     return { grant: outcome.after, changed: true };
@@ -212,7 +238,7 @@ export class PluginGrantService {
    * because the re-enable bookkeeping hiccuped would be worse than a unit
    * that stays suspended until its next decision re-runs this check.
    */
-  private async maybeReenableSuspendedUnit(
+  private async maybeReenableSuspendedHousehold(
     plugin: Plugin,
     validated: PluginManifestValidationResult,
     householdId: string,
@@ -230,7 +256,10 @@ export class PluginGrantService {
 
       const householdChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'household');
 
-      if (householdChecks.length > 0 && !(await this.householdConsentSatisfied(plugin, householdId, householdChecks))) {
+      if (
+        householdChecks.length > 0 &&
+        !(await this.unitConsentSatisfied(plugin, PluginGrantScope.Household, householdId, householdChecks))
+      ) {
         return;
       }
 
@@ -279,24 +308,104 @@ export class PluginGrantService {
   }
 
   /**
-   * Does this household's consent state satisfy every household-scope check
-   * of the active manifest? Required checks need a `Granted` row; any check
-   * that HAS one needs its recorded risk to still cover the catalog's
-   * current classification. Mirrors the update service's suspension
-   * predicate exactly — the two must agree or suspensions bounce.
+   * The user-scope mirror of the household re-enable above (#225): same
+   * predicate, same guarded write, same never-throw posture — the two
+   * differ only in the unit delegate, the check filter, and the event
+   * class. Kept as a sibling rather than folded into one parameterized
+   * method: the delegates and snapshot shapes are different types, and the
+   * duplication is the readable kind.
    */
-  private async householdConsentSatisfied(
+  private async maybeReenableSuspendedUser(
     plugin: Plugin,
-    householdId: string,
-    householdChecks: readonly NormalizedPermissionRequest[],
+    validated: PluginManifestValidationResult,
+    userId: string,
+    check: NormalizedPermissionRequest,
+    initiatedAt: Date,
+  ): Promise<void> {
+    try {
+      const unit = await this.db.userPlugin.findUnique({
+        where: { userId_pluginId: { userId, pluginId: plugin.id } },
+      });
+
+      if (unit === null || !unit.suspendedForConsent) {
+        return;
+      }
+
+      const userChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'user');
+
+      if (
+        userChecks.length > 0 &&
+        !(await this.unitConsentSatisfied(plugin, PluginGrantScope.User, userId, userChecks))
+      ) {
+        return;
+      }
+
+      // Guarded update, not a blind write: a concurrent decision may have
+      // cleared the suspension already, and only the writer that actually
+      // flipped the row emits.
+      const cleared = await this.db.userPlugin.updateMany({
+        where: { id: unit.id, suspendedForConsent: true },
+        data: { suspendedForConsent: false, suspendedAt: null },
+      });
+
+      if (cleared.count !== 1) {
+        return;
+      }
+
+      const snapshot = (suspendedForConsent: boolean) => ({
+        id: unit.id,
+        userId: unit.userId,
+        pluginId: unit.pluginId,
+        enabled: unit.enabled,
+        suspendedForConsent,
+      });
+
+      this.emitter.emit(
+        UserPluginUnitEnabledEvent.eventName,
+        new UserPluginUnitEnabledEvent(
+          snapshot(true),
+          snapshot(false),
+          check.canonicalSlug,
+          plugin.version,
+          initiatedAt,
+        ),
+      );
+      this.logger.log(
+        `User '${userId}' re-enabled for plugin '${plugin.slug}': consent for '${check.canonicalSlug}' ` +
+          'cleared the last outstanding required permission (D-AR late acceptance)',
+      );
+    } catch (err) {
+      this.logger.error(
+        `Re-enable check failed for user '${userId}' / plugin '${plugin.slug}' — the grant decision is ` +
+          `committed; the unit stays suspended until its next decision re-runs this check: ${
+            err instanceof Error ? err.message : err
+          }`,
+      );
+    }
+  }
+
+  /**
+   * Does this unit's consent state satisfy every check of the active
+   * manifest at its consent scope? Required checks need a `Granted` row;
+   * any check that HAS one needs its recorded risk to still cover the
+   * catalog's current classification. Mirrors the update service's
+   * suspension predicate exactly — the two must agree or suspensions
+   * bounce. Scope-parametric (#225): callers pass the checks pre-filtered
+   * to the matching `consentScope`.
+   */
+  private async unitConsentSatisfied(
+    plugin: Plugin,
+    scopeType: Exclude<PluginGrantScope, typeof PluginGrantScope.Server>,
+    scopeId: string,
+    unitChecks: readonly NormalizedPermissionRequest[],
   ): Promise<boolean> {
     const granted = await this.db.pluginGrant.findMany({
       where: {
         pluginId: plugin.id,
-        scopeType: PluginGrantScope.Household,
-        scopeId: householdId,
+        scopeType,
+        scopeId,
         status: PluginGrantStatus.Granted,
-        permissionSlug: { in: householdChecks.map((check) => check.canonicalSlug) },
+        permissionSlug: { in: unitChecks.map((check) => check.canonicalSlug) },
       },
       select: { permissionSlug: true, decidedRiskLevel: true },
     });
@@ -304,7 +413,7 @@ export class PluginGrantService {
 
     // Plugin-declared rows are locked to an explicit Low (D-W); core risk is
     // today's classification, read fresh rather than reconstructed.
-    const coreSlugs = householdChecks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
+    const coreSlugs = unitChecks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const coreRisks =
       coreSlugs.length === 0
         ? []
@@ -314,7 +423,7 @@ export class PluginGrantService {
           });
     const currentRiskBySlug = new Map(coreRisks.map((row) => [row.slug, row.riskLevel]));
 
-    for (const check of householdChecks) {
+    for (const check of unitChecks) {
       const decidedRiskLevel = decidedBySlug.get(check.canonicalSlug);
 
       if (decidedRiskLevel === undefined) {
@@ -427,6 +536,15 @@ export class PluginGrantService {
 
     if (plugin === null) {
       throw new PluginGrantPluginNotFoundError(pluginId);
+    }
+
+    // D-AS at the consent seam (#225): a tombstoned plugin is not a
+    // decision target at ANY scope — same posture as the update service.
+    // `Plugin.enabled` deliberately does NOT gate here: the kill switch
+    // decides when consent is ACTIONABLE, not whether it is decidable, and
+    // consenting before an admin enables is a legitimate ordering.
+    if (plugin.uninstalledAt !== null) {
+      throw new PluginGrantPluginTombstonedError(plugin.slug, plugin.uninstalledAt);
     }
 
     return plugin;
@@ -597,7 +715,6 @@ export class PluginGrantService {
 
   private async assertDeciderAuthority(
     input: PluginGrantDecisionInput,
-    plugin: Plugin,
     /** Output of `normalizeScopeId` — the sentinel for Server, a verified non-empty unit id otherwise. */
     scopeId: string,
   ): Promise<void> {
@@ -622,15 +739,15 @@ export class PluginGrantService {
         return;
       }
       case PluginGrantScope.User: {
+        // The subject check is the WHOLE user-scope authority predicate
+        // (#225 uniform enablement): the remaining conditions — plugin not
+        // tombstoned, manifest requests the permission at user scope — are
+        // enforced by loadPlugin and resolveRequestedCheck/
+        // assertScopeCoherence before this switch runs. Household
+        // membership is irrelevant to a user's consent about their own
+        // data.
         if (input.deciderId !== scopeId) {
           throw new PluginGrantAuthorityError(input.deciderId, 'User-scope consent is decided by the user themself');
-        }
-
-        if (!(await this.authority.hasQualifyingHouseholdForPlugin(input.deciderId, plugin.id))) {
-          throw new PluginGrantAuthorityError(
-            input.deciderId,
-            'User-scope consent requires membership in at least one household with the plugin enabled',
-          );
         }
 
         return;

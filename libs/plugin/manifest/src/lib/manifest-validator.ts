@@ -163,11 +163,13 @@ export const validatePluginManifest = (
 
   if (!parsed.success) {
     throw new PluginManifestValidationError(
-      parsed.error.issues.map((issue): ManifestIssue => ({
-        code: ManifestErrorCode.SCHEMA_INVALID,
-        path: formatIssuePath(issue.path),
-        message: issue.message,
-      })),
+      parsed.error.issues.map(
+        (issue): ManifestIssue => ({
+          code: ManifestErrorCode.SCHEMA_INVALID,
+          path: formatIssuePath(issue.path),
+          message: issue.message,
+        }),
+      ),
     );
   }
 
@@ -321,11 +323,15 @@ export const validatePluginManifest = (
       permissionChecks.push({ ...check, consentScope, origin: 'core', canonicalSlug: check.slug });
     }
 
-    if (manifest.scope === 'server' && consentScope !== 'server') {
+    // D-J as narrowed by #225: 'household' consent on a server-scope plugin
+    // still has no HouseholdPlugin surface to collect it; 'user' consent is
+    // permitted at ANY plugin scope, because UserPlugin is the per-user
+    // enable surface D-J originally said did not exist.
+    if (manifest.scope === 'server' && consentScope === 'household') {
       push(
         ManifestErrorCode.SCOPE_INCOHERENT,
         `${path}.consentScope`,
-        `'${check.slug}' requests '${consentScope}'-scope consent, but a server-scope plugin has no per-unit enable surface to collect it (D-J)`,
+        `'${check.slug}' requests household-scope consent, but a server-scope plugin has no HouseholdPlugin enable surface to collect it (D-J)`,
       );
     }
 

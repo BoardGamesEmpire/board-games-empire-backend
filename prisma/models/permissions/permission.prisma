@@ -3,7 +3,7 @@ model Permission {
 
   action     Action
   subject    String // e.g., 'Game', 'User', 'all'
-  fields      String[] // Optional: e.g., '["title", "content"]'
+  fields     String[] // Optional: e.g., '["title", "content"]'
   conditions Json? // ABAC magic: { ownerId: '{{ user.id }}' } – templated
   inverted   Boolean  @default(false)
   reason     String? // Audit trail: "Owner-only update"

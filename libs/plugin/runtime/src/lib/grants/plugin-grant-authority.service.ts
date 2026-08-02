@@ -13,6 +13,14 @@ import { Injectable } from '@nestjs/common';
  * conditional, and keeping `@bge/plugin` off `@bge/permissions` preserves
  * the dependency direction this design relies on (the permissions lib reads
  * `PluginGrant` via the database directly).
+ *
+ * User-scope decisions need no predicate HERE (#225 uniform enablement):
+ * the authority question reduces to conditions `PluginGrantService.decide()`
+ * already enforces — the decider is the subject, the plugin is not
+ * tombstoned, and the active manifest requests the permission at user
+ * scope. Household membership is irrelevant to both the decision and its
+ * validity; the former `hasQualifyingHouseholdForPlugin` anchor was the
+ * model that decision rejected.
  */
 @Injectable()
 export class PluginGrantAuthorityService {
@@ -40,38 +48,5 @@ export class PluginGrantAuthorityService {
     });
 
     return membership !== null;
-  }
-
-  /**
-   * User-scope decisions (household-agnostic): beyond being the decider
-   * themself (checked by the caller), the user must belong to at least one
-   * household where the plugin is enabled and not consent-suspended —
-   * consent travels with the user across qualifying households, and #211's
-   * eager revoke fires when the LAST qualifying association ends.
-   */
-  async hasQualifyingHouseholdForPlugin(userId: string, pluginId: string): Promise<boolean> {
-    const memberships = await this.db.householdMember.findMany({
-      where: { userId },
-      select: { householdId: true },
-    });
-
-    if (memberships.length === 0) {
-      return false;
-    }
-
-    const qualifying = await this.db.householdPlugin.findFirst({
-      where: {
-        pluginId,
-        // The serving predicate in full (#59 C3): a unit suspended pending
-        // consent is not running the plugin, so it cannot anchor a
-        // user-scope decision about it.
-        enabled: true,
-        suspendedForConsent: false,
-        householdId: { in: memberships.map((membership) => membership.householdId) },
-      },
-      select: { id: true },
-    });
-
-    return qualifying !== null;
   }
 }

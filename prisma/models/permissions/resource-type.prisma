@@ -15,6 +15,7 @@ enum ResourceType {
   Plugin
   PluginGrant
   HouseholdPlugin
+  UserPlugin
   PluginLifecycleEvent
 
   // ─── User ───────────────────────────────────────────────

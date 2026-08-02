@@ -576,24 +576,38 @@ describe('validatePluginManifest', () => {
   });
 
   describe('scope coherence (D-J)', () => {
-    it.each(['household', 'user'] as const)(
-      "rejects a server-scope plugin requesting '%s'-consentable permission — no per-unit enable surface exists to collect that consent",
-      (consentScope) => {
-        const input = manifest();
-        input.permissions.checks = [
-          {
-            slug: 'feedback:read',
-            required: false,
-            reason: 'Reads submitted feedback to compose the weekly digest.',
-            consentScope,
-          },
-        ];
+    it("rejects a server-scope plugin requesting 'household'-consentable permission — no HouseholdPlugin surface exists to collect that consent", () => {
+      const input = manifest();
+      input.permissions.checks = [
+        {
+          slug: 'feedback:read',
+          required: false,
+          reason: 'Reads submitted feedback to compose the weekly digest.',
+          consentScope: 'household',
+        },
+      ];
 
-        const error = expectRejection(input, ManifestErrorCode.SCOPE_INCOHERENT);
+      const error = expectRejection(input, ManifestErrorCode.SCOPE_INCOHERENT);
 
-        expect(error.issues.some((issue) => issue.path === 'permissions.checks[0].consentScope')).toBe(true);
-      },
-    );
+      expect(error.issues.some((issue) => issue.path === 'permissions.checks[0].consentScope')).toBe(true);
+    });
+
+    it("accepts 'user'-consentable permissions on a SERVER-scope plugin — UserPlugin is the per-user enable surface at any plugin scope (#225)", () => {
+      const input = manifest();
+      input.permissions.checks = [
+        ...input.permissions.checks,
+        {
+          slug: 'read:user_digest',
+          required: false,
+          reason: 'Reads the digest each member curated for themselves.',
+          consentScope: 'user',
+        },
+      ];
+
+      const result = validatePluginManifest(input, options);
+
+      expect(result.permissionChecks.at(-1)?.consentScope).toBe('user');
+    });
 
     it('rejects requiresHouseholdConfig on a server-scope plugin with the offending path', () => {
       const error = expectRejection(

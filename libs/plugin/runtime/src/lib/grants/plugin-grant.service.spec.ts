@@ -1,13 +1,5 @@
-import {
-  DatabaseService,
-  PluginGrantScope,
-  PluginGrantStatus,
-  RiskLevel,
-  type Permission,
-  type Plugin,
-  type PluginGrant,
-  type PluginPermission,
-} from '@bge/database';
+import type { Permission, Plugin, PluginGrant, PluginPermission } from '@bge/database';
+import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -21,6 +13,7 @@ import {
   PluginGrantExclusionError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
+  PluginGrantPluginTombstonedError,
   PluginGrantScopeIdError,
   PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
@@ -63,6 +56,7 @@ describe('PluginGrantService', () => {
     slug: 'demo-sink',
     version: '1.2.0',
     manifestJson: manifest,
+    uninstalledAt: null,
   } as unknown as Plugin;
 
   const grantRow = (overrides: Partial<PluginGrant> = {}): PluginGrant =>
@@ -84,9 +78,7 @@ describe('PluginGrantService', () => {
 
   let db: MockDatabaseService;
   let emitter: { emit: jest.Mock };
-  let authority: jest.Mocked<
-    Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin' | 'hasQualifyingHouseholdForPlugin'>
-  >;
+  let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin'>>;
   let service: PluginGrantService;
 
   beforeEach(() => {
@@ -111,13 +103,11 @@ describe('PluginGrantService', () => {
     authority = {
       isServerAdmin: jest.fn(),
       isHouseholdAdmin: jest.fn(),
-      hasQualifyingHouseholdForPlugin: jest.fn(),
     } satisfies Partial<jest.Mocked<PluginGrantAuthorityService>> as jest.Mocked<
-      Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin' | 'hasQualifyingHouseholdForPlugin'>
+      Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin'>
     >;
     authority.isServerAdmin.mockResolvedValue(true);
     authority.isHouseholdAdmin.mockResolvedValue(true);
-    authority.hasQualifyingHouseholdForPlugin.mockResolvedValue(true);
 
     service = new PluginGrantService(
       db as unknown as DatabaseService,
@@ -255,19 +245,82 @@ describe('PluginGrantService', () => {
       ).rejects.toThrow(PluginGrantAuthorityError);
     });
 
-    it('User-scope consent additionally requires a qualifying household with the plugin enabled', async () => {
-      authority.hasQualifyingHouseholdForPlugin.mockResolvedValue(false);
+    it('User-scope consent is household-AGNOSTIC — the subject check is the whole predicate (#225)', async () => {
+      const result = await service.decide({
+        ...serverDecision,
+        permissionSlug: 'read:public_content',
+        scopeType: PluginGrantScope.User,
+        scopeId: 'user-a',
+        deciderId: 'user-a',
+      });
 
-      await expect(
-        service.decide({
-          ...serverDecision,
-          permissionSlug: 'read:public_content',
+      expect(result.changed).toBe(true);
+      // No role/membership query at all: the decider IS the subject, the
+      // manifest requests the permission at user scope, and the plugin is
+      // not tombstoned — nothing else is authority-relevant.
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      expect(authority.isHouseholdAdmin).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('decide — user enablement anchor (#225)', () => {
+    const userDecision = {
+      ...serverDecision,
+      permissionSlug: 'read:public_content',
+      scopeType: PluginGrantScope.User,
+      scopeId: 'user-a',
+      deciderId: 'user-a',
+    } as const;
+
+    it('a Granted user-scope decision ensures the UserPlugin row, atomically with the grant', async () => {
+      await service.decide(userDecision);
+
+      // Empty update arm on purpose: the row may exist suspended or
+      // user-disabled, and consent never writes `enabled` or clears a
+      // suspension here (D-AO parity — D-AR owns that transition).
+      expect(db.userPlugin.upsert).toHaveBeenCalledWith({
+        where: { userId_pluginId: { userId: 'user-a', pluginId: 'plg_1' } },
+        create: { userId: 'user-a', pluginId: 'plg_1' },
+        update: {},
+      });
+    });
+
+    it('a Denied user-scope decision creates NO row — a refusal confers no enablement', async () => {
+      db.pluginGrant.upsert.mockResolvedValue(
+        grantRow({ scopeType: PluginGrantScope.User, scopeId: 'user-a', status: PluginGrantStatus.Denied }),
+      );
+
+      await service.decide({ ...userDecision, status: PluginGrantStatus.Denied });
+
+      expect(db.userPlugin.upsert).not.toHaveBeenCalled();
+    });
+
+    it('an idempotent re-statement touches neither the grant nor the row', async () => {
+      db.pluginGrant.findUnique.mockResolvedValue(
+        grantRow({
           scopeType: PluginGrantScope.User,
           scopeId: 'user-a',
-          deciderId: 'user-a',
+          permissionSlug: 'read:public_content',
+          decidedRiskLevel: RiskLevel.Medium,
         }),
-      ).rejects.toThrow(PluginGrantAuthorityError);
-      expect(authority.hasQualifyingHouseholdForPlugin).toHaveBeenCalledWith('user-a', 'plg_1');
+      );
+
+      const result = await service.decide(userDecision);
+
+      expect(result.changed).toBe(false);
+      expect(db.userPlugin.upsert).not.toHaveBeenCalled();
+    });
+
+    it('Household- and Server-scope decisions never touch UserPlugin', async () => {
+      await service.decide(serverDecision);
+      await service.decide({
+        ...serverDecision,
+        permissionSlug: 'update:calendar',
+        scopeType: PluginGrantScope.Household,
+        scopeId: 'hh_1',
+      });
+
+      expect(db.userPlugin.upsert).not.toHaveBeenCalled();
     });
   });
 
@@ -333,6 +386,16 @@ describe('PluginGrantService', () => {
       db.plugin.findUnique.mockResolvedValue(null);
 
       await expect(service.decide(serverDecision)).rejects.toThrow(PluginGrantPluginNotFoundError);
+    });
+
+    it('rejects a decision for a tombstoned plugin at ANY scope (D-AS at the consent seam, #225)', async () => {
+      db.plugin.findUnique.mockResolvedValue({
+        ...plugin,
+        uninstalledAt: new Date('2026-07-01T00:00:00Z'),
+      } as unknown as Plugin);
+
+      await expect(service.decide(serverDecision)).rejects.toThrow(PluginGrantPluginTombstonedError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
     });
 
     it('rejects a permission the manifest never requested', async () => {

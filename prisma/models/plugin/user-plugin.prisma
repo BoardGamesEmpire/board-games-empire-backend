@@ -1,0 +1,60 @@
+/// Per-user enablement + configuration for user-scope plugin consent
+/// (#225 uniform-enablement decision). The row is created BY the user's
+/// first Granted user-scope decision — consent is the enabling act, so
+/// there is nothing to opt into first — and exists to carry the state
+/// consent maintains. Absence means the user never granted anything at
+/// user scope; a Denied-only decision creates no row (a denial confers no
+/// authority and no enablement — durable refusals live on PluginGrant).
+///
+/// Uniqueness is (userId, pluginId) with NO household dimension: user-scope
+/// consent is household-agnostic, and reintroducing a household axis here
+/// would quietly undo the consent-once-per-user model PluginGrant already
+/// encodes.
+///
+/// `userId` carries a real FK with `onDelete: Cascade`, deliberately NOT
+/// following HouseholdPlugin.householdId's plain-String shape: `Household`
+/// is soft-deleted (`deletedAt`), so an unconstrained householdId never
+/// dangles, whereas `User` rows are hard-deleted and an unconstrained
+/// userId would orphan enablement rows on the very next account deletion.
+/// The AuditLog precedent does not transfer either — that table is history,
+/// where a stale id is a record; this one is live state a serving predicate
+/// reads. Cascade matches UserGatewayConnection: per-user configuration
+/// dies with the user.
+model UserPlugin {
+  id String @id @default(cuid(2))
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  pluginId String @map("plugin_id")
+  plugin   Plugin @relation(fields: [pluginId], references: [id], onDelete: Cascade)
+
+  /// The user's own switch, layered UNDER Plugin.enabled and any household
+  /// enablement — their intent, and only theirs. Consent escalation never
+  /// touches it (D-AO parity): the serving predicate is
+  /// `enabled && !suspendedForConsent`, so late acceptance restores exactly
+  /// the state the user chose.
+  enabled Boolean @default(true)
+
+  /// Consent suspension (D-AO at user scope): an update escalated a
+  /// permission to re-consent at this scope and the user has not accepted.
+  /// Set by activation (UserPluginUnitDisabledEvent), cleared by the D-AR
+  /// late-acceptance path in PluginGrantService.decide()
+  /// (UserPluginUnitEnabledEvent). The suspension CAUSE (the escalating
+  /// slugs) rides the lifecycle events, not a column.
+  suspendedForConsent Boolean   @default(false) @map("suspended_for_consent")
+  suspendedAt         DateTime? @map("suspended_at") @db.Timestamptz(3)
+
+  /// Per-user plugin configuration (manifest config.schema governs the
+  /// shape). Ships with the anchor row but has no writer yet — the
+  /// `requiresUserConfig` gate, write path, and config-updated event are
+  /// #228 (#59 C4).
+  config Json @default("{}")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@unique([userId, pluginId])
+  @@index([pluginId])
+  @@map("user_plugins")
+}

@@ -17,6 +17,8 @@ import {
   PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   PluginUpdatePendingEvent,
+  UserPluginUnitDisabledEvent,
+  UserPluginUnitEnabledEvent,
 } from '../events/plugin.events';
 
 /**
@@ -206,6 +208,30 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
+        manifestVersion: event.manifestVersion,
+        payload: { grantedPermissionSlug: event.grantedPermissionSlug },
+      };
+    }
+
+    // User-unit suspension events (#225) share the UnitDisabled/UnitEnabled
+    // routing keys with the household classes; the class IS the scope.
+    if (event instanceof UserPluginUnitDisabledEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.User,
+        scopeId: event.after.userId,
+        manifestVersion: event.manifestVersion,
+        payload: { requiredPermissionSlugs: event.requiredPermissionSlugs },
+      };
+    }
+
+    if (event instanceof UserPluginUnitEnabledEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.User,
+        scopeId: event.after.userId,
         manifestVersion: event.manifestVersion,
         payload: { grantedPermissionSlug: event.grantedPermissionSlug },
       };

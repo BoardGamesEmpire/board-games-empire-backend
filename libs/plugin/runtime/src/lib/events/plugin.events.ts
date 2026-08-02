@@ -1,5 +1,5 @@
 import { MutationEvent } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginGrant } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginGrant, UserPlugin } from '@bge/database';
 import { ResourceType } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
@@ -448,6 +448,72 @@ export class HouseholdPluginUnitEnabledEvent extends MutationEvent<HouseholdPlug
   constructor(
     before: HouseholdPluginSuspensionSnapshot,
     after: HouseholdPluginSuspensionSnapshot,
+    /** The decision that cleared the last outstanding requirement. */
+    public readonly grantedPermissionSlug: string,
+    /** The active manifest version whose requirements are now fully consented. */
+    public readonly manifestVersion: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+type UserPluginSuspensionSnapshot = Readonly<
+  Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
+>;
+
+/**
+ * A USER consent unit was suspended pending re-consent (#225) — the exact
+ * user-scope mirror of `HouseholdPluginUnitDisabledEvent`. Shares the
+ * `plugin.unit_disabled` routing key (the documented `ConfigUpdated`
+ * two-class precedent): listeners discriminate on `instanceof` / `subject`,
+ * never on the key. Suspension is explicit state (`suspendedForConsent`,
+ * D-AO); the user's `enabled` intent survives, and late acceptance restores
+ * exactly it (D-AR).
+ */
+export class UserPluginUnitDisabledEvent extends MutationEvent<UserPlugin> {
+  static readonly eventName = PluginEvent.UnitDisabled;
+
+  declare readonly before: UserPluginSuspensionSnapshot;
+  declare readonly after: UserPluginSuspensionSnapshot;
+
+  readonly subject = ResourceType.UserPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: UserPluginSuspensionSnapshot,
+    after: UserPluginSuspensionSnapshot,
+    /** Every escalated re-consent permission the user has not accepted — one suspension, however many slugs forced it. */
+    public readonly requiredPermissionSlugs: readonly string[],
+    /** The manifest version whose escalation suspended the unit. */
+    public readonly manifestVersion: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/**
+ * Late acceptance re-enabled a suspended USER unit (D-AR at user scope,
+ * #225): a `Granted` decision cleared the last outstanding user-scope
+ * requirement, so `PluginGrantService.decide()` lifted the suspension in
+ * the same flow. Shares the `plugin.unit_enabled` routing key with the
+ * household class; `subject` disambiguates.
+ */
+export class UserPluginUnitEnabledEvent extends MutationEvent<UserPlugin> {
+  static readonly eventName = PluginEvent.UnitEnabled;
+
+  declare readonly before: UserPluginSuspensionSnapshot;
+  declare readonly after: UserPluginSuspensionSnapshot;
+
+  readonly subject = ResourceType.UserPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: UserPluginSuspensionSnapshot,
+    after: UserPluginSuspensionSnapshot,
     /** The decision that cleared the last outstanding requirement. */
     public readonly grantedPermissionSlug: string,
     /** The active manifest version whose requirements are now fully consented. */

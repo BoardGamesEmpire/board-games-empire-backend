@@ -10,20 +10,23 @@ import {
   type Permission,
   type Plugin,
   type PluginGrant,
+  type UserPlugin,
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { HouseholdPluginUnitEnabledEvent } from '../events/plugin.events';
+import { HouseholdPluginUnitEnabledEvent, UserPluginUnitEnabledEvent } from '../events/plugin.events';
 import type { PluginGrantAuthorityService } from './plugin-grant-authority.service';
 import { PluginGrantService, type PluginGrantDecisionInput } from './plugin-grant.service';
 
 /**
  * D-AR late acceptance: `decide()` clears `suspendedForConsent` and emits
- * `plugin.unit_enabled` once a household's `Granted` decision covers every
- * required-at-scope permission of the active manifest. Focused here rather
- * than folded into the main decide() spec — the post-effect has its own
- * matrix.
+ * `plugin.unit_enabled` once a unit's `Granted` decision covers every
+ * required-at-scope permission of the active manifest — for household AND
+ * user units (#225). Focused here rather than folded into the main decide()
+ * spec — the post-effect has its own matrix. The household block carries
+ * the full predicate matrix; the user block asserts the mirrored transition
+ * and the one behavior unique to that scope.
  */
 describe('PluginGrantService — D-AR re-enable post-effect', () => {
   // The fixture's household-required surface: calendar:read (required) plus
@@ -45,6 +48,12 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
           required: false,
           reason: { en: 'Optional notifications.' },
           consentScope: 'household',
+        },
+        {
+          slug: 'read:user_digest',
+          required: true,
+          reason: { en: 'Reads the digest each member curated for themselves.' },
+          consentScope: 'user',
         },
       ],
     },
@@ -147,7 +156,6 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
     const authority = {
       isServerAdmin: jest.fn().mockResolvedValue(false),
       isHouseholdAdmin: jest.fn().mockResolvedValue(true),
-      hasQualifyingHouseholdForPlugin: jest.fn().mockResolvedValue(true),
     } satisfies Partial<jest.Mocked<PluginGrantAuthorityService>>;
     emitter = { emit: jest.fn() };
     service = new PluginGrantService(
@@ -263,5 +271,119 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
     db.householdPlugin.findUnique.mockRejectedValue(new Error('connection reset'));
 
     await expect(service.decide(decision())).resolves.toMatchObject({ changed: true });
+  });
+
+  /**
+   * The user-scope mirror (#225). The covering predicate is the same
+   * scope-parametric method the household matrix above exercises, so these
+   * assert the mirrored transition, the guarded write, and the scope's own
+   * wrinkle — the decision's in-transaction row ensure never clears a
+   * suspension.
+   */
+  describe('user scope', () => {
+    const userGrant = (overrides: Partial<PluginGrant> = {}): PluginGrant =>
+      makeGrant({
+        id: 'grant-u1',
+        scopeType: PluginGrantScope.User,
+        scopeId: 'user-1',
+        permissionSlug: 'read:user_digest',
+        ...overrides,
+      });
+
+    const makeUserUnit = (overrides: Partial<UserPlugin> = {}): UserPlugin => ({
+      id: 'up-1',
+      userId: 'user-1',
+      pluginId: 'plugin-1',
+      enabled: true,
+      config: {},
+      suspendedForConsent: true,
+      suspendedAt: new Date('2026-07-29T00:00:00Z'),
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+      ...overrides,
+    });
+
+    const userDecision = (): PluginGrantDecisionInput =>
+      decision({
+        scopeType: PluginGrantScope.User,
+        scopeId: 'user-1',
+        deciderId: 'user-1',
+        permissionSlug: 'read:user_digest',
+      });
+
+    beforeEach(() => {
+      db.permission.findUnique.mockResolvedValue(corePermission('read:user_digest', RiskLevel.Low));
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.Low)]);
+      db.pluginGrant.upsert.mockResolvedValue(userGrant());
+      db.pluginGrant.findMany.mockResolvedValue([userGrant()]);
+      db.userPlugin.findUnique.mockResolvedValue(makeUserUnit());
+      db.userPlugin.updateMany.mockResolvedValue({ count: 1 });
+    });
+
+    it('clears the suspension and emits unit_enabled when the decision covers the last outstanding required slug', async () => {
+      await service.decide(userDecision());
+
+      expect(db.userPlugin.updateMany).toHaveBeenCalledWith({
+        where: { id: 'up-1', suspendedForConsent: true },
+        data: { suspendedForConsent: false, suspendedAt: null },
+      });
+      expect(emitter.emit).toHaveBeenCalledWith(
+        UserPluginUnitEnabledEvent.eventName,
+        expect.objectContaining({
+          grantedPermissionSlug: 'read:user_digest',
+          manifestVersion: '1.2.0',
+          before: expect.objectContaining({ suspendedForConsent: true, userId: 'user-1' }),
+          after: expect.objectContaining({ suspendedForConsent: false }),
+        }),
+      );
+    });
+
+    it('the in-transaction row ensure does not clear the suspension — only the D-AR predicate may (D-AO parity)', async () => {
+      await service.decide(userDecision());
+
+      // The ensure runs with an EMPTY update arm; the only suspension write
+      // is the guarded D-AR clear asserted above.
+      expect(db.userPlugin.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: {} }));
+    });
+
+    it('leaves the suspension in place while a required user slug remains outstanding', async () => {
+      db.pluginGrant.findMany.mockResolvedValue([]);
+
+      await service.decide(userDecision());
+
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitEnabledEvent.eventName, expect.anything());
+    });
+
+    it('leaves the suspension in place when a granted slug no longer covers the catalog risk (D-X)', async () => {
+      db.pluginGrant.findMany.mockResolvedValue([userGrant({ decidedRiskLevel: RiskLevel.Low })]);
+      db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.High)]);
+
+      await service.decide(userDecision());
+
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does nothing for a unit that is not suspended', async () => {
+      db.userPlugin.findUnique.mockResolvedValue(makeUserUnit({ suspendedForConsent: false, suspendedAt: null }));
+
+      await service.decide(userDecision());
+
+      expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('does not emit when a concurrent writer already cleared the suspension (guarded updateMany)', async () => {
+      db.userPlugin.updateMany.mockResolvedValue({ count: 0 });
+
+      await service.decide(userDecision());
+
+      expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitEnabledEvent.eventName, expect.anything());
+    });
+
+    it('never fails the committed decision when the re-enable check errors — logged, not thrown', async () => {
+      db.userPlugin.findUnique.mockRejectedValue(new Error('connection reset'));
+
+      await expect(service.decide(userDecision())).resolves.toMatchObject({ changed: true });
+    });
   });
 });
