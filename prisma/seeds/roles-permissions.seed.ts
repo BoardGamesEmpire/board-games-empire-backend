@@ -737,15 +737,36 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       riskLevel: RiskLevel.Medium,
       reason: "View the member roster of a friend's friends-visible household",
     },
+    // Self-scoped by conditions: the `userId` pin means every household role
+    // can hold this grant without conferring removal power over anyone else.
+    // The service additionally pins `userId` in its `where` because CASL
+    // `manage` implies `delete` — an Owner/Admin's delete conditions cover the
+    // whole roster, and "leave" must mean the acting user's own row.
+    {
+      action: Action.delete,
+      subject: ResourceType.HouseholdMember,
+      conditions: {
+        userId: '{{ user.id }}',
+        householdId: '{{ householdId }}',
+      },
+      slug: 'delete:household_member:leave',
+      riskLevel: RiskLevel.Low,
+      reason: 'Leave a household you belong to',
+    },
     {
       action: Action.create,
       subject: ResourceType.HouseholdRole,
       conditions: {
-        householdId: '{{ householdId }}',
-        members: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+        // HouseholdRole carries neither `householdId` nor `members` — the only
+        // path to the household is through its 1:1 member row.
+        householdMember: {
+          household: {
+            members: {
+              some: {
+                userId: '{{ user.id }}',
+                role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+              },
+            },
           },
         },
       },
@@ -1459,6 +1480,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'delete:event_occurrence',
     'manage:quota:household_member',
     'create:household_member:join',
+    'delete:household_member:leave',
     'delete:event',
     'read:quota:household',
     'delete:game_play_session',
@@ -1514,6 +1536,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'read:event_game_vote',
     'read:event_game',
     'read:household_member',
+    'delete:household_member:leave',
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
@@ -1526,6 +1549,7 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
   // HOUSEHOLD GUEST
   await assignPermissions(SystemRole.HouseholdGuest, [
     'create:session_player:join',
+    'delete:household_member:leave',
     'read:event:participant',
     'read:game_play_session',
     'read:household',

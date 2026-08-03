@@ -1,8 +1,16 @@
-import { Action, DatabaseService, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { UpdateMemberRoleDto } from '../dto';
 import { assertHouseholdExists } from '../household-access.helpers';
 
 /**
@@ -44,6 +52,7 @@ export class HouseholdMemberService {
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -109,6 +118,234 @@ export class HouseholdMemberService {
     }
 
     throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+  }
+
+  /**
+   * Changes a member's household role (#156). Row-scoped by the actor's
+   * `manage` conditions on `HouseholdMember` (`manage:household_member` —
+   * Owner/Admin of the same household).
+   *
+   * Guards:
+   * - The actor cannot change their own role (400).
+   * - A member holding `HouseholdOwner` cannot be changed here at all (400):
+   *   every owner transition belongs to transfer-ownership (#158), so no
+   *   owner-count reasoning is needed on this path.
+   *
+   * The write is an upsert keyed on the 1:1 `householdMemberId` — the `role`
+   * relation is optional on the model, so a role-less member row gets a role
+   * created rather than an update miss. Fetch, guards, write, and re-read run
+   * in one transaction; the target's ability cache is evicted after commit so
+   * the new role's grants resolve on their next request.
+   */
+  async updateMemberRole(
+    householdId: string,
+    memberId: string,
+    updateMemberRoleDto: UpdateMemberRoleDto,
+  ): Promise<HouseholdMemberWithRelations> {
+    const actorUserId = this.abilityService.getActingUserId();
+    await assertHouseholdExists(this.db, householdId);
+
+    const scopedWhere = {
+      id: memberId,
+      householdId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
+    } satisfies Prisma.HouseholdMemberWhereInput;
+
+    try {
+      const updated = await this.db.$transaction(async (tx) => {
+        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, { id: memberId, householdId }, () => {
+          throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+        });
+
+        if (member.userId === actorUserId) {
+          throw new BadRequestException(t('errors.household.member_role_self'));
+        }
+
+        if (member.role?.role.name === SystemRole.HouseholdOwner) {
+          throw new BadRequestException(t('errors.household.member_role_owner'));
+        }
+
+        await tx.householdRole.upsert({
+          where: { householdMemberId: member.id },
+          create: {
+            householdMember: { connect: { id: member.id } },
+            role: { connect: { name: updateMemberRoleDto.role } },
+          },
+          update: {
+            role: { connect: { name: updateMemberRoleDto.role } },
+          },
+        });
+
+        return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, include: MEMBER_INCLUDE });
+      });
+
+      // The target's grants changed — evict their cached ability graph so the
+      // new role takes effect immediately rather than after the cache TTL.
+      await this.permissions.invalidateUser(updated.userId);
+
+      return updated;
+    } catch (error) {
+      this.logger.error(`Error updating role for member ${memberId} in household ${householdId}`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        // The member vanished between the scoped read and the write — the
+        // rows this actor was permitted to touch no longer match.
+        throw new ForbiddenException(t('common.forbidden.update'));
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Removes another member (#157). Row-scoped by the actor's `manage`
+   * conditions on `HouseholdMember` (Owner/Admin). An Owner/Admin removing
+   * their own row is deliberately allowed — it is semantically identical to
+   * leaving, and the last-owner guard applies either way.
+   */
+  async removeMember(householdId: string, memberId: string): Promise<HouseholdMemberWithRelations> {
+    await assertHouseholdExists(this.db, householdId);
+
+    const scopedWhere = {
+      id: memberId,
+      householdId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
+    } satisfies Prisma.HouseholdMemberWhereInput;
+
+    return this.deleteMembership(scopedWhere, { id: memberId, householdId }, () => {
+      throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+    });
+  }
+
+  /**
+   * The acting user leaves the household (#157). Row-scoped by the actor's
+   * `delete` conditions on `HouseholdMember` (`delete:household_member:leave`)
+   * — and additionally pinned to `userId` explicitly: CASL's `manage` implies
+   * every action, so an Owner/Admin's `delete` conditions cover ALL members of
+   * their household, and without the pin this endpoint would delete whichever
+   * row the conditions happened to match. The pin makes "me" mean me by
+   * construction, independent of how broad the actor's grants are.
+   */
+  async leaveHousehold(householdId: string): Promise<HouseholdMemberWithRelations> {
+    const actorUserId = this.abilityService.getActingUserId();
+    await assertHouseholdExists(this.db, householdId);
+
+    const scopedWhere = {
+      householdId,
+      userId: actorUserId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.delete),
+    } satisfies Prisma.HouseholdMemberWhereInput;
+
+    return this.deleteMembership(scopedWhere, { householdId, userId: actorUserId }, () => {
+      throw new NotFoundException(t('errors.household.not_a_member', { householdId }));
+    });
+  }
+
+  /**
+   * Shared removal primitive for remove-member and leave-household: resolve
+   * the target under the caller's scoped `where`, enforce the last-owner
+   * invariant, then delete the membership and its dependents in one
+   * transaction, evicting the removed user's ability cache after commit.
+   *
+   * Deletion order is mandatory — the schema declares no cascades, so
+   * `ExcludedGame` and the 1:1 `HouseholdRole` must go before the
+   * `HouseholdMember` row. The final delete re-applies the scoped `where`, so
+   * authorization is enforced at write time as well as at read time
+   * (`P2025` → 403).
+   */
+  private async deleteMembership(
+    scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
+    unscopedWhere: Prisma.HouseholdMemberWhereInput,
+    onNotFound: () => never,
+  ): Promise<HouseholdMemberWithRelations> {
+    try {
+      const removed = await this.db.$transaction(async (tx) => {
+        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, onNotFound);
+
+        if (member.role?.role.name === SystemRole.HouseholdOwner) {
+          await this.assertNotLastOwner(tx, scopedWhere.householdId);
+        }
+
+        await tx.excludedGame.deleteMany({ where: { householdMemberId: member.id } });
+        // deleteMany: the 1:1 role relation is optional, so a role-less member
+        // must not turn the cleanup into a P2025.
+        await tx.householdRole.deleteMany({ where: { householdMemberId: member.id } });
+
+        // Re-applies the scoped `where` at write time (extended unique where,
+        // same shape the read paths use) so a concurrent permission change
+        // between read and write still surfaces as P2025 → 403.
+        await tx.householdMember.delete({ where: { ...scopedWhere, id: member.id } });
+
+        return member;
+      });
+
+      // The household just left this user's ability surface — evict their
+      // cached graph so stale Household* abilities don't linger for the TTL.
+      await this.permissions.invalidateUser(removed.userId);
+
+      return removed;
+    } catch (error) {
+      this.logger.error(`Error removing member (${JSON.stringify(unscopedWhere)})`, error);
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw new ForbiddenException(t('common.forbidden.delete'));
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Locks the household's owner-role rows and enforces that at least one other
+   * `HouseholdOwner` remains. The `FOR UPDATE` matters: under READ COMMITTED,
+   * two concurrent owner departures would each see the other still present in
+   * a plain count and both proceed, leaving the household ownerless. Locking
+   * the owner rows serializes the departures so the second one observes the
+   * first and is refused.
+   *
+   * Only called when the departing member currently holds `HouseholdOwner` —
+   * a non-owner departure cannot violate the invariant, and the concurrent
+   * "promoted to owner mid-delete" case is impossible until transfer-ownership
+   * (#158) exists, which will take this same lock.
+   */
+  private async assertNotLastOwner(tx: Prisma.TransactionClient, householdId: string): Promise<void> {
+    const owners = await tx.$queryRaw<Array<{ household_member_id: string }>>(Prisma.sql`
+      SELECT hr.household_member_id
+      FROM household_roles hr
+      JOIN household_members hm ON hm.id = hr.household_member_id
+      JOIN roles r ON r.id = hr.role_id
+      WHERE hm.household_id = ${householdId}
+        AND r.name = ${SystemRole.HouseholdOwner}
+      FOR UPDATE OF hr
+    `);
+
+    if (owners.length <= 1) {
+      throw new BadRequestException(t('errors.household.last_owner', { householdId }));
+    }
+  }
+
+  /**
+   * Resolves a member under a permission-scoped `where`, disambiguating a
+   * scoped miss into 403 (row exists but is hidden from the actor) or the
+   * caller-supplied not-found (`onNotFound`) — the mutation-path counterpart
+   * of {@link isHiddenFromActor}, running against the transaction client so
+   * the resolution participates in the caller's transaction.
+   */
+  private async findScopedMemberOrThrow(
+    tx: Prisma.TransactionClient,
+    scopedWhere: Prisma.HouseholdMemberWhereInput,
+    unscopedWhere: Prisma.HouseholdMemberWhereInput,
+    onNotFound: () => never,
+  ): Promise<HouseholdMemberWithRelations> {
+    const member = await tx.householdMember.findFirst({ where: scopedWhere, include: MEMBER_INCLUDE });
+
+    if (member) {
+      return member;
+    }
+
+    if ((await tx.householdMember.count({ where: unscopedWhere })) > 0) {
+      throw new ForbiddenException(t('common.forbidden.view'));
+    }
+
+    onNotFound();
   }
 
   /**

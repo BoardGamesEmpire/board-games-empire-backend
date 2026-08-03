@@ -1,3 +1,5 @@
+import { SystemRole } from '@bge/database';
+import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdMemberController } from './household-member.controller';
 import { HouseholdMemberService, type HouseholdMemberWithRelations } from './household-member.service';
@@ -8,12 +10,17 @@ const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRel
 
 describe('HouseholdMemberController (delegation)', () => {
   let controller: HouseholdMemberController;
-  let service: jest.Mocked<Pick<HouseholdMemberService, 'getMembers' | 'getMember'>>;
+  let service: jest.Mocked<
+    Pick<HouseholdMemberService, 'getMembers' | 'getMember' | 'updateMemberRole' | 'removeMember' | 'leaveHousehold'>
+  >;
 
   beforeEach(() => {
     service = {
       getMembers: jest.fn().mockResolvedValue([MEMBER]),
       getMember: jest.fn().mockResolvedValue(MEMBER),
+      updateMemberRole: jest.fn().mockResolvedValue(MEMBER),
+      removeMember: jest.fn().mockResolvedValue(MEMBER),
+      leaveHousehold: jest.fn().mockResolvedValue(MEMBER),
     };
     controller = new HouseholdMemberController(service as never);
   });
@@ -32,5 +39,61 @@ describe('HouseholdMemberController (delegation)', () => {
 
     expect(service.getMember).toHaveBeenCalledWith('hh-1', 'member-1');
     expect(result).toEqual({ member: MEMBER });
+  });
+
+  it('updateMemberRole forwards ids and the DTO, wrapping with a success message', async () => {
+    const dto = { role: SystemRole.HouseholdAdmin } as const;
+
+    const result = await firstValueFrom(controller.updateMemberRole('hh-1', 'member-1', dto));
+
+    expect(service.updateMemberRole).toHaveBeenCalledWith('hh-1', 'member-1', dto);
+    expect(result).toEqual({
+      message: expect.objectContaining({
+        key: 'success.household.member_role_updated',
+        args: { memberId: 'member-1' },
+      }),
+      member: MEMBER,
+    });
+  });
+
+  it('removeMember forwards householdId and memberId, wrapping with a success message', async () => {
+    const result = await firstValueFrom(controller.removeMember('hh-1', 'member-1'));
+
+    expect(service.removeMember).toHaveBeenCalledWith('hh-1', 'member-1');
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.member_removed', args: { memberId: 'member-1' } }),
+      member: MEMBER,
+    });
+  });
+
+  it('leaveHousehold forwards householdId only, wrapping with a success message', async () => {
+    const result = await firstValueFrom(controller.leaveHousehold('hh-1'));
+
+    expect(service.leaveHousehold).toHaveBeenCalledWith('hh-1');
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.member_left' }),
+      member: MEMBER,
+    });
+  });
+
+  describe('route registration', () => {
+    it('declares the literal `me` route before the parametric `:memberId` route', () => {
+      // NestJS registers routes in declaration order within a controller, so
+      // `DELETE me` must precede `DELETE :memberId` or the param route captures
+      // the literal. Prototype property order preserves declaration order.
+      const methods = Object.getOwnPropertyNames(HouseholdMemberController.prototype);
+
+      const leaveIndex = methods.indexOf('leaveHousehold');
+      const removeIndex = methods.indexOf('removeMember');
+
+      expect(leaveIndex).toBeGreaterThan(-1);
+      expect(removeIndex).toBeGreaterThan(-1);
+      expect(leaveIndex).toBeLessThan(removeIndex);
+    });
+
+    it('binds the expected paths to the delete handlers', () => {
+      expect(Reflect.getMetadata('path', HouseholdMemberController.prototype.leaveHousehold)).toBe('me');
+      expect(Reflect.getMetadata('path', HouseholdMemberController.prototype.removeMember)).toBe(':memberId');
+    });
   });
 });

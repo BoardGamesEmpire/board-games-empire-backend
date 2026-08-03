@@ -12,7 +12,10 @@
   "household": {
     "created": "Household created successfully",
     "updated": "Household with ID {id} updated successfully",
-    "deleted": "Household with ID {id} deleted successfully"
+    "deleted": "Household with ID {id} deleted successfully",
+    "member_role_updated": "Member {memberId} role updated successfully",
+    "member_removed": "Member {memberId} removed from the household successfully",
+    "member_left": "You have left the household"
   },
   "event": {
     "created": "Event created successfully",
