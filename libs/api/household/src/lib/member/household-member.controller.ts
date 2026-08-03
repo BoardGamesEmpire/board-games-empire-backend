@@ -1,11 +1,13 @@
 import { Action, ResourceType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { UpdateMemberRoleDto } from '../dto';
 import { HouseholdMemberService } from './household-member.service';
 
 @ApiBearerAuth()
@@ -37,5 +39,55 @@ export class HouseholdMemberController {
   @Get(':memberId')
   getMember(@Param('householdId') householdId: string, @Param('memberId') memberId: string) {
     return from(this.memberService.getMember(householdId, memberId)).pipe(map((member) => ({ member })));
+  }
+
+  @ApiOperation({ summary: "Change a member's household role (owner transitions go through transfer-ownership)" })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiParam({ name: 'memberId', type: String })
+  @ApiResponse({ status: Http.Ok, description: 'Role updated' })
+  @ApiResponse({ status: Http.BadRequest, description: 'Own role, an owner, or an unassignable role' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Member or household not found' })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdMember))
+  @Patch(':memberId/role')
+  updateMemberRole(
+    @Param('householdId') householdId: string,
+    @Param('memberId') memberId: string,
+    @Body() updateMemberRoleDto: UpdateMemberRoleDto,
+  ) {
+    return from(this.memberService.updateMemberRole(householdId, memberId, updateMemberRoleDto)).pipe(
+      map((member) => ({ message: t('success.household.member_role_updated', { memberId }), member })),
+    );
+  }
+
+  // NOTE: this route MUST be declared before `DELETE :memberId` — NestJS
+  // registers routes in declaration order, and the parametric route would
+  // otherwise capture the literal `me`. Pinned by a controller test.
+  @ApiOperation({ summary: 'Leave the household (acting user)' })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, description: 'Left the household' })
+  @ApiResponse({ status: Http.BadRequest, description: 'Sole owner must transfer ownership first' })
+  @ApiResponse({ status: Http.NotFound, description: 'Not a member, or household not found' })
+  @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.HouseholdMember))
+  @Delete('me')
+  leaveHousehold(@Param('householdId') householdId: string) {
+    return from(this.memberService.leaveHousehold(householdId)).pipe(
+      map((member) => ({ message: t('success.household.member_left'), member })),
+    );
+  }
+
+  @ApiOperation({ summary: 'Remove a member from the household' })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiParam({ name: 'memberId', type: String })
+  @ApiResponse({ status: Http.Ok, description: 'Member removed' })
+  @ApiResponse({ status: Http.BadRequest, description: 'Sole owner cannot be removed' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Member or household not found' })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdMember))
+  @Delete(':memberId')
+  removeMember(@Param('householdId') householdId: string, @Param('memberId') memberId: string) {
+    return from(this.memberService.removeMember(householdId, memberId)).pipe(
+      map((member) => ({ message: t('success.household.member_removed', { memberId }), member })),
+    );
   }
 }

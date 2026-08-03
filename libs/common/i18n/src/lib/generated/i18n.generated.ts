@@ -142,6 +142,11 @@ export type I18nTranslations = {
             "invalid_language_tag": string;
             "member_not_found": string;
             "language_tag_unsupported": string;
+            "last_owner": string;
+            "role_not_provisioned": string;
+            "member_role_self": string;
+            "member_role_owner": string;
+            "not_a_member": string;
         };
         "quota": {
             "exceeded": string;
@@ -208,6 +213,9 @@ export type I18nTranslations = {
             "created": string;
             "updated": string;
             "deleted": string;
+            "member_role_updated": string;
+            "member_removed": string;
+            "member_left": string;
         };
         "event": {
             "created": string;
