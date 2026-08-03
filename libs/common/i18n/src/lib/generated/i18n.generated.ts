@@ -143,6 +143,7 @@ export type I18nTranslations = {
             "member_not_found": string;
             "language_tag_unsupported": string;
             "last_owner": string;
+            "role_not_provisioned": string;
             "member_role_self": string;
             "member_role_owner": string;
             "not_a_member": string;

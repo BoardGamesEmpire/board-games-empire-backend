@@ -1,8 +1,14 @@
 import { Action, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
+import { Http, PrismaError } from '@status/codes';
 import { HouseholdMemberService, MEMBER_INCLUDE, type HouseholdMemberWithRelations } from './household-member.service';
 
 const COND = { id: 'sentinel-condition' };
@@ -246,6 +252,10 @@ describe('HouseholdMemberService', () => {
   describe('updateMemberRole', () => {
     const DTO = { role: SystemRole.HouseholdAdmin } as const;
 
+    beforeEach(() => {
+      db.role.findUnique.mockResolvedValue({ id: 'role-admin' } as never);
+    });
+
     it('scopes the target by manage conditions, upserts the 1:1 role, and evicts the target cache', async () => {
       db.householdMember.findFirst.mockResolvedValue(makeMember());
       db.householdMember.findUniqueOrThrow.mockResolvedValue(
@@ -273,13 +283,16 @@ describe('HouseholdMemberService', () => {
           include: MEMBER_INCLUDE,
         }),
       );
+      // The role is resolved explicitly, then connected by FK: a nested
+      // `connect: { name }` would raise the same P2025 as a vanished member row.
+      expect(db.role.findUnique).toHaveBeenCalledWith({
+        where: { name: SystemRole.HouseholdAdmin },
+        select: { id: true },
+      });
       expect(db.householdRole.upsert).toHaveBeenCalledWith({
         where: { householdMemberId: 'member-1' },
-        create: {
-          householdMember: { connect: { id: 'member-1' } },
-          role: { connect: { name: SystemRole.HouseholdAdmin } },
-        },
-        update: { role: { connect: { name: SystemRole.HouseholdAdmin } } },
+        create: { householdMemberId: 'member-1', roleId: 'role-admin' },
+        update: { roleId: 'role-admin' },
       });
       // The re-read returns the post-write shape; the target's graph is evicted.
       expect(db.householdMember.findUniqueOrThrow).toHaveBeenCalledWith({
@@ -293,14 +306,26 @@ describe('HouseholdMemberService', () => {
     it('upserts (create arm) for a member that has no role row yet', async () => {
       db.householdMember.findFirst.mockResolvedValue(makeMember({ role: null }));
       db.householdMember.findUniqueOrThrow.mockResolvedValue(makeMember());
+      db.role.findUnique.mockResolvedValue({ id: 'role-guest' } as never);
 
       await service.updateMemberRole('hh-1', 'member-1', { role: SystemRole.HouseholdGuest });
 
       expect(db.householdRole.upsert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          create: expect.objectContaining({ role: { connect: { name: SystemRole.HouseholdGuest } } }),
-        }),
+        expect.objectContaining({ create: { householdMemberId: 'member-1', roleId: 'role-guest' } }),
       );
+    });
+
+    it('fails loud (500) when the target role is not provisioned, rather than reporting 403', async () => {
+      // Seed drift: an assignable SystemRole with no `roles` row. Connecting by
+      // name would surface this as a P2025 → 403, describing a server
+      // misconfiguration as the caller's lack of permission.
+      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.role.findUnique.mockResolvedValue(null);
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(InternalServerErrorException);
+
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
     it('rejects changing your own role (400) without writing or invalidating', async () => {
@@ -328,11 +353,14 @@ describe('HouseholdMemberService', () => {
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
-    it('throws Forbidden when the member exists but the actor may not manage it', async () => {
+    it('throws Forbidden — naming the UPDATE denial, not view — when the actor may not manage the member', async () => {
       db.householdMember.findFirst.mockResolvedValue(null);
       db.householdMember.count.mockResolvedValue(1);
 
-      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(ForbiddenException);
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.update' }),
+      });
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
     });
 
@@ -418,11 +446,14 @@ describe('HouseholdMemberService', () => {
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
-    it('throws Forbidden when the member exists but the actor may not manage it', async () => {
+    it('throws Forbidden — naming the DELETE denial, not view — when the actor may not manage the member', async () => {
       db.householdMember.findFirst.mockResolvedValue(null);
       db.householdMember.count.mockResolvedValue(1);
 
-      await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+      });
       expect(db.householdMember.delete).not.toHaveBeenCalled();
     });
 
@@ -439,6 +470,47 @@ describe('HouseholdMemberService', () => {
 
       await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    describe('log levels', () => {
+      let errorSpy: jest.SpyInstance;
+
+      beforeEach(() => {
+        errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+      });
+
+      afterEach(() => jest.restoreAllMocks());
+
+      it('does not log business-rule rejections at error level', async () => {
+        // A client-driven 400 on a normal endpoint must not be indistinguishable
+        // from a defect in log-based alerting.
+        db.householdMember.findFirst.mockResolvedValue(makeOwner());
+        db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
+
+        await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(BadRequestException);
+
+        expect(errorSpy).not.toHaveBeenCalled();
+      });
+
+      it('does not log an expected scoped-write miss (P2025) at error level', async () => {
+        db.householdMember.findFirst.mockResolvedValue(makeMember());
+        db.householdMember.delete.mockRejectedValue(dependentRecordNotFound());
+
+        await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
+
+        expect(errorSpy).not.toHaveBeenCalled();
+      });
+
+      it('logs an unexpected failure at error level and rethrows it unchanged', async () => {
+        const boom = new Error('connection reset');
+        db.householdMember.findFirst.mockResolvedValue(makeMember());
+        db.householdMember.delete.mockRejectedValue(boom);
+
+        await expect(service.removeMember('hh-1', 'member-1')).rejects.toBe(boom);
+
+        expect(errorSpy).toHaveBeenCalled();
+      });
     });
   });
 
@@ -497,6 +569,16 @@ describe('HouseholdMemberService', () => {
 
       await expect(service.leaveHousehold('hh-1')).rejects.toThrow(NotFoundException);
       expect(db.householdMember.delete).not.toHaveBeenCalled();
+    });
+
+    it('throws Forbidden naming the DELETE denial when the row exists but is not deletable by the actor', async () => {
+      db.householdMember.findFirst.mockResolvedValue(null);
+      db.householdMember.count.mockResolvedValue(1);
+
+      await expect(service.leaveHousehold('hh-1')).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+      });
     });
 
     it('throws NotFound when the household does not exist', async () => {

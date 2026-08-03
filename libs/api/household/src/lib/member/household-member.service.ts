@@ -9,7 +9,15 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { UpdateMemberRoleDto } from '../dto';
 import { assertHouseholdExists } from '../household-access.helpers';
 
@@ -44,6 +52,17 @@ export const MEMBER_INCLUDE = {
 } as const satisfies Prisma.HouseholdMemberInclude;
 
 export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ include: typeof MEMBER_INCLUDE }>;
+
+/**
+ * How a mutation path reports a scoped-resolution miss. Supplied per call site
+ * so the denial names the attempted action rather than a generic one.
+ */
+interface ScopedMemberDenials {
+  /** Rows exist but none are visible to this actor → 403 for the attempted action. */
+  onHidden: () => never;
+  /** No such row at all → the caller's 404. */
+  onMissing: () => never;
+}
 
 @Injectable()
 export class HouseholdMemberService {
@@ -153,9 +172,19 @@ export class HouseholdMemberService {
 
     try {
       const updated = await this.db.$transaction(async (tx) => {
-        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, { id: memberId, householdId }, () => {
-          throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
-        });
+        const member = await this.findScopedMemberOrThrow(
+          tx,
+          scopedWhere,
+          { id: memberId, householdId },
+          {
+            onHidden: () => {
+              throw new ForbiddenException(t('common.forbidden.update'));
+            },
+            onMissing: () => {
+              throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+            },
+          },
+        );
 
         if (member.userId === actorUserId) {
           throw new BadRequestException(t('errors.household.member_role_self'));
@@ -165,15 +194,22 @@ export class HouseholdMemberService {
           throw new BadRequestException(t('errors.household.member_role_owner'));
         }
 
+        // Resolved explicitly rather than via a nested `role: { connect: { name } }`:
+        // a missing `roles` row (seed drift) would raise the same P2025 as a
+        // vanished member row, and the catch below would report a server
+        // misconfiguration as an authorization failure. Fail loud instead.
+        const role = await tx.role.findUnique({ where: { name: updateMemberRoleDto.role }, select: { id: true } });
+
+        if (!role) {
+          throw new InternalServerErrorException(
+            t('errors.household.role_not_provisioned', { role: updateMemberRoleDto.role }),
+          );
+        }
+
         await tx.householdRole.upsert({
           where: { householdMemberId: member.id },
-          create: {
-            householdMember: { connect: { id: member.id } },
-            role: { connect: { name: updateMemberRoleDto.role } },
-          },
-          update: {
-            role: { connect: { name: updateMemberRoleDto.role } },
-          },
+          create: { householdMemberId: member.id, roleId: role.id },
+          update: { roleId: role.id },
         });
 
         return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, include: MEMBER_INCLUDE });
@@ -185,14 +221,11 @@ export class HouseholdMemberService {
 
       return updated;
     } catch (error) {
-      this.logger.error(`Error updating role for member ${memberId} in household ${householdId}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        // The member vanished between the scoped read and the write — the
-        // rows this actor was permitted to touch no longer match.
-        throw new ForbiddenException(t('common.forbidden.update'));
-      }
-
-      throw error;
+      throw this.rethrowMutationFailure(error, t('common.forbidden.update'), {
+        householdId,
+        memberId,
+        operation: 'updateMemberRole',
+      });
     }
   }
 
@@ -211,9 +244,18 @@ export class HouseholdMemberService {
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
-    return this.deleteMembership(scopedWhere, { id: memberId, householdId }, () => {
-      throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
-    });
+    return this.deleteMembership(
+      scopedWhere,
+      { id: memberId, householdId },
+      {
+        onHidden: () => {
+          throw new ForbiddenException(t('common.forbidden.delete'));
+        },
+        onMissing: () => {
+          throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+        },
+      },
+    );
   }
 
   /**
@@ -235,9 +277,18 @@ export class HouseholdMemberService {
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.delete),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
-    return this.deleteMembership(scopedWhere, { householdId, userId: actorUserId }, () => {
-      throw new NotFoundException(t('errors.household.not_a_member', { householdId }));
-    });
+    return this.deleteMembership(
+      scopedWhere,
+      { householdId, userId: actorUserId },
+      {
+        onHidden: () => {
+          throw new ForbiddenException(t('common.forbidden.delete'));
+        },
+        onMissing: () => {
+          throw new NotFoundException(t('errors.household.not_a_member', { householdId }));
+        },
+      },
+    );
   }
 
   /**
@@ -255,11 +306,11 @@ export class HouseholdMemberService {
   private async deleteMembership(
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
     unscopedWhere: Prisma.HouseholdMemberWhereInput,
-    onNotFound: () => never,
+    denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     try {
       const removed = await this.db.$transaction(async (tx) => {
-        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, onNotFound);
+        const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, denials);
 
         if (member.role?.role.name === SystemRole.HouseholdOwner) {
           await this.assertNotLastOwner(tx, scopedWhere.householdId);
@@ -284,13 +335,42 @@ export class HouseholdMemberService {
 
       return removed;
     } catch (error) {
-      this.logger.error(`Error removing member (${JSON.stringify(unscopedWhere)})`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException(t('common.forbidden.delete'));
-      }
+      throw this.rethrowMutationFailure(error, t('common.forbidden.delete'), {
+        ...unscopedWhere,
+        operation: 'deleteMembership',
+      });
+    }
+  }
 
+  /**
+   * Single failure classifier for the three mutations. Three outcomes, and the
+   * log level is the point:
+   *
+   * - An `HttpException` raised inside the transaction is a business-rule
+   *   rejection the endpoint is specified to produce (own role, owner role,
+   *   last owner, hidden row, not found). Rethrown untouched and NOT logged at
+   *   error level — client-driven 4xx on a normal endpoint would otherwise be
+   *   indistinguishable from real defects in log-based alerting.
+   * - A `P2025` is the scoped write missing: the rows this actor was permitted
+   *   to touch no longer match. Expected under concurrency, so `debug`.
+   * - Anything else is unexpected and keeps the full `error` log.
+   */
+  private rethrowMutationFailure(
+    error: unknown,
+    forbiddenMessage: ReturnType<typeof t>,
+    context: Record<string, unknown>,
+  ): never {
+    if (error instanceof HttpException) {
       throw error;
     }
+
+    if (isPrismaDependentRecordNotFoundError(error)) {
+      this.logger.debug(`Scoped write matched no rows: ${JSON.stringify(context)}`);
+      throw new ForbiddenException(forbiddenMessage);
+    }
+
+    this.logger.error(`Unexpected failure: ${JSON.stringify(context)}`, error);
+    throw error;
   }
 
   /**
@@ -324,16 +404,21 @@ export class HouseholdMemberService {
 
   /**
    * Resolves a member under a permission-scoped `where`, disambiguating a
-   * scoped miss into 403 (row exists but is hidden from the actor) or the
-   * caller-supplied not-found (`onNotFound`) — the mutation-path counterpart
-   * of {@link isHiddenFromActor}, running against the transaction client so
-   * the resolution participates in the caller's transaction.
+   * scoped miss into a hidden row or an absent one — the mutation-path
+   * counterpart of {@link isHiddenFromActor}, running against the transaction
+   * client so the resolution participates in the caller's transaction.
+   *
+   * Both outcomes are delegated to the caller rather than thrown here: the
+   * denial has to name the action the actor actually attempted. A member
+   * hidden from a `removeMember` call is a delete denial, not a view denial,
+   * and reporting "you don't have permission to view this resource" for a
+   * DELETE misdescribes what was refused.
    */
   private async findScopedMemberOrThrow(
     tx: Prisma.TransactionClient,
     scopedWhere: Prisma.HouseholdMemberWhereInput,
     unscopedWhere: Prisma.HouseholdMemberWhereInput,
-    onNotFound: () => never,
+    denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
     const member = await tx.householdMember.findFirst({ where: scopedWhere, include: MEMBER_INCLUDE });
 
@@ -342,10 +427,10 @@ export class HouseholdMemberService {
     }
 
     if ((await tx.householdMember.count({ where: unscopedWhere })) > 0) {
-      throw new ForbiddenException(t('common.forbidden.view'));
+      denials.onHidden();
     }
 
-    onNotFound();
+    denials.onMissing();
   }
 
   /**

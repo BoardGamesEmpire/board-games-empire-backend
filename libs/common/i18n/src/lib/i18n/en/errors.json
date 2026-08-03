@@ -125,6 +125,7 @@
     "member_not_found": "Member with ID {memberId} not found in household {householdId}",
     "language_tag_unsupported": "Language tag '{tag}' is not supported by this server",
     "last_owner": "The sole owner of household {householdId} cannot leave or be removed — transfer ownership first",
+    "role_not_provisioned": "Household role '{role}' is not provisioned on this server",
     "member_role_self": "You cannot change your own household role",
     "member_role_owner": "A household owner's role cannot be changed here — use the transfer-ownership flow",
     "not_a_member": "You are not a member of household {householdId}"
