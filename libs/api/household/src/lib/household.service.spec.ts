@@ -4,6 +4,7 @@ import { AbilityService, PermissionsService } from '@bge/permissions';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
+import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
 
 const COND = { id: 'sentinel-condition' };
@@ -133,6 +134,130 @@ describe('HouseholdService', () => {
     );
     // The new owner's cached ability graph is evicted so their grants resolve.
     expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
+  });
+
+  describe('create idempotency (#210)', () => {
+    const uniqueViolation = (target: string | string[]) =>
+      new Prisma.PrismaClientKnownRequestError('unique violation', {
+        code: PrismaError.UniqueConstraintViolation,
+        clientVersion: 'test',
+        meta: { target },
+      });
+
+    it('persists the client-supplied key on the row', async () => {
+      db.household.create.mockResolvedValue({ id: 'hh-1' } as Household);
+
+      await service.create({ name: 'Home', clientRequestId: 'key-1' });
+
+      expect(db.household.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ clientRequestId: 'key-1' }) }),
+      );
+    });
+
+    it('replays: returns the ORIGINAL row on a key conflict instead of surfacing it', async () => {
+      const original = { id: 'hh-original', createdById: 'user-1', clientRequestId: 'key-1' } as Household;
+      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.household.findUnique.mockResolvedValue(original);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
+
+      // The lookup omits `deletedAt: null` — the keyed create semantically
+      // succeeded; that row is its canonical outcome even if since deleted.
+      expect(db.household.findUnique).toHaveBeenCalledWith({
+        where: { createdById_clientRequestId: { createdById: 'user-1', clientRequestId: 'key-1' } },
+      });
+      // Eviction runs on replay too: heals the committed-then-crashed-before-
+      // eviction window of the original request. Idempotent and cheap.
+      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
+    });
+
+    it('replays when Prisma reports the target as the field-name array', async () => {
+      const original = { id: 'hh-original' } as Household;
+      db.household.create.mockRejectedValue(uniqueViolation(['createdById', 'clientRequestId']));
+      db.household.findUnique.mockResolvedValue(original);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
+    });
+
+    it('returns a soft-deleted original as-is (deletedAt visible for client reconciliation)', async () => {
+      const tombstoned = { id: 'hh-original', deletedAt: new Date('2026-08-01T00:00:00Z') } as Household;
+      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.household.findUnique.mockResolvedValue(tombstoned);
+
+      const result = await service.create({ name: 'Home', clientRequestId: 'key-1' });
+
+      expect(result).toBe(tombstoned);
+      expect(result.deletedAt).toEqual(new Date('2026-08-01T00:00:00Z'));
+    });
+
+    it('rethrows a P2002 raised by a DIFFERENT unique constraint', async () => {
+      const error = uniqueViolation(['householdId', 'userId']);
+      db.household.create.mockRejectedValue(error);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a matching P2002 when no key was supplied (keyless creates never replay)', async () => {
+      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.household.create.mockRejectedValue(error);
+
+      await expect(service.create({ name: 'Home' })).rejects.toBe(error);
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rethrows the original error when the replay lookup finds nothing', async () => {
+      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.household.create.mockRejectedValue(error);
+      db.household.findUnique.mockResolvedValue(null);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('rethrows non-unique-constraint failures untouched', async () => {
+      const error = new Error('connection reset');
+      db.household.create.mockRejectedValue(error);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ])('treats %s as no key (in-process callers skip DTO validation)', async (_label, key) => {
+      db.household.create.mockResolvedValue({ id: 'hh-1' } as Household);
+
+      await service.create({ name: 'Home', clientRequestId: key });
+
+      // Persisting '' would put every blank-key create by this user into one
+      // shared bucket, silently replaying unrelated creates.
+      expect(db.household.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ clientRequestId: undefined }) }),
+      );
+    });
+
+    it('never replays a blank key, even on an idempotency-unique conflict', async () => {
+      const error = uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.household.create.mockRejectedValue(error);
+
+      await expect(service.create({ name: 'Home', clientRequestId: '' })).rejects.toBe(error);
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('trims a padded key so the DTO and in-process paths share one bucket', async () => {
+      const original = { id: 'hh-original' } as Household;
+      db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.household.findUnique.mockResolvedValue(original);
+
+      await expect(service.create({ name: 'Home', clientRequestId: '  key-1  ' })).resolves.toBe(original);
+
+      expect(db.household.findUnique).toHaveBeenCalledWith({
+        where: { createdById_clientRequestId: { createdById: 'user-1', clientRequestId: 'key-1' } },
+      });
+    });
   });
 
   it('updateHousehold → update', async () => {
