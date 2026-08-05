@@ -2,7 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
-import { Body, Controller, Delete, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -57,6 +57,32 @@ export class HouseholdMemberController {
   ) {
     return from(this.memberService.updateMemberRole(householdId, memberId, updateMemberRoleDto)).pipe(
       map((member) => ({ message: t('success.household.member_role_updated', { memberId }), member })),
+    );
+  }
+
+  // Gated on `update` over HouseholdRole, which — unlike `update` over
+  // Household — is Owner-only: `update:household_role:transfer-ownership` is the
+  // sole `update`/`manage` grant on that subject, and HouseholdAdmin is
+  // explicitly excluded from it in the seed. A gate on
+  // `can(update, ResourceType.Household)` would admit Admins, because
+  // `update:household` is theirs too and CASL unions the rules for an
+  // (action, subject) pair.
+  @ApiOperation({ summary: 'Transfer household ownership to another member (current owner only)' })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiParam({ name: 'memberId', type: String, description: 'HouseholdMember.id of the member to promote' })
+  @ApiResponse({ status: Http.Ok, description: 'Ownership transferred' })
+  @ApiResponse({ status: Http.BadRequest, description: 'Target is yourself, or already the owner' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not the current owner of this household' })
+  @ApiResponse({ status: Http.NotFound, description: 'Member or household not found' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.HouseholdRole))
+  @Post(':memberId/transfer-ownership')
+  transferOwnership(@Param('householdId') householdId: string, @Param('memberId') memberId: string) {
+    return from(this.memberService.transferOwnership(householdId, memberId)).pipe(
+      map(({ owner, previousOwner }) => ({
+        message: t('success.household.ownership_transferred', { memberId }),
+        owner,
+        previousOwner,
+      })),
     );
   }
 

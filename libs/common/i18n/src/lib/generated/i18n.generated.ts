@@ -147,6 +147,8 @@ export type I18nTranslations = {
             "member_role_self": string;
             "member_role_owner": string;
             "not_a_member": string;
+            "transfer_target_self": string;
+            "transfer_target_already_owner": string;
         };
         "quota": {
             "exceeded": string;
@@ -216,6 +218,7 @@ export type I18nTranslations = {
             "member_role_updated": string;
             "member_removed": string;
             "member_left": string;
+            "ownership_transferred": string;
         };
         "event": {
             "created": string;

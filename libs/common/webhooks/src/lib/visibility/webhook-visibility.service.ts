@@ -56,6 +56,16 @@ export class WebhookVisibilityService {
       ResourceType.Job,
       (id, ability) => this.exists(this.db.job.count({ where: this.scope(ResourceType.Job, id, ability, false) })),
     ],
+    // Required by `household.ownership.transferred.v1` (#158). Without an entry
+    // here `isVisibleTo` throws for the subject, `fanOut` catches it per
+    // subscription, and the event is registered-but-undeliverable — an ERROR log
+    // per subscriber and no delivery. Household is soft-deleted, so a
+    // tombstoned household is never visible.
+    [
+      ResourceType.Household,
+      (id, ability) =>
+        this.exists(this.db.household.count({ where: this.scope(ResourceType.Household, id, ability, true) })),
+    ],
   ]);
 
   async isVisibleTo(subject: ResourceType, subjectId: string, ability: AppAbility): Promise<boolean> {

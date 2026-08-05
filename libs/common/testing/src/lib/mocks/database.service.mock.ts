@@ -77,10 +77,17 @@ export function createMockDatabaseService(): MockDatabaseService {
     // @ts-expect-error -- mocked as jest.MockedFunction
     $disconnect: jest.fn().mockResolvedValue(undefined),
     $transaction: jest.fn(),
-    $executeRaw: jest.fn(),
-    $executeRawUnsafe: jest.fn(),
-    $queryRaw: jest.fn(),
-    $queryRawUnsafe: jest.fn(),
+    // Raw helpers resolve to their real empty shapes rather than `undefined`.
+    // A bare jest.fn() models a client that returns nothing, which no Prisma raw
+    // query ever does: `$queryRaw` yields a row array and `$executeRaw` an
+    // affected-row count. The difference is invisible until production code
+    // touches the result — an unstubbed `$queryRaw` surfaced as
+    // "Cannot read properties of undefined (reading 'map')" classified as an
+    // unexpected 500, in a test that had nothing to do with raw SQL.
+    $executeRaw: jest.fn().mockResolvedValue(0 as never),
+    $executeRawUnsafe: jest.fn().mockResolvedValue(0 as never),
+    $queryRaw: jest.fn().mockResolvedValue([] as never),
+    $queryRawUnsafe: jest.fn().mockResolvedValue([] as never),
 
     // --- Model delegates ---
     account: mockDelegate(),

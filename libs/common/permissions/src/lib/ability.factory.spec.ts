@@ -490,6 +490,24 @@ describe('AbilityFactory', () => {
    *    happens in Prisma via `accessibleBy`. What matters here is that the
    *    template renders and that the field paths are the ones Prisma will accept.
    */
+  /**
+   * Every string leaf in a rendered condition tree, for empty-value detection.
+   * Shared by the #155 and #158 rule suites: Mustache renders an out-of-context
+   * variable as an EMPTY STRING rather than leaving a `{{ … }}` marker, so a
+   * marker scan cannot detect one — an empty leaf is the actual symptom.
+   */
+  function stringLeaves(value: unknown, acc: string[] = []): string[] {
+    if (typeof value === 'string') {
+      acc.push(value);
+    } else if (Array.isArray(value)) {
+      value.forEach((item) => stringLeaves(item, acc));
+    } else if (value !== null && typeof value === 'object') {
+      Object.values(value).forEach((item) => stringLeaves(item, acc));
+    }
+
+    return acc;
+  }
+
   describe('household member rules (#155)', () => {
     // Mirrors the seeded relational clause meaning "this User node is an
     // accepted friend of the acting user".
@@ -545,19 +563,6 @@ describe('AbilityFactory', () => {
           role: makeRole(roleName, permissions),
         })),
       });
-
-    /** Every string leaf in a rendered condition tree, for empty-value detection. */
-    function stringLeaves(value: unknown, acc: string[] = []): string[] {
-      if (typeof value === 'string') {
-        acc.push(value);
-      } else if (Array.isArray(value)) {
-        value.forEach((item) => stringLeaves(item, acc));
-      } else if (value !== null && typeof value === 'object') {
-        Object.values(value).forEach((item) => stringLeaves(item, acc));
-      }
-
-      return acc;
-    }
 
     describe('read:household_member — membership scoping', () => {
       it('renders {{ householdId }} from the membership context, not the user context', () => {
@@ -692,6 +697,146 @@ describe('AbilityFactory', () => {
       });
     });
   });
+
+  /**
+   * The Owner-only gate for transfer-ownership (#158) and the tightened
+   * `update:household` condition (#160). Both are relation-traversing, so they
+   * are asserted STRUCTURALLY for the reason documented above; what matters is
+   * that the templates render and that the field paths are ones Prisma accepts.
+   */
+  describe('ownership transfer rules (#158, #160)', () => {
+    const OWNER_OR_ADMIN = { in: ['HouseholdOwner', 'HouseholdAdmin'] };
+
+    const transferOwnership = () =>
+      makePermission({
+        action: Action.update,
+        subject: ResourceType.HouseholdRole,
+        slug: 'update:household_role:transfer-ownership',
+        conditions: {
+          householdMember: {
+            household: {
+              id: '{{ householdId }}',
+              members: {
+                some: { userId: '{{ user.id }}', role: { role: { name: 'HouseholdOwner' } } },
+              },
+            },
+          },
+        },
+      });
+
+    const updateHousehold = () =>
+      makePermission({
+        action: Action.update,
+        subject: ResourceType.Household,
+        slug: 'update:household',
+        conditions: {
+          id: '{{ householdId }}',
+          members: { some: { userId: '{{ user.id }}', role: { role: { name: OWNER_OR_ADMIN } } } },
+        },
+      });
+
+    const holder = (roleName: string, permissions: ReturnType<typeof makePermission>[]) =>
+      makeUser({
+        id: 'user-1',
+        householdMember: [{ householdId: 'hh-1', role: makeRole(roleName, permissions) }],
+      });
+
+    describe('update:household_role:transfer-ownership', () => {
+      it('reaches the household only through the member row, never a field HouseholdRole lacks', () => {
+        const conditions = factory
+          .createForUser(holder('HouseholdOwner', [transferOwnership()]))
+          .rules.at(-1)?.conditions;
+
+        expect(conditions).toEqual({
+          householdMember: {
+            household: {
+              id: 'hh-1',
+              members: { some: { userId: 'user-1', role: { role: { name: 'HouseholdOwner' } } } },
+            },
+          },
+        });
+        // HouseholdRole carries neither of these; the pre-#241 shape used both.
+        expect(conditions).not.toHaveProperty('householdId');
+        expect(conditions).not.toHaveProperty('members');
+      });
+
+      it('is the ONLY update/manage grant on HouseholdRole, which is what makes the gate owner-only', () => {
+        // `can(update, HouseholdRole)` is the controller gate. It can only stay
+        // owner-only while no other rule grants update (or manage, which implies
+        // it) on this subject — the seed enforces that by excluding the slug from
+        // the derived HouseholdAdmin list.
+        const ability = factory.createForUser(holder('HouseholdOwner', [transferOwnership()]));
+
+        const householdRoleRules = ability.rules.filter(
+          (rule) =>
+            rule.subject === ResourceType.HouseholdRole &&
+            [Action.update, Action.manage].includes(rule.action as 'update' | 'manage'),
+        );
+
+        expect(householdRoleRules).toHaveLength(1);
+      });
+
+      it('does not confer the gate on an admin who holds no such grant', () => {
+        // The seed's `disallowedHouseholdAdminPermissions` is what produces this;
+        // asserted here because the derived Admin list gives no compile-time signal.
+        const ability = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()]));
+
+        expect(ability.can(Action.update, asEntity('HouseholdRole', { id: 'hr-1' }))).toBe(false);
+      });
+
+      it('pins the grant to the household the owner role came from', () => {
+        const user = makeUser({
+          id: 'user-1',
+          householdMember: [
+            { householdId: 'hh-1', role: makeRole('HouseholdOwner', [transferOwnership()]) },
+            { householdId: 'hh-2', role: makeRole('HouseholdMember', []) },
+          ],
+        });
+
+        const rendered = factory
+          .createForUser(user)
+          .rules.filter((rule) => rule.subject === ResourceType.HouseholdRole)
+          .map(
+            (rule) =>
+              (rule.conditions as { householdMember: { household: { id: string } } }).householdMember.household.id,
+          );
+
+        expect(rendered).toEqual(['hh-1']);
+      });
+
+      it('renders every template variable to a non-empty value', () => {
+        const conditions = factory
+          .createForUser(holder('HouseholdOwner', [transferOwnership()]))
+          .rules.at(-1)?.conditions;
+
+        // An empty leaf is the symptom of a variable rendered out of context — a
+        // match-nothing clause rather than a visible failure (#234, #244).
+        expect(stringLeaves(conditions)).not.toContain('');
+      });
+    });
+
+    describe('update:household — tightened condition (#160)', () => {
+      it('requires an owner/admin membership, not merely a membership', () => {
+        const conditions = factory
+          .createForUser(holder('HouseholdOwner', [updateHousehold()]))
+          .rules.at(-1)?.conditions;
+
+        expect(conditions).toEqual({
+          id: 'hh-1',
+          members: { some: { userId: 'user-1', role: { role: { name: OWNER_OR_ADMIN } } } },
+        });
+      });
+
+      it('still admits admins, which is why the transfer gate cannot live on this subject', () => {
+        // `accessibleBy` unions every rule for an (action, subject) pair, so a
+        // narrower Household+update rule could not have restricted this to owners.
+        const conditions = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()])).rules.at(-1)
+          ?.conditions as { members: { some: { role: { role: { name: { in: string[] } } } } } };
+
+        expect(conditions.members.some.role.role.name.in).toContain('HouseholdAdmin');
+      });
+    });
+  });
 });
 
 function makePermissionStub(
@@ -787,7 +932,12 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
 }
 
 function makeRole(name: string, permissions: Permission[]): RoleWithPermissions {
-  return { role: { name, permissions: permissions.map((permission) => ({ permission })) } };
+  return {
+    role: {
+      name,
+      permissions: permissions.map((permission) => ({ permission })),
+    },
+  };
 }
 
 function makeUserPermission(

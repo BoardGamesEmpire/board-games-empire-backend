@@ -1,4 +1,5 @@
 import { SystemRole } from '@bge/database';
+import { RequestMethod } from '@nestjs/common';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdMemberController } from './household-member.controller';
@@ -7,11 +8,15 @@ import { HouseholdMemberService, type HouseholdMemberWithRelations } from './hou
 const PAGINATION = { offset: 0, limit: 10 } as never;
 
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
+const PROMOTED = { id: 'member-2', householdId: 'hh-1' } as HouseholdMemberWithRelations;
 
 describe('HouseholdMemberController (delegation)', () => {
   let controller: HouseholdMemberController;
   let service: jest.Mocked<
-    Pick<HouseholdMemberService, 'getMembers' | 'getMember' | 'updateMemberRole' | 'removeMember' | 'leaveHousehold'>
+    Pick<
+      HouseholdMemberService,
+      'getMembers' | 'getMember' | 'updateMemberRole' | 'transferOwnership' | 'removeMember' | 'leaveHousehold'
+    >
   >;
 
   beforeEach(() => {
@@ -19,6 +24,7 @@ describe('HouseholdMemberController (delegation)', () => {
       getMembers: jest.fn().mockResolvedValue([MEMBER]),
       getMember: jest.fn().mockResolvedValue(MEMBER),
       updateMemberRole: jest.fn().mockResolvedValue(MEMBER),
+      transferOwnership: jest.fn().mockResolvedValue({ owner: PROMOTED, previousOwner: MEMBER }),
       removeMember: jest.fn().mockResolvedValue(MEMBER),
       leaveHousehold: jest.fn().mockResolvedValue(MEMBER),
     };
@@ -53,6 +59,20 @@ describe('HouseholdMemberController (delegation)', () => {
         args: { memberId: 'member-1' },
       }),
       member: MEMBER,
+    });
+  });
+
+  it('transferOwnership forwards ids and returns both affected members', async () => {
+    const result = await firstValueFrom(controller.transferOwnership('hh-1', 'member-2'));
+
+    expect(service.transferOwnership).toHaveBeenCalledWith('hh-1', 'member-2');
+    expect(result).toEqual({
+      message: expect.objectContaining({
+        key: 'success.household.ownership_transferred',
+        args: { memberId: 'member-2' },
+      }),
+      owner: PROMOTED,
+      previousOwner: MEMBER,
     });
   });
 
@@ -94,6 +114,17 @@ describe('HouseholdMemberController (delegation)', () => {
     it('binds the expected paths to the delete handlers', () => {
       expect(Reflect.getMetadata('path', HouseholdMemberController.prototype.leaveHousehold)).toBe('me');
       expect(Reflect.getMetadata('path', HouseholdMemberController.prototype.removeMember)).toBe(':memberId');
+    });
+
+    it('binds transfer-ownership as a POST under the member path', () => {
+      // A literal segment AFTER `:memberId` cannot be captured by the parametric
+      // route, so this one carries no ordering constraint — unlike `me`.
+      expect(Reflect.getMetadata('path', HouseholdMemberController.prototype.transferOwnership)).toBe(
+        ':memberId/transfer-ownership',
+      );
+      expect(Reflect.getMetadata('method', HouseholdMemberController.prototype.transferOwnership)).toBe(
+        RequestMethod.POST,
+      );
     });
   });
 });
