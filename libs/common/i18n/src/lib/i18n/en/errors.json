@@ -128,7 +128,9 @@
     "role_not_provisioned": "Household role '{role}' is not provisioned on this server",
     "member_role_self": "You cannot change your own household role",
     "member_role_owner": "A household owner's role cannot be changed here — use the transfer-ownership flow",
-    "not_a_member": "You are not a member of household {householdId}"
+    "not_a_member": "You are not a member of household {householdId}",
+    "transfer_target_self": "You already own this household — transfer ownership to another member",
+    "transfer_target_already_owner": "Member {memberId} is already an owner of this household"
   },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",

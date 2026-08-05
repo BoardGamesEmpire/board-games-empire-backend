@@ -15,7 +15,8 @@
     "deleted": "Household with ID {id} deleted successfully",
     "member_role_updated": "Member {memberId} role updated successfully",
     "member_removed": "Member {memberId} removed from the household successfully",
-    "member_left": "You have left the household"
+    "member_left": "You have left the household",
+    "ownership_transferred": "Ownership transferred to member {memberId}; you are now a household admin"
   },
   "event": {
     "created": "Event created successfully",

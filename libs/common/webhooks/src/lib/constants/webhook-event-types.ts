@@ -32,6 +32,8 @@ export const WebhookEventType = {
   ImportJobFailed: 'game.import.failed.v1',
   /** Every job in an import batch reached a terminal status. */
   ImportBatchCompleted: 'game.import-batch.completed.v1',
+  /** Household ownership changed hands (#158). */
+  HouseholdOwnershipTransferred: 'household.ownership.transferred.v1',
 } as const;
 
 export type WebhookEventType = (typeof WebhookEventType)[keyof typeof WebhookEventType];
@@ -70,6 +72,30 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   [WebhookEventType.ImportJobStarted]: { subject: ResourceType.Job, requiredAction: Action.read },
   [WebhookEventType.ImportJobFailed]: { subject: ResourceType.Job, requiredAction: Action.read },
   [WebhookEventType.ImportBatchCompleted]: { subject: ResourceType.Job, requiredAction: Action.read },
+  // `read`, conforming to the subsystem invariant that every descriptor uses the
+  // read action and per-instance visibility is the gate (guarded by a registry
+  // spec).
+  //
+  // #158's design called for `update` here, reasoning that `read` on Household
+  // also admits friends-visibility readers (`read:households:friends`) and that
+  // who runs a household is not friends-visible material. That reasoning does
+  // not survive contact with the code: `requiredAction` is consulted ONLY when a
+  // subscription is created (`WebhookSubscriptionService`), while dispatch-time
+  // visibility always resolves the subject with the `accessibleBy` default —
+  // `read`. So `update` would narrow who may subscribe without narrowing who
+  // keeps receiving, and an owner demoted after subscribing would go on getting
+  // deliveries either way. Buying that asymmetry at the cost of weakening a
+  // tested repo-wide invariant is a bad trade.
+  //
+  // The control actually wanted — an audience that shrinks when the subscriber
+  // loses authority — requires dispatch to honour `requiredAction`, which is a
+  // change to every descriptor at once rather than a per-event override (#247).
+  // Until then the mitigation that does work is the payload: ids only, no member
+  // identity (see the emit site).
+  [WebhookEventType.HouseholdOwnershipTransferred]: {
+    subject: ResourceType.Household,
+    requiredAction: Action.read,
+  },
 };
 
 /** Frozen list of every webhook-eligible event name. */

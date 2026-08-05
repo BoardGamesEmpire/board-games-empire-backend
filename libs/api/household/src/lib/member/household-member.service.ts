@@ -9,6 +9,7 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
+import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
   ForbiddenException,
@@ -18,7 +19,9 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UpdateMemberRoleDto } from '../dto';
+import { HouseholdOwnershipTransferredEvent, type HouseholdOwnershipSnapshot } from '../events/household.events';
 import { assertHouseholdExists } from '../household-access.helpers';
 
 /**
@@ -54,6 +57,25 @@ export const MEMBER_INCLUDE = {
 export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ include: typeof MEMBER_INCLUDE }>;
 
 /**
+ * Anything that can issue reads on this service's behalf: the base client, or a
+ * transaction client inside `$transaction`. Lets a lookup live outside the
+ * transaction when it has no reason to hold locks.
+ */
+type QueryClient = DatabaseService | Prisma.TransactionClient;
+
+/**
+ * Both sides of a completed ownership transfer. The client needs both rows to
+ * reconcile its roster in one round trip — returning only the household would
+ * force a follow-up roster fetch to learn who is now Admin.
+ */
+export interface OwnershipTransferResult {
+  /** The promoted member, now `HouseholdOwner`. */
+  readonly owner: HouseholdMemberWithRelations;
+  /** The acting member, now `HouseholdAdmin`. */
+  readonly previousOwner: HouseholdMemberWithRelations;
+}
+
+/**
  * How a mutation path reports a scoped-resolution miss. Supplied per call site
  * so the denial names the attempted action rather than a generic one.
  */
@@ -72,6 +94,7 @@ export class HouseholdMemberService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
+    private readonly events: EventEmitter2,
   ) {}
 
   /**
@@ -194,22 +217,12 @@ export class HouseholdMemberService {
           throw new BadRequestException(t('errors.household.member_role_owner'));
         }
 
-        // Resolved explicitly rather than via a nested `role: { connect: { name } }`:
-        // a missing `roles` row (seed drift) would raise the same P2025 as a
-        // vanished member row, and the catch below would report a server
-        // misconfiguration as an authorization failure. Fail loud instead.
-        const role = await tx.role.findUnique({ where: { name: updateMemberRoleDto.role }, select: { id: true } });
-
-        if (!role) {
-          throw new InternalServerErrorException(
-            t('errors.household.role_not_provisioned', { role: updateMemberRoleDto.role }),
-          );
-        }
+        const roleId = await this.resolveRoleId(tx, updateMemberRoleDto.role);
 
         await tx.householdRole.upsert({
           where: { householdMemberId: member.id },
-          create: { householdMemberId: member.id, roleId: role.id },
-          update: { roleId: role.id },
+          create: { householdMemberId: member.id, roleId },
+          update: { roleId },
         });
 
         return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, include: MEMBER_INCLUDE });
@@ -225,6 +238,165 @@ export class HouseholdMemberService {
         householdId,
         memberId,
         operation: 'updateMemberRole',
+      });
+    }
+  }
+
+  /**
+   * Transfers household ownership to another member (#158): the target becomes
+   * `HouseholdOwner`, the acting owner becomes `HouseholdAdmin`, atomically.
+   * This is the ONLY path that produces an owner transition in either
+   * direction — #156's change-role endpoint refuses owner targets and cannot
+   * assign `HouseholdOwner`, so a household can never reach a multiple-owner or
+   * ownerless state through a surface that reasons about one row at a time.
+   *
+   * Authorization is the Owner-only `update:household_role:transfer-ownership`
+   * gate at the controller. Row scoping uses the actor's `manage` conditions on
+   * `HouseholdMember` (Owner AND Admin hold those, so scoping alone does not
+   * restrict this endpoint — the gate does, and the locked owner set backs it
+   * inside the transaction).
+   *
+   * Multiple owners are representable (`HouseholdRole` is 1:1 per *member*, but
+   * N members may hold `HouseholdOwner`), so this is a swap and not a
+   * normalization: co-owners are untouched, and a co-owner may transfer.
+   */
+  async transferOwnership(householdId: string, memberId: string): Promise<OwnershipTransferResult> {
+    const initiatedAt = new Date();
+    const actorUserId = this.abilityService.getActingUserId();
+    await assertHouseholdExists(this.db, householdId);
+
+    // Resolved OUTSIDE the transaction. Role ids are static seed data, not
+    // household state, so holding the owner-row lock across two lookups that
+    // cannot change the outcome only extends the window in which concurrent
+    // departures block. A seed change mid-flight would fail the FK regardless.
+    const ownerRoleId = await this.resolveRoleId(this.db, SystemRole.HouseholdOwner);
+    const adminRoleId = await this.resolveRoleId(this.db, SystemRole.HouseholdAdmin);
+
+    const conditions = this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage);
+    const actorWhere = {
+      householdId,
+      userId: actorUserId,
+      AND: conditions,
+    } satisfies Prisma.HouseholdMemberWhereInput;
+    const targetWhere = { id: memberId, householdId, AND: conditions } satisfies Prisma.HouseholdMemberWhereInput;
+
+    try {
+      const { before, after, result } = await this.db.$transaction(async (tx) => {
+        // Lock FIRST, read second. Two invariants depend on it:
+        //
+        // 1. Two co-owners transferring concurrently would each read the other
+        //    as an owner, each demote itself, and leave the household ownerless
+        //    — a legitimate-looking swap from inside either transaction.
+        // 2. `deleteMembership` takes this same lock, so serializing here is
+        //    what stops a concurrent removal of the target from landing between
+        //    the read and the upsert. That ordering would insert a HouseholdRole
+        //    for a deleted member and raise P2003, which
+        //    `rethrowMutationFailure` does not classify — an uncaught 500 where
+        //    the honest answer is 404.
+        //
+        // Reading after the lock is also what collapses the guards: there is no
+        // longer a pre-lock check to repeat, because every fact below is read
+        // from locked state.
+        const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, householdId);
+
+        // Authorization strictly before validation: resolving the actor first
+        // means a caller who is not an owner is refused before any 400 can
+        // answer "is member X already the owner?" on their behalf.
+        const actor = await this.findScopedMemberOrThrow(
+          tx,
+          actorWhere,
+          { householdId, userId: actorUserId },
+          {
+            onHidden: () => {
+              throw new ForbiddenException(t('common.forbidden.update'));
+            },
+            onMissing: () => {
+              throw new NotFoundException(t('errors.household.not_a_member', { householdId }));
+            },
+          },
+        );
+
+        if (!ownerMemberIds.includes(actor.id)) {
+          throw new ForbiddenException(t('common.forbidden.update'));
+        }
+
+        const target = await this.findScopedMemberOrThrow(
+          tx,
+          targetWhere,
+          { id: memberId, householdId },
+          {
+            onHidden: () => {
+              throw new ForbiddenException(t('common.forbidden.update'));
+            },
+            onMissing: () => {
+              throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+            },
+          },
+        );
+
+        if (target.id === actor.id) {
+          throw new BadRequestException(t('errors.household.transfer_target_self'));
+        }
+
+        if (ownerMemberIds.includes(target.id)) {
+          throw new BadRequestException(t('errors.household.transfer_target_already_owner', { memberId }));
+        }
+
+        // Upserts, not updates: `role` is optional on HouseholdMember, so a
+        // role-less target must get a row created rather than produce a miss.
+        //
+        // Deliberately NOT carrying the ability conditions in these `where`
+        // clauses, unlike the scoped deletes in `deleteMembership`. An upsert
+        // whose `where` matches nothing INSERTS — an authorization miss would
+        // become a duplicate-key error (or, on a model without the unique
+        // constraint, a silently created row), not the P2025 → 403 the delete
+        // paths rely on. Write-time authorization here is the lock above: the
+        // owner rows this actor's authority derives from are held for the rest
+        // of the transaction, so a concurrent demotion cannot interleave.
+        await tx.householdRole.upsert({
+          where: { householdMemberId: target.id },
+          create: { householdMemberId: target.id, roleId: ownerRoleId },
+          update: { roleId: ownerRoleId },
+        });
+
+        await tx.householdRole.upsert({
+          where: { householdMemberId: actor.id },
+          create: { householdMemberId: actor.id, roleId: adminRoleId },
+          update: { roleId: adminRoleId },
+        });
+
+        const owner = await tx.householdMember.findUniqueOrThrow({
+          where: { id: target.id },
+          include: MEMBER_INCLUDE,
+        });
+        const previousOwner = await tx.householdMember.findUniqueOrThrow({
+          where: { id: actor.id },
+          include: MEMBER_INCLUDE,
+        });
+
+        return {
+          before: { householdId, ownerMemberId: actor.id, ownerUserId: actor.userId },
+          after: { householdId, ownerMemberId: target.id, ownerUserId: target.userId },
+          result: { owner, previousOwner },
+        } satisfies {
+          before: HouseholdOwnershipSnapshot;
+          after: HouseholdOwnershipSnapshot;
+          result: OwnershipTransferResult;
+        };
+      });
+
+      // Both parties' grants changed, so both graphs are evicted — one bulk
+      // call rather than two, since `invalidateUsers` de-dupes and bounds
+      // concurrency.
+      await this.permissions.invalidateUsers([before.ownerUserId, after.ownerUserId]);
+      this.emitOwnershipTransferred(before, after, initiatedAt);
+
+      return result;
+    } catch (error) {
+      throw this.rethrowMutationFailure(error, t('common.forbidden.update'), {
+        householdId,
+        memberId,
+        operation: 'transferOwnership',
       });
     }
   }
@@ -312,8 +484,31 @@ export class HouseholdMemberService {
       const removed = await this.db.$transaction(async (tx) => {
         const member = await this.findScopedMemberOrThrow(tx, scopedWhere, unscopedWhere, denials);
 
-        if (member.role?.role.name === SystemRole.HouseholdOwner) {
-          await this.assertNotLastOwner(tx, scopedWhere.householdId);
+        // Lock unconditionally, and decide from the LOCKED set — never from
+        // `member.role`, which is a pre-lock read.
+        //
+        // Gating the lock on that read was sound only while nothing could
+        // promote a member to owner concurrently. #158 ships exactly that path:
+        // a member promoted by `transferOwnership` between this read and its
+        // commit would have been deleted with the last-owner check skipped
+        // entirely, leaving the household ownerless and unadministrable with no
+        // error raised anywhere.
+        //
+        // Reading before locking is safe because the decision uses only
+        // `member.id`, which is immutable, plus the locked owner set. Whichever
+        // way this interleaves with a concurrent transfer, one of the two blocks
+        // on the other's lock and observes its committed result. It also keeps
+        // 404/403 requests from taking a household-wide lock, which locking
+        // first would have done.
+        //
+        // The cost is that concurrent departures within one household serialize
+        // on its owner rows. That is the price of correctness under READ
+        // COMMITTED: there is no way to know whether the lock is needed without
+        // first taking it. Households are small and departures are rare.
+        const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, scopedWhere.householdId);
+
+        if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
+          throw new BadRequestException(t('errors.household.last_owner', { householdId: scopedWhere.householdId }));
         }
 
         await tx.excludedGame.deleteMany({ where: { householdMemberId: member.id } });
@@ -386,7 +581,28 @@ export class HouseholdMemberService {
    * "promoted to owner mid-delete" case is impossible until transfer-ownership
    * (#158) exists, which will take this same lock.
    */
-  private async assertNotLastOwner(tx: Prisma.TransactionClient, householdId: string): Promise<void> {
+  /**
+   * Locks the household's `HouseholdOwner` role rows for the remainder of the
+   * transaction and returns the `HouseholdMember.id`s holding them.
+   *
+   * The lock, not the count, is the point. Under READ COMMITTED two concurrent
+   * owner transitions each read the pre-image and each conclude they are safe;
+   * `FOR UPDATE OF hr` serializes them so the second observes the first. Both
+   * callers need that, for different invariants:
+   *
+   * - {@link deleteMembership} — a household must keep at least one owner.
+   * - {@link transferOwnership} — the acting owner must still be an owner, and
+   *   the target must still not be, at the moment the writes are issued.
+   *
+   * Returning the set rather than asserting inside is what lets both share one
+   * lock: the assertion differs, the locking does not.
+   *
+   * NOTE: the raw SQL is never executed by the unit suite ($queryRaw is
+   * mocked). Its identifiers are pinned against the checked-in Prisma models by
+   * a spec in this lib, which catches a later `@map` rename; that it actually
+   * serializes is #239's integration work.
+   */
+  private async lockHouseholdOwnerRows(tx: Prisma.TransactionClient, householdId: string): Promise<string[]> {
     const owners = await tx.$queryRaw<Array<{ household_member_id: string }>>(Prisma.sql`
       SELECT hr.household_member_id
       FROM household_roles hr
@@ -397,9 +613,77 @@ export class HouseholdMemberService {
       FOR UPDATE OF hr
     `);
 
-    if (owners.length <= 1) {
-      throw new BadRequestException(t('errors.household.last_owner', { householdId }));
+    return owners.map((owner) => owner.household_member_id);
+  }
+
+  /**
+   * Resolves a `SystemRole` to its `roles` row id, failing loud when the row is
+   * absent.
+   *
+   * Explicit resolution rather than a nested `role: { connect: { name } }`: a
+   * missing row (seed drift — a new `SystemRole` shipped before the seed
+   * reseeds) raises the same `P2025` from the connect target as a vanished
+   * member row raises from the write, and {@link rethrowMutationFailure} would
+   * report a server misconfiguration to the caller as their own lack of
+   * permission. Repo-wide generalization is #242.
+   */
+  private async resolveRoleId(client: QueryClient, name: SystemRole): Promise<string> {
+    const role = await client.role.findUnique({ where: { name }, select: { id: true } });
+
+    if (!role) {
+      throw new InternalServerErrorException(t('errors.household.role_not_provisioned', { role: name }));
     }
+
+    return role.id;
+  }
+
+  /**
+   * Fans the completed transfer out to the two emit-driven subsystems: the
+   * `MutationEvent` (audit row, via `AuditPersistenceListener`'s `onAny`) and
+   * the versioned webhook wire name. Two separate emits from one call site,
+   * mirroring the game-import processors.
+   *
+   * Called AFTER commit — a webhook or audit failure must never roll back the
+   * transfer, and a delivery describing a transaction that later aborted would
+   * be worse than a missing one.
+   *
+   * No `occurrenceId`: the envelope wants an id that is stable across re-emits
+   * of the SAME occurrence, and nothing available here qualifies. The audit row
+   * id does not exist yet (the listener writes it after this returns), and every
+   * id that does exist — the household, either role row — is stable across
+   * *different* transfers, so using one would make a second, legitimate
+   * transfer dedup against the first and silently drop its delivery. Absent an
+   * occurrenceId the dispatcher assigns a random delivery id (no dedup), which
+   * the contract explicitly allows.
+   */
+  private emitOwnershipTransferred(
+    before: HouseholdOwnershipSnapshot,
+    after: HouseholdOwnershipSnapshot,
+    initiatedAt: Date,
+  ): void {
+    this.events.emit(
+      HouseholdOwnershipTransferredEvent.eventName,
+      new HouseholdOwnershipTransferredEvent(before, after, initiatedAt),
+    );
+
+    this.events.emit(
+      WebhookEventType.HouseholdOwnershipTransferred,
+      webhookEnvelope({
+        subjectId: after.householdId,
+        householdId: after.householdId,
+        // Ids only. `data` is copied verbatim to a subscriber-controlled URL, so
+        // usernames, display names, avatars, and emails stay out of it — a read
+        // grant on the household is not consent to ship member identity to a
+        // third party.
+        data: {
+          householdId: after.householdId,
+          previousOwnerMemberId: before.ownerMemberId,
+          previousOwnerUserId: before.ownerUserId,
+          newOwnerMemberId: after.ownerMemberId,
+          newOwnerUserId: after.ownerUserId,
+        },
+      }),
+    );
   }
 
   /**

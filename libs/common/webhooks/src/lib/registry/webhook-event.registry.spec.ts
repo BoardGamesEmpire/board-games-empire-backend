@@ -82,7 +82,7 @@ describe('WebhookEventRegistry', () => {
     expect(registry.types().sort()).toEqual([...WEBHOOK_EVENT_TYPES].sort());
   });
 
-  it('exposes exactly the v1 Event-domain and import-lifecycle types', () => {
+  it('exposes exactly the v1 Event-domain, import-lifecycle, and household types', () => {
     expect(registry.types().sort()).toEqual(
       [
         WebhookEventType.EventCreated,
@@ -92,6 +92,7 @@ describe('WebhookEventRegistry', () => {
         WebhookEventType.ImportJobStarted,
         WebhookEventType.ImportJobFailed,
         WebhookEventType.ImportBatchCompleted,
+        WebhookEventType.HouseholdOwnershipTransferred,
       ].sort(),
     );
   });

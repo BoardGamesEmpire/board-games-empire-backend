@@ -667,13 +667,27 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       reason: 'View household details',
     },
 
-    // TODO: We should probably have more granular permissions here to allow for different levels of household management, etc. Otherwise, any member could update the household details
+    // Owner/Admin only, matching `delete:household` and `manage:household_member`.
+    //
+    // The prior condition asked only for membership. That was never as bad as
+    // the removed TODO claimed ("any member could update the household") —
+    // the slug is assigned exclusively to HouseholdOwner/HouseholdAdmin, and
+    // `{{ householdId }}` renders per membership, so a plain member never
+    // received the rule at all. The defect was that the condition depended on
+    // the assignment list for its entire security value: grant the slug one
+    // role wider and it silently becomes membership-only. The role clause
+    // makes the constraint self-describing (#160).
     {
       action: Action.update,
       subject: ResourceType.Household,
       conditions: {
         id: '{{ householdId }}',
-        members: { some: { userId: '{{ user.id }}' } },
+        members: {
+          some: {
+            userId: '{{ user.id }}',
+            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+          },
+        },
       },
       slug: 'update:household',
       riskLevel: RiskLevel.Low,
@@ -773,6 +787,42 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       slug: 'create:household_role',
       riskLevel: RiskLevel.High,
       reason: 'Create household roles',
+    },
+    // The Owner-only gate for transfer-ownership (#158).
+    //
+    // Subject is HouseholdRole rather than Household on purpose. A transfer IS
+    // two HouseholdRole writes, and more practically: Household + `update` can
+    // never express "Owner only", because `update:household` is held by
+    // HouseholdAdmin too and `accessibleBy` UNIONS every matching rule for an
+    // (action, subject) pair — a narrower rule widens the OR, it cannot
+    // restrict it. HouseholdRole carries no other `update`/`manage` grant, so
+    // `can(update, HouseholdRole)` is exactly "is an owner of some household".
+    //
+    // INVARIANT: `update`/`manage` on HouseholdRole must never be granted to
+    // HouseholdAdmin — see `disallowedHouseholdAdminPermissions` below. #234's
+    // walker is where this becomes machine-checked.
+    {
+      action: Action.update,
+      subject: ResourceType.HouseholdRole,
+      conditions: {
+        // Same traversal as `create:household_role`: HouseholdRole carries
+        // neither `householdId` nor `members`, so the household is reachable
+        // only through the 1:1 member row.
+        householdMember: {
+          household: {
+            id: '{{ householdId }}',
+            members: {
+              some: {
+                userId: '{{ user.id }}',
+                role: { role: { name: 'HouseholdOwner' } },
+              },
+            },
+          },
+        },
+      },
+      slug: 'update:household_role:transfer-ownership',
+      riskLevel: RiskLevel.High,
+      reason: 'Transfer household ownership to another member',
     },
 
     // TODO: maybe defer to a household policy?
@@ -1510,13 +1560,19 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'update:event',
     'update:game_play_session',
     'update:household',
+    'update:household_role:transfer-ownership',
     'update:rule_variant',
   ];
 
   // HOUSEHOLD OWNER
   await assignPermissions(SystemRole.HouseholdOwner, householdOwnerPermissions);
 
-  const disallowedHouseholdAdminPermissions = ['delete:household'];
+  // The Admin list is DERIVED from the owner list, so every Owner-only slug has
+  // to be named here or it is granted to HouseholdAdmin silently, with no
+  // compile-time signal. `update:household_role:transfer-ownership` is the gate
+  // that keeps owner transitions (both directions) out of #156's change-role
+  // endpoint; an Admin holding it would defeat that separation entirely.
+  const disallowedHouseholdAdminPermissions = ['delete:household', 'update:household_role:transfer-ownership'];
   const householdAdminPermissions = householdOwnerPermissions.filter(
     (perm) => !disallowedHouseholdAdminPermissions.includes(perm),
   );

@@ -2,6 +2,7 @@ import { DatabaseService, ResourceType } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { createPrismaAbility } from '@casl/prisma';
+import { WEBHOOK_EVENT_DESCRIPTORS } from '../constants/webhook-event-types';
 import { WebhookVisibilityService } from './webhook-visibility.service';
 
 describe('WebhookVisibilityService', () => {
@@ -53,10 +54,35 @@ describe('WebhookVisibilityService', () => {
     expect('deletedAt' in where).toBe(false);
   });
 
+  it('filters soft-deleted rows for the Household subject (#158)', async () => {
+    db.household.count.mockResolvedValue(1);
+
+    await expect(service.isVisibleTo(ResourceType.Household, 'hh-1', ability)).resolves.toBe(true);
+    expect(db.household.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 'hh-1', deletedAt: null, AND: [expect.anything()] }),
+    });
+  });
+
   it('fails loudly for an unmapped subject', async () => {
-    await expect(service.isVisibleTo(ResourceType.Household, 'hh-1', ability)).rejects.toThrow(
-      /No webhook visibility check implemented for subject "Household"/,
+    // Previously used Household, which #158 mapped. Any subject with a
+    // registered descriptor MUST have a check here or dispatch throws, so the
+    // example has to be a subject no descriptor names.
+    await expect(service.isVisibleTo(ResourceType.Invite, 'invite-1', ability)).rejects.toThrow(
+      /No webhook visibility check implemented for subject "Invite"/,
     );
-    expect(db.household.count).not.toHaveBeenCalled();
+    expect(db.invite.count).not.toHaveBeenCalled();
+  });
+
+  it('implements a check for every subject a registered descriptor names', async () => {
+    // The guard that would have caught #158's original plan: registering a
+    // descriptor without a visibility check produces an event that is accepted
+    // at subscription time and then never delivered, visible only as an ERROR
+    // log per subscriber. Unmocked counts resolve `undefined`, so every mapped
+    // subject reports "not visible" rather than throwing.
+    const subjects = [...new Set(Object.values(WEBHOOK_EVENT_DESCRIPTORS).map((descriptor) => descriptor.subject))];
+
+    for (const subject of subjects) {
+      await expect(service.isVisibleTo(subject, 'any-id', ability)).resolves.toBe(false);
+    }
   });
 });
