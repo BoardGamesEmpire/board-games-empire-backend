@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http, PrismaError } from '@status/codes';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { HouseholdEvents } from '../constants/household-events.constant';
 import { HouseholdMemberService, MEMBER_INCLUDE, type HouseholdMemberWithRelations } from './household-member.service';
@@ -645,7 +645,21 @@ describe('HouseholdMemberService', () => {
       }
     };
 
+    /**
+     * The preflight counts the actor's membership (`userId`); the hidden/missing
+     * probes count by member id. Dispatched on shape so neither depends on the
+     * order the service happens to issue them in.
+     */
+    const stubTransferCounts = ({ actorIsMember, targetExists }: { actorIsMember: boolean; targetExists: boolean }) => {
+      db.householdMember.count.mockImplementation((args) => {
+        const { where } = args as { where: { userId?: string } };
+
+        return Promise.resolve((where.userId ? actorIsMember : targetExists) ? 1 : 0) as never;
+      });
+    };
+
     beforeEach(() => {
+      stubTransferCounts({ actorIsMember: true, targetExists: true });
       stubRoles({ [SystemRole.HouseholdOwner]: 'role-owner', [SystemRole.HouseholdAdmin]: 'role-admin' });
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-actor' }]);
       db.householdMember.findUniqueOrThrow
@@ -796,6 +810,22 @@ describe('HouseholdMemberService', () => {
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
     });
 
+    it('refuses a non-member without opening a transaction or taking the lock', async () => {
+      // The controller gate asserts the actor owns SOME household, not this one,
+      // so an owner of another household reaches the service. Without the
+      // preflight they would lock this household's owner rows before being
+      // refused, giving any authenticated owner a contention lever against any
+      // household id they can name.
+      stubTransferCounts({ actorIsMember: false, targetExists: true });
+
+      await expect(service.transferOwnership('hh-other', 'member-2')).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_a_member' }),
+      });
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
     it('refuses (400) transferring to yourself', async () => {
       const actor = ACTOR();
       stubMembers(actor, actor);
@@ -832,8 +862,8 @@ describe('HouseholdMemberService', () => {
     });
 
     it('throws NotFound naming the actor when the acting user is not a member', async () => {
+      stubTransferCounts({ actorIsMember: false, targetExists: false });
       stubMembers(null);
-      db.householdMember.count.mockResolvedValue(0);
 
       await expect(service.transferOwnership('hh-1', 'member-2')).rejects.toMatchObject({
         status: Http.NotFound,
@@ -842,8 +872,8 @@ describe('HouseholdMemberService', () => {
     });
 
     it('throws NotFound naming the target when the target member does not exist', async () => {
+      stubTransferCounts({ actorIsMember: true, targetExists: false });
       stubMembers(ACTOR(), null);
-      db.householdMember.count.mockResolvedValue(0);
 
       await expect(service.transferOwnership('hh-1', 'member-missing')).rejects.toMatchObject({
         status: Http.NotFound,
@@ -852,8 +882,8 @@ describe('HouseholdMemberService', () => {
     });
 
     it('reports the UPDATE denial, not view, for a target hidden from the actor', async () => {
+      stubTransferCounts({ actorIsMember: true, targetExists: true });
       stubMembers(ACTOR(), null);
-      db.householdMember.count.mockResolvedValue(1);
 
       await expect(service.transferOwnership('hh-1', 'member-2')).rejects.toMatchObject({
         status: Http.Forbidden,
@@ -918,6 +948,24 @@ describe('HouseholdMemberService', () => {
           newOwnerMemberId: 'member-2',
           newOwnerUserId: 'user-2',
         });
+      });
+
+      it('does not fail the request when a listener throws after the commit', async () => {
+        // EventEmitter2 is configured without `ignoreErrors`, so a synchronous
+        // listener that throws propagates out of emit(). The transfer is already
+        // committed at that point — reporting 500 would send the client to retry
+        // into a 400 "already an owner".
+        stubMembers(ACTOR(), TARGET());
+        const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        events.emit.mockImplementation(() => {
+          throw new Error('audit listener exploded');
+        });
+
+        const result = await service.transferOwnership('hh-1', 'member-2');
+
+        expect(result.owner.id).toBe('member-2');
+        expect(logged).toHaveBeenCalled();
+        logged.mockRestore();
       });
 
       it('omits occurrenceId rather than reusing an id that is stable across transfers', async () => {
@@ -1028,23 +1076,20 @@ describe('HouseholdMemberService', () => {
       throw new Error('Could not locate prisma/models by walking up from the spec directory');
     };
 
+    // The three models the lock's SQL touches, read by name. An earlier version
+    // walked `prisma/models` recursively and read every `.prisma` file, which was
+    // slower and — worse — silently found nothing if a model moved. Naming them
+    // fails loudly with the missing path instead.
+    const MODEL_FILES = [
+      'household/household-role.prisma',
+      'household/household-member.prisma',
+      'permissions/role.prisma',
+    ];
+
     const readSchema = (): string => {
-      const files: string[] = [];
-      const walk = (current: string): void => {
-        for (const entry of readdirSync(current)) {
-          const full = join(current, entry);
+      const dir = findSchemaDir();
 
-          if (statSync(full).isDirectory()) {
-            walk(full);
-          } else if (full.endsWith('.prisma')) {
-            files.push(full);
-          }
-        }
-      };
-
-      walk(findSchemaDir());
-
-      return files.map((file) => readFileSync(file, 'utf8')).join('\n');
+      return MODEL_FILES.map((file) => readFileSync(join(dir, file), 'utf8')).join('\n');
     };
 
     const modelBody = (schema: string, model: string): string => {

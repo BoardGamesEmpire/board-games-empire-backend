@@ -265,6 +265,23 @@ export class HouseholdMemberService {
     const actorUserId = this.abilityService.getActingUserId();
     await assertHouseholdExists(this.db, householdId);
 
+    // Preflight, outside the transaction. The controller gate
+    // (`can(update, HouseholdRole)`) is a class-level check: it asserts the actor
+    // owns SOME household, not this one. Without this, an owner of household A
+    // could call the route for household B and take B's owner-row lock before
+    // the in-transaction read refused them, letting any authenticated owner
+    // contend on the owner rows of any household id they can name.
+    //
+    // Best-effort filter, NOT the authorization boundary — an unlocked read
+    // cannot be one. The authoritative checks stay inside the transaction, where
+    // the scoped read decides hidden vs absent and the locked owner set decides
+    // authority. Do not remove those on the strength of this.
+    const actorMemberships = await this.db.householdMember.count({ where: { householdId, userId: actorUserId } });
+
+    if (!actorMemberships) {
+      throw new NotFoundException(t('errors.household.not_a_member', { householdId }));
+    }
+
     // Resolved OUTSIDE the transaction. Role ids are static seed data, not
     // household state, so holding the owner-row lock across two lookups that
     // cannot change the outcome only extends the window in which concurrent
@@ -657,6 +674,34 @@ export class HouseholdMemberService {
    * the contract explicitly allows.
    */
   private emitOwnershipTransferred(
+    before: HouseholdOwnershipSnapshot,
+    after: HouseholdOwnershipSnapshot,
+    initiatedAt: Date,
+  ): void {
+    try {
+      this.emitTransferEvents(before, after, initiatedAt);
+    } catch (error) {
+      // The transfer is COMMITTED and both ability caches are already evicted.
+      // `EventEmitter2` is configured without `ignoreErrors`, so a synchronous
+      // listener that throws propagates out of `emit()` — and this call sits
+      // inside the mutation's try block, so it would reach
+      // `rethrowMutationFailure`, be classified as unexpected, and surface as a
+      // 500 for an operation that succeeded. The client would then retry into a
+      // 400 "already an owner".
+      //
+      // Logged rather than swallowed: a missing audit row is a real problem,
+      // just not one the caller can act on or retry away. Making audit writes
+      // durable rather than best-effort is #245's concern.
+      this.logger.error('Ownership transfer committed but emission failed', {
+        error,
+        householdId: after.householdId,
+        previousOwnerMemberId: before.ownerMemberId,
+        newOwnerMemberId: after.ownerMemberId,
+      });
+    }
+  }
+
+  private emitTransferEvents(
     before: HouseholdOwnershipSnapshot,
     after: HouseholdOwnershipSnapshot,
     initiatedAt: Date,
