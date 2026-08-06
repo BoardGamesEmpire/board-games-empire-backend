@@ -3,7 +3,7 @@ import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -28,6 +28,13 @@ export class HouseholdController {
     return from(this.householdService.getHouseholdsForUser(pagination)).pipe(map((households) => ({ households })));
   }
 
+  @ApiOperation({
+    summary: 'Create a household',
+    description:
+      'Idempotent when `clientRequestId` is supplied: a repeat submission with the same key (per user) ' +
+      'returns the original household — same id, same 201 envelope — instead of creating a duplicate. ' +
+      'The repeat payload is ignored (first writer wins). See #210.',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Household))

@@ -12,6 +12,13 @@ model Household {
   createdBy   User   @relation("HouseholdsCreated", fields: [createdById], references: [id])
   createdById String @map("created_by_id")
 
+  // Client-supplied idempotency key for POST /households (#210). A repeat
+  // submission with the same key short-circuits on the composite unique below
+  // and returns the ORIGINAL row instead of inserting a duplicate. Retained
+  // indefinitely on the row: the client's offline queue can hold a retry
+  // arbitrarily long, so a TTL'd key would silently reopen the duplicate hole.
+  clientRequestId String? @map("client_request_id")
+
   // Members-only by default; an owner sets `Friends` to let members' friends view it.
   visibility Visibility @default(Household)
 
@@ -30,6 +37,10 @@ model Household {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  // Per-user scope (not global): matches FeedbackReport.correlationKey and
+  // avoids cross-tenant key collisions. NULLs are distinct, so keyless creates
+  // are unaffected.
+  @@unique([createdById, clientRequestId], map: "household_created_by_client_request_id_unique")
   @@index([createdById])
   @@map("households")
 }

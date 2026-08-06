@@ -1,8 +1,10 @@
+import type { Household } from '@bge/database';
 import {
   Action,
   DatabaseService,
   InviteStatus,
   isPrismaDependentRecordNotFoundError,
+  isPrismaUniqueConstraintError,
   Prisma,
   ResourceType,
   SystemRole,
@@ -13,6 +15,7 @@ import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
+import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
 
@@ -202,48 +205,144 @@ export class HouseholdService {
 
   async create(createHouseholdDto: CreateHouseholdDto) {
     const userId = this.abilityService.getActingUserId();
-    const { language, ...rest } = createHouseholdDto;
+    const { language, clientRequestId: rawClientRequestId, ...rest } = createHouseholdDto;
     const languageTagId = await this.resolveLanguageTagId(language);
 
-    const household = await this.db.household.create({
-      data: {
-        ...rest,
-        languageTag: languageTagId
-          ? {
-              connect: {
-                id: languageTagId,
-              },
-            }
-          : undefined,
+    // A blank key is not a key. The DTO rejects one over HTTP, but `create` is
+    // also callable in-process, and persisting '' would put every keyless
+    // internal create by a user into one shared idempotency bucket — the second
+    // would silently "replay" the first. Trim so both entry points agree on the
+    // bucket: the DTO trims too, so a padded key can't split into two rows.
+    const clientRequestId = rawClientRequestId?.trim() || undefined;
 
-        createdBy: {
-          connect: {
-            id: userId,
+    let household: Household;
+    try {
+      // Optimistic insert — no pre-flight key lookup. A concurrent duplicate
+      // submission races here; the loser trips the composite unique and is
+      // recovered in the catch below (same shape as GameService.create's
+      // GameSource race recovery).
+      household = await this.db.household.create({
+        data: {
+          ...rest,
+          clientRequestId,
+          languageTag: languageTagId
+            ? {
+                connect: {
+                  id: languageTagId,
+                },
+              }
+            : undefined,
+
+          createdBy: {
+            connect: {
+              id: userId,
+            },
           },
-        },
 
-        members: {
-          create: {
-            userId,
-            role: {
-              create: {
-                role: {
-                  connect: {
-                    name: SystemRole.HouseholdOwner,
+          members: {
+            create: {
+              userId,
+              role: {
+                create: {
+                  role: {
+                    connect: {
+                      name: SystemRole.HouseholdOwner,
+                    },
                   },
                 },
               },
             },
           },
         },
-      },
-    });
+      });
+    } catch (error) {
+      const replayed =
+        clientRequestId === undefined ? null : await this.recoverKeyedCreate(error, userId, clientRequestId);
+
+      if (!replayed) {
+        throw error;
+      }
+
+      return replayed;
+    }
 
     // The acting user just became a HouseholdOwner — evict their cached ability
     // graph so the new household-scoped grants resolve on their next request.
     await this.permissions.invalidateUser(userId);
 
     return household;
+  }
+
+  /**
+   * Idempotent replay (#210). A create that trips the `(createdById,
+   * clientRequestId)` unique means the original COMMITTED — the retry exists
+   * only because its response was lost in transit — so return the original row
+   * rather than surfacing the conflict.
+   *
+   * Returns `null` when the caller should rethrow: a conflict on some other
+   * unique, or a key whose row can't be found (which would be a constraint we
+   * misidentified, not a replay).
+   */
+  private async recoverKeyedCreate(error: unknown, userId: string, clientRequestId: string): Promise<Household | null> {
+    if (!this.isClientRequestIdConflict(error)) {
+      if (isPrismaUniqueConstraintError(error)) {
+        // A keyed create hit a unique that isn't the idempotency one. Usually
+        // genuine (a concurrent membership insert), but it is also how a future
+        // Prisma/provider change to `meta.target` would present, so record the
+        // shape rather than degrading silently into a rethrow.
+        this.logger.debug(`Keyed household create hit another unique; target=${JSON.stringify(error.meta?.target)}`);
+      }
+
+      return null;
+    }
+
+    // The lookup deliberately omits the `deletedAt: null` filter: the keyed
+    // create semantically succeeded, and that row — even if since soft-deleted —
+    // is its canonical outcome for the client to reconcile against.
+    const existing = await this.db.household.findUnique({
+      where: { createdById_clientRequestId: { createdById: userId, clientRequestId } },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    this.logger.debug(`Idempotent replay of household create for user ${userId}; returning household ${existing.id}`);
+
+    // Evict on replay too. Replays are usually pure no-ops, but the one
+    // pathological original — committed, then crashed before its own eviction
+    // ran — leaves the owner's ability graph stale; the retry is the natural
+    // place to heal it, and eviction is idempotent and cheap.
+    await this.permissions.invalidateUser(userId);
+
+    return existing;
+  }
+
+  /**
+   * True only when a P2002 was raised by the idempotency constraint
+   * (`createdById` + `clientRequestId`), not by any other unique the nested
+   * create can touch. Prisma reports `meta.target` as the field-name array for
+   * a `@@unique` on some provider/version combinations and as the mapped
+   * constraint name on others — accept either, and treat anything else as a
+   * genuine failure to rethrow.
+   */
+  private isClientRequestIdConflict(error: unknown): boolean {
+    if (!isPrismaUniqueConstraintError(error)) {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    const names: string[] =
+      typeof target === 'string'
+        ? [target]
+        : Array.isArray(target)
+          ? target.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+
+    return names.some(
+      (name) =>
+        name === HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT || name === 'clientRequestId' || name === 'client_request_id',
+    );
   }
 
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {

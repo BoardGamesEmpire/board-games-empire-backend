@@ -36,6 +36,12 @@ describe('HouseholdController (no-Session delegation)', () => {
     expect(service.create).toHaveBeenCalledWith({ name: 'Home' });
   });
 
+  it('create forwards clientRequestId untouched (idempotent replay is the service’s concern)', async () => {
+    await firstValueFrom(controller.create({ name: 'Home', clientRequestId: 'key-1' } as never));
+
+    expect(service.create).toHaveBeenCalledWith({ name: 'Home', clientRequestId: 'key-1' });
+  });
+
   it('getById forwards only the id', async () => {
     await firstValueFrom(controller.getById('hh-1'));
     expect(service.getHouseholdById).toHaveBeenCalledWith('hh-1');
