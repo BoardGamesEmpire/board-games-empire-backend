@@ -179,6 +179,18 @@ describe('HouseholdService', () => {
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
     });
 
+    it('replays when Prisma reports the target as the raw column names', async () => {
+      // Third shape the discriminator accepts, and the one that was untested:
+      // Prisma has reported snake_case column names rather than Prisma field
+      // names across provider/version combinations. Untested, a regression here
+      // degrades every keyed replay into the 500 that #251 removed.
+      const original = { id: 'hh-original' } as Household;
+      db.household.create.mockRejectedValue(uniqueViolation(['created_by_id', 'client_request_id']));
+      db.household.findUnique.mockResolvedValue(original);
+
+      await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
+    });
+
     it('returns a soft-deleted original as-is (deletedAt visible for client reconciliation)', async () => {
       const tombstoned = { id: 'hh-original', deletedAt: new Date('2026-08-01T00:00:00Z') } as Household;
       db.household.create.mockRejectedValue(uniqueViolation(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT));

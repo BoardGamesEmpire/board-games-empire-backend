@@ -31,7 +31,25 @@ export const FEEDBACK_MAX_TITLE_LENGTH = 200;
 export const FEEDBACK_MAX_APP_VERSION_LENGTH = 64;
 export const FEEDBACK_MAX_PLATFORM_LENGTH = 32;
 export const FEEDBACK_MAX_LOCALE_LENGTH = 32;
-export const FEEDBACK_MAX_CORRELATION_KEY_LENGTH = 128;
+
+/**
+ * Wire-contract cap for `CreateFeedbackReportDto.clientRequestId`. Generous
+ * enough for any client id scheme (the Flutter client mints a cuid2 at compose
+ * time), tight enough that the unique index never carries unbounded input.
+ * Mirrors `HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH`.
+ */
+export const FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
+
+/**
+ * DB name of the `@@unique([userId, clientRequestId])` index, as mapped in
+ * `feedback-report.prisma`. Used to discriminate a P2002 raised by an idempotent
+ * replay from a P2002 raised by any other unique on the same insert.
+ *
+ * Exported rather than inlined so the discriminator and the schema cannot drift
+ * apart silently — a mismatch would degrade replays into 500s, which is the
+ * exact failure #251 exists to remove.
+ */
+export const FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT = 'feedback_report_user_client_request_id_unique';
 
 /** Cap on the `userRedactedFields` array length. */
 export const FEEDBACK_MAX_REDACTED_FIELDS = 64;

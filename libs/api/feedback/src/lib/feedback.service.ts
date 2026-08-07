@@ -1,12 +1,12 @@
 import type { FeedbackReport, SystemSetting } from '@bge/database';
-import { DatabaseService, Prisma, ResourceType } from '@bge/database';
+import { DatabaseService, isPrismaUniqueConstraintError, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { DeploymentInfoService } from '@bge/services';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
-import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import { FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT, FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
 import type { BreadcrumbDto } from './dto/breadcrumb.dto';
 import type { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import type {
@@ -68,6 +68,14 @@ export class FeedbackService {
    * third-party clients can't be trusted to do so — re-running redaction here
    * is cheap and idempotent, and `serverRedacted` flips to expose mismatches
    * for operational telemetry.
+   *
+   * When `dto.clientRequestId` is present the submission is idempotent: a repeat
+   * with the same key returns the original report rather than inserting a second
+   * one, and skips event emission so sinks are not re-notified (#251). The
+   * repeat's payload is ignored — first writer wins. Redaction still runs on the
+   * replay path and its result is discarded; keeping one code path is worth more
+   * than the saved work, and a pre-flight key lookup would cost a read on every
+   * keyed submission while still racing.
    */
   async submit(userId: string, dto: CreateFeedbackReportDto): Promise<FeedbackReport> {
     const settings = await this.getSettings();
@@ -77,29 +85,67 @@ export class FeedbackService {
     const { runtime, version } = this.deploymentInfo.getInfo();
     const userRedactedFields = dto.userRedactedFields ?? [];
 
-    const created = await this.db.feedbackReport.create({
-      data: {
-        message: redactedMessage,
-        stackTrace: redactedStackTrace,
-        title: dto.title ?? null,
-        category: dto.category,
-        context: dto.context ?? 'Unknown',
-        severity: dto.severity ?? null,
-        appVersion: dto.appVersion ?? null,
-        platform: dto.platform ?? null,
-        locale: dto.locale ?? null,
-        deviceInfo: redactedDeviceInfo !== null ? (redactedDeviceInfo as Prisma.InputJsonValue) : Prisma.DbNull,
-        breadcrumbs:
-          redactedBreadcrumbs !== null ? (redactedBreadcrumbs as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
-        deploymentRuntime: runtime,
-        deploymentVersion: version,
-        correlationKey: dto.correlationKey ?? null,
-        userRedactedFields,
-        redactionApplied: userRedactedFields.length > 0,
-        serverRedacted,
-        user: { connect: { id: userId } },
-      },
-    });
+    // A blank key is not a key. The DTO rejects one over HTTP, but `submit` is
+    // also callable in-process, and persisting '' would put every blank-key
+    // submission by a user into one shared idempotency bucket — the second would
+    // silently "replay" the first and return an unrelated report. Trim so both
+    // entry points agree on the bucket: the DTO trims too, so a padded retry
+    // can't split into two rows.
+    const clientRequestId = dto.clientRequestId?.trim() || undefined;
+
+    let created: FeedbackReport;
+    try {
+      // Optimistic insert — no pre-flight key lookup. A concurrent duplicate
+      // submission races here; the loser trips the composite unique and is
+      // recovered in the catch below.
+      created = await this.db.feedbackReport.create({
+        data: {
+          message: redactedMessage,
+          stackTrace: redactedStackTrace,
+          title: dto.title ?? null,
+          category: dto.category,
+          context: dto.context ?? 'Unknown',
+          severity: dto.severity ?? null,
+          appVersion: dto.appVersion ?? null,
+          platform: dto.platform ?? null,
+          locale: dto.locale ?? null,
+          deviceInfo: redactedDeviceInfo !== null ? (redactedDeviceInfo as Prisma.InputJsonValue) : Prisma.DbNull,
+          breadcrumbs:
+            redactedBreadcrumbs !== null ? (redactedBreadcrumbs as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          deploymentRuntime: runtime,
+          deploymentVersion: version,
+          clientRequestId,
+          userRedactedFields,
+          redactionApplied: userRedactedFields.length > 0,
+          serverRedacted,
+          user: { connect: { id: userId } },
+        },
+      });
+    } catch (error) {
+      const replayed =
+        clientRequestId === undefined ? null : await this.recoverKeyedSubmit(error, userId, clientRequestId);
+
+      if (!replayed) {
+        throw error;
+      }
+
+      // Deliberately returns WITHOUT emitting. A replay must not re-trigger sink
+      // fan-out: `FeedbackDispatcherService`'s deterministic jobId only dedups
+      // while a job is still queued (`removeOnComplete` frees the id on success),
+      // so a second emission after a successful drain would re-deliver the report
+      // to every sink and re-call each driver's `submit()`.
+      //
+      // Known residual: if the original committed but its fan-out never happened
+      // (the process died before the listener ran, or every enqueue failed — which
+      // the dispatcher logs and drops), the replay acknowledges a report that no
+      // sink will ever receive, and the client stops retrying. Not healed here on
+      // purpose: emitting conditionally would couple this service to
+      // `FeedbackSubmission` state and would still only rescue the reports a
+      // client happens to resubmit. A reconciliation sweep over reports with no
+      // submission rows covers that whole class, including the ones never
+      // retried, and is the right home for it.
+      return replayed;
+    }
 
     this.events.emit(FeedbackEvents.FeedbackReportSubmitted, {
       feedbackReportId: created.id,
@@ -110,6 +156,78 @@ export class FeedbackService {
     } satisfies FeedbackReportSubmittedEvent);
 
     return created;
+  }
+
+  /**
+   * Recovers an idempotent replay from a failed keyed insert: returns the
+   * original report when `error` is a unique violation on the idempotency index
+   * and the row is found, or `null` to mean "not a replay — rethrow".
+   *
+   * No `deletedAt` filter to omit here (unlike the household equivalent):
+   * `FeedbackReport` has no soft-delete. The retention sweep hard-deletes it, so
+   * a key never outlives its report — a retry arriving after the retention window
+   * finds nothing and creates a fresh report. Accepted caveat on #251; the
+   * retention window vastly exceeds any plausible offline-queue lifetime.
+   */
+  private async recoverKeyedSubmit(
+    error: unknown,
+    userId: string,
+    clientRequestId: string,
+  ): Promise<FeedbackReport | null> {
+    if (!this.isClientRequestIdConflict(error)) {
+      if (isPrismaUniqueConstraintError(error)) {
+        // `feedback_reports` carries exactly one unique index besides the primary
+        // key, so a P2002 that doesn't match the discriminator is a strong signal
+        // that Prisma changed the `meta.target` shape rather than a genuine
+        // second conflict. Warn rather than debug: silently degrading to a
+        // rethrow here would reinstate the 500-then-retry-forever loop.
+        this.logger.warn(
+          `Keyed feedback submission hit an unexpected unique constraint; ` +
+            `target=${JSON.stringify(error.meta?.target)}`,
+        );
+      }
+
+      return null;
+    }
+
+    const existing = await this.db.feedbackReport.findUnique({
+      where: { userId_clientRequestId: { userId, clientRequestId } },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    this.logger.debug(`Idempotent replay of feedback submission for user ${userId}; returning report ${existing.id}`);
+
+    return existing;
+  }
+
+  /**
+   * True when `error` is a P2002 raised by the feedback idempotency index.
+   *
+   * Accepts the mapped index name, the Prisma field-name array, and the raw
+   * column name, because Prisma has reported different `meta.target` shapes
+   * across provider/version combinations. A shape we don't recognize degrades to
+   * a rethrow, never to a wrong-row return — the composite lookup must also hit.
+   */
+  private isClientRequestIdConflict(error: unknown): boolean {
+    if (!isPrismaUniqueConstraintError(error)) {
+      return false;
+    }
+
+    const target = error.meta?.target;
+    const names: string[] =
+      typeof target === 'string'
+        ? [target]
+        : Array.isArray(target)
+          ? target.filter((entry): entry is string => typeof entry === 'string')
+          : [];
+
+    return names.some(
+      (name) =>
+        name === FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT || name === 'clientRequestId' || name === 'client_request_id',
+    );
   }
 
   /**

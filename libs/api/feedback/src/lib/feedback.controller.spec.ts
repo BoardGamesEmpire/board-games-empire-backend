@@ -144,7 +144,7 @@ function stubReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
     deploymentRuntime: DeploymentRuntime.StandaloneNode,
     deploymentVersion: null,
     userId: 'user-1',
-    correlationKey: null,
+    clientRequestId: null,
     userRedactedFields: [],
     redactionApplied: false,
     serverRedacted: false,

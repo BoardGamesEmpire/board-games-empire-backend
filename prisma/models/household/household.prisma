@@ -37,7 +37,7 @@ model Household {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  // Per-user scope (not global): matches FeedbackReport.correlationKey and
+  // Per-user scope (not global): matches FeedbackReport.clientRequestId and
   // avoids cross-tenant key collisions. NULLs are distinct, so keyless creates
   // are unaffected.
   @@unique([createdById, clientRequestId], map: "household_created_by_client_request_id_unique")

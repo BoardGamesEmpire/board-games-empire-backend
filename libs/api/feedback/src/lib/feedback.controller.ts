@@ -33,8 +33,19 @@ export class FeedbackController {
 
   constructor(private readonly feedback: FeedbackService) {}
 
-  @ApiOperation({ summary: 'Submit a feedback report (crash, bug, or feature request).' })
-  @ApiResponse({ status: Http.Created, description: 'Feedback report submitted successfully' })
+  @ApiOperation({
+    summary: 'Submit a feedback report (crash, bug, or feature request).',
+    description:
+      'Idempotent when `clientRequestId` is supplied: a repeat submission with the same key returns the original ' +
+      'report — same 201, same envelope, same id — instead of creating a duplicate, and does not re-notify the ' +
+      'configured feedback sinks. The repeat payload is ignored (first writer wins). Keys are scoped per user.',
+  })
+  @ApiResponse({
+    status: Http.Created,
+    description:
+      'Feedback report submitted successfully. Also returned for an idempotent replay, carrying the original report.',
+  })
+  @ApiResponse({ status: Http.BadRequest, description: 'Validation failed (includes a blank `clientRequestId`)' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Submission denied (insufficient permissions or feedback ban)' })
   @ApiResponse({ status: Http.TooManyRequests, description: 'Submission rate limit exceeded' })

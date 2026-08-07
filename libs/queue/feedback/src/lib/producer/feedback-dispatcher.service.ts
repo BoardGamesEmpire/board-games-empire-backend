@@ -82,9 +82,16 @@ export class FeedbackDispatcherService {
     // (report, sink) *while the job is still in the queue* — BullMQ ignores an
     // add whose jobId is still present. This is NOT at-most-once across time:
     // with removeOnComplete the id is freed after success, so a later re-emit
-    // would re-deliver. On the happy path that can't happen — feedback.report.
-    // submitted fires once per report (correlationKey is unique) — and the sink
-    // idempotency contract covers the residual case.
+    // would re-deliver.
+    //
+    // What prevents that is upstream, in FeedbackService.submit: a resubmitted
+    // clientRequestId short-circuits to the original report and returns WITHOUT
+    // emitting (#251), so feedback.report.submitted fires at most once per
+    // report. Note this is enforcement, not a property of the unique index
+    // alone — before #251 the duplicate raised an unhandled P2002, which
+    // happened to suppress the second emission by failing the whole request.
+    // The sink idempotency contract (`submit` MUST be safe to call again) covers
+    // the residual case.
     const jobId = `feedback:${feedbackReportId}:${sinkSlug}`;
 
     await this.queue.add(FEEDBACK_DELIVERY_JOB, wrapJobData({ feedbackReportId, sinkSlug }, { actor, correlationId }), {
