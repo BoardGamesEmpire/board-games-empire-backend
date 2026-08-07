@@ -3,9 +3,15 @@
   "compilerOptions": {
     "outDir": "out-tsc/@boardgamesempire/api-e2e",
     "esModuleInterop": true,
-    "noUnusedLocals": false,
-    "noImplicitAny": false
+    "noUnusedLocals": false
   },
   "include": ["jest.config.ts", "src/**/*.ts"],
-  "references": []
+  "references": [
+    {
+      "path": "../../libs/database"
+    },
+    {
+      "path": "../../libs/queue/feedback"
+    }
+  ]
 }

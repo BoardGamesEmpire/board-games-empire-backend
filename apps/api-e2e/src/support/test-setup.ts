@@ -1,9 +1,7 @@
-/* eslint-disable */
-import axios from 'axios';
-
-module.exports = async function() {
-  // Configure axios for tests to use.
-  const host = process.env.HOST ?? 'localhost';
-  const port = process.env.PORT ?? '3000';
-  axios.defaults.baseURL = `http://${host}:${port}`;
-};
+/**
+ * Declaring `setupFiles` in this project's jest config overrides the
+ * preset's `reflect-metadata` entry (see the note in jest.preset.js), so it
+ * must be loaded here — decorator metadata is evaluated the moment the
+ * first Nest/DTO module is imported.
+ */
+import 'reflect-metadata';

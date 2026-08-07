@@ -13,6 +13,11 @@ const ESM_PACKAGES = [
   '@better-auth',
   '@paralleldrive',
   '@noble',
+  // Scoped to `runtime/` on purpose: the package's entrypoints are CJS and
+  // must stay untransformed. Only the WASM query-compiler glue that a real
+  // PrismaClient dynamically imports on first query is pure ESM, and it is
+  // reached only by suites that talk to an actual database (the e2e harness).
+  '@prisma/client/runtime',
   '@thallesp/nestjs-better-auth',
   'apicalypse',
   'axios',
