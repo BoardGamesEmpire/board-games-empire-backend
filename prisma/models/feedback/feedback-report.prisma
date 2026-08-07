@@ -29,7 +29,12 @@ model FeedbackReport {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
 
-  correlationKey String? @map("correlation_key")
+  // Client-supplied idempotency key for the offline submission queue. A repeat
+  // submission of the same key returns the ORIGINAL report instead of inserting
+  // a duplicate, and deliberately does not re-emit the submitted event (#251).
+  // Named to match `Household.clientRequestId`; not `correlationKey`, which
+  // collides with the `correlationId` request-tracing concept.
+  clientRequestId String? @map("client_request_id")
 
   // ─── Redaction ──────────────────────────────────────────
   userRedactedFields String[] @default([]) @map("user_redacted_fields")
@@ -47,7 +52,10 @@ model FeedbackReport {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([userId, correlationKey], map: "feedback_report_user_correlation_key_unique")
+  // Per-user scope (not global): avoids cross-tenant key collisions. NULLs are
+  // distinct, so keyless submissions are unaffected — but '' is a value, not an
+  // absence, which is why blank keys are normalized away rather than persisted.
+  @@unique([userId, clientRequestId], map: "feedback_report_user_client_request_id_unique")
   @@index([status, createdAt])
   @@index([createdAt])
   @@index([userId])

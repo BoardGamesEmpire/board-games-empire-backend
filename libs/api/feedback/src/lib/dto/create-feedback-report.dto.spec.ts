@@ -3,7 +3,7 @@ import { plainToInstance } from 'class-transformer';
 import { validate, ValidationError } from 'class-validator';
 import { FEEDBACK_BREADCRUMBS_MAX_BYTES, FEEDBACK_MAX_STACK_TRACE_LENGTH } from '../constants/feedback.constants';
 import {
-  FEEDBACK_MAX_CORRELATION_KEY_LENGTH,
+  FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH,
   FEEDBACK_MAX_MESSAGE_LENGTH,
   FEEDBACK_MAX_REDACTED_FIELDS,
   FEEDBACK_MAX_TITLE_LENGTH,
@@ -205,9 +205,43 @@ describe('CreateFeedbackReportDto', () => {
     });
   });
 
-  describe('correlationKey (optional)', () => {
+  describe('clientRequestId (optional, #251)', () => {
     it('accepts a string key', async () => {
-      const errors = await validatePayload({ ...VALID_BUG_PAYLOAD, correlationKey: 'client-retry-abc123' });
+      const errors = await validatePayload({ ...VALID_BUG_PAYLOAD, clientRequestId: 'client-retry-abc123' });
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('stays undefined when omitted', () => {
+      const dto = plainToInstance(CreateFeedbackReportDto, { ...VALID_BUG_PAYLOAD });
+
+      expect(dto.clientRequestId).toBeUndefined();
+    });
+
+    it('trims surrounding whitespace so padded retries resolve to one key', () => {
+      const dto = plainToInstance(CreateFeedbackReportDto, { ...VALID_BUG_PAYLOAD, clientRequestId: '  key-1  ' });
+
+      expect(dto.clientRequestId).toBe('key-1');
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ])('rejects %s', async (_label, value) => {
+      // A blank key must 400. Accepting it would leave the caller believing the
+      // submission was idempotent when it had been treated as keyless — and,
+      // worse, '' is a legal unique value, so every blank-key submission by one
+      // user shares a single idempotency bucket.
+      const errors = await validatePayload({ ...VALID_BUG_PAYLOAD, clientRequestId: value });
+
+      expect(hasErrorFor(errors, 'clientRequestId')).toBe(true);
+    });
+
+    it('accepts a key exactly at the length cap', async () => {
+      const errors = await validatePayload({
+        ...VALID_BUG_PAYLOAD,
+        clientRequestId: 'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH),
+      });
 
       expect(errors).toHaveLength(0);
     });
@@ -215,10 +249,25 @@ describe('CreateFeedbackReportDto', () => {
     it('rejects a key exceeding the length cap', async () => {
       const errors = await validatePayload({
         ...VALID_BUG_PAYLOAD,
-        correlationKey: 'x'.repeat(FEEDBACK_MAX_CORRELATION_KEY_LENGTH + 1),
+        clientRequestId: 'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH + 1),
       });
 
-      expect(hasErrorFor(errors, 'correlationKey')).toBe(true);
+      expect(hasErrorFor(errors, 'clientRequestId')).toBe(true);
+    });
+
+    it('measures the cap after trimming', async () => {
+      const errors = await validatePayload({
+        ...VALID_BUG_PAYLOAD,
+        clientRequestId: `  ${'x'.repeat(FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH)}  `,
+      });
+
+      expect(errors).toHaveLength(0);
+    });
+
+    it('rejects a non-string key', async () => {
+      const errors = await validatePayload({ ...VALID_BUG_PAYLOAD, clientRequestId: 42 });
+
+      expect(hasErrorFor(errors, 'clientRequestId')).toBe(true);
     });
   });
 

@@ -12,9 +12,10 @@ import { DeploymentInfoService } from '@bge/services';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { PrismaError } from '@status/codes';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
-import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import { FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT, FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
 import { BreadcrumbLogLevel, type BreadcrumbDto } from './dto/breadcrumb.dto';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackService } from './feedback.service';
@@ -208,16 +209,157 @@ describe('FeedbackService', () => {
       await expect(service.submit('user-1', makeDto())).rejects.toThrow('DB connection lost');
       expect(events.emit).not.toHaveBeenCalled();
     });
+  });
 
-    it('persists the correlationKey when supplied', async () => {
+  describe('submit idempotency (#251)', () => {
+    const uniqueViolation = (target: string | string[]) =>
+      new Prisma.PrismaClientKnownRequestError('unique violation', {
+        code: PrismaError.UniqueConstraintViolation,
+        clientVersion: 'test',
+        meta: { target },
+      });
+
+    it('persists the client-supplied key on the row', async () => {
       db.feedbackReport.create.mockResolvedValue(stubReport());
 
-      await service.submit('user-1', makeDto({ correlationKey: 'retry-abc' }));
+      await service.submit('user-1', makeDto({ clientRequestId: 'retry-abc' }));
 
       expect(db.feedbackReport.create).toHaveBeenCalledWith(
         expect.objectContaining({
-          data: expect.objectContaining({ correlationKey: 'retry-abc' }),
+          data: expect.objectContaining({ clientRequestId: 'retry-abc' }),
         }),
+      );
+    });
+
+    it('replays: returns the ORIGINAL report on a key conflict instead of surfacing it', async () => {
+      const original = stubReport({ id: 'fb-original', userId: 'user-1', clientRequestId: 'key-1' });
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.feedbackReport.findUnique.mockResolvedValue(original);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
+
+      expect(db.feedbackReport.findUnique).toHaveBeenCalledWith({
+        where: { userId_clientRequestId: { userId: 'user-1', clientRequestId: 'key-1' } },
+      });
+    });
+
+    it('does NOT re-emit FeedbackReportSubmitted on a replay', async () => {
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.feedbackReport.findUnique.mockResolvedValue(stubReport({ id: 'fb-original' }));
+
+      await service.submit('user-1', makeDto({ clientRequestId: 'key-1' }));
+
+      // The load-bearing assertion of this issue. A second emission would fan
+      // out to every sink again: the dispatcher's deterministic jobId only
+      // dedups while a job is still queued, so once the original delivery has
+      // drained, a re-emit re-delivers and re-calls each driver's submit().
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('still emits on a fresh keyed submission (the suppression is replay-only)', async () => {
+      const created = stubReport({ id: 'fb-fresh', userId: 'user-9', clientRequestId: 'key-1' });
+      db.feedbackReport.create.mockResolvedValue(created);
+
+      await service.submit('user-9', makeDto({ clientRequestId: 'key-1' }));
+
+      expect(events.emit).toHaveBeenCalledWith(
+        FeedbackEvents.FeedbackReportSubmitted,
+        expect.objectContaining({ feedbackReportId: 'fb-fresh', submittedById: 'user-9' }),
+      );
+    });
+
+    it('replays when Prisma reports the target as the field-name array', async () => {
+      const original = stubReport({ id: 'fb-original' });
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(['userId', 'clientRequestId']));
+      db.feedbackReport.findUnique.mockResolvedValue(original);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
+    });
+
+    it('replays when Prisma reports the target as the raw column name', async () => {
+      const original = stubReport({ id: 'fb-original' });
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(['user_id', 'client_request_id']));
+      db.feedbackReport.findUnique.mockResolvedValue(original);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
+    });
+
+    it('rethrows a P2002 raised by a DIFFERENT unique constraint', async () => {
+      const error = uniqueViolation(['sinkSlug', 'externalId']);
+      db.feedbackReport.create.mockRejectedValue(error);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
+      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a matching P2002 when no key was supplied (keyless submissions never replay)', async () => {
+      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.feedbackReport.create.mockRejectedValue(error);
+
+      await expect(service.submit('user-1', makeDto())).rejects.toBe(error);
+      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('rethrows the original error when the replay lookup finds nothing', async () => {
+      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.feedbackReport.create.mockRejectedValue(error);
+      db.feedbackReport.findUnique.mockResolvedValue(null);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('rethrows non-unique-constraint failures untouched', async () => {
+      const error = new Error('connection reset');
+      db.feedbackReport.create.mockRejectedValue(error);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
+      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an empty string', ''],
+      ['whitespace only', '   '],
+    ])('treats %s as no key (in-process callers skip DTO validation)', async (_label, key) => {
+      db.feedbackReport.create.mockResolvedValue(stubReport());
+
+      await service.submit('user-1', makeDto({ clientRequestId: key }));
+
+      // Persisting '' would put every blank-key submission by this user into one
+      // shared bucket, silently replaying unrelated reports.
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ clientRequestId: undefined }) }),
+      );
+    });
+
+    it('never replays a blank key, even on an idempotency-unique conflict', async () => {
+      const error = uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT);
+      db.feedbackReport.create.mockRejectedValue(error);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: '' }))).rejects.toBe(error);
+      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('trims a padded key so the DTO and in-process paths share one bucket', async () => {
+      const original = stubReport({ id: 'fb-original' });
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT));
+      db.feedbackReport.findUnique.mockResolvedValue(original);
+
+      await expect(service.submit('user-1', makeDto({ clientRequestId: '  key-1  ' }))).resolves.toBe(original);
+
+      expect(db.feedbackReport.findUnique).toHaveBeenCalledWith({
+        where: { userId_clientRequestId: { userId: 'user-1', clientRequestId: 'key-1' } },
+      });
+    });
+
+    it('persists the trimmed key on a fresh keyed submission', async () => {
+      db.feedbackReport.create.mockResolvedValue(stubReport());
+
+      await service.submit('user-1', makeDto({ clientRequestId: '  key-1  ' }));
+
+      expect(db.feedbackReport.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ clientRequestId: 'key-1' }) }),
       );
     });
   });
@@ -651,7 +793,7 @@ function stubReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {
     deploymentRuntime: DeploymentRuntime.Kubernetes,
     deploymentVersion: '0.4.1',
     userId: 'user-1',
-    correlationKey: null,
+    clientRequestId: null,
     userRedactedFields: [],
     redactionApplied: false,
     serverRedacted: false,
