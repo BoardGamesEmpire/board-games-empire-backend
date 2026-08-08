@@ -12,6 +12,9 @@
     },
     {
       "path": "../../libs/queue/feedback"
+    },
+    {
+      "path": "../../libs/common/testing-e2e"
     }
   ]
 }

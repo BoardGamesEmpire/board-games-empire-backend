@@ -46,6 +46,8 @@
     "start:local": "nx run-many -t serve --parallel --no-cloud --skip-nx-cache",
     "pretest": "npm run nx:sync",
     "test": "nx run-many -t test --parallel=5 --passWithNoTests",
+    "pretest:e2e": "npm run nx:sync",
+    "test:e2e": "nx run-many -t e2e --parallel=1 --passWithNoTests",
     "typecheck": "nx run-many -t typecheck --parallel",
     "update": "nx migrate latest",
     "workspace-schematic": "nx workspace-schematic",
