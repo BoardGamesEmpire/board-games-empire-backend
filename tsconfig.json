@@ -79,6 +79,9 @@
       "path": "./libs/common/testing"
     },
     {
+      "path": "./libs/common/testing-e2e"
+    },
+    {
       "path": "./libs/api/notifications"
     },
     {
