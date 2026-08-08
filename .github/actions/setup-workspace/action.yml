@@ -1,0 +1,40 @@
+name: Setup workspace
+description: >-
+  Shared CI preamble (#259, D-259-1a): Node with the npm cache, environment
+  file, dependency install, Nx base/head SHAs for affected commands, and the
+  generated artifacts (Prisma client, protobuf types) that builds depend on.
+  Caching of the generation steps themselves is Nx's job (local + Nx Cloud
+  task cache), not bespoke actions/cache entries. The consuming job must
+  check the repository out first (with fetch-depth: 0 for nx-set-shas).
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 24
+        cache: 'npm'
+
+    - name: Set up environment
+      shell: bash
+      run: cp .env.example .env
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - uses: nrwl/nx-set-shas@v4
+      with:
+        main-branch-name: master
+
+    - name: Generate Prisma client
+      shell: bash
+      run: npx nx run database:generate
+
+    - name: Generate protobuf types
+      shell: bash
+      run: |
+        npm run proto:clean
+        npm run proto:deps
+        npx nx run proto-gateway:buf-export
+        npx nx run proto-gateway:generate

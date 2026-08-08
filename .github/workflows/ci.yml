@@ -12,6 +12,16 @@ permissions:
   actions: read
   contents: read
 
+# Superseded pushes to a PR stop running instead of burning minutes to
+# completion (#259). Push events (master) get a per-commit group instead of
+# an exemption flag: GitHub keeps at most one PENDING run per group even
+# with cancel-in-progress disabled, so a shared master group would silently
+# drop the middle commit of a merge burst and serialize master runs behind
+# the e2e job. A per-sha group means every master commit gets its own run.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   main:
     runs-on: ubuntu-latest
@@ -24,28 +34,7 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-          cache: 'npm'
-
-      - name: Set up environment
-        run: cp .env.example .env
-
-      - run: npm ci
-      - uses: nrwl/nx-set-shas@v4
-        with:
-          main-branch-name: master
-
-      - name: Generate Prisma client
-        run: npx nx run database:generate
-
-      - name: Generate protobuf types
-        run: |
-          npm run proto:clean
-          npm run proto:deps
-          npx nx run proto-gateway:buf-export
-          npx nx run proto-gateway:generate
+      - uses: ./.github/actions/setup-workspace
 
       - name: Check i18n types are up to date
         run: |
@@ -60,5 +49,70 @@ jobs:
       - run: npx nx affected -t test --parallel --maxParallel=3 --passWithNoTests
       - run: npx nx affected -t lint build --parallel --maxParallel=3
 
+      # Nx Cloud self-healing stays scoped to this job (D-259-1): letting it
+      # act on e2e failures against real containers is not something to
+      # invite while the suite's flake profile is uncharacterised.
       - run: npx nx fix-ci
         if: always()
+
+  # Black-box e2e gate (#259). Provisions real Postgres + Redis via
+  # testcontainers on the runner's Docker daemon (D-1 on #255). Advisory at
+  # first, then flipped to required in branch protection once flake is
+  # characterised (D-259-5).
+  #
+  # Gated on `main` rather than run alongside it — this revises D-259-1,
+  # which assumed this job would need only a cached `api:build`. It does
+  # not: the api bundle externalizes its workspace libraries, so this job
+  # builds the same affected graph `main` does. Run concurrently, a cold
+  # cache pays for that graph twice; run after, those builds are Nx Cloud
+  # cache hits and a failing lint or unit suite costs no container minutes
+  # at all. Unit feedback timing is unchanged either way — only the e2e
+  # verdict arrives later.
+  e2e:
+    needs: main
+    runs-on: ubuntu-latest
+    # Hard stop for the whole job, setup included: npm ci, generation, and
+    # (on a cache miss) the affected build all land before the suite starts
+    # (D-259-7).
+    timeout-minutes: 30
+    env:
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          filter: tree:0
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-workspace
+
+      # Built separately from the suite step for two reasons: `--parallel=1`
+      # below serializes the entire task graph, and the api bundle
+      # externalizes its workspace libraries (hence the `prune` /
+      # copy-workspace-modules targets), so `api:build` pulls ~40 `^build`
+      # tasks that have no business running one at a time. Affected-scoped:
+      # a doc-only PR runs no build tasks here, though the job still pays
+      # checkout and setup regardless.
+      - name: Build affected projects
+        run: npx nx affected -t build --parallel --maxParallel=3
+
+      # `affected` keeps doc-only PRs from paying the suite; the api-e2e
+      # project's implicitDependencies pull it in for any api-affecting
+      # change, and ci.yml itself is in sharedGlobals.
+      #
+      # The --exclude list is load-bearing, not tidiness: all five scaffolded
+      # *-e2e apps (#258) carry generated `e2e` targets that declare a
+      # `:serve` task as a dependency — a task that never exits, so an
+      # affected run that picks any of them up hangs until the job timeout.
+      # There is no safe one to unexclude; remove each exclusion only as
+      # #258 implements or deletes that app.
+      - name: Run e2e suite
+        timeout-minutes: 20
+        env:
+          # D-259-3: stream the API child's full output into the job log so a
+          # mid-run assertion failure is diagnosable without a local repro.
+          # Failure-scoped alternative tracked as #274.
+          BGE_E2E_VERBOSE: 'true'
+        run: >-
+          npx nx affected -t e2e --parallel=1
+          --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/gateway-coordinator-e2e,@boardgamesempire/gateway-worker-e2e,@boardgamesempire/igdb-gateway-e2e,@boardgamesempire/worker-e2e

@@ -51,7 +51,8 @@
           }
         },
         "dependsOn": [
-          "generate"
+          "generate",
+          "^build"
         ]
       },
       "prune-lockfile": {
