@@ -129,6 +129,41 @@ npx nx test api                   # single project
 npx nx affected -t test           # only affected projects
 ```
 
+### End-to-end tests
+
+```bash
+npx nx e2e @boardgamesempire/api-e2e
+```
+
+The e2e suite is black-box: the built API bundle (`apps/api/dist/main.js`,
+produced by the target's `api:build` dependency) runs as its own process
+against ephemeral Postgres and Redis containers provisioned by
+[testcontainers](https://node.testcontainers.org/), and every behavioral
+assertion travels over HTTP (supertest). Docker must be running. Each run
+applies the full migration chain from empty and the real reference seeds;
+between tests a truncate sweep clears every mutable table while preserving
+seeded reference data. The server and containers are stopped on teardown;
+if a run crashes before teardown, testcontainers' reaper (ryuk) removes the
+containers.
+
+Requirements and knobs:
+
+- **Docker** (or a compatible daemon reachable by testcontainers). CI's
+  GitHub-hosted runners have one.
+- `.env` must exist (copy `.env.example`) — the harness passes the
+  ephemeral `DATABASE_URL` and `REDIS_*`/`REDIS_WEBSOCKET_*`/`REDIS_BULLMQ_*`
+  connection variables to the server process and never writes to the file.
+- Prisma client and protobuf types must be generated once
+  (`npm run db:generate`, `npm run proto:generate`) — the api build needs
+  both.
+- `BGE_E2E_DATABASE_URL` / `BGE_E2E_REDIS_URL` — escape hatches that skip
+  container provisioning and use an existing endpoint instead. **Treated as
+  disposable**: migrated, seeded, truncated (and, with
+  `BGE_E2E_REDIS_FLUSH_OK=true`, flushed). Never point them at anything you
+  care about.
+- `BGE_E2E_VERBOSE=true` — streams the server's logs live instead of
+  buffering them for failure replay.
+
 ### Type checking
 
 ```bash

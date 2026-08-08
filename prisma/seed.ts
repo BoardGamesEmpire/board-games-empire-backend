@@ -4,15 +4,9 @@ import { Logger, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import * as path from 'node:path';
-import { gameLengthsSeed } from './seeds/game-lengths.seed';
-import { languagesSeed } from './seeds/languages.seed';
-import { platformsSeed } from './seeds/platforms.seed';
-import { rolesAndPermissionsSeed } from './seeds/roles-permissions.seed';
-import { safeHttpPolicySeed } from './seeds/safe-http-policy.seed';
-import { systemSettingsSeed } from './seeds/system-settings.seed';
+import { runSeeds } from './seeds/run-seeds';
 
 const envFilePath = path.resolve(process.cwd(), '.env');
-type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
 
 @Module({
   imports: [
@@ -34,10 +28,15 @@ type Seeder = (prisma: DatabaseService, logger: Logger) => Promise<void>;
 class SeedModule {}
 
 /**
+ * CLI entrypoint only (`npm run db:seed` / `npx prisma db seed`). The seed
+ * set and the loop live in `./seeds/run-seeds` so other callers — notably
+ * #236's bootstrap orchestration — can seed a database in-process without a
+ * child Nest bootstrap.
+ *
  * running 'npm run db:seed' without direct instantiation of DatabaseService fails to inject the ConfigService,
  * possibly due to decorator metadata not being properly emitted.
  *
- * @todo explore a migrations and seeds service that can run on startup
+ * @todo explore a migrations and seeds service that can run on startup (#236)
  */
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(SeedModule);
@@ -49,34 +48,12 @@ async function bootstrap() {
   const prisma = new DatabaseService(configService);
   await prisma.$connect();
 
-  const seeds: Seeder[] = [
-    gameLengthsSeed,
-    languagesSeed,
-    platformsSeed,
-    rolesAndPermissionsSeed,
-    safeHttpPolicySeed,
-    systemSettingsSeed,
-  ];
-
-  logger.log(`Starting database seeding...${seeds.length} seeds to run.`);
-
   try {
-    for (const seed of seeds) {
-      try {
-        logger.log(`Initializing ${seed.name}...`);
-        await seed(prisma, logger);
-        logger.log(`${seed.name} completed successfully.`);
-      } catch (error) {
-        logger.error(`Error initializing ${seed.name}:`);
-        throw error;
-      }
-    }
+    await runSeeds(prisma, logger);
   } finally {
     await prisma.$disconnect();
     await app.close();
   }
-
-  logger.log('All seeds completed successfully.');
 }
 
 bootstrap();

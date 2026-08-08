@@ -17,8 +17,7 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@boardgamesempire/api:build",
-          "@boardgamesempire/api:serve"
+          "@boardgamesempire/api:build"
         ]
       }
     }
