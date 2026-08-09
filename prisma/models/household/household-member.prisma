@@ -1,7 +1,7 @@
 model HouseholdMember {
   id String @id @default(cuid(2))
 
-  user   User   @relation(fields: [userId], references: [id])
+  user   User   @relation("HouseholdMemberships", fields: [userId], references: [id])
   userId String @map("user_id")
 
   householdId String    @map("household_id")
@@ -12,10 +12,26 @@ model HouseholdMember {
 
   role HouseholdRole?
 
+  // Provenance (#276). Which consent path produced this row, and who acted on
+  // the household's side: the founder themselves, the inviter (#163), or the
+  // approver (#231). `origin` discriminates which, so one actor column covers
+  // all three — `invitedById` would be wrong for two of them.
+  //
+  // Both are NULLABLE because a row can legitimately be created outside any
+  // consent path: the e2e roster fixture writes members directly, and a future
+  // data import would too. Forcing those to name a consent path would put a lie
+  // in the column. `addMemberWithin` always writes both, so NULL means exactly
+  // "created outside a consent path" — which is what abuse triage wants to ask.
+  origin HouseholdMembershipOrigin?
+
+  addedBy   User?   @relation("HouseholdMembersAdded", fields: [addedById], references: [id])
+  addedById String? @map("added_by_id")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  @@unique([householdId, userId])
+  @@unique([householdId, userId], map: "household_member_household_user_unique")
   @@index([userId])
+  @@index([addedById])
   @@map("household_members")
 }

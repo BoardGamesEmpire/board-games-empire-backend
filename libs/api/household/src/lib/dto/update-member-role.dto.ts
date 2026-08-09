@@ -17,6 +17,18 @@ export const ASSIGNABLE_HOUSEHOLD_ROLES = [
 
 export type AssignableHouseholdRole = (typeof ASSIGNABLE_HOUSEHOLD_ROLES)[number];
 
+/**
+ * Narrows an arbitrary `SystemRole` to the household-assignable subset.
+ *
+ * Exists because the roles that reach a write path do not always arrive
+ * pre-narrowed: an invite carries a `Role` FK, so #163 reads back a plain
+ * `SystemRole` and has to decide whether it may be assigned. Without this,
+ * every such caller writes its own `includes` check or — worse — casts.
+ */
+export function isAssignableHouseholdRole(role: SystemRole): role is AssignableHouseholdRole {
+  return (ASSIGNABLE_HOUSEHOLD_ROLES as readonly SystemRole[]).includes(role);
+}
+
 export class UpdateMemberRoleDto {
   @ApiProperty({
     enum: ASSIGNABLE_HOUSEHOLD_ROLES,

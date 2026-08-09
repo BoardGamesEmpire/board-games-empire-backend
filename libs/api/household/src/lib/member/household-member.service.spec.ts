@@ -1,9 +1,11 @@
-import { Action, Prisma, ResourceType, SystemRole } from '@bge/database';
+import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, SystemRole } from '@bge/database';
 import { AbilityService, PermissionsService } from '@bge/permissions';
+import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   InternalServerErrorException,
   Logger,
@@ -14,7 +16,32 @@ import { Http, PrismaError } from '@status/codes';
 import { readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { HouseholdEvents } from '../constants/household-events.constant';
-import { HouseholdMemberService, MEMBER_INCLUDE, type HouseholdMemberWithRelations } from './household-member.service';
+import { HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT } from '../constants/household.constants';
+import type { AssignableHouseholdRole } from '../dto';
+import {
+  HouseholdMemberService,
+  MEMBER_INCLUDE,
+  type AdmissibleMembershipOrigin,
+  type HouseholdMemberWithRelations,
+} from './household-member.service';
+
+/**
+ * `Prisma.sql` exposes both `strings` and a `text` getter; reading either
+ * structurally avoids depending on which the installed client version keeps.
+ *
+ * Module-scoped because two independent raw statements are now issued from this
+ * service — the owner lock and the household share-lock — and both the
+ * dispatching `$queryRaw` stub and the identifier-pinning suite need to tell
+ * them apart.
+ */
+const rawText = (value: unknown): string => {
+  const sql = value as { strings?: readonly string[]; text?: string };
+
+  return sql.strings?.join(' ') ?? sql.text ?? '';
+};
+
+/** True for the household share-lock statement, false for the owner lock. */
+const isHouseholdLockSql = (value: unknown): boolean => /\bFROM\s+households\b/.test(rawText(value));
 
 const COND = { id: 'sentinel-condition' };
 const PAGINATION = { offset: 0, limit: 10 };
@@ -25,6 +52,10 @@ const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): Hous
     userId: 'user-1',
     householdId: 'hh-1',
     showAllGames: true,
+    // Null is the honest default for a fixture: these rows were not produced by
+    // a consent path (#276), which is exactly what NULL means on the model.
+    origin: null,
+    addedById: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     user: {
@@ -68,6 +99,7 @@ describe('HouseholdMemberService', () => {
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
   let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
+  let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
 
   /**
    * Dispatches the two `householdMember.count` probes by shape rather than by
@@ -82,6 +114,43 @@ describe('HouseholdMemberService', () => {
     });
   };
 
+  /**
+   * A `consume()` outcome. Defaults to the unconstrained shape `QuotaService`
+   * returns when no cap applies, which is what every test that is not about
+   * quota wants.
+   */
+  const quotaDecision = (overrides: Partial<QuotaCheckResult> = {}): QuotaCheckResult => ({
+    allowed: true,
+    scope: null,
+    currentUsage: null,
+    limit: null,
+    softOverage: false,
+    constraints: [],
+    softOverages: [],
+    ...overrides,
+  });
+
+  /**
+   * Stubs both raw statements this service issues, keyed on which one is being
+   * asked. `householdExists: false` is how a missing or soft-deleted household
+   * is simulated for the member-creation seam.
+   */
+  const stubRawQueries = ({
+    householdExists = true,
+    owners = ['member-owner-a', 'member-owner-b'],
+  }: { householdExists?: boolean; owners?: readonly string[] } = {}) => {
+    db.$queryRaw.mockImplementation(
+      (query: unknown) =>
+        Promise.resolve(
+          isHouseholdLockSql(query)
+            ? householdExists
+              ? [{ id: 'hh-1' }]
+              : []
+            : owners.map((household_member_id) => ({ household_member_id })),
+        ) as Prisma.PrismaPromise<{ household_member_id: string }[] | { id: string }[]>,
+    );
+  };
+
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
@@ -92,6 +161,10 @@ describe('HouseholdMemberService', () => {
       invalidateUsers: jest.fn().mockResolvedValue(undefined),
     };
     events = { emit: jest.fn().mockReturnValue(true) };
+    quotas = {
+      consume: jest.fn().mockResolvedValue(quotaDecision()),
+      emitSoftOverages: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -99,6 +172,7 @@ describe('HouseholdMemberService', () => {
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
         { provide: EventEmitter2, useValue: events },
+        { provide: QuotaService, useValue: quotas },
       ],
     });
 
@@ -120,10 +194,22 @@ describe('HouseholdMemberService', () => {
     // real `$queryRaw` returns an array — so defaulting it in production code
     // would convert a future harness gap into a silent "this household has no
     // owners", which is precisely the read the lock exists to make trustworthy.
-    db.$queryRaw.mockResolvedValue([
-      { household_member_id: 'member-owner-a' },
-      { household_member_id: 'member-owner-b' },
-    ]);
+    //
+    // Dispatched by statement shape, not by call order.
+    //
+    // This file previously stubbed `$queryRaw` with a flat `mockResolvedValue`
+    // of owner rows, which was correct while the owner lock was the only raw
+    // statement in the service. `addMemberWithin` adds a second one (the
+    // household share-lock), and under the flat stub that statement would have
+    // received OWNER rows — a non-empty result, which `lockExistingHousehold`
+    // reads as "household exists". Every soft-delete/404 test would then have
+    // passed for the wrong reason, and a regression that dropped the guard
+    // entirely would have gone unnoticed.
+    //
+    // Shape dispatch is the same discipline `stubCounts` above already applies
+    // to the two `householdMember.count` probes, for the same reason: a stub
+    // keyed on ordering silently starts lying the moment a call is added.
+    stubRawQueries();
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -1045,17 +1131,504 @@ describe('HouseholdMemberService', () => {
     });
   });
 
+  describe('addMemberWithin', () => {
+    /**
+     * The seam takes a `Prisma.TransactionClient` because its guarantees are row
+     * locks, which only hold for the life of a transaction. The mock is
+     * structurally a subset of that client, so one documented widening lives
+     * here rather than an `any` at every call site.
+     */
+    const asTx = (client: MockDatabaseService): Prisma.TransactionClient =>
+      client as unknown as Prisma.TransactionClient;
+
+    const PARAMS = {
+      householdId: 'hh-1',
+      userId: 'user-2',
+      origin: HouseholdMembershipOrigin.InviteAccepted,
+      addedById: 'user-inviter',
+    } as const;
+
+    /** No existing membership, role row present. The happy-path preconditions. */
+    const stubAdmissible = (created: HouseholdMemberWithRelations = makeMember({ id: 'member-new' })) => {
+      db.householdMember.findUnique.mockResolvedValue(null);
+      db.role.findUnique.mockResolvedValue({ id: 'role-member' } as never);
+      db.householdMember.create.mockResolvedValue(created as never);
+    };
+
+    const uniqueConstraintError = (target: string | string[] = HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT) =>
+      new Prisma.PrismaClientKnownRequestError('duplicate', {
+        code: PrismaError.UniqueConstraintViolation,
+        clientVersion: 'test',
+        meta: { target },
+      });
+
+    it('inserts the member and its role in the caller transaction, shaped by MEMBER_INCLUDE', async () => {
+      const created = makeMember({ id: 'member-new', userId: 'user-2' });
+      stubAdmissible(created);
+
+      const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+      expect(db.householdMember.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            householdId: 'hh-1',
+            userId: 'user-2',
+            role: { create: { roleId: 'role-member' } },
+          }),
+          include: MEMBER_INCLUDE,
+        }),
+      );
+      expect(result.member).toBe(created);
+    });
+
+    it('defaults the role to HouseholdMember', async () => {
+      stubAdmissible();
+
+      await service.addMemberWithin(asTx(db), PARAMS);
+
+      expect(db.role.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { name: SystemRole.HouseholdMember } }),
+      );
+    });
+
+    it.each([SystemRole.HouseholdAdmin, SystemRole.HouseholdGuest, SystemRole.HouseholdMember] as const)(
+      'accepts the assignable role %s',
+      async (role: AssignableHouseholdRole) => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), { ...PARAMS, role });
+
+        expect(db.role.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { name: role } }));
+        expect(db.householdMember.create).toHaveBeenCalled();
+      },
+    );
+
+    // Rejected BEFORE any write is issued. Rejecting after the insert would
+    // leave the refusal dependent on a rollback the caller controls, and an
+    // owner admitted here would bypass transfer-ownership's locking (#158).
+    it.each([SystemRole.HouseholdOwner, SystemRole.Admin, SystemRole.EventHost] as const)(
+      'rejects the non-assignable role %s without writing',
+      async (role: SystemRole) => {
+        stubAdmissible();
+
+        await expect(
+          // Cast is the point of the test: a caller resolving a role from an
+          // `Invite.roleId` holds a plain `SystemRole`, and the runtime guard —
+          // not just the parameter type — has to refuse it.
+          service.addMemberWithin(asTx(db), { ...PARAMS, role: role as AssignableHouseholdRole }),
+        ).rejects.toThrow(BadRequestException);
+
+        expect(db.householdMember.create).not.toHaveBeenCalled();
+        expect(db.householdRole.create).not.toHaveBeenCalled();
+        // `$queryRaw` alone only proves the household ROW lock was skipped. The
+        // advisory lock lives inside the mocked `consume`, so without this a
+        // refactor that moved quota consumption ahead of the role guard would
+        // still pass while taking a lock for a request that cannot succeed.
+        expect(db.$queryRaw).not.toHaveBeenCalled();
+        expect(quotas.consume).not.toHaveBeenCalled();
+      },
+    );
+
+    it('throws NotFound when the household is missing or soft-deleted, without writing', async () => {
+      stubAdmissible();
+      stubRawQueries({ householdExists: false });
+
+      await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(NotFoundException);
+      expect(db.householdMember.create).not.toHaveBeenCalled();
+    });
+
+    it('takes the household share lock on the caller transaction, not the base client', async () => {
+      stubAdmissible();
+      const tx = { ...db, $queryRaw: jest.fn().mockResolvedValue([{ id: 'hh-1' }]) } as unknown as MockDatabaseService;
+
+      await service.addMemberWithin(asTx(tx), PARAMS);
+
+      expect(tx.$queryRaw).toHaveBeenCalled();
+      // A lock taken on the base client would serialize nothing: the guarantee
+      // only holds for the life of the caller's transaction.
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    // The seam owns the soft-delete guard outright, and this assertion is the
+    // thing that keeps it that way.
+    //
+    // Adding `assertHouseholdExists` alongside the lock would NOT be harmless
+    // belt-and-braces. It is an unlocked `count` on the base client, so it
+    // answers from outside the caller's transaction and its result is stale the
+    // instant it returns — the precise read/insert window `lockExistingHousehold`
+    // exists to close. Two guards where one is unsound reads as more careful
+    // while making the unsound one look load-bearing, and the next person to
+    // touch this has to re-derive which of the two actually holds. The lock
+    // already covers both outcomes the probe would (absent, soft-deleted), so
+    // the probe can only add a redundant round trip and a false sense of rigor.
+    it('does not use the unlocked household existence probe', async () => {
+      stubAdmissible();
+
+      await service.addMemberWithin(asTx(db), PARAMS);
+
+      expect(db.household.count).not.toHaveBeenCalled();
+    });
+
+    it('persists the supplied origin and addedById', async () => {
+      stubAdmissible();
+
+      await service.addMemberWithin(asTx(db), {
+        ...PARAMS,
+        origin: HouseholdMembershipOrigin.JoinApproved,
+        addedById: 'user-approver',
+      });
+
+      expect(db.householdMember.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            origin: HouseholdMembershipOrigin.JoinApproved,
+            addedById: 'user-approver',
+          }),
+        }),
+      );
+    });
+
+    it('returns the existing row without inserting when the user is already a member', async () => {
+      const existing = makeMember({ id: 'member-existing', userId: 'user-2' });
+      db.householdMember.findUnique.mockResolvedValue(existing as never);
+
+      const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+      expect(db.householdMember.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
+          include: MEMBER_INCLUDE,
+        }),
+      );
+      expect(result.member).toBe(existing);
+      expect(db.householdMember.create).not.toHaveBeenCalled();
+    });
+
+    // Silently applying the requested role would turn any invite link into a
+    // privilege-escalation path. Role changes are updateMemberRole's job.
+    it('leaves an existing member role untouched even when a different role is requested', async () => {
+      const existing = makeMember({ id: 'member-existing', userId: 'user-2' });
+      db.householdMember.findUnique.mockResolvedValue(existing as never);
+
+      const result = await service.addMemberWithin(asTx(db), { ...PARAMS, role: SystemRole.HouseholdAdmin });
+
+      expect(result.member.role?.role.name).toBe(SystemRole.HouseholdMember);
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(db.householdRole.create).not.toHaveBeenCalled();
+      expect(db.role.findUnique).not.toHaveBeenCalled();
+    });
+
+    // Recovery in place is impossible: Postgres has aborted the transaction, so
+    // reading the winner's row back here would fail too. 409 and let the caller
+    // retry the whole transaction into the pre-read.
+    it('maps a concurrent duplicate insert to Conflict rather than re-reading', async () => {
+      stubAdmissible();
+      db.householdMember.create.mockRejectedValue(uniqueConstraintError());
+
+      await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(ConflictException);
+      expect(db.householdMember.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('rethrows a non-unique write failure untouched', async () => {
+      stubAdmissible();
+      const failure = new Error('connection reset');
+      db.householdMember.create.mockRejectedValue(failure);
+
+      await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(failure);
+    });
+
+    // Seed drift is a server misconfiguration, not a caller error — it must not
+    // present as a permission or validation failure.
+    it('surfaces an unprovisioned role as InternalServerError without writing', async () => {
+      db.householdMember.findUnique.mockResolvedValue(null);
+      db.role.findUnique.mockResolvedValue(null);
+
+      await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(InternalServerErrorException);
+      expect(db.householdMember.create).not.toHaveBeenCalled();
+    });
+
+    // Both are the caller's post-commit contract. Asserted negatively because a
+    // regression here is otherwise silent: invalidating inside the transaction
+    // evicts a graph for a membership that may still roll back, and the 5-minute
+    // TTL makes the resulting stale-grant window invisible.
+    it('performs no ability-cache invalidation and emits nothing', async () => {
+      stubAdmissible();
+
+      await service.addMemberWithin(asTx(db), PARAMS);
+
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
+    });
+
+    it('returns an empty softOverages list when no cap applies', async () => {
+      stubAdmissible();
+
+      await expect(service.addMemberWithin(asTx(db), PARAMS)).resolves.toEqual(
+        expect.objectContaining({ softOverages: [] }),
+      );
+    });
+
+    // Founder membership is created by `HouseholdService.create`, never here.
+    // Accepting it would stamp a later admission as the household's creation —
+    // the exact question the discriminant exists to answer. 500 rather than 400
+    // because `origin` is never client-derived: every call site passes a literal.
+    it('rejects the Founder origin as a server error, without writing', async () => {
+      stubAdmissible();
+
+      await expect(
+        // Cast is the point: the parameter type already excludes Founder, so only
+        // a cast or a dynamically resolved value could get here — and the runtime
+        // guard has to catch those.
+        service.addMemberWithin(asTx(db), {
+          ...PARAMS,
+          origin: HouseholdMembershipOrigin.Founder as unknown as AdmissibleMembershipOrigin,
+        }),
+      ).rejects.toThrow(InternalServerErrorException);
+
+      expect(db.householdMember.create).not.toHaveBeenCalled();
+      // Refused before any lock is taken, like the role guard.
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(quotas.consume).not.toHaveBeenCalled();
+    });
+
+    it.each([HouseholdMembershipOrigin.InviteAccepted, HouseholdMembershipOrigin.JoinApproved] as const)(
+      'admits with the %s origin',
+      async (origin: AdmissibleMembershipOrigin) => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), { ...PARAMS, origin });
+
+        expect(db.householdMember.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ origin }) }),
+        );
+      },
+    );
+
+    describe('duplicate discrimination', () => {
+      // Prisma reports `meta.target` as the mapped constraint name on some
+      // provider/version combinations, the field-name array on others, and raw
+      // column names elsewhere. All three must map to 409 or a genuine duplicate
+      // becomes a 500 on the common path.
+      it.each([
+        ['the mapped constraint name', HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT],
+        ['the field-name array', ['householdId', 'userId']],
+        ['the raw column names', ['household_id', 'user_id']],
+      ])('maps a duplicate reported as %s to Conflict', async (_label, target) => {
+        stubAdmissible();
+        db.householdMember.create.mockRejectedValue(uniqueConstraintError(target));
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(ConflictException);
+      });
+
+      // The nested member/role create can raise P2002 from either generated
+      // primary key today, and from whatever unique someone adds tomorrow.
+      // Translating those to "already a member" would hide an unrelated database
+      // failure behind a confidently wrong answer.
+      it.each([
+        ['a primary key collision', ['id']],
+        ['an unrelated future unique', ['householdMemberId', 'roleId']],
+        ['a single matching field without its pair', ['userId']],
+      ])('rethrows a P2002 raised by %s rather than reporting Conflict', async (_label, target) => {
+        stubAdmissible();
+        const error = uniqueConstraintError(target);
+        db.householdMember.create.mockRejectedValue(error);
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toBe(error);
+      });
+
+      it('rethrows a P2002 with no target rather than guessing', async () => {
+        stubAdmissible();
+        const error = new Prisma.PrismaClientKnownRequestError('duplicate', {
+          code: PrismaError.UniqueConstraintViolation,
+          clientVersion: 'test',
+        });
+        db.householdMember.create.mockRejectedValue(error);
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toBe(error);
+      });
+    });
+
+    describe('quota gate (#159)', () => {
+      it('consumes one member against household_member_count on the caller transaction', async () => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), PARAMS);
+
+        expect(quotas.consume).toHaveBeenCalledWith(
+          'household_member_count',
+          1n,
+          { userId: 'actor-1', householdId: 'hh-1' },
+          db,
+        );
+      });
+
+      // `QuotaCheckContext.userId` is the acting principal, and neither
+      // parameter is reliably that: for `InviteAccepted` the actor is the
+      // invitee while `addedById` is the absent inviter, and for `JoinApproved`
+      // it is the approver. Passing either would charge the wrong principal the
+      // moment a User-scope cap exists on this resource.
+      it('charges the acting principal, not the joining user or the admitting actor', async () => {
+        stubAdmissible();
+        abilityService.getActingUserId.mockReturnValue('actor-approver');
+
+        await service.addMemberWithin(asTx(db), { ...PARAMS, userId: 'user-2', addedById: 'user-inviter' });
+
+        expect(quotas.consume).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.anything(),
+          expect.objectContaining({ userId: 'actor-approver' }),
+          expect.anything(),
+        );
+      });
+
+      // The advisory lock `consume` takes only holds for the life of the
+      // transaction it is handed. Passing the base client would compile, pass a
+      // naive assertion, and serialize nothing — two concurrent admissions would
+      // both read the pre-image and both pass a full cap.
+      it('hands consume the caller transaction, never the base client', async () => {
+        stubAdmissible();
+        const tx = {
+          ...db,
+          $queryRaw: jest.fn().mockResolvedValue([{ id: 'hh-1' }]),
+        } as unknown as MockDatabaseService;
+
+        await service.addMemberWithin(asTx(tx), PARAMS);
+
+        expect(quotas.consume).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), tx);
+      });
+
+      // Charging an idempotent return would let a client walk a household past
+      // its cap by replaying a single accept — the roster never grows, but the
+      // usage counter would.
+      it('does not consume when the user is already a member', async () => {
+        const existing = makeMember({ id: 'member-existing', userId: 'user-2' });
+        db.householdMember.findUnique.mockResolvedValue(existing as never);
+
+        const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+        expect(quotas.consume).not.toHaveBeenCalled();
+        expect(result.softOverages).toEqual([]);
+      });
+
+      // NOTE (#288): the status assertion below pins 402, which is inherited
+      // from `QuotaExceededException` rather than chosen for this path. When
+      // that taxonomy is settled, this is the assertion to update — the
+      // machine-readable fields underneath it are the stable contract and
+      // should survive whatever the status becomes.
+      it('rejects with QuotaExceededException carrying the binding constraint, without writing', async () => {
+        stubAdmissible();
+        quotas.consume.mockResolvedValue(
+          quotaDecision({ allowed: false, scope: QuotaScope.Household, limit: 8n, currentUsage: 8n }),
+        );
+
+        // One invocation, awaited twice, so the call-count assertion below stays
+        // meaningful.
+        const attempt = service.addMemberWithin(asTx(db), PARAMS);
+
+        await expect(attempt).rejects.toThrow(QuotaExceededException);
+        await expect(attempt).rejects.toMatchObject({
+          status: Http.PaymentRequired,
+          resource: 'household_member_count',
+          limit: 8n,
+          currentUsage: 8n,
+          attemptedAmount: 1n,
+        });
+
+        expect(db.householdMember.create).not.toHaveBeenCalled();
+        // Pre-read plus the confirming re-read: a cap breach is only reported
+        // once the membership is confirmed still absent.
+        expect(db.householdMember.findUnique).toHaveBeenCalledTimes(2);
+      });
+
+      // A denial while a concurrent admission of the SAME user committed is not a
+      // full household — the usage measured against already includes the row this
+      // call was about to insert. Reporting 402 would tell the caller their write
+      // failed when it has effectively succeeded; for #163 that is an invitee
+      // being told the household is full straight after joining it.
+      it('returns the concurrently admitted row instead of reporting quota exhaustion', async () => {
+        const winner = makeMember({ id: 'member-winner', userId: 'user-2' });
+        db.role.findUnique.mockResolvedValue({ id: 'role-member' } as never);
+        // Absent at the pre-read, present once the quota lock is granted.
+        db.householdMember.findUnique.mockResolvedValueOnce(null).mockResolvedValueOnce(winner as never);
+        quotas.consume.mockResolvedValue(
+          quotaDecision({ allowed: false, scope: QuotaScope.Household, limit: 8n, currentUsage: 8n }),
+        );
+
+        const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+        expect(result.member).toBe(winner);
+        // Nothing was admitted by this call, so it crossed no soft cap.
+        expect(result.softOverages).toEqual([]);
+        expect(db.householdMember.create).not.toHaveBeenCalled();
+        expect(db.householdMember.findUnique).toHaveBeenCalledTimes(2);
+      });
+
+      // Every other case here uses the unconstrained default decision, where
+      // `scope`, `limit`, and `currentUsage` are all null. Without this, an
+      // implementation that refused whenever a cap APPLIED — rather than when one
+      // was exceeded — would satisfy the whole suite.
+      it('admits the member when an enforced cap still has headroom', async () => {
+        stubAdmissible();
+        quotas.consume.mockResolvedValue(
+          quotaDecision({ allowed: true, scope: QuotaScope.Household, limit: 8n, currentUsage: 7n }),
+        );
+
+        const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+        expect(db.householdMember.create).toHaveBeenCalled();
+        expect(result.member.id).toBe('member-new');
+      });
+
+      // Consuming after the insert would take the advisory lock too late to
+      // serialize anything, so the order is part of the contract, not an
+      // incidental arrangement of statements.
+      it('consumes before inserting, not after', async () => {
+        stubAdmissible();
+
+        await service.addMemberWithin(asTx(db), PARAMS);
+
+        const consumeOrder = quotas.consume.mock.invocationCallOrder[0];
+        const createOrder = db.householdMember.create.mock.invocationCallOrder[0];
+        expect(consumeOrder).toBeLessThan(createOrder);
+      });
+
+      // Emitting inside the caller's transaction would warn about usage a
+      // rollback undoes. The seam returns them; the caller emits post-commit.
+      it('returns soft overages rather than emitting them', async () => {
+        const overage: QuotaSoftOverageEvent = {
+          scope: QuotaScope.Household,
+          scopeId: 'hh-1',
+          resource: 'household_member_count',
+          currentUsage: '8',
+          attemptedAmount: '1',
+          limit: '8',
+        };
+        stubAdmissible();
+        quotas.consume.mockResolvedValue(quotaDecision({ softOverage: true, softOverages: [overage] }));
+
+        const result = await service.addMemberWithin(asTx(db), PARAMS);
+
+        expect(result.softOverages).toEqual([overage]);
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+    });
+  });
+
   /**
    * Guards #239's first gap without a database. `$queryRaw` is mocked, so the
-   * lock's SQL never executes and a later `@map` rename would pass every other
+   * lock SQL never executes and a later `@map` rename would pass every other
    * test in this suite. The checked-in Prisma models are the authoritative source
    * of mapped names — Prisma 7's client generator exposes no runtime DMMF and its
    * output is gitignored, so the schema files are also the only source available.
    *
-   * Still does NOT show the lock serializes; that needs two real concurrent
+   * Covers both raw statements the service issues: the owner lock (#157/#158)
+   * and the household share lock the member-creation seam takes (#276).
+   *
+   * Still does NOT show either lock serializes; that needs two real concurrent
    * transactions (#239).
    */
-  describe('owner-lock SQL', () => {
+  describe('raw lock SQL', () => {
     const findSchemaDir = (): string => {
       let dir = __dirname;
 
@@ -1083,6 +1656,7 @@ describe('HouseholdMemberService', () => {
     const MODEL_FILES = [
       'household/household-role.prisma',
       'household/household-member.prisma',
+      'household/household.prisma',
       'permissions/role.prisma',
     ];
 
@@ -1110,26 +1684,21 @@ describe('HouseholdMemberService', () => {
       return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
     };
 
-    /**
-     * `Prisma.sql` exposes both `strings` and a `text` getter; reading either
-     * structurally avoids depending on which the installed client version keeps.
-     */
-    const rawText = (value: unknown): string => {
-      const sql = value as { strings?: readonly string[]; text?: string };
-
-      return sql.strings?.join(' ') ?? sql.text ?? '';
-    };
-
     const captureLockSql = async (): Promise<string> => {
       db.householdMember.findFirst.mockResolvedValue(makeOwner());
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
       db.householdMember.delete.mockResolvedValue(makeOwner() as never);
-      db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }, { household_member_id: 'member-2' }]);
+      stubRawQueries({ owners: ['member-1', 'member-2'] });
 
       await service.removeMember('hh-1', 'member-1');
 
-      return rawText((db.$queryRaw.mock.calls[0] as unknown[])[0]);
+      const ownerLock = db.$queryRaw.mock.calls
+        .map((call: unknown[]) => call[0])
+        .find((query: unknown) => !isHouseholdLockSql(query));
+      expect(ownerLock).toBeDefined();
+
+      return rawText(ownerLock);
     };
 
     it('references only identifiers the Prisma models actually map to', async () => {
@@ -1154,6 +1723,50 @@ describe('HouseholdMemberService', () => {
       // Without FOR UPDATE two concurrent owner transitions both pass their
       // checks and the household is left ownerless.
       await expect(captureLockSql()).resolves.toMatch(/FOR UPDATE OF hr/);
+    });
+
+    describe('household share lock', () => {
+      const captureHouseholdLockSql = async (): Promise<string> => {
+        db.householdMember.findUnique.mockResolvedValue(null);
+        db.role.findUnique.mockResolvedValue({ id: 'role-member' } as never);
+        db.householdMember.create.mockResolvedValue(makeMember() as never);
+
+        await service.addMemberWithin(db as unknown as Prisma.TransactionClient, {
+          householdId: 'hh-1',
+          userId: 'user-2',
+          origin: HouseholdMembershipOrigin.InviteAccepted,
+          addedById: 'user-inviter',
+        });
+
+        const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isHouseholdLockSql);
+        expect(query).toBeDefined();
+
+        return rawText(query);
+      };
+
+      it('references only identifiers the Prisma models actually map to', async () => {
+        const text = await captureHouseholdLockSql();
+        const schema = readSchema();
+
+        for (const identifier of [
+          table(schema, 'Household'),
+          column(schema, 'Household', 'deletedAt'),
+          column(schema, 'Household', 'id'),
+        ]) {
+          expect(text).toMatch(new RegExp(`\\b${identifier}\\b`));
+        }
+      });
+
+      it('excludes soft-deleted households and locks the row rather than merely reading it', async () => {
+        // FOR KEY SHARE — which the FK insert already takes implicitly — does
+        // NOT block the non-key UPDATE that soft-deletes. FOR SHARE does, and
+        // that gap is the whole race this statement closes.
+        const text = await captureHouseholdLockSql();
+
+        expect(text).toMatch(/deleted_at IS NULL/);
+        expect(text).toMatch(/FOR SHARE/);
+        expect(text).not.toMatch(/FOR KEY SHARE/);
+      });
     });
   });
 });

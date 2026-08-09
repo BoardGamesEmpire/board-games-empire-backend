@@ -130,7 +130,10 @@
     "member_role_owner": "A household owner's role cannot be changed here — use the transfer-ownership flow",
     "not_a_member": "You are not a member of household {householdId}",
     "transfer_target_self": "You already own this household — transfer ownership to another member",
-    "transfer_target_already_owner": "Member {memberId} is already an owner of this household"
+    "transfer_target_already_owner": "Member {memberId} is already an owner of this household",
+    "member_role_not_assignable": "Household role '{role}' cannot be assigned when adding a member — ownership is transferred, not granted",
+    "already_a_member": "User is already a member of household {householdId}",
+    "member_origin_not_admissible": "Membership origin '{origin}' cannot be recorded by the member-admission path — founder membership is created with the household"
   },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",

@@ -149,6 +149,9 @@ export type I18nTranslations = {
             "not_a_member": string;
             "transfer_target_self": string;
             "transfer_target_already_owner": string;
+            "member_role_not_assignable": string;
+            "already_a_member": string;
+            "member_origin_not_admissible": string;
         };
         "quota": {
             "exceeded": string;

@@ -1,0 +1,22 @@
+// How a HouseholdMember row came to exist (#276).
+//
+// Household membership is a bidirectional data grant — members read each
+// other's game collections — so it is a trust boundary, not a placement
+// within one. Every value below therefore names a path in which the JOINING
+// USER performed an affirmative act. There is deliberately no value for
+// "an admin added them", because no such path exists or is planned: that is
+// the invariant this enum makes unforgettable, since a new call site cannot
+// be written without choosing a value.
+//
+// `Open` join policy (#231), if it ships, adds a fourth value; it is not
+// pre-added here because the policy is undecided.
+enum HouseholdMembershipOrigin {
+  // Household creation. The founder consents by creating (#210's create path).
+  Founder
+  // The household invited, the invitee accepted (#163).
+  InviteAccepted
+  // The user requested to join, the household approved (#231).
+  JoinApproved
+
+  @@map("household_membership_origins")
+}

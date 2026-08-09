@@ -1,4 +1,4 @@
-import type { DatabaseService } from '@bge/database';
+import { Prisma, type DatabaseService } from '@bge/database';
 import { t } from '@bge/i18n';
 import { NotFoundException } from '@nestjs/common';
 
@@ -24,6 +24,50 @@ export async function householdExists(db: DatabaseService, householdId: string):
  */
 export async function assertHouseholdExists(db: DatabaseService, householdId: string): Promise<void> {
   if (!(await householdExists(db, householdId))) {
+    throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
+  }
+}
+
+/**
+ * Transactional counterpart of {@link assertHouseholdExists}: asserts the
+ * household is live AND holds a share lock on its row for the remainder of the
+ * caller's transaction. For write paths that add rows to a household (#276).
+ *
+ * The lock, not the read, is the point. `deletedAt` is an ordinary column, so
+ * `deleteHousehold` soft-deletes with a plain `UPDATE households`. Under READ
+ * COMMITTED an unlocked existence probe leaves a window in which that update
+ * commits between the probe and the insert, producing a member on a dead
+ * household with no error raised anywhere.
+ *
+ * The foreign key does not close it: inserting into `household_members` takes
+ * `FOR KEY SHARE` on the parent row, and `FOR KEY SHARE` does not block a
+ * non-key `UPDATE` — `deleted_at` is not a key column. `FOR SHARE` does.
+ *
+ * `FOR SHARE` rather than `FOR UPDATE` deliberately: it blocks the soft-delete's
+ * exclusive lock while letting concurrent member-adds to the same household
+ * proceed in parallel, which is the common case.
+ *
+ * Both interleavings are safe. If the soft-delete commits first, this statement
+ * blocks, then re-evaluates its `WHERE` against the new row version
+ * (`EvalPlanQual`), finds `deleted_at` set, matches nothing, and 404s. If this
+ * commits first, the soft-delete waits and then deletes a household that
+ * legitimately gained a member beforehand.
+ *
+ * NOTE: raw SQL because Prisma exposes no row-locking clause. The identifiers
+ * are pinned against the checked-in Prisma models by a spec in this lib so a
+ * later `@map` rename fails loudly; that it actually serializes is #239's
+ * integration work.
+ */
+export async function lockExistingHousehold(tx: Prisma.TransactionClient, householdId: string): Promise<void> {
+  const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT h.id
+    FROM households h
+    WHERE h.id = ${householdId}
+      AND h.deleted_at IS NULL
+    FOR SHARE
+  `);
+
+  if (rows.length === 0) {
     throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
   }
 }
