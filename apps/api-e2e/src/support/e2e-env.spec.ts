@@ -1,4 +1,7 @@
 import {
+  API_NODE_ENV,
+  API_PORT_VAR,
+  apiEnvOverrides,
   decideProvisioning,
   E2E_BASE_URL_VAR,
   E2E_DATABASE_URL_VAR,
@@ -149,6 +152,44 @@ describe('e2e-env (pure logic)', () => {
       // container-mode run in the same process) would survive and
       // authorize FLUSHALL against a Redis the harness does not own.
       expect(redisOwnershipOverride('external')).toEqual({ [E2E_OWNS_REDIS_VAR]: 'false' });
+    });
+  });
+
+  describe('apiEnvOverrides', () => {
+    const baseUrl = 'http://127.0.0.1:41234';
+
+    it('binds the API to the port the harness reserved', () => {
+      expect(apiEnvOverrides(baseUrl, 41234)[API_PORT_VAR]).toBe('41234');
+    });
+
+    it('pins NODE_ENV to a value system.config.ts accepts', () => {
+      // CI exports NODE_ENV=test and Jest's CLI assigns 'test' when unset;
+      // neither is in the schema's valid set, so an inherited value exits the
+      // API during ConfigModule validation and surfaces only as a readiness
+      // timeout. Pinning here makes the child's boot contract independent of
+      // whatever the runner, Jest, or a developer's shell happens to hold.
+      expect(apiEnvOverrides(baseUrl, 41234).NODE_ENV).toBe(API_NODE_ENV);
+      expect(['development', 'testing', 'staging', 'production']).toContain(API_NODE_ENV);
+    });
+
+    it('points BetterAuth at the ephemeral origin rather than the .env default', () => {
+      // .env.example hard-codes port 33333; inheriting it leaves BetterAuth
+      // minting absolute URLs for a server that is not the one under test.
+      expect(apiEnvOverrides(baseUrl, 41234).BETTER_AUTH_URL).toBe(baseUrl);
+    });
+
+    it('trusts both loopback spellings of the ephemeral origin', () => {
+      const origins = apiEnvOverrides(baseUrl, 41234).TRUSTED_ORIGINS.split(',');
+
+      expect(origins).toEqual(['http://127.0.0.1:41234', 'http://localhost:41234']);
+    });
+
+    it('re-derives every value from the port it is given', () => {
+      const overrides = apiEnvOverrides('http://127.0.0.1:55555', 55555);
+
+      expect(overrides[API_PORT_VAR]).toBe('55555');
+      expect(overrides.BETTER_AUTH_URL).toBe('http://127.0.0.1:55555');
+      expect(overrides.TRUSTED_ORIGINS).toContain('http://localhost:55555');
     });
   });
 

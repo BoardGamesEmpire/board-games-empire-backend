@@ -115,7 +115,12 @@ describe('performSignup', () => {
     // The trailing slash on the base URL must not double up.
     expect(url).toBe(`http://127.0.0.1:4100${SIGN_UP_EMAIL_PATH}`);
     expect(init?.method).toBe('POST');
-    expect(init?.headers).toEqual({ 'Content-Type': 'application/json' });
+    // Origin is required, not decorative: BetterAuth's origin check answers a
+    // state-changing request with neither Origin nor Referer with
+    // MISSING_OR_NULL_ORIGIN, and server-side fetch sends none by default.
+    // It must match the base URL (trailing slash already trimmed) so the
+    // harness's trusted-origins list accepts it.
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/json', Origin: 'http://127.0.0.1:4100' });
 
     const sentBody: unknown = JSON.parse(String(init?.body));
     expect(sentBody).toMatchObject({ name: 'alice' });

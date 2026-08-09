@@ -54,6 +54,56 @@ export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REDIS_IMAGE = 'redis:7-alpine';
 
 /**
+ * The `NODE_ENV` the API child runs under. Pinned by the harness rather than
+ * inherited, because every layer above disagrees about the spelling: the CI
+ * workflow exports `test`, Jest's CLI assigns `test` when the variable is
+ * unset, and a developer's shell may hold anything at all. `system.config.ts`
+ * validates against `development | testing | staging | production`, so an
+ * inherited `test` fails ConfigModule validation and the API exits during
+ * boot — visible only as a readiness timeout unless you read the child's log.
+ *
+ * `testing` (not `development`) is the correct member: it is what
+ * `DATA_ENCRYPTION_KEY`'s `defaultsFor` map keys off, and it keeps
+ * `env.isDevelopment` false so the suite does not silently exercise
+ * development-only branches such as Swagger auto-enablement.
+ */
+export const API_NODE_ENV = 'testing';
+
+/**
+ * Environment the API child gets on top of the inherited process env, given
+ * the ephemeral origin it is about to bind.
+ *
+ * Everything here is pinned for the same reason: the harness owns the child's
+ * boot contract, and anything left to inheritance is a value that differs
+ * between a developer's machine, a developer's `.env`, and CI — which is
+ * exactly the class of difference that turns a green local run into a red
+ * pipeline.
+ *
+ * `BETTER_AUTH_URL` and `TRUSTED_ORIGINS` matter beyond boot: `.env.example`
+ * hard-codes them to port 33333 while the harness binds an ephemeral port, so
+ * an inherited value leaves BetterAuth issuing absolute URLs for a server that
+ * is not the one under test.
+ *
+ * `TRUSTED_ORIGINS` is overridden for a narrower reason. `.env.example` ships
+ * `http://localhost:{PORT}`, and `authFactory` does expand `{PORT}` itself
+ * (from `system.port`) — so the inherited value would in fact resolve to the
+ * right port. What it would NOT cover is the host: the harness serves on
+ * `127.0.0.1`, and an `Origin: http://127.0.0.1:<port>` does not match a
+ * trusted `http://localhost:<port>`. Both spellings are listed so a spec may
+ * address the server either way.
+ */
+export function apiEnvOverrides(baseUrl: string, port: number): Record<string, string> {
+  const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost')];
+
+  return {
+    [API_PORT_VAR]: String(port),
+    NODE_ENV: API_NODE_ENV,
+    BETTER_AUTH_URL: baseUrl,
+    TRUSTED_ORIGINS: trustedOrigins.join(','),
+  };
+}
+
+/**
  * The three logical Redis connections the API configures via
  * `makeRedisConfig` (see `apps/api/src/app/configuration`). The harness
  * points all three at the same ephemeral server; the per-connection

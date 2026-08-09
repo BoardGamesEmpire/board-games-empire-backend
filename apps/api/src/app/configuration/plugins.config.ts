@@ -45,7 +45,18 @@ export default registerAs('plugins', () =>
   ]),
 );
 
+/**
+ * Both roots ship empty in `.env.example` (`PLUGINS_ROOT=`), which is how a
+ * fresh `cp .env.example .env` opts into the defaults declared above: `@bge/env`
+ * is created with `allowEmptyString: false`, so an empty value is treated as
+ * unset and `defaultValue` applies.
+ *
+ * Joi runs first, though, and a bare `Joi.string()` rejects `''` outright —
+ * boot dies on validation before the provider ever sees the key. `.allow('')`
+ * hands the empty value through to the layer that knows what to do with it,
+ * matching the `SERVER_IDENTIFIER` precedent in the system-settings config.
+ */
 export const pluginsConfigValidationSchema = {
-  PLUGINS_ROOT: Joi.string(),
-  PLUGINS_BUNDLED_ROOT: Joi.string(),
+  PLUGINS_ROOT: Joi.string().optional().allow(''),
+  PLUGINS_BUNDLED_ROOT: Joi.string().optional().allow(''),
 };

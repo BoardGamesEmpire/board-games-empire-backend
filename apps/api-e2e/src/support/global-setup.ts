@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as path from 'node:path';
 import {
-  API_PORT_VAR,
+  apiEnvOverrides,
   decideProvisioning,
   E2E_BASE_URL_VAR,
   E2E_VERBOSE_VAR,
@@ -105,7 +105,7 @@ async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<
 
   const child = spawn(process.execPath, [API_BUNDLE], {
     cwd: WORKSPACE_ROOT,
-    env: { ...env, [API_PORT_VAR]: String(port) },
+    env: { ...env, ...apiEnvOverrides(baseUrl, port) },
     // Always piped, never inherited: the retry path classifies a boot
     // failure by scanning this output for EADDRINUSE, and inherited stdio
     // would leave nothing to scan — making verbose runs the flaky ones.

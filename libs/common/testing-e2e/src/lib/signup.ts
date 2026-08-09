@@ -180,6 +180,14 @@ async function safeText(response: Response): Promise<string> {
  * Note: the caller must still wait for provisioning (see
  * `waitForProvisionedRoleName` in actors.ts) — a 2xx here proves the row
  * exists, not that the asynchronous provisioning listener has run.
+ *
+ * Sends an explicit `Origin`. BetterAuth's origin check rejects a
+ * state-changing request that carries neither `Origin` nor `Referer` with
+ * `MISSING_OR_NULL_ORIGIN`, and `fetch` on the server sends no `Origin` of
+ * its own — only browsers do. Setting it to the base URL makes the request
+ * look like what a real client sends and keeps the check ARMED; the
+ * alternative, `DISABLE_ORIGIN_CHECK=true` for the suite, would switch off a
+ * security control in the tests meant to prove it works.
  */
 export async function performSignup(
   baseUrl: string,
@@ -188,9 +196,11 @@ export async function performSignup(
 ): Promise<SignupResult> {
   const prepared = prepareSignup(options);
 
-  const response = await fetchFn(`${trimTrailingSlash(baseUrl)}${SIGN_UP_EMAIL_PATH}`, {
+  const origin = trimTrailingSlash(baseUrl);
+
+  const response = await fetchFn(`${origin}${SIGN_UP_EMAIL_PATH}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Origin: origin },
     body: JSON.stringify(prepared.body),
   });
 
