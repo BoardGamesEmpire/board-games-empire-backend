@@ -26,7 +26,12 @@ jobs:
   main:
     runs-on: ubuntu-latest
     env:
-      NODE_ENV: test
+      # `testing`, not the ecosystem-default `test` (#286): the app's own
+      # schema validates NODE_ENV against
+      # development|testing|staging|production, so `test` is a value nothing
+      # here can boot under. Harmless while no job constructs the app, and a
+      # confusing config-validation failure the moment one does.
+      NODE_ENV: testing
 
     steps:
       - uses: actions/checkout@v6
@@ -76,7 +81,12 @@ jobs:
     # (D-259-7).
     timeout-minutes: 30
     env:
-      NODE_ENV: test
+      # See the note on the `main` job (#286). The API child does not inherit
+      # this — the harness pins NODE_ENV itself, because Jest's CLI assigns
+      # `test` whenever the variable is unset, so the child's boot contract
+      # cannot depend on what the workflow happens to export. This value
+      # covers the Jest process, prisma migrate, and prisma db seed.
+      NODE_ENV: testing
 
     steps:
       - uses: actions/checkout@v6
