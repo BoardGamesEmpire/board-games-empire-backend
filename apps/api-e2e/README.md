@@ -32,18 +32,20 @@ The `e2e` job in `.github/workflows/ci.yml` is defined for every PR to `master` 
 - **Verbose by default in CI.** The job sets `BGE_E2E_VERBOSE=true`, so the API's full output lands in the (foldable) job log. On a spec failure, find the failing request's server lines there. If this proves too noisy to diagnose from in practice, #274 (failure-scoped log surfacing) is the filed alternative — say so on that issue rather than suffering quietly.
 - **Boot failures**: in buffered (non-verbose) runs the harness replays the child's last 120 output lines. In verbose runs — which CI is — the output has already streamed live, so there is nothing to replay; the failure message says so and the lines are above it in the log.
 - The job's `--exclude` list fences off the five scaffolded `*-e2e` apps (#258), **all** of which declare a never-exiting `:serve` task as a target dependency — there is no safe one to unexclude. Remove an exclusion only when #258 implements or deletes that app.
-- The container images are pulled anonymously from Docker Hub on every affecting run. If a shared-runner-IP rate limit ever reds the gate, that is a provisioning failure, not a flake — do not quarantine a test for it. First remedy: repoint `POSTGRES_IMAGE` / `REDIS_IMAGE` in `src/support/e2e-env.ts` at a mirror of the official images (e.g. `public.ecr.aws/docker/library/...`); note it on #259 (D-259-6 deferred pull-cost machinery pending real evidence).
+- The container images are pulled anonymously from Docker Hub on every affecting run. If a shared-runner-IP rate limit ever reds the gate, that is a provisioning failure, not a flake — do not quarantine a test for it. First remedy: repoint `POSTGRES_IMAGE` / `REDIS_IMAGE` in `src/support/e2e-env.ts` at a mirror of the official images (e.g. `public.ecr.aws/docker/library/...`), and file an issue under #254 — pull-cost caching was deferred on #259 (D-259-6) pending exactly this evidence.
 - Advisory at first, then flipped to required in branch protection once flake is characterised (D-259-5 on #259).
 
 ## Wall-clock budget
 
 | | |
 | --- | --- |
-| Baseline (first green CI run) | _pending — post to #259 when measured_ |
-| Budget | ≈ 2× baseline (record the number here once the baseline exists) |
-| Hard stop | `timeout-minutes: 20` on the CI step, 30 on the job |
+| Baseline | **2m44s** for the `e2e` job — 2026-08-10, [PR #287's run](https://github.com/BoardGamesEmpire/board-games-empire-backend/actions/runs/31378763014) |
+| Budget | **≈ 5m30s** for the `e2e` job (2× baseline) |
+| Hard stop | `timeout-minutes: 20` on the suite step, 30 on the job |
 
-The budget covers the current single-boot shape. #268's optional worker child adds a second boot for suites that opt in — re-measure and amend this table when it lands, rather than letting the number drift silently.
+The baseline is the whole job, so it includes checkout, `setup-workspace`, and `nx affected -t build`; the suite step itself is some fraction of it. Two things make it a deliberately conservative figure rather than a best case: the Nx Cloud cache was warm, and because that PR touched `ci.yml` (which is in `sharedGlobals`) every project was affected, making the build step as wide as it ever gets.
+
+The budget covers the current single-boot shape and a suite that is still only the harness, actor fixtures, and support specs. Real domain coverage (#257) is what will move it. #268's optional worker child adds a second boot for suites that opt in — re-measure and amend this table when either lands, rather than letting the number drift silently.
 
 If the suite outgrows the budget, the levers in rough order of preference: prune or merge slow specs; split into parallel CI jobs; template-database-per-worker (#275). Measure before reaching for the last one.
 
