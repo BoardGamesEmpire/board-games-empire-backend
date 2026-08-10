@@ -37,10 +37,11 @@ export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_clie
  * admission answers 500 rather than the documented 409, exactly the outcome the
  * naming was meant to prevent, for a different reason (#298).
  *
- * The fix reads `meta.driverAdapterError.cause.constraint.fields`, which the pg
- * adapter populates with the raw column pair `['household_id', 'user_id']` — so
- * this constant stays the name of record, and the column pair becomes the value
- * actually compared. Measured in `household-idempotency.spec.ts` (#257); shared
- * normalizer is #292.
+ * NOT YET FIXED. #298 carries the fix, which should read
+ * `meta.driverAdapterError.cause.constraint.fields` — measured in
+ * `household-idempotency.spec.ts` (#257) as the raw column pair
+ * `['household_id', 'user_id']` under `@prisma/adapter-pg`. When it lands, this
+ * constant stays the name of record and that column pair becomes the value
+ * actually compared. Shared normalizer is #292.
  */
 export const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_user_unique';
