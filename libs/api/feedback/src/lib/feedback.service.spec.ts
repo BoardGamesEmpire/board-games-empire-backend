@@ -212,11 +212,17 @@ describe('FeedbackService', () => {
   });
 
   describe('submit idempotency (#251)', () => {
-    const uniqueViolation = (target: string | string[]) =>
+    /**
+     * A P2002 as Prisma actually raises one. `meta` is OPTIONAL on purpose:
+     * omitting it reproduces what Prisma 7 + `PrismaPg` reports, and every case
+     * in this block used to pass a `target` — which is why the shape-sniffing
+     * discriminator this replaced was never once tested against reality.
+     */
+    const uniqueViolation = (target?: string | string[]) =>
       new Prisma.PrismaClientKnownRequestError('unique violation', {
         code: PrismaError.UniqueConstraintViolation,
         clientVersion: 'test',
-        meta: { target },
+        ...(target === undefined ? {} : { meta: { target } }),
       });
 
     it('persists the client-supplied key on the row', async () => {
@@ -268,28 +274,48 @@ describe('FeedbackService', () => {
       );
     });
 
-    it('replays when Prisma reports the target as the field-name array', async () => {
+    it('replays when the P2002 carries NO meta at all', async () => {
+      // THE REGRESSION TEST. This is what Prisma 7 + PrismaPg actually raises,
+      // and what the previous `meta.target` discriminator could never match: it
+      // rethrew, reinstating the 500-then-retry-forever loop #251 was built to
+      // remove. Found via the household equivalent's e2e coverage (#257); an
+      // e2e proof for this path is #262.
       const original = stubReport({ id: 'fb-original' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(['userId', 'clientRequestId']));
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation());
       db.feedbackReport.findUnique.mockResolvedValue(original);
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
     });
 
-    it('replays when Prisma reports the target as the raw column name', async () => {
+    it.each([
+      ['the mapped index name', FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT],
+      ['the Prisma field-name array', ['userId', 'clientRequestId']],
+      ['the raw column names', ['user_id', 'client_request_id']],
+      ['an unrecognized string', 'some_future_prisma_spelling'],
+    ])('replays regardless of the reported target shape: %s', async (_label, target) => {
+      // Recovery keys off the ROW, not the error shape, so none of these are
+      // special-cased any more. Kept as a set because the shape is exactly what
+      // drifts across Prisma versions, and the point is that drift no longer
+      // changes the outcome.
       const original = stubReport({ id: 'fb-original' });
-      db.feedbackReport.create.mockRejectedValue(uniqueViolation(['user_id', 'client_request_id']));
+      db.feedbackReport.create.mockRejectedValue(uniqueViolation(target));
       db.feedbackReport.findUnique.mockResolvedValue(original);
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).resolves.toBe(original);
     });
 
-    it('rethrows a P2002 raised by a DIFFERENT unique constraint', async () => {
+    it('rethrows a P2002 from a different unique, because no row exists under the key', async () => {
+      // Declined by the LOOKUP now rather than by inspecting the error: no row
+      // under this key means nothing committed, so there is no replay to serve.
+      // `feedback_reports` has only the one unique besides its primary key, so
+      // this branch should be unreachable in practice -- the service warns when
+      // it is taken.
       const error = uniqueViolation(['sinkSlug', 'externalId']);
       db.feedbackReport.create.mockRejectedValue(error);
+      db.feedbackReport.findUnique.mockResolvedValue(null);
 
       await expect(service.submit('user-1', makeDto({ clientRequestId: 'key-1' }))).rejects.toBe(error);
-      expect(db.feedbackReport.findUnique).not.toHaveBeenCalled();
+      expect(db.feedbackReport.findUnique).toHaveBeenCalled();
       expect(events.emit).not.toHaveBeenCalled();
     });
 

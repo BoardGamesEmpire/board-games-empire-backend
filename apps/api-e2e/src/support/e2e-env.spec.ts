@@ -1,6 +1,7 @@
 import {
   API_NODE_ENV,
   API_PORT_VAR,
+  API_THROTTLE_LIMIT,
   apiEnvOverrides,
   decideProvisioning,
   E2E_BASE_URL_VAR,
@@ -182,6 +183,25 @@ describe('e2e-env (pure logic)', () => {
       const origins = apiEnvOverrides(baseUrl, 41234).TRUSTED_ORIGINS.split(',');
 
       expect(origins).toEqual(['http://127.0.0.1:41234', 'http://localhost:41234']);
+    });
+
+    it('pins the IP-tier throttle limit above anything the suite can reach', () => {
+      // Every request in this app comes from 127.0.0.1, so the whole suite is
+      // one bucket in the global IP-tracked throttler. The app default (20) is
+      // only survivable today because THROTTLE_TTL is read as milliseconds
+      // (#293); pinning here means correcting that bug does not turn the suite
+      // red with 429s that look unrelated to the behavior under test.
+      expect(apiEnvOverrides(baseUrl, 41234).THROTTLE_LIMIT).toBe(String(API_THROTTLE_LIMIT));
+      expect(API_THROTTLE_LIMIT).toBeGreaterThan(1_000);
+    });
+
+    it('emits every override as a string, since process env carries no other type', () => {
+      // A numeric value here reaches `spawn`'s env object as a number and is
+      // stringified inconsistently across platforms; Joi would then validate
+      // something the child never saw.
+      for (const value of Object.values(apiEnvOverrides(baseUrl, 41234))) {
+        expect(typeof value).toBe('string');
+      }
     });
 
     it('re-derives every value from the port it is given', () => {

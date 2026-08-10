@@ -42,12 +42,16 @@ export const FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 
 /**
  * DB name of the `@@unique([userId, clientRequestId])` index, as mapped in
- * `feedback-report.prisma`. Used to discriminate a P2002 raised by an idempotent
- * replay from a P2002 raised by any other unique on the same insert.
+ * `feedback-report.prisma`.
  *
- * Exported rather than inlined so the discriminator and the schema cannot drift
- * apart silently — a mismatch would degrade replays into 500s, which is the
- * exact failure #251 exists to remove.
+ * NO LONGER A DISCRIMINATOR. `recoverKeyedSubmit` used to match this against a
+ * P2002's `meta.target`; Prisma 7 with the `PrismaPg` driver adapter reports no
+ * usable `target`, so the match never fired and every keyed retry became a
+ * 500 — the exact failure #251 exists to remove, reinstated silently. Replay now
+ * keys off the presence of a row under `(userId, clientRequestId)`.
+ *
+ * Retained as the name of record for the index, so a rename in the schema stays
+ * visible from TypeScript.
  */
 export const FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT = 'feedback_report_user_client_request_id_unique';
 
