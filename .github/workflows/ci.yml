@@ -26,7 +26,11 @@ jobs:
   main:
     runs-on: ubuntu-latest
     env:
-      NODE_ENV: test
+      # `testing`, not the ecosystem-default `test`: the valid set is
+      # development|testing|staging|production, declared in
+      # apps/api/src/app/configuration/system.config.ts. `test` fails that
+      # validation, so nothing here can boot the app under it (#286).
+      NODE_ENV: testing
 
     steps:
       - uses: actions/checkout@v6
@@ -76,7 +80,11 @@ jobs:
     # (D-259-7).
     timeout-minutes: 30
     env:
-      NODE_ENV: test
+      # Same value and reasoning as the `main` job. Covers the Jest process,
+      # prisma migrate, and prisma db seed — NOT the API child, which the
+      # harness pins separately (apiEnvOverrides) because Jest's CLI assigns
+      # `test` whenever the variable is unset.
+      NODE_ENV: testing
 
     steps:
       - uses: actions/checkout@v6
