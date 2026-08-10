@@ -1,5 +1,5 @@
 import type { Household } from '@bge/database';
-import { Action, InviteStatus, Prisma, ResourceType } from '@bge/database';
+import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
@@ -128,7 +128,17 @@ describe('HouseholdService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           createdBy: { connect: { id: 'user-1' } },
-          members: { create: expect.objectContaining({ userId: 'user-1' }) },
+          members: {
+            // Provenance is asserted, not merely `userId` (#276). Both columns are
+            // nullable, so dropping either from the nested create would otherwise
+            // leave this suite green while the founder became indistinguishable
+            // from a fixture row.
+            create: expect.objectContaining({
+              userId: 'user-1',
+              origin: HouseholdMembershipOrigin.Founder,
+              addedById: 'user-1',
+            }),
+          },
         }),
       }),
     );

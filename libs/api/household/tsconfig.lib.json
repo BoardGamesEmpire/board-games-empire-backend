@@ -27,6 +27,9 @@
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
+      "path": "../../common/quota/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/shared/tsconfig.lib.json"
     },
     {

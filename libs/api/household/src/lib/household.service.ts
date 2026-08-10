@@ -2,6 +2,7 @@ import type { Household } from '@bge/database';
 import {
   Action,
   DatabaseService,
+  HouseholdMembershipOrigin,
   InviteStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
@@ -242,6 +243,23 @@ export class HouseholdService {
           members: {
             create: {
               userId,
+              // Provenance (#276). The founder is the one membership that is not
+              // produced by `addMemberWithin`: this create is deliberately NOT
+              // transactional, which is what makes the P2002 replay recovery
+              // below legal (Postgres aborts a transaction on constraint
+              // violation, so a catch-and-recover inside one cannot re-read).
+              // Routing it through the seam would force a transaction it does
+              // not need and break that. It is also the only case where
+              // `HouseholdOwner` is legitimate.
+              //
+              // Quota (#159): this row is not CHARGED — creation never consumes,
+              // so a household can always be created regardless of the cap — but
+              // it IS COUNTED. `countHouseholdMembers` counts every row in the
+              // household, so a cap of N is a roster cap of N with the founder
+              // inside it, and the first admission through the seam already sees
+              // usage of 1.
+              origin: HouseholdMembershipOrigin.Founder,
+              addedById: userId,
               role: {
                 create: {
                   role: {

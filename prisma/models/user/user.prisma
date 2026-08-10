@@ -38,7 +38,7 @@ model User {
   lists                      List[]
   gatewayConnections         UserGatewayConnection[]
   userPlugins                UserPlugin[]
-  householdMember            HouseholdMember[]
+  householdMember            HouseholdMember[]       @relation("HouseholdMemberships")
   webhookSubscriptions       WebhookSubscription[]   @relation("WebhookSubscriptionsCreated")
 
   preferences UserPreferences?
@@ -71,6 +71,10 @@ model User {
   gameGatewaysCreated GameGateway[] @relation("GameGatewayCreator")
 
   households Household[] @relation("HouseholdsCreated")
+
+  // Who admitted a member to a household (#276): the inviter, the approver,
+  // or the founder themselves. `HouseholdMember.origin` says which.
+  householdMembersAdded HouseholdMember[] @relation("HouseholdMembersAdded")
 
   // campaignsOwned    Campaign[] @relation("CampaignOwner")
   // campaignsMastered Campaign[] @relation("CampaignGameMaster")
