@@ -70,6 +70,28 @@ export const REDIS_IMAGE = 'redis:7-alpine';
 export const API_NODE_ENV = 'testing';
 
 /**
+ * The IP-tier throttle limit the API child runs under. Pinned high rather than
+ * inherited, because every request the suite makes originates from `127.0.0.1`
+ * and therefore shares one bucket in the global `default` throttler
+ * (`AppModule`, tracked by IP): the whole app's worth of specs is a single
+ * client as far as rate limiting is concerned.
+ *
+ * That is not currently load-bearing, and the reason is a bug. `throttle.ttl`
+ * defaults to `60` while `@nestjs/throttler` v6 reads `ttl` in MILLISECONDS, so
+ * the live window is 60ms and the 20-request ceiling is unreachable in practice
+ * (#293). The moment that default is corrected, an unpinned suite would start
+ * failing partway through a run with `429`s that look like nothing to do with
+ * the behavior under test.
+ *
+ * So this override exists to decouple the suite from a production default,
+ * exactly as `NODE_ENV` and the Redis prefixes do — not to disable rate
+ * limiting as a feature. A spec that wants to assert throttling must set its own
+ * limit for the route it is testing; it cannot rely on the app default being
+ * whatever `.env` happens to say.
+ */
+export const API_THROTTLE_LIMIT = 1_000_000;
+
+/**
  * Environment the API child gets on top of the inherited process env, given
  * the ephemeral origin it is about to bind.
  *
@@ -100,6 +122,7 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
     NODE_ENV: API_NODE_ENV,
     BETTER_AUTH_URL: baseUrl,
     TRUSTED_ORIGINS: trustedOrigins.join(','),
+    THROTTLE_LIMIT: String(API_THROTTLE_LIMIT),
   };
 }
 

@@ -6,7 +6,7 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DateTime } from 'luxon';
 import { FeedbackEvents } from './constants/feedback-events.constant';
-import { FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT, FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
+import { FEEDBACK_CREATE_PERMISSION_SLUG } from './constants/feedback.constants';
 import type { BreadcrumbDto } from './dto/breadcrumb.dto';
 import type { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import type {
@@ -160,8 +160,22 @@ export class FeedbackService {
 
   /**
    * Recovers an idempotent replay from a failed keyed insert: returns the
-   * original report when `error` is a unique violation on the idempotency index
-   * and the row is found, or `null` to mean "not a replay — rethrow".
+   * original report when a unique violation is accompanied by a row under this
+   * key, or `null` to mean "not a replay — rethrow".
+   *
+   * THE ROW DECIDES, NOT THE ERROR SHAPE. This previously discriminated on
+   * `meta.target`, accepting three spellings because Prisma has reported
+   * different ones across provider/version combinations. Under Prisma 7 with
+   * the `PrismaPg` driver adapter it reports NONE of them — `meta` carries no
+   * usable `target` — so the discriminator never matched and every keyed retry
+   * rethrew, reinstating exactly the 500-then-retry-forever loop this feature
+   * was built to remove. Found via the household equivalent's e2e coverage
+   * (#257); the identical defect here has no e2e proof yet, which is #262.
+   *
+   * Keying off the lookup is both correct and shape-independent: a row under
+   * `(userId, clientRequestId)` means this key's insert already committed, which
+   * is precisely the condition a replay must return, whatever the database chose
+   * to say about which index it was.
    *
    * No `deletedAt` filter to omit here (unlike the household equivalent):
    * `FeedbackReport` has no soft-delete. The retention sweep hard-deletes it, so
@@ -174,19 +188,7 @@ export class FeedbackService {
     userId: string,
     clientRequestId: string,
   ): Promise<FeedbackReport | null> {
-    if (!this.isClientRequestIdConflict(error)) {
-      if (isPrismaUniqueConstraintError(error)) {
-        // `feedback_reports` carries exactly one unique index besides the primary
-        // key, so a P2002 that doesn't match the discriminator is a strong signal
-        // that Prisma changed the `meta.target` shape rather than a genuine
-        // second conflict. Warn rather than debug: silently degrading to a
-        // rethrow here would reinstate the 500-then-retry-forever loop.
-        this.logger.warn(
-          `Keyed feedback submission hit an unexpected unique constraint; ` +
-            `target=${JSON.stringify(error.meta?.target)}`,
-        );
-      }
-
+    if (!isPrismaUniqueConstraintError(error)) {
       return null;
     }
 
@@ -195,39 +197,22 @@ export class FeedbackService {
     });
 
     if (!existing) {
+      // `feedback_reports` carries exactly one unique index besides the primary
+      // key, so a P2002 with no row under this key should not be reachable at
+      // all. Warn rather than debug: this is the branch that reinstates the
+      // 500-then-retry-forever loop #251 removed, and the whole `meta` is logged
+      // because the old discriminator's blind spot was assuming `target` exists.
+      this.logger.warn(
+        `Keyed feedback submission raised P2002 with no row under the key; ` +
+          `meta=${JSON.stringify(error.meta)}. Rethrowing.`,
+      );
+
       return null;
     }
 
     this.logger.debug(`Idempotent replay of feedback submission for user ${userId}; returning report ${existing.id}`);
 
     return existing;
-  }
-
-  /**
-   * True when `error` is a P2002 raised by the feedback idempotency index.
-   *
-   * Accepts the mapped index name, the Prisma field-name array, and the raw
-   * column name, because Prisma has reported different `meta.target` shapes
-   * across provider/version combinations. A shape we don't recognize degrades to
-   * a rethrow, never to a wrong-row return — the composite lookup must also hit.
-   */
-  private isClientRequestIdConflict(error: unknown): boolean {
-    if (!isPrismaUniqueConstraintError(error)) {
-      return false;
-    }
-
-    const target = error.meta?.target;
-    const names: string[] =
-      typeof target === 'string'
-        ? [target]
-        : Array.isArray(target)
-          ? target.filter((entry): entry is string => typeof entry === 'string')
-          : [];
-
-    return names.some(
-      (name) =>
-        name === FEEDBACK_CLIENT_REQUEST_ID_CONSTRAINT || name === 'clientRequestId' || name === 'client_request_id',
-    );
   }
 
   /**

@@ -8,22 +8,40 @@ export const HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 
 /**
  * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
- * mapped in `household.prisma`. Used to discriminate a P2002 raised by an
- * idempotent replay from a P2002 raised by any other unique on the same nested
- * create.
+ * mapped in `household.prisma`.
+ *
+ * NO LONGER A DISCRIMINATOR. `recoverKeyedCreate` used to match this against a
+ * P2002's `meta.target`; Prisma 7 with the `PrismaPg` driver adapter reports no
+ * usable `target`, so the match never fired and every keyed retry became a 500
+ * (found by #257's e2e coverage). Replay now keys off the presence of a row
+ * under `(createdById, clientRequestId)`, which is shape-independent.
+ *
+ * Retained as the name of record for the constraint: the e2e suite asserts that
+ * the database does NOT report it, which is the assumption worth pinning, and a
+ * rename in `household.prisma` should be visible from TypeScript.
  */
 export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_client_request_id_unique';
 
 /**
  * DB name of the `@@unique([householdId, userId])` constraint, as mapped in
- * `household-member.prisma`. Used to discriminate a P2002 raised by a concurrent
- * admission of the same user from a P2002 raised by any other unique the nested
+ * `household-member.prisma`. Discriminates a P2002 raised by a concurrent
+ * admission of the same user from one raised by any other unique the nested
  * member/role create can touch — today either generated primary key, tomorrow
  * whatever unique someone adds.
  *
- * Named rather than left to Prisma's default so the check is exact. Guessing the
- * generated name would be the dangerous option: get it wrong and a genuine
- * duplicate stops being recognised, turning the documented 409 into a 500 on the
- * common path.
+ * Named rather than left to Prisma's default so the check is exact. That reasoning
+ * still holds, but it was never the binding constraint: `isDuplicateMembership`
+ * compares this against `meta.target`, and `@prisma/client@7.8.0` +
+ * `@prisma/adapter-pg` never populates `target` — `meta` carries only
+ * `driverAdapterError`. So the match has always failed and a genuine duplicate
+ * admission answers 500 rather than the documented 409, exactly the outcome the
+ * naming was meant to prevent, for a different reason (#298).
+ *
+ * NOT YET FIXED. #298 carries the fix, which should read
+ * `meta.driverAdapterError.cause.constraint.fields` — measured in
+ * `household-idempotency.spec.ts` (#257) as the raw column pair
+ * `['household_id', 'user_id']` under `@prisma/adapter-pg`. When it lands, this
+ * constant stays the name of record and that column pair becomes the value
+ * actually compared. Shared normalizer is #292.
  */
 export const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_user_unique';

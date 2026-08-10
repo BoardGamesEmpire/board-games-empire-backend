@@ -16,7 +16,6 @@ import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
-import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
 
@@ -297,20 +296,29 @@ export class HouseholdService {
    * only because its response was lost in transit — so return the original row
    * rather than surfacing the conflict.
    *
-   * Returns `null` when the caller should rethrow: a conflict on some other
-   * unique, or a key whose row can't be found (which would be a constraint we
-   * misidentified, not a replay).
+   * Returns `null` when the caller should rethrow: a P2002 on some other unique
+   * with no row under this key, or any non-unique failure.
+   *
+   * THE ROW DECIDES, NOT THE ERROR SHAPE. This previously discriminated on
+   * `meta.target`, accepting three spellings because Prisma has reported
+   * different ones across provider/version combinations. Under Prisma 7 with
+   * the `PrismaPg` driver adapter it reports NONE of them: `meta` carries no
+   * usable `target` at all, so the discriminator never matched, every keyed
+   * retry rethrew, and #210's guarantee inverted into a 500 on exactly the
+   * request it exists to make safe. Verified end-to-end in
+   * `apps/api-e2e/src/household/household-idempotency.spec.ts` (#257), which is
+   * how it was found — the unit specs all fabricated a `meta.target`, so the
+   * mock was the only thing the discriminator was ever tested against.
+   *
+   * Keying off the lookup instead is both correct and shape-independent: a row
+   * under `(userId, clientRequestId)` means this key's create already
+   * committed, which is precisely the condition a replay must return, whatever
+   * the database chose to say about which index it was. `clientRequestId` is
+   * the only unique on `households` that involves it, so there is no other
+   * conflict this could be confused with.
    */
   private async recoverKeyedCreate(error: unknown, userId: string, clientRequestId: string): Promise<Household | null> {
-    if (!this.isClientRequestIdConflict(error)) {
-      if (isPrismaUniqueConstraintError(error)) {
-        // A keyed create hit a unique that isn't the idempotency one. Usually
-        // genuine (a concurrent membership insert), but it is also how a future
-        // Prisma/provider change to `meta.target` would present, so record the
-        // shape rather than degrading silently into a rethrow.
-        this.logger.debug(`Keyed household create hit another unique; target=${JSON.stringify(error.meta?.target)}`);
-      }
-
+    if (!isPrismaUniqueConstraintError(error)) {
       return null;
     }
 
@@ -322,6 +330,23 @@ export class HouseholdService {
     });
 
     if (!existing) {
+      // Should be unreachable. `clientRequestId` participates in the only unique
+      // on `households`, and the nested member insert cannot collide on a
+      // freshly generated household id, so a P2002 with no row under this key
+      // means something we do not understand happened.
+      //
+      // WARN, not debug: `resolvePinoLevel` drops debug in production, and this
+      // is the branch that reinstates a 500 on a legitimate retry — the exact
+      // failure this recovery path exists to remove, and one that took an e2e
+      // suite to notice the first time. Matches the level its twin in
+      // `FeedbackService.recoverKeyedSubmit` uses for the same tripwire. The
+      // whole `meta` is logged rather than just `target`, since `target` being
+      // absent is what made the old discriminator useless.
+      this.logger.warn(
+        `Keyed household create raised P2002 with no row under the key; ` +
+          `meta=${JSON.stringify(error.meta)}. Rethrowing.`,
+      );
+
       return null;
     }
 
@@ -334,33 +359,6 @@ export class HouseholdService {
     await this.permissions.invalidateUser(userId);
 
     return existing;
-  }
-
-  /**
-   * True only when a P2002 was raised by the idempotency constraint
-   * (`createdById` + `clientRequestId`), not by any other unique the nested
-   * create can touch. Prisma reports `meta.target` as the field-name array for
-   * a `@@unique` on some provider/version combinations and as the mapped
-   * constraint name on others — accept either, and treat anything else as a
-   * genuine failure to rethrow.
-   */
-  private isClientRequestIdConflict(error: unknown): boolean {
-    if (!isPrismaUniqueConstraintError(error)) {
-      return false;
-    }
-
-    const target = error.meta?.target;
-    const names: string[] =
-      typeof target === 'string'
-        ? [target]
-        : Array.isArray(target)
-          ? target.filter((entry): entry is string => typeof entry === 'string')
-          : [];
-
-    return names.some(
-      (name) =>
-        name === HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT || name === 'clientRequestId' || name === 'client_request_id',
-    );
   }
 
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {

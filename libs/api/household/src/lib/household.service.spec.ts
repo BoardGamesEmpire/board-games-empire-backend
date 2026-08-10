@@ -147,11 +147,17 @@ describe('HouseholdService', () => {
   });
 
   describe('create idempotency (#210)', () => {
-    const uniqueViolation = (target: string | string[]) =>
+    /**
+     * A P2002 as Prisma actually raises one. `meta` is OPTIONAL on purpose:
+     * omitting it reproduces what Prisma 7 + `PrismaPg` reports, and every case
+     * in this block used to pass a `target` — which is why the shape-sniffing
+     * discriminator this replaced was never once tested against reality.
+     */
+    const uniqueViolation = (target?: string | string[]) =>
       new Prisma.PrismaClientKnownRequestError('unique violation', {
         code: PrismaError.UniqueConstraintViolation,
         clientVersion: 'test',
-        meta: { target },
+        ...(target === undefined ? {} : { meta: { target } }),
       });
 
     it('persists the client-supplied key on the row', async () => {
@@ -181,21 +187,31 @@ describe('HouseholdService', () => {
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
     });
 
-    it('replays when Prisma reports the target as the field-name array', async () => {
+    it('replays when the P2002 carries NO meta at all', async () => {
+      // THE REGRESSION TEST. This is what Prisma 7 + PrismaPg actually raises,
+      // and what the previous `meta.target` discriminator could never match: it
+      // rethrew, so every keyed retry answered 500 — inverting #210's guarantee
+      // on precisely the request it exists to make safe. Confirmed end-to-end in
+      // apps/api-e2e/src/household/household-idempotency.spec.ts (#257).
       const original = { id: 'hh-original' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(['createdById', 'clientRequestId']));
+      db.household.create.mockRejectedValue(uniqueViolation());
       db.household.findUnique.mockResolvedValue(original);
 
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
     });
 
-    it('replays when Prisma reports the target as the raw column names', async () => {
-      // Third shape the discriminator accepts, and the one that was untested:
-      // Prisma has reported snake_case column names rather than Prisma field
-      // names across provider/version combinations. Untested, a regression here
-      // degrades every keyed replay into the 500 that #251 removed.
+    it.each([
+      ['the mapped constraint name', HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT],
+      ['the Prisma field-name array', ['createdById', 'clientRequestId']],
+      ['the raw column names', ['created_by_id', 'client_request_id']],
+      ['an unrecognized string', 'some_future_prisma_spelling'],
+    ])('replays regardless of the reported target shape: %s', async (_label, target) => {
+      // Recovery keys off the ROW, not the error shape, so none of these are
+      // special-cased any more. Kept as a set because the shape is exactly what
+      // drifts across Prisma versions, and the point is that drift no longer
+      // changes the outcome.
       const original = { id: 'hh-original' } as Household;
-      db.household.create.mockRejectedValue(uniqueViolation(['created_by_id', 'client_request_id']));
+      db.household.create.mockRejectedValue(uniqueViolation(target));
       db.household.findUnique.mockResolvedValue(original);
 
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).resolves.toBe(original);
@@ -212,12 +228,18 @@ describe('HouseholdService', () => {
       expect(result.deletedAt).toEqual(new Date('2026-08-01T00:00:00Z'));
     });
 
-    it('rethrows a P2002 raised by a DIFFERENT unique constraint', async () => {
+    it('rethrows a P2002 from a different unique, because no row exists under the key', async () => {
+      // The nested member insert tripping `(householdId, userId)` is the genuine
+      // case. It is now declined by the LOOKUP rather than by inspecting the
+      // error: no row under this key means nothing committed, so there is no
+      // replay to serve. The lookup IS reached, unlike before — that extra query
+      // on the error path is the cost of not depending on `meta`.
       const error = uniqueViolation(['householdId', 'userId']);
       db.household.create.mockRejectedValue(error);
+      db.household.findUnique.mockResolvedValue(null);
 
       await expect(service.create({ name: 'Home', clientRequestId: 'key-1' })).rejects.toBe(error);
-      expect(db.household.findUnique).not.toHaveBeenCalled();
+      expect(db.household.findUnique).toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
