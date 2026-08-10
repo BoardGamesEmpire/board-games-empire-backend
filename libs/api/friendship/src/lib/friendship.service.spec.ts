@@ -1,12 +1,18 @@
 import type { Friendship } from '@bge/database';
-import { Action, FriendshipStatus, Prisma, ResourceType } from '@bge/database';
+import { Action, FriendshipStatus, ResourceType } from '@bge/database';
+import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService } from '@bge/permissions';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FriendshipService } from './friendship.service';
 
-const uniqueViolation = () =>
-  new Prisma.PrismaClientKnownRequestError('Unique constraint failed', { code: 'P2002', clientVersion: 'test' });
+/**
+ * A P2002 with no `meta`, which is what `@prisma/client@7.8.0` +
+ * `@prisma/adapter-pg` raises (#298). Fabricated through `@bge/database`'s shared
+ * factory rather than locally so there is one definition of the shape, pinned
+ * against a real database by `apps/api-e2e/src/database/p2002-shape.spec.ts`.
+ */
+const uniqueViolation = uniqueViolationWithoutMeta;
 
 const acceptingUser = { id: 'user-2', preferences: { allowFriendRequests: true } };
 

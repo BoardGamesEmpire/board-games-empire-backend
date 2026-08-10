@@ -24,24 +24,59 @@ export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_clie
 
 /**
  * DB name of the `@@unique([householdId, userId])` constraint, as mapped in
- * `household-member.prisma`. Discriminates a P2002 raised by a concurrent
- * admission of the same user from one raised by any other unique the nested
- * member/role create can touch — today either generated primary key, tomorrow
- * whatever unique someone adds.
+ * `prisma/models/household/household-member.prisma`.
  *
- * Named rather than left to Prisma's default so the check is exact. That reasoning
- * still holds, but it was never the binding constraint: `isDuplicateMembership`
- * compares this against `meta.target`, and `@prisma/client@7.8.0` +
- * `@prisma/adapter-pg` never populates `target` — `meta` carries only
- * `driverAdapterError`. So the match has always failed and a genuine duplicate
- * admission answers 500 rather than the documented 409, exactly the outcome the
- * naming was meant to prevent, for a different reason (#298).
+ * NAME OF RECORD ONLY — nothing compares against it on Postgres. Same status as
+ * {@link HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT}, for a related reason.
  *
- * NOT YET FIXED. #298 carries the fix, which should read
- * `meta.driverAdapterError.cause.constraint.fields` — measured in
- * `household-idempotency.spec.ts` (#257) as the raw column pair
- * `['household_id', 'user_id']` under `@prisma/adapter-pg`. When it lands, this
- * constant stays the name of record and that column pair becomes the value
- * actually compared. Shared normalizer is #292.
+ * The constraint was named rather than left to Prisma's default so that a P2002
+ * could be matched against it exactly. That reasoning was sound and the mechanism
+ * was absent: `isDuplicateMembership` compared it against `meta.target`, which
+ * `@prisma/client@7.8.0` + `@prisma/adapter-pg` never populates, so the match
+ * always failed and a genuine concurrent admission answered 500 instead of the
+ * documented 409 — exactly the outcome the naming was meant to prevent, by a
+ * different route (#298, found by #257's coverage).
+ *
+ * FIXED in #298. The discriminator now reads the constraint identity from
+ * `meta.driverAdapterError.cause.constraint.fields` via `constraintIdentity` in
+ * `@bge/database`, which on this stack reports the raw column pair — see
+ * {@link HOUSEHOLD_MEMBER_UNIQUE_COLUMNS}. This name survives only as the
+ * database's name of record, so a rename in the schema is visible from
+ * TypeScript, and as the spelling MySQL's `constraint.index` would report.
  */
 export const HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT = 'household_member_household_user_unique';
+
+/**
+ * The raw DB column names behind {@link HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT}, in
+ * the spelling `@prisma/adapter-pg` reports under
+ * `meta.driverAdapterError.cause.constraint.fields`.
+ *
+ * MEASURED 2026-08-10 against `@prisma/client@7.8.0` + `@prisma/adapter-pg` on
+ * Postgres 17 (#298), and pinned end-to-end in
+ * `apps/api-e2e/src/database/p2002-shape.spec.ts`. Both package versions are named
+ * because the claim is version-specific: the field is not public API, and Prisma
+ * intends to restore `meta.target`.
+ *
+ * This is the spelling that actually matches today. It is compared as an unordered
+ * EXACT set, so reordering the `@@unique([...])` declaration cannot change the
+ * status code and a future third column cannot be mistaken for this constraint.
+ */
+export const HOUSEHOLD_MEMBER_UNIQUE_COLUMNS = ['household_id', 'user_id'] as const;
+
+/**
+ * The Prisma FIELD names behind {@link HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT}.
+ *
+ * Not reported by anything on this stack today. Accepted alongside
+ * {@link HOUSEHOLD_MEMBER_UNIQUE_COLUMNS} because a restored `meta.target` would
+ * use this spelling (prisma/prisma#28953), and `constraintIdentity` reads `target`
+ * as a FALLBACK when the driver payload names no constraint. Without this entry,
+ * Prisma fixing its own bug would silently demote every real conflict to the
+ * `unknown` fallback.
+ *
+ * A fallback rather than a preference on purpose: the driver payload is parsed from
+ * Postgres's own `DETAIL` line and cannot name the wrong table, whereas a restored
+ * `target` has no guarantee of arriving free of the nested-create defect that
+ * already makes `meta.modelName` unusable (prisma/prisma#29595, #302). Accuracy
+ * outranks public-API status for a discriminator.
+ */
+export const HOUSEHOLD_MEMBER_UNIQUE_FIELDS = ['householdId', 'userId'] as const;

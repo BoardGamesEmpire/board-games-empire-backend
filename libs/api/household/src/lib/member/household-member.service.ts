@@ -1,12 +1,16 @@
 import {
   Action,
+  constraintIdentity,
   DatabaseService,
   HouseholdMembershipOrigin,
+  identifiesConstraint,
+  isIdentifiedConstraint,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
   Prisma,
   ResourceType,
   SystemRole,
+  type ConstraintIdentity,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
@@ -24,7 +28,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT } from '../constants/household.constants';
+import {
+  HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
+  HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
+  HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
+} from '../constants/household.constants';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto, type AssignableHouseholdRole } from '../dto';
 import { HouseholdOwnershipTransferredEvent, type HouseholdOwnershipSnapshot } from '../events/household.events';
 import { assertHouseholdExists, lockExistingHousehold } from '../household-access.helpers';
@@ -692,24 +700,62 @@ export class HouseholdMemberService {
       // member/role create can raise P2002 from either generated primary key
       // today and from whatever unique someone adds tomorrow, and translating
       // those to 409 would hide an unrelated database failure behind a
-      // confidently wrong answer. Same discrimination `recoverKeyedCreate`
-      // applies to its own nested create, and for the same reason.
-      if (this.isDuplicateMembership(error)) {
-        // Lost the race against a concurrent admission of the same user. NOT
-        // recoverable in place: the transaction is already aborted, so the
-        // existing row cannot be read back here. 409 and let the caller retry.
-        this.logger.debug(`Concurrent admission of user ${userId} to household ${householdId}`);
-
-        throw new ConflictException(t('errors.household.already_a_member', { householdId }));
-      }
-
+      // confidently wrong answer.
+      //
+      // Unlike `HouseholdService.recoverKeyedCreate` and
+      // `FeedbackService.recoverKeyedSubmit`, this cannot decide by re-reading the
+      // row: Postgres has already aborted the transaction and Prisma opens no
+      // savepoint, so a lookup here would itself fail. The error payload is the
+      // only remaining source of truth (#298).
       if (isPrismaUniqueConstraintError(error)) {
-        // Record the shape rather than degrading silently: this is also how a
-        // future Prisma change to `meta.target` would present.
-        this.logger.error(
-          `Member insert hit an unexpected unique; target=${JSON.stringify(error.meta?.target)}`,
-          error,
-        );
+        const identity = constraintIdentity(error);
+
+        if (this.isDuplicateMembership(identity)) {
+          // Lost the race against a concurrent admission of the same user. 409,
+          // and the caller retries the whole transaction into the pre-read.
+          this.logger.debug(`Concurrent admission of user ${userId} to household ${householdId}`);
+
+          throw new ConflictException(t('errors.household.already_a_member', { householdId }));
+        }
+
+        // Narrowed on the discriminant rather than via `isIdentifiedConstraint`,
+        // because `not-a-unique-violation` is also "not identified" and carries no
+        // `sqlState` to report. It is unreachable here — we are inside the P2002
+        // gate — but reading a field off a state that cannot occur is how the
+        // impossible becomes the unnoticed.
+        if (identity.source === 'unknown') {
+          // COULD NOT TELL which constraint fired, which is not the same as
+          // knowing it was a different one. Answering 409 here is not a guess:
+          // `household_members` carries exactly one unique besides its primary
+          // key, `household_roles`' two uniques both key on a `householdMemberId`
+          // this statement generates fresh, and a cuid2 primary-key collision is
+          // negligible — so the membership unique is the only violation reachable
+          // from this insert. `p2002-shape.spec.ts` guards that enumeration; if a
+          // second unique is added to the table, it fails and this branch has to
+          // be revisited.
+          //
+          // Warn rather than debug: reaching this means the payload stopped
+          // carrying an identity, and finding that out from a log beats finding it
+          // out from a wrong status code.
+          this.logger.warn(
+            `Could not identify the unique behind a member-insert P2002; assuming a concurrent admission of ` +
+              `user ${userId} to household ${householdId}. sqlState=${identity.sqlState ?? 'unreported'} ` +
+              `meta=${JSON.stringify(error.meta)}`,
+          );
+
+          throw new ConflictException(t('errors.household.already_a_member', { householdId }));
+        }
+
+        // Identified, and it is something else. Record the whole payload rather
+        // than degrading silently — logging only `meta.target` is what made the
+        // original failure invisible, since that field does not exist here.
+        if (isIdentifiedConstraint(identity)) {
+          this.logger.error(
+            `Member insert hit an unexpected unique; source=${identity.source} ` +
+              `names=${JSON.stringify(identity.names)} meta=${JSON.stringify(error.meta)}`,
+            error,
+          );
+        }
       }
 
       throw error;
@@ -717,37 +763,24 @@ export class HouseholdMemberService {
   }
 
   /**
-   * True only when a P2002 came from the `(householdId, userId)` unique.
+   * True only when a P2002's constraint identity names the
+   * `(householdId, userId)` unique.
    *
-   * Prisma reports `meta.target` as the mapped constraint name on some
-   * provider/version combinations and as the field-name array on others, and has
-   * reported raw column names too — all three are accepted, exactly as
-   * `HouseholdService.isClientRequestIdConflict` does. Two call sites now share
-   * this shape; folding both onto one helper in `@bge/database` is #292.
+   * Every known SPELLING of that one constraint is accepted, because the spelling
+   * depends on which source the identity came from: raw columns from the driver
+   * adapter (what ships today), Prisma field names from a restored `meta.target`,
+   * the mapped index name on MySQL. Each is compared as an unordered EXACT set,
+   * so this is not a return to the accept-list this replaced — a superset such as
+   * a future `@@unique([householdId, userId, ...])` is correctly refused rather
+   * than mistaken for this constraint.
+   *
+   * Takes the identity rather than the error so the caller can distinguish "not
+   * this constraint" from "no identity at all" and answer them differently.
    */
-  private isDuplicateMembership(error: unknown): boolean {
-    if (!isPrismaUniqueConstraintError(error)) {
-      return false;
-    }
-
-    const target = error.meta?.target;
-    const names: string[] =
-      typeof target === 'string'
-        ? [target]
-        : Array.isArray(target)
-          ? target.filter((entry): entry is string => typeof entry === 'string')
-          : [];
-
-    // Field/column names are matched as a PAIR. Either alone appears in other
-    // uniques on this table, so accepting a single name would re-open the hole
-    // this check closes.
-    const hasPair = (a: string, b: string) => names.includes(a) && names.includes(b);
-
-    return (
-      names.includes(HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT) ||
-      hasPair('householdId', 'userId') ||
-      hasPair('household_id', 'user_id')
-    );
+  private isDuplicateMembership(identity: ConstraintIdentity): boolean {
+    return identifiesConstraint(identity, HOUSEHOLD_MEMBER_UNIQUE_COLUMNS, HOUSEHOLD_MEMBER_UNIQUE_FIELDS, [
+      HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
+    ]);
   }
 
   /**

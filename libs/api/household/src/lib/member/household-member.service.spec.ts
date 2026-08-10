@@ -1,4 +1,5 @@
 import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, SystemRole } from '@bge/database';
+import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
@@ -16,7 +17,11 @@ import { Http, PrismaError } from '@status/codes';
 import { readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { HouseholdEvents } from '../constants/household-events.constant';
-import { HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT } from '../constants/household.constants';
+import {
+  HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
+  HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT,
+  HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
+} from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
 import {
   HouseholdMemberService,
@@ -1155,12 +1160,18 @@ describe('HouseholdMemberService', () => {
       db.householdMember.create.mockResolvedValue(created as never);
     };
 
-    const uniqueConstraintError = (target: string | string[] = HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT) =>
-      new Prisma.PrismaClientKnownRequestError('duplicate', {
-        code: PrismaError.UniqueConstraintViolation,
-        clientVersion: 'test',
-        meta: { target },
-      });
+    /**
+     * A membership duplicate in the shape the database actually produces:
+     * `@prisma/adapter-pg` reports the raw column pair under
+     * `meta.driverAdapterError.cause.constraint.fields` and no `meta.target` at
+     * all (measured 2026-08-10, #298; pinned in `p2002-shape.spec.ts`).
+     *
+     * Fabricated through `@bge/database`'s shared factory rather than locally.
+     * The defect this suite once asserted as correct was possible because four
+     * specs each invented their own payload, so the discriminator was only ever
+     * tested against the mock that fed it.
+     */
+    const membershipDuplicate = () => uniqueViolation({ fields: HOUSEHOLD_MEMBER_UNIQUE_COLUMNS });
 
     it('inserts the member and its role in the caller transaction, shaped by MEMBER_INCLUDE', async () => {
       const created = makeMember({ id: 'member-new', userId: 'user-2' });
@@ -1323,12 +1334,17 @@ describe('HouseholdMemberService', () => {
     // retry the whole transaction into the pre-read.
     it('maps a concurrent duplicate insert to Conflict rather than re-reading', async () => {
       stubAdmissible();
-      db.householdMember.create.mockRejectedValue(uniqueConstraintError());
+      db.householdMember.create.mockRejectedValue(membershipDuplicate());
 
       await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(ConflictException);
       expect(db.householdMember.findUnique).toHaveBeenCalledTimes(1);
     });
 
+    // Load-bearing for #298's fallback, which answers 409 for ANY unidentifiable
+    // unique violation. The gate keeping a connection reset out of that branch is
+    // `isPrismaUniqueConstraintError`; drop it and every write failure becomes a
+    // 409. That is why `constraintIdentity` reports `not-a-unique-violation`
+    // separately from `unknown` — the two must not share a fallback.
     it('rethrows a non-unique write failure untouched', async () => {
       stubAdmissible();
       const failure = new Error('connection reset');
@@ -1405,44 +1421,86 @@ describe('HouseholdMemberService', () => {
       },
     );
 
-    describe('duplicate discrimination', () => {
-      // Prisma reports `meta.target` as the mapped constraint name on some
-      // provider/version combinations, the field-name array on others, and raw
-      // column names elsewhere. All three must map to 409 or a genuine duplicate
-      // becomes a 500 on the common path.
+    /**
+     * #298. Every case in this block previously asserted the DEFECT as correct:
+     * the discriminator read `meta.target`, which this stack never populates, so
+     * four cases pinned a rethrow — including one for "a P2002 carrying no target
+     * at all", which is the only shape that ever occurred. The suite was green
+     * BECAUSE it asserted the failure, and anyone reading it concluded the
+     * discrimination worked.
+     */
+    describe('duplicate discrimination (#298)', () => {
+      // Each entry is a SPELLING of the one membership constraint, keyed to the
+      // source it arrives from. The column pair is what ships; the others are
+      // accepted so that Prisma restoring `meta.target`, or a second adapter,
+      // cannot silently demote every real conflict to the unknown fallback.
       it.each([
-        ['the mapped constraint name', HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT],
-        ['the field-name array', ['householdId', 'userId']],
-        ['the raw column names', ['household_id', 'user_id']],
-      ])('maps a duplicate reported as %s to Conflict', async (_label, target) => {
+        ['raw columns, via the driver adapter', () => uniqueViolation({ fields: HOUSEHOLD_MEMBER_UNIQUE_COLUMNS })],
+        [
+          'Prisma field names, via a restored meta.target',
+          () => uniqueViolation({ target: HOUSEHOLD_MEMBER_UNIQUE_FIELDS }),
+        ],
+        [
+          'the mapped index name, via a MySQL adapter',
+          () => uniqueViolation({ index: HOUSEHOLD_MEMBER_UNIQUE_CONSTRAINT }),
+        ],
+      ])('maps a duplicate reported as %s to Conflict', async (_label, build: () => Error) => {
         stubAdmissible();
-        db.householdMember.create.mockRejectedValue(uniqueConstraintError(target));
+        db.householdMember.create.mockRejectedValue(build());
 
         await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(ConflictException);
       });
 
-      // The nested member/role create can raise P2002 from either generated
-      // primary key today, and from whatever unique someone adds tomorrow.
-      // Translating those to "already a member" would hide an unrelated database
+      // FLIPPED from rethrow. An unidentifiable P2002 is not evidence that some
+      // OTHER constraint fired, and the previous assertion turned "I could not
+      // tell" into a 500 on the one path the 409 exists to serve. Answering 409 is
+      // sound because the membership unique is the only violation this insert can
+      // reach — an enumeration the schema guard below keeps true.
+      it.each([
+        ['no meta at all', uniqueViolationWithoutMeta],
+        ['no driver adapter error', () => uniqueViolation({ omitDriverAdapterError: true })],
+        ['a driver adapter error naming no constraint', () => uniqueViolation({ fields: [] })],
+      ])('maps a P2002 carrying %s to Conflict rather than rethrowing', async (_label, build: () => Error) => {
+        stubAdmissible();
+        db.householdMember.create.mockRejectedValue(build());
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toThrow(ConflictException);
+      });
+
+      // Still rethrown, and now with a MEASURED comparator rather than an invented
+      // one: `['id']` is what a primary-key collision reports (#298 case 3).
+      // Translating this to "already a member" would hide an unrelated database
       // failure behind a confidently wrong answer.
       it.each([
         ['a primary key collision', ['id']],
-        ['an unrelated future unique', ['householdMemberId', 'roleId']],
-        ['a single matching field without its pair', ['userId']],
-      ])('rethrows a P2002 raised by %s rather than reporting Conflict', async (_label, target) => {
+        ['an unrelated future unique', ['household_member_id', 'role_id']],
+      ])('rethrows a P2002 identified as %s', async (_label, fields: readonly string[]) => {
         stubAdmissible();
-        const error = uniqueConstraintError(target);
+        const error = uniqueViolation({ fields });
         db.householdMember.create.mockRejectedValue(error);
 
         await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toBe(error);
       });
 
-      it('rethrows a P2002 with no target rather than guessing', async () => {
+      // The reason spellings are compared as an EXACT SET rather than by
+      // membership. A superset is a DIFFERENT constraint; accepting it would
+      // answer confidently about the wrong index, and it is the failure mode a
+      // third column added to the unique would introduce.
+      it('rethrows a P2002 whose fields are a superset of the membership pair', async () => {
         stubAdmissible();
-        const error = new Prisma.PrismaClientKnownRequestError('duplicate', {
-          code: PrismaError.UniqueConstraintViolation,
-          clientVersion: 'test',
-        });
+        const error = uniqueViolation({ fields: ['household_id', 'user_id', 'archived_at'] });
+        db.householdMember.create.mockRejectedValue(error);
+
+        await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toBe(error);
+      });
+
+      // A single name is not the pair. Retained from the original block, now
+      // meaningful for a different reason: exact-set comparison rejects it on
+      // LENGTH, so this also guards against a future rewrite that loosens the
+      // comparison back to membership.
+      it('rethrows a P2002 naming one column of the pair without the other', async () => {
+        stubAdmissible();
+        const error = uniqueViolation({ fields: ['user_id'] });
         db.householdMember.create.mockRejectedValue(error);
 
         await expect(service.addMemberWithin(asTx(db), PARAMS)).rejects.toBe(error);
