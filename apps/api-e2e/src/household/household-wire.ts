@@ -202,16 +202,19 @@ export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_clie
  * Both now key replay off the presence of a row under the composite key, which is
  * shape-independent, so neither reads `meta.target` any more.
  *
- * ONE READER REMAINS: `HouseholdMemberService.isDuplicateMembership` still
- * compares against `meta.target` and therefore still never matches, so a
- * concurrent duplicate admission answers 500 instead of 409 (#298). It cannot use
- * the row-lookup fix — it runs inside a transaction Postgres has already aborted
- * — and must read `meta.driverAdapterError.cause.constraint.fields` instead.
+ * NO READER REMAINS. `HouseholdMemberService.isDuplicateMembership` was the last
+ * one; #298 moved it onto the constraint identity under
+ * `meta.driverAdapterError.cause.constraint`, which is populated. It could not
+ * adopt the row-lookup fix — it runs inside a transaction Postgres has already
+ * aborted, so it cannot re-read — and it answers a documented 409 when the payload
+ * carries no identity, so nothing in the application depends on `meta.target`.
  *
  * What remains worth asserting is the assumption itself — see the probe in
- * `household-idempotency.spec.ts`. If a future Prisma populates `target`, that
- * test goes red and this note is where to start reading; a populated target would
- * be welcome but must not quietly become load-bearing again.
+ * `household-idempotency.spec.ts` for this constraint, and
+ * `apps/api-e2e/src/database/p2002-shape.spec.ts` for the shape the member
+ * discriminator reads. If a future Prisma populates `target`, those tests go red
+ * and this note is where to start reading; a populated target would be welcome but
+ * must not quietly become load-bearing again.
  */
 export const P2002_REPORTS_NO_USABLE_TARGET = true;
 
@@ -221,6 +224,11 @@ export const P2002_REPORTS_NO_USABLE_TARGET = true;
  * `HouseholdService` and `FeedbackService`, because asserting this comes back
  * EMPTY is how the probe pins the finding above without depending on whether
  * `meta` is absent entirely or merely lacks a `target`.
+ *
+ * NOT the production normalizer. `constraintIdentity` in `@bge/database` is that,
+ * and it reads a union of sources rather than `target` alone. This stays local to
+ * the suite because its whole job is to assert an ABSENCE, which the production
+ * helper deliberately reports as `unknown` rather than as an empty list.
  */
 export function constraintTargetNames(target: unknown): string[] {
   if (typeof target === 'string') {

@@ -4,71 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { constraintTargetNames, createEnvelope, HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './household-wire';
-
-/**
- * Where a P2002's constraint identity came from, and the normalized names.
- *
- * Prototype for #292's shared normalizer, kept local to this spec on purpose: it
- * exists to MEASURE what `@prisma/client@7.8.0` + `PrismaPg` reports, and the
- * production helper belongs in `@bge/database` alongside
- * `isPrismaUniqueConstraintError` once the shape is confirmed. Its branch
- * coverage lands there with it.
- *
- * `source: 'unknown'` is the distinction whose absence caused three separate
- * bugs in this repo: "I could not tell" is not the same answer as "it is
- * definitely not this constraint", and collapsing them turns an unidentifiable
- * error into a confidently wrong one.
- */
-interface ConstraintIdentity {
-  readonly names: readonly string[];
-  readonly source: 'meta.target' | 'driverAdapterError.fields' | 'driverAdapterError.index' | 'unknown';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Postgres reports identifiers quoted when they needed quoting, so a name can
- * arrive as `"createdById"` — embedded quotes and all. Comparing that against
- * `'createdById'` silently fails, which is the same class of near-miss that made
- * the old `meta.target` discriminator useless.
- */
-function unquote(name: string): string {
-  return name.replace(/^"+|"+$/g, '');
-}
-
-function constraintIdentity(meta: unknown): ConstraintIdentity {
-  if (!isRecord(meta)) {
-    return { names: [], source: 'unknown' };
-  }
-
-  const target = constraintTargetNames(meta['target']).map(unquote);
-  if (target.length > 0) {
-    return { names: target, source: 'meta.target' };
-  }
-
-  const driverAdapterError = meta['driverAdapterError'];
-  const cause = isRecord(driverAdapterError) ? driverAdapterError['cause'] : undefined;
-  const constraint = isRecord(cause) ? cause['constraint'] : undefined;
-
-  if (isRecord(constraint)) {
-    // Postgres: a field-name array. MySQL: a single index name. Both are handled
-    // because #292's helper must not assume one adapter.
-    const fields = constraintTargetNames(constraint['fields']).map(unquote);
-    if (fields.length > 0) {
-      return { names: fields, source: 'driverAdapterError.fields' };
-    }
-
-    const index = constraint['index'];
-    if (typeof index === 'string' && index.length > 0) {
-      return { names: [unquote(index)], source: 'driverAdapterError.index' };
-    }
-  }
-
-  return { names: [], source: 'unknown' };
-}
+import { constraintTargetNames, createEnvelope } from './household-wire';
 
 /**
  * The wire payload for `POST /api/households`. Declared here rather than
@@ -323,35 +259,32 @@ describe('household create idempotency (#210 acceptance)', () => {
   });
 
   describe('the P2002 the recovery path relies on', () => {
-    it('identifies the violated constraint via the driver-adapter path, not meta.target', async () => {
-      // #257 D-257-2, twice revised. It first asserted that `meta.target` carries
-      // the mapped constraint name; it does not, and finding that out was the
-      // most valuable thing this suite has done: `HouseholdService` discriminated
-      // replays on `meta.target`, so it matched nothing, every keyed retry
-      // rethrew, and #210's guarantee had inverted into a 500 on precisely the
-      // request it exists to make safe. Every HTTP case above was failing for
-      // that reason.
+    it('raises a P2002 that carries no usable meta.target', async () => {
+      // #257 D-257-2, and now deliberately NARROWED.
       //
-      // It then asserted only that the constraint was unidentifiable. That was
-      // true of `meta.target` and false of the error as a whole — the identity
-      // moved to the driver-adapter payload rather than disappearing.
+      // This began as an assertion that `meta.target` carries the mapped
+      // constraint name. It does not, and finding that out was the most valuable
+      // thing this suite has done: `HouseholdService` discriminated replays on
+      // `meta.target`, so it matched nothing, every keyed retry rethrew, and
+      // #210's guarantee had inverted into a 500 on precisely the request it
+      // exists to make safe. Every HTTP case above was failing for that reason.
       //
-      // Three properties are asserted now, and the split matters:
+      // It then grew a second half asserting that the identity survives under
+      // `meta.driverAdapterError`. That half has MOVED to
+      // `apps/api-e2e/src/database/p2002-shape.spec.ts`, which pins it against
+      // the constraint that actually reads it — the membership unique, from a
+      // nested create inside a transaction (#298). Keeping a copy here would
+      // duplicate a characterization of `@bge/database` inside a household
+      // suite, and the two would drift.
       //
-      //   1. A duplicate keyed insert DOES raise a P2002. Load-bearing: the
-      //      household and feedback recovery paths key off the row, but they only
-      //      look for the row when they see a unique violation.
-      //   2. `meta.target` is empty. Characterization only.
-      //   3. The constraint IS identifiable via
-      //      `meta.driverAdapterError.cause.constraint`. This is the one
-      //      `addMemberWithin` depends on, and the reason it is pinned here.
+      // What remains is the property THIS suite depends on, and only that:
       //
-      // Not asserted, but a constraint on #292's normalizer: `meta.modelName` is
-      // NOT usable. Prisma reports the top-level model of a nested create rather
-      // than the model owning the violated constraint (prisma/prisma#29595), and
-      // both paths needing discrimination are nested creates. It cannot be
-      // demonstrated from here — on this create the top-level model IS the
-      // colliding one — so it is recorded rather than tested.
+      //   1. A duplicate keyed insert DOES raise a P2002. Load-bearing, because
+      //      the household and feedback recovery paths key off the ROW but only
+      //      look for the row once they see a unique violation.
+      //   2. `meta.target` is empty. Characterization, so the assumption cannot
+      //      rot silently — a populated target would be welcome, but resuming
+      //      use of it must be a decision rather than a drift.
       //
       // Sanctioned plumbing under #255's revised D-6 ("verifying state no
       // endpoint exposes"), and representative because `createTestDatabase`
@@ -383,65 +316,19 @@ describe('household create idempotency (#210 acceptance)', () => {
         );
       }
 
-      // (2) `meta.target` is empty. Characterized, not depended on: the services
-      // key off the row. If a future Prisma restores the field this goes red,
-      // which is the point — resuming use of it should be a decision.
+      // (2) `meta.target` is empty.
       const names = constraintTargetNames(captured.meta?.['target']);
 
       if (names.length > 0) {
         throw new Error(
           `Prisma now reports a P2002 target: ${JSON.stringify(names)} (meta=${JSON.stringify(captured.meta)}). ` +
             `That is a change from what was measured on 2026-08-10, not a defect — but the household and feedback ` +
-            `recovery paths no longer read it, so making it load-bearing again is a decision. See #295.`,
+            `recovery paths no longer read it, so making it load-bearing again is a decision. The reader that DOES ` +
+            `consult it is HouseholdMemberService (#298); see p2002-shape.spec.ts.`,
         );
       }
 
       expect(names).toEqual([]);
-
-      // (3) The constraint IS identifiable, under the driver-adapter path.
-      //
-      // This is the measurement `addMemberWithin` needs and cannot get any other
-      // way: it runs INSIDE a transaction that Postgres has already aborted, so
-      // it cannot re-read the row to decide whether a P2002 means "already a
-      // member" (409) or something else (500). The row-lookup fix used by
-      // `HouseholdService` and `FeedbackService` is unavailable there, which
-      // makes the error payload the only remaining source of truth.
-      //
-      // Prisma reports this under `meta.driverAdapterError.cause.constraint`
-      // rather than `meta.target`, and both the field and its shape are
-      // explicitly NOT public API — hence pinning it here rather than trusting
-      // the issue tracker. The assertion is deliberately positive (the
-      // constraint is identifiable) with the whole `meta` in the failure
-      // message, so one run settles the shape whether or not it matches what
-      // was expected.
-      const identity = constraintIdentity(captured.meta);
-
-      if (identity.source === 'unknown') {
-        throw new Error(
-          `Could not identify the violated constraint from a P2002. Neither meta.target nor ` +
-            `meta.driverAdapterError.cause.constraint carried a usable value, so option 4 (#292) has nothing ` +
-            `to read and addMemberWithin must fall back to inferring from its idempotency pre-read. ` +
-            `Observed meta: ${JSON.stringify(captured.meta)}`,
-        );
-      }
-
-      // Whatever the source, it must resolve to THIS constraint — either by its
-      // mapped name or by the column pair. Matched as a pair on purpose:
-      // `created_by_id` alone appears in other indexes on this table.
-      const identifiesThisConstraint =
-        identity.names.includes(HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT) ||
-        (identity.names.includes('client_request_id') && identity.names.includes('created_by_id')) ||
-        (identity.names.includes('clientRequestId') && identity.names.includes('createdById'));
-
-      if (!identifiesThisConstraint) {
-        throw new Error(
-          `A constraint identity was found via ${identity.source} but it does not name this constraint: ` +
-            `${JSON.stringify(identity.names)}. Expected '${HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT}' or the ` +
-            `column pair. Observed meta: ${JSON.stringify(captured.meta)}`,
-        );
-      }
-
-      expect(identifiesThisConstraint).toBe(true);
     });
   });
 });

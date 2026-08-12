@@ -1,5 +1,6 @@
 import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
+import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
@@ -148,17 +149,20 @@ describe('HouseholdService', () => {
 
   describe('create idempotency (#210)', () => {
     /**
-     * A P2002 as Prisma actually raises one. `meta` is OPTIONAL on purpose:
-     * omitting it reproduces what Prisma 7 + `PrismaPg` reports, and every case
-     * in this block used to pass a `target` — which is why the shape-sniffing
-     * discriminator this replaced was never once tested against reality.
+     * A P2002 in the shape Prisma actually raises, via `@bge/database`'s shared
+     * factory. `target` is OPTIONAL and absent by default: omitting it reproduces
+     * what `@prisma/client@7.8.0` + `@prisma/adapter-pg` reports, and every case in
+     * this block used to pass one — which is why the shape-sniffing discriminator
+     * this replaced was never once tested against reality.
+     *
+     * Fabricated centrally rather than here (#298). Four specs previously invented
+     * their own payload, so each discriminator was only ever tested against the
+     * mock that fed it, and no single place could be compared against a real
+     * database. `apps/api-e2e/src/database/p2002-shape.spec.ts` is what keeps the
+     * shared factory honest.
      */
     const uniqueViolation = (target?: string | string[]) =>
-      new Prisma.PrismaClientKnownRequestError('unique violation', {
-        code: PrismaError.UniqueConstraintViolation,
-        clientVersion: 'test',
-        ...(target === undefined ? {} : { meta: { target } }),
-      });
+      target === undefined ? uniqueViolationWithoutMeta() : sharedUniqueViolation({ target });
 
     it('persists the client-supplied key on the row', async () => {
       db.household.create.mockResolvedValue({ id: 'hh-1' } as Household);
