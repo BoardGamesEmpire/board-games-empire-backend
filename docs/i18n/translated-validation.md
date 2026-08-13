@@ -79,7 +79,8 @@ one app.
 1. Add the key to `libs/common/i18n/src/lib/i18n/en/validation.json`. Name it
    after the `class-validator` constraint (`isString`, `minLength`, …) so the
    catalog reads as a map of constraint → message.
-2. Run `npm run i18n:generate` and commit the regenerated types.
+2. Run `npm run i18n:generate` so your editor sees the new key. The types are
+   generated, not committed — every `typecheck` and every app `build` produces them on demand.
 3. Annotate the decorator: `@IsFoo({ message: i18nValidationMessage('validation.isFoo') })`.
 
 ## Scope

@@ -50,8 +50,10 @@
             ]
           }
         },
+        "// dependsOn": "^generate (#260): a cold build must produce the untracked Prisma client itself (the bundle imports it as a runtime value; i18n types are import-type and erased). Declare PER-PROJECT — a `build` key in nx.json targetDefaults creates a phantom build target on every source-only lib and fails them under @nx/enforce-module-boundaries. `^build` is repeated because a project-level dependsOn replaces a default rather than merging. Full reasoning: issue #260.",
         "dependsOn": [
           "generate",
+          "^generate",
           "^build"
         ]
       },

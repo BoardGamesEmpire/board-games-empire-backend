@@ -2,7 +2,8 @@ name: Setup workspace
 description: >-
   Shared CI preamble (#259, D-259-1a): Node with the npm cache, environment
   file, dependency install, Nx base/head SHAs for affected commands, and the
-  generated artifacts (Prisma client, protobuf types) that builds depend on.
+  generated artifacts (Prisma client, protobuf types, i18n types) that builds
+  depend on.
   Caching of the generation steps themselves is Nx's job (local + Nx Cloud
   task cache), not bespoke actions/cache entries. The consuming job must
   check the repository out first (with fetch-depth: 0 for nx-set-shas).
@@ -38,3 +39,21 @@ runs:
         npm run proto:deps
         npx nx run proto-gateway:buf-export
         npx nx run proto-gateway:generate
+
+    # Untracked as of #260, like the two above. The task graph can mostly produce
+    # this on its own: `typecheck` reaches `^generate` for every project except
+    # `@bge/database` and `proto-gateway` (both override `typecheck.dependsOn` and so
+    # drop the default; neither imports i18n), and the six apps' `build` targets
+    # reach it too.
+    #
+    # This step is NOT merely belt-and-braces, though. Nx cannot hash an untracked
+    # file, so a catalog-only change leaves every `typecheck` hash unchanged and a
+    # cached result can be served against a regenerated type — see "Known hazard"
+    # in docs/i18n/typed-keys.md, and the catalog-change guard in ci.yml that
+    # bypasses the cache when it matters. Generating here at least guarantees the
+    # artifact matches the catalogs for anything that runs uncached, and keeps the
+    # e2e job (`nx affected -t build`, no preceding typecheck) independent of the
+    # wiring. Cheap either way: an Nx cache hit when the catalogs are unchanged.
+    - name: Generate i18n types
+      shell: bash
+      run: npx nx run @board-games-empire/i18n:generate

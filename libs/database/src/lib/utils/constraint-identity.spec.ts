@@ -220,13 +220,19 @@ describe('uniqueViolation fixture fidelity', () => {
     return candidate;
   };
 
-  // `name` must be non-enumerable ON THE PROTOTYPE, as Error.prototype.name is.
-  // Plain assignment creates an enumerable prototype property, and `for...in`
-  // walks inherited enumerable keys, so `name` would surface where a real Error's
-  // never does. JSON.stringify skips inherited properties either way, which is
-  // exactly why the serialization check below passed while the descriptor was
-  // wrong.
-  it('exposes only cause to for...in, as a real Error subclass does', () => {
+  // MEASURED against `@prisma/driver-adapter-utils`, not reasoned from `Error`.
+  // The real class writes `name = 'DriverAdapterError'` in its class BODY
+  // (`dist/index.js:44` on 7.8.0), so the field is own, enumerable, and shadows
+  // the non-enumerable `Error.prototype.name`. A real payload therefore yields
+  // `for...in` → ['name','cause'], NOT ['cause'].
+  //
+  // The previous revision of this test asserted ['cause'] plus a non-enumerable
+  // descriptor on the prototype — a descriptor the real error does not have at
+  // all (`getOwnPropertyDescriptor(proto,'name')` is `undefined`, because the
+  // value lives on the instance). It passed, against a fixture built to the same
+  // wrong belief: precisely the self-referential fidelity failure #298 existed to
+  // remove.
+  it('exposes name and cause to for...in, as the real driver error does', () => {
     const driverAdapterError = driverAdapterErrorOf(uniqueViolation({ fields: ['household_id'] }));
 
     const enumerableKeys: string[] = [];
@@ -234,23 +240,42 @@ describe('uniqueViolation fixture fidelity', () => {
       enumerableKeys.push(key);
     }
 
-    expect(enumerableKeys).toEqual(['cause']);
+    expect(enumerableKeys).toEqual(['name', 'cause']);
     expect(driverAdapterError).toBeInstanceOf(Error);
-    expect(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(driverAdapterError), 'name')).toMatchObject({
+    expect(Object.getOwnPropertyDescriptor(driverAdapterError, 'name')).toMatchObject({
       value: 'DriverAdapterError',
-      enumerable: false,
+      enumerable: true,
     });
+    // Own, not inherited — the distinction the old assertion had backwards.
+    expect(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(driverAdapterError), 'name')).toBeUndefined();
   });
 
   // Load-bearing for the rethrow log in HouseholdMemberService, which prints the
   // whole `meta`. If `cause` stopped being own-and-enumerable the log would go
   // back to being useless without anything else failing.
+  //
+  // `name` serializes too, for the same own-and-enumerable reason. Asserting it
+  // positively is deliberate: the old assertion was `not.toContain`, which is
+  // false against a real payload and would have masked a fixture regressing back
+  // to the prototype form.
   it('keeps the constraint reachable through JSON.stringify(meta)', () => {
     const error = uniqueViolation({ fields: ['household_id', 'user_id'] });
     const serialized = JSON.stringify(error.meta);
 
     expect(serialized).toContain('household_id');
-    expect(serialized).not.toContain('DriverAdapterError');
+    expect(serialized).toContain('user_id');
+    expect(serialized).toContain('"name":"DriverAdapterError"');
+
+    // `message` and `stack` stay non-enumerable, as on any Error — asserted on the
+    // PARSED object, per property. A `not.toContain('stack')` substring check over
+    // the whole JSON would pass for the wrong reason (and would fail spuriously the
+    // day a constraint column is named something containing "stack"), and checking
+    // only one of the two left the other unguarded: a `message` class field would
+    // start serializing and this spec, whose whole job is pinning descriptors,
+    // would have stayed green.
+    const driverAdapterError = JSON.parse(serialized).driverAdapterError;
+    expect(driverAdapterError).not.toHaveProperty('message');
+    expect(driverAdapterError).not.toHaveProperty('stack');
   });
 });
 

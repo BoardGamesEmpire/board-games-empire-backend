@@ -19,7 +19,7 @@
     ],
     "name": "@board-games-empire/i18n",
     "targets": {
-      "generate-types": {
+      "generate": {
         "executor": "nx:run-commands",
         "cache": true,
         "inputs": [
@@ -36,6 +36,12 @@
         "options": {
           "command": "nestjs-i18n -p libs/common/i18n/src/lib/i18n -o libs/common/i18n/src/lib/generated/i18n.generated.ts"
         }
+      },
+      "typecheck": {
+        "dependsOn": [
+          "generate",
+          "^generate"
+        ]
       }
     }
   },

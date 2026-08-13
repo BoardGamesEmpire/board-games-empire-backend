@@ -38,6 +38,7 @@ node_modules
 /.sass-cache
 /connect.lock
 /coverage
+/docs/superpowers/
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log

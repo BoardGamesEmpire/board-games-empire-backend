@@ -115,7 +115,13 @@ function normalizeNames(value: unknown): readonly string[] {
 /**
  * Reads the driver adapter's `cause`, which is where the identity lives on this
  * stack. `driverAdapterError` is an `Error` INSTANCE whose `cause` is a plain
- * object; `cause` is enumerable, `message`/`name`/`stack` are not.
+ * object; `name` and `cause` are own and enumerable (the real class declares
+ * `name` as a class field, shadowing `Error.prototype.name`), while
+ * `message`/`stack` are not.
+ *
+ * Enumerability is irrelevant to this function — it is property access throughout
+ * — but it decides what `JSON.stringify(meta)` captures for the callers that log
+ * the payload, so `prisma-error.fixtures.ts` pins it.
  */
 function driverAdapterCause(meta: Record<string, unknown>): Record<string, unknown> | undefined {
   const driverAdapterError = meta['driverAdapterError'];

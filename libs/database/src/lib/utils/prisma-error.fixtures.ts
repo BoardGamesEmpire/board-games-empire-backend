@@ -23,11 +23,26 @@ interface DriverAdapterCause {
 
 /**
  * A real Error subclass rather than an object literal, because the descriptors are
- * load-bearing for anything that logs the payload: `cause` is own and enumerable so
- * `JSON.stringify(meta)` captures the constraint, while `name` and `message` are
- * not and drop out.
+ * load-bearing for anything that logs the payload: both `name` and `cause` are own
+ * and enumerable, so `JSON.stringify(meta)` captures the constraint AND the class
+ * name, while `message`/`stack` stay non-enumerable and drop out.
+ *
+ * `name` is declared as a CLASS FIELD, matching the real class verbatim —
+ * `@prisma/driver-adapter-utils` writes `name = 'DriverAdapterError'` in the class
+ * body (`dist/index.js:44` on 7.8.0), which makes it own, enumerable, writable, and
+ * configurable. An earlier revision put it on the prototype as non-enumerable, on
+ * the reasoning that `Error.prototype.name` is non-enumerable and `for...in` walks
+ * inherited keys. True of `Error`, not true of this subclass: the field shadows the
+ * prototype's, so a real payload yields `for...in` → `['name','cause']` and
+ * `JSON.stringify` → `{"name":"DriverAdapterError",…}`. Reasoning from the base
+ * class instead of measuring the real one is the same mistake #298 was about.
+ *
+ * Nothing in `constraintIdentity` reads this by enumeration — it is property access
+ * throughout — so the divergence only ever showed up in the fidelity specs that
+ * exist to catch exactly this.
  */
 class DriverAdapterError extends Error {
+  override readonly name = 'DriverAdapterError';
   override readonly cause: DriverAdapterCause;
 
   constructor(cause: DriverAdapterCause) {
@@ -35,17 +50,6 @@ class DriverAdapterError extends Error {
     this.cause = cause;
   }
 }
-
-// Assignment (`prototype.name = ...`) would create an ENUMERABLE property, and
-// `for...in` walks inherited keys, so `name` would surface where a real Error's
-// never does. Matches `Error.prototype.name`'s descriptor instead — fidelity is the
-// entire point of a fixture.
-Object.defineProperty(DriverAdapterError.prototype, 'name', {
-  value: 'DriverAdapterError',
-  writable: true,
-  enumerable: false,
-  configurable: true,
-});
 
 export interface UniqueViolationOptions {
   /**
