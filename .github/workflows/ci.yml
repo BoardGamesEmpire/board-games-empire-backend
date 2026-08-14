@@ -40,16 +40,74 @@ jobs:
 
       - uses: ./.github/actions/setup-workspace
 
-      - name: Check i18n types are up to date
-        run: |
-          npm run i18n:generate
-          git diff --exit-code -- libs/common/i18n/src/lib/generated/i18n.generated.ts \
-            || { echo "::error::i18n translation types are stale. Run 'npm run i18n:generate' and commit the result."; exit 1; }
-
       - name: Clean stale dist directories
         run: find libs apps -name "dist" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
-      - run: npx nx run-many -t typecheck
+      # Replaces the i18n drift gate removed in #260, and guards a real hole rather
+      # than a cosmetic one.
+      #
+      # `i18n.generated.ts` is generated and gitignored, so it is absent from Nx's
+      # file map and cannot be a `typecheck` input; the catalog JSONs are not inputs
+      # either. A catalog-only change therefore regenerates the type while leaving
+      # every `typecheck` hash unchanged, and Nx serves the verdict it cached for the
+      # PREVIOUS type. Deleting a key without touching its call sites goes green.
+      #
+      # Nothing else catches it: the app builds do not type-check (tsPlugins is not
+      # wired to ts-loader's `transformers`, so it runs transpileOnly), and Jest
+      # erases the type-only imports through @swc/jest. Verified by deleting
+      # `errors.household.last_owner` — cached typecheck and a full `api:build` both
+      # pass; `typecheck --skip-nx-cache` fails with TS2345.
+      #
+      # So when the catalogs move, bypass the cache. Strictly stronger than the old
+      # gate, which only compared bytes: this compiles the workspace against the
+      # regenerated type. Catalogs change rarely, so the cost is paid rarely.
+      #
+      # KNOWN COST, accepted: `--skip-nx-cache` also severs the Nx Cloud connection
+      # for that command. On exactly the runs where typecheck is load-bearing, the
+      # typecheck tasks are therefore absent from the Nx Cloud report, their results
+      # are not written to the remote cache (so the follow-on master push
+      # re-typechecks uncached), and `nx fix-ci` below has no record of them to act
+      # on. Correctness is preserved — self-healing and reporting are not.
+      # `--no-renames` is load-bearing: with rename detection on (the default),
+      # `git diff --name-only` reports ONLY the destination path, so moving a
+      # catalog out of `src/lib/i18n/` would not match this pattern — while
+      # `i18n:generate`'s own inputs DID change, dropping that whole subtree from
+      # `I18nTranslations`. That is the failure this step exists to catch, at its
+      # largest. `--no-renames` reports the old path too, so the move matches.
+      #
+      # `set -euo pipefail` matters for the same reason: without it a git failure is
+      # swallowed by the exit status of whatever follows it in the pipe and the step
+      # reports `changed=false` — failing OPEN on the only guard standing between a
+      # catalog key deletion and a green master. The explicit NX_BASE/NX_HEAD
+      # assertions cover nx-set-shas failing, changing its env-var contract, or
+      # `fetch-depth` being reduced.
+      #
+      # The diff is captured BEFORE matching, and matched with `grep -c` rather than
+      # `grep -q`, because `pipefail` and `grep -q` together reintroduce the same
+      # fail-open from the other end: `-q` exits on the first match, its producer
+      # gets SIGPIPE (141), `pipefail` propagates that, and the `if` takes the false
+      # branch — so a catalog change that sorts EARLY in a large diff reports
+      # `changed=false`. Reproduced with a 4001-file diff. `grep -c` has to read to
+      # EOF, so it cannot kill its producer; `|| true` absorbs its exit 1 on zero
+      # matches without hiding a git failure, which `set -e` catches on the
+      # assignment above.
+      - name: Detect i18n catalog changes
+        id: catalogs
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${NX_BASE:?NX_BASE is unset — nx-set-shas did not run or changed its contract}"
+          : "${NX_HEAD:?NX_HEAD is unset — nx-set-shas did not run or changed its contract}"
+          files="$(git diff --no-renames --name-only "$NX_BASE" "$NX_HEAD")"
+          matches="$(printf '%s\n' "$files" | grep -c '^libs/common/i18n/src/lib/i18n/' || true)"
+          changed=false
+          if [ "$matches" -gt 0 ]; then
+            changed=true
+          fi
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "i18n catalogs changed: $changed ($matches catalog file(s))"
+
+      - run: npx nx run-many -t typecheck ${{ steps.catalogs.outputs.changed == 'true' && '--skip-nx-cache' || '' }}
       - run: npx nx affected -t test --parallel --maxParallel=3 --passWithNoTests
       - run: npx nx affected -t lint build --parallel --maxParallel=3
 

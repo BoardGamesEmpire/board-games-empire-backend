@@ -737,6 +737,22 @@ export class HouseholdMemberService {
           // Warn rather than debug: reaching this means the payload stopped
           // carrying an identity, and finding that out from a log beats finding it
           // out from a wrong status code.
+          //
+          // ONE KNOWN WAY TO REACH THIS PERMANENTLY, and it is a privilege
+          // question rather than a Prisma-version one. `constraint.fields` is
+          // parsed from Postgres's DETAIL line, and `BuildIndexValueDescription`
+          // omits DETAIL entirely when the connecting role lacks SELECT on the key
+          // columns. Deploy the API under a write-scoped role that is not the
+          // schema owner and EVERY P2002 here degrades to `unknown`.
+          //
+          // Correctness survives that — the enumeration above is about which
+          // uniques exist, not about the payload — but observability does not:
+          // this warn stops being an anomaly signal and becomes one line per
+          // concurrent admission. Nothing currently provisions such a role (no
+          // GRANT or CREATE ROLE in `prisma/`, and the e2e harness connects as the
+          // owner, so `p2002-shape.spec.ts` would stay green through the change).
+          // If a scoped role is ever introduced, revisit this branch before the
+          // logs are trusted.
           this.logger.warn(
             `Could not identify the unique behind a member-insert P2002; assuming a concurrent admission of ` +
               `user ${userId} to household ${householdId}. sqlState=${identity.sqlState ?? 'unreported'} ` +

@@ -66,14 +66,25 @@ BOARDGAMEGEEK_API_KEY=your_bgg_api_key
 
 Most environment variables have sane development defaults.
 
-### 3. Generate the Prisma client and protobuf types
+### 3. Generate the Prisma client, protobuf types, and i18n types
 
 ```bash
 npm run db:generate
 npm run proto:generate
+npm run i18n:generate
 ```
 
-These must be run once before the first build and again any time the schema or `.proto` files change.
+None of the three are committed. Run them once before the first build, and again any time the schema,
+the `.proto` files, or an i18n catalog changes.
+
+Two of the three — the Prisma client and the i18n types — are also produced automatically as
+task-graph dependencies, since `typecheck` and the app `build`s pull them in. **The protobuf step is
+not**: `buf-export` is outside the task graph, and the api build copies `.proto` assets from the
+directory it produces, so `npm run proto:generate` genuinely has to be run by hand.
+
+Run all three anyway. It is what gets your editor to resolve `PrismaClient` / `I18nPath` immediately
+rather than after the first typecheck, and Nx cannot hash an untracked file, so a task that already
+has a cache entry will not re-run just because a generator did.
 
 ### 4. Run database migrations and seed
 
@@ -153,9 +164,11 @@ Requirements and knobs:
 - `.env` must exist (copy `.env.example`) — the harness passes the
   ephemeral `DATABASE_URL` and `REDIS_*`/`REDIS_WEBSOCKET_*`/`REDIS_BULLMQ_*`
   connection variables to the server process and never writes to the file.
-- Prisma client and protobuf types must be generated once
-  (`npm run db:generate`, `npm run proto:generate`) — the api build needs
-  both.
+- Prisma client, protobuf types, and i18n types must be generated once
+  (`npm run db:generate`, `npm run proto:generate`, `npm run i18n:generate`).
+  `api:build` pulls the Prisma and i18n generators in itself (#260), so it will
+  produce them if they are missing; the protobuf export step is not in the graph
+  and still has to be run by hand.
 - `BGE_E2E_DATABASE_URL` / `BGE_E2E_REDIS_URL` — escape hatches that skip
   container provisioning and use an existing endpoint instead. **Treated as
   disposable**: migrated, seeded, truncated (and, with
