@@ -54,6 +54,7 @@ describe('AuditLogService', () => {
       const plugin: Actor = {
         kind: 'plugin',
         pluginId: 'p1',
+        unit: { scopeType: 'Server' },
         trigger: { kind: 'apiKey', apiKeyId: 'k1', userId: 'u9' },
       };
 

@@ -125,6 +125,7 @@ describe('ActorSpanProcessor', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-foo',
+        unit: { scopeType: 'Server' },
         trigger: { kind: 'user', userId: 'user-abc' },
       };
       const processor = buildProcessor({ actor });
@@ -134,7 +135,25 @@ describe('ActorSpanProcessor', () => {
       expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_KIND, 'plugin');
       expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_ID, 'plugin-foo');
       expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_TRIGGER_KIND, 'user');
-      expect(span.setAttribute).toHaveBeenCalledTimes(3);
+      expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_UNIT_SCOPE, 'Server');
+      // Server units have no coordinate id — exactly four attributes.
+      expect(span.setAttribute).toHaveBeenCalledTimes(4);
+    });
+
+    it('stamps the unit coordinate id for household units — the coordinate that decided authority', () => {
+      const span = createMockSpan();
+      const actor: Actor = {
+        kind: 'plugin',
+        pluginId: 'plugin-foo',
+        unit: { scopeType: 'Household', householdId: 'hh-123' },
+        trigger: { kind: 'user', userId: 'user-abc' },
+      };
+      const processor = buildProcessor({ actor });
+
+      processor.onStart(span as unknown as Span, emptyContext);
+
+      expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_UNIT_SCOPE, 'Household');
+      expect(span.setAttribute).toHaveBeenCalledWith(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_UNIT_ID, 'hh-123');
     });
 
     it('exposes the immediate trigger kind for nested plugin actors (one hop deep)', () => {
@@ -142,9 +161,11 @@ describe('ActorSpanProcessor', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-outer',
+        unit: { scopeType: 'Server' },
         trigger: {
           kind: 'plugin',
           pluginId: 'plugin-inner',
+          unit: { scopeType: 'Server' },
           trigger: { kind: 'system', reason: 'scheduler' },
         },
       };
@@ -164,6 +185,7 @@ describe('ActorSpanProcessor', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-foo',
+        unit: { scopeType: 'Server' },
         trigger: { kind: 'user', userId: 'user-abc' },
       };
       const processor = buildProcessor({ actor });
@@ -218,6 +240,7 @@ describe('ActorSpanProcessor', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-foo',
+        unit: { scopeType: 'Server' },
         trigger: { kind: 'apiKey', apiKeyId: 'key-xyz', userId: 'user-abc' },
       };
       const processor = buildProcessor({

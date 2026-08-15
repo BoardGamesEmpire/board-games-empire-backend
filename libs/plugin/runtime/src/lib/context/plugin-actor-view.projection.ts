@@ -1,4 +1,4 @@
-import type { Actor } from '@bge/actor-context';
+import { type Actor, clonePluginUnit } from '@bge/actor-context';
 import type { PluginActorView } from '@boardgamesempire/plugin-contract';
 import { UnknownActorKindError } from './context.errors';
 
@@ -43,8 +43,16 @@ const projectActor = (actor: Actor): PluginActorView => {
       return Object.freeze({ kind: actor.kind, system: actor.system, identifier: actor.identifier });
     case 'plugin':
       // Recursive: the trigger chain is projected level by level, so a
-      // plugin walking `trigger` never reaches a host-owned object.
-      return Object.freeze({ kind: actor.kind, pluginId: actor.pluginId, trigger: projectActor(actor.trigger) });
+      // plugin walking `trigger` never reaches a host-owned object. The unit
+      // rides through `clonePluginUnit` — the same frozen owned-coordinates
+      // copy every boundary uses, which is exactly this projection's
+      // contract for it.
+      return Object.freeze({
+        kind: actor.kind,
+        pluginId: actor.pluginId,
+        unit: clonePluginUnit(actor.unit),
+        trigger: projectActor(actor.trigger),
+      });
     default: {
       const unprojectable: never = actor;
 

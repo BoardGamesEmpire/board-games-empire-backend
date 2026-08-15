@@ -30,6 +30,9 @@
       "path": "../actor-context/tsconfig.lib.json"
     },
     {
+      "path": "../../plugin/manifest/tsconfig.lib.json"
+    },
+    {
       "path": "../../database/tsconfig.lib.json"
     }
   ],

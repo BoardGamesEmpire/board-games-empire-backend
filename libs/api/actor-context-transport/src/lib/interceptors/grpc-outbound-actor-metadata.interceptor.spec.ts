@@ -71,13 +71,15 @@ describe('injectActorContextMetadata', () => {
       expect(decodeActor(metadata)).toEqual(actor);
     });
 
-    it('round-trips a nested plugin actor preserving the trigger chain', () => {
+    it('round-trips a nested plugin actor preserving the trigger chain and unit coordinates', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-outer',
+        unit: { scopeType: 'Household', householdId: 'hh-1' },
         trigger: {
           kind: 'plugin',
           pluginId: 'plugin-inner',
+          unit: { scopeType: 'Server' },
           trigger: { kind: 'user', userId: 'user-abc' },
         },
       };

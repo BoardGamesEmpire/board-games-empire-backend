@@ -60,12 +60,48 @@ export interface ExternalActorView {
 }
 
 /**
+ * The consent unit a plugin actor is operating as (#60): `Server` outside
+ * any household/user invocation, otherwise the coordinates of the unit
+ * whose grants scope the current work. A discriminated union — the same
+ * "exactly one coordinate accompanies its scope type" rule the host's
+ * `PluginUnit` enforces, mirrored structurally here because the contract
+ * lib stays dependency-free: a `Server` view with a `householdId` is
+ * unrepresentable rather than merely documented away.
+ *
+ * Like every field on this view, it is a frozen, point-in-time DTO — a
+ * projection of what was true when the host entered the plugin scope, not
+ * a live handle. It never re-resolves; a plugin holding one across
+ * asynchronous work observes the unit the scope was entered with.
+ */
+export type PluginUnitView = ServerPluginUnitView | HouseholdPluginUnitView | UserPluginUnitView;
+
+export interface ServerPluginUnitView {
+  readonly scopeType: 'Server';
+  readonly householdId?: never;
+  readonly userId?: never;
+}
+
+export interface HouseholdPluginUnitView {
+  readonly scopeType: 'Household';
+  readonly householdId: string;
+  readonly userId?: never;
+}
+
+export interface UserPluginUnitView {
+  readonly scopeType: 'User';
+  readonly userId: string;
+  readonly householdId?: never;
+}
+
+/**
  * Plugin code executing on behalf of a `trigger` actor. Recursive: a plugin
  * observing the chain can walk `trigger` back to the originating principal.
- * The trigger is audit attribution only — never an authority source (#59).
+ * The trigger is audit attribution only — never an authority source (#59);
+ * `unit` is the authority-bearing coordinate set (#60).
  */
 export interface PluginChainActorView {
   readonly kind: 'plugin';
   readonly pluginId: string;
+  readonly unit: PluginUnitView;
   readonly trigger: PluginActorView;
 }

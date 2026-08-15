@@ -40,8 +40,8 @@ describe('household wire parsers (pure logic)', () => {
     });
 
     it('rejects a missing message rather than defaulting it', () => {
-      // The message is part of the envelope contract the replay case asserts
-      // (D-257-9): a replay must be indistinguishable from a create, and that
+      // The message is part of the envelope contract the replay case asserts;
+      // a replay must be indistinguishable from a create, and that
       // is only checkable if its absence is an error rather than undefined.
       expect(() => createEnvelope(response({ household: { id: 'h1' } }), 'POST')).toThrow(/no 'message' string/);
     });

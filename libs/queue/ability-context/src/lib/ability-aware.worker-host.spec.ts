@@ -1,5 +1,6 @@
 import { AbilityService } from '@bge/permissions';
-import type { Job } from 'bullmq';
+import { ForbiddenException } from '@nestjs/common';
+import { UnrecoverableError, type Job } from 'bullmq';
 import { AbilityAwareWorkerHost } from './ability-aware.worker-host';
 
 interface TestJobData {
@@ -40,10 +41,19 @@ describe('AbilityAwareWorkerHost', () => {
     expect(abilityService.primeCurrentActor).toHaveBeenCalledTimes(1);
   });
 
-  it('propagates a priming failure so the job fails and BullMQ can retry', async () => {
-    const error = new Error('revoked key');
+  it('propagates a transient priming failure unchanged so BullMQ retries', async () => {
+    const error = new Error('database unreachable');
     abilityService.primeCurrentActor.mockRejectedValue(error);
 
     await expect(processor.triggerOnScopeReady({} as Job<TestJobData>)).rejects.toThrow(error);
+  });
+
+  it('rethrows a resolution ForbiddenException as UnrecoverableError — permanent refusal, never retried', async () => {
+    // A resolution-time 403 means the actor's authority is structurally gone
+    // (revoked key, unrenderable plugin grant); retrying re-fails forever.
+    abilityService.primeCurrentActor.mockRejectedValue(new ForbiddenException('grant cannot render'));
+
+    await expect(processor.triggerOnScopeReady({} as Job<TestJobData>)).rejects.toThrow(UnrecoverableError);
+    await expect(processor.triggerOnScopeReady({} as Job<TestJobData>)).rejects.toThrow(/grant cannot render/);
   });
 });

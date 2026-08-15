@@ -2,9 +2,11 @@ import { Action, Permission, ResourceType, RiskLevel } from '@bge/database';
 import { subject } from '@casl/ability';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type {
   ApiKeyScopeWithPermission,
   ApikeyWithScopes,
+  PluginGrantSnapshot,
   RoleWithPermissions,
   Subjects,
   UserPermissionWithPermission,
@@ -834,6 +836,263 @@ describe('AbilityFactory', () => {
           ?.conditions as { members: { some: { role: { role: { name: { in: string[] } } } } } };
 
         expect(conditions.members.some.role.role.name.in).toContain('HouseholdAdmin');
+      });
+    });
+  });
+
+  describe('createDenyAll', () => {
+    it('produces a no-rule ability that denies everything', () => {
+      const denyAll = factory.createDenyAll();
+
+      expect(denyAll.rules).toHaveLength(0);
+      expect(denyAll.can(Action.read, 'Game')).toBe(false);
+      expect(denyAll.can(Action.manage, 'all')).toBe(false);
+    });
+  });
+
+  describe('createForPlugin (#60)', () => {
+    const makeSnapshot = (overrides: Partial<PluginGrantSnapshot> = {}): PluginGrantSnapshot => ({
+      plugin: { id: 'plugin-1', slug: 'demo-plugin' },
+      unit: { scopeType: 'Household', householdId: 'hh-x' },
+      servable: true,
+      corePermissions: [],
+      ownGrantSlugs: [],
+      ...overrides,
+    });
+
+    describe('serving predicate (D60-2)', () => {
+      it('produces a no-rule ability when the unit is not servable, regardless of grants', () => {
+        const ability = factory.createForPlugin(
+          makeSnapshot({
+            servable: false,
+            corePermissions: [makePermission({ action: Action.read, subject: 'Game', conditions: null })],
+            ownGrantSlugs: ['plugin|demo-plugin|manage:digest'],
+          }),
+        );
+
+        expect(ability.rules).toHaveLength(0);
+        expect(ability.can(Action.read, 'Game')).toBe(false);
+      });
+    });
+
+    describe('own-namespace grants', () => {
+      it('builds a (verb, enveloped subject) rule parsed from the canonical slug', () => {
+        const ability = factory.createForPlugin(makeSnapshot({ ownGrantSlugs: ['plugin|demo-plugin|manage:digest'] }));
+
+        expect(ability.can(Action.manage, 'plugin|demo-plugin|digest' as Subjects)).toBe(true);
+      });
+
+      it('never grants outside the enveloped subject space', () => {
+        const ability = factory.createForPlugin(makeSnapshot({ ownGrantSlugs: ['plugin|demo-plugin|manage:digest'] }));
+
+        expect(ability.can(Action.manage, 'digest' as Subjects)).toBe(false);
+        expect(ability.can(Action.manage, 'Household')).toBe(false);
+      });
+
+      it('rejects a grant row whose slug names another plugin’s namespace (corrupted state)', () => {
+        const build = () =>
+          factory.createForPlugin(makeSnapshot({ ownGrantSlugs: ['plugin|other-plugin|manage:digest'] }));
+
+        expect(build).toThrow(PluginAbilityRenderRejectionError);
+        expect(build).toThrow(
+          expect.objectContaining({
+            reason: 'foreign-namespace-slug',
+            permissionSlug: 'plugin|other-plugin|manage:digest',
+            pluginSlug: 'demo-plugin',
+          }),
+        );
+      });
+
+      it('rejects an enveloped-but-unparseable slug as the same typed corruption, never a raw RangeError', () => {
+        const build = () => factory.createForPlugin(makeSnapshot({ ownGrantSlugs: ['plugin|demo-plugin'] }));
+
+        expect(build).not.toThrow(RangeError);
+        expect(build).toThrow(
+          expect.objectContaining({ reason: 'malformed-slug', permissionSlug: 'plugin|demo-plugin' }),
+        );
+      });
+    });
+
+    describe('core grants — unit-coordinate rendering (D-U)', () => {
+      const readGameInHousehold = () =>
+        makePermission({
+          action: Action.read,
+          subject: 'Game',
+          slug: 'read:game:household-unit',
+          conditions: { householdId: '{{ unit.householdId }}' },
+        });
+
+      it('renders conditions against the operating unit — household X, not household Y', () => {
+        const ability = factory.createForPlugin(makeSnapshot({ corePermissions: [readGameInHousehold()] }));
+
+        // Structural assertion (see #155 note above): the rendered clause is
+        // what Prisma evaluates; an in-memory can() on relation-shaped data
+        // would be a false signal.
+        expect(ability.rules.at(-1)?.conditions).toEqual({ householdId: 'hh-x' });
+        expect(stringLeaves(ability.rules.at(-1)?.conditions)).not.toContain('');
+      });
+
+      it('exposes plugin identity to templates ({{ plugin.slug }} / {{ plugin.id }})', () => {
+        const ability = factory.createForPlugin(
+          makeSnapshot({
+            corePermissions: [
+              makePermission({
+                action: Action.read,
+                subject: 'Game',
+                conditions: { source: '{{ plugin.slug }}' },
+              }),
+            ],
+          }),
+        );
+
+        expect(ability.rules.at(-1)?.conditions).toEqual({ source: 'demo-plugin' });
+      });
+
+      it('honours inverted core permissions as cannot-rules', () => {
+        const ability = factory.createForPlugin(
+          makeSnapshot({
+            corePermissions: [
+              makePermission({ action: Action.read, subject: 'Game', conditions: null }),
+              makePermission({ action: Action.read, subject: 'Game', inverted: true, conditions: null }),
+            ],
+          }),
+        );
+
+        expect(ability.can(Action.read, 'Game')).toBe(false);
+      });
+
+      it('honours condition-free permissions as type-level rules', () => {
+        const ability = factory.createForPlugin(
+          makeSnapshot({
+            corePermissions: [makePermission({ action: Action.read, subject: 'Game', conditions: null })],
+          }),
+        );
+
+        expect(ability.can(Action.read, 'Game')).toBe(true);
+      });
+    });
+
+    describe('fail-loud out-of-context rejection (D60-3)', () => {
+      it('rejects the user-centric seed templates — {{ user.id }} is not plugin-grantable', () => {
+        const seeded = makePermission({
+          action: Action.read,
+          subject: 'Game',
+          slug: 'read:game',
+          conditions: { userId: '{{ user.id }}' },
+        });
+        const build = () => factory.createForPlugin(makeSnapshot({ corePermissions: [seeded] }));
+
+        expect(build).toThrow(PluginAbilityRenderRejectionError);
+        expect(build).toThrow(
+          expect.objectContaining({
+            reason: 'out-of-context-variable',
+            variable: 'user.id',
+            permissionSlug: 'read:game',
+            unit: { scopeType: 'Household', householdId: 'hh-x' },
+          }),
+        );
+      });
+
+      it('rejects {{ unit.householdId }} while operating as a Server unit — the coordinate is absent, not empty', () => {
+        const snapshot = makeSnapshot({
+          unit: { scopeType: 'Server' },
+          corePermissions: [
+            makePermission({
+              action: Action.read,
+              subject: 'Game',
+              conditions: { householdId: '{{ unit.householdId }}' },
+            }),
+          ],
+        });
+
+        expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+      });
+
+      it.each<[string, string]>([
+        ['a partial token — renders to empty string, never validated by the name walk', '{{> some-partial }}'],
+        ['a comment token — renders to empty string', '{{! why is this here }}'],
+      ])('rejects %s', (_label, template) => {
+        const snapshot = makeSnapshot({
+          corePermissions: [
+            makePermission({ action: Action.read, subject: 'Game', conditions: { householdId: template } }),
+          ],
+        });
+
+        expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+      });
+
+      it('rejects prototype-chain paths — `in`-style lookup would admit {{ unit.constructor }}', () => {
+        const snapshot = makeSnapshot({
+          corePermissions: [
+            makePermission({ action: Action.read, subject: 'Game', conditions: { x: '{{ unit.constructor }}' } }),
+          ],
+        });
+
+        expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+      });
+
+      it('rejects non-leaf resolutions — {{ unit }} would render [object Object] into the clause', () => {
+        const snapshot = makeSnapshot({
+          corePermissions: [
+            makePermission({ action: Action.read, subject: 'Game', conditions: { x: '{{ unit }}' } }),
+          ],
+        });
+
+        expect(() => factory.createForPlugin(snapshot)).toThrow(
+          expect.objectContaining({ reason: 'out-of-context-variable', variable: 'unit' }),
+        );
+      });
+
+      it('rejects a template that does not parse (unclosed tag) as a typed rejection, never Mustache’s raw Error', () => {
+        const snapshot = makeSnapshot({
+          corePermissions: [
+            makePermission({
+              action: Action.read,
+              subject: 'Game',
+              slug: 'read:game:broken',
+              conditions: { householdId: '{{ unit.householdId' },
+            }),
+          ],
+        });
+        const build = () => factory.createForPlugin(snapshot);
+
+        expect(build).toThrow(
+          expect.objectContaining({ reason: 'malformed-template', permissionSlug: 'read:game:broken' }),
+        );
+      });
+
+      it('rejects section variables outside the context, not only interpolations', () => {
+        const snapshot = makeSnapshot({
+          corePermissions: [
+            makePermission({
+              action: Action.read,
+              subject: 'Game',
+              conditions: { flag: '{{#user}}{{ user.id }}{{/user}}' },
+            }),
+          ],
+        });
+
+        expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+      });
+
+      it('never renders a malformed clause — no empty string leaves can reach the rule set', () => {
+        // The user ability path accepts silent out-of-context rendering; the
+        // plugin path must never produce the `{ userId: '' }` shape at all.
+        const ability = factory.createForPlugin(
+          makeSnapshot({
+            corePermissions: [
+              makePermission({
+                action: Action.read,
+                subject: 'Game',
+                conditions: { householdId: '{{ unit.householdId }}', via: '{{ unit.scopeType }}' },
+              }),
+            ],
+          }),
+        );
+
+        for (const rule of ability.rules) {
+          expect(stringLeaves(rule.conditions)).not.toContain('');
+        }
       });
     });
   });

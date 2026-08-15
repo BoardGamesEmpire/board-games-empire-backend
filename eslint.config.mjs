@@ -14,6 +14,7 @@ export const restrictedImportPaths = {
     name: "@bge/actor-context",
     importNames: [
       "AuditContextInternalService",
+      "ABILITIES_CLS_KEY",
       "ACTOR_CLS_KEY",
       "CORRELATION_ID_CLS_KEY",
       "LOCALE_CLS_KEY",

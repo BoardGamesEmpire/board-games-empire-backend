@@ -36,6 +36,20 @@ export const BGE_OTEL_ATTRIBUTES = {
   ACTOR_TRIGGER_KIND: 'bge.actor.trigger_kind',
 
   /**
+   * Consent-unit scope a plugin actor operated as (`Server` | `Household` |
+   * `User`) — only set when `actor.kind === 'plugin'` (#60). The one
+   * coordinate that decided the plugin's authority for the span.
+   */
+  ACTOR_PLUGIN_UNIT_SCOPE: 'bge.actor.plugin_unit_scope',
+
+  /**
+   * The unit's coordinate id (Household.id / User.id) — only set for
+   * household/user units. Same PII posture as `HOUSEHOLD_ID`: an opaque
+   * row id, not an identity attribute.
+   */
+  ACTOR_PLUGIN_UNIT_ID: 'bge.actor.plugin_unit_id',
+
+  /**
    * External system label — only set when `actor.kind === 'external'`.
    * The system tag (e.g. `'gateway'`) is not PII; the identifier within
    * the system IS withheld.

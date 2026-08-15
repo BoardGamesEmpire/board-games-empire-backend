@@ -3,7 +3,9 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
+  riskCovers,
   RiskLevel,
+  SERVER_SCOPE_SENTINEL,
   type HouseholdPlugin,
   type Permission,
   type Plugin,
@@ -33,10 +35,10 @@ import {
   type PluginGrantRevocationReason,
 } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { CONSENT_SCOPE_TO_GRANT_SCOPE, SERVER_SCOPE_SENTINEL } from '../grants/plugin-grant.service';
-import { riskCovers } from '../grants/risk-ordering';
+import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
 import {
   collectForbiddenPermissionViolations,
+  collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
   criticalConfirmationExpectation,
@@ -558,10 +560,13 @@ export class PluginUpdateService {
       throw new PluginUpdateUnknownCorePermissionError(next.manifest.slug, missing);
     }
 
-    const [wildcard] = collectWildcardSubjectViolations(next, bySlug);
+    const [violation] = [
+      ...collectWildcardSubjectViolations(next, bySlug),
+      ...collectUnboundedUnitConsentViolations(next, bySlug),
+    ];
 
-    if (wildcard !== undefined) {
-      throw new PluginUpdateForbiddenPermissionError(next.manifest.slug, wildcard.permissionSlug, wildcard.detail);
+    if (violation !== undefined) {
+      throw new PluginUpdateForbiddenPermissionError(next.manifest.slug, violation.permissionSlug, violation.detail);
     }
 
     return bySlug;

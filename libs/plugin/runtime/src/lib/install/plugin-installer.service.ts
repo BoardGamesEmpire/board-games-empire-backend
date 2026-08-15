@@ -4,6 +4,7 @@ import {
   PluginGrantStatus,
   Prisma,
   RiskLevel,
+  SERVER_SCOPE_SENTINEL,
   type Permission,
   type Plugin,
   type PluginGrant,
@@ -23,11 +24,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { SERVER_SCOPE_SENTINEL } from '../grants/plugin-grant.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import {
   collectForbiddenPermissionViolations,
+  collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
   criticalConfirmationExpectation,
@@ -280,7 +281,10 @@ export class PluginInstallerService {
     validated: PluginManifestValidationResult,
     corePermissions: ReadonlyMap<string, Permission>,
   ): void {
-    const [violation] = collectWildcardSubjectViolations(validated, corePermissions);
+    const [violation] = [
+      ...collectWildcardSubjectViolations(validated, corePermissions),
+      ...collectUnboundedUnitConsentViolations(validated, corePermissions),
+    ];
 
     if (violation !== undefined) {
       throw new PluginInstallForbiddenPermissionError(

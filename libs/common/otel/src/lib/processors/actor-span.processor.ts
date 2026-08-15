@@ -53,6 +53,15 @@ export class ActorSpanProcessor implements SpanProcessor {
       if (actor.kind === 'plugin') {
         span.setAttribute(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_ID, actor.pluginId);
         span.setAttribute(BGE_OTEL_ATTRIBUTES.ACTOR_TRIGGER_KIND, actor.trigger.kind);
+        // The consent unit is the coordinate that decided the plugin's
+        // authority (#60) — without it, spans cannot distinguish which
+        // household/user a plugin acted for.
+        span.setAttribute(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_UNIT_SCOPE, actor.unit.scopeType);
+
+        const unitId = actor.unit.householdId ?? actor.unit.userId;
+        if (unitId) {
+          span.setAttribute(BGE_OTEL_ATTRIBUTES.ACTOR_PLUGIN_UNIT_ID, unitId);
+        }
       } else if (actor.kind === 'external') {
         span.setAttribute(BGE_OTEL_ATTRIBUTES.ACTOR_EXTERNAL_SYSTEM, actor.system);
       }

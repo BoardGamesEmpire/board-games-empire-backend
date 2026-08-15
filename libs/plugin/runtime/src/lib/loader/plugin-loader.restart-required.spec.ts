@@ -104,7 +104,9 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
     const contextFactory = { create: jest.fn().mockReturnValue(context) };
     const configService = { prime: jest.fn(), evict: jest.fn() };
     const systemActorScope = { run: jest.fn(<T>(_reason: string, fn: () => T): T => fn()) };
-    const pluginActorScope = { run: jest.fn(<T>(_pluginId: string, _reason: string, fn: () => T): T => fn()) };
+    const pluginActorScope = {
+      run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
+    };
 
     loader = new PluginLoaderService(
       db as unknown as DatabaseService,

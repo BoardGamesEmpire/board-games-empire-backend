@@ -1,4 +1,4 @@
-import { RiskLevel, type Permission } from '@bge/database';
+import { hasBoundingConditions, RiskLevel, type Permission } from '@bge/database';
 import {
   parsePluginPermissionSlug,
   type NormalizedPermissionRequest,
@@ -88,6 +88,42 @@ export const collectWildcardSubjectViolations = (
         permissionSlug: check.canonicalSlug,
         detail:
           "carries the wildcard 'all' subject — never grantable to a plugin, same rule AbilityFactory applies to direct assignment",
+      });
+    }
+  }
+
+  return violations;
+};
+
+/**
+ * Unit-boundedness on the CORE side (#60), resolvable only once the
+ * `Permission` rows are loaded: a core check consented at household/user
+ * scope must name a row that carries SOME bounding clause. A condition-free
+ * row is subject-wide authority — nothing a unit consents to can bound
+ * subject-wide reach to its own slice, so the read path refuses to confer
+ * such grants and `decide()` refuses to record them. A manifest declaring
+ * one would create a consent surface that is undecidable by design, and
+ * the install must not create it.
+ */
+export const collectUnboundedUnitConsentViolations = (
+  validated: PluginManifestValidationResult,
+  corePermissions: ReadonlyMap<string, Permission>,
+): readonly ForbiddenPermissionViolation[] => {
+  const violations: ForbiddenPermissionViolation[] = [];
+
+  for (const check of validated.permissionChecks) {
+    if (check.origin !== 'core' || check.consentScope === 'server') {
+      continue;
+    }
+
+    const permission = corePermissions.get(check.canonicalSlug);
+
+    if (permission !== undefined && !hasBoundingConditions(permission.conditions)) {
+      violations.push({
+        permissionSlug: check.canonicalSlug,
+        detail:
+          `is condition-free but consented at ${check.consentScope} scope — nothing bounds the conferred ` +
+          'authority to the consenting unit; request it at server scope or seed a unit-conditioned variant',
       });
     }
   }

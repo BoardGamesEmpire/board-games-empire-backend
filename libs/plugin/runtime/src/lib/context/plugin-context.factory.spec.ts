@@ -87,13 +87,23 @@ describe('PluginContextFactory', () => {
   describe('actor', () => {
     describe('actor', () => {
       it('exposes a projected, frozen view of the CLS actor rather than the CLS object', () => {
-        const actor: Actor = { kind: 'plugin', pluginId, trigger: { kind: 'system', reason: 'test' } };
+        const actor: Actor = {
+          kind: 'plugin',
+          pluginId,
+          unit: { scopeType: 'Server' },
+          trigger: { kind: 'system', reason: 'test' },
+        };
         auditContext.getActor.mockReturnValue(actor);
 
         const context = factory.create({ pluginId, slug, manifest: manifest([]) });
         const view = context.actor.current();
 
-        expect(view).toEqual({ kind: 'plugin', pluginId, trigger: { kind: 'system', reason: 'test' } });
+        expect(view).toEqual({
+          kind: 'plugin',
+          pluginId,
+          unit: { scopeType: 'Server' },
+          trigger: { kind: 'system', reason: 'test' },
+        });
         expect(view).not.toBe(actor);
         expect(Object.isFrozen(view)).toBe(true);
       });

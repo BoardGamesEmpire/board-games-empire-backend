@@ -101,7 +101,7 @@ describe('PluginLoaderService', () => {
       run: jest.fn(<T>(_reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<SystemActorScope, 'run'>>;
     pluginActorScope = {
-      run: jest.fn(<T>(_pluginId: string, _reason: string, fn: () => T): T => fn()),
+      run: jest.fn(<T>(_pluginId: string, _unit: unknown, _reason: string, fn: () => T): T => fn()),
     } as unknown as jest.Mocked<Pick<PluginActorScope, 'run'>>;
     validateMock.mockReturnValue({
       manifest,
@@ -187,7 +187,12 @@ describe('PluginLoaderService', () => {
 
       await loader.loadAllEnabled();
 
-      expect(pluginActorScope.run).toHaveBeenCalledWith(row.id, 'plugin-boot-load', expect.any(Function));
+      expect(pluginActorScope.run).toHaveBeenCalledWith(
+        row.id,
+        { scopeType: 'Server' },
+        'plugin-boot-load',
+        expect.any(Function),
+      );
     });
 
     it('awaits an async factory', async () => {

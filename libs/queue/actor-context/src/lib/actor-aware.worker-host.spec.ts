@@ -2,7 +2,7 @@ import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService, AuditContextService } from '@bge/actor-context';
 import { Injectable } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
-import type { Job } from 'bullmq';
+import { UnrecoverableError, type Job } from 'bullmq';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { ActorAwareWorkerHost } from './actor-aware.worker-host';
 import { type JobActorMeta, wrapJobData } from './job-meta';
@@ -111,6 +111,100 @@ describe('ActorAwareWorkerHost', () => {
     const job = buildJob(wrapJobData({ gameId: 'g1' }, { actor: { kind: 'system', reason: 't' }, correlationId: 'c' }));
 
     await expect(failing.process(job)).rejects.toThrow('boom');
+  });
+
+  it('rejects a job with no envelope as UnrecoverableError — immutable data, retrying cannot heal it', async () => {
+    const unwrapped = buildJob({ gameId: 'g1' });
+
+    await expect(worker.process(unwrapped)).rejects.toThrow(UnrecoverableError);
+    await expect(worker.process(unwrapped)).rejects.toThrow(/missing __meta envelope/);
+  });
+
+  it('rejects a plugin actor with an invalid unit as UnrecoverableError, with a message naming the unit', async () => {
+    const job = buildJob(
+      wrapJobData(
+        { gameId: 'g1' },
+        {
+          actor: {
+            kind: 'plugin',
+            pluginId: 'p-1',
+            unit: { scopeType: 'Household' }, // householdId lost in serialization
+            trigger: { kind: 'system', reason: 't' },
+          } as unknown as Actor,
+          correlationId: 'c',
+        },
+      ),
+    );
+
+    await expect(worker.process(job)).rejects.toThrow(UnrecoverableError);
+    await expect(worker.process(job)).rejects.toThrow(/invalid consent unit/);
+  });
+
+  it('rejects an invalid unit ANYWHERE in the trigger chain — matching the gRPC boundary’s recursion', async () => {
+    const job = buildJob(
+      wrapJobData(
+        { gameId: 'g1' },
+        {
+          actor: {
+            kind: 'plugin',
+            pluginId: 'outer',
+            unit: { scopeType: 'Server' },
+            trigger: { kind: 'plugin', pluginId: 'inner', trigger: { kind: 'system', reason: 't' } }, // no unit
+          } as unknown as Actor,
+          correlationId: 'c',
+        },
+      ),
+    );
+
+    await expect(worker.process(job)).rejects.toThrow(UnrecoverableError);
+  });
+
+  it('rejects a plugin actor whose trigger is MISSING as UnrecoverableError — never a TypeError that retries forever', async () => {
+    // A chain must terminate in a real non-plugin actor; an envelope whose
+    // plugin actor lost its trigger in serialization is malformed the same
+    // way a lost coordinate is, and must take the same unrecoverable path.
+    const job = buildJob(
+      wrapJobData(
+        { gameId: 'g1' },
+        {
+          actor: {
+            kind: 'plugin',
+            pluginId: 'p-1',
+            unit: { scopeType: 'Server' },
+            // no trigger at all
+          } as unknown as Actor,
+          correlationId: 'c',
+        },
+      ),
+    );
+
+    await expect(worker.process(job)).rejects.toThrow(UnrecoverableError);
+    await expect(worker.process(job)).rejects.toThrow(/invalid consent unit/);
+  });
+
+  it('runInActorScope drops attribution (rather than throwing) for an invalid plugin unit — failure handlers must not mask the original error', async () => {
+    const job = buildJob(
+      wrapJobData(
+        { gameId: 'g1' },
+        {
+          actor: {
+            kind: 'plugin',
+            pluginId: 'p-1',
+            unit: { scopeType: 'Galaxy' },
+            trigger: { kind: 'system', reason: 't' },
+          } as unknown as Actor,
+          correlationId: 'c',
+        },
+      ),
+    );
+
+    const ran = await (
+      worker as unknown as {
+        runInActorScope: (job: Job<SampleJobData>, fn: () => Promise<string>) => Promise<string>;
+      }
+    ).runInActorScope(job, async () => 'ran');
+
+    expect(ran).toBe('ran');
   });
 
   it('runInActorScope still runs the callback when the envelope is absent', async () => {

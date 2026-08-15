@@ -1,17 +1,17 @@
 import {
   DatabaseService,
+  hasBoundingConditions,
   PluginGrantScope,
   PluginGrantStatus,
+  riskCovers,
   RiskLevel,
+  SERVER_SCOPE_SENTINEL,
   type Plugin,
   type PluginGrant,
 } from '@bge/database';
 import {
   parsePluginPermissionSlug,
-  PluginManifestValidationError,
-  validatePluginManifest,
   type NormalizedPermissionRequest,
-  type PluginConsentScopeValue,
   type PluginManifestValidationResult,
 } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -24,7 +24,9 @@ import {
   UserPluginUnitEnabledEvent,
   type PluginGrantRevocationReason,
 } from '../events/plugin.events';
+import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
+import { CONSENT_SCOPE_TO_GRANT_SCOPE } from './consent-scope.map';
 import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
@@ -38,17 +40,6 @@ import {
 } from './grant.errors';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
-import { riskCovers } from './risk-ordering';
-
-/** The empty-string uniqueness sentinel Server-scope rows store (see plugin-grant.prisma). Shared with the installer's grant seeding. */
-export const SERVER_SCOPE_SENTINEL = '' as const;
-
-/** Manifest consent scope → grant scope. Shared with the C3 update path's scope-move handling. */
-export const CONSENT_SCOPE_TO_GRANT_SCOPE: Readonly<Record<PluginConsentScopeValue, PluginGrantScope>> = {
-  server: PluginGrantScope.Server,
-  household: PluginGrantScope.Household,
-  user: PluginGrantScope.User,
-};
 
 export interface PluginGrantDecisionInput {
   readonly pluginId: string;
@@ -552,59 +543,23 @@ export class PluginGrantService {
 
   /**
    * Grants exist only for permissions the manifest REQUESTED. The stored
-   * manifest is re-validated (same discipline as the loader), with two
-   * consent-specific differences:
-   *
-   * - `enforceBgeCompat: false` — whether the plugin can LOAD under the
-   *   current BGE is irrelevant to recording a decision about it; a BGE
-   *   upgrade past the plugin's range must not make its grants (or even a
-   *   denial) undecidable.
-   * - Failures are wrapped in `PluginGrantManifestInvalidError` so C4 has a
-   *   grant-domain error to map — an invalid stored manifest is corrupted
-   *   server state, never a caller mistake.
-   *
-   * The manifest's slug and version are additionally cross-checked against
-   * the `Plugin` row. Slug: the canonical envelope is expanded from the
-   * manifest, so on drift a decision could resolve against ANOTHER plugin's
-   * `PluginPermission` catalog row — exactly the cross-namespace grant the
-   * namespacing is meant to make impossible. Version: the row is stamped
-   * with `Plugin.version` while the checks come from the JSON, so drift
-   * would record consent against a version the shown permissions did not
-   * come from, making the escalation comparison meaningless.
+   * manifest is re-validated through the shared contract
+   * (`revalidateStoredManifest`: `enforceBgeCompat: false`, slug/version
+   * agreement with the row — a BGE upgrade past the plugin's range must not
+   * make its grants, or even a denial, undecidable). Failures are wrapped
+   * in `PluginGrantManifestInvalidError` so C4 has a grant-domain error to
+   * map — an invalid stored manifest is corrupted server state, never a
+   * caller mistake.
    */
   private resolveRequestedCheck(
     plugin: Plugin,
     permissionSlug: string,
   ): { readonly check: NormalizedPermissionRequest; readonly validated: PluginManifestValidationResult } {
-    let validated: PluginManifestValidationResult;
-
-    try {
-      validated = validatePluginManifest(plugin.manifestJson, {
-        bgeVersion: this.options.bgeVersion,
-        defaultLocale: this.options.defaultLocale,
-        enforceBgeCompat: false,
-      });
-    } catch (err) {
-      if (err instanceof PluginManifestValidationError) {
-        throw new PluginGrantManifestInvalidError(plugin.slug, 'stored manifest failed re-validation', err.issues);
-      }
-
-      throw err;
-    }
-
-    if (validated.manifest.slug !== plugin.slug) {
-      throw new PluginGrantManifestInvalidError(
-        plugin.slug,
-        `manifest slug '${validated.manifest.slug}' does not match the plugin row — canonical permission slugs would resolve against another plugin's catalog`,
-      );
-    }
-
-    if (validated.manifest.version !== plugin.version) {
-      throw new PluginGrantManifestInvalidError(
-        plugin.slug,
-        `manifest version '${validated.manifest.version}' does not match the plugin row's '${plugin.version}' — the row is stamped with the column while the checks come from the JSON, so the two must agree for escalation comparison to mean anything`,
-      );
-    }
+    const validated = revalidateStoredManifest(
+      { slug: plugin.slug, version: plugin.version, manifestJson: plugin.manifestJson },
+      this.options,
+      (pluginSlug, detail, issues) => new PluginGrantManifestInvalidError(pluginSlug, detail, issues),
+    );
 
     const check = validated.permissionChecks.find((candidate) => candidate.canonicalSlug === permissionSlug);
 
@@ -707,6 +662,20 @@ export class PluginGrantService {
       throw new PluginGrantExclusionError(
         check.canonicalSlug,
         "wildcard-subject ('all') authority is never grantable to a plugin — same rule AbilityFactory applies to direct assignment",
+      );
+    }
+
+    // Unit-boundedness (#60): a condition-free core permission is
+    // subject-wide authority, and a household/user cannot consent to more
+    // than its own slice. Refused here rather than recorded as a grant the
+    // read path would ignore — a decision that can never confer is not a
+    // decision, it is a trap for whoever reads the consent screen.
+    if (check.consentScope !== 'server' && !hasBoundingConditions(permission.conditions)) {
+      throw new PluginGrantExclusionError(
+        check.canonicalSlug,
+        'a condition-free core permission cannot be consented at household/user scope — nothing bounds the ' +
+          'conferred authority to the consenting unit; only server consent can confer it (or seed a ' +
+          'unit-conditioned variant, #315)',
       );
     }
 

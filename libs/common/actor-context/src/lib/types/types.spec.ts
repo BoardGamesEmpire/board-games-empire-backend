@@ -6,14 +6,18 @@ import {
   type PluginActor,
   type SystemActor,
   type UserActor,
+  actorHasValidPluginUnits,
   actorUserId,
+  assertPluginUnit,
   isAnonymousActor,
   isApiKeyActor,
   isExternalActor,
   isPluginActor,
+  isPluginUnit,
   isSystemActor,
   isUserActor,
   resolveTrigger,
+  SERVER_PLUGIN_UNIT,
 } from './index';
 
 describe('Actor type guards', () => {
@@ -33,6 +37,7 @@ describe('Actor type guards', () => {
   const plugin: PluginActor = {
     kind: 'plugin',
     pluginId: 'plugin-foo',
+    unit: SERVER_PLUGIN_UNIT,
     trigger: user,
   };
 
@@ -50,6 +55,87 @@ describe('Actor type guards', () => {
   });
 });
 
+describe('isPluginUnit', () => {
+  it.each<[string, unknown, boolean]>([
+    ['Server with no coordinates', { scopeType: 'Server' }, true],
+    ['Household with householdId', { scopeType: 'Household', householdId: 'hh-1' }, true],
+    ['User with userId', { scopeType: 'User', userId: 'u-1' }, true],
+    ['Server carrying a householdId', { scopeType: 'Server', householdId: 'hh-1' }, false],
+    ['Server carrying a userId', { scopeType: 'Server', userId: 'u-1' }, false],
+    ['Household missing its householdId', { scopeType: 'Household' }, false],
+    ['Household with an empty householdId', { scopeType: 'Household', householdId: '' }, false],
+    ['Household also carrying a userId', { scopeType: 'Household', householdId: 'hh-1', userId: 'u-1' }, false],
+    ['User missing its userId', { scopeType: 'User' }, false],
+    ['User also carrying a householdId', { scopeType: 'User', userId: 'u-1', householdId: 'hh-1' }, false],
+    ['unknown scope type', { scopeType: 'Galaxy' }, false],
+    ['non-object', 'Server', false],
+    ['null', null, false],
+  ])('%s -> %s', (_label, value, expected) => {
+    expect(isPluginUnit(value)).toBe(expected);
+  });
+
+  it('accepts the SERVER_PLUGIN_UNIT constant', () => {
+    expect(isPluginUnit(SERVER_PLUGIN_UNIT)).toBe(true);
+  });
+});
+
+describe('actorHasValidPluginUnits on malformed chains', () => {
+  it.each<[string, unknown]>([
+    ['a plugin actor with no trigger at all', { kind: 'plugin', pluginId: 'p1', unit: { scopeType: 'Server' } }],
+    [
+      'a nested plugin actor whose inner trigger is missing',
+      {
+        kind: 'plugin',
+        pluginId: 'outer',
+        unit: { scopeType: 'Server' },
+        trigger: { kind: 'plugin', pluginId: 'inner', unit: { scopeType: 'Server' } },
+      },
+    ],
+    [
+      'a trigger that is not an object',
+      { kind: 'plugin', pluginId: 'p1', unit: { scopeType: 'Server' }, trigger: 'system' },
+    ],
+    [
+      'a trigger that is an object but not an actor (no kind)',
+      { kind: 'plugin', pluginId: 'p1', unit: { scopeType: 'Server' }, trigger: { foo: 'bar' } },
+    ],
+    [
+      'a trigger with an unrecognized kind',
+      { kind: 'plugin', pluginId: 'p1', unit: { scopeType: 'Server' }, trigger: { kind: 'galaxy', reason: 't' } },
+    ],
+    ['a non-actor object at the top level', { foo: 'bar' }],
+    ['a null actor', null],
+  ])('returns false (never throws) for %s', (_label, actor) => {
+    expect(actorHasValidPluginUnits(actor as never)).toBe(false);
+  });
+
+  it('accepts a chain terminating in a real non-plugin actor', () => {
+    const actor: PluginActor = {
+      kind: 'plugin',
+      pluginId: 'p1',
+      unit: SERVER_PLUGIN_UNIT,
+      trigger: { kind: 'system', reason: 'boot' },
+    };
+
+    expect(actorHasValidPluginUnits(actor)).toBe(true);
+  });
+});
+
+describe('assertPluginUnit', () => {
+  it('passes a valid unit through silently', () => {
+    expect(() => assertPluginUnit({ scopeType: 'Household', householdId: 'hh-1' }, 'Spec ingress')).not.toThrow();
+  });
+
+  it('throws a RangeError naming the caller context and the offending unit', () => {
+    expect(() => assertPluginUnit({ scopeType: 'Server', householdId: 'hh-1' }, "Spec ingress for 'plg_1'")).toThrow(
+      new RangeError(
+        `Spec ingress for 'plg_1' received an invalid plugin unit {"scopeType":"Server","householdId":"hh-1"}: ` +
+          'expected Server (no coordinates), Household (householdId only), or User (userId only)',
+      ),
+    );
+  });
+});
+
 describe('resolveTrigger', () => {
   it('returns the actor unchanged when not a plugin', () => {
     const user: UserActor = { kind: 'user', userId: 'user-1' };
@@ -61,6 +147,7 @@ describe('resolveTrigger', () => {
     const plugin: PluginActor = {
       kind: 'plugin',
       pluginId: 'plugin-1',
+      unit: SERVER_PLUGIN_UNIT,
       trigger: user,
     };
     expect(resolveTrigger(plugin)).toEqual(user);
@@ -71,11 +158,13 @@ describe('resolveTrigger', () => {
     const inner: PluginActor = {
       kind: 'plugin',
       pluginId: 'plugin-inner',
+      unit: { scopeType: 'Household', householdId: 'hh-1' },
       trigger: user,
     };
     const outer: PluginActor = {
       kind: 'plugin',
       pluginId: 'plugin-outer',
+      unit: SERVER_PLUGIN_UNIT,
       trigger: inner,
     };
     expect(resolveTrigger(outer)).toEqual(user);
@@ -94,6 +183,7 @@ describe('actorUserId', () => {
       {
         kind: 'plugin',
         pluginId: 'p1',
+        unit: SERVER_PLUGIN_UNIT,
         trigger: { kind: 'user', userId: 'u4' },
       },
       'u4',
@@ -103,6 +193,7 @@ describe('actorUserId', () => {
       {
         kind: 'plugin',
         pluginId: 'p2',
+        unit: SERVER_PLUGIN_UNIT,
         trigger: { kind: 'system', reason: 'auto' },
       },
       null,

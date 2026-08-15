@@ -3,7 +3,10 @@ import { DatabaseModule } from '@bge/database';
 import { Module } from '@nestjs/common';
 import { PluginConfigEventsService } from './config/plugin-config-events.service';
 import { PluginConfigService } from './config/plugin-config.service';
+import { PluginConsentCheckClassifier } from './consent/plugin-consent-check-classifier.service';
+import { PluginConsentPresentationService } from './consent/plugin-consent-presentation.service';
 import { PluginContextFactory } from './context/plugin-context.factory';
+import { PluginFeatureStateService } from './features/plugin-feature-state.service';
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
 import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginInstallerService } from './install/plugin-installer.service';
@@ -38,7 +41,10 @@ import { PluginUpdateService } from './update/plugin-update.service';
   imports: [AuditContextModule, DatabaseModule],
   providers: [
     { provide: PLUGIN_MODULE_IMPORTER, useClass: DynamicImportPluginModuleImporter },
+    PluginConsentCheckClassifier,
+    PluginConsentPresentationService,
     PluginDirectoryResolverService,
+    PluginFeatureStateService,
     PluginInstanceRegistry,
     PluginContextFactory,
     PluginConfigEventsService,
@@ -52,6 +58,8 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginUpdateService,
   ],
   exports: [
+    PluginConsentPresentationService,
+    PluginFeatureStateService,
     PluginInstanceRegistry,
     PluginConfigService,
     PluginContextFactory,

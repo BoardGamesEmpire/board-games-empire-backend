@@ -12,6 +12,17 @@ export const SOURCE_CLS_KEY = 'actor-context:source' as const;
 export const LOCALE_CLS_KEY = 'actor-context:locale' as const;
 
 /**
+ * CLS slot for the per-request resolved ability array. OWNED by the
+ * permissions lib (`AbilityContextInternalService` is the only sanctioned
+ * writer; reads go through `AbilityService`) — the key string alone lives
+ * here because scope transitions must sever it: abilities are resolved FOR
+ * an actor, so a scope that installs a new actor (`runWith`) must not
+ * inherit the previous actor's set. This lib cannot import the permissions
+ * lib to learn the key (the dependency points the other way).
+ */
+export const ABILITIES_CLS_KEY = 'permissions:abilities' as const;
+
+/**
  * Public, read-only accessor for actor + correlation context. Consumers
  * (services, event emitters, listeners) inject this; they cannot set values.
  *
