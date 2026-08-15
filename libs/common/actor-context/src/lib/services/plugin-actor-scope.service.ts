@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'node:crypto';
-import type { Actor, PluginActor } from '../types';
+import { type Actor, assertPluginUnit, clonePluginUnit, type PluginActor, type PluginUnit } from '../types';
 import { AuditContextInternalService } from './audit-context-internal.service';
 import { AuditContextService } from './audit-context.service';
 
@@ -42,13 +42,24 @@ export class PluginActorScope {
    * Synchronous when `fn` is synchronous; CLS propagates through promise
    * chains via AsyncLocalStorage when `fn` is async.
    *
+   * `unit` is the consent unit the plugin operates AS for the duration of
+   * the scope (#60 D60-1) — deliberately required, never defaulted: this is
+   * an authority input (grants and CASL condition templates resolve against
+   * it), and an implicit Server default would silently widen or narrow what
+   * a forgotten call site resolves. Boot-time loads pass
+   * `SERVER_PLUGIN_UNIT`. A unit violating the coordinate rules throws
+   * before any scope is entered. The stored actor carries a detached copy,
+   * so caller-side mutation of the passed object cannot retarget the scope.
+   *
    * `systemFallbackReason` names the host task when there is no actor in
    * scope to inherit (e.g. `'plugin-boot-load'`); it is ignored whenever a
    * real trigger exists.
    */
-  run<T>(pluginId: string, systemFallbackReason: string, fn: () => T): T {
+  run<T>(pluginId: string, unit: PluginUnit, systemFallbackReason: string, fn: () => T): T {
+    assertPluginUnit(unit, `Plugin actor scope for '${pluginId}'`);
+
     const trigger: Actor = this.reader.getActor() ?? { kind: 'system', reason: systemFallbackReason };
-    const actor: PluginActor = { kind: 'plugin', pluginId, trigger };
+    const actor: PluginActor = { kind: 'plugin', pluginId, unit: clonePluginUnit(unit), trigger };
 
     return this.internal.runWith(
       {

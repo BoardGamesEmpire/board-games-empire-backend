@@ -64,6 +64,20 @@ describe('extractJobMeta', () => {
     expect(extractJobMeta({ [JOB_META_KEY]: { actor } })).toBeNull();
   });
 
+  it('round-trips a plugin actor with its consent unit — unit VALIDITY is the worker host’s concern, not this reader’s', () => {
+    const pluginActor = {
+      kind: 'plugin',
+      pluginId: 'p-1',
+      unit: { scopeType: 'Household', householdId: 'hh-1' },
+      trigger: actor,
+    };
+
+    expect(extractJobMeta({ [JOB_META_KEY]: { actor: pluginActor, correlationId: 'c' } })).toEqual({
+      actor: pluginActor,
+      correlationId: 'c',
+    });
+  });
+
   it('returns null when correlationId is not a string', () => {
     expect(
       extractJobMeta({

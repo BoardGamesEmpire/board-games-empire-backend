@@ -2,6 +2,7 @@ import {
   expandPluginPermissionSlug,
   isPluginPermissionSlug,
   parsePluginPermissionSlug,
+  pluginPermissionCaslSubject,
 } from './plugin-permission-slug.js';
 
 describe('plugin permission slug envelope', () => {
@@ -58,6 +59,27 @@ describe('plugin permission slug envelope', () => {
       expect(isPluginPermissionSlug('read:game')).toBe(false);
       // the retired Phase A prefix is NOT the envelope
       expect(isPluginPermissionSlug('plugin:demo-sink:digest:manage')).toBe(false);
+    });
+  });
+
+  describe('pluginPermissionCaslSubject (#60)', () => {
+    it('is the canonical envelope minus the verb', () => {
+      const parsed = parsePluginPermissionSlug('plugin|demo-sink|manage:digest');
+
+      expect(pluginPermissionCaslSubject(parsed)).toBe('plugin|demo-sink|digest');
+    });
+
+    it('preserves multi-segment subject paths', () => {
+      const parsed = parsePluginPermissionSlug('plugin|demo-sink|read:storage:cloud');
+
+      expect(pluginPermissionCaslSubject(parsed)).toBe('plugin|demo-sink|storage:cloud');
+    });
+
+    it('keeps identical bare subjects distinct across plugins', () => {
+      const a = pluginPermissionCaslSubject(parsePluginPermissionSlug('plugin|plugin-a|manage:digest'));
+      const b = pluginPermissionCaslSubject(parsePluginPermissionSlug('plugin|plugin-b|manage:digest'));
+
+      expect(a).not.toBe(b);
     });
   });
 });

@@ -2,6 +2,7 @@ export * from './lib/ability.factory';
 export * from './lib/ability.service';
 export * from './lib/decorators';
 export * from './lib/errors/ability-context-not-primed.error';
+export * from './lib/errors/plugin-ability-render-rejection.error';
 export * from './lib/guards';
 export * from './lib/interfaces';
 export * from './lib/middleware/ability-context.middleware';

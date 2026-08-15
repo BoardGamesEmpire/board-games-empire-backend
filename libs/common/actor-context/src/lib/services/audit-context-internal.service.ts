@@ -1,7 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { Actor, EventSource } from '../types';
-import { ACTOR_CLS_KEY, CORRELATION_ID_CLS_KEY, LOCALE_CLS_KEY, SOURCE_CLS_KEY } from './audit-context.service';
+import {
+  ABILITIES_CLS_KEY,
+  ACTOR_CLS_KEY,
+  CORRELATION_ID_CLS_KEY,
+  LOCALE_CLS_KEY,
+  SOURCE_CLS_KEY,
+} from './audit-context.service';
 
 export interface ActorContextInit {
   readonly actor: Actor | null;
@@ -33,10 +39,20 @@ export class AuditContextInternalService {
 
   /**
    * Runs `fn` inside a populated CLS scope. The new scope inherits any parent
-   * CLS state via nestjs-cls' `runWith`.
+   * CLS state via nestjs-cls' `runWith` — EXCEPT the resolved-abilities slot.
+   * Abilities are resolved FOR an actor, and every caller of this method
+   * installs a new one, so inheriting the parent's primed set would let the
+   * new principal (a plugin scope inside a request being the sharp case —
+   * plugin abilities are never intersected with the triggering user's, #60)
+   * silently run ability-filtered queries as the previous actor. Severed here, an
+   * unprimed read inside the new scope fails loud (`AbilityContextNotPrimedError`)
+   * until whatever dispatches into the scope re-primes for the new actor.
    */
   runWith<T>(init: ActorContextInit, fn: () => T): T {
-    const existingStore = this.cls.get() ?? {};
+    // ClsStore only indexes symbol keys statically; the widening cast is for
+    // the computed-key severing below (on the copy, never the live store).
+    const existingStore = { ...(this.cls.get() ?? {}) } as Record<string, unknown>;
+    delete existingStore[ABILITIES_CLS_KEY];
     const store = {
       ...existingStore,
       [ACTOR_CLS_KEY]: init.actor,

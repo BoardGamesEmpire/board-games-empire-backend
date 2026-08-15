@@ -1,7 +1,7 @@
 import { AbilityService } from '@bge/permissions';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
-import { Inject } from '@nestjs/common';
-import type { Job } from 'bullmq';
+import { ForbiddenException, Inject } from '@nestjs/common';
+import { UnrecoverableError, type Job } from 'bullmq';
 
 /**
  * Base class for BullMQ processors that perform ability-filtered work.
@@ -17,10 +17,14 @@ import type { Job } from 'bullmq';
  * in `@bge/permissions` and its DB/cache dependencies. Only processors that query
  * with the originating actor's abilities extend this.
  *
- * Priming is eager per job; the user / api-key permission graph is cached (5 min),
- * and a resolution failure (revoked key, DB error) fails the job so BullMQ retries
- * — no silent degradation. Priming runs only in the main `process` path, not in
- * the lenient `runInActorScope` reused by `@OnWorkerEvent` failure handlers.
+ * Priming is eager per job. A transient resolution failure (DB error) fails the
+ * job so BullMQ retries — no silent degradation. A `ForbiddenException` is
+ * different: at resolution time it means the actor's authority is structurally
+ * gone (revoked api key, a plugin grant that can no longer render — #60 D60-3),
+ * which no retry can repair, so it is rethrown as BullMQ's `UnrecoverableError`
+ * and the job fails once instead of retrying forever. Priming runs only in the
+ * main `process` path, not in the lenient `runInActorScope` reused by
+ * `@OnWorkerEvent` failure handlers.
  *
  * @example
  *   @Processor(QUEUE_NAMES.EVENT_REMINDERS)
@@ -42,6 +46,16 @@ export abstract class AbilityAwareWorkerHost<
   private readonly abilityService!: AbilityService;
 
   protected override async onScopeReady(_job: Job<TData, TResult, TName>, _token?: string): Promise<void> {
-    await this.abilityService.primeCurrentActor();
+    try {
+      await this.abilityService.primeCurrentActor();
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw new UnrecoverableError(
+          `Ability resolution refused for this job's actor (permanent): ${error.message}`,
+        );
+      }
+
+      throw error;
+    }
   }
 }

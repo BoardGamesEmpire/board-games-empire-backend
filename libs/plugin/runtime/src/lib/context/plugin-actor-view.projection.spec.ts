@@ -1,4 +1,4 @@
-import type { Actor, UserActor } from '@bge/actor-context';
+import { SERVER_PLUGIN_UNIT, type Actor, type UserActor } from '@bge/actor-context';
 import { UnknownActorKindError } from './context.errors';
 import { toPluginActorView } from './plugin-actor-view.projection';
 
@@ -70,14 +70,25 @@ describe('toPluginActorView', () => {
 
   describe('plugin chains', () => {
     const trigger: Actor = { kind: 'user', userId: 'u-1' };
-    const nested: Actor = { kind: 'plugin', pluginId: 'p-inner', trigger };
-    const chain: Actor = { kind: 'plugin', pluginId: 'p-outer', trigger: nested };
+    const nested: Actor = {
+      kind: 'plugin',
+      pluginId: 'p-inner',
+      unit: { scopeType: 'Household', householdId: 'hh-1' },
+      trigger,
+    };
+    const chain: Actor = { kind: 'plugin', pluginId: 'p-outer', unit: SERVER_PLUGIN_UNIT, trigger: nested };
 
     it('projects every level of the trigger chain', () => {
       expect(toPluginActorView(chain)).toEqual({
         kind: 'plugin',
         pluginId: 'p-outer',
-        trigger: { kind: 'plugin', pluginId: 'p-inner', trigger: { kind: 'user', userId: 'u-1' } },
+        unit: { scopeType: 'Server' },
+        trigger: {
+          kind: 'plugin',
+          pluginId: 'p-inner',
+          unit: { scopeType: 'Household', householdId: 'hh-1' },
+          trigger: { kind: 'user', userId: 'u-1' },
+        },
       });
     });
 
@@ -88,6 +99,17 @@ describe('toPluginActorView', () => {
       expect(Object.isFrozen(view.trigger)).toBe(true);
       expect(view.trigger.trigger).not.toBe(trigger);
       expect(Object.isFrozen(view.trigger.trigger)).toBe(true);
+    });
+
+    it('projects the unit as a frozen copy carrying only the owned coordinate', () => {
+      const view = toPluginActorView(nested) as { unit: { scopeType: string; householdId: string } };
+
+      expect(view.unit).not.toBe(nested.kind === 'plugin' ? nested.unit : undefined);
+      expect(Object.isFrozen(view.unit)).toBe(true);
+      expect(Object.keys(view.unit)).toEqual(['scopeType', 'householdId']);
+      expect(() => {
+        view.unit.householdId = 'hh-other';
+      }).toThrow(TypeError);
     });
   });
 

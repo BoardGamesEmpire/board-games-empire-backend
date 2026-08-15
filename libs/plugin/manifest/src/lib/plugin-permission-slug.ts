@@ -89,3 +89,19 @@ export const parsePluginPermissionSlug = (slug: string): ParsedPluginPermissionS
     subjectPath: bareSlug.slice(separatorIndex + 1),
   };
 };
+
+/**
+ * CASL subject string for an own-namespace grant:
+ * `plugin|<pluginSlug>|<subjectPath>` (the canonical envelope minus the
+ * verb). This is the deterministic slug → `(action, subject)` mapping the
+ * `PERMISSION_ACTION_VERBS` doc promises the ability factory (#60): the
+ * parsed verb is the CASL action, this is the subject.
+ *
+ * Enveloped for the same reason the slug is: no core `ResourceType` subject
+ * can contain `|`, so a plugin subject can never shadow a core one, and the
+ * plugin-slug segment keeps two plugins' identical `subjectPath`s distinct.
+ * Lives here (framework-free) so plugin authors and the #84 CLI can compute
+ * the same subject their code will be checked against.
+ */
+export const pluginPermissionCaslSubject = (parsed: ParsedPluginPermissionSlug): string =>
+  `${PLUGIN_PERMISSION_ENVELOPE_PREFIX}${parsed.pluginSlug}${PLUGIN_PERMISSION_DELIMITER}${parsed.subjectPath}`;

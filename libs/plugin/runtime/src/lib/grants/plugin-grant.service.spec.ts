@@ -89,7 +89,10 @@ describe('PluginGrantService', () => {
       slug: 'feedback:read',
       subject: 'FeedbackSubmission',
       riskLevel: RiskLevel.Medium,
-    } as Permission);
+      // Bounding clause so unit-scope decisions pass the unit-boundedness
+      // gate (#60); the condition-free refusal has its own explicit specs.
+      conditions: { householdId: '{{ unit.householdId }}' },
+    } as unknown as Permission);
     db.pluginPermission.findUnique.mockResolvedValue({
       id: 'plgperm_1',
       pluginId: 'plg_1',
@@ -349,6 +352,37 @@ describe('PluginGrantService', () => {
       } as Permission);
 
       await expect(service.decide(serverDecision)).rejects.toThrow(PluginGrantExclusionError);
+    });
+
+    it('refuses a CONDITION-FREE core permission at household scope — nothing bounds it to the consenting unit', async () => {
+      db.permission.findUnique.mockResolvedValue({
+        slug: 'update:calendar',
+        subject: 'calendar',
+        riskLevel: RiskLevel.Low,
+        conditions: null,
+      } as Permission);
+
+      await expect(
+        service.decide({
+          ...serverDecision,
+          permissionSlug: 'update:calendar',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'hh_1',
+        }),
+      ).rejects.toThrow(PluginGrantExclusionError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it('a condition-free core permission IS decidable at server scope — server consent is server-wide authority', async () => {
+      db.permission.findUnique.mockResolvedValue({
+        slug: 'feedback:read',
+        subject: 'FeedbackSubmission',
+        riskLevel: RiskLevel.Medium,
+        conditions: null,
+      } as Permission);
+
+      await expect(service.decide(serverDecision)).resolves.toMatchObject({ changed: true });
+      expect(db.pluginGrant.upsert).toHaveBeenCalled();
     });
 
     it.each(['manage:plugin', 'manage:plugin:household'])(

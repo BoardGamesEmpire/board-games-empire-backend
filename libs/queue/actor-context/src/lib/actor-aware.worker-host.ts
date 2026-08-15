@@ -1,7 +1,7 @@
-import { AuditContextInternalService } from '@bge/actor-context';
+import { actorHasValidPluginUnits, AuditContextInternalService } from '@bge/actor-context';
 import { WorkerHost } from '@nestjs/bullmq';
 import { Inject } from '@nestjs/common';
-import type { Job } from 'bullmq';
+import { UnrecoverableError, type Job } from 'bullmq';
 import { extractJobMeta } from './job-meta';
 
 /**
@@ -33,8 +33,25 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
   private readonly auditContext!: AuditContextInternalService;
 
   async process(job: Job<TData, TResult, TName>, token?: string): Promise<TResult> {
-    if (!extractJobMeta(job.data)) {
-      throw new Error(`Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`);
+    // Both rejections are UnrecoverableError: job data is immutable, so an
+    // absent envelope or a malformed actor can never heal — retrying
+    // re-fails forever. The two messages stay distinct so the operator
+    // chases the actual defect (a producer skipping wrapJobData vs. a
+    // broken actor inside the envelope).
+    const meta = extractJobMeta(job.data);
+
+    if (!meta) {
+      throw new UnrecoverableError(
+        `Job ${job.queueName}#${job.id} missing __meta envelope; jobs must be enqueued via wrapJobData`,
+      );
+    }
+
+    if (!actorHasValidPluginUnits(meta.actor)) {
+      throw new UnrecoverableError(
+        `Job ${job.queueName}#${job.id} envelope actor is malformed: a plugin actor carries an invalid ` +
+          'consent unit somewhere in the trigger chain, or the chain does not terminate in a real ' +
+          'non-plugin actor; the envelope is immutable, not retrying',
+      );
     }
 
     return this.runInActorScope(job, async () => {
@@ -66,7 +83,12 @@ export abstract class ActorAwareWorkerHost<TData, TResult = unknown, TName exten
   protected runInActorScope<T>(job: Job<TData, TResult, TName>, fn: () => T): T {
     const meta = extractJobMeta(job.data);
 
-    if (!meta) {
+    // Lenient on invalid plugin units for the same reason as a missing
+    // envelope: a failure handler must not mask the original error, and
+    // installing an actor with a malformed unit would blow up downstream
+    // (projection, ability resolution) instead. Attribution is dropped; the
+    // strict rejection lives in `process`.
+    if (!meta || !actorHasValidPluginUnits(meta.actor)) {
       return fn();
     }
 

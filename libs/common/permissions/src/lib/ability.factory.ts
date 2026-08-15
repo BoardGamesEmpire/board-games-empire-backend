@@ -1,10 +1,20 @@
+import { clonePluginUnit } from '@bge/actor-context';
 import type { Permission } from '@bge/database';
 import { Action } from '@bge/database';
+import { parsePluginPermissionSlug, pluginPermissionCaslSubject } from '@boardgamesempire/plugin-manifest';
 import { AbilityBuilder, ExtractSubjectType } from '@casl/ability';
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable, Logger } from '@nestjs/common';
 import * as Mustache from 'mustache';
-import type { ApikeyWithScopes, AppAbility, Subjects, UserPermissionWithPermission, UserWithRoles } from './interfaces';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
+import type {
+  ApikeyWithScopes,
+  AppAbility,
+  PluginGrantSnapshot,
+  Subjects,
+  UserPermissionWithPermission,
+  UserWithRoles,
+} from './interfaces';
 
 /**
  * Applies a single CASL rule. Conditions are built dynamically from JSON and the
@@ -20,6 +30,15 @@ type RuleApplier = (
   conditionsOrFields?: string[] | Record<string, unknown>,
   conditions?: Record<string, unknown>,
 ) => void;
+
+/**
+ * Subject detection shared by every `build(...)` in this factory: model
+ * instances resolve by constructor name, plain values pass through. One
+ * definition so the ability variants cannot drift on how a subject is
+ * classified.
+ */
+const detectAppSubjectType = (object: unknown) =>
+  ((object as { constructor?: { name?: string } })?.constructor?.name || object) as ExtractSubjectType<Subjects>;
 
 @Injectable()
 export class AbilityFactory {
@@ -63,9 +82,7 @@ export class AbilityFactory {
     // cached before the `permissions` field existed.
     this.applyUserPermissions(userWithRoles.permissions ?? [], ability, userWithRoles);
 
-    return ability.build({
-      detectSubjectType: (object) => (object?.constructor?.name || object) as ExtractSubjectType<Subjects>,
-    });
+    return ability.build({ detectSubjectType: detectAppSubjectType });
   }
 
   createForApiKey(apiKey: ApikeyWithScopes): AppAbility {
@@ -100,9 +117,234 @@ export class AbilityFactory {
     const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
     ability.can(Action.manage, 'all');
 
-    return ability.build({
-      detectSubjectType: (object) => (object?.constructor?.name || object) as ExtractSubjectType<Subjects>,
-    });
+    return ability.build({ detectSubjectType: detectAppSubjectType });
+  }
+
+  /**
+   * A no-rule ability: denies every action on every subject. For callers
+   * that must resolve SOMETHING for an actor with no resolvable authority —
+   * the dangling plugin actor being the current case — without forging a
+   * snapshot-shaped input to do it.
+   */
+  createDenyAll(): AppAbility {
+    return new AbilityBuilder<AppAbility>(createPrismaAbility).build({ detectSubjectType: detectAppSubjectType });
+  }
+
+  /**
+   * Plugin ability (#60): the granted set for the operating consent unit,
+   * exactly as resolved by `PermissionsService.getPluginGrantSnapshot` —
+   * never intersected with a triggering user.
+   *
+   * - A non-servable unit produces a NO-RULE ability (denies everything):
+   *   the quiet-denial half of D60-2/D60-3, kept here so every caller of
+   *   the snapshot gets the policy without re-implementing it.
+   * - Core grants render their condition templates against the
+   *   unit-coordinate context `{ plugin: { id, slug }, unit: { scopeType,
+   *   householdId?, userId? } }` — and FAIL LOUD (typed rejection, never a
+   *   silently-empty render) when a template references anything outside
+   *   it. See {@link PluginAbilityRenderRejectionError} for why.
+   * - Own-namespace grants become `(verb, enveloped subject)` rules parsed
+   *   deterministically from the canonical slug; a slug naming another
+   *   plugin's namespace is corrupted state and rejects.
+   */
+  createForPlugin(snapshot: PluginGrantSnapshot): AppAbility {
+    const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
+
+    if (!snapshot.servable) {
+      return ability.build({ detectSubjectType: detectAppSubjectType });
+    }
+
+    // clonePluginUnit is doing double duty here: the same owned-coordinates
+    // copy every boundary uses is what makes key-PRESENCE the thing the
+    // fail-loud walk checks (an absent coordinate is an absent key).
+    const context = {
+      plugin: { id: snapshot.plugin.id, slug: snapshot.plugin.slug },
+      unit: clonePluginUnit(snapshot.unit),
+    };
+
+    for (const permission of snapshot.corePermissions) {
+      let parsedConditions: Record<string, unknown> | undefined = undefined;
+
+      if (Object.keys(permission.conditions || {}).length > 0) {
+        const template = JSON.stringify(permission.conditions);
+        this.assertTemplateWithinContext(template, context, permission.slug, snapshot);
+        parsedConditions = JSON.parse(Mustache.render(template, context));
+      }
+
+      this.applyRule(ability, permission, parsedConditions);
+    }
+
+    for (const slug of snapshot.ownGrantSlugs) {
+      // The parse itself is part of the typed contract: a `plugin|`-prefixed
+      // slug that is not a canonical form is the same corruption class as a
+      // foreign namespace, and must not escape as a raw RangeError (a 500 /
+      // a retried job instead of the intended 403).
+      let parsed: ReturnType<typeof parsePluginPermissionSlug>;
+      try {
+        parsed = parsePluginPermissionSlug(slug);
+      } catch (error) {
+        if (error instanceof RangeError) {
+          throw new PluginAbilityRenderRejectionError({
+            reason: 'malformed-slug',
+            pluginId: snapshot.plugin.id,
+            pluginSlug: snapshot.plugin.slug,
+            permissionSlug: slug,
+            unit: snapshot.unit,
+          });
+        }
+
+        throw error;
+      }
+
+      if (parsed.pluginSlug !== snapshot.plugin.slug) {
+        throw new PluginAbilityRenderRejectionError({
+          reason: 'foreign-namespace-slug',
+          pluginId: snapshot.plugin.id,
+          pluginSlug: snapshot.plugin.slug,
+          permissionSlug: slug,
+          unit: snapshot.unit,
+        });
+      }
+
+      // The verb set is pinned to the Action enum values (manifest constants
+      // doc + drift spec), so the cast converts nominally, not lossily.
+      ability.can(parsed.action as Action, pluginPermissionCaslSubject(parsed) as ExtractSubjectType<Subjects>);
+    }
+
+    return ability.build({ detectSubjectType: detectAppSubjectType });
+  }
+
+  /**
+   * The one place a permission triple becomes a CASL rule: fields honored,
+   * `inverted` selects can/cannot. Shared by the user-role path
+   * ({@link parseConditions}) and the plugin path ({@link createForPlugin}),
+   * whose only legitimate difference is WHAT happens before rendering, not
+   * how a rendered rule is applied.
+   */
+  private applyRule(
+    ability: AbilityBuilder<AppAbility>,
+    rule: Pick<Permission, 'action' | 'subject' | 'inverted'> & { fields?: Permission['fields'] },
+    parsedConditions: Record<string, unknown> | undefined,
+  ): void {
+    const fields = rule.fields?.length ? rule.fields : undefined;
+    const conditions = [fields, parsedConditions].filter(Boolean);
+
+    const access: RuleApplier = rule.inverted ? ability.cannot : ability.can;
+    access.call(ability, rule.action, rule.subject as ExtractSubjectType<Subjects>, ...conditions);
+  }
+
+  /**
+   * The D-U fail-loud rule: every variable a condition template references
+   * must resolve to a value in the unit-coordinate context. Mustache renders
+   * missing variables to `''` — for user abilities that lands on a clause
+   * that matches nothing and is accepted as an operator concern
+   * ({@link applyUserPermissions}), but for a PLUGIN a malformed clause like
+   * `{ userId: '' }` is an authorization boundary rendered wrong, so the
+   * permission is rejected before any rendering happens.
+   *
+   * Walks the parsed token tree: interpolations (`name`/`&`) and section
+   * openers (`#`/`^`) all name variables; section bodies are walked
+   * recursively. The implicit iterator `.` never resolves here (the context
+   * holds no lists) and is treated as out-of-context.
+   */
+  private assertTemplateWithinContext(
+    template: string,
+    context: Record<string, unknown>,
+    permissionSlug: string,
+    snapshot: PluginGrantSnapshot,
+  ): void {
+    const reject = (variable: string): never => {
+      throw new PluginAbilityRenderRejectionError({
+        reason: 'out-of-context-variable',
+        pluginId: snapshot.plugin.id,
+        pluginSlug: snapshot.plugin.slug,
+        permissionSlug,
+        variable,
+        unit: snapshot.unit,
+      });
+    };
+
+    // Own-property resolution to a STRING leaf, or it does not resolve.
+    // Both halves are load-bearing: `in`-style lookup would admit
+    // prototype-chain names (`unit.constructor` is "in" every object), and
+    // a non-leaf resolution (`{{ unit }}`) would render `[object Object]`
+    // into the clause — junk, not authority. Every legitimate context value
+    // is a non-empty string (ids, slugs, the scope type).
+    const resolves = (path: string): boolean => {
+      if (path === '.') {
+        return false;
+      }
+
+      let value: unknown = context;
+      for (const segment of path.split('.')) {
+        if (typeof value !== 'object' || value === null || !Object.prototype.hasOwnProperty.call(value, segment)) {
+          return false;
+        }
+        value = (value as Record<string, unknown>)[segment];
+      }
+
+      return typeof value === 'string' && value.length > 0;
+    };
+
+    // The parse is inside the typed contract too: a template that does not
+    // even parse (unclosed tag) can no more be rendered safely than one
+    // referencing unknown variables, and must not escape as Mustache's raw
+    // Error (a 500 instead of the D60-3 403).
+    let tokens: unknown[];
+    try {
+      tokens = Mustache.parse(template);
+    } catch {
+      throw new PluginAbilityRenderRejectionError({
+        reason: 'malformed-template',
+        pluginId: snapshot.plugin.id,
+        pluginSlug: snapshot.plugin.slug,
+        permissionSlug,
+        unit: snapshot.unit,
+      });
+    }
+
+    // Mustache token tuples: [type, name, start, end, subTokens?]. The walk
+    // is a WHITELIST: 'text' carries no variable; 'name'/'&' interpolate
+    // (triple-stache parses as '&'); sections '#'/'^' name a variable and
+    // nest their body at index 4. Anything else — partials ('>') and
+    // comments ('!') both render to empty string, delimiter changes ('=')
+    // reshape parsing — is rejected outright rather than silently rendered.
+    const walk = (tokens: unknown[]): void => {
+      for (const token of tokens as [string, string, number, number, unknown[]?][]) {
+        const [type, name, , , subTokens] = token;
+
+        if (type === 'text') {
+          continue;
+        }
+
+        if (type === 'name' || type === '&' || type === '#' || type === '^') {
+          if (!resolves(name)) {
+            reject(name);
+          }
+
+          if ((type === '#' || type === '^') && Array.isArray(subTokens)) {
+            walk(subTokens);
+          }
+
+          continue;
+        }
+
+        // Not a variable problem — the token TYPE is forbidden, and `name`
+        // here is a partial name or comment text, not a context path. A
+        // distinct reason keeps the operator from hunting for a variable
+        // that does not exist.
+        throw new PluginAbilityRenderRejectionError({
+          reason: 'unsupported-token-type',
+          pluginId: snapshot.plugin.id,
+          pluginSlug: snapshot.plugin.slug,
+          permissionSlug,
+          tokenType: type,
+          unit: snapshot.unit,
+        });
+      }
+    };
+
+    walk(tokens);
   }
 
   private parseConditions(
@@ -120,11 +362,7 @@ export class AbilityFactory {
         parsedConditions = JSON.parse(rendered);
       }
 
-      const fields = permission.fields?.length ? permission.fields : undefined;
-      const conditions = [fields, parsedConditions].filter(Boolean);
-
-      const access: RuleApplier = permission.inverted ? ability.cannot : ability.can;
-      access.call(ability, permission.action, permission.subject as ExtractSubjectType<Subjects>, ...conditions);
+      this.applyRule(ability, permission, parsedConditions);
     }
   }
 

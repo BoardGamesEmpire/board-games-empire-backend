@@ -1,8 +1,20 @@
-import { DatabaseService } from '@bge/database';
+import type { PluginUnit } from '@bge/actor-context';
+import {
+  DatabaseService,
+  grantScopeCoordinatesForUnit,
+  hasBoundingConditions,
+  loadPluginUnitEnablement,
+  PluginGrantScope,
+  PluginGrantStatus,
+  type RiskLevel,
+  riskCovers,
+} from '@bge/database';
+import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
-import type { ApikeyWithScopes, UserWithRoles } from './interfaces';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
+import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
 
 @Injectable()
 export class PermissionsService {
@@ -280,6 +292,220 @@ export class PermissionsService {
         },
       },
     });
+  }
+
+  /**
+   * Resolves the granted-permission snapshot a plugin ability is built from
+   * (#60 D60-2): `Granted` rows for the operating unit's coordinates plus
+   * the always-applicable Server scope, with both consumption guards applied
+   * here rather than trusted to upstream machinery —
+   *
+   * - **Serving predicate.** `servable` is false when the plugin is disabled
+   *   or tombstoned, or (Household/User units) when the unit's enablement
+   *   row is missing, disabled, or `suspendedForConsent`. Suspension and
+   *   gated approval make a plain intersection transitively safe only while
+   *   every invoker remembers to check; applying it where grants are
+   *   consumed documents the invariant at the point of consumption.
+   * - **Risk coverage.** A grant whose `decidedRiskLevel` no longer covers
+   *   the permission's current catalog risk confers nothing (C3's "a
+   *   Granted row is not consent" — the stale risk is exactly what
+   *   escalated). Grants over slugs with no surviving catalog row likewise
+   *   confer nothing; both exclusions are logged at debug, not silently
+   *   swallowed.
+   * - **Unit-bounded conferral.** A Household/User-scope grant confers a
+   *   core permission only when the row carries bounding conditions
+   *   (`hasBoundingConditions`): a condition-free row is subject-wide
+   *   authority that only SERVER consent can confer. Warned, not debug —
+   *   the install/update gates and `decide()` refuse to create such
+   *   grants, so one existing can only mean the catalog drifted under a
+   *   recorded decision.
+   *
+   * Returns `null` when no `Plugin` row exists for the id — the caller
+   * decides what a dangling plugin actor means. Deliberately uncached: a
+   * consent decision must take effect on the next resolution, and no
+   * invalidation path exists yet (mirrors the D60-6 "no caching until
+   * measured" posture).
+   *
+   * Related but deliberately NOT the same predicate as the runtime's
+   * `unitConsentSatisfied` (suspension/re-enable): that asks whether a
+   * unit's consent still satisfies the MANIFEST (and treats a check whose
+   * catalog row vanished as `Low` so a deleted row cannot suspend a unit);
+   * this asks which grants confer AUTHORITY, and a grant with no catalog
+   * row confers nothing because there is no `Permission` row to build a
+   * rule from. They share `riskCovers`; the missing-row asymmetry is the
+   * questions differing, not drift.
+   */
+  async getPluginGrantSnapshot(pluginId: string, unit: PluginUnit): Promise<PluginGrantSnapshot | null> {
+    // Independent reads — the unit-enablement row is keyed by (unit, pluginId)
+    // and does not need the plugin row first.
+    const [plugin, unitServed] = await Promise.all([
+      this.db.plugin.findUnique({
+        where: { id: pluginId },
+        select: { id: true, slug: true, enabled: true, uninstalledAt: true },
+      }),
+      this.isUnitServed(pluginId, unit),
+    ]);
+
+    if (!plugin) {
+      return null;
+    }
+
+    const base = { plugin: { id: plugin.id, slug: plugin.slug }, unit };
+    const servable = plugin.enabled && plugin.uninstalledAt === null && unitServed;
+
+    if (!servable) {
+      return { ...base, servable: false, corePermissions: [], ownGrantSlugs: [] };
+    }
+
+    const grants = await this.db.pluginGrant.findMany({
+      where: {
+        pluginId,
+        status: PluginGrantStatus.Granted,
+        OR: grantScopeCoordinatesForUnit(unit),
+      },
+      select: { permissionSlug: true, decidedRiskLevel: true, scopeType: true },
+    });
+
+    if (grants.length === 0) {
+      return { ...base, servable: true, corePermissions: [], ownGrantSlugs: [] };
+    }
+
+    const ownSlugs = new Set(grants.map((grant) => grant.permissionSlug).filter(isPluginPermissionSlug));
+    const coreSlugs = grants.map((grant) => grant.permissionSlug).filter((slug) => !ownSlugs.has(slug));
+
+    // Corruption check BEFORE the catalog read: a grant row keyed to this
+    // plugin whose canonical slug names another plugin's namespace would
+    // otherwise vanish here — the pluginId-filtered catalog query finds no
+    // row, and the "no catalog row" debug below reads as a benign deleted
+    // permission. That is grant-table corruption, not drift, and it takes
+    // the same loud typed path the factory uses (D60-3), not a debug line.
+    for (const slug of ownSlugs) {
+      const rejection = (reason: 'foreign-namespace-slug' | 'malformed-slug') =>
+        new PluginAbilityRenderRejectionError({
+          reason,
+          pluginId: plugin.id,
+          pluginSlug: plugin.slug,
+          permissionSlug: slug,
+          unit,
+        });
+
+      let namespaceSlug: string;
+      try {
+        namespaceSlug = parsePluginPermissionSlug(slug).pluginSlug;
+      } catch (error) {
+        // `isPluginPermissionSlug` is a bare prefix test; a `plugin|` row
+        // that does not parse is the same corruption class and must take
+        // the same typed path, not escape as a raw RangeError (a 500).
+        if (error instanceof RangeError) {
+          throw rejection('malformed-slug');
+        }
+
+        throw error;
+      }
+
+      if (namespaceSlug !== plugin.slug) {
+        throw rejection('foreign-namespace-slug');
+      }
+    }
+
+    const [corePermissions, ownPermissions] = await Promise.all([
+      coreSlugs.length > 0 ? this.db.permission.findMany({ where: { slug: { in: coreSlugs } } }) : [],
+      ownSlugs.size > 0
+        ? this.db.pluginPermission.findMany({
+            where: { pluginId, slug: { in: [...ownSlugs] } },
+            select: { slug: true, riskLevel: true },
+          })
+        : [],
+    ]);
+
+    const currentRiskBySlug = new Map<string, RiskLevel>([
+      ...corePermissions.map((permission) => [permission.slug, permission.riskLevel] as const),
+      ...ownPermissions.map((permission) => [permission.slug, permission.riskLevel] as const),
+    ]);
+
+    // Wildcard-subject re-check at consumption: grant-time forbids wildcard
+    // subjects outright (D-Z), so a granted core slug now carrying `all` can
+    // only mean the catalog row drifted after consent. Same posture as the
+    // riskCovers guard — the decision no longer describes the permission —
+    // but warned rather than debug-logged, because it is always anomalous.
+    const wildcardSlugs = new Set(
+      corePermissions.filter((permission) => permission.subject === 'all').map((permission) => permission.slug),
+    );
+    for (const slug of wildcardSlugs) {
+      this.logger.warn(
+        `Plugin ${pluginId} grant over '${slug}' points at a permission whose subject drifted to the ` +
+          `'all' wildcard after consent; conferring nothing`,
+      );
+    }
+
+    // Unit-boundedness: a Household/User-scope grant confers a core
+    // permission only when the catalog row carries SOME bounding clause. A
+    // condition-free permission is an unscoped type-level rule — subject-wide
+    // authority — and nothing a unit consents to can bound subject-wide reach
+    // to that unit's slice, so one user's consent must never read as
+    // server-wide access (#60). Server-scope grants are exempt: server
+    // consent IS server-wide authority, exactly what install/approval
+    // seeding records. Own-namespace slugs never appear in this set — their
+    // subjects are enveloped per plugin, scoped by construction.
+    const unconditionedCoreSlugs = new Set(
+      corePermissions.filter((permission) => !hasBoundingConditions(permission.conditions)).map((p) => p.slug),
+    );
+
+    // A slug can be granted at more than one scope (e.g. Server and the
+    // unit); it confers when ANY of its grants still covers current risk.
+    const conferringSlugs = new Set<string>();
+    for (const grant of grants) {
+      if (wildcardSlugs.has(grant.permissionSlug)) {
+        continue;
+      }
+
+      if (grant.scopeType !== PluginGrantScope.Server && unconditionedCoreSlugs.has(grant.permissionSlug)) {
+        this.logger.warn(
+          `Plugin ${pluginId} grant over '${grant.permissionSlug}' at ${grant.scopeType} scope names a ` +
+            'condition-free permission; nothing bounds that authority to the consenting unit — conferring ' +
+            'nothing (seed a unit-conditioned variant instead, #315)',
+        );
+        continue;
+      }
+
+      const currentRisk = currentRiskBySlug.get(grant.permissionSlug);
+
+      if (currentRisk === undefined) {
+        this.logger.debug(
+          `Plugin ${pluginId} grant over '${grant.permissionSlug}' has no catalog row; conferring nothing`,
+        );
+        continue;
+      }
+
+      if (!riskCovers(grant.decidedRiskLevel, currentRisk)) {
+        this.logger.debug(
+          `Plugin ${pluginId} grant over '${grant.permissionSlug}' was decided at ${grant.decidedRiskLevel} ` +
+            `but the permission now carries ${currentRisk}; conferring nothing until re-consent`,
+        );
+        continue;
+      }
+
+      conferringSlugs.add(grant.permissionSlug);
+    }
+
+    return {
+      ...base,
+      servable: true,
+      corePermissions: corePermissions.filter((permission) => conferringSlugs.has(permission.slug)),
+      ownGrantSlugs: [...ownSlugs].filter((slug) => conferringSlugs.has(slug)),
+    };
+  }
+
+  /**
+   * The unit half of the serving predicate: `enabled && !suspendedForConsent`
+   * on the unit's enablement row (#225), read through the shared
+   * `loadPluginUnitEnablement` so this predicate and the feature-state
+   * derivation cannot drift on what "served" means.
+   */
+  private async isUnitServed(pluginId: string, unit: PluginUnit): Promise<boolean> {
+    const state = await loadPluginUnitEnablement(this.db, pluginId, unit);
+
+    return state.enabled && !state.suspendedForConsent;
   }
 
   private loadApiKeyGraph(apiKeyId: string) {

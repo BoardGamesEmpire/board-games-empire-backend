@@ -1,3 +1,4 @@
+import { ABILITIES_CLS_KEY } from '@bge/actor-context';
 import { Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { AppAbility } from '../interfaces';
@@ -6,8 +7,13 @@ import type { AppAbility } from '../interfaces';
  * CLS key for the per-request resolved ability array. Exported for the
  * priming middleware and tests only — application code must never read it
  * directly; it goes through the public `AbilityService`.
+ *
+ * The key STRING is defined in `@bge/actor-context` (re-exported here so
+ * this lib's consumers keep one import home): `runWith` scope transitions
+ * must sever this slot when installing a new actor, and that lib cannot
+ * import this one to learn the key.
  */
-export const ABILITIES_CLS_KEY = 'permissions:abilities' as const;
+export { ABILITIES_CLS_KEY };
 
 /**
  * Internal writer/reader for the per-request ability array.

@@ -1,10 +1,19 @@
-import { type Actor, AuditContextService, isApiKeyActor, isSystemActor, isUserActor } from '@bge/actor-context';
+import {
+  type Actor,
+  AuditContextService,
+  isApiKeyActor,
+  isPluginActor,
+  isSystemActor,
+  isUserActor,
+  type PluginActor,
+} from '@bge/actor-context';
 import { Action } from '@bge/database';
 import { t } from '@bge/i18n';
 import { accessibleBy, type WhereInput } from '@casl/prisma';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { AppAbility, ModelResourceType } from './interfaces';
 import { PermissionsService } from './permissions.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
@@ -19,13 +28,19 @@ import { AbilityContextInternalService } from './services/ability-context-intern
  *                over-scoped key or a user-level restriction both clamp access
  *                down)
  * - `system`   → `[systemAbility]` (`manage all`; `reason` is audit-only for now)
- * - `anonymous`/`external`/`plugin` → resolution throws (see
+ * - `plugin`   → `[pluginAbility]` (#60): the granted set for the actor's
+ *                operating consent unit, single-element by design — never
+ *                intersected with the triggering user (D-V). A unit that is
+ *                not currently served resolves to a no-rule ability (denies
+ *                everything); a grant that cannot be rendered safely is a
+ *                typed rejection surfaced as 403 (D60-3).
+ * - `anonymous`/`external` → resolution throws (see
  *   {@link resolveAbilitiesForActor}); these are deferred / have no query surface.
  *
  * Plugins are installed principals, not delegations of user authority — the
  * "no intersection with the triggering user" rule is enforced by what populates
- * the array (a plugin would get a single-element `[pluginAbility]`), not by
- * special-casing intersection logic here.
+ * the array (a single-element `[pluginAbility]`), not by special-casing
+ * intersection logic here.
  */
 @Injectable()
 export class AbilityService {
@@ -118,8 +133,8 @@ export class AbilityService {
    *
    * Primes only the *current* actor (read from CLS); there is no arbitrary-actor
    * parameter, so this cannot forge an ability set. Unauthenticated and
-   * not-yet-supported kinds (`anonymous`/`external`/`plugin`) prime `[]`, which
-   * the query layer and PoliciesGuard treat as denial — never an unfiltered
+   * not-yet-supported kinds (`anonymous`/`external`) prime `[]`, which the
+   * query layer and PoliciesGuard treat as denial — never an unfiltered
    * query. Resolution failures (revoked key, DB error) propagate to the caller
    * (→ request/job failure) rather than degrading silently.
    */
@@ -165,9 +180,7 @@ export class AbilityService {
         );
 
       case 'plugin':
-        throw new Error(
-          'Plugin actor abilities are not implemented yet; deferred to the ' + 'plugin loader work (issues #59/#60).',
-        );
+        return [await this.buildPluginAbility(actor)];
 
       default:
         return assertNeverActor(actor);
@@ -209,6 +222,51 @@ export class AbilityService {
 
     return this.abilityFactory.createForApiKey(apiKey);
   }
+
+  /**
+   * Builds the single-element plugin ability (#60). Two failure shapes,
+   * deliberately distinct:
+   *
+   * - **Quiet denial** — no `Plugin` row (dangling actor), or the unit fails
+   *   the serving predicate: a no-rule ability that denies everything. Not
+   *   an error; the unit simply is not being served.
+   * - **Loud rejection** — a granted permission that cannot be consumed
+   *   safely ({@link PluginAbilityRenderRejectionError}), whether the
+   *   snapshot read detected grant-table corruption or the factory refused
+   *   a template. This is the single handling site D60-3 requires: the
+   *   structured warning below is the debuggability of the resulting 403,
+   *   so it names the plugin, the permission, the offending variable, and
+   *   the unit coordinates (ids only) before the typed error is mapped to
+   *   `ForbiddenException`.
+   */
+  private async buildPluginAbility(actor: PluginActor): Promise<AppAbility> {
+    try {
+      const snapshot = await this.permissionsService.getPluginGrantSnapshot(actor.pluginId, actor.unit);
+
+      if (!snapshot) {
+        this.logger.warn(
+          `Plugin actor '${actor.pluginId}' has no Plugin row; resolving a no-rule ability (denies everything)`,
+        );
+
+        return this.abilityFactory.createDenyAll();
+      }
+
+      return this.abilityFactory.createForPlugin(snapshot);
+    } catch (error) {
+      if (error instanceof PluginAbilityRenderRejectionError) {
+        this.logger.warn(
+          `Plugin ability rejected (${error.reason}): permission '${error.permissionSlug}' for plugin ` +
+            `'${error.pluginSlug}' (${error.pluginId})` +
+            (error.variable ? ` references out-of-context template variable '${error.variable}'` : '') +
+            ` while operating as unit ${JSON.stringify(error.unit)}`,
+        );
+
+        throw new ForbiddenException(t('common.forbidden.action'));
+      }
+
+      throw error;
+    }
+  }
 }
 
 /**
@@ -218,10 +276,10 @@ export class AbilityService {
  * Single source of truth for that decision: the priming middleware uses it to
  * gate resolution (priming `[]` for the rest), so the "resolvable kinds" set is
  * expressed once instead of being duplicated there. Keep in lock-step with the
- * `switch` above when a deferred kind (`anonymous`/`plugin`) gains a surface.
+ * `switch` above when a deferred kind (`anonymous`) gains a surface.
  */
 export function isResolvableActor(actor: Actor): boolean {
-  return isUserActor(actor) || isApiKeyActor(actor) || isSystemActor(actor);
+  return isUserActor(actor) || isApiKeyActor(actor) || isSystemActor(actor) || isPluginActor(actor);
 }
 
 /**

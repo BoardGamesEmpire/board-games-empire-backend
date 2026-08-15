@@ -122,14 +122,22 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
     ...overrides,
   });
 
-  const calendarRead = { slug: 'calendar:read', subject: 'calendar', riskLevel: RiskLevel.Low } as Permission;
+  // Bounding clauses so unit-scope decisions pass the unit-boundedness gate
+  // (#60); the condition-free refusal is specced in the main service suite.
+  const calendarRead = {
+    slug: 'calendar:read',
+    subject: 'calendar',
+    riskLevel: RiskLevel.Low,
+    conditions: { householdId: '{{ unit.householdId }}' },
+  } as unknown as Permission;
 
   /**
    * The re-enable predicate reads `select: { slug, riskLevel }`, but the
    * delegate mock is typed against the full row — so the projection is
    * asserted, matching how `calendarRead` above is built.
    */
-  const corePermission = (slug: string, riskLevel: RiskLevel): Permission => ({ slug, riskLevel }) as Permission;
+  const corePermission = (slug: string, riskLevel: RiskLevel): Permission =>
+    ({ slug, riskLevel, conditions: { householdId: '{{ unit.householdId }}' } }) as unknown as Permission;
 
   let db: MockDatabaseService;
   let emitter: { emit: jest.Mock };

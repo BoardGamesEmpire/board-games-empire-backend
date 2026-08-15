@@ -34,7 +34,13 @@
  * inherit. `next.handle().subscribe(subscriber)` runs inside `runWith`
  * so AsyncLocalStorage propagates to async emissions downstream.
  */
-import { type Actor, type ActorContextInit, AuditContextInternalService } from '@bge/actor-context';
+import {
+  type Actor,
+  type ActorContextInit,
+  AuditContextInternalService,
+  clonePluginUnit,
+  isPluginUnit,
+} from '@bge/actor-context';
 import { BGE_ACTOR_HEADER, CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { resolveCorrelationId } from '@bge/utils';
 import type { Metadata } from '@grpc/grpc-js';
@@ -255,8 +261,18 @@ export const validateActorShape = (value: unknown): Actor => {
         throw new BadRequestException('plugin actor: pluginId must be a string');
       }
 
+      const unit = obj['unit'];
+      if (!isPluginUnit(unit)) {
+        throw new BadRequestException(
+          'plugin actor: unit must carry a valid scopeType with exactly the coordinate that scope owns',
+        );
+      }
+
       const trigger = validateActorShape(obj['trigger']);
-      return { kind: 'plugin', pluginId, trigger };
+      // Canonical-fields reconstruction, same as every variant: undeclared
+      // wire fields are dropped, and the clone keeps only the coordinate the
+      // (already validated) scope type owns.
+      return { kind: 'plugin', pluginId, unit: clonePluginUnit(unit), trigger };
     }
 
     default: {

@@ -361,6 +361,7 @@ describe('validateActorShape', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-foo',
+        unit: { scopeType: 'Server' },
         trigger: { kind: 'user', userId: 'user-abc' },
       };
       expect(validateActorShape(actor)).toEqual(actor);
@@ -370,9 +371,11 @@ describe('validateActorShape', () => {
       const actor: Actor = {
         kind: 'plugin',
         pluginId: 'plugin-outer',
+        unit: { scopeType: 'Household', householdId: 'hh-1' },
         trigger: {
           kind: 'plugin',
           pluginId: 'plugin-inner',
+          unit: { scopeType: 'User', userId: 'user-abc' },
           trigger: { kind: 'system', reason: 'scheduler' },
         },
       };
@@ -383,13 +386,55 @@ describe('validateActorShape', () => {
       expect(() =>
         validateActorShape({
           kind: 'plugin',
+          unit: { scopeType: 'Server' },
           trigger: { kind: 'user', userId: 'u-1' },
         }),
       ).toThrow(BadRequestException);
     });
 
+    it('throws when the unit is missing', () => {
+      expect(() =>
+        validateActorShape({
+          kind: 'plugin',
+          pluginId: 'p-1',
+          trigger: { kind: 'user', userId: 'u-1' },
+        }),
+      ).toThrow(BadRequestException);
+    });
+
+    it.each<[string, unknown]>([
+      ['a Server unit carrying a coordinate', { scopeType: 'Server', householdId: 'hh-1' }],
+      ['a Household unit missing its householdId', { scopeType: 'Household' }],
+      ['a User unit also carrying a householdId', { scopeType: 'User', userId: 'u-1', householdId: 'hh-1' }],
+      ['an unknown scope type', { scopeType: 'Galaxy' }],
+    ])('throws when the unit is %s', (_label, unit) => {
+      expect(() =>
+        validateActorShape({
+          kind: 'plugin',
+          pluginId: 'p-1',
+          unit,
+          trigger: { kind: 'user', userId: 'u-1' },
+        }),
+      ).toThrow(BadRequestException);
+    });
+
+    it('drops undeclared extra fields from the unit on reconstruction', () => {
+      const validated = validateActorShape({
+        kind: 'plugin',
+        pluginId: 'p-1',
+        unit: { scopeType: 'Server' },
+        trigger: { kind: 'user', userId: 'u-1' },
+        forged: 'field',
+      }) as { unit: object };
+
+      expect(Object.keys(validated)).toEqual(['kind', 'pluginId', 'unit', 'trigger']);
+      expect(Object.keys(validated.unit)).toEqual(['scopeType']);
+    });
+
     it('throws when trigger is missing', () => {
-      expect(() => validateActorShape({ kind: 'plugin', pluginId: 'p-1' })).toThrow(BadRequestException);
+      expect(() => validateActorShape({ kind: 'plugin', pluginId: 'p-1', unit: { scopeType: 'Server' } })).toThrow(
+        BadRequestException,
+      );
     });
 
     it('throws when trigger is structurally invalid', () => {
@@ -397,6 +442,7 @@ describe('validateActorShape', () => {
         validateActorShape({
           kind: 'plugin',
           pluginId: 'p-1',
+          unit: { scopeType: 'Server' },
           trigger: { kind: 'user' }, // missing userId
         }),
       ).toThrow(BadRequestException);

@@ -1,4 +1,4 @@
-import { PluginActorScope, SystemActorScope } from '@bge/actor-context';
+import { PluginActorScope, SERVER_PLUGIN_UNIT, SystemActorScope } from '@bge/actor-context';
 import { DatabaseService, type Plugin } from '@bge/database';
 import type { PluginFactory } from '@boardgamesempire/plugin-contract';
 import { validatePluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -112,7 +112,9 @@ export class PluginLoaderService implements OnApplicationBootstrap {
     this.configService.prime(plugin.slug, plugin.config);
 
     const context = this.contextFactory.create({ pluginId: plugin.id, slug: plugin.slug, manifest });
-    const instance = await this.pluginActorScope.run(plugin.id, 'plugin-boot-load', () =>
+    // Boot loads have no consent unit to operate for — the plugin acts as
+    // its Server-scope self until an invocation enters a unit scope (#60).
+    const instance = await this.pluginActorScope.run(plugin.id, SERVER_PLUGIN_UNIT, 'plugin-boot-load', () =>
       Promise.resolve(factory(context)),
     );
 

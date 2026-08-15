@@ -1,15 +1,10 @@
-import { PluginGrantScope, PluginGrantStatus, type RiskLevel } from '@bge/database';
-import { riskCovers } from '../grants/risk-ordering';
+import { PluginGrantScope, PluginGrantStatus, riskCovers, type RiskLevel } from '@bge/database';
 import type {
   GrantComparisonView,
   ManifestComparisonView,
   UpdateEscalation,
   UpdateEscalationComparison,
 } from './update-escalation.types';
-
-// Re-exported so consumers reaching for the ordering alongside the
-// comparison do not need a second import path.
-export { riskCovers };
 
 export interface EscalationComparatorInput {
   readonly active: ManifestComparisonView;

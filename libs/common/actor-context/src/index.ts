@@ -1,12 +1,19 @@
 export {
+  actorHasValidPluginUnits,
   actorUserId,
+  assertNeverPluginUnit,
+  assertPluginUnit,
+  clonePluginUnit,
   isAnonymousActor,
   isApiKeyActor,
   isExternalActor,
   isPluginActor,
+  isPluginUnit,
   isSystemActor,
   isUserActor,
+  PLUGIN_UNIT_SCOPE_TYPES,
   resolveTrigger,
+  SERVER_PLUGIN_UNIT,
 } from './lib/types';
 
 export type {
@@ -17,9 +24,14 @@ export type {
   EventMeta,
   EventSource,
   ExternalActor,
+  HouseholdPluginUnit,
   PluginActor,
+  PluginUnit,
+  PluginUnitScopeType,
+  ServerPluginUnit,
   SystemActor,
   UserActor,
+  UserPluginUnit,
 } from './lib/types';
 
 export { AuditExclude, Auditable, MutationEvent, type MutationAction } from './lib/decorators/mutation-event';
@@ -53,6 +65,7 @@ export { PluginActorScope } from './lib/services/plugin-actor-scope.service';
 // (issue #57). System code paths use SystemActorScope instead.
 export { AuditContextInternalService, type ActorContextInit } from './lib/services/audit-context-internal.service';
 export {
+  ABILITIES_CLS_KEY,
   ACTOR_CLS_KEY,
   CORRELATION_ID_CLS_KEY,
   LOCALE_CLS_KEY,

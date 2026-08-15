@@ -2,7 +2,13 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import type { Actor } from '../types';
 import { type ActorContextInit, AuditContextInternalService } from './audit-context-internal.service';
-import { ACTOR_CLS_KEY, AuditContextService, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './audit-context.service';
+import {
+  ABILITIES_CLS_KEY,
+  ACTOR_CLS_KEY,
+  AuditContextService,
+  CORRELATION_ID_CLS_KEY,
+  SOURCE_CLS_KEY,
+} from './audit-context.service';
 
 describe('AuditContextInternalService', () => {
   let module: TestingModule;
@@ -109,6 +115,32 @@ describe('AuditContextInternalService', () => {
         ),
       );
       expect(locale).toBe('de');
+    });
+
+    it('severs the resolved-abilities slot when installing a new actor — abilities never cross principals', () => {
+      // A request-scoped store with abilities primed for the outer (user)
+      // actor. A nested scope installing a NEW actor (system here; the plugin
+      // scope is the sharp case per D-V) must not inherit them: an unprimed
+      // read inside fails loud instead of silently querying as the outer user.
+      const outerAbilities = [{ marker: 'outer-user-abilities' }];
+
+      const observed = internal.runWith(
+        { actor: { kind: 'user', userId: 'u1' }, correlationId: 'c', source: 'http' },
+        () => {
+          cls.set(ABILITIES_CLS_KEY, outerAbilities);
+
+          const inherited = internal.runWith(
+            { actor: { kind: 'system', reason: 'nested' }, correlationId: 'c2', source: 'system' },
+            () => cls.get(ABILITIES_CLS_KEY),
+          );
+
+          // The outer scope's own primed set survives the nested scope.
+          return { inherited, outerAfterNested: cls.get(ABILITIES_CLS_KEY) };
+        },
+      );
+
+      expect(observed.inherited).toBeUndefined();
+      expect(observed.outerAfterNested).toBe(outerAbilities);
     });
   });
 

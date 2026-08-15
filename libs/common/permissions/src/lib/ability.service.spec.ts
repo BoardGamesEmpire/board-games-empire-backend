@@ -6,7 +6,8 @@ import { ForbiddenException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { AbilityService } from './ability.service';
-import type { ApikeyWithScopes, AppAbility, Subjects, UserWithRoles } from './interfaces';
+import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
+import type { ApikeyWithScopes, AppAbility, PluginGrantSnapshot, Subjects, UserWithRoles } from './interfaces';
 import { PermissionsService } from './permissions.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
 
@@ -14,8 +15,12 @@ describe('AbilityService', () => {
   let service: AbilityService;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
   let abilityContext: jest.Mocked<Pick<AbilityContextInternalService, 'prime' | 'peek'>>;
-  let permissionsService: jest.Mocked<Pick<PermissionsService, 'getUserRoleGraph' | 'getApiKeyScopeGraph'>>;
-  let abilityFactory: jest.Mocked<Pick<AbilityFactory, 'createForUser' | 'createForApiKey' | 'createForSystem'>>;
+  let permissionsService: jest.Mocked<
+    Pick<PermissionsService, 'getUserRoleGraph' | 'getApiKeyScopeGraph' | 'getPluginGrantSnapshot'>
+  >;
+  let abilityFactory: jest.Mocked<
+    Pick<AbilityFactory, 'createForUser' | 'createForApiKey' | 'createForSystem' | 'createForPlugin' | 'createDenyAll'>
+  >;
 
   const ability = (rules: SubjectRawRule<Action, ExtractSubjectType<Subjects>, PrismaQuery>[]): AppAbility =>
     createPrismaAbility(rules) as AppAbility;
@@ -23,8 +28,18 @@ describe('AbilityService', () => {
   beforeEach(async () => {
     auditContext = { getActor: jest.fn() };
     abilityContext = { prime: jest.fn(), peek: jest.fn() };
-    permissionsService = { getUserRoleGraph: jest.fn(), getApiKeyScopeGraph: jest.fn() };
-    abilityFactory = { createForUser: jest.fn(), createForApiKey: jest.fn(), createForSystem: jest.fn() };
+    permissionsService = {
+      getUserRoleGraph: jest.fn(),
+      getApiKeyScopeGraph: jest.fn(),
+      getPluginGrantSnapshot: jest.fn(),
+    };
+    abilityFactory = {
+      createForUser: jest.fn(),
+      createForApiKey: jest.fn(),
+      createForSystem: jest.fn(),
+      createForPlugin: jest.fn(),
+      createDenyAll: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -151,6 +166,28 @@ describe('AbilityService', () => {
         expect(abilityContext.prime).toHaveBeenCalledWith([]);
       });
 
+      it('resolves and primes the single-element plugin ability — plugin is a resolvable kind now (#60)', async () => {
+        const pluginAbility = ability([]);
+        auditContext.getActor.mockReturnValue({
+          kind: 'plugin',
+          pluginId: 'plugin-1',
+          unit: { scopeType: 'Server' },
+          trigger: { kind: 'system', reason: 'boot' },
+        });
+        permissionsService.getPluginGrantSnapshot.mockResolvedValue({
+          plugin: { id: 'plugin-1', slug: 'demo-plugin' },
+          unit: { scopeType: 'Server' },
+          servable: true,
+          corePermissions: [],
+          ownGrantSlugs: [],
+        });
+        abilityFactory.createForPlugin.mockReturnValue(pluginAbility);
+
+        await service.primeCurrentActor();
+
+        expect(abilityContext.prime).toHaveBeenCalledWith([pluginAbility]);
+      });
+
       it('propagates a resolution failure and does not prime (revoked api key)', async () => {
         auditContext.getActor.mockReturnValue({ kind: 'apiKey', apiKeyId: 'gone', userId: 'u' });
         permissionsService.getUserRoleGraph.mockResolvedValue({ id: 'u' } as UserWithRoles);
@@ -229,10 +266,77 @@ describe('AbilityService', () => {
       await expect(service.resolveAbilitiesForActor(actor)).rejects.toThrow(/no ability surface/i);
     });
 
-    it('plugin → throws (deferred to plugin loader)', async () => {
-      const actor: Actor = { kind: 'plugin', pluginId: 'plugin-1', trigger: { kind: 'user', userId: 'user-1' } };
+    describe('plugin (#60)', () => {
+      const pluginActor: Actor = {
+        kind: 'plugin',
+        pluginId: 'plugin-1',
+        unit: { scopeType: 'Household', householdId: 'hh-1' },
+        trigger: { kind: 'user', userId: 'user-1' },
+      };
 
-      await expect(service.resolveAbilitiesForActor(actor)).rejects.toThrow(/not implemented/i);
+      const snapshot = (overrides: Partial<PluginGrantSnapshot> = {}): PluginGrantSnapshot => ({
+        plugin: { id: 'plugin-1', slug: 'demo-plugin' },
+        unit: { scopeType: 'Household', householdId: 'hh-1' },
+        servable: true,
+        corePermissions: [],
+        ownGrantSlugs: [],
+        ...overrides,
+      });
+
+      it('plugin → single-element [pluginAbility], never intersected with the trigger', async () => {
+        const pluginAbility = ability([]);
+        const snap = snapshot();
+        permissionsService.getPluginGrantSnapshot.mockResolvedValue(snap);
+        abilityFactory.createForPlugin.mockReturnValue(pluginAbility);
+
+        const result = await service.resolveAbilitiesForActor(pluginActor);
+
+        expect(permissionsService.getPluginGrantSnapshot).toHaveBeenCalledWith('plugin-1', {
+          scopeType: 'Household',
+          householdId: 'hh-1',
+        });
+        expect(abilityFactory.createForPlugin).toHaveBeenCalledWith(snap);
+        // The trigger's user graph is never consulted (D-V: no intersection).
+        expect(permissionsService.getUserRoleGraph).not.toHaveBeenCalled();
+        expect(result).toEqual([pluginAbility]);
+      });
+
+      it('plugin with no Plugin row → single deny-all ability (quiet denial), never []', async () => {
+        permissionsService.getPluginGrantSnapshot.mockResolvedValue(null);
+        const emptyAbility = ability([]);
+        abilityFactory.createDenyAll.mockReturnValue(emptyAbility);
+
+        const result = await service.resolveAbilitiesForActor(pluginActor);
+
+        expect(abilityFactory.createDenyAll).toHaveBeenCalledTimes(1);
+        expect(abilityFactory.createForPlugin).not.toHaveBeenCalled();
+        expect(result).toEqual([emptyAbility]);
+      });
+
+      it('plugin render rejection → ForbiddenException (the D60-3 loud path), original error not leaked', async () => {
+        permissionsService.getPluginGrantSnapshot.mockResolvedValue(snapshot());
+        abilityFactory.createForPlugin.mockImplementation(() => {
+          throw new PluginAbilityRenderRejectionError({
+            reason: 'out-of-context-variable',
+            pluginId: 'plugin-1',
+            pluginSlug: 'demo-plugin',
+            permissionSlug: 'read:household',
+            variable: 'user.id',
+            unit: { scopeType: 'Household', householdId: 'hh-1' },
+          });
+        });
+
+        await expect(service.resolveAbilitiesForActor(pluginActor)).rejects.toThrow(ForbiddenException);
+      });
+
+      it('plugin unexpected factory error → propagates unchanged (not swallowed into a 403)', async () => {
+        permissionsService.getPluginGrantSnapshot.mockResolvedValue(snapshot());
+        abilityFactory.createForPlugin.mockImplementation(() => {
+          throw new RangeError('corrupted slug');
+        });
+
+        await expect(service.resolveAbilitiesForActor(pluginActor)).rejects.toThrow(RangeError);
+      });
     });
   });
 

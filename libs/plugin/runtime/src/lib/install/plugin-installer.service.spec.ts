@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { SERVER_SCOPE_SENTINEL } from '../grants/plugin-grant.service';
+import { SERVER_SCOPE_SENTINEL } from '@bge/database';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginInstallAuthorityError,
@@ -737,8 +737,21 @@ describe('PluginInstallerService', () => {
       await writeManifest(manifest);
       db.permission.findMany.mockResolvedValue([
         feedbackRead,
-        { slug: 'update:calendar', subject: 'calendar', riskLevel: RiskLevel.Low } as Permission,
-        { slug: 'read:public_content', subject: 'public_content', riskLevel: RiskLevel.Low } as Permission,
+        // Unit-consented checks must name conditioned rows to pass the
+        // unit-boundedness gate (#60); these fixtures model the seeded
+        // unit-conditioned variants.
+        {
+          slug: 'update:calendar',
+          subject: 'calendar',
+          riskLevel: RiskLevel.Low,
+          conditions: { householdId: '{{ unit.householdId }}' },
+        } as unknown as Permission,
+        {
+          slug: 'read:public_content',
+          subject: 'public_content',
+          riskLevel: RiskLevel.Low,
+          conditions: { ownerId: '{{ unit.userId }}' },
+        } as unknown as Permission,
       ]);
 
       const result = await service.install(input());

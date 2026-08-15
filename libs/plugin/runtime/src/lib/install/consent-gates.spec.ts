@@ -2,6 +2,7 @@ import { RiskLevel, type Permission } from '@bge/database';
 import { buildPluginManifest, validatePluginManifest } from '@boardgamesempire/plugin-manifest';
 import {
   collectForbiddenPermissionViolations,
+  collectUnboundedUnitConsentViolations,
   collectWildcardSubjectViolations,
   compareExactReentry,
   criticalConfirmationExpectation,
@@ -84,6 +85,73 @@ describe('consent-gates', () => {
       ]);
 
       expect(collectWildcardSubjectViolations(validated, corePermissions)).toEqual([]);
+    });
+  });
+
+  describe('collectUnboundedUnitConsentViolations', () => {
+    const withHouseholdCheck = () => {
+      const manifest = buildPluginManifest({ scope: 'household' });
+      manifest.permissions.checks = [
+        ...manifest.permissions.checks,
+        {
+          slug: 'update:calendar',
+          required: false,
+          reason: { en: 'Writes digest reminders to the household calendar.' },
+          consentScope: 'household',
+        },
+      ];
+
+      return validate(manifest);
+    };
+
+    it('flags a household-consented core check whose Permission row is condition-free', () => {
+      const corePermissions = new Map<string, Permission>([
+        ['update:calendar', { slug: 'update:calendar', subject: 'calendar', riskLevel: RiskLevel.Low } as Permission],
+      ]);
+
+      expect(collectUnboundedUnitConsentViolations(withHouseholdCheck(), corePermissions)).toEqual([
+        expect.objectContaining({ permissionSlug: 'update:calendar' }),
+      ]);
+    });
+
+    it('accepts a unit-consented check whose row carries a bounding clause', () => {
+      const corePermissions = new Map<string, Permission>([
+        [
+          'update:calendar',
+          {
+            slug: 'update:calendar',
+            subject: 'calendar',
+            riskLevel: RiskLevel.Low,
+            conditions: { householdId: '{{ unit.householdId }}' },
+          } as unknown as Permission,
+        ],
+      ]);
+
+      expect(collectUnboundedUnitConsentViolations(withHouseholdCheck(), corePermissions)).toEqual([]);
+    });
+
+    it('never flags server-consented checks — server consent IS server-wide authority', () => {
+      // The default fixture's core check (feedback:read) is server-consented
+      // and its row is condition-free; that is the normal, legitimate case.
+      const corePermissions = new Map<string, Permission>([
+        ['feedback:read', { slug: 'feedback:read', subject: 'feedback', riskLevel: RiskLevel.Medium } as Permission],
+      ]);
+
+      expect(collectUnboundedUnitConsentViolations(validate(buildPluginManifest()), corePermissions)).toEqual([]);
+    });
+
+    it('ignores plugin-origin checks — enveloped subjects are scoped by construction', () => {
+      const manifest = buildPluginManifest({ scope: 'household' });
+      manifest.permissions.checks = [
+        {
+          slug: 'manage:digest',
+          required: true,
+          reason: { en: 'Owns the digest data it stores.' },
+          consentScope: 'household',
+        },
+      ];
+
+      expect(collectUnboundedUnitConsentViolations(validate(manifest), new Map())).toEqual([]);
     });
   });
 
