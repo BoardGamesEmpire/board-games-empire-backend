@@ -12,6 +12,11 @@ import type { PluginUnit } from '@bge/actor-context';
  * - `malformed-template` — the condition template does not even parse
  *   (unclosed tag, broken delimiter change). Nothing can be validated about
  *   it, so nothing renders.
+ * - `unsupported-token-type` — the template parses but uses Mustache syntax
+ *   the render contract forbids: partials (`>`) and comments (`!`) render to
+ *   empty string, delimiter changes (`=`) reshape parsing. None of them can
+ *   carry validatable authority, and none of them names a context variable —
+ *   a distinct reason so the operator is not sent hunting for one.
  * - `foreign-namespace-slug` — an own-namespace grant row whose canonical
  *   slug names a DIFFERENT plugin's namespace. Grants are keyed by pluginId,
  *   so this is corrupted state; rendering it would hand this plugin another
@@ -23,13 +28,19 @@ import type { PluginUnit } from '@bge/actor-context';
 export type PluginAbilityRejectionReason =
   | 'out-of-context-variable'
   | 'malformed-template'
+  | 'unsupported-token-type'
   | 'foreign-namespace-slug'
   | 'malformed-slug';
 
-const REASON_DETAIL: Readonly<Record<PluginAbilityRejectionReason, (input: { variable?: string }) => string>> = {
+const REASON_DETAIL: Readonly<
+  Record<PluginAbilityRejectionReason, (input: { variable?: string; tokenType?: string }) => string>
+> = {
   'out-of-context-variable': ({ variable }) =>
     `condition template references '${variable}', which is outside the unit-coordinate context`,
   'malformed-template': () => 'condition template does not parse',
+  'unsupported-token-type': ({ tokenType }) =>
+    `condition template uses unsupported Mustache syntax (token type '${tokenType}'): ` +
+    'only interpolations and sections can render authority',
   'foreign-namespace-slug': () => 'canonical slug names a different plugin’s namespace',
   'malformed-slug': () => 'slug carries the plugin| envelope but is not a parseable canonical form',
 };
@@ -59,6 +70,8 @@ export class PluginAbilityRenderRejectionError extends Error {
   readonly permissionSlug: string;
   /** The offending template variable for `out-of-context-variable`; absent otherwise. */
   readonly variable?: string;
+  /** The offending Mustache token type for `unsupported-token-type`; absent otherwise. */
+  readonly tokenType?: string;
   readonly unit: PluginUnit;
 
   constructor(input: {
@@ -67,6 +80,7 @@ export class PluginAbilityRenderRejectionError extends Error {
     pluginSlug: string;
     permissionSlug: string;
     variable?: string;
+    tokenType?: string;
     unit: PluginUnit;
   }) {
     super(
@@ -79,6 +93,7 @@ export class PluginAbilityRenderRejectionError extends Error {
     this.pluginSlug = input.pluginSlug;
     this.permissionSlug = input.permissionSlug;
     this.variable = input.variable;
+    this.tokenType = input.tokenType;
     this.unit = input.unit;
   }
 }

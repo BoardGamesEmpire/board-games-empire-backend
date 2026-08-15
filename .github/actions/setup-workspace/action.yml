@@ -5,13 +5,16 @@ description: >-
   generated artifacts (Prisma client, protobuf types, i18n types) that builds
   depend on.
   Caching of the generation steps themselves is Nx's job (local + Nx Cloud
-  task cache), not bespoke actions/cache entries. The consuming job must
-  check the repository out first (with fetch-depth: 0 for nx-set-shas).
+  task cache), not bespoke actions/cache entries. `node_modules` is the one
+  exception, and only because Nx has no task to cache there — see the cache
+  step below. The consuming job must check the repository out first (with
+  fetch-depth: 0 for nx-set-shas).
 
 runs:
   using: composite
   steps:
     - uses: actions/setup-node@v6
+      id: node
       with:
         node-version: 24
         cache: 'npm'
@@ -20,9 +23,74 @@ runs:
       shell: bash
       run: cp .env.example .env
 
+    # `cache: 'npm'` above already hits: the ~375MB npm download cache restores
+    # in ~5s and no tarball is fetched. The cost `npm ci` pays is the other
+    # half of the work — wiping and writing ~1.2GB of node_modules — and both
+    # jobs paid it in full (69s in `main`, 99s in `e2e`; ~half of all runner
+    # time on a warm-Nx-Cloud run). So cache the tree itself.
+    #
+    # Safe to restore-and-skip only because nothing installs state OUTSIDE
+    # node_modules: the root package.json declares no preinstall/postinstall/
+    # prepare, and every generated artifact below is an explicit Nx target that
+    # runs after this step regardless of hit or miss. Re-check that assumption
+    # before adding an install lifecycle script.
+    #
+    # No `restore-keys`, deliberately: a prefix match would hand us a
+    # node_modules resolved from a DIFFERENT lockfile while `npm ci` is skipped,
+    # which fails as a subtly wrong dependency graph rather than a slow job.
+    # Exact match or full install; there is no useful middle.
+    #
+    # The path list is five globs, not one, because this is an npm WORKSPACES
+    # monorepo: `npm ci` writes a nested node_modules into any workspace whose
+    # dependency cannot hoist (libs/common/shared carries 7.5MB; the six apps
+    # each pin their own reflect-metadata). Restoring only the root while
+    # skipping `npm ci` would not fail — resolution would quietly fall through
+    # to the hoisted copy at a different version. The depths cover every entry
+    # in package.json `workspaces`, down to `libs/gateway/driver/*`; the guard
+    # on the install step below fails the run if a workspace ever lands deeper.
+    # These match at fixed depths under apps/ and libs/, so none of them can
+    # reach the 224 nested node_modules inside the root tree and double-archive
+    # them.
+    #
+    # The key carries the resolved Node version (24.19.0), not the `24` pinned
+    # above, so a runner-image patch bump cannot serve native modules built
+    # against a different ABI. Cost of that strictness is one full `npm ci` on
+    # the first run after each 24.x bump.
+    #
+    # Cross-job: both jobs compute the same key, and `e2e` needs `main`, so a
+    # cold key is installed once in `main`, saved by its post step, and hit by
+    # `e2e`. actions/cache skips its own save on an exact hit, so `e2e` never
+    # races to rewrite the entry.
+    - name: Restore node_modules
+      id: node-modules
+      uses: actions/cache@v6
+      with:
+        path: |
+          node_modules
+          apps/*/node_modules
+          libs/*/node_modules
+          libs/*/*/node_modules
+          libs/*/*/*/node_modules
+        key: node-modules-${{ runner.os }}-${{ runner.arch }}-node${{ steps.node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}
+
+    # The guard runs on the install path only, which is exactly the run that
+    # introduces a new workspace: adding one changes package-lock.json, which
+    # misses the cache key. So a workspace nested deeper than the globs above is
+    # caught on the run that adds it, before any later run can skip `npm ci` and
+    # silently resolve its un-hoisted dependencies to the hoisted versions.
     - name: Install dependencies
+      if: steps.node-modules.outputs.cache-hit != 'true'
       shell: bash
-      run: npm ci
+      run: |
+        set -euo pipefail
+        npm ci
+        uncached="$(find apps libs -type d -name node_modules -not -path '*/node_modules/*' \
+          | grep -Ev '^(apps/[^/]+|libs/[^/]+|libs/[^/]+/[^/]+|libs/[^/]+/[^/]+/[^/]+)/node_modules$' || true)"
+        if [ -n "$uncached" ]; then
+          echo "::error::workspace node_modules outside the cached globs in .github/actions/setup-workspace; add its depth to the cache path:"
+          printf '%s\n' "$uncached"
+          exit 1
+        fi
 
     - uses: nrwl/nx-set-shas@v4
       with:

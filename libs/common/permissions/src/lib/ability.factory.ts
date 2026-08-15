@@ -329,7 +329,18 @@ export class AbilityFactory {
           continue;
         }
 
-        reject(name);
+        // Not a variable problem — the token TYPE is forbidden, and `name`
+        // here is a partial name or comment text, not a context path. A
+        // distinct reason keeps the operator from hunting for a variable
+        // that does not exist.
+        throw new PluginAbilityRenderRejectionError({
+          reason: 'unsupported-token-type',
+          pluginId: snapshot.plugin.id,
+          pluginSlug: snapshot.plugin.slug,
+          permissionSlug,
+          tokenType: type,
+          unit: snapshot.unit,
+        });
       }
     };
 

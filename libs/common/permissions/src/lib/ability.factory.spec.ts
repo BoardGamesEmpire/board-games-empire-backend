@@ -1008,10 +1008,11 @@ describe('AbilityFactory', () => {
         expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
       });
 
-      it.each<[string, string]>([
-        ['a partial token — renders to empty string, never validated by the name walk', '{{> some-partial }}'],
-        ['a comment token — renders to empty string', '{{! why is this here }}'],
-      ])('rejects %s', (_label, template) => {
+      it.each<[string, string, string]>([
+        ['a partial token — renders to empty string, never validated by the name walk', '{{> some-partial }}', '>'],
+        ['a comment token — renders to empty string', '{{! why is this here }}', '!'],
+        ['a delimiter change — reshapes parsing itself', '{{=<% %>=}}<% unit.householdId %>', '='],
+      ])('rejects %s as unsupported-token-type, not a phantom out-of-context variable', (_label, template, tokenType) => {
         const snapshot = makeSnapshot({
           corePermissions: [
             makePermission({ action: Action.read, subject: 'Game', conditions: { householdId: template } }),
@@ -1019,6 +1020,9 @@ describe('AbilityFactory', () => {
         });
 
         expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+        expect(() => factory.createForPlugin(snapshot)).toThrow(
+          expect.objectContaining({ reason: 'unsupported-token-type', tokenType }),
+        );
       });
 
       it('rejects prototype-chain paths — `in`-style lookup would admit {{ unit.constructor }}', () => {
