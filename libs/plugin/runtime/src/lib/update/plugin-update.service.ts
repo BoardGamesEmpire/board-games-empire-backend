@@ -57,6 +57,7 @@ import {
   PluginUpdateCriticalConfirmationError,
   PluginUpdateForbiddenPermissionError,
   PluginUpdateManifestError,
+  PluginUpdateManifestSource,
   PluginUpdateNoPendingError,
   PluginUpdatePendingConflictError,
   PluginUpdatePluginNotFoundError,
@@ -468,6 +469,7 @@ export class PluginUpdateService {
     } catch (err) {
       throw new PluginUpdateManifestError(
         directory.slug,
+        'new',
         `manifest.json could not be read or parsed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
@@ -477,6 +479,7 @@ export class PluginUpdateService {
     if (next.manifest.slug !== plugin.slug) {
       throw new PluginUpdateManifestError(
         directory.slug,
+        'new',
         `manifest slug '${next.manifest.slug}' does not match the installed plugin — updates replace in place, never rename`,
       );
     }
@@ -514,6 +517,7 @@ export class PluginUpdateService {
     if (validated.manifest.slug !== plugin.slug || validated.manifest.version !== expectedVersion) {
       throw new PluginUpdateManifestError(
         plugin.slug,
+        context.label,
         `stored ${context.label} manifest identifies '${validated.manifest.slug}'@${validated.manifest.version} but the row ` +
           `says '${plugin.slug}'@${expectedVersion} — drifted state makes the escalation comparison meaningless`,
       );
@@ -525,7 +529,7 @@ export class PluginUpdateService {
   private validate(
     raw: unknown,
     slug: string,
-    context: { readonly enforceBgeCompat: boolean; readonly label: string },
+    context: { readonly enforceBgeCompat: boolean; readonly label: PluginUpdateManifestSource },
   ): PluginManifestValidationResult {
     try {
       return validatePluginManifest(raw, {
@@ -535,7 +539,7 @@ export class PluginUpdateService {
       });
     } catch (err) {
       if (err instanceof PluginManifestValidationError) {
-        throw new PluginUpdateManifestError(slug, `${context.label} manifest failed validation`, err.issues);
+        throw new PluginUpdateManifestError(slug, context.label, `${context.label} manifest failed validation`, err.issues);
       }
 
       throw err;

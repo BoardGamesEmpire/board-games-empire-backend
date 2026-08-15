@@ -1238,6 +1238,62 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
         'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
     },
 
+    // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
+    // Server-scope pair: no explicit role assignment below — Owner holds it via
+    // `manage:all`, Admin via `allPermsExceptManageAll` — Owner/Admin only,
+    // per the locked role assignment on #59. Plugin principals can NEVER hold the `manage:` pair regardless of
+    // rows: the runtime's hard exclusion matches `manage:plugin*` by pattern
+    // on purpose (both slugs are pinned against it by the runtime's
+    // consent-gate specs), so these seeds change what admins may do, not what
+    // the gate refuses. The `read:` pair is deliberately OUTSIDE that
+    // exclusion (decision recorded on #59, 2026-08-15): consent decides it,
+    // not a categorical gate. In practice that means `read:plugin` — it is
+    // condition-free, so a manifest may request it as an ordinary
+    // admin-consentable check under unit-bounded conferral; it reveals
+    // plugin/consent topology, which is why it is Medium rather than Low.
+    // `read:plugin:household` is nominally consentable too, but its CLS
+    // `{{ householdId }}` template below renders only for USER abilities
+    // (the unit-coordinate variants are #315's work — this row cannot carry
+    // both forms). A plugin granted it does not lose just that grant: the
+    // render rejection fails the plugin's ENTIRE ability for the unit
+    // (deny-all, logged loud) until the grant is revoked — do not grant it
+    // to plugins as seeded.
+    {
+      action: Action.manage,
+      subject: ResourceType.Plugin,
+      slug: 'manage:plugin',
+      riskLevel: RiskLevel.Critical,
+      reason: 'Install, update, and uninstall server plugins and approve their permission grants — permission mutation by proxy',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.Plugin,
+      slug: 'read:plugin',
+      riskLevel: RiskLevel.Medium,
+      reason: 'View installed plugins, their manifests, pending updates, and server consent state',
+    },
+    // Household-scope pair: conditioned on the CLS household like the other
+    // household permissions (`read:household`) — HouseholdPlugin carries the
+    // scalar `householdId`, so instance checks stay bounded to the household
+    // the request is operating in.
+    {
+      action: Action.manage,
+      subject: ResourceType.HouseholdPlugin,
+      conditions: { householdId: '{{ householdId }}' },
+      slug: 'manage:plugin:household',
+      riskLevel: RiskLevel.Medium,
+      reason:
+        'Enable, disable, configure, and consent to plugins for a household — enabling third-party code outranks ordinary household-scoped writes',
+    },
+    {
+      action: Action.read,
+      subject: ResourceType.HouseholdPlugin,
+      conditions: { householdId: '{{ householdId }}' },
+      slug: 'read:plugin:household',
+      riskLevel: RiskLevel.Low,
+      reason: "View a household's enabled plugins, their feature state, and consent status",
+    },
+
     // --- Webhook Subscriptions ─────────────────────────────────────
     {
       action: Action.manage,
@@ -1539,6 +1595,10 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
     'manage:attendee_game_list',
     'manage:event_attendee',
     'manage:household_member',
+    // Plugin unit administration (#59 C4): household owners AND admins —
+    // deliberately absent from every non-admin household role.
+    'manage:plugin:household',
+    'read:plugin:household',
     'read:attendee_game_list',
     'read:event_availability_vote',
     'read:event_game_nomination',

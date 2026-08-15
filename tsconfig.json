@@ -215,6 +215,9 @@
     },
     {
       "path": "./libs/plugin/runtime"
+    },
+    {
+      "path": "./libs/api/plugin"
     }
   ]
 }
