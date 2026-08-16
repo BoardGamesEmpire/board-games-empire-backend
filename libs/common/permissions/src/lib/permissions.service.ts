@@ -296,7 +296,7 @@ export class PermissionsService {
 
   /**
    * Resolves the granted-permission snapshot a plugin ability is built from
-   * (#60 D60-2): `Granted` rows for the operating unit's coordinates plus
+   * (#60): `Granted` rows for the operating unit's coordinates plus
    * the always-applicable Server scope, with both consumption guards applied
    * here rather than trusted to upstream machinery —
    *
@@ -323,8 +323,8 @@ export class PermissionsService {
    * Returns `null` when no `Plugin` row exists for the id — the caller
    * decides what a dangling plugin actor means. Deliberately uncached: a
    * consent decision must take effect on the next resolution, and no
-   * invalidation path exists yet (mirrors the D60-6 "no caching until
-   * measured" posture).
+   * invalidation path exists yet (mirrors the feature-state service's "no
+   * caching until measured" posture).
    *
    * Related but deliberately NOT the same predicate as the runtime's
    * `unitConsentSatisfied` (suspension/re-enable): that asks whether a
@@ -378,7 +378,7 @@ export class PermissionsService {
     // otherwise vanish here — the pluginId-filtered catalog query finds no
     // row, and the "no catalog row" debug below reads as a benign deleted
     // permission. That is grant-table corruption, not drift, and it takes
-    // the same loud typed path the factory uses (D60-3), not a debug line.
+    // the same loud typed path the factory uses, not a debug line.
     for (const slug of ownSlugs) {
       const rejection = (reason: 'foreign-namespace-slug' | 'malformed-slug') =>
         new PluginAbilityRenderRejectionError({
@@ -424,7 +424,7 @@ export class PermissionsService {
     ]);
 
     // Wildcard-subject re-check at consumption: grant-time forbids wildcard
-    // subjects outright (D-Z), so a granted core slug now carrying `all` can
+    // subjects outright, so a granted core slug now carrying `all` can
     // only mean the catalog row drifted after consent. Same posture as the
     // riskCovers guard — the decision no longer describes the permission —
     // but warned rather than debug-logged, because it is always anomalous.

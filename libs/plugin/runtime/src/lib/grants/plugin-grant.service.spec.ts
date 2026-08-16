@@ -280,7 +280,7 @@ describe('PluginGrantService', () => {
 
       // Empty update arm on purpose: the row may exist suspended or
       // user-disabled, and consent never writes `enabled` or clears a
-      // suspension here (D-AO parity — D-AR owns that transition).
+      // suspension here — the late-acceptance path owns that transition.
       expect(db.userPlugin.upsert).toHaveBeenCalledWith({
         where: { userId_pluginId: { userId: 'user-a', pluginId: 'plg_1' } },
         create: { userId: 'user-a', pluginId: 'plg_1' },
@@ -422,7 +422,7 @@ describe('PluginGrantService', () => {
       await expect(service.decide(serverDecision)).rejects.toThrow(PluginGrantPluginNotFoundError);
     });
 
-    it('rejects a decision for a tombstoned plugin at ANY scope (D-AS at the consent seam, #225)', async () => {
+    it('rejects a decision for a tombstoned plugin at ANY scope (#225)', async () => {
       db.plugin.findUnique.mockResolvedValue({
         ...plugin,
         uninstalledAt: new Date('2026-07-01T00:00:00Z'),

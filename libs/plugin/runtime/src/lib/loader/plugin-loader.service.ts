@@ -72,7 +72,7 @@ export class PluginLoaderService implements OnApplicationBootstrap {
    * `quarantine()` and force-disable a perfectly healthy plugin).
    */
   async loadAllEnabled(): Promise<void> {
-    // `uninstalledAt: null` is belt-and-braces with the D-AS invariant that
+    // `uninstalledAt: null` is belt-and-braces with the invariant that
     // uninstall force-disables: the tombstone predicate every C3+ query
     // carries is cheapest to keep locally true rather than provably implied.
     const plugins = await this.db.plugin.findMany({ where: { enabled: true, uninstalledAt: null } });

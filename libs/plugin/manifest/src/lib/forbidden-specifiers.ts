@@ -1,10 +1,10 @@
 /**
- * Import specifiers the install-time static analysis (#59 D-E / D-AC)
+ * Import specifiers the install-time static analysis (#59)
  * screens plugin code for. Lives in this framework-free lib so the server
  * installer and the #84 `bge-plugin validate` CLI share ONE reviewed list —
  * the two surfaces can never disagree about what is forbidden.
  *
- * Static analysis is defense-in-depth (D-B), and the honest limit is worth
+ * Static analysis is defense-in-depth, and the honest limit is worth
  * stating plainly: no specifier list is a network or filesystem sandbox.
  * `fetch` has been a global since Node 18 and needs no import at all, raw
  * sockets can carry a hand-rolled HTTP client, and `eval`-shaped access
@@ -52,7 +52,7 @@ export const FORBIDDEN_IMPORT_SPECIFIERS: readonly string[] = [
 ];
 
 /**
- * Flagged as warnings, never rejected — tier-1 honesty (D-AC): these are
+ * Flagged as warnings, never rejected — tier-1 honesty: these are
  * PRIMITIVES with legitimate plugin-local uses (reading a bundled asset,
  * talking to a sidecar the admin configured), they are reachable in-process
  * regardless, and rejection would ban that legitimate use. The line against
@@ -106,7 +106,7 @@ export const NPM_ALIAS_PREFIX = 'npm:';
  * ordinary range. Without this, name-level dependency screening is trivially
  * defeated: `"my-http": "npm:axios@^1"` puts axios in the tree under a name
  * no list contains, and the call site `require('my-http')` is unlisted too,
- * so all three D-AC screens come back clean. Shared with the #84 CLI, which
+ * so all three screens come back clean. Shared with the #84 CLI, which
  * has to reach the same verdict offline.
  */
 export const resolveAliasedPackageName = (range: string): string | null => {

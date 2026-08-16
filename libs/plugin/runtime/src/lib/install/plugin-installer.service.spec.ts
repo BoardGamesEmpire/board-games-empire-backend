@@ -257,7 +257,8 @@ describe('PluginInstallerService', () => {
       expect(db.pluginGrant.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           permissionSlug: 'feedback:read',
-          // Core risk propagates from the Permission row into decidedRiskLevel (D-X input for C3).
+          // Core risk propagates from the Permission row into decidedRiskLevel — the baseline
+          // update-time risk escalation compares against (#59).
           decidedRiskLevel: RiskLevel.Medium,
         }),
       });
@@ -450,7 +451,7 @@ describe('PluginInstallerService', () => {
   });
 
   describe('authority and core-permission existence', () => {
-    it('rejects a non-admin installer before touching permission data (D-AD)', async () => {
+    it('rejects a non-admin installer before touching permission data', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
 
       await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallAuthorityError);
@@ -476,7 +477,7 @@ describe('PluginInstallerService', () => {
     });
   });
 
-  describe('Critical second factor (D-AE / D-AI)', () => {
+  describe('Critical second factor', () => {
     const withCriticalCheck = async (required: boolean): Promise<void> => {
       const manifest = buildPluginManifest();
       manifest.permissions.checks = [
@@ -551,7 +552,7 @@ describe('PluginInstallerService', () => {
     });
   });
 
-  describe('static-analysis gate (D-AC)', () => {
+  describe('static-analysis gate', () => {
     const forbidden: StaticAnalysisFinding = {
       file: 'index.js',
       kind: 'esm-import',
@@ -598,9 +599,9 @@ describe('PluginInstallerService', () => {
     });
 
     /**
-     * The gate is a lint, not a sandbox (D-AH), so an operator can accept the
-     * risk on their own instance — but only per specifier, and always on the
-     * record (D-AJ).
+     * The gate is a lint, not a sandbox, so an operator can accept the risk
+     * on their own instance — but only per specifier, and always on the
+     * record (#59).
      */
     describe('admin override', () => {
       const twoForbidden: StaticAnalysisReport = {
@@ -716,7 +717,7 @@ describe('PluginInstallerService', () => {
     });
   });
 
-  describe('per-unit consent stays per-unit (D-AA)', () => {
+  describe('per-unit consent stays per-unit', () => {
     it('seeds NOTHING for household- and user-consentable checks', async () => {
       const manifest = buildPluginManifest({ scope: 'household' });
       manifest.permissions.checks = [

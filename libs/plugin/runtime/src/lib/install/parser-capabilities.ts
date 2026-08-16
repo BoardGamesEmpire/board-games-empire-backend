@@ -26,7 +26,7 @@ export interface ParserCapabilityProbe {
 
 /**
  * Syntax the resolved parser must handle for `require()` screening to reach
- * every file (#219 / D-AM). The original probe was a bare import statement,
+ * every file (#219). The original probe was a bare import statement,
  * which certified a stale meriyah 1.x that then choked on most real 2026
  * plugin code — optional chaining, `??=`, private fields, static blocks,
  * top-level await — degrading each such file to a `parse-failure` WARNING
@@ -41,7 +41,7 @@ export interface ParserCapabilityProbe {
  * `next: true` flag, which the analyzer never passes; reading the 1.x
  * parser source without the lexer's flag gate makes the partition look
  * looser than it is. The floor probes are kept — a build failing THOSE is
- * broken more fundamentally, and D-AM's fail-closed posture covers it the
+ * broken more fundamentally, and the fail-closed posture covers it the
  * same way.
  */
 export const PARSER_CAPABILITY_PROBES: readonly ParserCapabilityProbe[] = [
@@ -101,7 +101,7 @@ export const PARSER_CAPABILITY_PROBES: readonly ParserCapabilityProbe[] = [
  * Runs every capability probe against the resolved parser and returns the
  * names of the ones it failed — empty when the parser is fit for a full
  * scan. Pure and side-effect free: the caller decides whether a non-empty
- * result is fatal (the analyzer refuses per D-AM) or diagnostic.
+ * result is fatal (the analyzer refuses to scan) or diagnostic.
  */
 export const probeParserCapabilities = (): readonly string[] => {
   const failed: string[] = [];

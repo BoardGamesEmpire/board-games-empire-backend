@@ -499,7 +499,7 @@ describe('validatePluginManifest', () => {
     });
   });
 
-  describe('storage declarations (D-H: shape-enforced, execution-inert)', () => {
+  describe('storage declarations (shape-enforced, execution-inert)', () => {
     it('rejects an own table missing the plugin_<slug>_ prefix', () => {
       expectRejection(
         manifest({ storage: { ownTables: ['digests'], readsCore: [], writesCore: [] } }),
@@ -549,9 +549,9 @@ describe('validatePluginManifest', () => {
   });
 
   describe('warnings (non-fatal author guidance)', () => {
-    it('warns on a required permission at household/user consent scope (D16)', () => {
+    it('warns on a required permission at household/user consent scope', () => {
       // Household-scope manifest: on a SERVER-scope plugin this combination is
-      // now a SCOPE_INCOHERENT error (D-J), and warnings only surface on success.
+      // now a SCOPE_INCOHERENT error, and warnings only surface on success.
       const input = manifest({ scope: 'household' });
       input.permissions.declares = [...input.permissions.declares, 'update:calendar'];
       input.permissions.checks = [
@@ -575,7 +575,7 @@ describe('validatePluginManifest', () => {
     });
   });
 
-  describe('scope coherence (D-J)', () => {
+  describe('scope coherence', () => {
     it("rejects a server-scope plugin requesting 'household'-consentable permission — no HouseholdPlugin surface exists to collect that consent", () => {
       const input = manifest();
       input.permissions.checks = [
@@ -644,7 +644,7 @@ describe('validatePluginManifest', () => {
     });
   });
 
-  describe('slug reservation (D-K)', () => {
+  describe('slug reservation', () => {
     /** Rebuilds every slug-namespaced field so ONLY the reservation rule is exercised. */
     const manifestWithSlug = (slug: string): PluginManifest =>
       manifest({

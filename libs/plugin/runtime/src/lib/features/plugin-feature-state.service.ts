@@ -15,8 +15,8 @@ import { PluginFeatureStateManifestError } from './feature-state.errors';
  * Why a feature is not active, strongest-first. `denied` and `pending` are
  * per-check consent states (a durable refusal vs. a decision nobody has
  * made — which includes a grant whose `decidedRiskLevel` no longer covers
- * the permission's current risk, since D-X means that consent must be
- * given again). `suspended` is the unit-level D-AO state and is reported
+ * the permission's current risk, since that consent must be given
+ * again). `suspended` is the unit-level suspension state and is reported
  * only when the feature's consent is otherwise complete — an actionable
  * denial/pending always wins the `reason` slot, because it names what the
  * unit can actually do about it.
@@ -57,7 +57,7 @@ export interface PluginFeatureUnitState {
    * The full operational predicate: plugin enabled and not tombstoned, AND
    * (for Household/User units) the unit's enablement row exists with
    * `enabled && !suspendedForConsent`. Deliberately separate from feature
-   * `state`: per D-AQ a feature is active iff its owned checks are granted
+   * `state`: a feature is active iff its owned checks are granted
    * and the unit is not consent-suspended — a unit that merely switched the
    * plugin off keeps its consent-derived states, and `served: false` is
    * what tells the caller nothing runs right now.
@@ -68,8 +68,8 @@ export interface PluginFeatureUnitState {
 }
 
 /**
- * The queryable "is feature X active for unit Y" derivation (#60 D60-6),
- * landed where it is consumed per D-AQ. Inputs are exactly the C3
+ * The queryable "is feature X active for unit Y" derivation (#60),
+ * landed where it is consumed. Inputs are exactly the C3
  * contract: `PluginGrant` rows (Granted confers, Denied is durable, no row
  * is pending), per-unit suspension state, and the manifest's
  * `checks[].feature` → `features[].name` binding (validated at install).
@@ -95,7 +95,7 @@ export interface PluginFeatureUnitState {
  * confers nothing and reports `pending` (the decision must be re-made), as
  * does a grant whose catalog row is gone.
  *
- * No caching (D60-6): a consent decision must be visible on the next read,
+ * No caching: a consent decision must be visible on the next read,
  * and no invalidation path exists yet.
  */
 @Injectable()
@@ -134,7 +134,7 @@ export class PluginFeatureStateService {
     }
 
     // Tombstoned plugins short-circuit BEFORE manifest re-validation: their
-    // grants and catalog rows are purged (D-AS), there is nothing to derive,
+    // grants and catalog rows are purged, there is nothing to derive,
     // and a stale stored manifest must not turn "uninstalled" into a 5xx.
     if (plugin.uninstalledAt !== null) {
       return {

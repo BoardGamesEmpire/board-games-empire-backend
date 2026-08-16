@@ -204,7 +204,7 @@ describe('PluginStaticAnalysisService', () => {
     expect(gatingFindings(report)).toEqual([]);
   });
 
-  it('screens package.json dependencies by name (D-AC): a forbidden dependency gates without scanning vendored source', async () => {
+  it('screens package.json dependencies by name: a forbidden dependency gates without scanning vendored source', async () => {
     await write(
       'package.json',
       JSON.stringify({ name: 'demo-sink', version: '1.2.0', dependencies: { axios: '^1.7.0', lodash: '^4.17.21' } }),

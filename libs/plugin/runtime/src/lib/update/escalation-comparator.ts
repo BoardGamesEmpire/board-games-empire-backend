@@ -13,20 +13,20 @@ export interface EscalationComparatorInput {
   readonly grants: readonly GrantComparisonView[];
   /**
    * TODAY's catalog risk per canonical slug in the NEXT manifest — core
-   * slugs from `Permission`, plugin-declared slugs locked `Low` (D-W).
+   * slugs from `Permission`, plugin-declared slugs locked `Low`.
    */
   readonly currentRiskBySlug: ReadonlyMap<string, RiskLevel>;
 }
 
 /**
- * The update-escalation comparison (#59 Phase C3, D-AP). Pure and
- * synchronous: the service prepares the views, this decides what escalated,
- * whether the server admin must approve, what a surviving denial blocks
- * (D-AB), and which household units activation will suspend (D-AO).
+ * The update-escalation comparison (#59 Phase C3). Pure and synchronous:
+ * the service prepares the views, this decides what escalated, whether the
+ * server admin must approve, what a surviving denial blocks, and which
+ * household units activation will suspend.
  *
  * Set semantics throughout — removal of a permission, a domain, or a
  * writesCore entry never escalates (narrowings are free), and the
- * `'configured'` transitions follow D-AP exactly: list → `'configured'`
+ * `'configured'` transitions are asymmetric: list → `'configured'`
  * broadens and gates, `'configured'` → list narrows, `'configured'` →
  * `'configured'` is no change.
  *
@@ -77,7 +77,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
     }
   }
 
-  // Risk escalation (D-X): only decisions that EXIST can be escalated
+  // Risk escalation: only decisions that EXIST can be escalated
   // against, and only for permissions the next manifest still requests —
   // a grant on a dropped check is dormant, not escalated.
   const nextSlugs = new Set(input.next.checks.map((check) => check.canonicalSlug));
@@ -143,7 +143,7 @@ export const compareForEscalations = (input: EscalationComparatorInput): UpdateE
       escalation.kind === 'writes-core-added',
   );
 
-  // D-AB: a surviving Server-scope Denied row on a permission the NEXT
+  // A surviving Server-scope Denied row on a permission the NEXT
   // manifest marks required blocks activation — required means the plugin
   // cannot honestly run without it, and a durable refusal must not be
   // steamrolled by a version bump. Keyed on next's required set, not on
@@ -207,7 +207,7 @@ const compareOutboundDomains = (
 ): UpdateEscalation[] => {
   if (next === 'configured') {
     // 'configured' → 'configured' is no change; list → 'configured' is the
-    // D-AP broadening.
+    // broadening.
     return active === 'configured' ? [] : [{ kind: 'outbound-domains-configured' }];
   }
 

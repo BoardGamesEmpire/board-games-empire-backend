@@ -4,11 +4,11 @@ import type { PluginUnit } from '@bge/actor-context';
  * Why a granted permission was refused at plugin ability resolution:
  *
  * - `out-of-context-variable` — a core permission's condition template
- *   references a variable outside the D-U unit-coordinate context (e.g. the
+ *   references a variable outside the unit-coordinate context (e.g. the
  *   user-centric `{{ user.id }}` seeds, or `{{ unit.householdId }}` while
  *   operating as a Server unit). Mustache renders missing variables to `''`,
  *   which would produce a malformed, potentially over-broad clause like
- *   `{ userId: '' }` — so the rule is rejected, never rendered (D-U).
+ *   `{ userId: '' }` — so the rule is rejected, never rendered (#60).
  * - `malformed-template` — the condition template does not even parse
  *   (unclosed tag, broken delimiter change). Nothing can be validated about
  *   it, so nothing renders.
@@ -46,7 +46,7 @@ const REASON_DETAIL: Readonly<
 };
 
 /**
- * The D60-3 typed rejection: raised when a granted permission cannot be
+ * The typed rejection: raised when a granted permission cannot be
  * consumed safely — by `AbilityFactory.createForPlugin` (template rejection)
  * or by `PermissionsService.getPluginGrantSnapshot` (grant-table
  * corruption) — carrying everything the single logging site in

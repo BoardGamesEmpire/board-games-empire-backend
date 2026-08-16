@@ -79,7 +79,7 @@
       "cache": true
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build", "^generate"]
     },
     "@nx/js:tsc": {
       "cache": true,

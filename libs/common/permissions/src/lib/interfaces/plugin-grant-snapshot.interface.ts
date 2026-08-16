@@ -3,9 +3,9 @@ import type { Permission } from '@bge/database';
 
 /**
  * Everything `AbilityFactory.createForPlugin` needs, resolved by
- * `PermissionsService.getPluginGrantSnapshot` (#60 D60-2): the plugin's
- * identity coordinates for the D-U render context, whether the operating
- * unit is currently served at all, and the granted permission set split by
+ * `PermissionsService.getPluginGrantSnapshot` (#60): the plugin's
+ * identity coordinates for the condition-template render context, whether
+ * the operating unit is currently served at all, and the granted set split by
  * origin (core catalog rows vs. own-namespace canonical slugs).
  *
  * The read path has already applied both consumption guards when this

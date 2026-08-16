@@ -2,13 +2,13 @@ import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { PLUGIN_SLUG_PATTERN, RESERVED_PLUGIN_SLUGS } from '@boardgamesempire/plugin-manifest';
 
 /**
- * D-K drift spec: `RESERVED_PLUGIN_SLUGS` is maintained by hand in the
+ * Drift spec: `RESERVED_PLUGIN_SLUGS` is maintained by hand in the
  * framework-free manifest lib (the dependency points this way, so the
  * manifest lib cannot import `PluginEvent`); this spec is the enforcement
  * that keeps the two vocabularies from drifting silently — same pattern as
  * the `PluginCategory` and `PluginLifecycleEventType` bijection specs.
  */
-describe('RESERVED_PLUGIN_SLUGS ↔ PluginEvent (D-K)', () => {
+describe('RESERVED_PLUGIN_SLUGS ↔ PluginEvent', () => {
   const LIFECYCLE_ROUTING_PREFIX = 'plugin.';
 
   const derivedFromLifecycleVocabulary = new Set(

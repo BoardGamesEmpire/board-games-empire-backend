@@ -69,7 +69,7 @@ import {
 } from './update.errors';
 
 /**
- * Typed update provenance, mirroring D-AG's install shape: `bundled = false
+ * Typed update provenance, mirroring install's shape: `bundled = false
  * ⇒ pendingSha256` is unrepresentable-when-violated. URL/registry
  * provenance columns keep describing the INSTALL; #84 extends this when its
  * ingress metadata needs to ride an update.
@@ -79,20 +79,20 @@ export type PluginUpdateProvenance =
   | { readonly bundled: false; readonly pendingSha256: string };
 
 export interface PluginUpdateStageInput {
-  /** The NEW version's resolved directory — placed by #84 (or the bundled resolver); this service never touches a tarball (D-Y/D-AN). */
+  /** The NEW version's resolved directory — placed by #84 (or the bundled resolver); this service never touches a tarball (#59). */
   readonly directory: InstalledPluginDirectory;
   readonly provenance: PluginUpdateProvenance;
-  /** The staging admin — server-admin authority is verified, never assumed (D-AD parity). */
+  /** The staging admin — server-admin authority is verified, never assumed, exactly as install verifies it. */
   readonly initiatorId: string;
-  /** Admin opt-in: extend static analysis into node_modules; findings advisory only (D-AC). */
+  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
   readonly deepScan?: boolean;
-  /** Exact re-entry of every forbidden import specifier analysis reported on the NEW version (D-AJ parity). */
+  /** Exact re-entry of every forbidden import specifier analysis reported on the NEW version — the same acknowledgement install demands. */
   readonly acknowledgeForbiddenImports?: readonly string[];
 }
 
 export interface PluginUpdateStageResult {
   readonly plugin: Plugin;
-  /** True when no server-gating escalation existed and the update activated immediately (D-AN). */
+  /** True when no server-gating escalation existed and the update activated immediately. */
   readonly activated: boolean;
   readonly comparison: UpdateEscalationComparison;
   readonly analysis: StaticAnalysisReport;
@@ -105,7 +105,7 @@ export interface PluginUpdateStageResult {
 export interface PluginUpdateApproveInput {
   readonly slug: string;
   readonly approverId: string;
-  /** Exact re-entry of every Critical permission slug this approval will GRANT (D-AE/D-AI parity). */
+  /** Exact re-entry of every Critical permission slug this approval will GRANT — the same second factor install demands (#59). */
   readonly confirmCriticalSlugs?: readonly string[];
 }
 
@@ -134,7 +134,7 @@ interface ActivationOutcome {
   readonly revokedGrants: readonly PluginGrant[];
   /** Grants deleted because their permission moved consent scope. */
   readonly scopeMovedGrants: readonly PluginGrant[];
-  /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (D-X). */
+  /** Server-scope grants whose `decidedRiskLevel` this approval refreshed (#59). */
   readonly reStampedGrants: readonly PluginGrant[];
   readonly suspendedHouseholdUnits: readonly SuspensionCandidate<HouseholdPlugin>[];
   /** User units suspended pending re-consent — the household pass's exact user-scope mirror (#225). */
@@ -142,7 +142,7 @@ interface ActivationOutcome {
 }
 
 /**
- * The update consent seam (#59 Phase C3, D-AN): the DB/consent half of a
+ * The update consent seam (#59 Phase C3): the DB/consent half of a
  * plugin update. #84's distribution pipeline wraps `stage()` exactly as it
  * wraps `install()` — ingress, SHA-256 verification, extraction, and disk
  * placement of the new version stay there, as does removing a rejected
@@ -151,16 +151,16 @@ interface ActivationOutcome {
  * `stage()` validates the new manifest (with `bgeCompat` ENFORCED — a
  * version that cannot load must not be activatable), screens it through the
  * SAME consent gates as install (categorical exclusions, core-permission
- * existence, static analysis with the D-AJ overridable specifier gate),
- * runs the D-AP escalation comparison against the ACTIVE manifest, and then
- * either activates immediately (no server-gating escalation, no D-AB
+ * existence, static analysis with its overridable forbidden-specifier
+ * gate), runs the escalation comparison against the ACTIVE manifest, and
+ * then either activates immediately (no server-gating escalation, no
  * denial block) or writes the pending columns and emits
  * `plugin.update_pending` for the admin surface.
  *
- * ACTIVATION never hot-swaps running code (D-AT): the transaction promotes
- * the DB state — version, manifest, the D-AF `declares[]` catalog diff with
+ * ACTIVATION never hot-swaps running code: the transaction promotes
+ * the DB state — version, manifest, the `declares[]` catalog diff with
  * `'permission-removed'` grant revocation, per-unit suspension for
- * required-at-household-scope escalations (D-AO) — and sets
+ * required-at-household-scope escalations — and sets
  * `restartRequired`; the running instance continues on the prior code until
  * the next boot, where the loader clears the flag. No forced restart:
  * updating several plugins in one sitting must not bounce the server N
@@ -168,7 +168,7 @@ interface ActivationOutcome {
  *
  * User-scope escalations suspend `UserPlugin` units exactly as household
  * escalations suspend `HouseholdPlugin` units (#225) — same batched shape,
- * same guarded write, same D-AR late-acceptance re-enable. Users with no
+ * same guarded write, same late-acceptance re-enable. Users with no
  * enablement row are untouched: no row means not enabled, so there is
  * nothing to suspend.
  */
@@ -237,7 +237,7 @@ export class PluginUpdateService {
     const active = this.validateActiveManifest(plugin);
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
-    // Immediate activation (D-AN): nothing server-gates and no denial
+    // Immediate activation: nothing server-gates and no denial
     // blocks. New household/user-scope permissions do not hold this path —
     // their consent is the units', expressed as suspension below.
     if (!comparison.serverGating && comparison.blockedByDenial.length === 0) {
@@ -356,7 +356,7 @@ export class PluginUpdateService {
     const corePermissions = await this.loadCorePermissions(next);
 
     // Recomputed rather than replayed from staging: decisions can change
-    // between stage and approve, and D-AB keys on the denials that survive
+    // between stage and approve, and the block keys on the denials that survive
     // NOW.
     const comparison = await this.compare(plugin, active, next, corePermissions);
 
@@ -365,15 +365,15 @@ export class PluginUpdateService {
     }
 
     // Approval IS the server-scope consent act for the update's NEW
-    // server-consentable checks — seeded Granted, mirroring install (D-AA
-    // posture). Checks with ANY existing row are left alone: a Granted row
+    // server-consentable checks — seeded Granted, mirroring install's
+    // posture. Checks with ANY existing row are left alone: a Granted row
     // is already consent, and a Denied row on an optional check is a
     // durable refusal this approval must not overwrite.
     const checksToSeed = await this.serverChecksToSeed(plugin, next);
 
     // The second factor tracks the authority this approval CONFERS, which is
     // the newly seeded checks plus any server-scope permission whose risk
-    // rose since it was decided (D-X). Re-approving a Low permission that
+    // rose since it was decided (#59). Re-approving a Low permission that
     // became Critical hands over Critical authority just as surely as
     // granting it fresh, so it demands the same re-entry.
     const riskEscalatedChecks = next.permissionChecks.filter((check) =>
@@ -433,7 +433,7 @@ export class PluginUpdateService {
 
     // #84 seam: the staged version's on-disk files are the distribution
     // pipeline's to remove — this service never touches the filesystem
-    // beyond reading manifests (D-Y).
+    // beyond reading manifests (#59).
     this.emitter.emit(
       PluginUpdateRejectedEvent.eventName,
       new PluginUpdateRejectedEvent(this.stagingSnapshot(plugin), this.stagingSnapshot(rejected), initiatedAt),
@@ -443,7 +443,7 @@ export class PluginUpdateService {
     return rejected;
   }
 
-  /** D-AS predicate at the seam: a tombstoned row is not an update target, and the distinction deserves its own error. */
+  /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
   private async loadUpdatablePlugin(slug: string): Promise<Plugin> {
     const plugin = await this.db.plugin.findUnique({ where: { slug } });
 
@@ -626,7 +626,7 @@ export class PluginUpdateService {
 
   /**
    * TODAY's catalog risk per requested slug. Plugin-declared rows are locked
-   * to an explicit Low (D-W) and can never risk-escalate; core risk is the
+   * to an explicit Low and can never risk-escalate; core risk is the
    * current classification.
    */
   private currentRiskBySlug(
@@ -684,12 +684,12 @@ export class PluginUpdateService {
 
   /**
    * The activation transaction, shared by the immediate path and
-   * `approve()`: promote the pending state, apply the D-AF `declares[]`
+   * `approve()`: promote the pending state, apply the `declares[]`
    * catalog diff (insert added rows, revoke and delete grants on removed
    * declares with `'permission-removed'` provenance, delete the rows),
    * seed the approval's server grants, suspend household AND user units
-   * lacking consent on their scope's re-consent escalations (D-AO, #225),
-   * and set `restartRequired` (D-AT). Events are collected inside and
+   * lacking consent on their scope's re-consent escalations (#225),
+   * and set `restartRequired`. Events are collected inside and
    * emitted by the caller AFTER commit.
    */
   private async activate(
@@ -709,7 +709,7 @@ export class PluginUpdateService {
       const addedDeclares = [...nextDeclares].filter((slug) => !activeDeclares.has(slug));
       const removedDeclares = [...activeDeclares].filter((slug) => !nextDeclares.has(slug));
 
-      // D-AF: grants on removed declares are deleted with
+      // Grants on removed declares are deleted with
       // 'permission-removed' provenance — collected BEFORE deletion because
       // the revocation events are the only durable record of what lapsed.
       let revokedGrants: PluginGrant[] = [];
@@ -724,12 +724,12 @@ export class PluginUpdateService {
 
       for (const slug of addedDeclares) {
         await tx.pluginPermission.create({
-          // Explicit Low, never the manifest and never a schema default (D-W).
+          // Explicit Low, never the manifest and never a schema default (#59).
           data: { pluginId: plugin.id, slug, riskLevel: RiskLevel.Low },
         });
       }
 
-      // D-X re-stamp: approval is the consent act for a server-scope risk
+      // Re-stamp: approval is the consent act for a server-scope risk
       // escalation, so the row records TODAY's risk and this version. Without
       // it the stale baseline re-fires the same escalation on every future
       // update and the Critical second factor never sees the reclassification.
@@ -821,7 +821,7 @@ export class PluginUpdateService {
           pendingManifestJson: Prisma.DbNull,
           pendingSha256: null,
           pendingSince: null,
-          // D-AT: the running instance is still the prior code; the loader
+          // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.
           restartRequired: true,
         },
@@ -853,7 +853,7 @@ export class PluginUpdateService {
               status: PluginGrantStatus.Granted,
               permissionSlug: { in: [...comparison.householdReconsentSlugs] },
             },
-            // decidedRiskLevel is load-bearing, not decoration: for a D-X
+            // decidedRiskLevel is load-bearing, not decoration: for a risk
             // escalation the Granted row EXISTS by definition — its stale
             // risk is what escalated — so treating presence as consent would
             // silently skip every risk-escalated unit.
@@ -1022,12 +1022,12 @@ export class PluginUpdateService {
    * the pure half of the suspension pass, shared by the household and user
    * blocks in `activate()` so the covering predicate cannot drift between
    * scopes. A slug is outstanding unless the unit has a Granted row AND the
-   * risk it consented under still covers today's classification (D-X).
+   * risk it consented under still covers today's classification (#59).
    */
   private suspensionCandidates<TUnit>(args: {
     readonly units: readonly TUnit[];
     readonly scopeIdOf: (unit: TUnit) => string;
-    /** Constructed, not read back — the write sets exactly the suspension fields; `enabled` intent is untouched (D-AO). */
+    /** Constructed, not read back — the write sets exactly the suspension fields; `enabled` intent is untouched. */
     readonly suspend: (unit: TUnit) => TUnit;
     readonly granted: readonly {
       readonly scopeId: string;

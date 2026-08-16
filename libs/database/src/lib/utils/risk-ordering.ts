@@ -3,12 +3,12 @@ import type { RiskLevel } from '../client';
 /**
  * Ordering over `RiskLevel`, and the single question every consent check
  * asks of a stored decision: does the risk the unit consented under still
- * cover the risk the permission carries today (D-X)?
+ * cover the risk the permission carries today (#59)?
  *
  * Lives here (rather than in the plugin runtime, its original home) because
  * consumers now span two dependency islands: the runtime's escalation
- * comparison / suspension pass / D-AR re-enable check, and the permissions
- * lib's plugin grant read path (#60 D60-2) — which the runtime imports and
+ * comparison / suspension pass / late-acceptance re-enable check, and the
+ * permissions lib's plugin grant read path (#60) — which the runtime imports and
  * therefore must not be imported by. `@bge/database` is beneath both.
  *
  * Explicit rather than derived from enum declaration order: the Prisma enum

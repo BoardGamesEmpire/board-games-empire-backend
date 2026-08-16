@@ -167,8 +167,8 @@ export class PluginGrantService {
       // a user who consented but is not enabled, a state only another
       // decision could heal. The update arm is deliberately empty: the row
       // may exist suspended or user-disabled, and consent never writes
-      // `enabled` or clears a suspension here (D-AO parity — the D-AR
-      // re-enable path below owns that transition, with its own predicate).
+      // `enabled` or clears a suspension here — the late-acceptance
+      // re-enable path below owns that transition, with its own predicate.
       // A Denied decision creates no row: a refusal confers no enablement,
       // and the durable denial already lives on the grant row itself.
       if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
@@ -194,7 +194,7 @@ export class PluginGrantService {
     );
     this.emitter.emit(EventClass.eventName, event);
 
-    // Late acceptance re-enables (D-AR): a CHANGED unit-scope `Granted`
+    // Late acceptance re-enables: a CHANGED unit-scope `Granted`
     // decision is the only transition that can clear a consent suspension,
     // so the check rides the decision itself rather than a sweeper. Same
     // shape at both unit scopes (#225).
@@ -212,7 +212,7 @@ export class PluginGrantService {
   /**
    * Clear a unit's `suspendedForConsent` once the household's consent state
    * satisfies the ACTIVE manifest, and emit `plugin.unit_enabled`
-   * (D-AR/D-AU). Evaluated on every changed Household grant rather than only
+   * (#59). Evaluated on every changed Household grant rather than only
    * on escalated slugs — self-healing: if an intervening update removed a
    * requirement, the next consent still lifts a suspension that no longer
    * has outstanding slugs.
@@ -221,7 +221,7 @@ export class PluginGrantService {
    * pass, or a unit oscillates: suspended by activation, then cleared by an
    * unrelated consent that never addressed what suspended it. So a slug is
    * outstanding when it is required and ungranted, OR when it is granted at
-   * a `decidedRiskLevel` that no longer covers today's catalog risk (D-X) —
+   * a `decidedRiskLevel` that no longer covers today's catalog risk —
    * presence of a `Granted` row is not consent at a risk nobody was shown.
    *
    * Failures are logged, never thrown: the decision above is already
@@ -286,7 +286,7 @@ export class PluginGrantService {
       );
       this.logger.log(
         `Household '${householdId}' re-enabled for plugin '${plugin.slug}': consent for '${check.canonicalSlug}' ` +
-          'cleared the last outstanding required permission (D-AR late acceptance)',
+          'cleared the last outstanding required permission (late acceptance)',
       );
     } catch (err) {
       this.logger.error(
@@ -363,7 +363,7 @@ export class PluginGrantService {
       );
       this.logger.log(
         `User '${userId}' re-enabled for plugin '${plugin.slug}': consent for '${check.canonicalSlug}' ` +
-          'cleared the last outstanding required permission (D-AR late acceptance)',
+          'cleared the last outstanding required permission (late acceptance)',
       );
     } catch (err) {
       this.logger.error(
@@ -402,7 +402,7 @@ export class PluginGrantService {
     });
     const decidedBySlug = new Map(granted.map((row) => [row.permissionSlug, row.decidedRiskLevel]));
 
-    // Plugin-declared rows are locked to an explicit Low (D-W); core risk is
+    // Plugin-declared rows are locked to an explicit Low; core risk is
     // today's classification, read fresh rather than reconstructed.
     const coreSlugs = unitChecks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const coreRisks =
@@ -529,7 +529,7 @@ export class PluginGrantService {
       throw new PluginGrantPluginNotFoundError(pluginId);
     }
 
-    // D-AS at the consent seam (#225): a tombstoned plugin is not a
+    // Tombstones at the consent seam (#225): a tombstoned plugin is not a
     // decision target at ANY scope — same posture as the update service.
     // `Plugin.enabled` deliberately does NOT gate here: the kill switch
     // decides when consent is ACTIONABLE, not whether it is decidable, and

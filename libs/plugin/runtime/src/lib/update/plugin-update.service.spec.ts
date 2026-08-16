@@ -231,7 +231,7 @@ describe('PluginUpdateService', () => {
       await expect(service.stage(input())).rejects.toThrow(PluginUpdatePluginNotFoundError);
     });
 
-    it('rejects a tombstoned plugin (D-AS)', async () => {
+    it('rejects a tombstoned plugin', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ uninstalledAt: new Date('2026-07-01T00:00:00Z') }));
       await writeManifest(nextManifest());
 
@@ -287,7 +287,7 @@ describe('PluginUpdateService', () => {
       await expect(service.stage(input())).rejects.toMatchObject({ missingSlugs: ['feedback:read'] });
     });
 
-    it('gates on unacknowledged forbidden imports with exact re-entry (D-AJ parity)', async () => {
+    it('gates on unacknowledged forbidden imports with exact re-entry, as install does', async () => {
       const finding: StaticAnalysisFinding = {
         kind: 'esm-import',
         specifier: 'child_process',
@@ -308,7 +308,7 @@ describe('PluginUpdateService', () => {
     });
   });
 
-  describe('stage() immediate activation (D-AN)', () => {
+  describe('stage() immediate activation', () => {
     it('activates in place when nothing escalates: version promoted, restartRequired set, sha rolled forward', async () => {
       await writeManifest(nextManifest());
 
@@ -346,7 +346,7 @@ describe('PluginUpdateService', () => {
       expect('installedSha256' in updateData).toBe(false);
     });
 
-    it('applies the D-AF declares diff: added rows created Low, removed grants revoked with permission-removed', async () => {
+    it('applies the declares diff: added rows created Low, removed grants revoked with permission-removed', async () => {
       // v1.3.0 renames the declared permission: manage:digest → manage:archive.
       const removedGrant = makeGrant({
         id: 'grant-2',
@@ -421,7 +421,7 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
-    it('forces staging when a durable denial blocks activation even with no server-gating escalation (D-AB)', async () => {
+    it('forces staging when a durable denial blocks activation even with no server-gating escalation', async () => {
       db.pluginGrant.findMany.mockResolvedValue([
         makeGrant({ status: PluginGrantStatus.Denied, permissionSlug: 'feedback:read' }),
         makeGrant({ id: 'grant-2', permissionSlug: 'plugin|demo-sink|manage:digest', decidedRiskLevel: RiskLevel.Low }),
@@ -461,7 +461,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('re-checks the denial block at approval time (D-AB)', async () => {
+    it('re-checks the denial block at approval time', async () => {
       const next = nextManifest({
         permissions: {
           ...activeManifest.permissions,
@@ -478,7 +478,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('demands exact Critical re-entry for the NEW server checks it will grant (D-AE parity)', async () => {
+    it('demands exact Critical re-entry for the NEW server checks it will grant, as install does', async () => {
       const next = nextManifest({
         permissions: {
           ...activeManifest.permissions,
@@ -507,7 +507,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('activates: seeds ONLY undecided server checks Granted, promotes pending, suspends unconsented units (D-AO)', async () => {
+    it('activates: seeds ONLY undecided server checks Granted, promotes pending, suspends unconsented units', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -620,7 +620,7 @@ describe('PluginUpdateService', () => {
     });
 
     /**
-     * D-X: a permission whose catalog risk rose since it was decided. Without
+     * A permission whose catalog risk rose since it was decided. Without
      * the re-stamp the stale baseline re-fires this escalation on every future
      * update, and the Critical second factor never sees the reclassification.
      */
@@ -730,7 +730,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('suspends a unit holding a STALE Granted row — presence of a grant is not consent at the new risk (D-X)', async () => {
+    it('suspends a unit holding a STALE Granted row — presence of a grant is not consent at the new risk', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -931,7 +931,7 @@ describe('PluginUpdateService', () => {
    * scope — user escalations never server-gate, and rowless users are
    * untouched by construction.
    */
-  describe('user-scope suspension (D-AO at user scope, #225)', () => {
+  describe('user-scope suspension (#225)', () => {
     const makeUserUnit = (overrides: Partial<UserPlugin> = {}): UserPlugin => ({
       id: 'up-1',
       userId: 'user-1',
@@ -946,7 +946,7 @@ describe('PluginUpdateService', () => {
     });
 
     // A required user check on the (server-scope) fixture is legal under
-    // D-J as narrowed by #225 — UserPlugin is the per-user enable surface
+    // Narrowed by #225 — UserPlugin is the per-user enable surface
     // at any plugin scope.
     const nextWithUserCheck = (): PluginManifest =>
       nextManifest({
@@ -1055,7 +1055,7 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitDisabledEvent.eventName, expect.anything());
     });
 
-    it('suspends a unit holding a STALE Granted row — presence is not consent at the new risk (D-X)', async () => {
+    it('suspends a unit holding a STALE Granted row — presence is not consent at the new risk', async () => {
       // Active AND next both request the user check; only the catalog risk
       // moved (Low → High) above the risk the user consented under.
       const shared = nextWithUserCheck();

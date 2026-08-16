@@ -35,7 +35,7 @@ export class PluginGrantPluginNotFoundError extends Error {
 }
 
 /**
- * The plugin the decision targets is tombstoned (D-AS): an uninstalled
+ * The plugin the decision targets is tombstoned: an uninstalled
  * plugin is not a decision target at ANY scope — its grants were cleared on
  * uninstall, and recording new consent against a row the loader will never
  * serve would manufacture authority for nothing (#225).

@@ -58,7 +58,7 @@ const UNSCREENABLE_KINDS: ReadonlySet<StaticAnalysisFindingKind> = new Set([
 
 export interface StaticAnalysisOptions {
   /**
-   * Admin opt-in (D-AC): extend the scan into `node_modules`. Every finding
+   * Admin opt-in: extend the scan into `node_modules`. Every finding
    * it produces is advisory — vendored code trips the specifier list
    * legitimately — so this exists for the admin who wants eyes on the whole
    * tree before confirming, never as a gate.
@@ -93,9 +93,9 @@ const errorCode = (err: unknown): string | undefined =>
 const findingIdentity = (finding: StaticAnalysisFinding): string => `${finding.kind}\u0000${finding.specifier ?? ''}`;
 
 /**
- * Install-time static analysis (#59 D-E): `es-module-lexer` for ESM import
+ * Install-time static analysis (#59): `es-module-lexer` for ESM import
  * specifiers, a `meriyah` AST pass for CJS `require(...)` calls, and
- * name-level screening of dependency descriptors (D-AC), with npm alias
+ * name-level screening of dependency descriptors, with npm alias
  * ranges resolved so a renamed package cannot slip past every screen at once.
  *
  * What GATES is narrow and statable: the plugin's own source, and the
@@ -105,7 +105,7 @@ const findingIdentity = (finding: StaticAnalysisFinding): string => `${finding.k
  * `axios` is a legitimate occurrence and rejecting the install over it would
  * punish the author for a choice they did not make.
  *
- * Defense-in-depth by design (D-B): plugins are never mounted into host DI,
+ * Defense-in-depth by design: plugins are never mounted into host DI,
  * so a forbidden import would not resolve to a live service anyway — which
  * is why non-literal dynamic specifiers and unreadable or unparseable files
  * are WARNINGS in the audit payload, not rejections. Hard-failing on lazy
@@ -186,7 +186,7 @@ export class PluginStaticAnalysisService {
   /**
    * Probe that the resolved parser can handle every syntax class the AST
    * pass depends on, run before the first scan and REFUSING to analyze when
-   * any probe fails (#219 / D-AM). A capability gap means each file using
+   * any probe fails (#219). A capability gap means each file using
    * that syntax degrades to `parse-failure`, its `require()` calls go
    * unscreened, and the lexer-failure fallback is lost for it — partial
    * coverage presenting as a completed scan, which is the one report this
@@ -366,7 +366,7 @@ export class PluginStaticAnalysisService {
       return [...collected.values()];
     }
 
-    // ESM pass (D-E): static import/export-from specifiers plus dynamic
+    // ESM pass: static import/export-from specifiers plus dynamic
     // import() call sites, where a non-literal specifier is unscreenable and
     // therefore a warning.
     let lexerSucceeded = true;
@@ -389,7 +389,7 @@ export class PluginStaticAnalysisService {
       lexerSucceeded = false;
     }
 
-    // CJS pass (D-E): meriyah AST for require(...) calls. When the lexer
+    // CJS pass: meriyah AST for require(...) calls. When the lexer
     // failed, the same walk also recovers import declarations so a file one
     // parser chokes on is still screened by the other.
     const program = this.parseProgram(source);
@@ -479,7 +479,7 @@ export class PluginStaticAnalysisService {
   }
 
   /**
-   * Dependency screening by NAME (D-AC). Alias ranges are resolved on both
+   * Dependency screening by NAME. Alias ranges are resolved on both
    * sides — the local name an alias hides behind is unlisted by
    * construction, and so is the `require()` of it, so without this the
    * rename defeats every screen and still reports clean.

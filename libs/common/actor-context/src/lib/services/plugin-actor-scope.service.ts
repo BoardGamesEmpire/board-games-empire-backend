@@ -43,7 +43,7 @@ export class PluginActorScope {
    * chains via AsyncLocalStorage when `fn` is async.
    *
    * `unit` is the consent unit the plugin operates AS for the duration of
-   * the scope (#60 D60-1) — deliberately required, never defaulted: this is
+   * the scope (#60) — deliberately required, never defaulted: this is
    * an authority input (grants and CASL condition templates resolve against
    * it), and an implicit Server default would silently widen or narrow what
    * a forgotten call site resolves. Boot-time loads pass

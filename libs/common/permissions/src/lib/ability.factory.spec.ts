@@ -860,7 +860,7 @@ describe('AbilityFactory', () => {
       ...overrides,
     });
 
-    describe('serving predicate (D60-2)', () => {
+    describe('serving predicate', () => {
       it('produces a no-rule ability when the unit is not servable, regardless of grants', () => {
         const ability = factory.createForPlugin(
           makeSnapshot({
@@ -913,7 +913,7 @@ describe('AbilityFactory', () => {
       });
     });
 
-    describe('core grants — unit-coordinate rendering (D-U)', () => {
+    describe('core grants — unit-coordinate rendering', () => {
       const readGameInHousehold = () =>
         makePermission({
           action: Action.read,
@@ -972,7 +972,7 @@ describe('AbilityFactory', () => {
       });
     });
 
-    describe('fail-loud out-of-context rejection (D60-3)', () => {
+    describe('fail-loud out-of-context rejection', () => {
       it('rejects the user-centric seed templates — {{ user.id }} is not plugin-grantable', () => {
         const seeded = makePermission({
           action: Action.read,

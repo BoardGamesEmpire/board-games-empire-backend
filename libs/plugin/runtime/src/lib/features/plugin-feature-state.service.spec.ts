@@ -196,7 +196,7 @@ describe('PluginFeatureStateService', () => {
     expect(db.plugin.findUnique).not.toHaveBeenCalled();
   });
 
-  describe('derivation (D-AQ)', () => {
+  describe('derivation', () => {
     it('reports every feature active for a fully consented, served household unit', async () => {
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 
@@ -257,7 +257,7 @@ describe('PluginFeatureStateService', () => {
       expect(feature).toMatchObject({ state: 'disabled', reason: 'denied', blockingSlugs: ['feedback:read'] });
     });
 
-    it('a grant whose decided risk no longer covers current risk reports pending (D-X re-consent)', async () => {
+    it('a grant whose decided risk no longer covers current risk reports pending — consent must be re-given', async () => {
       db.permission.findMany.mockResolvedValue([
         riskRow('feedback:read'),
         riskRow('create:notification', RiskLevel.High),
@@ -290,7 +290,7 @@ describe('PluginFeatureStateService', () => {
       expect(feature).toMatchObject({ state: 'active', reason: null, blockingSlugs: [] });
     });
 
-    it('a core subject drifted to the all wildcard reports pending — the D-Z re-check the ability applies', async () => {
+    it('a core subject drifted to the all wildcard reports pending — the same re-check the ability applies', async () => {
       db.permission.findMany.mockResolvedValue([
         riskRow('feedback:read'),
         riskRow('create:notification', RiskLevel.Low, 'all'),
@@ -315,7 +315,7 @@ describe('PluginFeatureStateService', () => {
     });
   });
 
-  describe('suspension (D-AO)', () => {
+  describe('suspension', () => {
     it('reports consent-complete features disabled with reason suspended while the unit is consent-suspended', async () => {
       db.householdPlugin.findUnique.mockResolvedValue({ enabled: true, suspendedForConsent: true } as never);
 
@@ -345,7 +345,7 @@ describe('PluginFeatureStateService', () => {
   });
 
   describe('serving vs consent separation', () => {
-    it('a missing household enablement row is not served, but consent-derived states stand (D-AQ literal)', async () => {
+    it('a missing household enablement row is not served, but consent-derived states stand', async () => {
       db.householdPlugin.findUnique.mockResolvedValue(null as never);
 
       const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
@@ -366,7 +366,7 @@ describe('PluginFeatureStateService', () => {
     });
   });
 
-  describe('scope ownership mirrors the ability read path (D60-2)', () => {
+  describe('scope ownership mirrors the ability read path (#60)', () => {
     it('queries grants at the Server sentinel plus the unit coordinates, for bound checks only', async () => {
       await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
 

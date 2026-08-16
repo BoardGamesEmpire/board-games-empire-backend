@@ -156,7 +156,7 @@ describe('consent-gates', () => {
   });
 
   describe('criticalConfirmationExpectation', () => {
-    it('returns only Critical CORE checks, sorted — plugin-declared slugs never qualify (D-W)', () => {
+    it('returns only Critical CORE checks, sorted — plugin-declared slugs never qualify', () => {
       const validated = validate(buildPluginManifest());
       const corePermissions = new Map<string, Permission>([
         ['feedback:read', { slug: 'feedback:read', subject: 'feedback', riskLevel: RiskLevel.Critical } as Permission],

@@ -136,8 +136,8 @@ export class AbilityFactory {
    * never intersected with a triggering user.
    *
    * - A non-servable unit produces a NO-RULE ability (denies everything):
-   *   the quiet-denial half of D60-2/D60-3, kept here so every caller of
-   *   the snapshot gets the policy without re-implementing it.
+   *   the quiet-denial half of the plugin read path, kept here so every
+   *   caller of the snapshot gets the policy without re-implementing it.
    * - Core grants render their condition templates against the
    *   unit-coordinate context `{ plugin: { id, slug }, unit: { scopeType,
    *   householdId?, userId? } }` — and FAIL LOUD (typed rejection, never a
@@ -234,7 +234,7 @@ export class AbilityFactory {
   }
 
   /**
-   * The D-U fail-loud rule: every variable a condition template references
+   * The fail-loud rule: every variable a condition template references
    * must resolve to a value in the unit-coordinate context. Mustache renders
    * missing variables to `''` — for user abilities that lands on a clause
    * that matches nothing and is accepted as an operator concern
@@ -289,7 +289,7 @@ export class AbilityFactory {
     // The parse is inside the typed contract too: a template that does not
     // even parse (unclosed tag) can no more be rendered safely than one
     // referencing unknown variables, and must not escape as Mustache's raw
-    // Error (a 500 instead of the D60-3 403).
+    // Error (a 500 instead of the typed rejection's 403).
     let tokens: unknown[];
     try {
       tokens = Mustache.parse(template);

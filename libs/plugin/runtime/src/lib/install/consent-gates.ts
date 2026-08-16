@@ -25,7 +25,7 @@ export interface ForbiddenPermissionViolation {
 }
 
 /**
- * Categorical exclusions on the manifest's permission surface (D-Z/D-W):
+ * Categorical exclusions on the manifest's permission surface (#59):
  * plugin-administration authority requested as a core check, a declared
  * bare slug that mimics the administration vocabulary, or a declared slug
  * claiming the `'all'` subject. Pattern-based on purpose — the refusal must
@@ -132,10 +132,10 @@ export const collectUnboundedUnitConsentViolations = (
 };
 
 /**
- * The Critical second-factor expectation (D-AE/D-AI): the sorted Critical
+ * The Critical second-factor expectation: the sorted Critical
  * slugs among the server-consentable core checks that the calling pipeline
  * is about to GRANT. Plugin-declared permissions never qualify — their
- * rows are locked to an explicit `Low` (D-W).
+ * rows are locked to an explicit `Low`.
  */
 export const criticalConfirmationExpectation = (
   checksToGrant: readonly NormalizedPermissionRequest[],
@@ -178,7 +178,7 @@ export interface ForbiddenAcknowledgementResolution {
 }
 
 /**
- * Resolve the static-analysis gate against an admin's acceptance (D-AJ).
+ * Resolve the static-analysis gate against an admin's acceptance (#59).
  * Keyed on the SPECIFIER, not the finding: `axios` imported from nine files
  * is one decision, and per-specifier (rather than a blanket flag) means a
  * NEW violation in a later version cannot ride an old acceptance.
