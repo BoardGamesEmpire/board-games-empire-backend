@@ -38,7 +38,7 @@ export const describePluginRegistryContract = <TInstance>(
     });
 
     describe('register', () => {
-      it('registers DISABLED by default (D-M: fail-safe, matching Plugin.enabled @default(false))', () => {
+      it('registers DISABLED by default — fail-safe, matching Plugin.enabled @default(false)', () => {
         registry.register('alpha', options.createInstance(1));
 
         expect(registry.has('alpha')).toBe(true);
@@ -107,7 +107,7 @@ export const describePluginRegistryContract = <TInstance>(
         expect(registry.resolve('alpha')).toBe(instance);
       });
 
-      it('throws PluginDisabledError for a DEFAULT registration — enablement must be explicit (D-M)', () => {
+      it('throws PluginDisabledError for a DEFAULT registration — enablement must be explicit', () => {
         registry.register('alpha', options.createInstance(1));
 
         expect(() => registry.resolve('alpha')).toThrow(PluginDisabledError);

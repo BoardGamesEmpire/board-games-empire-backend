@@ -30,7 +30,7 @@ import { expandPluginPermissionSlug, PLUGIN_PERMISSION_DELIMITER } from './plugi
 
 export interface ManifestValidationOptions {
   /**
-   * The running BGE version (build-time injected, see D-D) that `bgeCompat` must satisfy.
+   * The running BGE version (build-time injected, #59) that `bgeCompat` must satisfy.
    */
   readonly bgeVersion: string;
 
@@ -146,7 +146,7 @@ const isTrivialReason = (text: string, minLength: number): boolean => {
 /**
  * Full manifest validation: structural (zod) pass mapped to `SCHEMA_INVALID`
  * issues, then the semantic second pass covering #59 install-validation
- * steps 2–9 plus the Phase A audit rules (D-J scope coherence, D-K slug
+ * steps 2–9 plus the Phase A audit rules (scope coherence, slug
  * reservation). Collect-all by design — every issue in one throw.
  *
  * Deliberately NOT here (they need the database or the tarball and belong to
@@ -224,7 +224,7 @@ export const validatePluginManifest = (
     );
   }
 
-  // ── scope coherence (D-J) ──────────────────────────────────
+  // ── scope coherence ────────────────────────────────────────
   // Per-check consentScope coherence lives in the checks loop below. Topics
   // are deliberately EXEMPT: topic subscription is a per-user opt-in at the
   // topic runtime (#196), never a PluginGrant, so a household/user-scoped
@@ -323,15 +323,15 @@ export const validatePluginManifest = (
       permissionChecks.push({ ...check, consentScope, origin: 'core', canonicalSlug: check.slug });
     }
 
-    // D-J as narrowed by #225: 'household' consent on a server-scope plugin
-    // still has no HouseholdPlugin surface to collect it; 'user' consent is
+    // Narrowed by #225: 'household' consent on a server-scope plugin still
+    // has no HouseholdPlugin surface to collect it; 'user' consent is
     // permitted at ANY plugin scope, because UserPlugin is the per-user
-    // enable surface D-J originally said did not exist.
+    // enable surface the original rule assumed did not exist.
     if (manifest.scope === 'server' && consentScope === 'household') {
       push(
         ManifestErrorCode.SCOPE_INCOHERENT,
         `${path}.consentScope`,
-        `'${check.slug}' requests household-scope consent, but a server-scope plugin has no HouseholdPlugin enable surface to collect it (D-J)`,
+        `'${check.slug}' requests household-scope consent, but a server-scope plugin has no HouseholdPlugin enable surface to collect it`,
       );
     }
 
@@ -505,7 +505,7 @@ export const validatePluginManifest = (
     },
   );
 
-  // ── storage (D-H: declaration-only at MVP, but shape-enforced now) ─────
+  // ── storage (declaration-only at MVP, but shape-enforced now) ─────────
   const tablePrefix = pluginTablePrefix(manifest.slug);
 
   manifest.storage.ownTables.forEach((table, index) => {

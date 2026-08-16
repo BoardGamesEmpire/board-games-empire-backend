@@ -2,7 +2,7 @@ import type { PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/databa
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
 
 /**
- * Escalation vocabulary for the update comparison (#59 Phase C3, D-AN/D-AP).
+ * Escalation vocabulary for the update comparison (#59 Phase C3).
  * Types only — `plugin.events.ts` carries these on the update-pending
  * payload, and the comparator produces them — so the shapes live in a
  * dependency-light file the same way `static-analysis.types.ts` does.
@@ -24,8 +24,8 @@ export type UpdateEscalation =
     }
   /**
    * A permission with an existing consent decision now carries a HIGHER
-   * catalog risk than the one shown when the unit decided (D-X: the stored
-   * `decidedRiskLevel` is the comparison baseline, never a reconstruction).
+   * catalog risk than the one shown when the unit decided — the stored
+   * `decidedRiskLevel` is the comparison baseline, never a reconstruction.
    */
   | {
       readonly kind: 'risk-escalated';
@@ -38,7 +38,7 @@ export type UpdateEscalation =
   | { readonly kind: 'outbound-domain-added'; readonly domain: string }
   /**
    * `network.outboundDomains` moves from an explicit list to the literal
-   * `'configured'` — a BROADENING (D-AP): reach delegates from an enumerated
+   * `'configured'` — a BROADENING: reach delegates from an enumerated
    * set to whatever the runtime SafeHttp policy permits. The reverse
    * transition is a narrowing and produces nothing.
    */
@@ -88,25 +88,25 @@ export interface UpdateEscalationComparison {
    * broadening, or a `writesCore` addition.
    *
    * Escalations belonging to a unit deliberately do NOT server-gate — their
-   * consent is not the server admin's to give (D-V), and gating on them
+   * consent is not the server admin's to give, and gating on them
    * would both ask the wrong principal and stall the update on a decision
    * that principal cannot make. Activation expresses those as per-unit
-   * suspension instead (D-AO).
+   * suspension instead.
    */
   readonly serverGating: boolean;
   /**
    * Server-scope `Denied` rows on permissions the next manifest marks
-   * required (D-AB). Non-empty BLOCKS activation entirely — staging is
+   * required. Non-empty BLOCKS activation entirely — staging is
    * still permitted, approval is refused until the denial is reversed.
    */
   readonly blockedByDenial: readonly string[];
   /**
    * Household-scope slugs a unit must decide again before it may keep
    * serving: newly required, promoted to required, risk-escalated above the
-   * risk the unit consented under (D-X), or newly moved to household
+   * risk the unit consented under, or newly moved to household
    * consent. On activation every household unit lacking a `Granted` row for
-   * all of these is suspended (D-AO) until late acceptance re-enables it
-   * (D-AR), which re-stamps the decision at today's risk.
+   * all of these is suspended until late acceptance re-enables it, which
+   * re-stamps the decision at today's risk (#59).
    *
    * Named for re-consent rather than for `required` because risk escalation
    * qualifies regardless of the flag: consent given for a Low permission is
@@ -125,10 +125,10 @@ export interface UpdateEscalationComparison {
    * User-scope slugs a user must decide again before their unit may keep
    * serving — the exact user-scope mirror of `householdReconsentSlugs`
    * (#225): newly required, promoted to required, risk-escalated above the
-   * risk the user consented under (D-X), or newly moved to user consent. On
+   * risk the user consented under, or newly moved to user consent. On
    * activation every `UserPlugin` unit lacking a covering `Granted` row for
-   * all of these is suspended (D-AO) until late acceptance re-enables it
-   * (D-AR). Users with no enablement row are unaffected — no row means not
+   * all of these is suspended until late acceptance re-enables it. Users
+   * with no enablement row are unaffected — no row means not
    * enabled, so there is nothing to suspend.
    */
   readonly userReconsentSlugs: readonly string[];

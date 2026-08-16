@@ -44,7 +44,7 @@ export enum ManifestErrorCode {
   VERSION_INVALID = 'VERSION_INVALID',
 }
 
-/** Non-fatal author guidance surfaced by `bge-plugin validate` (#84 / D16). */
+/** Non-fatal author guidance surfaced by `bge-plugin validate` (#84). */
 export enum ManifestWarningCode {
   REQUIRED_UNIT_SCOPE_PERMISSION = 'REQUIRED_UNIT_SCOPE_PERMISSION',
 }

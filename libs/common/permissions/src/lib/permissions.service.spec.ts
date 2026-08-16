@@ -253,7 +253,7 @@ describe('PermissionsService', () => {
     });
   });
 
-  describe('getPluginGrantSnapshot (#60 D60-2)', () => {
+  describe('getPluginGrantSnapshot (#60)', () => {
     const HOUSEHOLD_UNIT: PluginUnit = { scopeType: 'Household', householdId: 'hh-1' };
 
     const pluginRow = (overrides: Partial<{ enabled: boolean; uninstalledAt: Date | null }> = {}) => ({
@@ -399,7 +399,7 @@ describe('PermissionsService', () => {
         );
       });
 
-      it('excludes a grant whose decidedRiskLevel no longer covers the current risk (D-X)', async () => {
+      it('excludes a grant whose decidedRiskLevel no longer covers the current risk', async () => {
         db.pluginGrant.findMany.mockResolvedValue([grantRow('read:game', RiskLevel.Low)] as never);
         db.permission.findMany.mockResolvedValue([
           makePermission({ slug: 'read:game', riskLevel: RiskLevel.High }),

@@ -20,7 +20,7 @@ import { UnrecoverableError, type Job } from 'bullmq';
  * Priming is eager per job. A transient resolution failure (DB error) fails the
  * job so BullMQ retries — no silent degradation. A `ForbiddenException` is
  * different: at resolution time it means the actor's authority is structurally
- * gone (revoked api key, a plugin grant that can no longer render — #60 D60-3),
+ * gone (revoked api key, a plugin grant that can no longer render — #60),
  * which no retry can repair, so it is rethrown as BullMQ's `UnrecoverableError`
  * and the job fails once instead of retrying forever. Priming runs only in the
  * main `process` path, not in the lenient `runInActorScope` reused by

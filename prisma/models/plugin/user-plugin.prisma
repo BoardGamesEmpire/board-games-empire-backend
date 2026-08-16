@@ -31,14 +31,14 @@ model UserPlugin {
 
   /// The user's own switch, layered UNDER Plugin.enabled and any household
   /// enablement — their intent, and only theirs. Consent escalation never
-  /// touches it (D-AO parity): the serving predicate is
+  /// touches it: the serving predicate is
   /// `enabled && !suspendedForConsent`, so late acceptance restores exactly
   /// the state the user chose.
   enabled Boolean @default(true)
 
-  /// Consent suspension (D-AO at user scope): an update escalated a
+  /// Consent suspension at user scope: an update escalated a
   /// permission to re-consent at this scope and the user has not accepted.
-  /// Set by activation (UserPluginUnitDisabledEvent), cleared by the D-AR
+  /// Set by activation (UserPluginUnitDisabledEvent), cleared by the
   /// late-acceptance path in PluginGrantService.decide()
   /// (UserPluginUnitEnabledEvent). The suspension CAUSE (the escalating
   /// slugs) rides the lifecycle events, not a column.

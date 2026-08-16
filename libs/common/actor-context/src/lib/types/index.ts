@@ -51,9 +51,9 @@ export const PLUGIN_UNIT_SCOPE_TYPES = ['Server', 'Household', 'User'] as const;
 export type PluginUnitScopeType = (typeof PLUGIN_UNIT_SCOPE_TYPES)[number];
 
 /**
- * The consent unit a plugin actor is operating AS (#60 D60-1) — the
+ * The consent unit a plugin actor is operating AS (#60) — the
  * coordinates ability resolution intersects `PluginGrant` rows against and
- * renders CASL condition templates with (D-U's `unit.*` context).
+ * renders CASL condition templates with (the `unit.*` context).
  *
  * A discriminated union rather than a flat optional-fields shape: each
  * scope type carries EXACTLY the coordinate it owns, so an invalid unit

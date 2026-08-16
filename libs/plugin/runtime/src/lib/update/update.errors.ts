@@ -32,7 +32,7 @@ export class PluginUpdatePluginNotFoundError extends Error {
 }
 
 /**
- * The row exists but is a D-AS tombstone (`uninstalledAt` set): its code is
+ * The row exists but is a tombstone (`uninstalledAt` set): its code is
  * gone and its consent surface was purged, so there is nothing to update.
  * Reinstalling the slug clears the tombstone; that path is the installer's.
  */
@@ -49,7 +49,7 @@ export class PluginUpdateTombstonedError extends Error {
   }
 }
 
-/** The updater is not a server admin. Update consent is a server-admin act (D-AD parity with install). */
+/** The updater is not a server admin. Update consent is a server-admin act, exactly as install consent is. */
 export class PluginUpdateAuthorityError extends Error {
   override readonly name = 'PluginUpdateAuthorityError';
 
@@ -163,7 +163,7 @@ export class PluginUpdateForbiddenPermissionError extends Error {
 }
 
 /**
- * D-AB: a surviving Server-scope `Denied` row exists on a permission the
+ * A surviving Server-scope `Denied` row exists on a permission the
  * pending manifest marks required. Activation is refused until the denial
  * is reversed through the consent surface — a durable refusal is not
  * steamrolled by a version bump. Carries the blocking slugs so the C4
@@ -184,7 +184,7 @@ export class PluginUpdateBlockedByDenialError extends Error {
 }
 
 /**
- * The Critical second factor, update edition (D-AE/D-AI parity): approval
+ * The Critical second factor, update edition (#59): approval
  * grants the update's NEW server-consentable permissions, so any Critical
  * ones demand exact re-entry — every one, nothing else.
  */
@@ -206,7 +206,7 @@ export class PluginUpdateCriticalConfirmationError extends Error {
 /**
  * Static analysis of the new version found forbidden specifiers and the
  * staging admin did not accept them — the same overridable gate, with the
- * same exact re-entry discipline, that D-AJ defines for installs. An update
+ * same exact re-entry discipline, that installs use. An update
  * path weaker than the install path would make version 2 the obvious place
  * to smuggle what version 1 could not carry.
  */

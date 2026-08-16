@@ -16,13 +16,13 @@ model HouseholdPlugin {
 
   /// Household-level switch, layered UNDER Plugin.enabled — the household
   /// ADMIN's intent, and only theirs. Consent escalation never touches it
-  /// (D-AO): the serving predicate is `enabled && !suspendedForConsent`, so
+  /// at all: the serving predicate is `enabled && !suspendedForConsent`, so
   /// late acceptance restores exactly the state the admin chose.
   enabled Boolean @default(true)
 
-  /// Consent suspension (D-AO): an update escalated a permission to
+  /// Consent suspension: an update escalated a permission to
   /// required at this scope and the household has not accepted. Set by
-  /// activation (HouseholdPluginUnitDisabledEvent), cleared by the D-AR
+  /// activation (HouseholdPluginUnitDisabledEvent), cleared by the
   /// late-acceptance path in PluginGrantService.decide()
   /// (HouseholdPluginUnitEnabledEvent). The suspension CAUSE (the
   /// escalating slugs) rides the lifecycle events, not a column.

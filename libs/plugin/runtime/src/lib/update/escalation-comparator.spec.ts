@@ -126,7 +126,7 @@ describe('compareForEscalations', () => {
     });
   });
 
-  describe('risk escalation (D-X)', () => {
+  describe('risk escalation', () => {
     it('flags a grant whose current catalog risk exceeds the decided risk, and server-gates', () => {
       const result = compare({
         active: view({ checks: [check('feedback:read')] }),
@@ -344,7 +344,7 @@ describe('compareForEscalations', () => {
     });
   });
 
-  describe("outbound domains (D-AP 'configured' transitions)", () => {
+  describe("outbound domains ('configured' transitions)", () => {
     it('flags each added domain', () => {
       const result = compare({
         active: view({ outboundDomains: ['a.example.com'] }),
@@ -404,7 +404,7 @@ describe('compareForEscalations', () => {
     });
   });
 
-  describe('denial block (D-AB)', () => {
+  describe('denial block', () => {
     it('blocks on a server-scope Denied row for a permission the next manifest requires', () => {
       const result = compare({
         active: view({ checks: [check('feedback:read', 'server', false)] }),

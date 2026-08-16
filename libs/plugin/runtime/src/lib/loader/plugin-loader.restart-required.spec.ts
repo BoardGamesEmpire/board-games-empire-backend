@@ -23,9 +23,9 @@ jest.mock('@boardgamesempire/plugin-manifest', () => ({
 }));
 
 /**
- * The C3 loader deltas (#59): D-AT `restartRequired` clearing on the boot
+ * The C3 loader deltas (#59): `restartRequired` clearing on the boot
  * that loads the activated version, the advisory disk-version comparison
- * behind it, and the D-AS tombstone predicate on the boot query. The
+ * behind it, and the tombstone predicate on the boot query. The
  * broader load/quarantine matrix lives in `plugin-loader.service.spec.ts`.
  */
 describe('PluginLoaderService — restart-required and tombstones', () => {
@@ -127,7 +127,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
     jest.clearAllMocks();
   });
 
-  it('queries only enabled, non-tombstoned rows (D-AS predicate)', async () => {
+  it('queries only enabled, non-tombstoned rows', async () => {
     db.plugin.findMany.mockResolvedValue([]);
 
     await loader.loadAllEnabled();
@@ -135,7 +135,7 @@ describe('PluginLoaderService — restart-required and tombstones', () => {
     expect(db.plugin.findMany).toHaveBeenCalledWith({ where: { enabled: true, uninstalledAt: null } });
   });
 
-  it('clears restartRequired on the boot that loads the matching disk version (D-AT)', async () => {
+  it('clears restartRequired on the boot that loads the matching disk version', async () => {
     const plugin = makePluginRow({ restartRequired: true });
     db.plugin.findMany.mockResolvedValue([plugin]);
     directories.resolve.mockResolvedValue(await scaffoldDirectory('demo-sink', '1.3.0'));

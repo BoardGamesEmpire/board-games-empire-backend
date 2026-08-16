@@ -10,7 +10,7 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
  * Isolated from the main analyzer spec on purpose: that suite runs the REAL
  * parsers because the service's value is what they actually surface, while
  * this one substitutes the parser to exercise the environments the
- * capability probe exists to refuse (#219 / D-AM) — a build that honours
+ * capability probe exists to refuse (#219) — a build that honours
  * neither module option key, and the genuine stale major (required from its
  * nesting in the dependency tree) that honours the keys but chokes on
  * modern syntax.

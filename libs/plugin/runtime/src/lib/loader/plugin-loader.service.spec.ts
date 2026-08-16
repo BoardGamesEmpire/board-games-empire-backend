@@ -68,7 +68,7 @@ describe('PluginLoaderService', () => {
     const rootDir = join(workDir, slug);
     await mkdir(join(rootDir, 'dist'), { recursive: true });
     await writeFile(join(rootDir, 'package.json'), JSON.stringify({ exports: './dist/index.js' }));
-    // The C3 disk-version containment check (D-AT) compares this against
+    // The C3 disk-version containment check compares this against
     // Plugin.version — the scaffold must describe the version the row claims.
     await writeFile(join(rootDir, 'manifest.json'), JSON.stringify({ slug, version: '1.2.3' }));
     await writeFile(join(rootDir, 'dist', 'index.js'), '// entrypoint');

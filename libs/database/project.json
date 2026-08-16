@@ -7,11 +7,15 @@
   "targets": {
     "generate": {
       "executor": "nx:run-commands",
-      "cache": true,
+      "cache": false,
       "options": {
         "command": "prisma generate"
       },
-      "inputs": ["{workspaceRoot}/prisma/**/*.prisma", "{workspaceRoot}/prisma.config.ts"],
+      "inputs": [
+        "{workspaceRoot}/prisma/**/*.prisma",
+        "{workspaceRoot}/prisma.config.ts",
+        { "externalDependencies": ["prisma", "@prisma/client"] }
+      ],
       "outputs": ["{projectRoot}/src/lib/generated"]
     },
     "prepare": {

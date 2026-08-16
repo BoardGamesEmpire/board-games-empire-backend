@@ -1,5 +1,5 @@
 /**
- * Result shapes for install-time static analysis (#59 D-E / D-AC).
+ * Result shapes for install-time static analysis (#59).
  * Types only — `plugin.events.ts` imports these for the installed event's
  * audit context, and the analyzer service imports them alongside its
  * implementation dependencies, so the shapes live in a dependency-free file.
@@ -12,7 +12,7 @@ export type StaticAnalysisSeverity = 'forbidden' | 'warning';
  * (`node_modules`, admin opt-in) are ADVISORY regardless of severity —
  * vendored code trips the specifier list legitimately (a dependency that
  * itself wraps `axios`), so only `default`-scope forbidden findings gate an
- * install (D-AC).
+ * install.
  */
 export type StaticAnalysisScanScope = 'default' | 'deep';
 
@@ -88,7 +88,7 @@ export const MAX_GATING_EXAMPLES_PER_SPECIFIER = 3;
  * The findings that BLOCK an install: forbidden specifiers reached by the
  * default scan. Everything else — warnings of any scope and ALL deep-scan
  * findings — is recorded in the install audit payload and the install
- * response, never gating (D-AC).
+ * response, never gating.
  */
 export const gatingFindings = (report: StaticAnalysisReport): readonly StaticAnalysisFinding[] =>
   report.findings.filter((finding) => isGatingFinding(finding));

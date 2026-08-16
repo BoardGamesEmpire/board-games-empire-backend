@@ -120,7 +120,7 @@ describe('AuditContextInternalService', () => {
     it('severs the resolved-abilities slot when installing a new actor — abilities never cross principals', () => {
       // A request-scoped store with abilities primed for the outer (user)
       // actor. A nested scope installing a NEW actor (system here; the plugin
-      // scope is the sharp case per D-V) must not inherit them: an unprimed
+      // scope is the sharp case) must not inherit them: an unprimed
       // read inside fails loud instead of silently querying as the outer user.
       const outerAbilities = [{ marker: 'outer-user-abilities' }];
 

@@ -60,7 +60,7 @@ export class PluginInstallUnknownCorePermissionError extends Error {
 
 /**
  * The manifest declares or requests a categorically ungrantable permission:
- * a plugin-administration slug (self-escalation loop, D-Z) or an
+ * a plugin-administration slug (a self-escalation loop) or an
  * `'all'`-wildcard subject. Enforced at install — every grant for it would
  * fail C1's hard exclusion anyway, so the honest outcome is rejecting the
  * install rather than shipping a plugin whose consent surface can never be
@@ -79,7 +79,7 @@ export class PluginInstallForbiddenPermissionError extends Error {
 }
 
 /**
- * The Critical second factor (D-AE / D-AI) was not satisfied:
+ * The Critical second factor (#59) was not satisfied:
  * `confirmCriticalSlugs` must re-enter EXACTLY the Critical slugs this
  * install will GRANT — every one of them, and nothing else.
  *
@@ -106,7 +106,7 @@ export class PluginInstallCriticalConfirmationError extends Error {
 
 /**
  * The resolved meriyah build failed one or more parser capability probes
- * (#219 / D-AM), so the AST pass would degrade: every file using syntax the
+ * (#219), so the AST pass would degrade: every file using syntax the
  * build cannot parse records `parse-failure` instead of being walked, its
  * `require()` calls go unscreened, and the lexer-failure fallback is gone
  * for it. Whatever screening survives, a gate running at partial coverage
@@ -137,7 +137,7 @@ export class PluginStaticAnalysisUnavailableError extends Error {
 
 /**
  * Static analysis found forbidden specifiers in the default scan and the
- * installing admin did not accept them (D-AC).
+ * installing admin did not accept them.
  *
  * The gate is overridable on purpose: this list is a lint aimed at honest
  * authors, not a sandbox — trivial obfuscation defeats it, so treating it as

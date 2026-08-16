@@ -197,7 +197,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         manifestVersion: event.manifestVersion,
         // The escalating slugs are the durable "why" for this suspension —
         // the notification listener and the #67 timeline read them from
-        // here, never from a mutable column (D-AO).
+        // here, never from a mutable column.
         payload: { requiredPermissionSlugs: event.requiredPermissionSlugs },
       };
     }
@@ -297,7 +297,7 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
           pendingVersion: event.after.pendingVersion,
           pendingSha256: event.pendingSha256,
           // What escalated and what the staging admin waved through — the
-          // consent record for WHY approval was demanded (D-AP/D-AJ).
+          // consent record for WHY approval was demanded.
           escalations: event.escalations,
           acknowledgedForbiddenImports: event.acknowledgedForbiddenImports,
         },

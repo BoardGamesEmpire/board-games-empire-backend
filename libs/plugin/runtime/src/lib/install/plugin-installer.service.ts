@@ -50,7 +50,7 @@ import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
 /**
- * Typed provenance (D-AG): `bundled = false ⇒ installedSha256` is
+ * Typed provenance: `bundled = false ⇒ installedSha256` is
  * unrepresentable-when-violated rather than a runtime throw — the compile-
  * time analog of the `bundled = false ⇒ installed_sha256 IS NOT NULL`
  * pipeline invariant, consistent with the `PermissionSeedDefinition`
@@ -68,14 +68,14 @@ export type PluginInstallProvenance =
     };
 
 export interface PluginInstallInput {
-  /** Populated by the #84 pipeline (or the bundled resolver) — the installer never touches a tarball (D-Y). */
+  /** Populated by the #84 pipeline (or the bundled resolver) — the installer never touches a tarball (#59). */
   readonly directory: InstalledPluginDirectory;
   readonly provenance: PluginInstallProvenance;
-  /** The installing admin — server-admin authority is verified, never assumed (D-AD). */
+  /** The installing admin — server-admin authority is verified, never assumed. */
   readonly installerId: string;
-  /** Exact re-entry of every Critical + required permission slug (D-AE). */
+  /** Exact re-entry of every Critical + required permission slug. */
   readonly confirmCriticalSlugs?: readonly string[];
-  /** Admin opt-in: extend static analysis into node_modules; findings advisory only (D-AC). */
+  /** Admin opt-in: extend static analysis into node_modules; findings advisory only. */
   readonly deepScan?: boolean;
   /**
    * Exact re-entry of every forbidden import specifier static analysis
@@ -97,7 +97,7 @@ export interface PluginInstallResult {
   readonly declaredPermissions: readonly PluginPermission[];
   /** Server-scope grants seeded by this install; per-unit consent starts empty. */
   readonly seededGrants: readonly PluginGrant[];
-  /** Full analysis report — warnings and deep-scan advisories for the install response (D-AC). */
+  /** Full analysis report — warnings and deep-scan advisories for the install response. */
   readonly analysis: StaticAnalysisReport;
   /** Author-guidance warnings from manifest validation, surfaced but never gating. */
   readonly warnings: readonly ManifestWarning[];
@@ -106,17 +106,17 @@ export interface PluginInstallResult {
 }
 
 /**
- * The install orchestration seam (#59 Phase C2, D-Y): manifest validation →
- * categorical exclusions → installer authority (D-AD) → core-permission
- * existence (step 3, DB half) → Critical second factor (D-AE) → static
- * analysis (D-E/D-AC) → one transaction persisting the `Plugin` row, its
- * `PluginPermission` catalog (D-AF: fresh-install rows only), and the
+ * The install orchestration seam (#59 Phase C2): manifest validation →
+ * categorical exclusions → installer authority → core-permission
+ * existence (step 3, DB half) → Critical second factor → static
+ * analysis → one transaction persisting the `Plugin` row, its
+ * `PluginPermission` catalog (fresh-install rows only), and the
  * server-scope grant seed → post-commit `plugin.installed` provenance.
  *
  * Input is a resolved directory plus typed provenance — ingress, SHA-256
  * verification, extraction, and the atomic move belong to the #84 pipeline
  * that wraps this service. The fresh-install denial-list check was
- * deliberately dropped (D-AB): no `PluginGrant` rows can exist for a plugin
+ * deliberately dropped: no `PluginGrant` rows can exist for a plugin
  * being created, and uninstall purges them, so denial at install is
  * expressed by the admin declining to confirm.
  *
@@ -296,7 +296,7 @@ export class PluginInstallerService {
   }
 
   /**
-   * The Critical second factor (D-AE): EXACT re-entry — every Critical slug
+   * The Critical second factor (#59): EXACT re-entry — every Critical slug
    * this install will GRANT present, nothing else. Extra entries are
    * rejected too; a confirmation naming slugs that need no confirmation
    * means the caller and the server disagree about what is being consented
@@ -312,7 +312,7 @@ export class PluginInstallerService {
    * gate tracks the authority actually being handed over.
    *
    * Plugin-declared permissions never qualify: their rows are locked to an
-   * explicit `Low` (D-W), so only core checks can be Critical.
+   * explicit `Low`, so only core checks can be Critical.
    */
   private assertCriticalConfirmation(
     validated: PluginManifestValidationResult,
@@ -437,8 +437,8 @@ export class PluginInstallerService {
             data: {
               pluginId: plugin.id,
               slug: declared.canonicalSlug,
-              // Explicit Low, never the manifest and never a schema default
-              // (D-W): own-namespace slugs gate only the plugin's own
+              // Explicit Low, never the manifest and never a schema
+              // default: own-namespace slugs gate only the plugin's own
               // declared surface.
               riskLevel: RiskLevel.Low,
             },

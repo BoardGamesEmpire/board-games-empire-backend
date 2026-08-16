@@ -296,7 +296,7 @@ describe('AbilityService', () => {
           householdId: 'hh-1',
         });
         expect(abilityFactory.createForPlugin).toHaveBeenCalledWith(snap);
-        // The trigger's user graph is never consulted (D-V: no intersection).
+        // The trigger's user graph is never consulted — no intersection.
         expect(permissionsService.getUserRoleGraph).not.toHaveBeenCalled();
         expect(result).toEqual([pluginAbility]);
       });
@@ -313,7 +313,7 @@ describe('AbilityService', () => {
         expect(result).toEqual([emptyAbility]);
       });
 
-      it('plugin render rejection → ForbiddenException (the D60-3 loud path), original error not leaked', async () => {
+      it('plugin render rejection → ForbiddenException (the loud path), original error not leaked', async () => {
         permissionsService.getPluginGrantSnapshot.mockResolvedValue(snapshot());
         abilityFactory.createForPlugin.mockImplementation(() => {
           throw new PluginAbilityRenderRejectionError({

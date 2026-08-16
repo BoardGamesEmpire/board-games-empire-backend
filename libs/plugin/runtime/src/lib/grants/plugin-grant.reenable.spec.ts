@@ -20,7 +20,7 @@ import type { PluginGrantAuthorityService } from './plugin-grant-authority.servi
 import { PluginGrantService, type PluginGrantDecisionInput } from './plugin-grant.service';
 
 /**
- * D-AR late acceptance: `decide()` clears `suspendedForConsent` and emits
+ * Late acceptance: `decide()` clears `suspendedForConsent` and emits
  * `plugin.unit_enabled` once a unit's `Granted` decision covers every
  * required-at-scope permission of the active manifest — for household AND
  * user units (#225). Focused here rather than folded into the main decide()
@@ -28,7 +28,7 @@ import { PluginGrantService, type PluginGrantDecisionInput } from './plugin-gran
  * the full predicate matrix; the user block asserts the mirrored transition
  * and the one behavior unique to that scope.
  */
-describe('PluginGrantService — D-AR re-enable post-effect', () => {
+describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
   // The fixture's household-required surface: calendar:read (required) plus
   // the baseline server checks the post-effect must ignore.
   const manifest = buildPluginManifest({
@@ -223,7 +223,7 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
     expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitEnabledEvent.eventName, expect.anything());
   });
 
-  it('leaves the suspension in place when a granted slug no longer covers the catalog risk (D-X)', async () => {
+  it('leaves the suspension in place when a granted slug no longer covers the catalog risk', async () => {
     // notify:send is OPTIONAL and already granted — at Low, while the catalog
     // now says High. Presence of that row is not consent at today's risk, so
     // clearing the suspension here would undo the update's own escalation.
@@ -346,11 +346,11 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
       );
     });
 
-    it('the in-transaction row ensure does not clear the suspension — only the D-AR predicate may (D-AO parity)', async () => {
+    it('the in-transaction row ensure does not clear the suspension — only the late-acceptance predicate may', async () => {
       await service.decide(userDecision());
 
       // The ensure runs with an EMPTY update arm; the only suspension write
-      // is the guarded D-AR clear asserted above.
+      // is the guarded late-acceptance clear asserted above.
       expect(db.userPlugin.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: {} }));
     });
 
@@ -363,7 +363,7 @@ describe('PluginGrantService — D-AR re-enable post-effect', () => {
       expect(emitter.emit).not.toHaveBeenCalledWith(UserPluginUnitEnabledEvent.eventName, expect.anything());
     });
 
-    it('leaves the suspension in place when a granted slug no longer covers the catalog risk (D-X)', async () => {
+    it('leaves the suspension in place when a granted slug no longer covers the catalog risk', async () => {
       db.pluginGrant.findMany.mockResolvedValue([userGrant({ decidedRiskLevel: RiskLevel.Low })]);
       db.permission.findMany.mockResolvedValue([corePermission('read:user_digest', RiskLevel.High)]);
 

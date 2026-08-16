@@ -85,7 +85,7 @@ describe('plugin lifecycle events', () => {
       expect(event.after).not.toHaveProperty('provenance');
     });
 
-    it('records the forbidden imports the installing admin accepted (#59 D-AJ)', () => {
+    it('records the forbidden imports the installing admin accepted (#59)', () => {
       expect(event.acknowledgedForbiddenImports).toEqual(['axios']);
     });
 
@@ -250,7 +250,7 @@ describe('plugin lifecycle events', () => {
   });
 
   describe('HouseholdPluginUnitDisabledEvent', () => {
-    it('carries the escalated permission slugs and manifest version as context; enabled is untouched (D-AO)', () => {
+    it('carries the escalated permission slugs and manifest version as context; enabled is untouched', () => {
       const event = new HouseholdPluginUnitDisabledEvent(
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
@@ -268,7 +268,7 @@ describe('plugin lifecycle events', () => {
   });
 
   describe('HouseholdPluginUnitEnabledEvent', () => {
-    it('carries the clearing decision as context (D-AR/D-AU)', () => {
+    it('carries the clearing decision as context', () => {
       const event = new HouseholdPluginUnitEnabledEvent(
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
         { id: 'hp_1', householdId: 'hh_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },
@@ -295,7 +295,7 @@ describe('plugin lifecycle events', () => {
 
       expect(event.requiredPermissionSlugs).toEqual(['read:user_digest']);
       expect(event.manifestVersion).toBe('1.3.0');
-      // The user's enabled intent survives the suspension (D-AO parity).
+      // The user's enabled intent survives the suspension, as it does at household scope.
       expect(event.after.enabled).toBe(true);
       expect(event.action).toBe('update');
       expect(event.subject).toBe('UserPlugin');
@@ -304,7 +304,7 @@ describe('plugin lifecycle events', () => {
   });
 
   describe('UserPluginUnitEnabledEvent', () => {
-    it('carries the clearing decision as context (D-AR at user scope, #225)', () => {
+    it('carries the clearing decision as context (#225)', () => {
       const event = new UserPluginUnitEnabledEvent(
         { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: true },
         { id: 'up_1', userId: 'user_1', pluginId: 'plg_1', enabled: true, suspendedForConsent: false },

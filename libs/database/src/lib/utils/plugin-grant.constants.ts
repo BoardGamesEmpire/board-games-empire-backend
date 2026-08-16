@@ -27,7 +27,7 @@ export type PluginUnitCoordinates =
   | { readonly scopeType: 'User'; readonly userId: string; readonly householdId?: undefined };
 
 /**
- * The grant-row scope filters a unit's resolution reads (#60 D60-2): the
+ * The grant-row scope filters a unit's resolution reads (#60): the
  * Server sentinel always (server grants are the plugin's global authority),
  * plus the unit's own coordinates. Never widened past the operating unit —
  * a household-unit read must not see another household's rows — and shared

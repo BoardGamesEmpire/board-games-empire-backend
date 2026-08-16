@@ -236,9 +236,9 @@ export class PluginUpdatePendingEvent extends MutationEvent<Plugin> {
     after: PluginUpdateStagingSnapshot,
     /** Checksum of the staged tarball; `null` for bundled upgrades. */
     public readonly pendingSha256: string | null,
-    /** What escalated — WHY this update needed staged consent (D-AP). Context for the lifecycle row and the C4 surface. */
+    /** What escalated — WHY this update needed staged consent. Context for the lifecycle row and the C4 surface. */
     public readonly escalations: readonly UpdateEscalation[],
-    /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version (D-AJ parity). */
+    /** Forbidden import specifiers the staging admin explicitly accepted on the NEW version. */
     public readonly acknowledgedForbiddenImports: readonly string[],
     initiatedAt: Date,
   ) {
@@ -358,7 +358,7 @@ export type PluginGrantRevocationReason =
   | 'role-demoted'
   | 'user-deleted'
   | 'household-deleted'
-  /** The declaring plugin's update removed the permission from `declares[]` — the D-AF catalog diff deleted its grants. */
+  /** The declaring plugin's update removed the permission from `declares[]` — the catalog diff deleted its grants. */
   | 'permission-removed'
   /**
    * An update moved the permission to a different consent scope, so the
@@ -400,10 +400,10 @@ type HouseholdPluginSuspensionSnapshot = Readonly<
  * A consent unit was SUSPENDED because an update escalated a permission to
  * required at its consent scope and the unit has not accepted (#59
  * consent-unit escalation semantics). Suspension is explicit state
- * (`suspendedForConsent`, D-AO), never an `enabled` flip — the admin's
- * prior intent survives, and late acceptance restores exactly it (D-AR).
+ * (`suspendedForConsent`), never an `enabled` flip — the admin's prior
+ * intent survives, and late acceptance restores exactly it.
  * The escalating slugs and manifest version ride the event: the lifecycle
- * row is the durable "why", per D-A.
+ * row is the durable "why".
  */
 export class HouseholdPluginUnitDisabledEvent extends MutationEvent<HouseholdPlugin> {
   static readonly eventName = PluginEvent.UnitDisabled;
@@ -429,11 +429,11 @@ export class HouseholdPluginUnitDisabledEvent extends MutationEvent<HouseholdPlu
 }
 
 /**
- * Late acceptance re-enabled a suspended unit (D-AR): a `Granted` decision
+ * Late acceptance re-enabled a suspended unit: a `Granted` decision
  * cleared the last outstanding required-at-scope permission, so
  * `PluginGrantService.decide()` lifted the suspension in the same flow —
  * the consent act is the re-enable trigger by definition. Own routing key,
- * symmetric with `UnitDisabled` (D-AU): listeners for consent-suspension
+ * symmetric with `UnitDisabled`: listeners for consent-suspension
  * transitions must not have to filter server kill-switch flips.
  */
 export class HouseholdPluginUnitEnabledEvent extends MutationEvent<HouseholdPlugin> {
@@ -468,9 +468,9 @@ type UserPluginSuspensionSnapshot = Readonly<
  * user-scope mirror of `HouseholdPluginUnitDisabledEvent`. Shares the
  * `plugin.unit_disabled` routing key (the documented `ConfigUpdated`
  * two-class precedent): listeners discriminate on `instanceof` / `subject`,
- * never on the key. Suspension is explicit state (`suspendedForConsent`,
- * D-AO); the user's `enabled` intent survives, and late acceptance restores
- * exactly it (D-AR).
+ * never on the key. Suspension is explicit state (`suspendedForConsent`),
+ * exactly as at household scope: the user's `enabled` intent survives, and
+ * late acceptance restores exactly it.
  */
 export class UserPluginUnitDisabledEvent extends MutationEvent<UserPlugin> {
   static readonly eventName = PluginEvent.UnitDisabled;
@@ -496,8 +496,8 @@ export class UserPluginUnitDisabledEvent extends MutationEvent<UserPlugin> {
 }
 
 /**
- * Late acceptance re-enabled a suspended USER unit (D-AR at user scope,
- * #225): a `Granted` decision cleared the last outstanding user-scope
+ * Late acceptance re-enabled a suspended USER unit (#225): a `Granted`
+ * decision cleared the last outstanding user-scope
  * requirement, so `PluginGrantService.decide()` lifted the suspension in
  * the same flow. Shares the `plugin.unit_enabled` routing key with the
  * household class; `subject` disambiguates.

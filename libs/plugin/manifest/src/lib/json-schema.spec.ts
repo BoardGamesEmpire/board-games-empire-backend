@@ -40,7 +40,7 @@ describe('buildPluginManifestJsonSchema', () => {
   });
 });
 
-describe('renderPluginManifestJsonSchemaArtifact (D-L parity)', () => {
+describe('renderPluginManifestJsonSchemaArtifact', () => {
   it('round-trips to exactly the builder output — the emitted file IS the builder result', () => {
     expect(JSON.parse(renderPluginManifestJsonSchemaArtifact())).toEqual(buildPluginManifestJsonSchema());
   });

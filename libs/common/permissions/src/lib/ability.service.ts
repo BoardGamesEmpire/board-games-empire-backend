@@ -30,10 +30,10 @@ import { AbilityContextInternalService } from './services/ability-context-intern
  * - `system`   → `[systemAbility]` (`manage all`; `reason` is audit-only for now)
  * - `plugin`   → `[pluginAbility]` (#60): the granted set for the actor's
  *                operating consent unit, single-element by design — never
- *                intersected with the triggering user (D-V). A unit that is
+ *                intersected with the triggering user (#60). A unit that is
  *                not currently served resolves to a no-rule ability (denies
  *                everything); a grant that cannot be rendered safely is a
- *                typed rejection surfaced as 403 (D60-3).
+ *                typed rejection surfaced as 403.
  * - `anonymous`/`external` → resolution throws (see
  *   {@link resolveAbilitiesForActor}); these are deferred / have no query surface.
  *
@@ -233,7 +233,7 @@ export class AbilityService {
    * - **Loud rejection** — a granted permission that cannot be consumed
    *   safely ({@link PluginAbilityRenderRejectionError}), whether the
    *   snapshot read detected grant-table corruption or the factory refused
-   *   a template. This is the single handling site D60-3 requires: the
+   *   a template. This is the single handling site for that rejection: the
    *   structured warning below is the debuggability of the resulting 403,
    *   so it names the plugin, the permission, the offending variable, and
    *   the unit coordinates (ids only) before the typed error is mapped to

@@ -3,7 +3,7 @@ import { PluginEvent } from '@boardgamesempire/plugin-contract';
 
 /**
  * Routing key → persisted enum for the dedicated `plugin_lifecycle_events`
- * table (D-A). The Phase B listener uses this to translate an in-process
+ * table. The Phase B listener uses this to translate an in-process
  * event into its durable row; the bijection spec keeps the EventEmitter2
  * vocabulary and the Prisma enum from drifting apart (same pattern as the
  * proto `stringEnums` alignment specs).
