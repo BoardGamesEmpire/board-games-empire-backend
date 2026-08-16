@@ -183,5 +183,38 @@
   },
   "gateway_registry": {
     "auth_type_not_implemented": "Auth type '{authType}' is not yet implemented. Gateway connection requires AuthType.None until this is implemented."
+  },
+  "plugin": {
+    "install_authority": "Installing a plugin requires a server administrator",
+    "update_authority": "Staging, approving, or rejecting a plugin update requires a server administrator",
+    "grant_authority": "You lack the authority to make this consent decision",
+    "grant_exclusion": "'{permissionSlug}' can never be granted to a plugin",
+    "install_forbidden_permission": "The plugin cannot be installed: '{permissionSlug}' is not a grantable permission",
+    "update_forbidden_permission": "The update cannot proceed: '{permissionSlug}' is not a grantable permission",
+    "update_not_found": "Plugin '{slug}' is not installed",
+    "grant_plugin_not_found": "The plugin this decision targets does not exist",
+    "update_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it instead of updating",
+    "grant_tombstoned": "Plugin '{slug}' was uninstalled and cannot accept consent decisions",
+    "install_conflict": "Plugin '{slug}' is already installed — updates go through the pending/approve flow",
+    "install_permission_collision": "Plugin '{slug}' declares permission slugs that already exist",
+    "update_version_conflict": "Version '{version}' of plugin '{slug}' is already active",
+    "update_pending_conflict": "Plugin '{slug}' already has version '{pendingVersion}' staged — resolve it before staging '{incomingVersion}'",
+    "update_no_pending": "Plugin '{slug}' has no staged pending update to resolve",
+    "install_critical_confirmation": "This install grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
+    "update_critical_confirmation": "This update grants Critical permissions that must be explicitly confirmed — re-enter each listed permission exactly",
+    "install_static_analysis": "Static analysis found forbidden imports — re-enter each listed specifier to accept the risk and install anyway",
+    "update_static_analysis": "Static analysis found forbidden imports in the new version — re-enter each listed specifier to accept the risk and proceed",
+    "update_blocked_by_denial": "The update cannot activate: required permissions carry a durable server-scope denial — reverse the denial or reject the update",
+    "install_manifest": "The manifest for plugin '{slug}' failed validation",
+    "update_manifest": "The update manifest for plugin '{slug}' failed validation",
+    "install_unknown_core_permissions": "The manifest requests core permissions that do not exist",
+    "update_unknown_core_permissions": "The update requests core permissions that do not exist",
+    "grant_unknown_permission": "'{permissionSlug}' cannot be decided for this plugin",
+    "grant_consent_scope_mismatch": "'{permissionSlug}' is consented at {expected} scope; this decision was made at {received} scope",
+    "grant_scope_id": "The decision scope identifier is invalid for {scopeType} scope",
+    "grant_scope_not_revocable": "{scopeType}-scope grants are not revocable — they are removed with the plugin",
+    "state_corrupted": "The plugin is in an inconsistent state on this server — an administrator must investigate",
+    "stored_manifest_invalid": "The stored manifest for plugin '{slug}' is invalid or inconsistent with its installed record — an administrator must investigate",
+    "static_analysis_unavailable": "Plugin static analysis is unavailable on this server — installs and updates are refused until an operator resolves the parser installation"
   }
 }

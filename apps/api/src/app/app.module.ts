@@ -29,6 +29,7 @@ import { NotificationsModule } from '@bge/notifications';
 import { createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { PluginModule } from '@bge/plugin';
+import { PluginsApiModule } from '@bge/plugins';
 import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
@@ -241,6 +242,11 @@ import { baseLogger } from './lib/logger';
         defaultLocale: FALLBACK_LOCALE,
       }),
     }),
+
+    // HTTP surface over the plugin runtime (#59 Phase C4, slices #319–#323):
+    // the domain-error → status filter now, consent-collection controllers as
+    // the slices land.
+    PluginsApiModule,
 
     QuotasModule,
     SafeHttpModule,

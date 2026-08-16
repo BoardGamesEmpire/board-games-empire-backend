@@ -60,16 +60,33 @@ export class PluginUpdateAuthorityError extends Error {
   }
 }
 
+/**
+ * Which manifest failed: the transport boundary maps these differently, so
+ * the class must say which one it is rather than leaving the distinction in
+ * message prose.
+ *
+ * - `'new'` — the submitted manifest: a caller error the author can fix.
+ * - `'pending'` — the STORED staged manifest re-validated at approve time.
+ *   The likely cause is a bgeCompat lapse (BGE upgraded between stage and
+ *   approve) and the caller-actionable remedy is rejecting the staged
+ *   update, which clears the state either way — but drift here is
+ *   corruption, so it also warrants a loud log.
+ * - `'active'` — the STORED active manifest: corrupted server state, never
+ *   a caller error (the same contract as `PluginGrantManifestInvalidError`).
+ */
+export type PluginUpdateManifestSource = 'new' | 'pending' | 'active';
+
 /** The new (or stored pending/active) manifest is unreadable, invalid, or does not describe the plugin it arrived for. */
 export class PluginUpdateManifestError extends Error {
   override readonly name = 'PluginUpdateManifestError';
 
   constructor(
     public readonly slug: string,
+    public readonly source: PluginUpdateManifestSource,
     detail: string,
     public readonly issues?: readonly ManifestIssue[],
   ) {
-    super(`Plugin '${slug}' update manifest rejected: ${detail}`);
+    super(`Plugin '${slug}' update manifest rejected (${source}): ${detail}`);
   }
 }
 
