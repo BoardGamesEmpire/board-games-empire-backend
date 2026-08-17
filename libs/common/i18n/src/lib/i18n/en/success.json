@@ -74,5 +74,11 @@
   },
   "feedback": {
     "submitted": "Feedback report submitted successfully"
+  },
+  "plugin": {
+    "enabled": "Plugin '{slug}' enabled successfully",
+    "disabled": "Plugin '{slug}' disabled successfully",
+    "config_updated": "Configuration for plugin '{slug}' updated successfully",
+    "uninstalled": "Plugin '{slug}' uninstalled successfully"
   }
 }

@@ -34,8 +34,8 @@ import {
   type GrantedPermissionRecord,
   type PluginGrantRevocationReason,
 } from '../events/plugin.events';
-import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { CONSENT_SCOPE_TO_GRANT_SCOPE } from '../grants/consent-scope.map';
+import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import {
   collectForbiddenPermissionViolations,
   collectUnboundedUnitConsentViolations,
@@ -50,6 +50,7 @@ import { gatingFindings, type StaticAnalysisReport } from '../install/static-ana
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
 import { compareForEscalations } from './escalation-comparator';
+import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
 import {
   PluginUpdateAuthorityError,
@@ -274,9 +275,11 @@ export class PluginUpdateService {
       // transaction. The check above reads before the write, so two
       // concurrent stages could both see an empty slot and the loser would
       // silently overwrite the winner's staged version — exactly the
-      // supersede this refusal exists to prevent.
+      // supersede this refusal exists to prevent. `uninstalledAt` rides the
+      // same guard: uninstall clears these columns, and re-arming them
+      // afterwards would report a staged update against a tombstone.
       const claimed = await tx.plugin.updateMany({
-        where: { id: plugin.id, pendingVersion: null },
+        where: { id: plugin.id, pendingVersion: null, uninstalledAt: null },
         data: {
           pendingVersion: next.manifest.version,
           pendingManifestJson: next.manifest as Prisma.InputJsonValue,
@@ -288,8 +291,12 @@ export class PluginUpdateService {
       if (claimed.count !== 1) {
         const current = await tx.plugin.findUnique({
           where: { id: plugin.id },
-          select: { pendingVersion: true },
+          select: { pendingVersion: true, uninstalledAt: true },
         });
+
+        if (current?.uninstalledAt != null) {
+          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+        }
 
         throw new PluginUpdatePendingConflictError(
           plugin.slug,
@@ -428,7 +435,7 @@ export class PluginUpdateService {
 
     const rejected = await this.db.plugin.update({
       where: { id: plugin.id },
-      data: { pendingVersion: null, pendingManifestJson: Prisma.DbNull, pendingSha256: null, pendingSince: null },
+      data: CLEARED_STAGED_UPDATE,
     });
 
     // #84 seam: the staged version's on-disk files are the distribution
@@ -539,7 +546,12 @@ export class PluginUpdateService {
       });
     } catch (err) {
       if (err instanceof PluginManifestValidationError) {
-        throw new PluginUpdateManifestError(slug, context.label, `${context.label} manifest failed validation`, err.issues);
+        throw new PluginUpdateManifestError(
+          slug,
+          context.label,
+          `${context.label} manifest failed validation`,
+          err.issues,
+        );
       }
 
       throw err;
@@ -805,8 +817,15 @@ export class PluginUpdateService {
         );
       }
 
-      const updated = await tx.plugin.update({
-        where: { id: plugin.id },
+      // Guarded on the tombstone, not just the id: an uninstall committing
+      // between this flow's load and here would leave the grants and catalog
+      // rows written above stranded on a tombstoned plugin, where the
+      // reinstall's fresh seed collides with them on the grant unique index
+      // and the plugin can never be installed again. Failing the guard rolls
+      // this whole transaction back, which is the only safe answer — the
+      // admin re-runs against the reinstalled plugin.
+      const claimed = await tx.plugin.updateMany({
+        where: { id: plugin.id, uninstalledAt: null },
         data: {
           version: next.manifest.version,
           // Row identity columns follow the manifest they mirror — a version
@@ -817,15 +836,20 @@ export class PluginUpdateService {
           scope: MANIFEST_SCOPE_TO_PRISMA[next.manifest.scope],
           manifestJson: next.manifest as Prisma.InputJsonValue,
           ...(provenance.bundled ? {} : { installedSha256: provenance.pendingSha256 }),
-          pendingVersion: null,
-          pendingManifestJson: Prisma.DbNull,
-          pendingSha256: null,
-          pendingSince: null,
+          ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
           // clears this on the boot that actually loads the new version.
           restartRequired: true,
         },
       });
+
+      if (claimed.count !== 1) {
+        const current = await tx.plugin.findUnique({ where: { id: plugin.id }, select: { uninstalledAt: true } });
+
+        throw new PluginUpdateTombstonedError(plugin.slug, current?.uninstalledAt ?? initiatedAt);
+      }
+
+      const updated = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
 
       // TODAY's risk per requested slug, shared by both suspension passes:
       // the covering test must read one classification or the two scopes

@@ -5,6 +5,7 @@ import {
   PluginGrantStatus,
   PluginScope,
   RiskLevel,
+  SERVER_SCOPE_SENTINEL,
   type DatabaseService,
   type Permission,
   type Plugin,
@@ -19,9 +20,9 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginInstalledEvent } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
-import { SERVER_SCOPE_SENTINEL } from '@bge/database';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
   PluginInstallAuthorityError,
@@ -34,6 +35,7 @@ import {
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
 } from './install.errors';
+import { DEFAULT_PLUGIN_EXECUTION_MODE } from './manifest-enum.maps';
 import { PluginInstallerService, type PluginInstallInput } from './plugin-installer.service';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import type { StaticAnalysisFinding, StaticAnalysisReport } from './static-analysis.types';
@@ -194,6 +196,7 @@ describe('PluginInstallerService', () => {
       db as unknown as DatabaseService,
       authority as unknown as PluginGrantAuthorityService,
       analyzer as unknown as PluginStaticAnalysisService,
+      new PluginConfigSchemaService(),
       emitter as unknown as EventEmitter2,
       options,
     );
@@ -691,6 +694,115 @@ describe('PluginInstallerService', () => {
       await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallConflictError);
       expect(db.plugin.create).not.toHaveBeenCalled();
       expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    describe('reinstall over a tombstone', () => {
+      const tombstoned = (overrides: Partial<Plugin> = {}): Plugin =>
+        makePlugin({
+          id: 'existing',
+          enabled: false,
+          uninstalledAt: new Date('2026-08-01T00:00:00Z'),
+          restartRequired: true,
+          // Retained server config; the fixture schema allows a string webhookUrl.
+          config: { webhookUrl: 'https://retained.example.test' },
+          ...overrides,
+        });
+
+      beforeEach(() => {
+        db.plugin.findUnique.mockResolvedValue(tombstoned());
+        // The tombstone claim is a guarded write, so it goes through
+        // updateMany and re-reads the row it won.
+        db.plugin.updateMany.mockResolvedValue({ count: 1 });
+        db.plugin.findUniqueOrThrow.mockResolvedValue(makePlugin({ id: 'existing', uninstalledAt: null }));
+      });
+
+      it('clears the tombstone in place instead of conflicting — uninstall and its inverse land together', async () => {
+        const result = await service.install(input());
+
+        expect(db.plugin.create).not.toHaveBeenCalled();
+        expect(db.plugin.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            // Guarded on the tombstone still being there: a concurrent
+            // reinstall must not overwrite the living row it produced.
+            where: { id: 'existing', uninstalledAt: { not: null } },
+            data: expect.objectContaining({
+              uninstalledAt: null,
+              enabled: false,
+              restartRequired: true,
+              version: '1.2.0',
+              installedById: 'admin-1',
+              pendingVersion: null,
+              pendingSha256: null,
+              pendingSince: null,
+            }),
+          }),
+        );
+        expect(result.plugin.uninstalledAt).toBeNull();
+      });
+
+      it('re-seeds the permission catalog and server grants — the uninstall purge made consent start from zero', async () => {
+        await service.install(input());
+
+        expect(db.pluginPermission.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ pluginId: 'existing' }) }),
+        );
+        expect(db.pluginGrant.create).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ pluginId: 'existing' }) }),
+        );
+      });
+
+      it('carries retained server config forward when it still satisfies the new schema', async () => {
+        await service.install(input());
+
+        const update = db.plugin.updateMany.mock.calls[0][0] as { data: Record<string, unknown> };
+        expect(update.data['config']).toEqual({ webhookUrl: 'https://retained.example.test' });
+        expect(installedEvent().retainedConfigReset).toBe(false);
+      });
+
+      it('resets schema-invalid retained config to {} and records the reset on the event', async () => {
+        db.plugin.findUnique.mockResolvedValue(tombstoned({ config: { webhookUrl: 42 } }));
+
+        await service.install(input());
+
+        const update = db.plugin.updateMany.mock.calls[0][0] as { data: Record<string, unknown> };
+        expect(update.data['config']).toEqual({});
+        expect(installedEvent().retainedConfigReset).toBe(true);
+      });
+
+      it('writes the default execution mode explicitly when the manifest carries no hint — an update cannot lean on the column default', async () => {
+        const manifest = buildPluginManifest();
+        delete manifest.executionMode;
+        await writeManifest(manifest);
+
+        await service.install(input());
+
+        const [{ data }] = db.plugin.updateMany.mock.calls[0] as [{ data: Record<string, unknown> }];
+        expect(data['executionMode']).toBe(DEFAULT_PLUGIN_EXECUTION_MODE);
+      });
+
+      it('refuses when a concurrent reinstall cleared the tombstone first', async () => {
+        db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+        await expect(service.install(input())).rejects.toBeInstanceOf(PluginInstallConflictError);
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it('a fresh install reports no reset — the flag is reinstall provenance only', async () => {
+        db.plugin.findUnique.mockResolvedValue(null);
+
+        await service.install(input());
+
+        expect(installedEvent().retainedConfigReset).toBe(false);
+      });
+
+      it('never touches the retained household/user config rows — reinstall is what the tombstone preserved them for', async () => {
+        await service.install(input());
+
+        expect(db.householdPlugin.deleteMany).not.toHaveBeenCalled();
+        expect(db.userPlugin.deleteMany).not.toHaveBeenCalled();
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+        expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+      });
     });
 
     it('surfaces a declares collision from the catalog pre-check', async () => {

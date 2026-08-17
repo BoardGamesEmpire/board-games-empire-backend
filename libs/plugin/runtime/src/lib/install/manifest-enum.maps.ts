@@ -20,3 +20,15 @@ export const MANIFEST_EXECUTION_MODE_TO_PRISMA: Readonly<Record<PluginExecutionM
   'in-process': PluginExecutionMode.InProcess,
   worker: PluginExecutionMode.Worker,
 };
+
+/**
+ * The mode a plugin gets when its manifest declares none — `executionMode`
+ * is an optional author hint, not a required field.
+ *
+ * MUST mirror `@default(InProcess)` on `Plugin.executionMode`. A fresh
+ * install omits the column and lets the database answer; a REINSTALL writes
+ * over a tombstoned row, and an update applies no column defaults, so that
+ * path has to name the value. Naming it once, here beside the bridge maps,
+ * keeps the two answers from drifting the day the schema default changes.
+ */
+export const DEFAULT_PLUGIN_EXECUTION_MODE: PluginExecutionMode = PluginExecutionMode.InProcess;

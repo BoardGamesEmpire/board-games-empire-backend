@@ -1,4 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
+import { AbilityService } from '@bge/permissions';
+import { PluginLifecycleService } from '@bge/plugin';
 import { Global, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
@@ -7,17 +9,24 @@ import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 import { PluginsApiModule } from './plugins-api.module';
 
 /**
- * `I18nService` is provided app-wide by nestjs-i18n's `@Global` `I18nModule`;
- * stub it globally here so it is visible to this module's controller-scoped
- * filter, exactly as the real global module would be. (This test asserts DI
- * wiring, not translation.)
+ * Stand-ins for the app's global modules, visible everywhere exactly as the
+ * real ones are: `I18nService` (nestjs-i18n's `@Global` I18nModule),
+ * `AbilityService` (the `@Global` PermissionsModule), and
+ * `PluginLifecycleService` (the `@Global` plugin runtime, configured once by
+ * the host's forRootAsync). This test asserts DI wiring, not behavior — the
+ * wiring under guard is still PluginsApiModule's own AuditContextModule
+ * import.
  */
 @Global()
 @Module({
-  providers: [{ provide: I18nService, useValue: { translate: () => '' } }],
-  exports: [I18nService],
+  providers: [
+    { provide: I18nService, useValue: { translate: () => '' } },
+    { provide: AbilityService, useValue: {} },
+    { provide: PluginLifecycleService, useValue: {} },
+  ],
+  exports: [I18nService, AbilityService, PluginLifecycleService],
 })
-class StubI18nModule {}
+class StubGlobalsModule {}
 
 /**
  * Boot-time DI guard for `PluginsApiModule`.
@@ -33,7 +42,7 @@ class StubI18nModule {}
 describe('PluginsApiModule (DI wiring smoke test)', () => {
   it('resolves the exception filter and its dependencies at compile time', async () => {
     const moduleRef = await Test.createTestingModule({
-      imports: [ClsModule.forRoot({ global: true }), StubI18nModule, PluginsApiModule],
+      imports: [ClsModule.forRoot({ global: true }), StubGlobalsModule, PluginsApiModule],
     }).compile();
 
     // The filter resolves only because PluginsApiModule imports
@@ -58,7 +67,7 @@ describe('PluginsApiModule (DI wiring smoke test)', () => {
     class ForeignHostModule {}
 
     const moduleRef = await Test.createTestingModule({
-      imports: [ClsModule.forRoot({ global: true }), StubI18nModule, ForeignHostModule],
+      imports: [ClsModule.forRoot({ global: true }), StubGlobalsModule, ForeignHostModule],
     }).compile();
 
     expect(moduleRef.select(ForeignHostModule).get(PluginExceptionFilter)).toBeInstanceOf(PluginExceptionFilter);

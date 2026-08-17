@@ -316,9 +316,11 @@ describe('PluginUpdateService', () => {
 
       expect(result.activated).toBe(true);
       expect(result.comparison.serverGating).toBe(false);
-      expect(db.plugin.update).toHaveBeenCalledWith(
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'plugin-1' },
+          // Guarded on the tombstone: an uninstall that lands mid-flight must
+          // take the whole activation with it.
+          where: { id: 'plugin-1', uninstalledAt: null },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
@@ -336,13 +338,30 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalledWith(PluginUpdatePendingEvent.eventName, expect.anything());
     });
 
+    it('refuses to activate onto a row uninstalled mid-flight — the whole transaction rolls back', async () => {
+      const uninstalledAt = new Date('2026-08-16T12:00:00Z');
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load, before the race
+        .mockResolvedValue(makePlugin({ uninstalledAt })); // the guard's re-read
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateTombstonedError);
+      expect(failure).toMatchObject({ uninstalledAt });
+      // Grants seeded earlier in the same transaction go with it; committing
+      // them onto a tombstone would collide with the reinstall's fresh seed.
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
     it('keeps installedSha256 untouched for bundled provenance', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ bundled: true, installedSha256: null }));
       await writeManifest(nextManifest());
 
       await service.stage(input({ directory: directory(true), provenance: { bundled: true } }));
 
-      const updateData = db.plugin.update.mock.calls[0][0].data as Partial<Plugin>;
+      const updateData = db.plugin.updateMany.mock.calls[0][0].data as Partial<Plugin>;
       expect('installedSha256' in updateData).toBe(false);
     });
 
@@ -394,7 +413,7 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.escalations).toEqual([{ kind: 'writes-core-added', model: 'GameNight' }]);
       // Conditional on the slot still being empty inside the transaction.
       expect(db.plugin.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-1', pendingVersion: null },
+        where: { id: 'plugin-1', pendingVersion: null, uninstalledAt: null },
         data: expect.objectContaining({
           pendingVersion: '1.3.0',
           pendingSha256: 'new-sha',
@@ -418,6 +437,18 @@ describe('PluginUpdateService', () => {
 
       expect(failure).toBeInstanceOf(PluginUpdatePendingConflictError);
       expect(failure).toMatchObject({ pendingVersion: '1.5.0', incomingVersion: '1.3.0' });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses to stage onto a row uninstalled mid-flight rather than re-arming the pending columns uninstall just cleared', async () => {
+      const uninstalledAt = new Date('2026-08-16T12:00:00Z');
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      db.plugin.findUnique.mockResolvedValueOnce(makePlugin()).mockResolvedValue(makePlugin({ uninstalledAt }));
+      await writeManifest(nextManifest({ storage: { ...activeManifest.storage, writesCore: ['GameNight'] } }));
+
+      const failure = await service.stage(input()).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateTombstonedError);
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 

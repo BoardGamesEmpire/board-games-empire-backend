@@ -17,6 +17,7 @@ const makePluginRow = (overrides: Partial<Plugin> = {}): Plugin =>
     config: {},
     loadFailed: false,
     loadError: null,
+    uninstalledAt: null,
     ...overrides,
   }) as Plugin;
 
@@ -134,13 +135,27 @@ describe('PluginConfigService', () => {
 
       await service.refresh('demo-sink');
 
-      expect(db.plugin.findUnique).toHaveBeenCalledWith({ where: { slug: 'demo-sink' }, select: { config: true } });
+      expect(db.plugin.findUnique).toHaveBeenCalledWith({
+        where: { slug: 'demo-sink' },
+        select: { config: true, uninstalledAt: true },
+      });
       expect(service.snapshotFor('demo-sink')).toEqual({ apiKey: 'new' });
     });
 
     it('drops the snapshot when the plugin row no longer exists', async () => {
       service.prime('demo-sink', { apiKey: 'old' });
       db.plugin.findUnique.mockResolvedValue(null);
+
+      await service.refresh('demo-sink');
+
+      expect(service.snapshotFor('demo-sink')).toEqual({});
+    });
+
+    it('drops the snapshot for a tombstoned plugin — the row outlives the uninstall, the config must not', async () => {
+      service.prime('demo-sink', { apiKey: 'old' });
+      db.plugin.findUnique.mockResolvedValue(
+        makePluginRow({ config: { apiKey: 'old' }, uninstalledAt: new Date('2026-08-16T00:00:00Z') }),
+      );
 
       await service.refresh('demo-sink');
 

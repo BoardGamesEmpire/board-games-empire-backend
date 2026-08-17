@@ -1,4 +1,6 @@
+export * from './lib/config/config-schema.errors';
 export * from './lib/config/plugin-config-events.service';
+export * from './lib/config/plugin-config-schema.service';
 export * from './lib/config/plugin-config.constants';
 export * from './lib/config/plugin-config.service';
 export * from './lib/consent/consent-classification.types';
@@ -21,7 +23,9 @@ export * from './lib/install/manifest-enum.maps';
 export * from './lib/install/plugin-installer.service';
 export * from './lib/install/plugin-static-analysis.service';
 export * from './lib/install/static-analysis.types';
+export * from './lib/lifecycle/lifecycle.errors';
 export * from './lib/lifecycle/plugin-lifecycle.listener';
+export * from './lib/lifecycle/plugin-lifecycle.service';
 export * from './lib/loader/entrypoint-resolver';
 export * from './lib/loader/loader.errors';
 export * from './lib/loader/path-containment';

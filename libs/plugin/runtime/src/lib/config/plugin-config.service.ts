@@ -17,9 +17,9 @@ const EMPTY_CONFIG: Readonly<Record<string, unknown>> = Object.freeze({});
  * current frozen snapshot reference; `refresh()` swaps the reference
  * atomically, so a reader mid-request sees the old snapshot or the new,
  * never a partial. Refresh failures retain the prior snapshot (the next
- * event or interval retries); a DELETED row drops the snapshot — the plugin
- * was uninstalled and serving stale config would mask that loudly-relevant
- * fact.
+ * event or interval retries); a row that is gone OR tombstoned drops the
+ * snapshot — the plugin was uninstalled and serving stale config would mask
+ * that loudly-relevant fact.
  */
 @Injectable()
 export class PluginConfigService implements OnModuleInit {
@@ -63,11 +63,21 @@ export class PluginConfigService implements OnModuleInit {
   /** Re-reads one plugin's config from DB and swaps its snapshot. */
   async refresh(slug: string): Promise<void> {
     try {
-      const row = await this.db.plugin.findUnique({ where: { slug }, select: { config: true } });
+      const row = await this.db.plugin.findUnique({ where: { slug }, select: { config: true, uninstalledAt: true } });
 
       if (row === null) {
         this.snapshots.delete(slug);
         this.logger.warn(`Plugin '${slug}' no longer exists — dropped its config snapshot`);
+        return;
+      }
+
+      // Uninstall TOMBSTONES rather than deletes (#320), so an absent row is
+      // no longer the only end-of-life signal: the config column survives
+      // precisely so a reinstall can inherit it, and serving it meanwhile
+      // would keep a removed plugin's settings live in this process.
+      if (row.uninstalledAt !== null) {
+        this.snapshots.delete(slug);
+        this.logger.warn(`Plugin '${slug}' is uninstalled — dropped its config snapshot`);
         return;
       }
 
