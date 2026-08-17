@@ -215,6 +215,12 @@
     "grant_scope_not_revocable": "{scopeType}-scope grants are not revocable — they are removed with the plugin",
     "state_corrupted": "The plugin is in an inconsistent state on this server — an administrator must investigate",
     "stored_manifest_invalid": "The stored manifest for plugin '{slug}' is invalid or inconsistent with its installed record — an administrator must investigate",
-    "static_analysis_unavailable": "Plugin static analysis is unavailable on this server — installs and updates are refused until an operator resolves the parser installation"
+    "static_analysis_unavailable": "Plugin static analysis is unavailable on this server — installs and updates are refused until an operator resolves the parser installation",
+    "lifecycle_authority": "Enabling, disabling, configuring, or uninstalling a plugin requires a server administrator",
+    "lifecycle_not_found": "Plugin '{slug}' is not installed",
+    "lifecycle_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again",
+    "uninstall_bundled": "Plugin '{slug}' is bundled with BGE and cannot be uninstalled — disable it instead",
+    "config_invalid": "The configuration for plugin '{slug}' does not match its declared schema",
+    "config_schema_unusable": "Plugin '{slug}' declares a configuration schema this server cannot evaluate — an administrator must investigate"
   }
 }

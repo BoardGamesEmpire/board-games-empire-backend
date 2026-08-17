@@ -126,12 +126,30 @@ describe('plugin lifecycle events', () => {
     it('is delete-shaped and takes its subjectId from the before snapshot', () => {
       const event = new PluginUninstalledEvent(
         { id: 'plg_1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+        [],
         initiatedAt,
       );
 
       expect(event.action).toBe('delete');
       expect(event.subjectId).toBe('plg_1');
       expect(PluginUninstalledEvent.eventName).toBe(PluginEvent.Uninstalled);
+    });
+
+    it('carries the affected-unit coordinates as context — the announcement seam, off the row snapshot', () => {
+      const event = new PluginUninstalledEvent(
+        { id: 'plg_1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+        [
+          { scopeType: 'Household', householdId: 'hh_1' },
+          { scopeType: 'User', userId: 'usr_1' },
+        ],
+        initiatedAt,
+      );
+
+      expect(event.affectedUnits).toEqual([
+        { scopeType: 'Household', householdId: 'hh_1' },
+        { scopeType: 'User', userId: 'usr_1' },
+      ]);
+      expect(event.before).not.toHaveProperty('affectedUnits');
     });
   });
 

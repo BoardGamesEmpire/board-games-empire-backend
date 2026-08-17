@@ -1,6 +1,8 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18nMessage, I18nPath, I18nTranslations, t, translateException } from '@bge/i18n';
 import {
+  PluginConfigSchemaUnusableError,
+  PluginConfigValidationError,
   PluginConsentPresentationManifestError,
   PluginFeatureStateManifestError,
   PluginGrantAuthorityError,
@@ -21,7 +23,12 @@ import {
   PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginLifecycleAuthorityError,
+  PluginLifecycleManifestError,
+  PluginLifecycleNotFoundError,
+  PluginLifecycleTombstonedError,
   PluginStaticAnalysisUnavailableError,
+  PluginUninstallBundledError,
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
@@ -144,7 +151,11 @@ function buildRenderers(): RendererMap {
   // infrastructure state — admin-diagnosable, so they render (class docs on
   // the three stored-manifest errors say exactly this).
   const storedManifestInvalid = (
-    exception: PluginGrantManifestInvalidError | PluginFeatureStateManifestError | PluginConsentPresentationManifestError,
+    exception:
+      | PluginGrantManifestInvalidError
+      | PluginFeatureStateManifestError
+      | PluginConsentPresentationManifestError
+      | PluginLifecycleManifestError,
   ): PluginErrorRendering => ({
     status: Http.InternalServerError,
     message: t('errors.plugin.stored_manifest_invalid', { slug: exception.pluginSlug }),
@@ -167,6 +178,11 @@ function buildRenderers(): RendererMap {
   renders(PluginGrantAuthorityError, () => ({
     status: Http.Forbidden,
     message: t('errors.plugin.grant_authority'),
+  }));
+
+  renders(PluginLifecycleAuthorityError, () => ({
+    status: Http.Forbidden,
+    message: t('errors.plugin.lifecycle_authority'),
   }));
 
   renders(PluginGrantExclusionError, (exception) => ({
@@ -194,6 +210,12 @@ function buildRenderers(): RendererMap {
     fields: { pluginId: exception.pluginId },
   }));
 
+  renders(PluginLifecycleNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.lifecycle_not_found', { slug: exception.slug }),
+    fields: { slug: exception.slug },
+  }));
+
   // ─── 410 — tombstoned (the record exists and says so; not a 404) ─────────
 
   renders(PluginUpdateTombstonedError, (exception) => ({
@@ -206,6 +228,12 @@ function buildRenderers(): RendererMap {
     status: Http.Gone,
     message: t('errors.plugin.grant_tombstoned', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
+  }));
+
+  renders(PluginLifecycleTombstonedError, (exception) => ({
+    status: Http.Gone,
+    message: t('errors.plugin.lifecycle_tombstoned', { slug: exception.slug }),
+    fields: { slug: exception.slug, uninstalledAt: exception.uninstalledAt },
   }));
 
   // ─── 409 — state conflicts ────────────────────────────────────────────────
@@ -245,6 +273,12 @@ function buildRenderers(): RendererMap {
   renders(PluginUpdateNoPendingError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.update_no_pending', { slug: exception.slug }),
+    fields: { slug: exception.slug },
+  }));
+
+  renders(PluginUninstallBundledError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.uninstall_bundled', { slug: exception.slug }),
     fields: { slug: exception.slug },
   }));
 
@@ -328,6 +362,12 @@ function buildRenderers(): RendererMap {
     fields: { scopeType: exception.scopeType },
   }));
 
+  renders(PluginConfigValidationError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.config_invalid', { slug: exception.slug }),
+    fields: { slug: exception.slug, issues: exception.issues },
+  }));
+
   // ─── 500 — corrupted server state (never a caller error; logged loud) ────
 
   renders(PluginInstallProvenanceMismatchError, provenanceMismatch);
@@ -336,6 +376,17 @@ function buildRenderers(): RendererMap {
   renders(PluginGrantManifestInvalidError, storedManifestInvalid);
   renders(PluginFeatureStateManifestError, storedManifestInvalid);
   renders(PluginConsentPresentationManifestError, storedManifestInvalid);
+  renders(PluginLifecycleManifestError, storedManifestInvalid);
+
+  // A config.schema the server cannot compile passed manifest validation
+  // (which never interprets it) and surfaced on first use — the plugin's
+  // problem to ship fixed, the operator's to notice, never the caller's.
+  renders(PluginConfigSchemaUnusableError, (exception) => ({
+    status: Http.InternalServerError,
+    message: t('errors.plugin.config_schema_unusable', { slug: exception.slug }),
+    fields: { slug: exception.slug, version: exception.version },
+    operatorActionable: true,
+  }));
 
   // ─── 503 — static analysis unavailable (operator must act) ───────────────
   // Deliberately no Retry-After: a shadowed parser build never heals on its

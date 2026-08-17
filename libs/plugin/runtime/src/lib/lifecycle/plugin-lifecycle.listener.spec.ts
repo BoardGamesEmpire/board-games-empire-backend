@@ -22,6 +22,7 @@ import {
   PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginLoadFailedEvent,
+  PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
@@ -413,6 +414,38 @@ describe('PluginLifecycleListener', () => {
     });
   });
 
+  describe('uninstalled rows', () => {
+    it('persists the affected-unit coordinates and the uninstalled version — the durable record for #324', async () => {
+      emitter.emit(
+        PluginEvent.Uninstalled,
+        new PluginUninstalledEvent(
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+          [
+            { scopeType: 'Household', householdId: 'hh_1' },
+            { scopeType: 'User', userId: 'usr_1' },
+          ],
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          pluginId: 'plugin-1',
+          pluginSlug: 'demo-sink',
+          event: PluginLifecycleEventType.Uninstalled,
+          manifestVersion: '1.2.0',
+          payload: {
+            affectedUnits: [
+              { scopeType: 'Household', householdId: 'hh_1' },
+              { scopeType: 'User', userId: 'usr_1' },
+            ],
+          },
+        }),
+      );
+    });
+  });
+
   describe('config reload publication', () => {
     it('publishes a reload for SERVER-scope config updates', async () => {
       const event = new PluginConfigUpdatedEvent(
@@ -438,6 +471,22 @@ describe('PluginLifecycleListener', () => {
       emitter.emit(PluginEvent.ConfigUpdated, event);
       await flush();
 
+      expect(configEvents.publish).toHaveBeenCalledWith({ slug: 'demo-sink' });
+    });
+
+    it('publishes a reload on uninstall so every process drops the tombstoned plugin’s snapshot', async () => {
+      emitter.emit(
+        PluginEvent.Uninstalled,
+        new PluginUninstalledEvent(
+          { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', bundled: false },
+          [],
+          initiatedAt,
+        ),
+      );
+      await flush();
+
+      // The refresh finds a tombstone and evicts; without the message the
+      // stale snapshot would live until the next backstop interval.
       expect(configEvents.publish).toHaveBeenCalledWith({ slug: 'demo-sink' });
     });
 

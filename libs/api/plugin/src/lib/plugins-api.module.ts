@@ -1,6 +1,7 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { Module } from '@nestjs/common';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+import { PluginsController } from './plugins.controller';
 
 /**
  * HTTP surface for the plugin system (#59 Phase C4). The runtime lives in
@@ -26,7 +27,12 @@ import { PluginExceptionFilter } from './filters/plugin-exception.filter';
     // which reads the request locale to translate its copy. No provider in this
     // module injects it directly, so the need is easy to miss.
     AuditContextModule,
+    // No import for the controller's other dependencies: PermissionsModule
+    // (PoliciesGuard, AbilityService) and the runtime `@bge/plugin`
+    // (PluginLifecycleService) are both global modules, the latter
+    // configured once by the host's forRootAsync.
   ],
+  controllers: [PluginsController],
   providers: [PluginExceptionFilter],
   exports: [AuditContextModule, PluginExceptionFilter],
 })

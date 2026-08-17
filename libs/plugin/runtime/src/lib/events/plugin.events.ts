@@ -1,4 +1,4 @@
-import { MutationEvent } from '@bge/actor-context';
+import { MutationEvent, type PluginUnit } from '@bge/actor-context';
 import type { HouseholdPlugin, Plugin, PluginGrant, UserPlugin } from '@bge/database';
 import { ResourceType } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
@@ -80,6 +80,14 @@ export interface PluginInstallAuditContext {
    * reconstruction `decidedRiskLevel` exists to avoid on grant rows.
    */
   readonly acknowledgedForbiddenImports: readonly string[];
+  /**
+   * A reinstall over a tombstone found the retained server config invalid
+   * under the NEW manifest's `config.schema` and reset it to `{}` —
+   * "did my old settings survive the reinstall" is answered here, not
+   * reconstructed from row state. Always false on a fresh install; optional
+   * so pre-reinstall construction sites need no churn.
+   */
+  readonly retainedConfigReset?: boolean;
 }
 
 export class PluginInstalledEvent extends MutationEvent<Plugin> {
@@ -96,6 +104,7 @@ export class PluginInstalledEvent extends MutationEvent<Plugin> {
   readonly auditFindings: readonly NpmAuditFinding[] | null;
   readonly staticAnalysis: readonly StaticAnalysisFinding[];
   readonly acknowledgedForbiddenImports: readonly string[];
+  readonly retainedConfigReset: boolean;
 
   constructor(after: PluginInstalledSnapshot, context: PluginInstallAuditContext, initiatedAt: Date) {
     super(null, after, initiatedAt);
@@ -105,6 +114,7 @@ export class PluginInstalledEvent extends MutationEvent<Plugin> {
     this.auditFindings = context.auditFindings;
     this.staticAnalysis = context.staticAnalysis;
     this.acknowledgedForbiddenImports = context.acknowledgedForbiddenImports;
+    this.retainedConfigReset = context.retainedConfigReset ?? false;
   }
 }
 
@@ -151,9 +161,19 @@ export class PluginUninstalledEvent extends MutationEvent<Plugin> {
   readonly subject = ResourceType.Plugin;
   readonly subjectId: string;
 
-  constructor(before: PluginUninstalledSnapshot, initiatedAt: Date) {
+  /**
+   * Every household/user unit that had the plugin enabled at uninstall
+   * time — context, not row state, captured before the purge because the
+   * grant and (under `purgeData`) unit-config rows are gone by the time
+   * anything consumes this. The seam the uninstall-announcement flow
+   * (#324) renders "who is affected" from.
+   */
+  readonly affectedUnits: readonly PluginUnit[];
+
+  constructor(before: PluginUninstalledSnapshot, affectedUnits: readonly PluginUnit[], initiatedAt: Date) {
     super(before, null, initiatedAt);
     this.subjectId = before.id;
+    this.affectedUnits = affectedUnits;
   }
 }
 

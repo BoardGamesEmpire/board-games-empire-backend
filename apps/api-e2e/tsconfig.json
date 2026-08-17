@@ -8,13 +8,16 @@
   "include": ["jest.config.ts", "src/**/*.ts"],
   "references": [
     {
-      "path": "../../libs/database"
+      "path": "../../libs/plugin/manifest"
     },
     {
       "path": "../../libs/queue/feedback"
     },
     {
       "path": "../../libs/common/testing-e2e"
+    },
+    {
+      "path": "../../libs/database"
     }
   ]
 }

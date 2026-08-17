@@ -14,6 +14,7 @@ import {
   PluginGrantRevokedEvent,
   PluginInstalledEvent,
   PluginLoadFailedEvent,
+  PluginUninstalledEvent,
   PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   PluginUpdatePendingEvent,
@@ -123,6 +124,13 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
     if (payload instanceof PluginConfigUpdatedEvent) {
       await this.configEvents.publish({ slug: payload.after.slug });
     }
+
+    // Uninstall rides the same channel: the refresh it triggers finds a
+    // tombstone and drops the snapshot, which is how processes other than the
+    // one that served the request stop holding a removed plugin's config.
+    if (payload instanceof PluginUninstalledEvent) {
+      await this.configEvents.publish({ slug: payload.before.slug });
+    }
   }
 
   private async persist(lifecycleType: PluginLifecycleEventType, event: MutationEvent): Promise<void> {
@@ -173,6 +181,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
           // ones, is a question asked of this table directly — not one to
           // reconstruct from which findings can coexist with an install.
           acknowledgedForbiddenImports: event.acknowledgedForbiddenImports,
+          // Whether a reinstall dropped retained server config as
+          // schema-invalid — same "asked of this table directly" contract.
+          retainedConfigReset: event.retainedConfigReset,
         },
       };
     }
@@ -314,7 +325,19 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    // Remaining Plugin-subject events (Enabled, Disabled, Uninstalled,
+    if (event instanceof PluginUninstalledEvent) {
+      return {
+        ...this.pluginRowIdentity(event.before),
+        manifestVersion: event.before.version,
+        // The units that had the plugin enabled at uninstall time. The
+        // grant rows are purged and unit-config rows may be too, so this
+        // row is the only durable record of who the removal affected —
+        // the uninstall-announcement flow (#324) reads it from here.
+        payload: { affectedUnits: event.affectedUnits },
+      };
+    }
+
+    // Remaining Plugin-subject events (Enabled, Disabled,
     // ConfigUpdated, UpdateRejected): id + slug live on
     // whichever snapshot is non-null; no extra context payload.
     const snapshot = (event.after ?? event.before) as { id?: unknown; slug?: unknown };

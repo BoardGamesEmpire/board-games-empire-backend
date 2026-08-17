@@ -111,6 +111,8 @@
     "@status/envirator": "1.12.0",
     "@thallesp/nestjs-better-auth": "2.6.1",
     "@willsoto/nestjs-prometheus": "6.1.0",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "argon2": "0.44.0",
     "axios": "1.18.1",
     "better-auth": "1.6.23",

@@ -22,10 +22,12 @@ import {
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
+import { CLEARED_STAGED_UPDATE } from '../update/staged-update.columns';
 import {
   collectForbiddenPermissionViolations,
   collectUnboundedUnitConsentViolations,
@@ -45,7 +47,11 @@ import {
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
 } from './install.errors';
-import { MANIFEST_EXECUTION_MODE_TO_PRISMA, MANIFEST_SCOPE_TO_PRISMA } from './manifest-enum.maps';
+import {
+  DEFAULT_PLUGIN_EXECUTION_MODE,
+  MANIFEST_EXECUTION_MODE_TO_PRISMA,
+  MANIFEST_SCOPE_TO_PRISMA,
+} from './manifest-enum.maps';
 import { PluginStaticAnalysisService } from './plugin-static-analysis.service';
 import { gatingFindings, type StaticAnalysisFinding, type StaticAnalysisReport } from './static-analysis.types';
 
@@ -140,6 +146,7 @@ export class PluginInstallerService {
     private readonly db: DatabaseService,
     private readonly authority: PluginGrantAuthorityService,
     private readonly staticAnalysis: PluginStaticAnalysisService,
+    private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
@@ -175,6 +182,15 @@ export class PluginInstallerService {
       input.acknowledgeForbiddenImports ?? [],
     );
 
+    // Compiled here rather than inside `persist`: the reinstall branch
+    // validates retained config against this schema while holding the row
+    // lock, and ajv's codegen has no business inside that window.
+    this.configSchema.warm({
+      slug: validated.manifest.slug,
+      version: validated.manifest.version,
+      schema: validated.manifest.config.schema,
+    });
+
     const persisted = await this.persist(
       validated,
       provenance,
@@ -184,13 +200,24 @@ export class PluginInstallerService {
       initiatedAt,
     );
 
-    this.emitInstalled(persisted.plugin, provenance, serverChecks, analysis, acknowledgedForbiddenImports, initiatedAt);
+    const { retainedConfigReset, ...persistedResult } = persisted;
+
+    this.emitInstalled(
+      persisted.plugin,
+      provenance,
+      serverChecks,
+      analysis,
+      acknowledgedForbiddenImports,
+      retainedConfigReset,
+      initiatedAt,
+    );
     this.logger.log(
       `Installed plugin '${persisted.plugin.slug}'@${persisted.plugin.version}: ` +
-        `${persisted.declaredPermissions.length} declared permission(s), ${persisted.seededGrants.length} server grant(s) seeded`,
+        `${persisted.declaredPermissions.length} declared permission(s), ${persisted.seededGrants.length} server grant(s) seeded` +
+        (retainedConfigReset ? '; retained server config was schema-invalid and reset' : ''),
     );
 
-    return { ...persisted, analysis, warnings: validated.warnings, acknowledgedForbiddenImports };
+    return { ...persistedResult, analysis, warnings: validated.warnings, acknowledgedForbiddenImports };
   }
 
   /**
@@ -378,13 +405,21 @@ export class PluginInstallerService {
     serverChecks: readonly NormalizedPermissionRequest[],
     corePermissions: ReadonlyMap<string, Permission>,
     initiatedAt: Date,
-  ): Promise<Pick<PluginInstallResult, 'plugin' | 'declaredPermissions' | 'seededGrants'>> {
+  ): Promise<
+    Pick<PluginInstallResult, 'plugin' | 'declaredPermissions' | 'seededGrants'> & { retainedConfigReset: boolean }
+  > {
     const manifest = validated.manifest;
 
     return this.db.$transaction(async (tx) => {
-      const existing = await tx.plugin.findUnique({ where: { slug: manifest.slug }, select: { id: true } });
+      const existing = await tx.plugin.findUnique({
+        where: { slug: manifest.slug },
+        select: { id: true, uninstalledAt: true, config: true },
+      });
 
-      if (existing !== null) {
+      // A LIVING row conflicts — updates are the C3 flow. A tombstone does
+      // not: uninstall's inverse is reinstall, which clears it in place
+      // below so the retained unit config keeps its foreign keys.
+      if (existing !== null && existing.uninstalledAt === null) {
         throw new PluginInstallConflictError(manifest.slug);
       }
 
@@ -407,27 +442,85 @@ export class PluginInstallerService {
         );
       }
 
-      const plugin = await tx.plugin.create({
-        data: {
-          slug: manifest.slug,
-          version: manifest.version,
-          category: MANIFEST_CATEGORY_TO_PRISMA[manifest.category],
-          scope: MANIFEST_SCOPE_TO_PRISMA[manifest.scope],
-          // Manifest hint; the column default covers an absent declaration.
-          ...(manifest.executionMode === undefined
-            ? {}
-            : { executionMode: MANIFEST_EXECUTION_MODE_TO_PRISMA[manifest.executionMode] }),
-          // The VALIDATED manifest object — the canonical form every later
-          // re-validation (loader, grants, C3 comparison) starts from.
-          manifestJson: manifest as Prisma.InputJsonValue,
-          bundled: provenance.bundled,
-          installedFromUrl: provenance.bundled ? null : (provenance.installedFromUrl ?? null),
-          installedSha256: provenance.bundled ? null : provenance.installedSha256,
-          registrySlug: provenance.bundled ? null : (provenance.registrySlug ?? null),
-          installedById: installerId,
-          installedAt: initiatedAt,
-        },
-      });
+      const sharedColumns = {
+        version: manifest.version,
+        category: MANIFEST_CATEGORY_TO_PRISMA[manifest.category],
+        scope: MANIFEST_SCOPE_TO_PRISMA[manifest.scope],
+        // The VALIDATED manifest object — the canonical form every later
+        // re-validation (loader, grants, C3 comparison) starts from.
+        manifestJson: manifest as Prisma.InputJsonValue,
+        bundled: provenance.bundled,
+        installedFromUrl: provenance.bundled ? null : (provenance.installedFromUrl ?? null),
+        installedSha256: provenance.bundled ? null : provenance.installedSha256,
+        registrySlug: provenance.bundled ? null : (provenance.registrySlug ?? null),
+        installedById: installerId,
+        installedAt: initiatedAt,
+      };
+
+      let plugin: Plugin;
+      let retainedConfigReset = false;
+
+      if (existing === null) {
+        plugin = await tx.plugin.create({
+          data: {
+            slug: manifest.slug,
+            ...sharedColumns,
+            // Manifest hint; the column default covers an absent declaration.
+            ...(manifest.executionMode === undefined
+              ? {}
+              : { executionMode: MANIFEST_EXECUTION_MODE_TO_PRISMA[manifest.executionMode] }),
+          },
+        });
+      } else {
+        const retained = this.retainedServerConfig(manifest, existing.config);
+        retainedConfigReset = retained.reset;
+
+        // Reinstall clears the tombstone in place. Consent starts from zero
+        // (the uninstall purge emptied the catalog; re-seeded below), the
+        // enable switch starts OFF like any fresh install, and the running
+        // process may still hold the pre-uninstall module — restartRequired
+        // says so until the loader's success path clears it.
+        //
+        // Guarded on the tombstone STILL being present, the way the unique
+        // slug index guards a fresh install: two concurrent reinstalls both
+        // read a tombstone, and without this the loser would overwrite the
+        // winner's living row — a silent version/provenance swap the
+        // permission-collision index only catches when the two installs
+        // happen to declare overlapping permissions.
+        const claimed = await tx.plugin.updateMany({
+          where: { id: existing.id, uninstalledAt: { not: null } },
+          data: {
+            ...sharedColumns,
+            // An absent hint must RESET to the default here — an update
+            // applies no column defaults the way create does, so the value
+            // is named rather than left to the database.
+            executionMode:
+              manifest.executionMode === undefined
+                ? DEFAULT_PLUGIN_EXECUTION_MODE
+                : MANIFEST_EXECUTION_MODE_TO_PRISMA[manifest.executionMode],
+            enabled: false,
+            uninstalledAt: null,
+            restartRequired: true,
+            loadFailed: false,
+            loadError: null,
+            config: retained.config as Prisma.InputJsonValue,
+            // Stale signals about the uninstalled version.
+            latestKnownVersion: null,
+            latestKnownChannel: null,
+            securityAdvisory: null,
+            lastUpdateCheckAt: null,
+            // Cleared by uninstall already; kept here so the row cannot
+            // resurrect a staged update even if that invariant slips.
+            ...CLEARED_STAGED_UPDATE,
+          },
+        });
+
+        if (claimed.count !== 1) {
+          throw new PluginInstallConflictError(manifest.slug);
+        }
+
+        plugin = await tx.plugin.findUniqueOrThrow({ where: { id: existing.id } });
+      }
 
       const declaredPermissions: PluginPermission[] = [];
 
@@ -466,8 +559,45 @@ export class PluginInstallerService {
         );
       }
 
-      return { plugin, declaredPermissions, seededGrants };
+      return { plugin, declaredPermissions, seededGrants, retainedConfigReset };
     });
+  }
+
+  /**
+   * Reinstall's retained-config rule: SERVER config rides the retained
+   * `Plugin` row through an uninstall regardless of `purgeData` (that flag
+   * scopes to the household/user rows, #320), and is carried forward ONLY if
+   * it satisfies the NEW manifest's schema; otherwise it resets to `{}` and
+   * the event records the reset. Failing the reinstall instead was rejected —
+   * an admin whose only escape hatch destroys retained unit config is being
+   * offered no choice at all. A schema that cannot compile proves nothing
+   * about the retained value, so it resets too; the broken schema itself
+   * surfaces loudly on the first config write.
+   */
+  private retainedServerConfig(
+    manifest: PluginManifestValidationResult['manifest'],
+    retained: Prisma.JsonValue,
+  ): { config: Record<string, unknown>; reset: boolean } {
+    const isPlainObject = typeof retained === 'object' && retained !== null && !Array.isArray(retained);
+
+    if (!isPlainObject) {
+      return { config: {}, reset: true };
+    }
+
+    const config = retained as Record<string, unknown>;
+
+    try {
+      const issues = this.configSchema.validate({
+        slug: manifest.slug,
+        version: manifest.version,
+        schema: manifest.config.schema,
+        config,
+      });
+
+      return issues.length === 0 ? { config, reset: false } : { config: {}, reset: true };
+    } catch {
+      return { config: {}, reset: true };
+    }
   }
 
   private riskFor(
@@ -503,6 +633,7 @@ export class PluginInstallerService {
     serverChecks: readonly NormalizedPermissionRequest[],
     analysis: StaticAnalysisReport,
     acknowledgedForbiddenImports: readonly string[],
+    retainedConfigReset: boolean,
     initiatedAt: Date,
   ): void {
     const eventProvenance: PluginProvenance = provenance.bundled
@@ -544,6 +675,7 @@ export class PluginInstallerService {
         // filtered down to look clean.
         staticAnalysis: analysis.findings,
         acknowledgedForbiddenImports,
+        retainedConfigReset,
       },
       initiatedAt,
     );
