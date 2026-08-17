@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "prisma generate"
+        "command": "node scripts/prisma-generate.js"
       },
       "inputs": [
         "{workspaceRoot}/prisma/**/*.prisma",
