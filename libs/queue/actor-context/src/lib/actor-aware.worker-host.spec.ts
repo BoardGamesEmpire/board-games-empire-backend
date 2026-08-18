@@ -5,7 +5,7 @@ import { Test, type TestingModule } from '@nestjs/testing';
 import { UnrecoverableError, type Job } from 'bullmq';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { ActorAwareWorkerHost } from './actor-aware.worker-host';
-import { type JobActorMeta, wrapJobData } from './job-meta';
+import { wrapJobData, type JobActorMeta } from './job-meta';
 
 interface SampleJobData {
   readonly gameId: string;

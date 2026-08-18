@@ -11,7 +11,9 @@ import { classifyDeliveryError, WebhookDeliveryErrorCode } from './classify-deli
 
 describe('classifyDeliveryError', () => {
   it('classifies a non-2xx delivery response', () => {
-    const result = classifyDeliveryError(new WebhookDeliveryFailedError('Delivery d1 to subscription s1 returned 503', 503));
+    const result = classifyDeliveryError(
+      new WebhookDeliveryFailedError('Delivery d1 to subscription s1 returned 503', 503),
+    );
     expect(result.code).toBe(WebhookDeliveryErrorCode.NonSuccessResponse);
   });
 

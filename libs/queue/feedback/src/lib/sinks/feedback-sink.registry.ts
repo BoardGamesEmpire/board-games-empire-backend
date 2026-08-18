@@ -48,7 +48,9 @@ export class FeedbackSinkRegistry {
 
   private static indexBySlug(sinks: readonly FeedbackSink[]): ReadonlyMap<string, FeedbackSink> {
     if (sinks.length === 0) {
-      throw new FeedbackSinkMisconfiguredError('No feedback sinks registered; at least the bundled local sink is required');
+      throw new FeedbackSinkMisconfiguredError(
+        'No feedback sinks registered; at least the bundled local sink is required',
+      );
     }
 
     const map = new Map<string, FeedbackSink>();

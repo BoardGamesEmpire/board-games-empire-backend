@@ -159,9 +159,7 @@ describe('LanguageLinkService', () => {
     });
 
     it('marks syntactically valid but unregistered subtags Unresolved', async () => {
-      const summary = await service.interview(GW, [
-        { value: 'xq-XX', format: LanguageCodeFormat.IetfBcp47 },
-      ]);
+      const summary = await service.interview(GW, [{ value: 'xq-XX', format: LanguageCodeFormat.IetfBcp47 }]);
 
       expect(summary.unresolved).toBe(1);
       expect(db.language.upsert).not.toHaveBeenCalled();
@@ -189,9 +187,7 @@ describe('LanguageLinkService', () => {
       const summary = await service.interview(GW, [{ value: 'German', format: LanguageCodeFormat.Name }]);
 
       expect(summary.resolved).toBe(1);
-      expect(db.languageTag.findUnique).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { tag: 'de' } }),
-      );
+      expect(db.languageTag.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { tag: 'de' } }));
     });
 
     it('quarantines unknown names as Unresolved and never creates vocabulary', async () => {

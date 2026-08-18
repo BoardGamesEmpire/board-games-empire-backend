@@ -88,7 +88,14 @@ export class PluginConsentCheckClassifier {
         catalog.unconditionedCoreSlugs.has(check.canonicalSlug);
 
       decisions.set(check.canonicalSlug, {
-        decision: this.decide(pluginId, check.canonicalSlug, grant, currentRiskLevel, wildcardSubject, unboundedUnitScope),
+        decision: this.decide(
+          pluginId,
+          check.canonicalSlug,
+          grant,
+          currentRiskLevel,
+          wildcardSubject,
+          unboundedUnitScope,
+        ),
         decidedRiskLevel: grant?.decidedRiskLevel ?? null,
         // Not marked stale when the grant cannot confer for structural
         // reasons: staleness says "re-consent fixes this", and it does not.

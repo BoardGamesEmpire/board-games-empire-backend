@@ -43,9 +43,7 @@ describe('UserAwareCacheInterceptor', () => {
   });
 
   it('namespaces the cache key by the authenticated user', () => {
-    expect(trackBy(httpContext('GET', '/api/game-collections', 'user-1'))).toBe(
-      'user:user-1:/api/game-collections',
-    );
+    expect(trackBy(httpContext('GET', '/api/game-collections', 'user-1'))).toBe('user:user-1:/api/game-collections');
   });
 
   it('gives distinct users distinct keys for the same URL', () => {

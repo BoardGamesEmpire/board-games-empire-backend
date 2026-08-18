@@ -15,7 +15,12 @@ import { FeedbackDeliveryService } from './feedback-delivery.service';
  * satisfies the `ActorAwareWorkerHost` CLS requirement.
  */
 @Module({
-  imports: [AuditContextModule, DatabaseModule, FeedbackSinkModule, BullModule.registerQueue({ name: FEEDBACK_QUEUE_NAME })],
+  imports: [
+    AuditContextModule,
+    DatabaseModule,
+    FeedbackSinkModule,
+    BullModule.registerQueue({ name: FEEDBACK_QUEUE_NAME }),
+  ],
   providers: [FeedbackDeliveryService, FeedbackDeliveryProcessor],
   exports: [FeedbackDeliveryService],
 })

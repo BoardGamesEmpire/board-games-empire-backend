@@ -21,12 +21,12 @@ captured at boot. The strategy is chosen with `MEDIA_LOCAL_DISK_MOUNT_CHECK`.
 
 ### Modes (`MEDIA_LOCAL_DISK_MOUNT_CHECK`)
 
-| Mode | What it does | Operator action | Best for |
-| --- | --- | --- | --- |
-| `auto` *(default)* | Enables `st_dev` **only if** the root is a distinct mount (its device id differs from its parent directory's). Otherwise it's a no-op. | None | Dedicated block volumes / K8s PVs, and local dev |
-| `st_dev` | Always records `statSync(root).dev` at boot and compares it on every probe / before every write. | None | Dedicated volumes where you want the check forced on |
-| `sentinel` | Requires an operator-provisioned marker file under the root; its absence means the volume isn't mounted. | Create the marker (below) | NFS, overlayfs, bind mounts — anywhere `st_dev` is unreliable |
-| `off` | No unmount detection (original behavior; zero overhead on writes). | None | Opt-out |
+| Mode               | What it does                                                                                                                           | Operator action           | Best for                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------- |
+| `auto` _(default)_ | Enables `st_dev` **only if** the root is a distinct mount (its device id differs from its parent directory's). Otherwise it's a no-op. | None                      | Dedicated block volumes / K8s PVs, and local dev              |
+| `st_dev`           | Always records `statSync(root).dev` at boot and compares it on every probe / before every write.                                       | None                      | Dedicated volumes where you want the check forced on          |
+| `sentinel`         | Requires an operator-provisioned marker file under the root; its absence means the volume isn't mounted.                               | Create the marker (below) | NFS, overlayfs, bind mounts — anywhere `st_dev` is unreliable |
+| `off`              | No unmount detection (original behavior; zero overhead on writes).                                                                     | None                      | Opt-out                                                       |
 
 On a detected unmount, `ping()` and `put()` raise `StorageUnavailableError`
 (`retryable: true`) — `put()` refuses **before** writing, so nothing lands on a
@@ -42,8 +42,8 @@ per-write cost isn't wanted.
 `st_dev` (the filesystem device id) is a reliable signal for a dedicated block
 volume, but **not** everywhere:
 
-- **NFS** assigns synthetic/anonymous device numbers that can *change across a
-  legitimate remount*. After a normal drop/reconnect the id may differ from the
+- **NFS** assigns synthetic/anonymous device numbers that can _change across a
+  legitimate remount_. After a normal drop/reconnect the id may differ from the
   boot baseline, producing a false "unavailable" that only clears on process
   restart (the restart re-captures the baseline). Prefer `sentinel`.
 - **overlayfs / bind mounts** (common with host-directory Docker mounts) may
@@ -52,7 +52,7 @@ volume, but **not** everywhere:
   protection); use `sentinel` if you need a guarantee.
 
 `auto` enables `st_dev` for **any** distinct mount — it cannot tell NFS from a
-block volume, so it *will* turn on the device check on an NFS root even though the
+block volume, so it _will_ turn on the device check on an NFS root even though the
 id can shift across a legitimate remount. On NFS/overlay/bind, set `sentinel`
 explicitly rather than relying on `auto`. When the root is **not** a distinct
 mount, `auto` disables the check and logs a `warn` — so a dedicated volume that
@@ -62,7 +62,7 @@ unprotected for the process lifetime.
 ### Provisioning the sentinel (`sentinel` mode)
 
 The driver **never creates** the sentinel: auto-creating it would let a restarted
-process re-mark an *empty* mountpoint on the underlying disk and reinstate the
+process re-mark an _empty_ mountpoint on the underlying disk and reinstate the
 exact data-loss bug. Create it yourself, once, after the volume is mounted:
 
 ```sh
@@ -82,14 +82,14 @@ indefinitely** rather than error. Two mechanisms bound this:
 - `MEDIA_LOCAL_DISK_PROBE_TIMEOUT_MS` (default `5000`) caps each probe so
   readiness reports down instead of hanging.
 - `MEDIA_LOCAL_DISK_PROBE_TIMEOUT_FATAL_THRESHOLD` (default `3`, `0` disables):
-  after this many *consecutive* probe timeouts the process self-exits (hard exit,
+  after this many _consecutive_ probe timeouts the process self-exits (hard exit,
   not a graceful shutdown) so the orchestrator restarts it.
 
 > **Why self-exit?** A blocked `stat` keeps occupying a **libuv threadpool** slot
 > even after the JS-level timeout fires — the timeout unblocks the caller, not the
 > kernel syscall. The default threadpool has only **4** slots and is shared by all
 > async `fs`, `dns.lookup`, and some `crypto`; once exhausted by hung probes,
-> *every* async filesystem and DNS operation in the process stalls (including DB
+> _every_ async filesystem and DNS operation in the process stalls (including DB
 > and Redis hostname resolution). This does **not** block the event loop, so an
 > HTTP liveness probe still returns 200 — the process looks alive while being
 > functionally dead. Restarting is the only reliable recovery, and readiness
@@ -97,5 +97,5 @@ indefinitely** rather than error. Two mechanisms bound this:
 >
 > Operators expecting hung-mount exposure (e.g. NFS) may raise
 > `UV_THREADPOOL_SIZE` (e.g. `16`–`32`) as defense-in-depth — but note this only
-> *delays* exhaustion under a persistent hang; it does not prevent it. Managing
+> _delays_ exhaustion under a persistent hang; it does not prevent it. Managing
 > that env var is left to the operator.

@@ -6,8 +6,8 @@ import {
   loadPluginUnitEnablement,
   PluginGrantScope,
   PluginGrantStatus,
-  type RiskLevel,
   riskCovers,
+  type RiskLevel,
 } from '@bge/database';
 import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesempire/plugin-manifest';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';

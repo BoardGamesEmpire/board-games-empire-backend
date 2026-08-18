@@ -19,10 +19,7 @@ import { ExecutionContext, Injectable } from '@nestjs/common';
 @Injectable()
 export class UserAwareCacheInterceptor extends CacheInterceptor {
   protected override trackBy(context: ExecutionContext): string | undefined {
-    const noCache = this.reflector.getAllAndOverride<boolean>(NO_CACHE_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const noCache = this.reflector.getAllAndOverride<boolean>(NO_CACHE_KEY, [context.getHandler(), context.getClass()]);
     if (noCache) {
       return undefined;
     }

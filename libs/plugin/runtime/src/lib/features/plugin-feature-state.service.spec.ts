@@ -190,9 +190,9 @@ describe('PluginFeatureStateService', () => {
   });
 
   it('rejects a structurally invalid unit at the boundary, before any query', async () => {
-    await expect(
-      service.resolveForUnit('plg_1', { scopeType: 'Household' } as unknown as PluginUnit),
-    ).rejects.toThrow(RangeError);
+    await expect(service.resolveForUnit('plg_1', { scopeType: 'Household' } as unknown as PluginUnit)).rejects.toThrow(
+      RangeError,
+    );
     expect(db.plugin.findUnique).not.toHaveBeenCalled();
   });
 

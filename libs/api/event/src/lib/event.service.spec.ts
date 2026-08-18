@@ -11,8 +11,8 @@ import {
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateEventDto } from './dto/create-event.dto';
-import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { EventService } from './event.service';
+import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 
 const COND = { id: 'sentinel-condition' };
 

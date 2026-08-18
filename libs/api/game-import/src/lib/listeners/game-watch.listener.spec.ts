@@ -53,9 +53,7 @@ describe('GameWatchListener', () => {
 
     await listener.handle(makeExpansionCompleted());
 
-    expect(db.gameWatch.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { gameId: 'base-game-1' } }),
-    );
+    expect(db.gameWatch.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { gameId: 'base-game-1' } }));
     expect(notifications.createMany).toHaveBeenCalledWith([
       {
         userId: 'watcher-1',

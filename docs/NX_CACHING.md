@@ -70,6 +70,58 @@ Cannot find module './internal/prismaNamespace.js'
 while every other suite passed. `^generate` makes consumers wait, which is what
 the dependency actually is.
 
+## `generate` runs through a lock, not `prisma generate` directly
+
+The target's command is `node scripts/prisma-generate.js`. That wrapper exists
+because uncaching the target removed the thing that was accidentally serialising
+it.
+
+`npm start` is `nf start`, and the Procfile launches one `nx run
+<app>:serve:development` per app — six separate Nx processes with six separate
+task graphs. Nx dedupes a task within one invocation, never across invocations,
+so every one of them runs `@bge/database:generate` for itself. While the target
+was cached, five of those were restores. Uncached, they are six real
+`prisma generate` runs starting within milliseconds of each other, all deleting
+and rewriting the same output directory:
+
+```
+ENOTEMPTY: directory not empty, rmdir '.../generated/models'
+EEXIST: file already exists, mkdir '.../generated/models'
+.../generated exists and is not empty but doesn't look like a generated Prisma Client
+```
+
+Whichever error surfaces first fails that app's whole serve chain, and a
+half-written tree is left on disk for the next run to trip over.
+
+The wrapper does two things, and both are needed:
+
+- **An exclusive lock** (`node_modules/.cache/prisma-generate/lock`, created
+  with `mkdir` because that is atomic) so only one run writes at a time. Stale
+  locks are reclaimed when the owning pid is gone.
+- **A fingerprint** over `prisma/**/*.prisma`, `prisma.config.ts`, and the
+  installed `prisma` / `@prisma/client` versions, recorded in
+  `node_modules/.cache/prisma-generate/stamp.json` with the file count of the
+  tree it produced. A run whose fingerprint and file count already match does
+  nothing.
+
+The lock alone would be a regression dressed as a fix: six serialised runs still
+rewrite the client five more times than necessary, while other apps' webpack
+builds are reading it — the same mid-write read described in the previous
+section. The fingerprint is what makes those five no-ops. The file count is the
+integrity half of it, so a tree that was partially deleted is regenerated rather
+than trusted.
+
+To confirm it still holds, from a cold tree:
+
+```bash
+rm -rf libs/database/src/lib/generated node_modules/.cache/prisma-generate
+for i in 1 2 3 4 5 6; do node scripts/prisma-generate.js & done; wait
+find libs/database/src/lib/generated -type f | wc -l   # expect 136
+```
+
+Exactly one run should report `Generated Prisma Client`; the other five should
+report `client is up to date, skipping`.
+
 ## If you revisit this
 
 The honest summary is that Nx's directory-output caching is not trustworthy for

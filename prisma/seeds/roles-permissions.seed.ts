@@ -1263,7 +1263,8 @@ export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logg
       subject: ResourceType.Plugin,
       slug: 'manage:plugin',
       riskLevel: RiskLevel.Critical,
-      reason: 'Install, update, and uninstall server plugins and approve their permission grants — permission mutation by proxy',
+      reason:
+        'Install, update, and uninstall server plugins and approve their permission grants — permission mutation by proxy',
     },
     {
       action: Action.read,

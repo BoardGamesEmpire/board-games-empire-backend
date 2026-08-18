@@ -26,9 +26,12 @@ export class WebhookEventRegistry {
     WebhookEventType,
     WebhookEventDescriptor
   >(
-    (Object.entries(WEBHOOK_EVENT_DESCRIPTORS) as [WebhookEventType, (typeof WEBHOOK_EVENT_DESCRIPTORS)[WebhookEventType]][]).map(
-      ([type, meta]) => [type, { type, ...meta }],
-    ),
+    (
+      Object.entries(WEBHOOK_EVENT_DESCRIPTORS) as [
+        WebhookEventType,
+        (typeof WEBHOOK_EVENT_DESCRIPTORS)[WebhookEventType],
+      ][]
+    ).map(([type, meta]) => [type, { type, ...meta }]),
   );
 
   /**

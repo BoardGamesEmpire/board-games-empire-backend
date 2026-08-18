@@ -69,7 +69,9 @@ export class MediaLinkService {
 
     const handler = LINK_HANDLERS[linkKey(target.subjectType, kind)];
     if (!handler) {
-      throw new BadRequestException(t('errors.media_link.cannot_attach_kind', { kind, subjectType: target.subjectType }));
+      throw new BadRequestException(
+        t('errors.media_link.cannot_attach_kind', { kind, subjectType: target.subjectType }),
+      );
     }
 
     const presentation = target.presentation ?? {};
@@ -96,7 +98,9 @@ export class MediaLinkService {
       };
     } catch (error) {
       if (isPrismaForeignKeyConstraintError(error)) {
-        throw new NotFoundException(t('errors.media_link.subject_not_found', { subjectType: target.subjectType, subjectId: target.subjectId }));
+        throw new NotFoundException(
+          t('errors.media_link.subject_not_found', { subjectType: target.subjectType, subjectId: target.subjectId }),
+        );
       }
       throw error;
     }

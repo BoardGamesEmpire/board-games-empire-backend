@@ -77,7 +77,12 @@ export class FeedbackDispatcherService {
     }
   }
 
-  private async enqueue(feedbackReportId: string, sinkSlug: string, actor: Actor, correlationId: string): Promise<void> {
+  private async enqueue(
+    feedbackReportId: string,
+    sinkSlug: string,
+    actor: Actor,
+    correlationId: string,
+  ): Promise<void> {
     // Deterministic jobId dedups concurrent / rapid re-emits of the same
     // (report, sink) *while the job is still in the queue* — BullMQ ignores an
     // add whose jobId is still present. This is NOT at-most-once across time:

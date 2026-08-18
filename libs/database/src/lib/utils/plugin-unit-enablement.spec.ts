@@ -52,8 +52,8 @@ describe('loadPluginUnitEnablement', () => {
   });
 
   it('fails loud on a scope type outside the union', async () => {
-    await expect(
-      loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Galaxy' } as never),
-    ).rejects.toThrow(RangeError);
+    await expect(loadPluginUnitEnablement(client, 'plg_1', { scopeType: 'Galaxy' } as never)).rejects.toThrow(
+      RangeError,
+    );
   });
 });

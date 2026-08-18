@@ -18,7 +18,7 @@ ratifies the resulting convention rather than inventing a new one.
 the tags whose `LanguageTag.systemSupported` flag is `true`. Today that set is `['en']`.
 
 - `LanguageTag.tag` is stored canonical (`Intl.getCanonicalLocales`) and is documented in the
-  schema as *"the system's preferred language identifier … the public API identifier"* —
+  schema as _"the system's preferred language identifier … the public API identifier"_ —
   `prisma/models/system/language.prisma`.
 - `systemSupported` is a boolean on **`LanguageTag`** (locale-scoped), not on `Language`. A
   language "is supported" iff one of its tags is.
@@ -35,7 +35,7 @@ the tags whose `LanguageTag.systemSupported` flag is `true`. Today that set is `
 
 ## Key mapping
 
-- **DB tag → catalog folder: identity.** The folder name *is* the canonical tag
+- **DB tag → catalog folder: identity.** The folder name _is_ the canonical tag
   (`en`, `zh-Hant`). No conversion function exists or is needed.
 - **Requested locale → catalog folder: `resolveCatalogLocale`** in `@bge/locale`
   (`libs/common/locale/src/lib/locale.ts`). It resolves a caller's prioritized ranges

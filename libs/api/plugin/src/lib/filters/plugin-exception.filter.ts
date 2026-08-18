@@ -99,7 +99,9 @@ function buildRenderers(): RendererMap {
 
   const forbiddenPermission =
     (key: I18nPath) =>
-    (exception: PluginInstallForbiddenPermissionError | PluginUpdateForbiddenPermissionError): PluginErrorRendering => ({
+    (
+      exception: PluginInstallForbiddenPermissionError | PluginUpdateForbiddenPermissionError,
+    ): PluginErrorRendering => ({
       status: Http.Forbidden,
       message: t(key, { permissionSlug: exception.permissionSlug }),
       fields: { slug: exception.slug, permissionSlug: exception.permissionSlug },
@@ -107,7 +109,9 @@ function buildRenderers(): RendererMap {
 
   const criticalConfirmation =
     (key: I18nPath) =>
-    (exception: PluginInstallCriticalConfirmationError | PluginUpdateCriticalConfirmationError): PluginErrorRendering => ({
+    (
+      exception: PluginInstallCriticalConfirmationError | PluginUpdateCriticalConfirmationError,
+    ): PluginErrorRendering => ({
       status: Http.Conflict,
       message: t(key),
       fields: {
@@ -132,7 +136,9 @@ function buildRenderers(): RendererMap {
 
   const unknownCorePermissions =
     (key: I18nPath) =>
-    (exception: PluginInstallUnknownCorePermissionError | PluginUpdateUnknownCorePermissionError): PluginErrorRendering => ({
+    (
+      exception: PluginInstallUnknownCorePermissionError | PluginUpdateUnknownCorePermissionError,
+    ): PluginErrorRendering => ({
       status: Http.UnprocessableEntity,
       message: t(key),
       fields: { slug: exception.slug, missingSlugs: exception.missingSlugs },
@@ -327,8 +333,14 @@ function buildRenderers(): RendererMap {
         },
   );
 
-  renders(PluginInstallUnknownCorePermissionError, unknownCorePermissions('errors.plugin.install_unknown_core_permissions'));
-  renders(PluginUpdateUnknownCorePermissionError, unknownCorePermissions('errors.plugin.update_unknown_core_permissions'));
+  renders(
+    PluginInstallUnknownCorePermissionError,
+    unknownCorePermissions('errors.plugin.install_unknown_core_permissions'),
+  );
+  renders(
+    PluginUpdateUnknownCorePermissionError,
+    unknownCorePermissions('errors.plugin.update_unknown_core_permissions'),
+  );
 
   renders(PluginGrantUnknownPermissionError, (exception) => ({
     status: Http.UnprocessableEntity,
@@ -482,7 +494,10 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
       code: exception.name,
     };
 
-    super.catch(translateException(new HttpException(body, status, { cause: exception }), this.i18n, this.auditContext), host);
+    super.catch(
+      translateException(new HttpException(body, status, { cause: exception }), this.i18n, this.auditContext),
+      host,
+    );
   }
 
   /**

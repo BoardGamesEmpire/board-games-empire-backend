@@ -10,12 +10,12 @@ export { ClsLocaleResolver } from './lib/cls-locale.resolver';
 // `i18nValidationMessage<I18nTranslations>(...)` against real keys — invalid
 // keys then fail `tsc`.
 export type { I18nPath, I18nTranslations } from './lib/generated/i18n.generated';
-export { I18nConfigModule } from './lib/i18n.module';
 export { I18nExceptionFilter } from './lib/i18n-exception.filter';
 export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
+export { I18nConfigModule } from './lib/i18n.module';
 export { LocaleResolutionService, type LocaleResolutionInput } from './lib/locale-resolution.service';
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
-export { translateException } from './lib/translate-exception';
 export { I18nMessage, isI18nMessage, t } from './lib/translatable';
+export { translateException } from './lib/translate-exception';
 export { i18nValidationMessage, type I18nValidationPath } from './lib/validation-message';

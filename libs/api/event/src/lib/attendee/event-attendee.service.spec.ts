@@ -234,7 +234,9 @@ describe('EventAttendeeService', () => {
 
     it('removeGameFromList emits a GameRemovedFromListEvent (delete) for the removed row', async () => {
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
-      db.eventAttendeeGameList.findUnique.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
+      db.eventAttendeeGameList.findUnique.mockResolvedValue(
+        makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }),
+      );
       db.eventAttendeeGameList.delete.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
 
       await service.removeGameFromList('event-1', 'att-1', 'gl-1');

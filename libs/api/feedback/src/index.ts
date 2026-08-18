@@ -1,12 +1,12 @@
-export * from './lib/feedback.module';
 export { FeedbackEvents, type FeedbackEvent } from './lib/constants/feedback-events.constant';
+export * from './lib/feedback.module';
 // Per-user feedback throttler registered into the global ThrottlerModule by the
 // API app (the IP tier reuses the built-in `default` throttler; see #45).
-export { createUserThrottler } from './lib/throttling/feedback-throttler';
 export type {
-  FeedbackReportSubmittedEvent,
   FeedbackReportPurgedEvent,
+  FeedbackReportSubmittedEvent,
   FeedbackReportTriagedEvent,
   UserFeedbackBannedEvent,
   UserFeedbackUnbannedEvent,
 } from './lib/interfaces/feedback.interface';
+export { createUserThrottler } from './lib/throttling/feedback-throttler';

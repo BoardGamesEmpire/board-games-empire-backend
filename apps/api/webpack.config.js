@@ -16,7 +16,7 @@ module.exports = {
       main: './src/main.ts',
       tsConfig: './tsconfig.app.json',
       assets: [
-        "./src/assets",
+        './src/assets',
         {
           glob: '**/*.proto',
           input: '../../libs/proto/gateway/proto-export',
@@ -36,6 +36,6 @@ module.exports = {
       outputHashing: 'none',
       generatePackageJson: false,
       sourceMap: true,
-    })
+    }),
   ],
 };

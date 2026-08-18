@@ -1,5 +1,5 @@
-import { BARE_PLUGIN_PERMISSION_SLUG_PATTERN, PLUGIN_SLUG_PATTERN } from './constants.js';
 import type { PermissionActionVerb } from './constants.js';
+import { BARE_PLUGIN_PERMISSION_SLUG_PATTERN, PLUGIN_SLUG_PATTERN } from './constants.js';
 
 /**
  * Canonical plugin-permission envelope: `plugin|<pluginSlug>|<bare>`.

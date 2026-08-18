@@ -43,6 +43,25 @@ jobs:
       - name: Clean stale dist directories
         run: find libs apps -name "dist" -type d -prune -exec rm -rf {} + 2>/dev/null || true
 
+      # Prettier was never enforced anywhere in the pipeline before #314 — `lint`
+      # is ESLint, which is not configured to report formatting — and 100 tracked
+      # files had drifted by the time anyone measured.
+      #
+      # `--all` is load-bearing, not belt-and-braces. Without it `format:check`
+      # inspects only files affected relative to the base, which is precisely how
+      # the drift accumulated unseen: nothing ever looked at a file nobody was
+      # touching. An affected-scoped gate would not have caught the problem it is
+      # here to prevent from recurring.
+      #
+      # Cheap enough to run first and fail fast: ~9s over the full tree, against
+      # minutes for the typecheck/test/build block below.
+      #
+      # Generated output is excluded via .prettierignore rather than .gitignore —
+      # prettier does not read nested .gitignore files, so a whole-repo run picks
+      # the proto codegen straight back up. See the comment there.
+      - name: Check formatting
+        run: npx nx format:check --all
+
       # Replaces the i18n drift gate removed in #260, and guards a real hole rather
       # than a cosmetic one.
       #

@@ -8,8 +8,7 @@ import { LocaleResolutionMiddleware } from './locale-resolution.middleware';
 
 type ResolutionMock = jest.Mocked<Pick<LocaleResolutionService, 'resolve'>>;
 
-const buildRequest = (headers: Record<string, string | undefined> = {}): Request =>
-  ({ headers }) as unknown as Request;
+const buildRequest = (headers: Record<string, string | undefined> = {}): Request => ({ headers }) as unknown as Request;
 
 describe('LocaleResolutionMiddleware', () => {
   let module: TestingModule;

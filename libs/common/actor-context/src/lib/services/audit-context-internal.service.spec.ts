@@ -101,9 +101,8 @@ describe('AuditContextInternalService', () => {
     });
 
     it('populates the locale when the seam carries one', () => {
-      const locale = internal.runWith(
-        { actor: null, correlationId: 'c', source: 'queue', locale: 'de' },
-        () => context.getLocale(),
+      const locale = internal.runWith({ actor: null, correlationId: 'c', source: 'queue', locale: 'de' }, () =>
+        context.getLocale(),
       );
       expect(locale).toBe('de');
     });

@@ -4,3 +4,18 @@
 /.nx/cache
 /.nx/workspace-data
 /.nx/self-healing
+
+# Generated sources. These are already gitignored, but that is not enough:
+# prettier does not read nested .gitignore files, so a whole-repo run
+# (`nx format:check --all`) picks them straight back up. Listing them here is
+# what keeps the CI gate honest.
+#
+# - proto gen output      → libs/proto/gateway/.gitignore  (verified: 4 files
+#                           reported by `nx format:check --all` before this entry)
+# - i18n generated types  → root .gitignore (#260); the artifact also carries its
+#                           own /* prettier-ignore */ header, so this is belt-and-braces
+# - prisma client         → libs/database/.gitignore; prettier-clean today, but that
+#                           is a property of the current codegen, not a guarantee
+/libs/proto/gateway/src/gen
+/libs/common/i18n/src/lib/generated
+/libs/database/src/lib/generated

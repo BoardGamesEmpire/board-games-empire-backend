@@ -15,16 +15,48 @@ export class AttachMediaDto {
   subjectId!: string;
 
   // presentation (applied on first attach)
-  @ApiPropertyOptional() @IsOptional() @IsString({ message: i18nValidationMessage('validation.isString') }) title?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString({ message: i18nValidationMessage('validation.isString') }) caption?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString({ message: i18nValidationMessage('validation.isString') }) altText?: string;
-  @ApiPropertyOptional() @IsOptional() @IsString({ message: i18nValidationMessage('validation.isString') }) thumbnailUrl?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  title?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  caption?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  altText?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  thumbnailUrl?: string;
 
   // per-attachment context (each subject reads the subset it supports)
-  @ApiPropertyOptional() @IsOptional() @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') }) isCover?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') }) isDefault?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') }) isFeatured?: boolean;
-  @ApiPropertyOptional() @IsOptional() @IsInt({ message: i18nValidationMessage('validation.isInt') }) @Min(0, { message: i18nValidationMessage('validation.min') }) sortOrder?: number;
-  @ApiPropertyOptional() @IsOptional() @IsDate({ message: i18nValidationMessage('validation.isDate') }) @Type(() => Date) takenAt?: Date;
-  @ApiPropertyOptional() @IsOptional() @IsString({ message: i18nValidationMessage('validation.isString') }) category?: string;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  isCover?: boolean;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  isDefault?: boolean;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
+  isFeatured?: boolean;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(0, { message: i18nValidationMessage('validation.min') })
+  sortOrder?: number;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDate({ message: i18nValidationMessage('validation.isDate') })
+  @Type(() => Date)
+  takenAt?: Date;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  category?: string;
 }

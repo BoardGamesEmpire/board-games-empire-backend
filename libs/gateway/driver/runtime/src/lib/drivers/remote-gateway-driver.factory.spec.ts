@@ -1,8 +1,8 @@
 import { AuthType } from '@bge/database';
 import { pingWithRetry } from '@bge/utils';
-import { EMPTY, of } from 'rxjs';
 import { ClientProxyFactory, type ClientGrpcProxy } from '@nestjs/microservices';
 import { Test } from '@nestjs/testing';
+import { EMPTY, of } from 'rxjs';
 import { GatewayCredentialsFactory } from '../credentials/gateway-credentials.factory';
 import { RemoteGatewayDriverFactory } from './remote-gateway-driver.factory';
 

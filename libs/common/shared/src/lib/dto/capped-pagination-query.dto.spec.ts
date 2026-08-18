@@ -17,7 +17,9 @@ describe('DefaultPaginationQueryDto — the secure-by-default opt-out DTO', () =
   });
 
   it('accepts the default cap exactly', async () => {
-    expect(await errorsFor(DefaultPaginationQueryDto, 'limit', { limit: String(DEFAULT_MAX_PAGE_SIZE) })).toHaveLength(0);
+    expect(await errorsFor(DefaultPaginationQueryDto, 'limit', { limit: String(DEFAULT_MAX_PAGE_SIZE) })).toHaveLength(
+      0,
+    );
   });
 
   // #11: the base carried no cap, so /games, /households passed an arbitrary
@@ -46,12 +48,16 @@ describe('DefaultPaginationQueryDto — the secure-by-default opt-out DTO', () =
   });
 
   it('defaults offset to 0 when absent', async () => {
-    const dto = plainToInstance(DefaultPaginationQueryDto, {}, { enableImplicitConversion: true }) as { offset: number };
+    const dto = plainToInstance(DefaultPaginationQueryDto, {}, { enableImplicitConversion: true }) as {
+      offset: number;
+    };
     expect(dto.offset).toBe(0);
   });
 
   it('accepts the offset cap exactly', async () => {
-    expect(await errorsFor(DefaultPaginationQueryDto, 'offset', { offset: String(DEFAULT_MAX_OFFSET) })).toHaveLength(0);
+    expect(await errorsFor(DefaultPaginationQueryDto, 'offset', { offset: String(DEFAULT_MAX_OFFSET) })).toHaveLength(
+      0,
+    );
   });
 
   // Bounds the worst-case Prisma `skip` scan (a large offset is a self-DoS in a

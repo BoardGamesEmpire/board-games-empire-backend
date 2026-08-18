@@ -16,6 +16,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
+import { pickSnapshot } from '../utils/pick-snapshot.util';
 import { OccurrenceEvents } from './constants';
 import { AddOccurrenceDto } from './dto/add-occurrence.dto';
 import { SubmitAvailabilityDto } from './dto/submit-availability.dto';
@@ -27,7 +28,6 @@ import {
   OccurrenceUpdatedEvent,
 } from './events/occurrence.events';
 import type { AvailabilitySummary, AvailabilitySummaryEntry } from './interfaces';
-import { pickSnapshot } from '../utils/pick-snapshot.util';
 
 @Injectable()
 export class EventOccurrenceService {
@@ -305,9 +305,7 @@ export class EventOccurrenceService {
     }
 
     if (occurrence.status !== OccurrenceStatus.Proposed) {
-      throw new BadRequestException(
-        t('errors.occurrence.availability_proposed_only', { status: occurrence.status }),
-      );
+      throw new BadRequestException(t('errors.occurrence.availability_proposed_only', { status: occurrence.status }));
     }
 
     // Pre-read classifies create vs update for the audit before-snapshot.

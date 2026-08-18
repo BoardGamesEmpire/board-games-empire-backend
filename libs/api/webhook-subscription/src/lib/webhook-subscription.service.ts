@@ -277,9 +277,7 @@ export class WebhookSubscriptionService {
     for (const ability of abilities) {
       const visible = await this.visibility.isVisibleTo(resourceType, resourceId, ability);
       if (!visible) {
-        throw new ForbiddenException(
-          t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }),
-        );
+        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }));
       }
     }
   }

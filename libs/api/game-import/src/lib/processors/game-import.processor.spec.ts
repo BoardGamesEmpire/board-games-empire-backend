@@ -1,6 +1,6 @@
 import { DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
-import { WebhookEventType } from '@bge/webhooks';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
+import { WebhookEventType } from '@bge/webhooks';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Job } from 'bullmq';
 import { JobNames } from '../constants/queue.constants';
@@ -116,7 +116,12 @@ describe('GameImportProcessor', () => {
       expansionExternalIds: ['exp-a', 'exp-b'],
       locale: 'en',
     };
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+    });
 
     await processor.process(makeJob(JobNames.GameImport, withExpansions));
 
@@ -142,7 +147,12 @@ describe('GameImportProcessor', () => {
   });
 
   it('does not spawn when a base requested no expansions', async () => {
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+    });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
@@ -150,7 +160,12 @@ describe('GameImportProcessor', () => {
   });
 
   it('skips completion events when the row is already terminal (guarded markCompleted no-ops)', async () => {
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: true,
+      sourceCreated: true,
+      platformGames: [],
+    });
     // Both markRunning and markCompleted no-op: the row was cancelled (e.g. its
     // base failed) while this flow was in flight.
     db.job.updateMany.mockResolvedValue({ count: 0 });
@@ -182,7 +197,12 @@ describe('GameImportProcessor', () => {
   });
 
   it('skips the imported webhook on re-imports (no new source) but still emits JobCompleted', async () => {
-    gameUpsert.upsert.mockResolvedValue({ gameId: 'game-1', gameCreated: false, sourceCreated: false, platformGames: [] });
+    gameUpsert.upsert.mockResolvedValue({
+      gameId: 'game-1',
+      gameCreated: false,
+      sourceCreated: false,
+      platformGames: [],
+    });
 
     await processor.process(makeJob(JobNames.GameImport, basePayload));
 
@@ -234,7 +254,11 @@ describe('GameImportProcessor', () => {
         new Error('boom'),
       );
       expect(runWith).toHaveBeenCalledWith(
-        expect.objectContaining({ source: 'queue', actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' }),
+        expect.objectContaining({
+          source: 'queue',
+          actor: { kind: 'user', userId: 'user-7' },
+          correlationId: 'corr-1',
+        }),
         expect.any(Function),
       );
       expect(db.job.updateMany).toHaveBeenCalledWith({
@@ -282,7 +306,11 @@ describe('GameImportProcessor', () => {
 
     it('does not run the child-cancellation sweep when an expansion import fails', async () => {
       await processor.onFailed(
-        makeJob(JobNames.ExpansionImport, { ...basePayload, baseGameExternalId: 'ext-base' }, { attemptsMade: 3, attempts: 3 }),
+        makeJob(
+          JobNames.ExpansionImport,
+          { ...basePayload, baseGameExternalId: 'ext-base' },
+          { attemptsMade: 3, attempts: 3 },
+        ),
         new Error('boom'),
       );
 
@@ -291,42 +319,45 @@ describe('GameImportProcessor', () => {
       );
     });
 
-    it('sanitizes the webhook payload and the persisted result — no raw error text reaches ' +
-      'third-party subscribers or the non-owner-scoped REST status endpoint', async () => {
-      await processor.onFailed(
-        makeJob(JobNames.GameImport, basePayload, { attemptsMade: 3, attempts: 3 }),
-        new Error('ECONNREFUSED 10.0.4.12:5432 (internal db host leaked in a raw Prisma error)'),
-      );
+    it(
+      'sanitizes the webhook payload and the persisted result — no raw error text reaches ' +
+        'third-party subscribers or the non-owner-scoped REST status endpoint',
+      async () => {
+        await processor.onFailed(
+          makeJob(JobNames.GameImport, basePayload, { attemptsMade: 3, attempts: 3 }),
+          new Error('ECONNREFUSED 10.0.4.12:5432 (internal db host leaked in a raw Prisma error)'),
+        );
 
-      expect(events.emit).toHaveBeenCalledWith(
-        WebhookEventType.ImportJobFailed,
-        expect.objectContaining({
-          data: expect.objectContaining({
-            jobId: 'job-1',
-            errorCode: 'INTERNAL_ERROR',
-            error: 'The import failed due to an internal error.',
+        expect(events.emit).toHaveBeenCalledWith(
+          WebhookEventType.ImportJobFailed,
+          expect.objectContaining({
+            data: expect.objectContaining({
+              jobId: 'job-1',
+              errorCode: 'INTERNAL_ERROR',
+              error: 'The import failed due to an internal error.',
+            }),
           }),
-        }),
-      );
-      expect(db.job.updateMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            result: { errorCode: 'INTERNAL_ERROR', error: 'The import failed due to an internal error.' },
+        );
+        expect(db.job.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              result: { errorCode: 'INTERNAL_ERROR', error: 'The import failed due to an internal error.' },
+            }),
           }),
-        }),
-      );
-      // The in-process event (consumed by the owner-facing notification
-      // listener and the audit listener) also carries only the sanitized
-      // classification — the raw message with the internal host never reaches
-      // it; it lives solely in the Job.error column and operator logs.
-      const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
-      const failed = failedCall![1] as ImportJobFailedEvent;
-      expect(failed.after.result).toEqual({
-        errorCode: 'INTERNAL_ERROR',
-        error: 'The import failed due to an internal error.',
-      });
-      expect(JSON.stringify(failed)).not.toContain('10.0.4.12');
-    });
+        );
+        // The in-process event (consumed by the owner-facing notification
+        // listener and the audit listener) also carries only the sanitized
+        // classification — the raw message with the internal host never reaches
+        // it; it lives solely in the Job.error column and operator logs.
+        const failedCall = events.emit.mock.calls.find(([name]) => name === ImportJobFailedEvent.eventName);
+        const failed = failedCall![1] as ImportJobFailedEvent;
+        expect(failed.after.result).toEqual({
+          errorCode: 'INTERNAL_ERROR',
+          error: 'The import failed due to an internal error.',
+        });
+        expect(JSON.stringify(failed)).not.toContain('10.0.4.12');
+      },
+    );
 
     it('skips events when the row is already terminal (fetch side marked it first)', async () => {
       db.job.updateMany.mockResolvedValue({ count: 0 });

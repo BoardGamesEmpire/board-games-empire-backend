@@ -308,7 +308,8 @@ export class LanguageLinkService {
     entry: GatewayLanguageInput,
   ): Promise<Resolution> {
     const registryEntry = iso6393Registry.find(
-      (candidate) => (iso6393 ? candidate.iso6393 === iso6393 : false) || (iso6391 ? candidate.iso6391 === iso6391 : false),
+      (candidate) =>
+        (iso6393 ? candidate.iso6393 === iso6393 : false) || (iso6391 ? candidate.iso6391 === iso6391 : false),
     );
 
     if (!registryEntry) {
@@ -402,9 +403,7 @@ export class LanguageLinkService {
     }
 
     const enrichedCode = this.normalizeIso(entry.iso6393);
-    const enriched = enrichedCode
-      ? iso6393Registry.find((candidate) => candidate.iso6393 === enrichedCode)
-      : undefined;
+    const enriched = enrichedCode ? iso6393Registry.find((candidate) => candidate.iso6393 === enrichedCode) : undefined;
 
     return enriched?.iso6393 ?? null;
   }

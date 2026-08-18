@@ -33,7 +33,7 @@ describe('TransformBoolean', () => {
     expect(toSample({ flag: 'False' }).flag).toBe(false);
   });
 
-  it("treats any other present string as false", () => {
+  it('treats any other present string as false', () => {
     expect(toSample({ flag: 'yes' }).flag).toBe(false);
     expect(toSample({ flag: '1' }).flag).toBe(false);
     expect(toSample({ flag: '' }).flag).toBe(false);

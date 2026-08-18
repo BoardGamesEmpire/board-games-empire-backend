@@ -56,7 +56,9 @@ export class LocaleResolutionService {
 
   async resolve({ userId, acceptLanguage }: LocaleResolutionInput): Promise<string> {
     const preference = userId ? await this.preferredTag(userId) : null;
-    const ranges = preference ? [preference, ...parseAcceptLanguage(acceptLanguage)] : parseAcceptLanguage(acceptLanguage);
+    const ranges = preference
+      ? [preference, ...parseAcceptLanguage(acceptLanguage)]
+      : parseAcceptLanguage(acceptLanguage);
 
     return resolveCatalogLocale(ranges, this.supportedLocales.getSupportedTags(), FALLBACK_LOCALE);
   }

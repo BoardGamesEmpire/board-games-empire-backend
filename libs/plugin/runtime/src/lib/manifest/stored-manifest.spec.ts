@@ -55,7 +55,9 @@ describe('revalidateStoredManifest', () => {
     const build = () => revalidateStoredManifest(row({ slug: 'other-plugin' }), options, factory);
 
     expect(build).toThrow(TestManifestError);
-    expect(build).toThrow(expect.objectContaining({ detail: expect.stringContaining('does not match the plugin row') }));
+    expect(build).toThrow(
+      expect.objectContaining({ detail: expect.stringContaining('does not match the plugin row') }),
+    );
   });
 
   it('rejects a manifest whose version drifted from the row', () => {

@@ -21,7 +21,10 @@ describe('sanitizeImportError', () => {
   });
 
   it('classifies other persist-origin errors as INTERNAL_ERROR', () => {
-    const result = sanitizeImportError(new Error('duplicate key value violates unique constraint "games_pkey"'), 'persist');
+    const result = sanitizeImportError(
+      new Error('duplicate key value violates unique constraint "games_pkey"'),
+      'persist',
+    );
     expect(result.code).toBe(ImportErrorCode.InternalError);
   });
 

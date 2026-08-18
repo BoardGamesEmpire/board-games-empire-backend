@@ -50,9 +50,7 @@ export abstract class AbilityAwareWorkerHost<
       await this.abilityService.primeCurrentActor();
     } catch (error) {
       if (error instanceof ForbiddenException) {
-        throw new UnrecoverableError(
-          `Ability resolution refused for this job's actor (permanent): ${error.message}`,
-        );
+        throw new UnrecoverableError(`Ability resolution refused for this job's actor (permanent): ${error.message}`);
       }
 
       throw error;
