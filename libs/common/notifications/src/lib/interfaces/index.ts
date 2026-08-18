@@ -1,5 +1,5 @@
-import { NotificationType } from '@bge/database';
 import type { JobType, ResourceType } from '@bge/database';
+import { NotificationType } from '@bge/database';
 
 /**
  * Per-`NotificationType` payload shapes.

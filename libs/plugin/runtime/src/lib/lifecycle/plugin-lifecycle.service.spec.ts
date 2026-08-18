@@ -3,8 +3,8 @@ import { createMockDatabaseService, type MockDatabaseService } from '@bge/testin
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import { PluginConfigValidationError } from '../config/config-schema.errors';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,

@@ -120,8 +120,7 @@ export class TaxonomyUpsertService {
             select: { familyId: true },
           })
           .then((row) => row?.familyId),
-      findBySlug: (slug) =>
-        this.db.family.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
+      findBySlug: (slug) => this.db.family.findUnique({ where: { slug }, select: { id: true } }).then((row) => row?.id),
       createCanonical: (slug) =>
         this.db.family
           .create({

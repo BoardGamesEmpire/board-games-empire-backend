@@ -14,11 +14,11 @@ Note that the api bundle **externalizes its workspace libraries** rather than in
 
 Escape hatches, both optional and both treating the endpoint as **disposable** (migrated, seeded, and swept exactly like a container):
 
-| Variable | Effect |
-| --- | --- |
-| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container. |
-| `BGE_E2E_REDIS_URL` | Use an existing Redis instead of a container. `resetRedis` (FLUSHALL) additionally requires `BGE_E2E_REDIS_FLUSH_OK=true`. |
-| `BGE_E2E_VERBOSE` | Set to `true` to stream the API child's output live instead of buffering it. |
+| Variable               | Effect                                                                                                                     |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container.                                                                           |
+| `BGE_E2E_REDIS_URL`    | Use an existing Redis instead of a container. `resetRedis` (FLUSHALL) additionally requires `BGE_E2E_REDIS_FLUSH_OK=true`. |
+| `BGE_E2E_VERBOSE`      | Set to `true` to stream the API child's output live instead of buffering it.                                               |
 
 ## Isolation model
 
@@ -26,7 +26,7 @@ One database, one Jest worker (`maxWorkers: 1`), truncate sweep between tests (#
 
 ## CI
 
-The `e2e` job in `.github/workflows/ci.yml` is defined for every PR to `master` and gated on the unit job via `needs: main` (#259). The job itself always pays checkout and workspace setup; the *suite* runs only when `nx affected` puts `api-e2e` in the affected set, so a change touching neither the api nor its libraries reaches the suite step and no-ops. Notes:
+The `e2e` job in `.github/workflows/ci.yml` is defined for every PR to `master` and gated on the unit job via `needs: main` (#259). The job itself always pays checkout and workspace setup; the _suite_ runs only when `nx affected` puts `api-e2e` in the affected set, so a change touching neither the api nor its libraries reaches the suite step and no-ops. Notes:
 
 - **Only runs if `main` is green.** Lint, typecheck, and unit failures skip the suite entirely — no containers, no minutes. This also means the affected build the e2e job performs is served from the Nx Cloud cache `main` just populated, rather than recomputed.
 - **Verbose by default in CI.** The job sets `BGE_E2E_VERBOSE=true`, so the API's full output lands in the (foldable) job log. On a spec failure, find the failing request's server lines there. If this proves too noisy to diagnose from in practice, #274 (failure-scoped log surfacing) is the filed alternative — say so on that issue rather than suffering quietly.
@@ -37,11 +37,11 @@ The `e2e` job in `.github/workflows/ci.yml` is defined for every PR to `master` 
 
 ## Wall-clock budget
 
-| | |
-| --- | --- |
-| Baseline | **2m44s** for the `e2e` job — 2026-08-10, [PR #287's run](https://github.com/BoardGamesEmpire/board-games-empire-backend/actions/runs/31378763014) |
-| Budget | **≈ 5m30s** for the `e2e` job (2× baseline) |
-| Hard stop | `timeout-minutes: 20` on the suite step, 30 on the job |
+|           |                                                                                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Baseline  | **2m44s** for the `e2e` job — 2026-08-10, [PR #287's run](https://github.com/BoardGamesEmpire/board-games-empire-backend/actions/runs/31378763014) |
+| Budget    | **≈ 5m30s** for the `e2e` job (2× baseline)                                                                                                        |
+| Hard stop | `timeout-minutes: 20` on the suite step, 30 on the job                                                                                             |
 
 The baseline is the whole job, so it includes checkout, `setup-workspace`, and `nx affected -t build`; the suite step itself is some fraction of it. Two things make it a deliberately conservative figure rather than a best case: the Nx Cloud cache was warm, and because that PR touched `ci.yml` (which is in `sharedGlobals`) every project was affected, making the build step as wide as it ever gets.
 

@@ -39,7 +39,7 @@ const { version } = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
 if (valid(version) === null) {
   console.error(
     `[generate-bge-version] workspace package.json version '${version}' is not valid semver — ` +
-    'plugin bgeCompat evaluation requires a valid version, refusing to stamp it into the build.',
+      'plugin bgeCompat evaluation requires a valid version, refusing to stamp it into the build.',
   );
   process.exit(1);
 }

@@ -3,8 +3,8 @@ import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from 
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
-import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 import { PluginConsentPresentationManifestError } from './consent-presentation.errors';
+import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 import { PluginConsentPresentationService } from './plugin-consent-presentation.service';
 
 describe('PluginConsentPresentationService', () => {
@@ -157,18 +157,16 @@ describe('PluginConsentPresentationService', () => {
   });
 
   it('rejects a structurally invalid unit at the boundary, before any query', async () => {
-    await expect(
-      service.presentForUnit('plg_1', { scopeType: 'Household' } as unknown as PluginUnit),
-    ).rejects.toThrow(RangeError);
+    await expect(service.presentForUnit('plg_1', { scopeType: 'Household' } as unknown as PluginUnit)).rejects.toThrow(
+      RangeError,
+    );
     expect(db.plugin.findUnique).not.toHaveBeenCalled();
   });
 
   it('wraps an invalid stored manifest in the presentation-surface error', async () => {
     db.plugin.findUnique.mockResolvedValue(pluginRow({ manifestJson: { nonsense: true } }) as never);
 
-    await expect(service.presentForUnit('plg_1', SERVER_UNIT)).rejects.toThrow(
-      PluginConsentPresentationManifestError,
-    );
+    await expect(service.presentForUnit('plg_1', SERVER_UNIT)).rejects.toThrow(PluginConsentPresentationManifestError);
   });
 
   describe('the install/update response viewpoint (Server unit)', () => {
@@ -315,11 +313,14 @@ describe('PluginConsentPresentationService', () => {
       expect(presentation?.displayName).toEqual({ value: 'Demo-Senke', locale: 'de', usedFallback: true });
     });
 
-    it.each(['fr', 'not a locale !!'])('unsupported or malformed locale %j resolves at the default, flagged', async (locale) => {
-      const presentation = await service.presentForUnit('plg_1', SERVER_UNIT, locale);
+    it.each(['fr', 'not a locale !!'])(
+      'unsupported or malformed locale %j resolves at the default, flagged',
+      async (locale) => {
+        const presentation = await service.presentForUnit('plg_1', SERVER_UNIT, locale);
 
-      expect(presentation?.displayName).toEqual({ value: 'Demo Sink', locale: 'en', usedFallback: true });
-    });
+        expect(presentation?.displayName).toEqual({ value: 'Demo Sink', locale: 'en', usedFallback: true });
+      },
+    );
   });
 
   describe('presentPendingForUnit (staged update approval surface)', () => {
@@ -347,7 +348,7 @@ describe('PluginConsentPresentationService', () => {
       await expect(service.presentPendingForUnit('plg_1', SERVER_UNIT)).resolves.toBeNull();
     });
 
-    it('presents the PENDING manifest against today\'s decisions', async () => {
+    it("presents the PENDING manifest against today's decisions", async () => {
       db.plugin.findUnique.mockResolvedValue(
         pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest }) as never,
       );

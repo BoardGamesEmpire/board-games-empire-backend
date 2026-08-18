@@ -1,5 +1,5 @@
-import { GatewayRegistryService } from '@bge/gateway-registry';
 import { FlowProducerNames } from '@bge/game-import';
+import { GatewayRegistryService } from '@bge/gateway-registry';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { getFlowProducerToken } from '@nestjs/bullmq';
 import { ConfigService } from '@nestjs/config';

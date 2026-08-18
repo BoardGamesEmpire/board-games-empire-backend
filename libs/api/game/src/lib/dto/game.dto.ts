@@ -2,35 +2,32 @@ import type { Game } from '@bge/database';
 import { ContentType, TimeMeasure, Visibility } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class GameDto
-  implements
-    Pick<
-      Game,
-      | 'id'
-      | 'title'
-      | 'subtitle'
-      | 'description'
-      | 'image'
-      | 'thumbnail'
-      | 'publishYear'
-      | 'minPlayers'
-      | 'maxPlayers'
-      | 'minPlayTime'
-      | 'minPlayTimeMeasure'
-      | 'maxPlayTime'
-      | 'maxPlayTimeMeasure'
-      | 'minAge'
-      | 'complexity'
-      | 'averageRating'
-      | 'ratingsCount'
-      | 'ownedByCount'
-      | 'visibility'
-      | 'contentType'
-      | 'createdById'
-      | 'createdAt'
-      | 'updatedAt'
-    >
-{
+export class GameDto implements Pick<
+  Game,
+  | 'id'
+  | 'title'
+  | 'subtitle'
+  | 'description'
+  | 'image'
+  | 'thumbnail'
+  | 'publishYear'
+  | 'minPlayers'
+  | 'maxPlayers'
+  | 'minPlayTime'
+  | 'minPlayTimeMeasure'
+  | 'maxPlayTime'
+  | 'maxPlayTimeMeasure'
+  | 'minAge'
+  | 'complexity'
+  | 'averageRating'
+  | 'ratingsCount'
+  | 'ownedByCount'
+  | 'visibility'
+  | 'contentType'
+  | 'createdById'
+  | 'createdAt'
+  | 'updatedAt'
+> {
   @ApiProperty({ description: 'Unique game identifier' })
   id!: string;
 

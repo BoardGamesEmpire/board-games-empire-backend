@@ -43,35 +43,35 @@ stay English).
    into shared `common.*` keys (see §4).
 5. **All custom domain errors are out of scope.** Where storage/signature errors reach HTTP they are
    already remapped to **generic English strings at the `libs/api/media` filter/controller sites**
-   (those mapping-site strings *are* in scope and counted under `media`).
+   (those mapping-site strings _are_ in scope and counted under `media`).
 
 ---
 
 ## 2. Summary counts (in-scope)
 
-| Lib | Exception msgs | Success `message:` | Notes |
-|---|---:|---:|---|
-| libs/api/event | 32 | 21 | largest surface |
-| libs/api/media | 35 | 1 | + generic strings from StorageExceptionFilter mapping sites |
-| libs/api/friendship | 14 | 3 | |
-| libs/common/quota | 12 | — | incl. `QuotaExceededException` (msg centralized in ctor) + 1 validator msg |
-| libs/api/game | 8 | 3 | |
-| libs/api/webhook-subscription | 8 | 5 | 1 dynamic (caller-supplied) message |
-| libs/api/game-collection | 7 | 3 | |
-| libs/api/game-gateway | 6 | 0 | 2 dynamic `error.message` pass-through (see §6) |
-| libs/common/permissions | 5 | — | ForbiddenException only; custom error out of scope |
-| libs/api/household | 4 | 3 | |
-| libs/api/safe-http | 4 | — | + 2 custom-validator messages (admin) |
-| libs/api/game-import | 3 | 5 | worker context + `SAFE_MESSAGE` client-safe copy map |
-| libs/api/system-settings | 2 | — | operator-facing "run the seed" invariants |
-| libs/api/quota | 1 | 1 | |
-| libs/api/feedback | 1 | 1 | + 1 custom-validator message |
-| libs/api/language | 1 | — | |
-| libs/api/well-known | 1 | — | |
-| libs/api/gateway-registry | 1 | — | NotImplementedException |
-| libs/common/actor-context | 1 | — | `audit-context.service.ts:53` ForbiddenException |
-| **libs/api/actor-context-transport** | **19** | — | **LOW PRIORITY** — 2 HTTP, 17 internal gRPC |
-| **Totals** | **~165** | **~42** | |
+| Lib                                  | Exception msgs | Success `message:` | Notes                                                                      |
+| ------------------------------------ | -------------: | -----------------: | -------------------------------------------------------------------------- |
+| libs/api/event                       |             32 |                 21 | largest surface                                                            |
+| libs/api/media                       |             35 |                  1 | + generic strings from StorageExceptionFilter mapping sites                |
+| libs/api/friendship                  |             14 |                  3 |                                                                            |
+| libs/common/quota                    |             12 |                  — | incl. `QuotaExceededException` (msg centralized in ctor) + 1 validator msg |
+| libs/api/game                        |              8 |                  3 |                                                                            |
+| libs/api/webhook-subscription        |              8 |                  5 | 1 dynamic (caller-supplied) message                                        |
+| libs/api/game-collection             |              7 |                  3 |                                                                            |
+| libs/api/game-gateway                |              6 |                  0 | 2 dynamic `error.message` pass-through (see §6)                            |
+| libs/common/permissions              |              5 |                  — | ForbiddenException only; custom error out of scope                         |
+| libs/api/household                   |              4 |                  3 |                                                                            |
+| libs/api/safe-http                   |              4 |                  — | + 2 custom-validator messages (admin)                                      |
+| libs/api/game-import                 |              3 |                  5 | worker context + `SAFE_MESSAGE` client-safe copy map                       |
+| libs/api/system-settings             |              2 |                  — | operator-facing "run the seed" invariants                                  |
+| libs/api/quota                       |              1 |                  1 |                                                                            |
+| libs/api/feedback                    |              1 |                  1 | + 1 custom-validator message                                               |
+| libs/api/language                    |              1 |                  — |                                                                            |
+| libs/api/well-known                  |              1 |                  — |                                                                            |
+| libs/api/gateway-registry            |              1 |                  — | NotImplementedException                                                    |
+| libs/common/actor-context            |              1 |                  — | `audit-context.service.ts:53` ForbiddenException                           |
+| **libs/api/actor-context-transport** |         **19** |                  — | **LOW PRIORITY** — 2 HTTP, 17 internal gRPC                                |
+| **Totals**                           |       **~165** |            **~42** |                                                                            |
 
 Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstraint` messages.
 
@@ -82,137 +82,137 @@ Validation (whole repo): **1** inline `message:` + **3** custom `ValidatorConstr
 Ordered roughly by value/size. Each is an independent unit of work (good for parallel owners).
 
 - [x] `libs/api/event` — **DONE**. Actual surface was **~50 exceptions + 22 success** (not 32/21):
-  the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
-  in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
-  must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
-  normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
-  `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
-  (en-only, no test asserts it — accepted).
+      the original `throw new *Exception` sweep **missed every `assert(cond, new *Exception(...))`** (18
+      in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
+      must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
+      normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
+      `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
+      (en-only, no test asserts it — accepted).
 - [x] `libs/api/media` — **DONE**. Real surface was **41 exceptions + 1 success** (inventory said
-  35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
-  (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
-  resolve `t()` markers via the shared `translateException` helper (`@bge/i18n`).
-  `MulterExceptionFilter` was narrowed from a bare `@Catch()` to `@Catch(MulterError)` (adds
-  `@types/multer`) — the old catch-all had been silently shadowing the **global** exception *and*
-  validation filters for the whole media-object controller (a latent #142 side-effect; validation
-  errors there now format correctly again). Fixed `storage-exception.filter.ts` passing the raw
-  `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
-  `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
-  `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
+      35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
+      (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
+      resolve `t()` markers via the shared `translateException` helper (`@bge/i18n`).
+      `MulterExceptionFilter` was narrowed from a bare `@Catch()` to `@Catch(MulterError)` (adds
+      `@types/multer`) — the old catch-all had been silently shadowing the **global** exception _and_
+      validation filters for the whole media-object controller (a latent #142 side-effect; validation
+      errors there now format correctly again). Fixed `storage-exception.filter.ts` passing the raw
+      `exception.message` to clients (info-leak → generic `errors.storage.insufficient`).
+      `QuotaExceededException` is left to the quota lib (message centralized in its ctor); its
+      `'storage_bytes'` metric-key args carry a `no-restricted-syntax` escape-hatch.
 - [x] `libs/api/friendship` — **DONE**. Actual surface was **15 exceptions + 3 success** (inventory said
-  14): the sweep missed the `return new ForbiddenException(...)` in `mapMissingToForbidden` — a non-`throw`
-  construction, exactly the under count §3 warns about. No `assert()` throws in this lib. Added
-  `errors.user.not_found` (new shared key for the addressee lookup; other user-referencing libs can adopt
-  it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
-  `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
-  Logger line (`mapMissingToForbidden`) left English.
+      14): the sweep missed the `return new ForbiddenException(...)` in `mapMissingToForbidden` — a non-`throw`
+      construction, exactly the under count §3 warns about. No `assert()` throws in this lib. Added
+      `errors.user.not_found` (new shared key for the addressee lookup; other user-referencing libs can adopt
+      it). The dynamic `respond` success (`Friendship ${status}`) became per-status keys
+      `success.friendship.{accepted,declined,withdrawn,blocked}` so each stays a whole translatable sentence.
+      Logger line (`mapMissingToForbidden`) left English.
 - [x] `libs/common/quota` — **DONE**. 11 service exceptions + `QuotaExceededException` ctor message + 1
-  validator msg. The exception carries machine-readable fields (`resource`/`scope`/`limit`/…) beside its
-  message, so `translateException` gained a branch that translates a marker nested in a structured body's
-  `message` field in place (see [translated-exceptions.md](./translated-exceptions.md) → Structured bodies).
-  The registry's 3 plain `Error` throws stay English (internal, not `*Exception`). Namespace `errors.quota.*`
-  / `success.quota.*` (import alias `@bge/quota`; the api lib is `@bge/quotas` — no collision). Added
-  `validation.nonNegativeIntegerString` (preserves the exact `@IsNumberString` copy via `{property}`).
+      validator msg. The exception carries machine-readable fields (`resource`/`scope`/`limit`/…) beside its
+      message, so `translateException` gained a branch that translates a marker nested in a structured body's
+      `message` field in place (see [translated-exceptions.md](./translated-exceptions.md) → Structured bodies).
+      The registry's 3 plain `Error` throws stay English (internal, not `*Exception`). Namespace `errors.quota.*`
+      / `success.quota.*` (import alias `@bge/quota`; the api lib is `@bge/quotas` — no collision). Added
+      `validation.nonNegativeIntegerString` (preserves the exact `@IsNumberString` copy via `{property}`).
 - [x] `libs/api/game` — 8 exceptions + 3 success — **DONE (Phase 3 spike)**; established the
-  success-response interceptor, catalog conventions, and #145 guardrail (see
-  [translated-responses.md](./translated-responses.md))
+      success-response interceptor, catalog conventions, and #145 guardrail (see
+      [translated-responses.md](./translated-responses.md))
 - [x] `libs/api/webhook-subscription` — **DONE**. 8 exceptions (7 literal + the 1 dynamic §6 msg) + 5 success.
-  The dynamic `requireAbilities(message)` was resolved at its 3 call sites (per §6): the helper's param
-  became `I18nMessage` and each caller passes a distinct `t()` key (`forbidden_create`/`forbidden_change_events`/
-  `forbidden_reactivate`). The empty-update throw reuses shared `common.at_least_one_field` (adds "for update"
-  — accurate, it's the update path). Namespace `errors.webhook_subscription.*` (9 keys) / `success.webhook_subscription.*`
-  (5 keys). Both specs needed ZERO edits (assert exception types / definedness, never strings). **DTOs are in a
-  separate lib (`@bge/webhooks` / `libs/common/webhooks`)** — bare decorators, no custom message literals, so no
-  guardrail trip; that lib's validator-annotation sweep is deferred to its own item.
+      The dynamic `requireAbilities(message)` was resolved at its 3 call sites (per §6): the helper's param
+      became `I18nMessage` and each caller passes a distinct `t()` key (`forbidden_create`/`forbidden_change_events`/
+      `forbidden_reactivate`). The empty-update throw reuses shared `common.at_least_one_field` (adds "for update"
+      — accurate, it's the update path). Namespace `errors.webhook_subscription.*` (9 keys) / `success.webhook_subscription.*`
+      (5 keys). Both specs needed ZERO edits (assert exception types / definedness, never strings). **DTOs are in a
+      separate lib (`@bge/webhooks` / `libs/common/webhooks`)** — bare decorators, no custom message literals, so no
+      guardrail trip; that lib's validator-annotation sweep is deferred to its own item.
 - [x] `libs/api/game-collection` — **DONE**. Real surface was **8 exceptions + 3 success** (inventory
-  said 7): the sweep missed the `return new NotFoundException(...)` in `mapMissingToNotFound` — a
-  non-`throw` construction, exactly the under count §3 warns about. No `assert()` throws. Fully
-  mechanical (no custom filters): services throw `t()` markers to the global `I18nExceptionFilter`,
-  controller returns `t('success.game_collection.*')` markers. New per-entity namespaces
-  `errors.game_collection.{not_found,release_platform_mismatch}`, `errors.platform_game.not_found`,
-  `errors.game_release.not_found` (translatable nouns baked into the frame, only IDs interpolated);
-  reused shared `common.at_least_one_field`. `success.game_collection.{added,updated,removed}`. No new
-  validation keys — all 4 DTOs annotated against existing `validation.*`. Only the controller spec's
-  one `message: expect.any(String)` needed editing (→ `t()` marker, `toMatchObject` structural); the
-  service spec asserts exception TYPES only (zero edits). Guardrail enabled.
+      said 7): the sweep missed the `return new NotFoundException(...)` in `mapMissingToNotFound` — a
+      non-`throw` construction, exactly the under count §3 warns about. No `assert()` throws. Fully
+      mechanical (no custom filters): services throw `t()` markers to the global `I18nExceptionFilter`,
+      controller returns `t('success.game_collection.*')` markers. New per-entity namespaces
+      `errors.game_collection.{not_found,release_platform_mismatch}`, `errors.platform_game.not_found`,
+      `errors.game_release.not_found` (translatable nouns baked into the frame, only IDs interpolated);
+      reused shared `common.at_least_one_field`. `success.game_collection.{added,updated,removed}`. No new
+      validation keys — all 4 DTOs annotated against existing `validation.*`. Only the controller spec's
+      one `message: expect.any(String)` needed editing (→ `t()` marker, `toMatchObject` structural); the
+      service spec asserts exception TYPES only (zero edits). Guardrail enabled.
 - [x] `libs/api/game-gateway` — **DONE**. 6 service exceptions + fixed the 2 raw `error.message`
-  pass-through **info-leaks** (§6). No `assert()`, no success `message:` bodies. New per-entity
-  namespace `errors.game_gateway.{not_found,not_found_or_denied,connect_failed,disconnect_failed}`
-  (two distinct not-found messages: `getById` says "not found or access denied" — the ability-scoped
-  `findUniqueOrThrow` can't distinguish the two — while `update`/`delete` count first and say plain
-  "not found"). The controller's connect/disconnect `catchError` now returns a generic translated
-  marker (`connect_failed`/`disconnect_failed`) rendered by `I18nResponseInterceptor`; the raw
-  coordinator error stays server-side in the logger only. Reused `common.at_least_one_field` /
-  `common.forbidden.{update,delete}`. No new validation keys — `CreateGameGatewayDto` annotated
-  against existing `validation.{isString,isPositive,max,isBoolean,isIn}`; `UpdateGameGatewayDto` is
-  `PartialType(CreateGameGatewayDto)` so it inherits the annotations. Both specs assert exception
-  TYPES / DTO fields only — zero edits.
+      pass-through **info-leaks** (§6). No `assert()`, no success `message:` bodies. New per-entity
+      namespace `errors.game_gateway.{not_found,not_found_or_denied,connect_failed,disconnect_failed}`
+      (two distinct not-found messages: `getById` says "not found or access denied" — the ability-scoped
+      `findUniqueOrThrow` can't distinguish the two — while `update`/`delete` count first and say plain
+      "not found"). The controller's connect/disconnect `catchError` now returns a generic translated
+      marker (`connect_failed`/`disconnect_failed`) rendered by `I18nResponseInterceptor`; the raw
+      coordinator error stays server-side in the logger only. Reused `common.at_least_one_field` /
+      `common.forbidden.{update,delete}`. No new validation keys — `CreateGameGatewayDto` annotated
+      against existing `validation.{isString,isPositive,max,isBoolean,isIn}`; `UpdateGameGatewayDto` is
+      `PartialType(CreateGameGatewayDto)` so it inherits the annotations. Both specs assert exception
+      TYPES / DTO fields only — zero edits.
 - [x] `libs/common/permissions` — **DONE**. 5 ForbiddenException (surface matched inventory; no
-  `assert()` throws, no success bodies, no DTOs). Fully mechanical (no custom filters): the guard and
-  `AbilityService` throw `t()` markers caught by the global `I18nExceptionFilter`. Reused shared
-  `common.forbidden.access` (ability.service `getResourceConditionsForAbilities` ×2) and new
-  `common.forbidden.action` (policies.guard ×2 — "You do not have permission to perform this action.").
-  New `errors.api_key.not_found_or_revoked` for the one unique message (revoked/missing key on ability
-  resolution). No new validation keys. Both specs assert exception TYPES / delegation only (zero edits).
-  Guardrail enabled on `permissions/eslint.config.mjs`; `nx sync` added the i18n tsconfig ref (first
-  `@bge/i18n` import).
+      `assert()` throws, no success bodies, no DTOs). Fully mechanical (no custom filters): the guard and
+      `AbilityService` throw `t()` markers caught by the global `I18nExceptionFilter`. Reused shared
+      `common.forbidden.access` (ability.service `getResourceConditionsForAbilities` ×2) and new
+      `common.forbidden.action` (policies.guard ×2 — "You do not have permission to perform this action.").
+      New `errors.api_key.not_found_or_revoked` for the one unique message (revoked/missing key on ability
+      resolution). No new validation keys. Both specs assert exception TYPES / delegation only (zero edits).
+      Guardrail enabled on `permissions/eslint.config.mjs`; `nx sync` added the i18n tsconfig ref (first
+      `@bge/i18n` import).
 - [x] `libs/api/household` — **DONE**. Real surface was **9 exceptions + 3 success** (inventory said
-  4/3): the `throw new` sweep missed **4 `assert(cond, new *Exception(...))` throws** (3 not-found +
-  BCP 47 tag validation), exactly the under count §3 warns about. Fully mechanical (no custom filters).
-  New `errors.household.{not_found,invalid_language_tag,language_tag_unsupported}` (IDs / user-supplied
-  tags interpolated; not-found normalized to the "with ID {id}" frame). Reused shared
-  `common.forbidden.{view,update,delete}` (the view/delete throws' "this household" copy normalized to
-  the generic "this resource" — service spec asserts TYPES only) and `common.at_least_one_field`.
-  `success.household.{created,updated,deleted}` (updated/deleted keep the `{id}`). No new validation
-  keys — `CreateHouseholdDto` annotated against existing `validation.{isString,isEnum}`;
-  `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
-  TYPES / delegation only — zero edits. Guardrail enabled.
+      4/3): the `throw new` sweep missed **4 `assert(cond, new *Exception(...))` throws** (3 not-found +
+      BCP 47 tag validation), exactly the under count §3 warns about. Fully mechanical (no custom filters).
+      New `errors.household.{not_found,invalid_language_tag,language_tag_unsupported}` (IDs / user-supplied
+      tags interpolated; not-found normalized to the "with ID {id}" frame). Reused shared
+      `common.forbidden.{view,update,delete}` (the view/delete throws' "this household" copy normalized to
+      the generic "this resource" — service spec asserts TYPES only) and `common.at_least_one_field`.
+      `success.household.{created,updated,deleted}` (updated/deleted keep the `{id}`). No new validation
+      keys — `CreateHouseholdDto` annotated against existing `validation.{isString,isEnum}`;
+      `UpdateHouseholdDto` is `PartialType(CreateHouseholdDto)` so it inherits. Both specs assert exception
+      TYPES / delegation only — zero edits. Guardrail enabled.
 - [x] `libs/api/safe-http` — 4 exceptions + 2 custom-validator messages
 - [x] `libs/api/game-import` — **DONE**. Only 1 of the 3 exceptions is HTTP-facing
-  (`import-status.service.ts` batch lookup → `errors.game_import.batch_not_found`); the other two are
-  thrown inside BullMQ worker processors, caught by `sanitizeImportError`, and land only in `Job.error`
-  plus operator logs, so they stay English (both use string concatenation, so the #145 guardrail's
-  direct-literal selectors don't trip — no eslint-disable needed). The `SAFE_MESSAGE` map stays English
-  for worker-emitted surfaces (webhook/notification); only the REST read-back is localized —
-  `toJobDto` maps `errorCode → t(IMPORT_FAILURE_MESSAGE_KEYS[code])` behind `I18nResponseInterceptor`.
-  Deferred worker-side localization (notification + webhook) → new issue **#188**. Added
-  `errors.game_import.batch_not_found` + `errors.game_import.failure.*`, `success.game_import.enqueued`,
-  `validation.isUUID`. Both DTOs annotated.
+      (`import-status.service.ts` batch lookup → `errors.game_import.batch_not_found`); the other two are
+      thrown inside BullMQ worker processors, caught by `sanitizeImportError`, and land only in `Job.error`
+      plus operator logs, so they stay English (both use string concatenation, so the #145 guardrail's
+      direct-literal selectors don't trip — no eslint-disable needed). The `SAFE_MESSAGE` map stays English
+      for worker-emitted surfaces (webhook/notification); only the REST read-back is localized —
+      `toJobDto` maps `errorCode → t(IMPORT_FAILURE_MESSAGE_KEYS[code])` behind `I18nResponseInterceptor`.
+      Deferred worker-side localization (notification + webhook) → new issue **#188**. Added
+      `errors.game_import.batch_not_found` + `errors.game_import.failure.*`, `success.game_import.enqueued`,
+      `validation.isUUID`. Both DTOs annotated.
 - [x] `libs/api/system-settings` — **DONE**. 2 exceptions (surface matched inventory; no `assert()`, no
-  success bodies). Operator-facing "run the seed" invariants →
-  `errors.system_settings.{not_found,multiple}` (mirrors the `safe_http.no_policy` / `multiple_policies`
-  singleton-invariant pattern). `UpdateSystemSettingsDto` annotated (`@IsBoolean` ×4, `@IsNumber`)
-  against existing `validation.isBoolean` + new `validation.isNumber`; `@IsOptional()` left unannotated.
-  Both specs are `should be defined` only (zero edits). Guardrail enabled; `nx sync` added the i18n
-  tsconfig ref (first `@bge/i18n` import).
+      success bodies). Operator-facing "run the seed" invariants →
+      `errors.system_settings.{not_found,multiple}` (mirrors the `safe_http.no_policy` / `multiple_policies`
+      singleton-invariant pattern). `UpdateSystemSettingsDto` annotated (`@IsBoolean` ×4, `@IsNumber`)
+      against existing `validation.isBoolean` + new `validation.isNumber`; `@IsOptional()` left unannotated.
+      Both specs are `should be defined` only (zero edits). Guardrail enabled; `nx sync` added the i18n
+      tsconfig ref (first `@bge/i18n` import).
 - [x] `libs/api/quota` — **DONE**. 1 exception (reuses `errors.quota.unknown_resource`) + 1 success
-  (`success.quota.set`). Controller spec updated to assert the `t()` marker.
+      (`success.quota.set`). Controller spec updated to assert the `t()` marker.
 - [x] `libs/api/feedback` — **DONE**. 1 exception + 1 success + 1 custom-validator message. The
-  exception (`banUser` user-not-found) reuses the shared `errors.user.not_found` key. Success
-  `message:` → `success.feedback.submitted` (the `SubmitFeedbackResponse.message` type widened from
-  `string` to `I18nMessage`; the interceptor renders it to a string pre-serialization). The
-  `MaxJsonBytesConstraint.defaultMessage()` now returns `i18nValidationMessage('validation.maxJsonBytes')`
-  — but with `value` stripped from the args, because the factory JSON-serializes `args.value` and the
-  rejected payload may be oversized or non-serializable (BigInt/circular); the catalog string only uses
-  `{property}` + `{constraints.0}`. DTO annotation added `validation.{isObject,arrayMaxSize,isISO8601,maxJsonBytes}`.
-  The internal `findCreatePermission` plain `Error` stays English (§5). Controller spec updated to assert
-  the `t()` marker; validator spec unaffected (asserts booleans).
+      exception (`banUser` user-not-found) reuses the shared `errors.user.not_found` key. Success
+      `message:` → `success.feedback.submitted` (the `SubmitFeedbackResponse.message` type widened from
+      `string` to `I18nMessage`; the interceptor renders it to a string pre-serialization). The
+      `MaxJsonBytesConstraint.defaultMessage()` now returns `i18nValidationMessage('validation.maxJsonBytes')`
+      — but with `value` stripped from the args, because the factory JSON-serializes `args.value` and the
+      rejected payload may be oversized or non-serializable (BigInt/circular); the catalog string only uses
+      `{property}` + `{constraints.0}`. DTO annotation added `validation.{isObject,arrayMaxSize,isISO8601,maxJsonBytes}`.
+      The internal `findCreatePermission` plain `Error` stays English (§5). Controller spec updated to assert
+      the `t()` marker; validator spec unaffected (asserts booleans).
 - [x] `libs/api/language` — **DONE** (was the #143 exemplar; `errors.language.not_found` already
-  converted). This pass only enabled the #145 guardrail on its eslint config.
+      converted). This pass only enabled the #145 guardrail on its eslint config.
 - [x] `libs/api/well-known` — **DONE**. 1 exception (`getSecurityTxt` → `errors.well_known.security_txt_not_configured`;
-  concatenated literals joined into one catalog entry per §6). The `assert(settings, '…')` in
-  `strategy.service.ts` stays English — a `node:assert` invariant that surfaces as a generic 500, never a
-  client-facing body (§5). Controller spec's "descriptive message" test rewritten to assert the marker via
-  `getResponse()`.
+      concatenated literals joined into one catalog entry per §6). The `assert(settings, '…')` in
+      `strategy.service.ts` stays English — a `node:assert` invariant that surfaces as a generic 500, never a
+      client-facing body (§5). Controller spec's "descriptive message" test rewritten to assert the marker via
+      `getResponse()`.
 - [x] `libs/api/gateway-registry` — **DONE**. 1 exception (`GatewayCredentialsFactory` →
-  `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
-  (zero spec edits).
+      `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
+      (zero spec edits).
 - [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:54`). **BLOCKED on a cycle:**
-  `@bge/i18n` already imports `AuditContextService` / `LOCALE_CLS_KEY` from `@bge/actor-context`, so
-  having `@bge/actor-context` import `t` from `@bge/i18n` forms a circular project reference that
-  `tsc --build` rejects. Needs the pure `t`/`translatable` primitive (no NestJS/actor-context deps)
-  extracted into a lower lib both can depend on before this one can migrate. The plain `Error` at
-  `audit-context.service.ts:44` stays English regardless (§5).
+      `@bge/i18n` already imports `AuditContextService` / `LOCALE_CLS_KEY` from `@bge/actor-context`, so
+      having `@bge/actor-context` import `t` from `@bge/i18n` forms a circular project reference that
+      `tsc --build` rejects. Needs the pure `t`/`translatable` primitive (no NestJS/actor-context deps)
+      extracted into a lower lib both can depend on before this one can migrate. The plain `Error` at
+      `audit-context.service.ts:44` stays English regardless (§5).
 - [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — 19 auth-plumbing exceptions (17 internal gRPC)
 
 ---
@@ -238,7 +238,7 @@ mapping site (which is in scope and counted under `media`). Do **not** translate
 - **Storage** (`libs/storage/*`): `StorageMisconfiguredError`, `DriverNotRegisteredError`,
   `InvalidObjectKeyError`, `ObjectNotFoundError`, `SignatureInvalidError`, `SignatureExpiredError`,
   `RangeError`, `ProbeTimeoutError`. StorageExceptionFilter → generic `503 Storage temporarily
-  unavailable`; signature/not-found remapped inside `media-object.service.ts` to
+unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   `Invalid signature` / `Signed URL has expired` / `Media not found` (those strings **are** in scope).
 - **secure-http** (`libs/common/secure-http`): `DnsResolutionError`, `SsrfRejectionError`,
   `RedirectToDisallowedTargetError`, `RedirectLimitExceededError`, `RequestTimeoutError`,
@@ -278,12 +278,12 @@ mapping site (which is in scope and counted under `media`). Do **not** translate
 
 ## 7. Validation messages (full list)
 
-| file:line | source | message |
-|---|---|---|
-| libs/common/quota/.../dto/set-quota.dto.ts:18 | inline `@IsNumberString` message | `limit must be a non-negative integer string` |
-| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()` | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes` |
-| libs/api/safe-http/.../dto/validators.ts:33 | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")` |
-| libs/api/safe-http/.../dto/validators.ts:71 | `IsCidrConstraint.defaultMessage()` | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
+| file:line                                                       | source                                            | message                                                                                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| libs/common/quota/.../dto/set-quota.dto.ts:18                   | inline `@IsNumberString` message                  | `limit must be a non-negative integer string`                                                                                |
+| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()`         | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes`                                                   |
+| libs/api/safe-http/.../dto/validators.ts:33                     | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")`                                    |
+| libs/api/safe-http/.../dto/validators.ts:71                     | `IsCidrConstraint.defaultMessage()`               | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
 
 Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
 (#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
@@ -292,6 +292,6 @@ tracked as Phase 3 work (#144).
 
 ---
 
-*Full per-site message tables (every throw with exact text + interpolation args) were captured during
+_Full per-site message tables (every throw with exact text + interpolation args) were captured during
 the sweep and can be regenerated per lib on demand; the checklist in §3 plus the shared-key plan in §4
-is what Phase 3 owners work from.*
+is what Phase 3 owners work from._

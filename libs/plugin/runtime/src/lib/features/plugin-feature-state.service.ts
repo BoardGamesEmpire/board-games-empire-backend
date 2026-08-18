@@ -2,10 +2,7 @@ import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
 import { DatabaseService, loadPluginUnitEnablement } from '@bge/database';
 import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
-import {
-  unitConsumesConsentScope,
-  type ConsentCheckClassification,
-} from '../consent/consent-classification.types';
+import { unitConsumesConsentScope, type ConsentCheckClassification } from '../consent/consent-classification.types';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';

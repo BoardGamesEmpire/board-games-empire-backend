@@ -16,7 +16,14 @@ import { NominationEvent } from '../constants';
 type NominationCreatedSnapshot = Readonly<
   Pick<
     EventGameNomination,
-    'id' | 'eventId' | 'occurrenceId' | 'platformGameId' | 'nominatedById' | 'suppliedFromId' | 'status' | 'votingDeadline'
+    | 'id'
+    | 'eventId'
+    | 'occurrenceId'
+    | 'platformGameId'
+    | 'nominatedById'
+    | 'suppliedFromId'
+    | 'status'
+    | 'votingDeadline'
   >
 >;
 
@@ -101,7 +108,10 @@ export class VoteCastEvent extends MutationEvent<EventGameVote> {
 }
 
 type EventGameAddedSnapshot = Readonly<
-  Pick<EventGame, 'id' | 'eventId' | 'occurrenceId' | 'platformGameId' | 'suppliedById' | 'nominationId' | 'addedById' | 'role'>
+  Pick<
+    EventGame,
+    'id' | 'eventId' | 'occurrenceId' | 'platformGameId' | 'suppliedById' | 'nominationId' | 'addedById' | 'role'
+  >
 >;
 
 /** An EventGame row was created — via direct add or elevation from a passed nomination. */

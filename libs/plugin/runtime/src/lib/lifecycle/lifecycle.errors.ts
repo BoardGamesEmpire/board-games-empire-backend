@@ -12,7 +12,9 @@ export class PluginLifecycleAuthorityError extends Error {
   override readonly name = 'PluginLifecycleAuthorityError';
 
   constructor(public readonly actorId: string) {
-    super(`Actor '${actorId}' lacks authority: enabling, disabling, configuring, or uninstalling a plugin requires a server admin`);
+    super(
+      `Actor '${actorId}' lacks authority: enabling, disabling, configuring, or uninstalling a plugin requires a server admin`,
+    );
   }
 }
 

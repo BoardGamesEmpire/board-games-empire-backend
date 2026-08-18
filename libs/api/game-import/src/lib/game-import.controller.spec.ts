@@ -3,8 +3,8 @@ import { JobStatus } from '@bge/database';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { firstValueFrom, of } from 'rxjs';
-import { ImportBatchStatus } from './interfaces/import-job.interface';
 import { GameImportController } from './game-import.controller';
+import { ImportBatchStatus } from './interfaces/import-job.interface';
 import { GameImportStatusService } from './services/import-status.service';
 
 describe('GameImportController', () => {

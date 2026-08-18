@@ -50,7 +50,7 @@ handling — nothing about existing error responses changes.
 The global `I18nExceptionFilter` only runs when no more-specific filter handles
 the exception first. A **controller-scoped** filter (`@UseFilters(...)`) that
 maps a lower-layer error and renders the response itself (via `super.catch`)
-therefore runs *instead of* the global filter — Nest invokes only the most
+therefore runs _instead of_ the global filter — Nest invokes only the most
 specific match. Such a filter must resolve markers itself: build the
 marker-carrying Nest exception, then hand it to the exported
 `translateException(exception, i18n, auditContext)` helper (the same core the
@@ -72,12 +72,12 @@ return super.catch(
 
 `libs/api/media` does this for its storage/multer filters. Keep such filters
 **narrow** (`@Catch(SpecificError)`), never a bare `@Catch()`: a catch-all on a
-controller shadows the global exception *and* validation filters for every route
+controller shadows the global exception _and_ validation filters for every route
 on it, silently bypassing translation.
 
 ### Structured bodies (a marker beside machine-readable fields)
 
-Most exceptions carry the `t()` marker *as the whole body*. A few carry
+Most exceptions carry the `t()` marker _as the whole body_. A few carry
 machine-readable fields the client reads programmatically **alongside** the
 human message — e.g. `QuotaExceededException` returns `resource`, `scope`,
 `limit`, `currentUsage`, `attemptedAmount`, and a custom `error` label next to
@@ -90,7 +90,9 @@ super(
     statusCode: Http.PaymentRequired,
     error: 'Quota Exceeded',
     message: t('errors.quota.exceeded', { resource, scope }),
-    resource, scope, limit: limit.toString(), /* …currentUsage, attemptedAmount */
+    resource,
+    scope,
+    limit: limit.toString() /* …currentUsage, attemptedAmount */,
   },
   Http.PaymentRequired,
 );

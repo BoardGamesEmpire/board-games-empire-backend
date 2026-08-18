@@ -22,11 +22,11 @@ Issues, Discord, Sentry, …) arrive as plugins once the loader (#59) lands.
 
 ```ts
 interface FeedbackSink {
-  readonly slug: string;                 // persisted on FeedbackSubmission.sinkSlug
-  readonly bundled?: boolean;            // ships in-tree; cannot be uninstalled
-  acceptsCategory?(category): boolean;   // category filter (absent = accept all)
+  readonly slug: string; // persisted on FeedbackSubmission.sinkSlug
+  readonly bundled?: boolean; // ships in-tree; cannot be uninstalled
+  acceptsCategory?(category): boolean; // category filter (absent = accept all)
   submit(report, context): Promise<SinkSubmissionResult>;
-  syncStatus?(submission): Promise<SinkSubmissionResult>;  // deferred (see below)
+  syncStatus?(submission): Promise<SinkSubmissionResult>; // deferred (see below)
 }
 ```
 

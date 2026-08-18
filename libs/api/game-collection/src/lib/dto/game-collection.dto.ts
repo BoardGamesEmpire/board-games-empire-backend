@@ -58,30 +58,27 @@ export class CollectionReleaseSummaryDto {
   releaseYear!: number | null;
 }
 
-export class GameCollectionDto
-  implements
-    Pick<
-      GameCollection,
-      | 'id'
-      | 'userId'
-      | 'platformGameId'
-      | 'releaseId'
-      | 'medium'
-      | 'quantity'
-      | 'visibility'
-      | 'rating'
-      | 'playCount'
-      | 'playAgain'
-      | 'favorite'
-      | 'comment'
-      | 'lastPlayed'
-      | 'lastUpdated'
-      | 'deletedAt'
-      | 'deleteReason'
-      | 'createdAt'
-      | 'updatedAt'
-    >
-{
+export class GameCollectionDto implements Pick<
+  GameCollection,
+  | 'id'
+  | 'userId'
+  | 'platformGameId'
+  | 'releaseId'
+  | 'medium'
+  | 'quantity'
+  | 'visibility'
+  | 'rating'
+  | 'playCount'
+  | 'playAgain'
+  | 'favorite'
+  | 'comment'
+  | 'lastPlayed'
+  | 'lastUpdated'
+  | 'deletedAt'
+  | 'deleteReason'
+  | 'createdAt'
+  | 'updatedAt'
+> {
   @ApiProperty({ description: 'Unique collection entry identifier' })
   id!: string;
 

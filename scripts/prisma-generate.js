@@ -132,10 +132,7 @@ function tryAcquire() {
     throw error;
   }
 
-  fs.writeFileSync(
-    path.join(lockDir, 'owner.json'),
-    JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }),
-  );
+  fs.writeFileSync(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
 
   return true;
 }

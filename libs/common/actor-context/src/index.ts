@@ -1,4 +1,6 @@
 export {
+  PLUGIN_UNIT_SCOPE_TYPES,
+  SERVER_PLUGIN_UNIT,
   actorHasValidPluginUnits,
   actorUserId,
   assertNeverPluginUnit,
@@ -11,9 +13,7 @@ export {
   isPluginUnit,
   isSystemActor,
   isUserActor,
-  PLUGIN_UNIT_SCOPE_TYPES,
   resolveTrigger,
-  SERVER_PLUGIN_UNIT,
 } from './lib/types';
 
 export type {

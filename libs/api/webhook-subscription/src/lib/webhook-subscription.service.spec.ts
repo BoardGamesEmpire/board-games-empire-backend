@@ -1,7 +1,12 @@
 import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
 import { AbilityService, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
-import { createMockAbilityService, createTestingModuleWithDb, MockAbilityService, MockDatabaseService } from '@bge/testing';
+import {
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  MockAbilityService,
+  MockDatabaseService,
+} from '@bge/testing';
 import {
   CreateWebhookSubscriptionDto,
   WebhookEventRegistry,

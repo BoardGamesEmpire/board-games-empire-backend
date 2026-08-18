@@ -91,7 +91,9 @@ describe('MutationEvent', () => {
 
   it('rejects construction with neither before nor after', () => {
     expect(() => new CreatedEvent(null, null, new Date())).toThrow(TypeError);
-    expect(() => new CreatedEvent(null, null, new Date())).toThrow(/CreatedEvent requires at least one of before\/after/);
+    expect(() => new CreatedEvent(null, null, new Date())).toThrow(
+      /CreatedEvent requires at least one of before\/after/,
+    );
   });
 
   describe('subject identification', () => {

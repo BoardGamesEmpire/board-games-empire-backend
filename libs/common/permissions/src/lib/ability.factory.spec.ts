@@ -1012,18 +1012,21 @@ describe('AbilityFactory', () => {
         ['a partial token — renders to empty string, never validated by the name walk', '{{> some-partial }}', '>'],
         ['a comment token — renders to empty string', '{{! why is this here }}', '!'],
         ['a delimiter change — reshapes parsing itself', '{{=<% %>=}}<% unit.householdId %>', '='],
-      ])('rejects %s as unsupported-token-type, not a phantom out-of-context variable', (_label, template, tokenType) => {
-        const snapshot = makeSnapshot({
-          corePermissions: [
-            makePermission({ action: Action.read, subject: 'Game', conditions: { householdId: template } }),
-          ],
-        });
+      ])(
+        'rejects %s as unsupported-token-type, not a phantom out-of-context variable',
+        (_label, template, tokenType) => {
+          const snapshot = makeSnapshot({
+            corePermissions: [
+              makePermission({ action: Action.read, subject: 'Game', conditions: { householdId: template } }),
+            ],
+          });
 
-        expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
-        expect(() => factory.createForPlugin(snapshot)).toThrow(
-          expect.objectContaining({ reason: 'unsupported-token-type', tokenType }),
-        );
-      });
+          expect(() => factory.createForPlugin(snapshot)).toThrow(PluginAbilityRenderRejectionError);
+          expect(() => factory.createForPlugin(snapshot)).toThrow(
+            expect.objectContaining({ reason: 'unsupported-token-type', tokenType }),
+          );
+        },
+      );
 
       it('rejects prototype-chain paths — `in`-style lookup would admit {{ unit.constructor }}', () => {
         const snapshot = makeSnapshot({
@@ -1037,9 +1040,7 @@ describe('AbilityFactory', () => {
 
       it('rejects non-leaf resolutions — {{ unit }} would render [object Object] into the clause', () => {
         const snapshot = makeSnapshot({
-          corePermissions: [
-            makePermission({ action: Action.read, subject: 'Game', conditions: { x: '{{ unit }}' } }),
-          ],
+          corePermissions: [makePermission({ action: Action.read, subject: 'Game', conditions: { x: '{{ unit }}' } })],
         });
 
         expect(() => factory.createForPlugin(snapshot)).toThrow(

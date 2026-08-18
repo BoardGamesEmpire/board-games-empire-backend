@@ -95,8 +95,7 @@ export class SupportedLocalesService implements OnModuleInit {
     // it is never "unreachable" — exclude it from the drift warning even when
     // the DB does not flag it systemSupported.
     const catalogWithoutFlag = catalogs.filter(
-      (catalog) =>
-        !dbTagsLower.has(catalog.toLowerCase()) && catalog.toLowerCase() !== FALLBACK_LOCALE.toLowerCase(),
+      (catalog) => !dbTagsLower.has(catalog.toLowerCase()) && catalog.toLowerCase() !== FALLBACK_LOCALE.toLowerCase(),
     );
     if (catalogWithoutFlag.length > 0) {
       this.logger.warn(

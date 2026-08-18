@@ -1,4 +1,11 @@
-import { EventAvailabilityVote, Game, NominationStatus, NotificationType, OccurrenceStatus, PlatformGame } from '@bge/database';
+import {
+  EventAvailabilityVote,
+  Game,
+  NominationStatus,
+  NotificationType,
+  OccurrenceStatus,
+  PlatformGame,
+} from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import {
   createTestingModuleWithDb,

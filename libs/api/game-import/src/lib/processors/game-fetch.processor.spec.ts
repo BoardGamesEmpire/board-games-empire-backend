@@ -16,9 +16,7 @@ import { GameFetchProcessor } from './game-fetch.processor';
 describe('GameFetchProcessor', () => {
   let processor: GameFetchProcessor;
   let db: { job: { updateMany: jest.Mock; update: jest.Mock; findFirst: jest.Mock } };
-  let gatewayRegistry: jest.Mocked<
-    Pick<GatewayRegistryService, 'resolve' | 'reportSuccess' | 'reportFailure'>
-  >;
+  let gatewayRegistry: jest.Mocked<Pick<GatewayRegistryService, 'resolve' | 'reportSuccess' | 'reportFailure'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
   let runWith: jest.Mock;

@@ -197,7 +197,10 @@ describe('PluginExceptionFilter', () => {
 
     it.each([
       [new PluginInstallStaticAnalysisError('sample', [AXIOS_FINDING], ['axios'], []), 'install_static_analysis'],
-      [new PluginUpdateStaticAnalysisError('sample', [AXIOS_FINDING], ['axios'], ['left-pad']), 'update_static_analysis'],
+      [
+        new PluginUpdateStaticAnalysisError('sample', [AXIOS_FINDING], ['axios'], ['left-pad']),
+        'update_static_analysis',
+      ],
     ] as const)('renders the acknowledgement prompt on %s', (exception, key) => {
       filter.catch(exception, host);
 
@@ -233,7 +236,10 @@ describe('PluginExceptionFilter', () => {
     it('keeps a stored-PENDING manifest failure a 422 but logs it loud', () => {
       // Rejecting the staged update clears the state, so the request stays
       // caller-resolvable — but the failure may be drift, so operators hear it.
-      filter.catch(new PluginUpdateManifestError('sample', 'pending', 'bgeCompat no longer satisfied', [SCHEMA_ISSUE]), host);
+      filter.catch(
+        new PluginUpdateManifestError('sample', 'pending', 'bgeCompat no longer satisfied', [SCHEMA_ISSUE]),
+        host,
+      );
 
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()['message']).toBe('t:errors.plugin.update_manifest');

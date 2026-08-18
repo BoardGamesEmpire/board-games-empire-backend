@@ -19,8 +19,7 @@ export class ImportJobStatusDto {
 
   @ApiProperty({
     enum: JobStatus,
-    description:
-      'Current job state. Pending and Running are in-flight; Completed, Failed, and Cancelled are terminal.',
+    description: 'Current job state. Pending and Running are in-flight; Completed, Failed, and Cancelled are terminal.',
   })
   status!: JobStatus;
 

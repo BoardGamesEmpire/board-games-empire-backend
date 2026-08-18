@@ -8,5 +8,8 @@ export const MediaFileInterceptor = FileInterceptor('file', {
   fileFilter: (_req: unknown, file: { mimetype: string }, cb: (error: Error | null, acceptFile: boolean) => void) =>
     ALLOWED_UPLOAD_MIME_TYPES.has(file.mimetype)
       ? cb(null, true)
-      : cb(new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype })), false),
+      : cb(
+          new UnsupportedMediaTypeException(t('errors.media_object.unsupported_type', { mimeType: file.mimetype })),
+          false,
+        ),
 });

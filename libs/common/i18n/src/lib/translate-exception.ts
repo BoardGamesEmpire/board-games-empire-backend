@@ -58,11 +58,9 @@ export function translateException(
     // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
     // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`,
     // so markers thrown without a cause still render byte-identically.
-    return new HttpException(
-      { statusCode: status, message, error: STATUS_CODES[status] ?? exception.name },
-      status,
-      { cause: exception.cause },
-    );
+    return new HttpException({ statusCode: status, message, error: STATUS_CODES[status] ?? exception.name }, status, {
+      cause: exception.cause,
+    });
   }
 
   // (2) Structured body whose `message` field is a marker → translate that field

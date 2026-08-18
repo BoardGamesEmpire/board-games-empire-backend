@@ -9,7 +9,12 @@ import { StrategyService } from './strategy.service';
 import { WellKnownController } from './well-known.controller';
 
 @Module({
-  imports: [ConfigModule.forFeature(securityTxtConfig), ConfigModule.forFeature(bgeIdentityConfig), DatabaseModule, ServicesModule],
+  imports: [
+    ConfigModule.forFeature(securityTxtConfig),
+    ConfigModule.forFeature(bgeIdentityConfig),
+    DatabaseModule,
+    ServicesModule,
+  ],
   controllers: [WellKnownController],
   providers: [StrategyService, SecurityTxtService],
 })

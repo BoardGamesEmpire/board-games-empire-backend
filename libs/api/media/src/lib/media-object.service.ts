@@ -88,7 +88,9 @@ export class MediaObjectService {
     }
     // Fail fast before writing bytes: a type that can't link to the subject can never be approved.
     if (!this.mediaLink.canLink(file.mimetype, dto.subjectType)) {
-      throw new BadRequestException(t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }));
+      throw new BadRequestException(
+        t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }),
+      );
     }
 
     const userId = this.ability.getActingUserId();

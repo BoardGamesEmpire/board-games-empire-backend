@@ -43,7 +43,7 @@ it('an owner can list their households', async () => {
 - **Provisioning is awaited.** The signup response can return before the asynchronous
   `UserProvisioningListener` commits; factories poll for the `UserRole` row and fail loudly on
   timeout.
-- **The Owner sentinel.** Provisioning grants `SystemRole.Owner` to the *first* human user, and
+- **The Owner sentinel.** Provisioning grants `SystemRole.Owner` to the _first_ human user, and
   the isolation sweep truncates users per test — so every factory method first ensures a sentinel
   Owner exists. Specs counting `user` rows must expect this +1 (plus the service account the Owner
   provisioning creates).

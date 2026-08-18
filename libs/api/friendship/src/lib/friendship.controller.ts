@@ -6,7 +6,12 @@ import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagge
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { CreateFriendRequestDto, ListFriendshipsQueryDto, RespondableFriendshipStatus, RespondFriendRequestDto } from './dto';
+import {
+  CreateFriendRequestDto,
+  ListFriendshipsQueryDto,
+  RespondableFriendshipStatus,
+  RespondFriendRequestDto,
+} from './dto';
 import { FriendshipService } from './friendship.service';
 
 /**

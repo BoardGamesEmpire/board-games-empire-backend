@@ -83,11 +83,15 @@ export class MediaContributionService {
       select: { id: true, status: true },
     });
     if (existing) {
-      throw new ConflictException(t('errors.contribution.already_exists', { id: mediaObjectId, status: existing.status }));
+      throw new ConflictException(
+        t('errors.contribution.already_exists', { id: mediaObjectId, status: existing.status }),
+      );
     }
 
     if (!this.mediaLink.canLink(media.mimeType, dto.subjectType)) {
-      throw new BadRequestException(t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }));
+      throw new BadRequestException(
+        t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }),
+      );
     }
 
     const data = {

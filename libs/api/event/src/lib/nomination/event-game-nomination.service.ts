@@ -91,7 +91,9 @@ export class EventGameNominationService {
     });
 
     if (supplyEntry?.attendee?.eventId !== eventId) {
-      throw new NotFoundException(t('errors.nomination.supplied_from_not_found', { suppliedFromId: dto.suppliedFromId }));
+      throw new NotFoundException(
+        t('errors.nomination.supplied_from_not_found', { suppliedFromId: dto.suppliedFromId }),
+      );
     }
 
     if (supplyEntry.collection.platformGameId !== dto.platformGameId) {

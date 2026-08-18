@@ -6,8 +6,8 @@ import {
 } from '@boardgamesempire/storage-contract';
 import type { ConfigService } from '@nestjs/config';
 import { Buffer } from 'node:buffer';
-import { statSync } from 'node:fs';
 import type { Stats } from 'node:fs';
+import { statSync } from 'node:fs';
 import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import { LocalDiskDriver } from './local-disk.driver.js';

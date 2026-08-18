@@ -12,8 +12,8 @@ import { I18nService } from 'nestjs-i18n';
 import { MediaLinkService } from './link/link.service';
 import { MediaContributionNotificationListener } from './listeners/media-contribution-notification.listener';
 import { MediaContributionService } from './media-contribution.service';
-import { MediaModule } from './media.module';
 import { MediaObjectService } from './media-object.service';
+import { MediaModule } from './media.module';
 
 /**
  * `I18nService` is provided app-wide by nestjs-i18n's `@Global` `I18nModule`;

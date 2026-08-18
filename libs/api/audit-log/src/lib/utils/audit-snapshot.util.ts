@@ -1,7 +1,6 @@
 import type { Prisma } from '@bge/database';
 
-const jsonReplacer = (_key: string, value: unknown): unknown =>
-  typeof value === 'bigint' ? value.toString() : value;
+const jsonReplacer = (_key: string, value: unknown): unknown => (typeof value === 'bigint' ? value.toString() : value);
 
 /**
  * Deep JSON-safe conversion for audit persistence: Dates → ISO strings,

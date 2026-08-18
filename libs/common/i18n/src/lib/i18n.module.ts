@@ -3,8 +3,8 @@ import { Module } from '@nestjs/common';
 import { I18nModule } from 'nestjs-i18n';
 import * as path from 'node:path';
 import { ClsLocaleResolver } from './cls-locale.resolver';
-import { FALLBACK_LOCALE } from './locale.constants';
 import { LocaleResolutionService } from './locale-resolution.service';
+import { FALLBACK_LOCALE } from './locale.constants';
 import { SupportedLocalesService } from './supported-locales.service';
 
 /**

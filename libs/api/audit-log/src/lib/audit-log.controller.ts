@@ -6,8 +6,8 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { AuditLogService } from './services/audit-log.service';
 import { AuditLogListResponseDto, ListAuditLogsQueryDto } from './dto';
+import { AuditLogService } from './services/audit-log.service';
 
 /**
  * Read-only by design: audit rows have no mutation API. Rows are written

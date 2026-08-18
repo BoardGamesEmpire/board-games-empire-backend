@@ -2,9 +2,9 @@ import { DatabaseService, PlatformType } from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
 import type { GameData, GameReleaseData, LanguageData, PlatformData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
+import { toSlug } from '../utils/slug';
 import { toEditionKey, toPlatformType, toReleaseDate, toReleaseRegion, toReleaseStatus } from './helpers';
 import { ReleaseGraphResolver } from './release-graph.resolver';
-import { toSlug } from '../utils/slug';
 
 export type PlatformGameMap = Map<string, string>;
 

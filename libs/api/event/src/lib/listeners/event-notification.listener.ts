@@ -20,7 +20,10 @@ import type { OccurrenceStatusChangedEvent } from '../occurrence/events/occurren
 export class EventNotificationListener {
   private readonly logger = new Logger(EventNotificationListener.name);
 
-  constructor(private readonly db: DatabaseService, private readonly notifications: NotificationsService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   @OnEvent(EventEvents.EventCreated, { async: true })
   async onEventCreated(event: EventCreatedEvent): Promise<void> {
