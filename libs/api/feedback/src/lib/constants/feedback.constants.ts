@@ -75,6 +75,13 @@ export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
  * per-user tier tracks the authenticated user; the per-IP tier tracks the
  * source address. Both apply to every submission — whichever trips first wins.
  *
+ * "Rolling" is accurate for the storage in use: `ThrottlerStorageService`
+ * schedules a decrement per hit at `now + ttl`, so the count is the hits in the
+ * trailing window rather than a counter that resets on a fixed boundary. One
+ * caveat, tracked in #341 rather than here: its block-reset path clears pending
+ * decrements for every key under the throttler name, not just the key being
+ * reset, so once any caller's block expires the others stop decaying.
+ *
  * The window is MILLISECONDS, as `@nestjs/throttler` reads it and as the name
  * says. It was previously `FEEDBACK_THROTTLE_TTL_SECONDS = 60 * 60`, forwarded
  * unconverted into `@Throttle`, which made the rolling hour above a rolling

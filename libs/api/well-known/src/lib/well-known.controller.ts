@@ -18,10 +18,13 @@ import { StrategyService } from './strategy.service';
  * The accepted cost, stated plainly because it is not obvious: the bucket is
  * keyed on handler and source IP, so callers sharing an address — one NAT, one
  * corporate proxy, one CGNAT range — share this endpoint's budget and CAN 429
- * each other. What makes that acceptable rather than merely tolerable is
- * `Cache-Control: public, max-age=300` below: the response is identical for
- * every caller, so a compliant client asks at most twelve times an hour and
- * the budget is only reachable by clients ignoring it.
+ * each other.
+ *
+ * `Cache-Control: public, max-age=300` below makes that unlikely to bite rather
+ * than impossible. The header permits caching; it does not oblige a client to
+ * cache, retain, or reuse anything, so a well-behaved client that revalidates
+ * eagerly still reaches the endpoint. The limit is a backstop against volume,
+ * not a guarantee derived from the caching policy.
  *
  * If federation ever puts a large shared-egress population behind one address,
  * this is the endpoint that notices first, and the answer is a route-level
