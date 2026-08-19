@@ -91,9 +91,10 @@ describe('household create idempotency (#210 acceptance)', () => {
       // `maxWorkers: 1` constrains test-level parallelism, not request-level
       // concurrency within a test.
       //
-      // Deliberately two requests, not a large burst: the app's `default`
-      // throttler tracks by IP and the whole suite shares one bucket, so a wide
-      // burst would be asserting the rate limiter rather than the constraint
+      // Deliberately two requests, not a large burst: the `default` throttler
+      // keys on handler plus IP, so a burst here lands in this endpoint's own
+      // bucket alongside every other spec that posts a household — and a wide
+      // one would be asserting the rate limiter rather than the constraint
       // (see API_THROTTLE_LIMIT, and #293 for why that pin now matters).
       const actor = await actors.user();
       const payload: CreateHouseholdPayload = { name: 'Concurrent household', clientRequestId: freshKey() };

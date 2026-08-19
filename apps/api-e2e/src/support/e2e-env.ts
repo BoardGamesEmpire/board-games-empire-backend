@@ -71,11 +71,11 @@ export const API_NODE_ENV = 'testing';
 
 /**
  * The IP-tier throttle limit the API child runs under. Pinned high rather than
- * inherited, because every request the suite makes originates from `127.0.0.1`
- * and therefore shares one bucket in the global `default` throttler
- * (`AppModule`, tracked by IP): every spec that calls a given endpoint shares
- * one bucket for it, since `ThrottlerGuard` keys on handler plus IP rather than
- * IP alone.
+ * inherited, because `ThrottlerGuard` keys on handler AND source IP, and every
+ * request the suite makes originates from `127.0.0.1`. So the buckets are
+ * per endpoint rather than one for the whole suite — but within an endpoint,
+ * every spec that calls it is the same client, and specs accumulate against
+ * the busiest routes across the entire run.
  *
  * This is load-bearing as of #293. The window used to be 60ms — `throttle.ttl`
  * defaulted to `60` while `@nestjs/throttler` reads `ttl` in MILLISECONDS — so

@@ -12,11 +12,20 @@ import { StrategyService } from './strategy.service';
  * Serves RFC 8615 well-known URIs for BGE server discovery.
  *
  * Deliberately NOT `@SkipThrottle()`, unlike `/health` and `/metrics`. Those are
- * infrastructure endpoints whose failure breaks operations; this one is public
- * traffic and rate limiting it is appropriate. It is called out here only
- * because the responses are cacheable for 300s and identical for every caller,
- * so a client that trips the limit is one ignoring `Cache-Control` — and the
- * per-handler, per-IP bucket means it cannot affect anyone else's discovery.
+ * infrastructure endpoints whose failure breaks operations; this is public
+ * traffic, and rate limiting it is appropriate.
+ *
+ * The accepted cost, stated plainly because it is not obvious: the bucket is
+ * keyed on handler and source IP, so callers sharing an address — one NAT, one
+ * corporate proxy, one CGNAT range — share this endpoint's budget and CAN 429
+ * each other. What makes that acceptable rather than merely tolerable is
+ * `Cache-Control: public, max-age=300` below: the response is identical for
+ * every caller, so a compliant client asks at most twelve times an hour and
+ * the budget is only reachable by clients ignoring it.
+ *
+ * If federation ever puts a large shared-egress population behind one address,
+ * this is the endpoint that notices first, and the answer is a route-level
+ * limit rather than an exemption.
  */
 @ApiTags('well-known')
 @AllowAnonymous()

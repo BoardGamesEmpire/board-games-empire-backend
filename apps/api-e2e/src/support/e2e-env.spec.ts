@@ -187,11 +187,13 @@ describe('e2e-env (pure logic)', () => {
     });
 
     it('pins the IP-tier throttle limit above anything the suite can reach', () => {
-      // Every request in this app comes from 127.0.0.1, so the whole suite is
-      // one bucket in the global IP-tracked throttler. Since #293 the window is
-      // a real 60 seconds rather than 60ms, so the app default (20) would now
-      // reject specs partway through a run; this pin is what keeps the suite
-      // from going red with 429s unrelated to the behavior under test.
+      // `ThrottlerGuard` keys on handler and source IP, and every request in
+      // this app comes from 127.0.0.1 — so each endpoint has its own bucket,
+      // and every spec calling that endpoint counts into it. Since #293 the
+      // window is a real 60 seconds rather than 60ms, so the app default (20)
+      // would reject specs partway through a run on any route the suite
+      // exercises more than 20 times; this pin is what keeps it from going red
+      // with 429s unrelated to the behavior under test.
       expect(apiEnvOverrides(baseUrl, 41234).THROTTLE_LIMIT).toBe(String(API_THROTTLE_LIMIT));
       expect(API_THROTTLE_LIMIT).toBeGreaterThan(1_000);
       // The window is pinned alongside it: an inherited `.env` value is the one
