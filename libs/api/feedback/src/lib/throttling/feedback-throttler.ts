@@ -25,6 +25,13 @@ import { Throttle, type ThrottlerGetTrackerFunction, type ThrottlerOptions } fro
 export const USER_THROTTLER_NAME = 'user';
 
 /**
+ * `@nestjs/throttler`'s built-in IP-tracked tier. Named here beside its partner
+ * so the pair has one definition: this module overrides it per route, and the
+ * API app registers it, and a literal in either place drifts from the other.
+ */
+export const DEFAULT_THROTTLER_NAME = 'default';
+
+/**
  * Route marker read by {@link createUserThrottler}'s `skipIf`. The `user`
  * throttler is registered globally, so without an explicit opt-in it would
  * throttle every authenticated route; this key gates it to routes that want it.
@@ -66,11 +73,13 @@ export const skipUserThrottle = (context: ExecutionContext): boolean => {
  * Builds the global `user` named throttler. `limit` is a sentinel that is never
  * enforced: opted-in routes override it via `@Throttle`, and every other route
  * is skipped by `skipIf` — it exists only because `ThrottlerOptions.limit` is
- * required. `ttl` is likewise a placeholder overridden per route.
+ * required. `ttlMs` is likewise a placeholder overridden per route.
+ *
+ * MILLISECONDS, as `@nestjs/throttler` reads it (#293).
  */
-export const createUserThrottler = (ttl: number): ThrottlerOptions => ({
+export const createUserThrottler = (ttlMs: number): ThrottlerOptions => ({
   name: USER_THROTTLER_NAME,
-  ttl,
+  ttl: ttlMs,
   limit: Number.MAX_SAFE_INTEGER,
   getTracker: getUserTracker,
   skipIf: skipUserThrottle,
@@ -81,12 +90,21 @@ export const createUserThrottler = (ttl: number): ThrottlerOptions => ({
  * opt-in marker plus both `@Throttle` overrides (IP via `default`, user via
  * `user`). Bundling them in one decorator keeps the marker and the throttle
  * overrides from drifting apart.
+ *
+ * `ttlMs` is forwarded into `@Throttle` untouched, so it is the library's unit —
+ * MILLISECONDS. The parameter is named for it because passing a seconds-shaped
+ * number here is silent: the route keeps serving, the limit simply stops being
+ * a limit (#293).
+ *
+ * Note that the `default` override REPLACES the app-wide IP window for this
+ * route, so pinning `THROTTLE_LIMIT` in an environment does not raise the
+ * ceiling here — see `apps/api-e2e/src/support/e2e-env.ts`.
  */
-export const FeedbackSubmissionThrottle = (opts: { userLimit: number; ipLimit: number; ttl: number }) =>
+export const FeedbackSubmissionThrottle = (opts: { userLimit: number; ipLimit: number; ttlMs: number }) =>
   applyDecorators(
     SetMetadata(PER_USER_THROTTLE_KEY, true),
     Throttle({
-      default: { limit: opts.ipLimit, ttl: opts.ttl },
-      [USER_THROTTLER_NAME]: { limit: opts.userLimit, ttl: opts.ttl },
+      [DEFAULT_THROTTLER_NAME]: { limit: opts.ipLimit, ttl: opts.ttlMs },
+      [USER_THROTTLER_NAME]: { limit: opts.userLimit, ttl: opts.ttlMs },
     }),
   );

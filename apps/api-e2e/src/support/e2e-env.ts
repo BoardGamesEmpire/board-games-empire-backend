@@ -73,23 +73,39 @@ export const API_NODE_ENV = 'testing';
  * The IP-tier throttle limit the API child runs under. Pinned high rather than
  * inherited, because every request the suite makes originates from `127.0.0.1`
  * and therefore shares one bucket in the global `default` throttler
- * (`AppModule`, tracked by IP): the whole app's worth of specs is a single
- * client as far as rate limiting is concerned.
+ * (`AppModule`, tracked by IP): every spec that calls a given endpoint shares
+ * one bucket for it, since `ThrottlerGuard` keys on handler plus IP rather than
+ * IP alone.
  *
- * That is not currently load-bearing, and the reason is a bug. `throttle.ttl`
- * defaults to `60` while `@nestjs/throttler` v6 reads `ttl` in MILLISECONDS, so
- * the live window is 60ms and the 20-request ceiling is unreachable in practice
- * (#293). The moment that default is corrected, an unpinned suite would start
- * failing partway through a run with `429`s that look like nothing to do with
- * the behavior under test.
+ * This is load-bearing as of #293. The window used to be 60ms — `throttle.ttl`
+ * defaulted to `60` while `@nestjs/throttler` reads `ttl` in MILLISECONDS — so
+ * the 20-request ceiling was unreachable and the pin was precautionary. The
+ * window is now a real 60 seconds (`THROTTLE_TTL_MS`), and an unpinned suite
+ * would fail partway through a run with `429`s that look like nothing to do
+ * with the behavior under test.
  *
  * So this override exists to decouple the suite from a production default,
  * exactly as `NODE_ENV` and the Redis prefixes do — not to disable rate
  * limiting as a feature. A spec that wants to assert throttling must set its own
  * limit for the route it is testing; it cannot rely on the app default being
  * whatever `.env` happens to say.
+ *
+ * One gap this does NOT cover: a route carrying its own `@Throttle({ default })`
+ * REPLACES the app-wide IP tier, so this pin does not raise its ceiling. Feedback
+ * submission is the only such route today, at 100/IP/hour — a real hour since
+ * #293. A feedback suite (#262) issuing more than 100 submissions from
+ * `127.0.0.1` will see `429`s regardless of the value below, and must set its
+ * own route-level limit.
  */
 export const API_THROTTLE_LIMIT = 1_000_000;
+
+/**
+ * The IP-tier window the API child runs under, pinned for the same reason as
+ * the limit beside it. A developer's `.env` is read at `NODE_ENV=testing`, so
+ * an unpinned window is the one throttle knob that could differ between a local
+ * run and CI — and #293 is the standing proof that a wrong window is silent.
+ */
+export const API_THROTTLE_TTL_MS = 60_000;
 
 /**
  * Environment the API child gets on top of the inherited process env, given
@@ -123,6 +139,7 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
     BETTER_AUTH_URL: baseUrl,
     TRUSTED_ORIGINS: trustedOrigins.join(','),
     THROTTLE_LIMIT: String(API_THROTTLE_LIMIT),
+    THROTTLE_TTL_MS: String(API_THROTTLE_TTL_MS),
   };
 }
 

@@ -10,6 +10,13 @@ import { StrategyService } from './strategy.service';
 
 /**
  * Serves RFC 8615 well-known URIs for BGE server discovery.
+ *
+ * Deliberately NOT `@SkipThrottle()`, unlike `/health` and `/metrics`. Those are
+ * infrastructure endpoints whose failure breaks operations; this one is public
+ * traffic and rate limiting it is appropriate. It is called out here only
+ * because the responses are cacheable for 300s and identical for every caller,
+ * so a client that trips the limit is one ignoring `Cache-Control` — and the
+ * per-handler, per-IP bucket means it cannot affect anyone else's discovery.
  */
 @ApiTags('well-known')
 @AllowAnonymous()

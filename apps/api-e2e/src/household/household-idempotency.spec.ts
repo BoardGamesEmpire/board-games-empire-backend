@@ -94,7 +94,7 @@ describe('household create idempotency (#210 acceptance)', () => {
       // Deliberately two requests, not a large burst: the app's `default`
       // throttler tracks by IP and the whole suite shares one bucket, so a wide
       // burst would be asserting the rate limiter rather than the constraint
-      // (see API_THROTTLE_LIMIT and #293).
+      // (see API_THROTTLE_LIMIT, and #293 for why that pin now matters).
       const actor = await actors.user();
       const payload: CreateHouseholdPayload = { name: 'Concurrent household', clientRequestId: freshKey() };
 
