@@ -398,5 +398,17 @@ describe('HealthController', () => {
 
       expect(module.get(ConfigService)).toBe(configService);
     });
+
+    it('is exempt from the global rate limiter', () => {
+      // The liveness docblock's own rule: a probe that can be silenced is
+      // indistinguishable from no probe. A 429 silences it, and because
+      // `blockDuration` defaults to the window, the refusal is total for a full
+      // minute — long enough to cross `failureThreshold` and restart the pod,
+      // which clears the in-process counters and leaves the cadence that caused
+      // it unchanged. `@SkipThrottle()` writes `THROTTLER:SKIP` + the throttler
+      // name; the key is internal to @nestjs/throttler and spelled out rather
+      // than imported, so a version that changes it fails here loudly.
+      expect(Reflect.getMetadata('THROTTLER:SKIPdefault', HealthController)).toBe(true);
+    });
   });
 });

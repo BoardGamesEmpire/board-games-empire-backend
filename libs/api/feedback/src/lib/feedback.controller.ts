@@ -8,7 +8,7 @@ import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { from, map, Observable, tap } from 'rxjs';
 import {
   FEEDBACK_IP_THROTTLE_LIMIT,
-  FEEDBACK_THROTTLE_TTL_SECONDS,
+  FEEDBACK_THROTTLE_TTL_MS,
   FEEDBACK_USER_THROTTLE_LIMIT,
 } from './constants/feedback.constants';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
@@ -53,7 +53,7 @@ export class FeedbackController {
   @FeedbackSubmissionThrottle({
     userLimit: FEEDBACK_USER_THROTTLE_LIMIT,
     ipLimit: FEEDBACK_IP_THROTTLE_LIMIT,
-    ttl: FEEDBACK_THROTTLE_TTL_SECONDS,
+    ttlMs: FEEDBACK_THROTTLE_TTL_MS,
   })
   @HttpCode(Http.Created)
   @Post('reports')

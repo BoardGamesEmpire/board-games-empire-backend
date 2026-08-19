@@ -1,3 +1,5 @@
+import { hours } from '@nestjs/throttler';
+
 /**
  * Compile-time constants for the feedback feature.
  *
@@ -73,12 +75,26 @@ export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
  * per-user tier tracks the authenticated user; the per-IP tier tracks the
  * source address. Both apply to every submission — whichever trips first wins.
  *
+ * "Rolling" is accurate for the storage in use: `ThrottlerStorageService`
+ * schedules a decrement per hit at `now + ttl`, so the count is the hits in the
+ * trailing window rather than a counter that resets on a fixed boundary. One
+ * caveat, tracked in #341 rather than here: its block-reset path clears pending
+ * decrements for every key under the throttler name, not just the key being
+ * reset, so once any caller's block expires the others stop decaying.
+ *
+ * The window is MILLISECONDS, as `@nestjs/throttler` reads it and as the name
+ * says. It was previously `FEEDBACK_THROTTLE_TTL_SECONDS = 60 * 60`, forwarded
+ * unconverted into `@Throttle`, which made the rolling hour above a rolling
+ * 3.6 SECONDS — the policy read as enforced while being unreachable in normal
+ * use (#293). `hours(1)` is the library's own helper: it yields milliseconds,
+ * and it says "one hour" while doing it.
+ *
  * TODO: migrate to SystemSetting once a dynamic ThrottlerStorage exists in the
  * codebase.
  */
 export const FEEDBACK_USER_THROTTLE_LIMIT = 30;
 export const FEEDBACK_IP_THROTTLE_LIMIT = 100;
-export const FEEDBACK_THROTTLE_TTL_SECONDS = 60 * 60;
+export const FEEDBACK_THROTTLE_TTL_MS = hours(1);
 
 /**
  * Slug for the `create:feedback_report` permission. Banning a user is

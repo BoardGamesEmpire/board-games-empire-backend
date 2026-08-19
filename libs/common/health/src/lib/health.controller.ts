@@ -8,6 +8,7 @@ import {
   HealthIndicatorFunction,
   HttpHealthIndicator,
 } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import { type NextParameters, NextAsyncPre, SurrogateDelegate } from 'surrogate';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
@@ -26,6 +27,29 @@ interface DisabledResponse {
 
 const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
 
+/**
+ * Exempt from rate limiting, for the reason the liveness docblock below already
+ * gives: a probe that can be silenced is indistinguishable from no probe, and a
+ * 429 silences it exactly the way a config flag would.
+ *
+ * The global `default` throttler keys on handler AND source IP, so each route
+ * here has its own bucket and `/metrics` does not draw from it. That is enough
+ * on its own: at the app default of 20 per minute, a liveness probe at
+ * `periodSeconds: 3` is exactly 20 per minute all by itself, before an
+ * load-balancer health check or an uptime monitor hitting the same path from
+ * the same egress address adds to it.
+ *
+ * `blockDuration` defaults to the window, so the first refusal blocks the route
+ * outright for a full minute rather than letting the odd request through —
+ * which is what turns a rate limit into consecutive probe failures fast enough
+ * to cross `failureThreshold`. The in-memory storage dies with the process, so
+ * the restart clears the block; the probe cadence has not changed, so it trips
+ * again a window later. The failure is a restart loop, not a stuck block.
+ *
+ * This was unreachable while the window was 60ms and became reachable when #293
+ * corrected it — the throttler was never actually enforcing anything before.
+ */
+@SkipThrottle()
 @SurrogateDelegate()
 @ApiTags('health')
 @AllowAnonymous()

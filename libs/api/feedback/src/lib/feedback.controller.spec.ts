@@ -106,11 +106,13 @@ describe('FeedbackController', () => {
       expect(ability.can).toHaveBeenCalledWith(Action.create, ResourceType.FeedbackReport);
     });
 
-    // Throttle decorator correctness is validated at the integration layer
-    // (ThrottlerGuard against a real Redis storage). Asserting decorator
-    // metadata here would couple this test to @nestjs/throttler internals,
-    // which vary across major versions and provide little value over the
-    // integration test that actually exercises the rate limit.
+    // Throttle decorator correctness lives in `throttling/feedback-throttler.spec.ts`,
+    // which does read `@nestjs/throttler`'s metadata keys. This comment used to
+    // say that was deliberately avoided in favour of an integration test against
+    // a real Redis storage — there is no such test, and no Redis storage is wired
+    // into ThrottlerModule at all. The coupling was worth accepting: without it
+    // nothing caught the tier shipping a 3.6-second window for a policy
+    // documented as hourly (#293).
   });
 });
 
