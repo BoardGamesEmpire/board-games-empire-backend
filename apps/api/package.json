@@ -9,13 +9,13 @@
         "cache": true,
         "inputs": [
           "{workspaceRoot}/package.json",
-          "{workspaceRoot}/scripts/generate-bge-version.js"
+          "{workspaceRoot}/libs/scripts/src/bin/generate-bge-version.js"
         ],
         "outputs": [
           "{projectRoot}/src/app/generated/bge-version.ts"
         ],
         "options": {
-          "command": "node scripts/generate-bge-version.js"
+          "command": "node libs/scripts/src/bin/generate-bge-version.js"
         }
       },
       "build": {

@@ -1,0 +1,13 @@
+{
+  "name": "@bge/scripts",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "scripts",
+    "tags": [
+      "scripts",
+      "infra"
+    ]
+  },
+  "dependencies": {}
+}
