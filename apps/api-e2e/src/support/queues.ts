@@ -64,14 +64,28 @@ export function createTestQueue(name: string, env: NodeJS.ProcessEnv = process.e
 /**
  * Jobs still owed processing: everything except completed/failed.
  *
- * `paused` is in the list because pausing a queue RENAMES its `wait` list to
- * `paused`, so a paused queue holding work reports zero `waiting` — and every
- * negative assertion built on this count would pass with jobs still enqueued.
- * Nothing pauses the queue today, which is exactly why it is worth pinning now:
- * the worker child that issue 348 adds has pause control as its whole premise.
+ * `'waiting'` is deliberate and is BullMQ's PUBLIC name for this state, not a
+ * typo for the Redis key. `QueueGetters.commandByType` aliases it —
+ * `type = type === 'waiting' ? 'wait' : type` — and BullMQ's own `count()` and
+ * `getWaitingCount()` pass `'waiting'`. `wait` is the key the list lives under;
+ * `waiting` is the JobType callers hand to the API. Substituting `'wait'` here
+ * has already been suggested in review once, hence this note.
+ *
+ * That substitution would also be actively harmful, which is the reason
+ * `paused` is spelled out below. `getJobCounts` runs its arguments through
+ * `sanitizeJobTypes`, which pushes `'paused'` whenever `'waiting'` is present
+ * and then dedupes — so paused jobs are counted implicitly already, and listing
+ * `paused` changes no count today. It earns its place by surviving the edit
+ * that drops the implicit add: switch to `'wait'` and BullMQ stops volunteering
+ * `paused`, silently, because the special case is keyed on the exact string
+ * `'waiting'`.
+ *
+ * Why paused matters at all: pausing RENAMEs the `wait` list to `paused`, so a
+ * paused queue holding work reports zero under `wait`. Nothing pauses the queue
+ * today; the worker child that issue 348 adds has pause control as its premise.
  *
  * No double counting: a job is in exactly one of these lists, since pause moves
- * it rather than copying it.
+ * it rather than copying it, and `sanitizeJobTypes` dedupes the type list.
  */
 export async function countPendingJobs(queue: QueueLike): Promise<number> {
   const counts = await queue.getJobCounts('waiting', 'paused', 'active', 'delayed', 'prioritized', 'waiting-children');

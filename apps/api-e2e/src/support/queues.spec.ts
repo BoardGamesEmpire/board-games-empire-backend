@@ -54,10 +54,12 @@ describe('countPendingJobs', () => {
   });
 
   it('counts jobs parked in the paused list', async () => {
-    // Pausing RENAMES `wait` to `paused`, so a queue holding work reports zero
-    // `waiting`. Omitting `paused` would make every negative assertion built on
-    // this count pass with jobs still enqueued — latent while nothing pauses the
-    // queue, and load-bearing as soon as the worker child (issue 348) does.
+    // Pausing RENAMEs `wait` to `paused`, so a queue holding work reports zero
+    // under `wait`. What this pins is that the sum INCLUDES a paused count when
+    // one comes back — not that the production call would miss it without the
+    // explicit argument. It would not: `sanitizeJobTypes` adds `paused` for any
+    // request containing `waiting`. See the note on `countPendingJobs` for why
+    // the argument is spelled out regardless.
     const paused: QueueLike = {
       name: 'paused-queue',
       getJobCounts: (...types: string[]) =>
