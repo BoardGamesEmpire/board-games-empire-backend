@@ -1,4 +1,5 @@
 import type { Household, HouseholdMember } from '@bge/database';
+import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
  * Wire-contract types and fail-loud response parsers shared by the household
@@ -12,6 +13,11 @@ import type { Household, HouseholdMember } from '@bge/database';
  * `@bge/testing-e2e`'s `extractUserId` / `extractSessionToken` hold for the
  * signup response.
  *
+ * The aggregate-independent half of that machinery — `Wire`, `HttpResponseLike`,
+ * and the failure message — moved to `../support/wire.ts` when the feedback
+ * suite became its second consumer (#262). Re-exported below so this module's
+ * public surface is unchanged.
+ *
  * The constraint name below is inlined rather than imported from `@bge/household`
  * deliberately, matching the reasoning in `signup.ts`: this suite is black-box,
  * and importing the product lib would pull its Nest module graph (controller
@@ -20,18 +26,7 @@ import type { Household, HouseholdMember } from '@bge/database';
  * database fact rather than an application constant.
  */
 
-/** `GET /api/households/:id`, `POST /api/households`, etc. — for error messages. */
-export type RequestDescription = string;
-
-/**
- * JSON projection of a Prisma row: `Date` columns arrive over the wire as ISO
- * strings, everything else survives unchanged. Derived from the model type
- * rather than restated, so a schema change surfaces as a type error here
- * instead of as a silently vacuous assertion.
- */
-export type Wire<TRow> = {
-  [TKey in keyof TRow]: TRow[TKey] extends Date ? string : TRow[TKey] extends Date | null ? string | null : TRow[TKey];
-};
+export type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 
 export type HouseholdWire = Wire<Household>;
 export type HouseholdMemberWire = Wire<HouseholdMember>;
@@ -70,37 +65,7 @@ export interface ListHouseholdsEnvelope {
   readonly households: readonly HouseholdWire[];
 }
 
-/**
- * The subset of a `supertest` response these parsers read. Declared
- * structurally rather than as supertest's `Response` so the parsers can be
- * unit-tested against plain objects with no cast — a `Response` is assignable
- * to this, since `body: any` satisfies `body: unknown`.
- */
-export interface HttpResponseLike {
-  readonly status: number;
-  readonly body: unknown;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** A short, safe rendering of an unexpected body for a failure message. */
-function preview(body: unknown): string {
-  try {
-    const serialized = JSON.stringify(body);
-    return serialized === undefined ? String(body) : serialized.slice(0, 300);
-  } catch {
-    return '<unserializable body>';
-  }
-}
-
-function fail(what: string, request: RequestDescription, response: HttpResponseLike): never {
-  throw new Error(
-    `${request} returned ${response.status} but ${what}. The response envelope has changed — ` +
-      `update apps/api-e2e/src/household/household-wire.ts to match. Body: ${preview(response.body)}`,
-  );
-}
+const fail = envelopeFailure('apps/api-e2e/src/household/household-wire.ts');
 
 /**
  * Narrows an unknown value to a household row: an object carrying a non-empty
@@ -193,7 +158,7 @@ export const HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT = 'household_created_by_clie
  * `meta.target` under `@prisma/client@7.8.0` + `PrismaPg` on Postgres 17.
  *
  * This began as a pinned expectation that the mapped constraint name would be
- * reported (#257 D-257-2). The first run against a real database said otherwise,
+ * reported (#257). The first run against a real database said otherwise,
  * and the consequence was not a wrong constant: `HouseholdService` discriminated
  * replays on `meta.target`, so it matched nothing, every keyed retry rethrew, and
  * #210's guarantee had inverted into a 500 on exactly the request it exists to

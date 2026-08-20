@@ -35,7 +35,7 @@ describe('household lifecycle', () => {
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
   /**
-   * Arranges an invite directly, per #257 D-257-4: inline rather than as a
+   * Arranges an invite directly (#257): inline rather than as a
    * `@bge/testing-e2e` factory until #273 supplies a second consumer and the
    * shared shape is visible rather than guessed.
    *
@@ -198,7 +198,7 @@ describe('household lifecycle', () => {
       const persisted = await db.client.household.findUniqueOrThrow({ where: { id: fixture.household.id } });
       expect(persisted.deletedAt).not.toBeNull();
 
-      // Gone from both read routes — and 404, not 403 (#257 D-257-3). The
+      // Gone from both read routes — and 404, not 403 (#257). The
       // existence probe filters `deletedAt: null`, so a former member learns
       // "gone" rather than "forbidden"; telling them otherwise would leak that
       // the row survives.
