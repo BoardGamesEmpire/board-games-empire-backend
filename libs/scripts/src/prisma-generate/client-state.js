@@ -72,11 +72,25 @@ function createClientState(workspaceRoot) {
     );
   }
 
+  /**
+   * Drop the stamp so no other invocation can believe the tree is current.
+   *
+   * Called before the tree is destroyed and rebuilt. The stamp is what the
+   * unlocked fast path trusts, and a rebuild passes through a state that
+   * satisfies it: the fingerprint has not changed, and a regenerating tree
+   * momentarily reaches the recorded file count with `client.ts` present while
+   * the last file is still being written. Clearing it first turns that fast path
+   * into a wait on the lock.
+   */
+  function clearStamp() {
+    fs.rmSync(stampFile, { force: true });
+  }
+
   function writeStamp(expectedFingerprint) {
     fs.writeFileSync(stampFile, JSON.stringify({ fingerprint: expectedFingerprint, fileCount: outputFileCount() }));
   }
 
-  return { fingerprint, isCurrent, writeStamp };
+  return { fingerprint, isCurrent, clearStamp, writeStamp };
 }
 
 module.exports = { createClientState };

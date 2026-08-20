@@ -69,6 +69,11 @@ function main(args) {
     // The holder of the lock may have generated while we queued.
     if (reportIfCurrent(client, expectedFingerprint)) return 0;
 
+    // Stop advertising a tree we are about to destroy: another invocation's
+    // unlocked check would otherwise match the old stamp part-way through the
+    // rebuild and report the client ready while it is still being written.
+    client.clearStamp();
+
     // The generator refuses a non-empty directory it does not recognise, which
     // is exactly the state an interrupted run leaves behind.
     fs.rmSync(outputDir, { recursive: true, force: true });
