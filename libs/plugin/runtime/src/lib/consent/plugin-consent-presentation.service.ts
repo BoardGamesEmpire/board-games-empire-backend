@@ -15,9 +15,11 @@ import type { PluginCheckPresentation, PluginConsentPresentation } from './conse
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
 /**
- * The `Plugin` columns both presentation paths read.
+ * The `Plugin` columns both presentation paths read. Exported so callers
+ * holding a wider row (a full `Plugin`) can hand it to the snapshot-taking
+ * entry point without a cast.
  */
-interface PresentablePluginRow {
+export interface PresentablePluginRow {
   readonly id: string;
   readonly slug: string;
   readonly version: string;
@@ -110,7 +112,32 @@ export class PluginConsentPresentationService {
   ): Promise<PluginConsentPresentation | null> {
     const plugin = await this.loadPresentable(pluginId, unit);
 
-    if (plugin === null || plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
+    if (plugin === null) {
+      return null;
+    }
+
+    return this.presentPendingFromRow(plugin, unit, locale);
+  }
+
+  /**
+   * The snapshot-taking form of {@link presentPendingForUnit}, for a
+   * composer that pairs this surface with other reads of the SAME row
+   * (#321's pending read). Re-reading here would open a window in which the
+   * staged update resolves and is REPLACED between the two reads — and a
+   * version match cannot detect that, because a rejected version can be
+   * re-staged under the same number with different content. Presenting from
+   * the caller's row makes the composed response consistent by
+   * construction. Same null contract as the loading form: a tombstoned row,
+   * or one with nothing staged, has no pending consent surface.
+   */
+  async presentPendingFromRow(
+    plugin: PresentablePluginRow,
+    unit: PluginUnit,
+    locale?: string,
+  ): Promise<PluginConsentPresentation | null> {
+    assertPluginUnit(unit, `Consent presentation for plugin '${plugin.id}'`);
+
+    if (plugin.uninstalledAt !== null || plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
       return null;
     }
 

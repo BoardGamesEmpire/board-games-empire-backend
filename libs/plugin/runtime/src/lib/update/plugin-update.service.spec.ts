@@ -12,6 +12,7 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
+import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -318,9 +319,11 @@ describe('PluginUpdateService', () => {
       expect(result.comparison.serverGating).toBe(false);
       expect(db.plugin.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          // Guarded on the tombstone: an uninstall that lands mid-flight must
-          // take the whole activation with it.
-          where: { id: 'plugin-1', uninstalledAt: null },
+          // Guarded on the tombstone (an uninstall that lands mid-flight must
+          // take the whole activation with it) AND on the pending slot still
+          // being empty — the immediate path must not clobber a concurrently
+          // staged update with its cleared columns.
+          where: { id: 'plugin-1', uninstalledAt: null, pendingVersion: null, pendingSince: null },
           data: expect.objectContaining({
             version: '1.3.0',
             restartRequired: true,
@@ -352,6 +355,31 @@ describe('PluginUpdateService', () => {
       expect(failure).toMatchObject({ uninstalledAt });
       // Grants seeded earlier in the same transaction go with it; committing
       // them onto a tombstone would collide with the reinstall's fresh seed.
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('applies the tx-local denial re-check on the immediate path too — same rule, same rollback', async () => {
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([]) // compare(): nothing denied, nothing escalates
+        // The tx-local re-read sees a denial on the fixture's required
+        // server check, committed after the comparison ran.
+        .mockResolvedValueOnce([
+          { permissionSlug: 'plugin|demo-sink|manage:digest', status: PluginGrantStatus.Denied } as PluginGrant,
+        ]);
+      await writeManifest(nextManifest());
+
+      await expect(service.stage(input())).rejects.toThrow(PluginUpdateBlockedByDenialError);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses when a concurrent stage claims the empty pending slot mid-activation, rather than clobbering it', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin()) // the load: no pending, nothing escalates
+        .mockResolvedValue(makePlugin({ pendingVersion: '9.9.9', pendingSha256: 'other-sha' })); // the guard's re-read
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+      await writeManifest(nextManifest());
+
+      await expect(service.stage(input())).rejects.toThrow(PluginUpdatePendingConflictError);
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
@@ -492,6 +520,234 @@ describe('PluginUpdateService', () => {
       );
     });
 
+    it('loses a concurrent-approve race with the typed no-pending refusal, before writing a single grant', async () => {
+      // Both approves load the same staged row; the other one commits first,
+      // consuming the pending state. The claim — keyed on the exact staging
+      // this approval computed from (version AND the pendingSince stamp: a
+      // rejected version can be re-staged under the same number, so the
+      // version alone is a reusable identity), running before any other
+      // write — is what turns the loser into a 409 instead of a unique-index
+      // crash on the grants the winner just seeded.
+      db.plugin.findUnique
+        .mockResolvedValueOnce(pendingPlugin(nextManifest())) // this approve's load
+        .mockResolvedValue(makePlugin()); // the guard's re-read: pending already consumed
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
+        PluginUpdateNoPendingError,
+      );
+
+      expect(db.plugin.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: 'plugin-1',
+            uninstalledAt: null,
+            pendingVersion: '1.3.0',
+            pendingSince: new Date('2026-07-29T00:00:00Z'),
+          },
+        }),
+      );
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses over a denial that landed after the gates but before the claim — the transaction re-checks and rolls back', async () => {
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: activeManifest.permissions.checks.map((check) =>
+            check.slug === 'feedback:read' ? { ...check, required: true } : check,
+          ),
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([]) // compare(): nothing denied yet
+        .mockResolvedValueOnce([]) // serverChecksToSeed(): nothing decided yet
+        // The tx-local re-read: a denial committed between the gates and
+        // the claim. The durable-denial rule must hold at the moment of
+        // activation, not the moment of the request.
+        .mockResolvedValueOnce([{ permissionSlug: 'feedback:read', status: PluginGrantStatus.Denied } as PluginGrant]);
+
+      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
+        PluginUpdateBlockedByDenialError,
+      );
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('drops a check decided mid-flight from the seed set instead of colliding on the grant unique index', async () => {
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+      const seeded = makeGrant({ id: 'grant-3', permissionSlug: 'plugin|demo-sink|manage:digest' });
+      db.pluginGrant.create.mockResolvedValue(seeded);
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([]) // compare()
+        .mockResolvedValueOnce([]) // serverChecksToSeed(): both checks undecided
+        // feedback:read was decided while this approval was in flight; only
+        // the still-undecided check may seed.
+        .mockResolvedValueOnce([{ permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as PluginGrant]);
+
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+      expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
+      expect(db.pluginGrant.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ permissionSlug: 'plugin|demo-sink|manage:digest' }),
+      });
+      expect(result.seededGrants).toEqual([seeded]);
+      expect(emitter.emit).toHaveBeenCalledWith(
+        PluginUpdateApprovedEvent.eventName,
+        expect.objectContaining({
+          grantedPermissions: [expect.objectContaining({ slug: 'plugin|demo-sink|manage:digest' })],
+        }),
+      );
+    });
+
+    it('re-challenges from inside the transaction when a mid-flight decision shrinks the Critical expectation', async () => {
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'user:impersonate',
+              required: true,
+              reason: { en: 'Acts as members.' },
+              consentScope: 'server' as const,
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'user:impersonate', subject: 'user', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([]) // compare()
+        .mockResolvedValueOnce([]) // serverChecksToSeed(): user:impersonate undecided — expectation is [user:impersonate]
+        // Decided while in flight: the seed set shrinks, so the confirmed
+        // set no longer matches what this transaction grants.
+        .mockResolvedValueOnce([
+          { permissionSlug: 'user:impersonate', status: PluginGrantStatus.Granted } as PluginGrant,
+        ]);
+
+      const failure = await service
+        .approve({ slug: 'demo-sink', approverId: 'admin-1', confirmCriticalSlugs: ['user:impersonate'] })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateCriticalConfirmationError);
+      expect(failure).toMatchObject({ expectedSlugs: [], receivedSlugs: ['user:impersonate'] });
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The tx-local read is a snapshot, not a lock on absent keys: a decision
+     * can commit between it and the seeding write, and the unique index is
+     * what catches that. These pin the recovery — one whole retry against a
+     * snapshot that can see the decision — and its bounds.
+     */
+    describe('a decision that commits between the tx-local read and the seeding write', () => {
+      const grantCollision = () =>
+        uniqueViolation({
+          fields: ['plugin_id', 'scope_type', 'scope_id', 'permission_slug'],
+          constraintName: 'plugin_grants_plugin_id_scope_type_scope_id_permission_slug_key',
+        });
+
+      it('retries the whole transaction, and the second snapshot drops the decided check from the seed set', async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        const seeded = makeGrant({ id: 'grant-3', permissionSlug: 'plugin|demo-sink|manage:digest' });
+        db.pluginGrant.create.mockRejectedValueOnce(grantCollision()).mockResolvedValue(seeded);
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]) // serverChecksToSeed()
+          .mockResolvedValueOnce([]) // first attempt: nothing decided, so it seeds both and loses the race
+          // The retry's snapshot SEES the decision the first attempt collided
+          // with, so the check drops out rather than colliding again.
+          .mockResolvedValueOnce([
+            { permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as PluginGrant,
+          ]);
+
+        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+        expect(result.seededGrants).toEqual([seeded]);
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+        expect(db.pluginGrant.create).toHaveBeenLastCalledWith({
+          data: expect.objectContaining({ permissionSlug: 'plugin|demo-sink|manage:digest' }),
+        });
+        // Re-claimed, not carried over: the rolled-back attempt released it.
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+        // One approval, one event — the abandoned attempt emits nothing,
+        // because emission waits for the commit.
+        expect(emitter.emit).toHaveBeenCalledTimes(1);
+      });
+
+      it('reaches the typed denial refusal when the racing decision was a durable denial', async () => {
+        const next = nextManifest({
+          permissions: {
+            ...activeManifest.permissions,
+            checks: activeManifest.permissions.checks.map((check) =>
+              check.slug === 'feedback:read' ? { ...check, required: true } : check,
+            ),
+          },
+        });
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
+        db.pluginGrant.create.mockRejectedValueOnce(grantCollision());
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]) // serverChecksToSeed()
+          .mockResolvedValueOnce([]) // first attempt: seeds, and collides with the denial being written
+          .mockResolvedValueOnce([
+            { permissionSlug: 'feedback:read', status: PluginGrantStatus.Denied } as PluginGrant,
+          ]);
+
+        // The durable-denial rule, not a 500: what the collision was hiding
+        // is a refusal the retry can finally see.
+        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
+          PluginUpdateBlockedByDenialError,
+        );
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it("retries once and no further — a second collision is the caller's answer", async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        const collision = grantCollision();
+        db.pluginGrant.create.mockRejectedValue(collision);
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]) // serverChecksToSeed()
+          .mockResolvedValueOnce([]) // first attempt
+          .mockResolvedValueOnce([]); // retry: still undecided in ITS snapshot, so it seeds and loses again
+
+        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(collision);
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        [
+          'a unique violation on some other constraint',
+          () => uniqueViolation({ fields: ['plugin_id', 'slug'], constraintName: 'plugin_permissions_slug_key' }),
+        ],
+        // "Could not tell which constraint" is not "it was mine": retrying a
+        // violation this transaction cannot explain would replay a
+        // deterministic failure.
+        ['a P2002 carrying no identifiable constraint', () => uniqueViolationWithoutMeta()],
+      ])('propagates %s without retrying', async (_label, makeError) => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        const failure = makeError();
+        db.pluginGrant.create.mockRejectedValue(failure);
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]) // serverChecksToSeed()
+          .mockResolvedValueOnce([]); // the only attempt
+
+        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(failure);
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
+      });
+    });
+
     it('re-checks the denial block at approval time', async () => {
       const next = nextManifest({
         permissions: {
@@ -598,6 +854,14 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Low,
           }),
         ]) // serverChecksToSeed()
+        .mockResolvedValueOnce([
+          makeGrant(),
+          makeGrant({
+            id: 'grant-2',
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]) // tx-local server re-read: unchanged since the gates
         .mockResolvedValueOnce([]); // activate() – household grants for the unit
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
       db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
@@ -648,6 +912,10 @@ describe('PluginUpdateService', () => {
           grantedPermissions: [expect.objectContaining({ slug: 'user:impersonate', consentScope: 'server' })],
         }),
       );
+      // The per-unit consequences ride the result (#321): the admin who
+      // approved sees them synchronously, not only on the event stream.
+      expect(result.suspendedHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['calendar:read'] }]);
+      expect(result.suspendedUserUnits).toEqual([]);
     });
 
     /**
@@ -740,9 +1008,11 @@ describe('PluginUpdateService', () => {
       );
       const seeded = makeGrant({ id: 'grant-new', permissionSlug: 'feedback:read' });
       db.pluginGrant.create.mockResolvedValue(seeded);
-      // compare() → serverChecksToSeed() → activate() stale-scope lookup
+      // compare() → serverChecksToSeed() → tx-local server re-read →
+      // activate() stale-scope lookup
       db.pluginGrant.findMany
         .mockResolvedValueOnce([staleHouseholdGrant])
+        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([staleHouseholdGrant]);
 
@@ -820,7 +1090,7 @@ describe('PluginUpdateService', () => {
       );
     });
 
-    it('emits only for units the write actually flipped when a concurrent writer takes one', async () => {
+    it('emits and reports only the units the write actually flipped when a concurrent writer takes one', async () => {
       const next = nextManifest({
         scope: 'household',
         permissions: {
@@ -848,6 +1118,7 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([makeGrant({ permissionSlug: 'plugin|demo-sink|manage:digest' })])
+        .mockResolvedValueOnce([makeGrant({ permissionSlug: 'plugin|demo-sink|manage:digest' })]) // tx-local server re-read
         .mockResolvedValueOnce([]);
       db.householdPlugin.findMany.mockResolvedValueOnce([
         makeUnit(),
@@ -859,13 +1130,17 @@ describe('PluginUpdateService', () => {
       // against the full row, so the projection is asserted.
       db.householdPlugin.findMany.mockResolvedValueOnce([{ id: 'hp-1' } as HouseholdPlugin]);
 
-      await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
 
       const suspensionEvents = emitter.emit.mock.calls.filter(
         ([name]) => name === HouseholdPluginUnitDisabledEvent.eventName,
       );
       expect(suspensionEvents).toHaveLength(1);
       expect(suspensionEvents[0][1]).toMatchObject({ after: expect.objectContaining({ id: 'hp-1' }) });
+      // The result reports the same post-write filtered set the events
+      // describe — never the candidate list (#321).
+      expect(result.suspendedHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['feedback:read'] }]);
+      expect(result.suspendedUserUnits).toEqual([]);
     });
 
     it('does NOT suspend when the recorded risk still covers the current classification', async () => {
@@ -1068,6 +1343,14 @@ describe('PluginUpdateService', () => {
           }),
         ]) // compare()
         .mockResolvedValueOnce([
+          makeGrant(),
+          makeGrant({
+            id: 'grant-2',
+            permissionSlug: 'plugin|demo-sink|manage:digest',
+            decidedRiskLevel: RiskLevel.Low,
+          }),
+        ]) // tx-local server re-read: both server checks decided, no denial
+        .mockResolvedValueOnce([
           makeGrant({
             id: 'grant-u1',
             scopeType: PluginGrantScope.User,
@@ -1128,15 +1411,19 @@ describe('PluginUpdateService', () => {
   });
 
   describe('reject()', () => {
-    it('clears the pending columns and emits update_rejected', async () => {
+    it('clears the pending columns — conditionally on the exact staging the rejector saw — and emits update_rejected', async () => {
+      // The staging stamp joins the version in the predicate: a rejected
+      // version can be re-staged under the same number, and this clear must
+      // never take a replacement staging with it.
+      const stagedAt = new Date('2026-08-10T09:00:00Z');
       db.plugin.findUnique.mockResolvedValue(
-        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingSince: new Date() }),
+        makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha', pendingSince: stagedAt }),
       );
 
       await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' });
 
-      expect(db.plugin.update).toHaveBeenCalledWith({
-        where: { id: 'plugin-1' },
+      expect(db.plugin.updateMany).toHaveBeenCalledWith({
+        where: { id: 'plugin-1', pendingVersion: '1.3.0', pendingSince: stagedAt, uninstalledAt: null },
         data: { pendingVersion: null, pendingManifestJson: Prisma.DbNull, pendingSha256: null, pendingSince: null },
       });
       expect(emitter.emit).toHaveBeenCalledWith(
@@ -1149,6 +1436,173 @@ describe('PluginUpdateService', () => {
       await expect(service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' })).rejects.toThrow(
         PluginUpdateNoPendingError,
       );
+    });
+
+    it('refuses — with no event — when the staged update it targeted resolved or was replaced mid-flight', async () => {
+      // A reject racing an approve must not report "rejected" for an update
+      // that in fact activated, and racing a replacement stage it must not
+      // clear a version nobody decided on. The guarded write turns both
+      // races into the typed no-pending refusal.
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha' })) // the load
+        .mockResolvedValue(makePlugin()); // the guard's re-read: still installed, pending gone
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+      await expect(service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' })).rejects.toThrow(
+        PluginUpdateNoPendingError,
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('answers the tombstone, not no-pending, when an uninstall won the race', async () => {
+      const uninstalledAt = new Date('2026-08-16T12:00:00Z');
+      db.plugin.findUnique
+        .mockResolvedValueOnce(makePlugin({ pendingVersion: '1.3.0', pendingSha256: 'new-sha' }))
+        .mockResolvedValue(makePlugin({ uninstalledAt }));
+      db.plugin.updateMany.mockResolvedValue({ count: 0 });
+
+      const failure = await service.reject({ slug: 'demo-sink', rejectorId: 'admin-1' }).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginUpdateTombstonedError);
+      expect(failure).toMatchObject({ uninstalledAt });
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The pending-read seam (#321): the approval screen's data source.
+   * Same load/validate/compare pipeline as `approve()` — RECOMPUTED against
+   * today's decisions, so the screen and the approval cannot disagree — but
+   * a pure read: a denial that would make approve() throw is rendered as
+   * `blockedByDenial` state instead.
+   */
+  describe('describePending()', () => {
+    const pendingSince = new Date('2026-07-29T00:00:00Z');
+
+    const stagedPlugin = (nextJson: PluginManifest, overrides: Partial<Plugin> = {}): Plugin =>
+      makePlugin({
+        pendingVersion: nextJson.version,
+        pendingManifestJson: nextJson as unknown as Prisma.JsonValue,
+        pendingSha256: 'new-sha',
+        pendingSince,
+        ...overrides,
+      });
+
+    it('throws the not-found error for an unknown slug', async () => {
+      db.plugin.findUnique.mockResolvedValue(null);
+
+      await expect(service.describePending('absent')).rejects.toThrow(PluginUpdatePluginNotFoundError);
+    });
+
+    it('throws the tombstone error for an uninstalled plugin — a 410, never a 404', async () => {
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin(nextManifest(), { uninstalledAt: new Date('2026-08-01T00:00:00Z') }),
+      );
+
+      await expect(service.describePending('demo-sink')).rejects.toThrow(PluginUpdateTombstonedError);
+    });
+
+    it('throws the no-pending error when nothing is staged', async () => {
+      await expect(service.describePending('demo-sink')).rejects.toThrow(PluginUpdateNoPendingError);
+    });
+
+    it('returns the row, pendingSince, and a comparison recomputed against today, without requiring authority', async () => {
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: [
+            ...activeManifest.permissions.checks,
+            {
+              slug: 'user:impersonate',
+              required: true,
+              reason: { en: 'Acts as members.' },
+              consentScope: 'server' as const,
+            },
+          ],
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(next));
+      db.permission.findMany.mockResolvedValue([
+        feedbackRead,
+        { slug: 'user:impersonate', subject: 'user', riskLevel: RiskLevel.Critical } as Permission,
+      ]);
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.plugin.pendingVersion).toBe('1.3.0');
+      expect(description.pendingSince).toEqual(pendingSince);
+      expect(description.comparison.serverGating).toBe(true);
+      expect(description.comparison.escalations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: 'new-permission', slug: 'user:impersonate', consentScope: 'server' }),
+        ]),
+      );
+      // A read is not a consent act: the edge guards it with read:plugin,
+      // and no server-admin re-verification runs here.
+      expect(authority.isServerAdmin).not.toHaveBeenCalled();
+      // Nothing was written or emitted — describe is a pure read.
+      expect(db.plugin.update).not.toHaveBeenCalled();
+      expect(db.plugin.updateMany).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('reports the declares[] catalog diff approving would apply — the destructive half of the screen', async () => {
+      // Same rename the applied-diff test stages: manage:digest → manage:archive.
+      // Both paths compute it through one helper, so the screen cannot
+      // promise a diff the transaction would not apply.
+      db.plugin.findUnique.mockResolvedValue(
+        stagedPlugin(
+          nextManifest({
+            permissions: {
+              declares: ['manage:archive'],
+              checks: activeManifest.permissions.checks.filter((check) => check.slug !== 'manage:digest'),
+            },
+          }),
+        ),
+      );
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.declares).toEqual({
+        added: ['plugin|demo-sink|manage:archive'],
+        removed: ['plugin|demo-sink|manage:digest'],
+      });
+    });
+
+    it('reports an empty declares[] diff when the update leaves the catalog alone', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(nextManifest()));
+
+      const description = await service.describePending('demo-sink');
+
+      // Empty, not absent: a client rendering "no catalog changes" should not
+      // have to distinguish an omitted field from an unchanged catalog.
+      expect(description.declares).toEqual({ added: [], removed: [] });
+    });
+
+    it('renders a durable denial as blockedByDenial STATE — the read never throws the approve-time block', async () => {
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: activeManifest.permissions.checks.map((check) =>
+            check.slug === 'feedback:read' ? { ...check, required: true } : check,
+          ),
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(next));
+      db.pluginGrant.findMany.mockResolvedValue([makeGrant({ status: PluginGrantStatus.Denied })]);
+
+      const description = await service.describePending('demo-sink');
+
+      expect(description.comparison.blockedByDenial).toEqual(['feedback:read']);
+    });
+
+    it('enforces bgeCompat on the stored pending manifest, mirroring approve() — the 422 names the pending source', async () => {
+      db.plugin.findUnique.mockResolvedValue(stagedPlugin(nextManifest({ bgeCompat: '>=99.0.0' })));
+
+      await expect(service.describePending('demo-sink')).rejects.toMatchObject({
+        name: 'PluginUpdateManifestError',
+        source: 'pending',
+      });
     });
   });
 });
