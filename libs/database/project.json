@@ -9,12 +9,17 @@
       "executor": "nx:run-commands",
       "cache": false,
       "options": {
-        "command": "node scripts/prisma-generate.js"
+        "command": "node libs/scripts/src/bin/prisma-generate.js"
       },
       "inputs": [
         "{workspaceRoot}/prisma/**/*.prisma",
         "{workspaceRoot}/prisma.config.ts",
-        { "externalDependencies": ["prisma", "@prisma/client"] }
+        "{workspaceRoot}/libs/scripts/src/bin/prisma-generate.js",
+        "{workspaceRoot}/libs/scripts/src/prisma-generate/**/*.js",
+        "!{workspaceRoot}/libs/scripts/src/prisma-generate/**/*.spec.js",
+        {
+          "externalDependencies": ["prisma", "@prisma/client"]
+        }
       ],
       "outputs": ["{projectRoot}/src/lib/generated"]
     },

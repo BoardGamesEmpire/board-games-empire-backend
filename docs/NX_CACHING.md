@@ -72,7 +72,7 @@ the dependency actually is.
 
 ## `generate` runs through a lock, not `prisma generate` directly
 
-The target's command is `node scripts/prisma-generate.js`. That wrapper exists
+The target's command is `node libs/scripts/src/bin/prisma-generate.js`. That wrapper exists
 because uncaching the target removed the thing that was accidentally serialising
 it.
 
@@ -95,9 +95,19 @@ half-written tree is left on disk for the next run to trip over.
 
 The wrapper does two things, and both are needed:
 
-- **An exclusive lock** (`node_modules/.cache/prisma-generate/lock`, created
-  with `mkdir` because that is atomic) so only one run writes at a time. Stale
-  locks are reclaimed when the owning pid is gone.
+- **An exclusive lock** (`node_modules/.cache/prisma-generate/lock.json`) so only
+  one run writes at a time. A free lock is taken with `link`, which fails if the
+  lock already exists and creates a file that already carries its owner record —
+  so a kill mid-acquire cannot strand a lock nobody can identify. A lock is stale
+  when its owner died, when it outlived any plausible run, or when it has carried
+  no readable owner for a couple of seconds. Freeing a stale lock and taking it
+  are **separate** steps: the reclaimer renames the lock aside, which is exclusive
+  (two waiters cannot both move it, the loser gets `ENOENT`), and then competes
+  for the now-free lock through the ordinary `link` like anyone else. Replacing
+  the lock in place instead would let two reclaimers each read back their own
+  record and both conclude they hold it. The staleness threshold is deliberately
+  shorter than the wait timeout: a waiter that gave up first could never reclaim
+  anything, which is the defect #338 was filed for.
 - **A fingerprint** over `prisma/**/*.prisma`, `prisma.config.ts`, and the
   installed `prisma` / `@prisma/client` versions, recorded in
   `node_modules/.cache/prisma-generate/stamp.json` with the file count of the
@@ -115,7 +125,7 @@ To confirm it still holds, from a cold tree:
 
 ```bash
 rm -rf libs/database/src/lib/generated node_modules/.cache/prisma-generate
-for i in 1 2 3 4 5 6; do node scripts/prisma-generate.js & done; wait
+for i in 1 2 3 4 5 6; do node libs/scripts/src/bin/prisma-generate.js & done; wait
 find libs/database/src/lib/generated -type f | wc -l   # expect 136
 ```
 
