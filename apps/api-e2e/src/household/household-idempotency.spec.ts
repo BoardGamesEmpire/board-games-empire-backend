@@ -72,7 +72,7 @@ describe('household create idempotency (#210 acceptance)', () => {
       expect(replay.household.id).toBe(original.household.id);
       await expect(householdCountFor(actor)).resolves.toBe(1);
 
-      // D-257-9: a replay is indistinguishable from a create on the wire. Both
+      // A replay is indistinguishable from a create on the wire (#257). Both
       // are 201 (asserted above) and carry the same envelope, so a client
       // cannot infer that its retry was a retry — which is the whole point of
       // supplying a key.
@@ -261,7 +261,7 @@ describe('household create idempotency (#210 acceptance)', () => {
 
   describe('the P2002 the recovery path relies on', () => {
     it('raises a P2002 that carries no usable meta.target', async () => {
-      // #257 D-257-2, and now deliberately NARROWED.
+      // #257, and now deliberately NARROWED.
       //
       // This began as an assertion that `meta.target` carries the mapped
       // constraint name. It does not, and finding that out was the most valuable

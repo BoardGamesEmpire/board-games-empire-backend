@@ -204,7 +204,7 @@ describe('household authorization', () => {
    */
   describe('the ability cache', () => {
     it('resolves a creator new HouseholdOwner grants on their next request', async () => {
-      // #257 D-257-1. Note what this does NOT assert: a GET would return 200
+      // #257. Note what this does NOT assert: a GET would return 200
       // whether or not eviction happened, because `read:households` lives on
       // the base User role with a `members.some.userId` condition that
       // `accessibleBy` renders into a Prisma WHERE evaluated against live rows.
