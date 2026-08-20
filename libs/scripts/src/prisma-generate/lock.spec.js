@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const crypto = require('node:crypto');
+
 const { createLock, LOCK_STALE_MS, LOCK_TIMEOUT_MS } = require('./lock');
 
 const DEAD_PID = 999;
@@ -202,6 +204,66 @@ describe('prisma-generate lock', () => {
 
     expect(() => waiter.acquire()).toThrow(/Timed out after \d+ms .* \(held by pid \d+\)/);
     expect(lockOwner()).toBe(holder);
+  });
+
+  it('never rewrites a live lock while failing to acquire it', () => {
+    plantLock(300);
+    const before = fs.readFileSync(lockPath, 'utf8');
+
+    // A staging file leaked by an earlier process that died between its `link`
+    // and its cleanup is still hard-linked to the live lock: same inode, two
+    // names. A later process that reuses the pid must not write through it.
+    fs.linkSync(lockPath, `${lockPath}.300.0`);
+
+    // Enough that the contender's record differs from the holder's; nowhere near
+    // the staleness threshold, so the holder stays live.
+    clock.advance(1);
+
+    const contender = lockFor(300, {
+      options: {
+        sleep: () => {
+          throw new Error('one poll only');
+        },
+      },
+    });
+
+    expect(() => contender.acquire()).toThrow('one poll only');
+    expect(fs.readFileSync(lockPath, 'utf8')).toBe(before);
+    expect(lockOwner()).toBe(300);
+  });
+
+  it('steps to a fresh staging name rather than writing through a leaked one', () => {
+    plantLock(300);
+    const before = fs.readFileSync(lockPath, 'utf8');
+    clock.advance(1);
+
+    // Force the collision the unguessable name normally prevents, so the
+    // exclusive-create guard is the only thing standing between the contender and
+    // the live lock's bytes.
+    const names = ['collides', 'collides', 'fresh'];
+    const uuid = jest.spyOn(crypto, 'randomUUID').mockImplementation(() => names.shift() ?? 'fresh');
+    fs.linkSync(lockPath, `${lockPath}.staging.300.collides`);
+
+    const contender = lockFor(300, {
+      options: {
+        sleep: () => {
+          throw new Error('one poll only');
+        },
+      },
+    });
+
+    try {
+      expect(() => contender.acquire()).toThrow('one poll only');
+
+      // Proof the collision path actually ran: both colliding names were consumed.
+      expect(names).toEqual([]);
+      expect(fs.existsSync(`${lockPath}.staging.300.collides`)).toBe(true);
+
+      expect(fs.readFileSync(lockPath, 'utf8')).toBe(before);
+      expect(lockOwner()).toBe(300);
+    } finally {
+      uuid.mockRestore();
+    }
   });
 
   it('does not assume ownership of a stale lock it merely freed', () => {

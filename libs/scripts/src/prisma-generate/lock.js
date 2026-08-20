@@ -27,6 +27,7 @@
  * The clock, process liveness, and the poll wait are injected so the reclaim
  * races can be driven deterministically instead of chased with signals.
  */
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 
 /**
@@ -67,6 +68,14 @@ const LOCK_STALE_MS = 120_000;
  */
 const LOCK_OWNER_GRACE_MS = 2_000;
 const POLL_INTERVAL_MS = 100;
+/**
+ * How many staging names to try before giving up.
+ *
+ * A collision means an unguessable name matched a leaked file, so one retry is
+ * already generous; the bound is here so a pathological state fails with a
+ * message instead of spinning.
+ */
+const STAGING_ATTEMPTS = 5;
 
 /**
  * A waiter has to outlive the staleness threshold, or it gives up before the
@@ -115,8 +124,14 @@ function createLock({
 }) {
   assertReclaimIsReachable(staleMs, timeoutMs);
 
-  /** Distinguishes this process's staging files from any other racer's. */
-  let scratch = 0;
+  /**
+   * A name in the lock's directory that no other process can be holding.
+   *
+   * Unguessable rather than sequential on purpose: a `pid` plus a counter repeats
+   * exactly once the pid is reused, and colliding with a leaked staging file is
+   * not harmless (see `stage`).
+   */
+  const scratchPath = (kind) => `${lockPath}.${kind}.${pid}.${crypto.randomUUID()}`;
   /** The record we published, for as long as we believe we still hold the lock. */
   let held = null;
 
@@ -164,19 +179,43 @@ function createLock({
   /**
    * A staging file holding a complete record, ready to become the lock.
    *
-   * A process killed between the write and the `link`/`rename` that consumes it
-   * leaks its staging file. That is deliberate: sweeping other processes' staging
-   * files would delete a record whose owner is about to link it, turning a
-   * successful acquire into an ENOENT crash. The files are inert, and they live
-   * under `node_modules/.cache/`.
+   * Created exclusively, and that is not belt-and-braces. A process killed
+   * between its `link` and its cleanup leaks a staging file that is still
+   * hard-linked to the live lock — one inode, two names — so writing to a name
+   * that already exists can truncate and rewrite the lock itself, leaving it
+   * naming a process that never acquired it. Its real holder can then no longer
+   * release it, and every waiter blocks until the record looks stale.
+   *
+   * `wx` refuses that write rather than performing it, and the unguessable name
+   * means the case does not arise in the first place. Leaked files are therefore
+   * inert, which is why they are not swept: deleting another process's staging
+   * file would turn its imminent `link` into an ENOENT crash. They live under
+   * `node_modules/.cache/`.
    */
   function stage() {
     const record = { pid, acquiredAt: now() };
-    const stagingPath = `${lockPath}.${pid}.${scratch++}`;
 
-    fs.writeFileSync(stagingPath, JSON.stringify(record));
+    for (let attempt = 0; attempt < STAGING_ATTEMPTS; attempt++) {
+      const stagingPath = scratchPath('staging');
+      let fd;
 
-    return { record, stagingPath };
+      try {
+        fd = fs.openSync(stagingPath, 'wx');
+      } catch (error) {
+        if (error.code === 'EEXIST') continue;
+        throw error;
+      }
+
+      try {
+        fs.writeFileSync(fd, JSON.stringify(record));
+      } finally {
+        fs.closeSync(fd);
+      }
+
+      return { record, stagingPath };
+    }
+
+    throw new Error(`Could not create a staging file for ${lockPath} after ${STAGING_ATTEMPTS} attempts.`);
   }
 
   function tryAcquire() {
@@ -216,7 +255,7 @@ function createLock({
     const confirmed = read();
     if (confirmed === null || !sameHolder(confirmed.owner, observed.owner)) return false;
 
-    const quarantinePath = `${lockPath}.stale.${pid}.${scratch++}`;
+    const quarantinePath = scratchPath('stale');
 
     try {
       fs.renameSync(lockPath, quarantinePath);
