@@ -224,6 +224,14 @@
     "config_schema_unusable": "Plugin '{slug}' declares a configuration schema this server cannot evaluate — an administrator must investigate",
     "grant_required_denial": "Cannot deny '{permissionSlug}': the active manifest for plugin '{slug}' requires it — disable or uninstall the plugin instead",
     "presentation_not_found": "Plugin '{slug}' is not installed",
-    "presentation_tombstoned": "Plugin '{slug}' was uninstalled and has no consent surface"
+    "presentation_tombstoned": "Plugin '{slug}' was uninstalled and has no consent surface",
+    "unit_authority": "Managing this household's plugin enablement requires a household owner or admin",
+    "unit_plugin_not_found": "Plugin '{slug}' is not installed",
+    "unit_plugin_tombstoned": "Plugin '{slug}' was uninstalled and has no unit enablement",
+    "unit_scope": "Plugin '{slug}' is {scope}-scoped and has no per-household enablement",
+    "unit_not_enrolled": "Plugin '{slug}' has no enablement record for this unit",
+    "unit_config_required": "Plugin '{slug}' requires household configuration before it can be enabled — supply a config document with the enable request",
+    "feature_state_not_found": "Plugin '{slug}' is not installed",
+    "feature_state_tombstoned": "Plugin '{slug}' was uninstalled and has no feature state"
   }
 }

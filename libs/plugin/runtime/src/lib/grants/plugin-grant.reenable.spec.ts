@@ -612,6 +612,36 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       );
     });
 
+    it('both household passes take the household advisory key BEFORE the row lock (#323)', async () => {
+      // #323's enable endpoint creates HouseholdPlugin rows near decisions,
+      // so the household passes are enrolled in the same advisory scheme as
+      // the user-scope trio: an uncommitted creation is invisible to the
+      // row lock query, and only the advisory key — which exists before the
+      // row — orders these writers against it.
+
+      // Re-enable direction (a Granted decision on the suspended unit).
+      await service.decide(decision());
+
+      const reenableAdvisory = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, string];
+      expect(reenableAdvisory[0].join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
+      expect(reenableAdvisory[1]).toBe('plugin_grant:household_unit:household-1:plugin-1');
+      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$queryRaw.mock.invocationCallOrder[0]);
+
+      jest.clearAllMocks();
+
+      // Suspend direction (a changed denial on the required household check).
+      db.pluginGrant.upsert.mockResolvedValue(makeGrant({ status: PluginGrantStatus.Denied }));
+      db.pluginGrant.findMany.mockResolvedValue([]);
+      db.$queryRaw.mockResolvedValue(lockedUnit('hp-1', false));
+
+      await service.decide(decision({ status: PluginGrantStatus.Denied }));
+
+      const suspendAdvisory = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, string];
+      expect(suspendAdvisory[0].join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
+      expect(suspendAdvisory[1]).toBe('plugin_grant:household_unit:household-1:plugin-1');
+      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$queryRaw.mock.invocationCallOrder[0]);
+    });
+
     it('lets the predicate under the lock overrule the trigger that fired the pass (reconcile path)', async () => {
       // On a CHANGED denial this interleaving no longer exists: the flip
       // either commits first and the upsert re-denies over it, or it blocks

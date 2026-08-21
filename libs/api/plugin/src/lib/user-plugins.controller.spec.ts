@@ -1,6 +1,13 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
-import type { PluginConsentPresentation, PluginConsentPresentationService, PluginGrantService } from '@bge/plugin';
+import type {
+  PluginConsentPresentation,
+  PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginFeatureUnitState,
+  PluginGrantService,
+  PluginUnitLifecycleService,
+} from '@bge/plugin';
 import { ForbiddenException, RequestMethod } from '@nestjs/common';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
@@ -15,21 +22,42 @@ const PRESENTATION = {
   checks: [],
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted } as never;
+const UNIT_ROW = { id: 'up-1', userId: USER_ID, pluginId: 'plugin-1', enabled: true } as never;
+const FEATURE_STATE = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink' },
+  unit: { scopeType: 'User', userId: USER_ID },
+  served: true,
+  suspendedForConsent: false,
+  features: [],
+} as unknown as PluginFeatureUnitState;
 
 describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let controller: UserPluginsController;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentForUnitBySlug'>>;
+  let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'enableUser' | 'disableUser'>>;
+  let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale' | 'getActor'>>;
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
     presentation = { presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION) };
+    units = {
+      enableUser: jest.fn().mockResolvedValue(UNIT_ROW),
+      disableUser: jest.fn().mockResolvedValue(UNIT_ROW),
+    };
+    featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
     auditContext = {
       getLocale: jest.fn().mockReturnValue(null),
       getActor: jest.fn().mockReturnValue({ kind: 'user', userId: USER_ID } as Actor),
     };
-    controller = new UserPluginsController(grants as never, presentation as never, auditContext as never);
+    controller = new UserPluginsController(
+      grants as never,
+      presentation as never,
+      units as never,
+      featureState as never,
+      auditContext as never,
+    );
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -85,6 +113,37 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     );
   });
 
+  it('enable/disable address the session user only, and render the unit with the shared success keys', async () => {
+    const enabled = await firstValueFrom(controller.enable('demo-sink'));
+
+    expect(units.enableUser).toHaveBeenCalledWith({ slug: 'demo-sink', userId: USER_ID });
+    expect(enabled).toEqual({
+      message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
+      unit: UNIT_ROW,
+    });
+
+    const disabled = await firstValueFrom(controller.disable('demo-sink'));
+
+    expect(units.disableUser).toHaveBeenCalledWith({ slug: 'demo-sink', userId: USER_ID });
+    expect(disabled).toEqual({
+      message: expect.objectContaining({ key: 'success.plugin.disabled', args: { slug: 'demo-sink' } }),
+      unit: UNIT_ROW,
+    });
+  });
+
+  it('featureStates renders the session user as the unit, locale from CLS', async () => {
+    auditContext.getLocale.mockReturnValue('de');
+
+    const result = await firstValueFrom(controller.featureStates('demo-sink'));
+
+    expect(featureState.resolveForUnitBySlug).toHaveBeenCalledWith(
+      'demo-sink',
+      { scopeType: 'User', userId: USER_ID },
+      'de',
+    );
+    expect(result).toEqual({ featureState: FEATURE_STATE });
+  });
+
   /**
    * The actor-kind floor: no permission seed exists for this axis (D-BA
    * seeded server + household pairs only), so there is no ability for
@@ -122,6 +181,19 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
 
       expect(() => controller.consentPresentation('demo-sink')).toThrow(ForbiddenException);
     });
+
+    it.each([
+      ['enable', () => controller.enable('demo-sink')],
+      ['disable', () => controller.disable('demo-sink')],
+      ['featureStates', () => controller.featureStates('demo-sink')],
+    ] as const)('the floor holds on the #323 %s route too — before the service is asked', (_name, invoke) => {
+      auditContext.getActor.mockReturnValue({ kind: 'apiKey', userId: USER_ID, apiKeyId: 'key-1' } as unknown as Actor);
+
+      expect(invoke).toThrow(ForbiddenException);
+      expect(units.enableUser).not.toHaveBeenCalled();
+      expect(units.disableUser).not.toHaveBeenCalled();
+      expect(featureState.resolveForUnitBySlug).not.toHaveBeenCalled();
+    });
   });
 
   describe('route registration', () => {
@@ -130,19 +202,22 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     it.each([
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
+      ['enable', ':slug/enable', RequestMethod.POST],
+      ['disable', ':slug/disable', RequestMethod.POST],
+      ['featureStates', ':slug/features', RequestMethod.GET],
     ] as const)('binds %s to %s', (handler, path, method) => {
       expect(Reflect.getMetadata('path', UserPluginsController.prototype[handler])).toBe(path);
       expect(Reflect.getMetadata('method', UserPluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the grant-consent routes', () => {
+    it('registers exactly the grant-consent and unit-enablement routes', () => {
       const handlers = Object.getOwnPropertyNames(UserPluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
           Reflect.getMetadata('path', UserPluginsController.prototype[name as never]) !== undefined,
       );
 
-      expect(handlers).toEqual(['decideGrant', 'consentPresentation']);
+      expect(handlers).toEqual(['decideGrant', 'consentPresentation', 'enable', 'disable', 'featureStates']);
     });
   });
 });

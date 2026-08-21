@@ -40,6 +40,7 @@ import {
 } from './grant.errors';
 import { isPluginAdministrationSlug } from './plugin-admin-permissions';
 import { PluginGrantAuthorityService } from './plugin-grant-authority.service';
+import { lockHouseholdUnitScope, lockUserUnitScope } from './unit-scope-lock';
 
 export interface PluginGrantDecisionInput {
   /** The plugin's slug — the HTTP edge's addressing (D-AX/D-BO); the service resolves the row. */
@@ -282,7 +283,7 @@ export class PluginGrantService {
       // state; without it, two overlapping transactions are each invisible
       // to the other (see lockUserUnitScope).
       if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
-        await this.lockUserUnitScope(tx, scopeId, plugin.id);
+        await lockUserUnitScope(tx, scopeId, plugin.id);
 
         const otherRequiredSlugs = validated.permissionChecks
           .filter(
@@ -451,6 +452,12 @@ export class PluginGrantService {
       const householdChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'household');
 
       const cleared = await this.db.$transaction(async (tx) => {
+        // The scope lock, not just the row lock (#323): the household
+        // enable endpoint creates rows near decisions now, and an uncommitted
+        // creation is invisible to the row lock query — waiting on the
+        // advisory key is what makes a born-suspended row visible here at all.
+        await lockHouseholdUnitScope(tx, householdId, plugin.id);
+
         const unit = await this.lockHouseholdUnit(tx, householdId, plugin.id);
 
         if (unit === null || !unit.suspendedForConsent) {
@@ -538,7 +545,7 @@ export class PluginGrantService {
         // this pass should clear may not be COMMITTED yet when a
         // concurrent flip's re-enable runs — waiting on the advisory key
         // is what makes the anchor visible here at all.
-        await this.lockUserUnitScope(tx, userId, plugin.id);
+        await lockUserUnitScope(tx, userId, plugin.id);
 
         const unit = await this.lockUserUnit(tx, userId, plugin.id);
 
@@ -622,6 +629,12 @@ export class PluginGrantService {
     deniedSlug: string,
     initiatedAt: Date,
   ): Promise<SuspendedUnitState | null> {
+    // Advisory before the row lock (#323): the enable endpoint
+    // creates household rows near decisions now, and this pass must wait
+    // out an uncommitted creation rather than read "no row" past it —
+    // the same suffix of the total order the user-scope twin takes.
+    await lockHouseholdUnitScope(tx, householdId, plugin.id);
+
     const householdChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'household');
     const unit = await this.lockHouseholdUnit(tx, householdId, plugin.id);
 
@@ -729,7 +742,7 @@ export class PluginGrantService {
     deniedSlug: string,
     initiatedAt: Date,
   ): Promise<SuspendedUnitState | null> {
-    await this.lockUserUnitScope(tx, userId, plugin.id);
+    await lockUserUnitScope(tx, userId, plugin.id);
 
     const userChecks = validated.permissionChecks.filter((candidate) => candidate.consentScope === 'user');
     const unit = await this.lockUserUnit(tx, userId, plugin.id);
@@ -819,36 +832,6 @@ export class PluginGrantService {
       FOR UPDATE`;
 
     return toLockedUnit(rows);
-  }
-
-  /**
-   * Serialize every writer of one user's unit state for one plugin —
-   * including the writer that runs BEFORE the `UserPlugin` row exists. A
-   * `FOR UPDATE` on the unit row cannot order the anchor-creating grant
-   * against a concurrent required denial: while the anchor's INSERT is
-   * uncommitted, the denial's lock query finds no row to wait on, the
-   * grant's denied-required probe cannot see the uncommitted denial, and
-   * both commit believing the other absent — a serving anchor beside a
-   * durable required denial (#359 round 6). The advisory key exists before
-   * the row does, so whichever transaction takes it second observes the
-   * first's commit.
-   *
-   * Postgres derives the 64-bit key itself (`hashtextextended`) —
-   * deliberately NOT a cryptographic hash: nothing here is protected by
-   * the digest, a collision only over-serializes two unrelated units, and
-   * a crypto API around a userId reads as data protection where none is
-   * intended (the CodeQL finding on the sha1 predecessor was right about
-   * the smell, wrong about the risk). Same int8 keyspace discipline as
-   * QuotaService.advisoryLockKey. Taken AFTER the grant-row upsert and
-   * BEFORE the unit row lock everywhere, so the lock order is total.
-   * Household units need the same treatment the day anything creates
-   * their rows near a decision — today that writer is #323's enable
-   * endpoint, recorded there.
-   */
-  private async lockUserUnitScope(tx: Prisma.TransactionClient, userId: string, pluginId: string): Promise<void> {
-    const scopeKey = `plugin_grant:user_unit:${userId}:${pluginId}`;
-
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${scopeKey}, 0))`;
   }
 
   /** The user-scope sibling of {@link lockHouseholdUnit}. */

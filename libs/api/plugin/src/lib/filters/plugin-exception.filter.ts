@@ -7,6 +7,8 @@ import {
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginFeatureStateManifestError,
+  PluginFeatureStateNotFoundError,
+  PluginFeatureStateTombstonedError,
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
@@ -32,6 +34,13 @@ import {
   PluginLifecycleTombstonedError,
   PluginStaticAnalysisUnavailableError,
   PluginUninstallBundledError,
+  PluginUnitAuthorityError,
+  PluginUnitConfigRequiredError,
+  PluginUnitManifestError,
+  PluginUnitNotEnrolledError,
+  PluginUnitPluginNotFoundError,
+  PluginUnitPluginTombstonedError,
+  PluginUnitScopeError,
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
@@ -164,7 +173,8 @@ function buildRenderers(): RendererMap {
       | PluginGrantManifestInvalidError
       | PluginFeatureStateManifestError
       | PluginConsentPresentationManifestError
-      | PluginLifecycleManifestError,
+      | PluginLifecycleManifestError
+      | PluginUnitManifestError,
   ): PluginErrorRendering => ({
     status: Http.InternalServerError,
     message: t('errors.plugin.stored_manifest_invalid', { slug: exception.pluginSlug }),
@@ -192,6 +202,11 @@ function buildRenderers(): RendererMap {
   renders(PluginLifecycleAuthorityError, () => ({
     status: Http.Forbidden,
     message: t('errors.plugin.lifecycle_authority'),
+  }));
+
+  renders(PluginUnitAuthorityError, () => ({
+    status: Http.Forbidden,
+    message: t('errors.plugin.unit_authority'),
   }));
 
   renders(PluginGrantExclusionError, (exception) => ({
@@ -229,6 +244,29 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.slug },
   }));
 
+  renders(PluginUnitPluginNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.unit_plugin_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
+  // A unit with no enablement row is addressed state that does not exist —
+  // a 404 on the unit, distinct from the plugin-level 404 above, and the
+  // scopeType tells one client handler which axis to prompt for (enable
+  // creates household rows; a user's row comes from their first Granted
+  // consent).
+  renders(PluginUnitNotEnrolledError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.unit_not_enrolled', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, scopeType: exception.scopeType },
+  }));
+
+  renders(PluginFeatureStateNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.feature_state_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
   // ─── 410 — tombstoned (the record exists and says so; not a 404) ─────────
 
   renders(PluginUpdateTombstonedError, (exception) => ({
@@ -253,6 +291,18 @@ function buildRenderers(): RendererMap {
     status: Http.Gone,
     message: t('errors.plugin.lifecycle_tombstoned', { slug: exception.slug }),
     fields: { slug: exception.slug, uninstalledAt: exception.uninstalledAt },
+  }));
+
+  renders(PluginUnitPluginTombstonedError, (exception) => ({
+    status: Http.Gone,
+    message: t('errors.plugin.unit_plugin_tombstoned', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
+  }));
+
+  renders(PluginFeatureStateTombstonedError, (exception) => ({
+    status: Http.Gone,
+    message: t('errors.plugin.feature_state_tombstoned', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
   }));
 
   // ─── 409 — state conflicts ────────────────────────────────────────────────
@@ -299,6 +349,18 @@ function buildRenderers(): RendererMap {
     status: Http.Conflict,
     message: t('errors.plugin.uninstall_bundled', { slug: exception.slug }),
     fields: { slug: exception.slug },
+  }));
+
+  // The enable-time config gate (#323): enable refused because required household config was
+  // neither supplied nor retained in valid form. Curable state conflict,
+  // not a validation error — the request itself was well-formed; `issues`
+  // names what a RETAINED document violates (empty when none existed) so
+  // the client's schema-driven form renders what to fix without a second
+  // request.
+  renders(PluginUnitConfigRequiredError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.unit_config_required', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, issues: exception.issues },
   }));
 
   // ─── 409 — confirmation challenges (prompt inputs come FROM the error) ───
@@ -401,6 +463,12 @@ function buildRenderers(): RendererMap {
     fields: { scopeType: exception.scopeType },
   }));
 
+  renders(PluginUnitScopeError, (exception) => ({
+    status: Http.UnprocessableEntity,
+    message: t('errors.plugin.unit_scope', { slug: exception.pluginSlug, scope: exception.scope }),
+    fields: { slug: exception.pluginSlug, scope: exception.scope },
+  }));
+
   renders(PluginConfigValidationError, (exception) => ({
     status: Http.UnprocessableEntity,
     message: t('errors.plugin.config_invalid', { slug: exception.slug }),
@@ -416,6 +484,7 @@ function buildRenderers(): RendererMap {
   renders(PluginFeatureStateManifestError, storedManifestInvalid);
   renders(PluginConsentPresentationManifestError, storedManifestInvalid);
   renders(PluginLifecycleManifestError, storedManifestInvalid);
+  renders(PluginUnitManifestError, storedManifestInvalid);
 
   // A config.schema the server cannot compile passed manifest validation
   // (which never interprets it) and surfaced on first use — the plugin's
