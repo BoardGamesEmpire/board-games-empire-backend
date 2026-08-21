@@ -99,6 +99,15 @@ describe('PluginUpdateService', () => {
     ...overrides,
   });
 
+  /**
+   * A row as the tx-local FOR UPDATE re-read returns it (#356): raw
+   * snake_case columns off the driver, not a Prisma-shaped PluginGrant.
+   */
+  const lockedRow = (permissionSlug: string, status: PluginGrantStatus) => ({
+    permission_slug: permissionSlug,
+    status,
+  });
+
   const makeGrant = (overrides: Partial<PluginGrant> = {}): PluginGrant => ({
     id: 'grant-1',
     pluginId: 'plugin-1',
@@ -359,13 +368,10 @@ describe('PluginUpdateService', () => {
     });
 
     it('applies the tx-local denial re-check on the immediate path too — same rule, same rollback', async () => {
-      db.pluginGrant.findMany
-        .mockResolvedValueOnce([]) // compare(): nothing denied, nothing escalates
-        // The tx-local re-read sees a denial on the fixture's required
-        // server check, committed after the comparison ran.
-        .mockResolvedValueOnce([
-          { permissionSlug: 'plugin|demo-sink|manage:digest', status: PluginGrantStatus.Denied } as PluginGrant,
-        ]);
+      db.pluginGrant.findMany.mockResolvedValueOnce([]); // compare(): nothing denied, nothing escalates
+      // The tx-local locking re-read sees a denial on the fixture's required
+      // server check, committed after the comparison ran.
+      db.$queryRaw.mockResolvedValue([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Denied)]);
       await writeManifest(nextManifest());
 
       await expect(service.stage(input())).rejects.toThrow(PluginUpdateBlockedByDenialError);
@@ -563,11 +569,11 @@ describe('PluginUpdateService', () => {
       db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
       db.pluginGrant.findMany
         .mockResolvedValueOnce([]) // compare(): nothing denied yet
-        .mockResolvedValueOnce([]) // serverChecksToSeed(): nothing decided yet
-        // The tx-local re-read: a denial committed between the gates and
-        // the claim. The durable-denial rule must hold at the moment of
-        // activation, not the moment of the request.
-        .mockResolvedValueOnce([{ permissionSlug: 'feedback:read', status: PluginGrantStatus.Denied } as PluginGrant]);
+        .mockResolvedValueOnce([]); // serverChecksToSeed(): nothing decided yet
+      // The tx-local locking re-read: a denial committed between the gates
+      // and the claim. The durable-denial rule must hold at the moment of
+      // activation, not the moment of the request.
+      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateBlockedByDenialError,
@@ -576,16 +582,57 @@ describe('PluginUpdateService', () => {
       expect(emitter.emit).not.toHaveBeenCalled();
     });
 
+    it('refuses when a Granted row flipped to Denied between the gates and the lock — the UPDATE half no retry can see (#356)', async () => {
+      const next = nextManifest({
+        permissions: {
+          ...activeManifest.permissions,
+          checks: activeManifest.permissions.checks.map((check) =>
+            check.slug === 'feedback:read' ? { ...check, required: true } : check,
+          ),
+        },
+      });
+      db.plugin.findUnique.mockResolvedValue(pendingPlugin(next));
+      // Every pre-transaction read sees the Granted row: the comparison
+      // passes, and the already-decided check is EXCLUDED from the seed set
+      // — this transaction never writes that row, so no unique violation
+      // can surface the flip and the bounded retry never fires. Only the
+      // locked re-read can catch it.
+      db.pluginGrant.findMany
+        .mockResolvedValueOnce([makeGrant()]) // compare(): feedback:read Granted
+        .mockResolvedValueOnce([makeGrant()]); // serverChecksToSeed(): already decided, nothing to seed
+      // The locked re-read sees the SAME row, flipped to Denied by a
+      // decide() that committed after the gates. FOR UPDATE is what
+      // guarantees this ordering: the flip either commits before the lock
+      // (and refuses here) or blocks on it until this transaction resolves.
+      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
+
+      await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
+        PluginUpdateBlockedByDenialError,
+      );
+      expect(db.pluginGrant.create).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+
+      // The re-read must be the LOCKING form — a plain snapshot cannot
+      // order itself against decide()'s update, which is the whole point.
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      const [template, pluginId] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, string];
+      const sql = template.join('?').replace(/\s+/g, ' ');
+      expect(sql).toContain('FOR UPDATE');
+      expect(sql).toContain('FROM plugin_grants');
+      expect(sql).toContain("scope_type = 'Server'");
+      expect(pluginId).toBe('plugin-1');
+    });
+
     it('drops a check decided mid-flight from the seed set instead of colliding on the grant unique index', async () => {
       db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
       const seeded = makeGrant({ id: 'grant-3', permissionSlug: 'plugin|demo-sink|manage:digest' });
       db.pluginGrant.create.mockResolvedValue(seeded);
       db.pluginGrant.findMany
         .mockResolvedValueOnce([]) // compare()
-        .mockResolvedValueOnce([]) // serverChecksToSeed(): both checks undecided
-        // feedback:read was decided while this approval was in flight; only
-        // the still-undecided check may seed.
-        .mockResolvedValueOnce([{ permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as PluginGrant]);
+        .mockResolvedValueOnce([]); // serverChecksToSeed(): both checks undecided
+      // feedback:read was decided while this approval was in flight; only
+      // the still-undecided check may seed.
+      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
       const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
 
@@ -624,12 +671,10 @@ describe('PluginUpdateService', () => {
       ]);
       db.pluginGrant.findMany
         .mockResolvedValueOnce([]) // compare()
-        .mockResolvedValueOnce([]) // serverChecksToSeed(): user:impersonate undecided — expectation is [user:impersonate]
-        // Decided while in flight: the seed set shrinks, so the confirmed
-        // set no longer matches what this transaction grants.
-        .mockResolvedValueOnce([
-          { permissionSlug: 'user:impersonate', status: PluginGrantStatus.Granted } as PluginGrant,
-        ]);
+        .mockResolvedValueOnce([]); // serverChecksToSeed(): user:impersonate undecided — expectation is [user:impersonate]
+      // Decided while in flight: the seed set shrinks, so the confirmed
+      // set no longer matches what this transaction grants.
+      db.$queryRaw.mockResolvedValue([lockedRow('user:impersonate', PluginGrantStatus.Granted)]);
 
       const failure = await service
         .approve({ slug: 'demo-sink', approverId: 'admin-1', confirmCriticalSlugs: ['user:impersonate'] })
@@ -659,13 +704,12 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.create.mockRejectedValueOnce(grantCollision()).mockResolvedValue(seeded);
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
-          .mockResolvedValueOnce([]) // serverChecksToSeed()
-          .mockResolvedValueOnce([]) // first attempt: nothing decided, so it seeds both and loses the race
-          // The retry's snapshot SEES the decision the first attempt collided
-          // with, so the check drops out rather than colliding again.
-          .mockResolvedValueOnce([
-            { permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as PluginGrant,
-          ]);
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        db.$queryRaw
+          .mockResolvedValueOnce([]) // first attempt's locked read: nothing decided, so it seeds both and loses the race
+          // The retry's locked read SEES the decision the first attempt
+          // collided with, so the check drops out rather than colliding again.
+          .mockResolvedValueOnce([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
         const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
 
@@ -694,11 +738,10 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.create.mockRejectedValueOnce(grantCollision());
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
-          .mockResolvedValueOnce([]) // serverChecksToSeed()
-          .mockResolvedValueOnce([]) // first attempt: seeds, and collides with the denial being written
-          .mockResolvedValueOnce([
-            { permissionSlug: 'feedback:read', status: PluginGrantStatus.Denied } as PluginGrant,
-          ]);
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        db.$queryRaw
+          .mockResolvedValueOnce([]) // first attempt's locked read: seeds, and collides with the denial being written
+          .mockResolvedValueOnce([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
         // The durable-denial rule, not a 500: what the collision was hiding
         // is a refusal the retry can finally see.
@@ -715,9 +758,10 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.create.mockRejectedValue(collision);
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
-          .mockResolvedValueOnce([]) // serverChecksToSeed()
-          .mockResolvedValueOnce([]) // first attempt
-          .mockResolvedValueOnce([]); // retry: still undecided in ITS snapshot, so it seeds and loses again
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        db.$queryRaw
+          .mockResolvedValueOnce([]) // first attempt's locked read
+          .mockResolvedValueOnce([]); // retry: still undecided in ITS read, so it seeds and loses again
 
         await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(collision);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
@@ -739,8 +783,8 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.create.mockRejectedValue(failure);
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
-          .mockResolvedValueOnce([]) // serverChecksToSeed()
-          .mockResolvedValueOnce([]); // the only attempt
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        db.$queryRaw.mockResolvedValue([]); // the only attempt's locked read
 
         await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(failure);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
@@ -854,15 +898,11 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Low,
           }),
         ]) // serverChecksToSeed()
-        .mockResolvedValueOnce([
-          makeGrant(),
-          makeGrant({
-            id: 'grant-2',
-            permissionSlug: 'plugin|demo-sink|manage:digest',
-            decidedRiskLevel: RiskLevel.Low,
-          }),
-        ]) // tx-local server re-read: unchanged since the gates
         .mockResolvedValueOnce([]); // activate() – household grants for the unit
+      db.$queryRaw.mockResolvedValue([
+        lockedRow('feedback:read', PluginGrantStatus.Granted),
+        lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted),
+      ]); // tx-local locked server re-read: unchanged since the gates
       db.householdPlugin.findMany.mockResolvedValue([makeUnit()]);
       db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
 
@@ -1008,11 +1048,10 @@ describe('PluginUpdateService', () => {
       );
       const seeded = makeGrant({ id: 'grant-new', permissionSlug: 'feedback:read' });
       db.pluginGrant.create.mockResolvedValue(seeded);
-      // compare() → serverChecksToSeed() → tx-local server re-read →
-      // activate() stale-scope lookup
+      // compare() → serverChecksToSeed() → activate() stale-scope lookup
+      // (the tx-local server re-read is the locked $queryRaw, empty here).
       db.pluginGrant.findMany
         .mockResolvedValueOnce([staleHouseholdGrant])
-        .mockResolvedValueOnce([])
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([staleHouseholdGrant]);
 
@@ -1118,8 +1157,9 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([makeGrant({ permissionSlug: 'plugin|demo-sink|manage:digest' })])
-        .mockResolvedValueOnce([makeGrant({ permissionSlug: 'plugin|demo-sink|manage:digest' })]) // tx-local server re-read
         .mockResolvedValueOnce([]);
+      // tx-local locked server re-read
+      db.$queryRaw.mockResolvedValue([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted)]);
       db.householdPlugin.findMany.mockResolvedValueOnce([
         makeUnit(),
         makeUnit({ id: 'hp-2', householdId: 'household-2' }),
@@ -1343,14 +1383,6 @@ describe('PluginUpdateService', () => {
           }),
         ]) // compare()
         .mockResolvedValueOnce([
-          makeGrant(),
-          makeGrant({
-            id: 'grant-2',
-            permissionSlug: 'plugin|demo-sink|manage:digest',
-            decidedRiskLevel: RiskLevel.Low,
-          }),
-        ]) // tx-local server re-read: both server checks decided, no denial
-        .mockResolvedValueOnce([
           makeGrant({
             id: 'grant-u1',
             scopeType: PluginGrantScope.User,
@@ -1359,6 +1391,11 @@ describe('PluginUpdateService', () => {
             decidedRiskLevel: RiskLevel.Low,
           }),
         ]); // activate() – user grants for the unit
+      // tx-local locked server re-read: both server checks decided, no denial
+      db.$queryRaw.mockResolvedValue([
+        lockedRow('feedback:read', PluginGrantStatus.Granted),
+        lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted),
+      ]);
       await writeManifest(nextWithUserCheck());
 
       await service.stage(input());

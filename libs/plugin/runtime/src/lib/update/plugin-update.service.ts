@@ -1058,10 +1058,30 @@ export class PluginUpdateService {
       // claim back with it, and a check decided since the caller computed
       // its seed set must drop out of the seeding rather than collide on
       // the grant unique index as an untyped 500.
-      const serverGrants = await tx.pluginGrant.findMany({
-        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Server },
-        select: { permissionSlug: true, status: true },
-      });
+      //
+      // LOCKED, not just re-read (#356). `decide()` UPDATEs an existing row
+      // from its own transaction, and an update raises no unique violation,
+      // so the bounded retry below never sees a Granted → Denied flip
+      // landing after a plain snapshot — activation would commit a manifest
+      // the required-denial rule (D-AV) should have refused. `FOR UPDATE`
+      // takes a row lock on every server grant, and Postgres row locks are
+      // mutual: `decide()`'s upsert blocks until this transaction resolves,
+      // so the flip either commits before this read (and refuses below) or
+      // after activation (where `decide()` re-reads the ACTIVE manifest and
+      // D-AV judges the flip itself). Raw SQL because Prisma's query API
+      // cannot express FOR UPDATE; unqualified table name so the search_path
+      // (per-worker test schemas) resolves it. The lock covers EXISTING rows
+      // only — a row that does not exist cannot be locked — so the
+      // insert-half race stays with the unique index and the retry.
+      const lockedGrantRows = await tx.$queryRaw<{ permission_slug: string; status: PluginGrantStatus }[]>`
+        SELECT permission_slug, status
+        FROM plugin_grants
+        WHERE plugin_id = ${plugin.id} AND scope_type = 'Server'
+        FOR UPDATE`;
+      const serverGrants = lockedGrantRows.map((row) => ({
+        permissionSlug: row.permission_slug,
+        status: row.status,
+      }));
       const deniedServerSlugs = new Set(
         serverGrants.filter((grant) => grant.status === PluginGrantStatus.Denied).map((grant) => grant.permissionSlug),
       );
