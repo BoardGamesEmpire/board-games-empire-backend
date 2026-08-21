@@ -1,9 +1,10 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { Action, ResourceType } from '@bge/database';
+import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
+  PluginGrantService,
   PluginLifecycleService,
   PluginUpdateNoPendingError,
   PluginUpdateService,
@@ -14,7 +15,7 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { ApprovePluginUpdateDto, UninstallPluginDto, UpdatePluginConfigDto } from './dto';
+import { ApprovePluginUpdateDto, DecidePluginGrantDto, UninstallPluginDto, UpdatePluginConfigDto } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 
 /**
@@ -41,9 +42,80 @@ export class PluginsController {
     private readonly lifecycle: PluginLifecycleService,
     private readonly abilityService: AbilityService,
     private readonly updates: PluginUpdateService,
+    private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly auditContext: AuditContextService,
   ) {}
+
+  // ─── Grant decisions + consent presentation (#322): Server scope ──────────
+
+  @ApiOperation({
+    summary: 'Record a server-scope consent decision for one requested permission',
+    description:
+      'Grant or durably deny a permission the active manifest requests at server consent scope. Idempotent on ' +
+      'exact re-statement (changed: false). Denying a permission the active manifest REQUIRES is refused with a ' +
+      '409 naming the honest levers — disable or uninstall (D-AV); a permission only a staged update requires ' +
+      'stays deniable, and blocks at approve instead.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Insufficient permissions, or a categorically ungrantable permission',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'Denial refused: the active manifest requires this permission (disable or uninstall instead)',
+  })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description: 'Not requested by the manifest, or decided at the wrong consent scope',
+  })
+  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.Plugin))
+  @HttpCode(Http.Ok)
+  @Post(':slug/grants')
+  decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
+    return from(
+      this.grants.decide({
+        slug,
+        scopeType: PluginGrantScope.Server,
+        permissionSlug: dto.permissionSlug,
+        status: dto.status,
+        deciderId: this.abilityService.getActingUserId(),
+      }),
+    ).pipe(
+      map(({ grant, changed }) => ({
+        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
+        grant,
+        changed,
+      })),
+    );
+  }
+
+  @ApiOperation({
+    summary: "Present the active manifest's consent surface for the Server unit",
+    description:
+      "The server admin's consent screen: every check the active manifest requests — riskLevel, required, " +
+      'consentScope, localized reason, feature binding, and its decision state from this viewpoint (unit-scope ' +
+      "checks read 'per-unit') — plus the localized features[] the checks group under.",
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  // Mutation-adjacent by definition: it exists to be read right before a
+  // decide POST, and the decide's write must be visible on the re-read. The
+  // response cache also keys without the resolved locale (#358), which
+  // would cross-serve this fully localized body between locales.
+  @NoCache()
+  @Get(':slug/consent')
+  consentPresentation(@Param('slug') slug: string) {
+    return from(
+      this.presentation.presentForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+    ).pipe(map((presentation) => ({ presentation })));
+  }
 
   @ApiOperation({ summary: 'Enable a plugin (server-level switch)' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

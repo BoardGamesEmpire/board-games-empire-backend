@@ -10,7 +10,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { unitOwnsConsentScope } from './consent-classification.types';
-import { PluginConsentPresentationManifestError } from './consent-presentation.errors';
+import {
+  PluginConsentPresentationManifestError,
+  PluginConsentPresentationNotFoundError,
+  PluginConsentPresentationTombstonedError,
+} from './consent-presentation.errors';
 import type { PluginCheckPresentation, PluginConsentPresentation } from './consent-presentation.types';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 
@@ -86,6 +90,36 @@ export class PluginConsentPresentationService {
     const plugin = await this.loadPresentable(pluginId, unit);
     if (plugin === null) {
       return null;
+    }
+
+    const validated = this.revalidate(plugin, {
+      version: plugin.version,
+      manifestJson: plugin.manifestJson,
+    });
+
+    return this.assemble(plugin, validated, 'active', unit, locale);
+  }
+
+  /**
+   * {@link presentForUnit} addressed by slug, for the HTTP edge (D-BO,
+   * #322): plugins are slug-addressed at every endpoint (D-AX), and the
+   * edge owes D-AY's 404/410 distinction — which the null-for-both
+   * contract of the id-addressed form cannot feed. Throws instead of
+   * returning null; the tombstone check still runs BEFORE manifest
+   * re-validation so a stale stored manifest cannot turn "uninstalled"
+   * into a 5xx.
+   */
+  async presentForUnitBySlug(slug: string, unit: PluginUnit, locale?: string): Promise<PluginConsentPresentation> {
+    assertPluginUnit(unit, `Consent presentation for plugin '${slug}'`);
+
+    const plugin = await this.db.plugin.findUnique({ where: { slug }, select: PRESENTABLE_PLUGIN_SELECT });
+
+    if (plugin === null) {
+      throw new PluginConsentPresentationNotFoundError(slug);
+    }
+
+    if (plugin.uninstalledAt !== null) {
+      throw new PluginConsentPresentationTombstonedError(slug, plugin.uninstalledAt);
     }
 
     const validated = this.revalidate(plugin, {

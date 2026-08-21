@@ -1,7 +1,9 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { Module } from '@nestjs/common';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+import { HouseholdPluginsController } from './household-plugins.controller';
 import { PluginsController } from './plugins.controller';
+import { UserPluginsController } from './user-plugins.controller';
 
 /**
  * HTTP surface for the plugin system (#59 Phase C4). The runtime lives in
@@ -32,7 +34,7 @@ import { PluginsController } from './plugins.controller';
     // (PluginLifecycleService) are both global modules, the latter
     // configured once by the host's forRootAsync.
   ],
-  controllers: [PluginsController],
+  controllers: [PluginsController, HouseholdPluginsController, UserPluginsController],
   providers: [PluginExceptionFilter],
   exports: [AuditContextModule, PluginExceptionFilter],
 })

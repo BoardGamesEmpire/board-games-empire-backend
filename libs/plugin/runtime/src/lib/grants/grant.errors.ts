@@ -25,12 +25,37 @@ export class PluginGrantManifestInvalidError extends Error {
   }
 }
 
-/** The plugin the decision targets does not exist. */
+/** The plugin the decision targets does not exist. Slug-addressed like every other endpoint-facing service (D-BO). */
 export class PluginGrantPluginNotFoundError extends Error {
   override readonly name = 'PluginGrantPluginNotFoundError';
 
-  constructor(public readonly pluginId: string) {
-    super(`Plugin '${pluginId}' not found`);
+  constructor(public readonly pluginSlug: string) {
+    super(`Plugin '${pluginSlug}' not found`);
+  }
+}
+
+/**
+ * D-AV (#59/#322): a `Denied` decision on a check the ACTIVE manifest marks
+ * `required` at server consent scope. Refused rather than recorded — the
+ * author declared the permission load-bearing, so accepting the denial
+ * would either invent a fourth serving state or leave the plugin silently
+ * running without it. The honest levers are first-class actions the same
+ * decider already holds: disable or uninstall the plugin. A permission
+ * required only by a PENDING manifest is deliberately NOT this error —
+ * denying it stays legal and blocks at approve instead (D-AB); rejecting
+ * the staged update is the explicit resolution.
+ */
+export class PluginGrantRequiredDenialError extends Error {
+  override readonly name = 'PluginGrantRequiredDenialError';
+
+  constructor(
+    public readonly pluginSlug: string,
+    public readonly permissionSlug: string,
+  ) {
+    super(
+      `Cannot deny '${permissionSlug}' for plugin '${pluginSlug}': the active manifest requires it at server ` +
+        'consent scope. Disable or uninstall the plugin instead',
+    );
   }
 }
 

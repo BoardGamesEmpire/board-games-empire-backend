@@ -1,6 +1,11 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AbilityService } from '@bge/permissions';
-import { PluginConsentPresentationService, PluginLifecycleService, PluginUpdateService } from '@bge/plugin';
+import {
+  PluginConsentPresentationService,
+  PluginGrantService,
+  PluginLifecycleService,
+  PluginUpdateService,
+} from '@bge/plugin';
 import { Global, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
@@ -24,9 +29,17 @@ import { PluginsApiModule } from './plugins-api.module';
     { provide: AbilityService, useValue: {} },
     { provide: PluginLifecycleService, useValue: {} },
     { provide: PluginUpdateService, useValue: {} },
+    { provide: PluginGrantService, useValue: {} },
     { provide: PluginConsentPresentationService, useValue: {} },
   ],
-  exports: [I18nService, AbilityService, PluginLifecycleService, PluginUpdateService, PluginConsentPresentationService],
+  exports: [
+    I18nService,
+    AbilityService,
+    PluginLifecycleService,
+    PluginUpdateService,
+    PluginGrantService,
+    PluginConsentPresentationService,
+  ],
 })
 class StubGlobalsModule {}
 
