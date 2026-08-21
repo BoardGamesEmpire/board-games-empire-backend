@@ -192,7 +192,7 @@
     "install_forbidden_permission": "The plugin cannot be installed: '{permissionSlug}' is not a grantable permission",
     "update_forbidden_permission": "The update cannot proceed: '{permissionSlug}' is not a grantable permission",
     "update_not_found": "Plugin '{slug}' is not installed",
-    "grant_plugin_not_found": "The plugin this decision targets does not exist",
+    "grant_plugin_not_found": "Plugin '{slug}' is not installed",
     "update_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it instead of updating",
     "grant_tombstoned": "Plugin '{slug}' was uninstalled and cannot accept consent decisions",
     "install_conflict": "Plugin '{slug}' is already installed — updates go through the pending/approve flow",
@@ -221,6 +221,9 @@
     "lifecycle_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again",
     "uninstall_bundled": "Plugin '{slug}' is bundled with BGE and cannot be uninstalled — disable it instead",
     "config_invalid": "The configuration for plugin '{slug}' does not match its declared schema",
-    "config_schema_unusable": "Plugin '{slug}' declares a configuration schema this server cannot evaluate — an administrator must investigate"
+    "config_schema_unusable": "Plugin '{slug}' declares a configuration schema this server cannot evaluate — an administrator must investigate",
+    "grant_required_denial": "Cannot deny '{permissionSlug}': the active manifest for plugin '{slug}' requires it — disable or uninstall the plugin instead",
+    "presentation_not_found": "Plugin '{slug}' is not installed",
+    "presentation_tombstoned": "Plugin '{slug}' was uninstalled and has no consent surface"
   }
 }

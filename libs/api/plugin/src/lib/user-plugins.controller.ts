@@ -1,0 +1,117 @@
+import { AuditContextService, isUserActor, type UserPluginUnit } from '@bge/actor-context';
+import { PluginGrantScope } from '@bge/database';
+import { t } from '@bge/i18n';
+import { PluginConsentPresentationService, PluginGrantService } from '@bge/plugin';
+import { NoCache } from '@bge/shared';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, UseFilters } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Http } from '@status/codes';
+import { from } from 'rxjs';
+import { map } from 'rxjs/operators';
+import { DecidePluginGrantDto } from './dto';
+import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+
+/**
+ * User-scope plugin consent (#59 Phase C4, #322): each user's own grant
+ * decisions and the consent surface they decide from. #323 adds the unit
+ * enable/disable endpoints to this class. Self-addressed under `/users/me`
+ * per D-AX — the acting user from CLS is BOTH the decider and the consent
+ * unit, so no one else's unit is addressable, and no permission seed exists
+ * for this axis (D-BA seeded only the server and household pairs).
+ *
+ * With no seed, PoliciesGuard has nothing to clamp an API key's floor on —
+ * so the gate here is the actor KIND: user-scope consent is "decided by the
+ * user themself" (#225's predicate taken literally), and an API key is an
+ * agent acting AS its owner, not the owner. Without this, a key minted with
+ * any unrelated scope could record consent to third-party code and create
+ * the owner's enablement anchor — authority the key was never scoped to.
+ */
+@ApiBearerAuth()
+@UseFilters(PluginExceptionFilter)
+@ApiTags('user-plugins')
+@Controller('users/me/plugins')
+export class UserPluginsController {
+  constructor(
+    private readonly grants: PluginGrantService,
+    private readonly presentation: PluginConsentPresentationService,
+    private readonly auditContext: AuditContextService,
+  ) {}
+
+  @ApiOperation({
+    summary: 'Record an own-user consent decision for one requested permission',
+    description:
+      'Grant or durably deny a permission the active manifest requests at user consent scope, for your own ' +
+      'account. A Granted decision creates your enablement anchor (#225); a Denied decision creates nothing — ' +
+      'and a denial that leaves a REQUIRED user check unsatisfied suspends your unit until late acceptance.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'A categorically ungrantable permission' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description: 'Not requested by the manifest, or decided at the wrong consent scope',
+  })
+  @HttpCode(Http.Ok)
+  @Post(':slug/grants')
+  decideGrant(@Param('slug') slug: string, @Body() dto: DecidePluginGrantDto) {
+    const userId = this.selfUserId();
+
+    return from(
+      this.grants.decide({
+        slug,
+        scopeType: PluginGrantScope.User,
+        scopeId: userId,
+        permissionSlug: dto.permissionSlug,
+        status: dto.status,
+        deciderId: userId,
+      }),
+    ).pipe(
+      map(({ grant, changed }) => ({
+        message: t('success.plugin.grant_decided', { slug, permissionSlug: dto.permissionSlug }),
+        grant,
+        changed,
+      })),
+    );
+  }
+
+  @ApiOperation({
+    summary: "Present the active manifest's consent surface for your own unit",
+    description:
+      'Your consent screen: every check the active manifest requests, with your own decision state per check — ' +
+      "server-consented checks show the server's concrete state (one addressable decider), household-consented " +
+      "checks read 'per-unit' (every household decides for itself) — plus riskLevel, required, localized reason, " +
+      'and the localized features[] the checks group under.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  // Mutation-adjacent (read right before a decide POST, which must be
+  // visible on the re-read) — and the response cache keys without the
+  // resolved locale (#358), which would cross-serve localized bodies.
+  @NoCache()
+  @Get(':slug/consent')
+  consentPresentation(@Param('slug') slug: string) {
+    const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };
+
+    return from(this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
+      map((presentation) => ({ presentation })),
+    );
+  }
+
+  /**
+   * "The user themself", enforced: only a session-user actor may exercise
+   * this axis. An API key resolves to its OWNER's id everywhere else — here
+   * that would let a key of any scope consent on the owner's behalf, so the
+   * kind check IS the missing ability floor (see the class doc).
+   */
+  private selfUserId(): string {
+    const actor = this.auditContext.getActor();
+
+    if (!actor || !isUserActor(actor)) {
+      throw new ForbiddenException(t('common.forbidden.action'));
+    }
+
+    return actor.userId;
+  }
+}

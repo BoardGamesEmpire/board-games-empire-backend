@@ -1,8 +1,10 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
+import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
+  PluginGrantService,
   PluginLifecycleService,
   PluginUpdateService,
   UpdateEscalationComparison,
@@ -39,12 +41,22 @@ const PRESENTATION = {
   source: 'pending',
   checks: [],
 } as unknown as PluginConsentPresentation;
+const ACTIVE_PRESENTATION = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink', enabled: true },
+  manifestVersion: '1.2.0',
+  source: 'active',
+  checks: [],
+} as unknown as PluginConsentPresentation;
+const GRANT = { id: 'grant-1', permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as never;
 
 describe('PluginsController (delegation)', () => {
   let controller: PluginsController;
   let lifecycle: jest.Mocked<Pick<PluginLifecycleService, 'enable' | 'disable' | 'updateConfig' | 'uninstall'>>;
   let updates: jest.Mocked<Pick<PluginUpdateService, 'approve' | 'reject' | 'describePending'>>;
-  let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentPendingFromRow'>>;
+  let presentation: jest.Mocked<
+    Pick<PluginConsentPresentationService, 'presentPendingFromRow' | 'presentForUnitBySlug'>
+  >;
+  let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
 
@@ -71,13 +83,18 @@ describe('PluginsController (delegation)', () => {
         declares: DECLARES,
       }),
     };
-    presentation = { presentPendingFromRow: jest.fn().mockResolvedValue(PRESENTATION) };
+    presentation = {
+      presentPendingFromRow: jest.fn().mockResolvedValue(PRESENTATION),
+      presentForUnitBySlug: jest.fn().mockResolvedValue(ACTIVE_PRESENTATION),
+    };
+    grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
     controller = new PluginsController(
       lifecycle as never,
       abilityService as never,
       updates as never,
+      grants as never,
       presentation as never,
       auditContext as never,
     );
@@ -226,12 +243,58 @@ describe('PluginsController (delegation)', () => {
     });
   });
 
+  describe('grant decide + consent presentation (#322)', () => {
+    it('decideGrant records a Server-scope decision with the CLS actor as decider — never the body', async () => {
+      const result = await firstValueFrom(
+        controller.decideGrant('demo-sink', {
+          permissionSlug: 'feedback:read',
+          status: PluginGrantStatus.Granted,
+        }),
+      );
+
+      expect(grants.decide).toHaveBeenCalledWith({
+        slug: 'demo-sink',
+        scopeType: PluginGrantScope.Server,
+        permissionSlug: 'feedback:read',
+        status: PluginGrantStatus.Granted,
+        deciderId: MOCK_ACTING_USER_ID,
+      });
+      expect(result).toEqual({
+        message: expect.objectContaining({
+          key: 'success.plugin.grant_decided',
+          args: { slug: 'demo-sink', permissionSlug: 'feedback:read' },
+        }),
+        grant: GRANT,
+        changed: true,
+      });
+    });
+
+    it('consentPresentation renders the Server unit from the slug entry point, locale from CLS', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.consentPresentation('demo-sink'));
+
+      expect(presentation.presentForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, 'de');
+      expect(result).toEqual({ presentation: ACTIVE_PRESENTATION });
+    });
+
+    it('an unresolved CLS locale is passed as undefined — the presentation falls back to the default locale', async () => {
+      auditContext.getLocale.mockReturnValue(null);
+
+      await firstValueFrom(controller.consentPresentation('demo-sink'));
+
+      expect(presentation.presentForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, undefined);
+    });
+  });
+
   describe('route registration', () => {
     // Every route lives under `:slug/<literal>`, so no parametric route can
     // shadow another and declaration order carries no constraint TODAY. The
     // paths and verbs are pinned so a future plain `:slug` or literal
     // sibling route must revisit ordering deliberately.
     it.each([
+      ['decideGrant', ':slug/grants', RequestMethod.POST],
+      ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
       ['disable', ':slug/disable', RequestMethod.POST],
       ['updateConfig', ':slug/config', RequestMethod.PATCH],
@@ -244,7 +307,7 @@ describe('PluginsController (delegation)', () => {
       expect(Reflect.getMetadata('method', PluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the lifecycle and update-consent routes', () => {
+    it('registers exactly the lifecycle, update-consent, and grant-consent routes', () => {
       const handlers = Object.getOwnPropertyNames(PluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
@@ -252,6 +315,8 @@ describe('PluginsController (delegation)', () => {
       );
 
       expect(handlers).toEqual([
+        'decideGrant',
+        'consentPresentation',
         'enable',
         'disable',
         'updateConfig',

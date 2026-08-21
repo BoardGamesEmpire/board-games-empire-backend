@@ -25,7 +25,10 @@ import {
 
 export interface PluginLifecycleActionInput {
   readonly slug: string;
-  /** The acting admin — resolved from CLS at the API edge, verified here, never taken from a request body. */
+
+  /**
+   *  The acting admin — resolved from CLS at the API edge, verified here, never taken from a request body.
+   */
   readonly actorId: string;
 }
 

@@ -4,6 +4,8 @@ import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNotFoundError,
+  PluginConsentPresentationTombstonedError,
   PluginFeatureStateManifestError,
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
@@ -11,6 +13,7 @@ import {
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
+  PluginGrantRequiredDenialError,
   PluginGrantScopeIdError,
   PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
@@ -59,9 +62,9 @@ import { STATUS_CODES } from 'node:http';
  * Wire naming: when a body names the plugin's slug, the field is `slug`,
  * whatever the runtime error calls it (`slug` on install/update,
  * `pluginSlug` on grant/read errors) — one 410/422 client handler must work
- * for all of them. Not every body carries one: the grant path addresses
- * plugins by id, so its not-found body exposes `pluginId`, and the
- * scope-shape errors identify no plugin at all.
+ * for all of them. Since D-BO made the grant/consent paths slug-addressed,
+ * every not-found body carries `slug` too; only the scope-shape errors
+ * identify no plugin at all.
  *
  * `operatorActionable: true` marks errors an operator must act on —
  * server-state failures the caller cannot fix (provenance drift,
@@ -210,10 +213,14 @@ function buildRenderers(): RendererMap {
 
   renders(PluginGrantPluginNotFoundError, (exception) => ({
     status: Http.NotFound,
-    message: t('errors.plugin.grant_plugin_not_found'),
-    // The grant path addresses plugins by id, and an unknown id has no slug
-    // to normalize — the one not-found body without a `slug` field.
-    fields: { pluginId: exception.pluginId },
+    message: t('errors.plugin.grant_plugin_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
+  renders(PluginConsentPresentationNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.presentation_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
   }));
 
   renders(PluginLifecycleNotFoundError, (exception) => ({
@@ -233,6 +240,12 @@ function buildRenderers(): RendererMap {
   renders(PluginGrantPluginTombstonedError, (exception) => ({
     status: Http.Gone,
     message: t('errors.plugin.grant_tombstoned', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
+  }));
+
+  renders(PluginConsentPresentationTombstonedError, (exception) => ({
+    status: Http.Gone,
+    message: t('errors.plugin.presentation_tombstoned', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
   }));
 
@@ -300,6 +313,20 @@ function buildRenderers(): RendererMap {
     status: Http.Conflict,
     message: t('errors.plugin.update_blocked_by_denial'),
     fields: { slug: exception.slug, deniedRequiredSlugs: exception.deniedRequiredSlugs },
+  }));
+
+  // The decide()-side sibling of the denial block above (D-AV/D-BP, #322):
+  // not a challenge — there is nothing to re-submit — but the same kind of
+  // curable state conflict, and the client renders the two honest levers
+  // (disable, uninstall) FROM this body, so its `code` and fields are
+  // pinned (client repo #237).
+  renders(PluginGrantRequiredDenialError, (exception) => ({
+    status: Http.Conflict,
+    message: t('errors.plugin.grant_required_denial', {
+      slug: exception.pluginSlug,
+      permissionSlug: exception.permissionSlug,
+    }),
+    fields: { slug: exception.pluginSlug, permissionSlug: exception.permissionSlug },
   }));
 
   // ─── 422 — manifest and semantic validation ───────────────────────────────

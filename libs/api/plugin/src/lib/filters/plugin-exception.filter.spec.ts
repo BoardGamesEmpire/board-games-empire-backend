@@ -2,6 +2,8 @@ import { PluginGrantScope } from '@bge/database';
 import * as pluginRuntime from '@bge/plugin';
 import {
   PluginConsentPresentationManifestError,
+  PluginConsentPresentationNotFoundError,
+  PluginConsentPresentationTombstonedError,
   PluginFeatureStateManifestError,
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
@@ -9,6 +11,7 @@ import {
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
+  PluginGrantRequiredDenialError,
   PluginGrantScopeIdError,
   PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
@@ -126,12 +129,16 @@ describe('PluginExceptionFilter', () => {
       expect(body()['slug']).toBe('sample');
     });
 
-    it('maps PluginGrantPluginNotFoundError to 404 with the plugin id', () => {
-      filter.catch(new PluginGrantPluginNotFoundError('plg_1'), host);
+    // Slug-addressed since D-BO: every not-found body carries `slug`.
+    it.each([
+      [new PluginGrantPluginNotFoundError('sample'), 'grant_plugin_not_found'],
+      [new PluginConsentPresentationNotFoundError('sample'), 'presentation_not_found'],
+    ] as const)('maps %s to 404 with the slug', (exception, key) => {
+      filter.catch(exception, host);
 
       expect(rendered().getStatus()).toBe(Http.NotFound);
-      expect(body()['message']).toBe('t:errors.plugin.grant_plugin_not_found');
-      expect(body()['pluginId']).toBe('plg_1');
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['slug']).toBe('sample');
     });
   });
 
@@ -143,6 +150,7 @@ describe('PluginExceptionFilter', () => {
     it.each([
       [new PluginUpdateTombstonedError('sample', uninstalledAt), 'update_tombstoned'],
       [new PluginGrantPluginTombstonedError('sample', uninstalledAt), 'grant_tombstoned'],
+      [new PluginConsentPresentationTombstonedError('sample', uninstalledAt), 'presentation_tombstoned'],
     ] as const)('maps %s to 410 with the tombstone timestamp', (exception, key) => {
       filter.catch(exception, host);
 
@@ -209,6 +217,16 @@ describe('PluginExceptionFilter', () => {
       expect(body()['findings']).toEqual([AXIOS_FINDING]);
       expect(body()['unacknowledgedSpecifiers']).toEqual(['axios']);
       expect(body()['unexpectedSpecifiers']).toEqual(exception.unexpectedSpecifiers);
+    });
+
+    it('maps the D-AV required-denial refusal to 409 with the slug and permission — the lever prompt renders from this body', () => {
+      filter.catch(new PluginGrantRequiredDenialError('sample', 'plugin|sample|manage:digest'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['message']).toBe('t:errors.plugin.grant_required_denial');
+      expect(body()['slug']).toBe('sample');
+      expect(body()['permissionSlug']).toBe('plugin|sample|manage:digest');
+      expect(body()['code']).toBe('PluginGrantRequiredDenialError');
     });
 
     it('renders the blocking denials on PluginUpdateBlockedByDenialError', () => {

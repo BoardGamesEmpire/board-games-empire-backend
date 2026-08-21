@@ -2,7 +2,7 @@ import { clonePluginUnit } from '@bge/actor-context';
 import type { Permission } from '@bge/database';
 import { Action } from '@bge/database';
 import { parsePluginPermissionSlug, pluginPermissionCaslSubject } from '@boardgamesempire/plugin-manifest';
-import { AbilityBuilder, ExtractSubjectType } from '@casl/ability';
+import { AbilityBuilder, detectSubjectType, ExtractSubjectType } from '@casl/ability';
 import { createPrismaAbility } from '@casl/prisma';
 import { Injectable, Logger } from '@nestjs/common';
 import * as Mustache from 'mustache';
@@ -36,9 +36,32 @@ type RuleApplier = (
  * instances resolve by constructor name, plain values pass through. One
  * definition so the ability variants cannot drift on how a subject is
  * classified.
+ *
+ * `subject()`-TAGGED plain objects resolve by their tag — the edge instance
+ * checks (#322: "may THIS household be addressed?") build their subjects
+ * that way, because a plain object's constructor is `Object`, which matches
+ * no rule and would silently deny. CASL's own detector serves the tag
+ * lookup, but it is NOT total: it returns `constructor.modelName || name`
+ * for every untagged object and dereferences `constructor` unguarded, so a
+ * null-prototype object would turn a deny into a TypeError, and an
+ * anonymous class's `''` would swallow the passthrough. The guards keep
+ * this detector total exactly as the constructor-name original was:
+ * degenerate inputs (a null prototype, a shadowed `constructor: null`) fall
+ * through to the original passthrough — CASL's typed string-or-class
+ * refusal — never a TypeError from inside detection.
  */
-const detectAppSubjectType = (object: unknown) =>
-  ((object as { constructor?: { name?: string } })?.constructor?.name || object) as ExtractSubjectType<Subjects>;
+const detectAppSubjectType = (object: unknown) => {
+  const detected =
+    object !== null && typeof object === 'object' && (object as { constructor?: unknown }).constructor != null
+      ? detectSubjectType(object as Record<string, unknown>)
+      : undefined;
+
+  if (typeof detected === 'string' && detected.length > 0) {
+    return detected as ExtractSubjectType<Subjects>;
+  }
+
+  return ((object as { constructor?: { name?: string } })?.constructor?.name || object) as ExtractSubjectType<Subjects>;
+};
 
 @Injectable()
 export class AbilityFactory {

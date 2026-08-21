@@ -14,6 +14,7 @@ import {
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
+  PluginGrantRequiredDenialError,
   PluginGrantScopeIdError,
   PluginGrantScopeNotRevocableError,
   PluginGrantUnknownPermissionError,
@@ -121,7 +122,7 @@ describe('PluginGrantService', () => {
   });
 
   const serverDecision = {
-    pluginId: 'plg_1',
+    slug: 'demo-sink',
     scopeType: PluginGrantScope.Server,
     permissionSlug: 'feedback:read',
     status: PluginGrantStatus.Granted,
@@ -203,6 +204,111 @@ describe('PluginGrantService', () => {
     });
   });
 
+  describe('decide — required-denial rule (D-AV, #322)', () => {
+    it('refuses a Denied decision on a check the ACTIVE manifest requires at server scope, naming the levers', async () => {
+      const failure = await service
+        .decide({
+          ...serverDecision,
+          permissionSlug: 'plugin|demo-sink|manage:digest',
+          status: PluginGrantStatus.Denied,
+        })
+        .catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginGrantRequiredDenialError);
+      expect(failure).toMatchObject({ pluginSlug: 'demo-sink', permissionSlug: 'plugin|demo-sink|manage:digest' });
+      expect((failure as Error).message).toMatch(/disable or uninstall/i);
+      // Refused BEFORE the transaction: nothing written, nothing emitted —
+      // the grant table stays contradiction-free by never seeing the row.
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('refuses the polarity FLIP too — an existing Granted row does not license the contradiction', async () => {
+      db.pluginGrant.findUnique.mockResolvedValue(
+        grantRow({ permissionSlug: 'plugin|demo-sink|manage:digest', decidedRiskLevel: RiskLevel.Low }),
+      );
+
+      await expect(
+        service.decide({
+          ...serverDecision,
+          permissionSlug: 'plugin|demo-sink|manage:digest',
+          status: PluginGrantStatus.Denied,
+        }),
+      ).rejects.toThrow(PluginGrantRequiredDenialError);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+    });
+
+    it('a denial against a permission only the PENDING manifest requires stays legal — upgrades never coerce the installed plugin', async () => {
+      // The staged update promotes feedback:read to required; the ACTIVE
+      // manifest — the one decide() judges against — keeps it optional.
+      // Activation stays blocked at approve (D-AB) instead.
+      const pending = buildPluginManifest();
+      pending.version = '1.3.0';
+      pending.permissions.checks = pending.permissions.checks.map((check) =>
+        check.slug === 'feedback:read' ? { ...check, required: true } : check,
+      );
+      db.plugin.findUnique.mockResolvedValue({
+        ...plugin,
+        pendingVersion: '1.3.0',
+        pendingManifestJson: pending,
+      } as unknown as Plugin);
+
+      const result = await service.decide({ ...serverDecision, status: PluginGrantStatus.Denied });
+
+      expect(result.changed).toBe(true);
+      expect(emitter.emit).toHaveBeenCalledWith(PluginEvent.GrantRejected, expect.any(PluginGrantRejectedEvent));
+    });
+
+    /**
+     * The in-transaction re-judgment: the pre-transaction check reads the
+     * plugin row BEFORE the write serializes against #356's activation
+     * lock, so an activation that commits in between is only catchable by
+     * re-reading AFTER the upsert. The throw rolls the recorded denial back
+     * with the transaction.
+     */
+    it('re-judges inside the transaction — an activation that promoted the check to required mid-decision rolls the denial back', async () => {
+      const promoted = buildPluginManifest({ scope: 'household', version: '1.3.0' });
+      promoted.permissions.checks = promoted.permissions.checks.map((check) =>
+        check.slug === 'feedback:read' ? { ...check, required: true } : check,
+      );
+      db.plugin.findUnique
+        .mockResolvedValueOnce(plugin) // the pre-transaction load: 1.2.0, feedback:read OPTIONAL — the front door passes
+        .mockResolvedValueOnce({ ...plugin, version: '1.3.0', manifestJson: promoted } as unknown as Plugin);
+
+      await expect(service.decide({ ...serverDecision, status: PluginGrantStatus.Denied })).rejects.toThrow(
+        PluginGrantRequiredDenialError,
+      );
+      // The write happened — and the throw took it back with the
+      // transaction, so nothing is emitted for a row that never committed.
+      expect(db.pluginGrant.upsert).toHaveBeenCalledTimes(1);
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('tolerates the check being DROPPED by a mid-decision activation — a denial of nothing needs no refusal', async () => {
+      const dropped = buildPluginManifest({ scope: 'household', version: '1.3.0' });
+      dropped.permissions.checks = dropped.permissions.checks.filter((check) => check.slug !== 'feedback:read');
+      db.plugin.findUnique
+        .mockResolvedValueOnce(plugin)
+        .mockResolvedValueOnce({ ...plugin, version: '1.3.0', manifestJson: dropped } as unknown as Plugin);
+
+      const result = await service.decide({ ...serverDecision, status: PluginGrantStatus.Denied });
+
+      expect(result.changed).toBe(true);
+    });
+
+    it('answers a tombstone that landed mid-decision with the tombstone error, rolling the write back', async () => {
+      db.plugin.findUnique
+        .mockResolvedValueOnce(plugin)
+        .mockResolvedValueOnce({ ...plugin, uninstalledAt: new Date('2026-08-10T00:00:00Z') } as unknown as Plugin);
+
+      await expect(service.decide({ ...serverDecision, status: PluginGrantStatus.Denied })).rejects.toThrow(
+        PluginGrantPluginTombstonedError,
+      );
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('decide — authority', () => {
     it('rejects a Server-scope decision from a non-admin', async () => {
       authority.isServerAdmin.mockResolvedValue(false);
@@ -281,11 +387,16 @@ describe('PluginGrantService', () => {
       // Empty update arm on purpose: the row may exist suspended or
       // user-disabled, and consent never writes `enabled` or clears a
       // suspension here — the late-acceptance path owns that transition.
+      // The create arm states its birth state explicitly: no OTHER required
+      // user check exists in this manifest (read:public_content is the only
+      // user check, and it is optional), so the denied-required probe is
+      // skipped entirely and the anchor is born serving.
       expect(db.userPlugin.upsert).toHaveBeenCalledWith({
         where: { userId_pluginId: { userId: 'user-a', pluginId: 'plg_1' } },
-        create: { userId: 'user-a', pluginId: 'plg_1' },
+        create: { userId: 'user-a', pluginId: 'plg_1', suspendedForConsent: false, suspendedAt: null },
         update: {},
       });
+      expect(db.pluginGrant.count).not.toHaveBeenCalled();
     });
 
     it('a Denied user-scope decision creates NO row — a refusal confers no enablement', async () => {

@@ -3,7 +3,11 @@ import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from 
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
-import { PluginConsentPresentationManifestError } from './consent-presentation.errors';
+import {
+  PluginConsentPresentationManifestError,
+  PluginConsentPresentationNotFoundError,
+  PluginConsentPresentationTombstonedError,
+} from './consent-presentation.errors';
 import { PluginConsentCheckClassifier } from './plugin-consent-check-classifier.service';
 import { PluginConsentPresentationService } from './plugin-consent-presentation.service';
 
@@ -167,6 +171,49 @@ describe('PluginConsentPresentationService', () => {
     db.plugin.findUnique.mockResolvedValue(pluginRow({ manifestJson: { nonsense: true } }) as never);
 
     await expect(service.presentForUnit('plg_1', SERVER_UNIT)).rejects.toThrow(PluginConsentPresentationManifestError);
+  });
+
+  /**
+   * The slug-addressed entry point for the HTTP edge (D-BO, #322): same
+   * assembly as `presentForUnit`, but the missing/tombstoned states THROW —
+   * the edge owes D-AY's 404/410 distinction, which the id-addressed form's
+   * null-for-both contract cannot feed.
+   */
+  describe('presentForUnitBySlug (D-BO, #322)', () => {
+    it('loads by slug and assembles the same active-manifest surface', async () => {
+      const presentation = await service.presentForUnitBySlug('demo-sink', SERVER_UNIT);
+
+      expect(db.plugin.findUnique).toHaveBeenCalledWith(expect.objectContaining({ where: { slug: 'demo-sink' } }));
+      expect(presentation.plugin).toEqual({ id: 'plg_1', slug: 'demo-sink', enabled: true });
+      expect(presentation.source).toBe('active');
+      expect(presentation.checks.length).toBeGreaterThan(0);
+    });
+
+    it('throws the typed not-found error for an unknown slug', async () => {
+      db.plugin.findUnique.mockResolvedValue(null as never);
+
+      const failure = await service.presentForUnitBySlug('ghost', SERVER_UNIT).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginConsentPresentationNotFoundError);
+      expect(failure).toMatchObject({ pluginSlug: 'ghost' });
+    });
+
+    it('throws the typed tombstone error BEFORE touching the stored manifest — a 410, never a 404 or a 5xx', async () => {
+      const uninstalledAt = new Date('2026-08-01T00:00:00Z');
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt, manifestJson: { corrupted: true } }) as never);
+
+      const failure = await service.presentForUnitBySlug('demo-sink', SERVER_UNIT).catch((err: unknown) => err);
+
+      expect(failure).toBeInstanceOf(PluginConsentPresentationTombstonedError);
+      expect(failure).toMatchObject({ pluginSlug: 'demo-sink', uninstalledAt });
+    });
+
+    it('rejects a structurally invalid unit at the boundary, before any query', async () => {
+      await expect(
+        service.presentForUnitBySlug('demo-sink', { scopeType: 'User' } as unknown as PluginUnit),
+      ).rejects.toThrow(RangeError);
+      expect(db.plugin.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   describe('the install/update response viewpoint (Server unit)', () => {

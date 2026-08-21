@@ -591,6 +591,43 @@ describe('AbilityFactory', () => {
         expect(ability.can(Action.read, asEntity('HouseholdMember', { id: 'm-1', householdId: 'hh-1' }))).toBe(false);
       });
 
+      it("detects a subject()-TAGGED plain object by its tag — the #322 edge instance checks' shape", () => {
+        // A plain object's constructor is `Object`, which matches no rule:
+        // without tag-aware detection this check would silently deny for
+        // members and non-members alike, which is exactly the wrong kind of
+        // safe. The tag routes it to the same conditioned rules the
+        // class-instance checks above evaluate.
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        expect(
+          ability.can(Action.read, subject('HouseholdMember', { householdId: 'hh-1' }) as unknown as Subjects),
+        ).toBe(true);
+        expect(
+          ability.can(Action.read, subject('HouseholdMember', { householdId: 'hh-2' }) as unknown as Subjects),
+        ).toBe(false);
+        // Untagged plain objects keep their previous meaning (constructor
+        // detection → `Object`, no rule, denied) rather than throwing.
+        expect(ability.can(Action.read, { householdId: 'hh-1' } as unknown as Subjects)).toBe(false);
+      });
+
+      it('keeps the pre-tag-aware failure mode for degenerate subjects — CASL’s typed refusal, never a TypeError', () => {
+        const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1']));
+
+        // CASL's own detectSubjectType dereferences `constructor` unguarded,
+        // so routing a null-prototype object (prototype-stripped parser
+        // output) through it would die with "Cannot read properties of
+        // undefined". The guard falls back to the original passthrough,
+        // which CASL's rule index refuses with ITS typed error — exactly
+        // what the constructor-name detector produced before this change.
+        const nullProto = Object.assign(Object.create(null) as Record<string, unknown>, { householdId: 'hh-1' });
+        expect(() => ability.can(Action.read, nullProto as unknown as Subjects)).toThrow(/subject types/);
+
+        // Same story for an own `constructor: null` — CASL would die reading
+        // `null.modelName`, so the guard must treat null and undefined alike.
+        const shadowedCtor = { constructor: null, householdId: 'hh-1' };
+        expect(() => ability.can(Action.read, shadowedCtor as unknown as Subjects)).toThrow(/subject types/);
+      });
+
       it('emits one independently-scoped rule per membership (multi-household actor)', () => {
         const ability = factory.createForUser(memberOf('HouseholdMember', ['hh-1', 'hh-2']));
 
