@@ -1,5 +1,7 @@
 import {
+  constraintIdentity,
   DatabaseService,
+  identifiesConstraint,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
@@ -70,6 +72,47 @@ import {
 } from './update.errors';
 
 /**
+ * `PluginGrant`'s decision unique, in every spelling `constraintIdentity` can
+ * report it: raw columns from the driver adapter (the shape that ships), and
+ * Prisma field names in case a release restores `meta.target`.
+ */
+const GRANT_DECISION_UNIQUE_COLUMNS = ['plugin_id', 'scope_type', 'scope_id', 'permission_slug'] as const;
+const GRANT_DECISION_UNIQUE_FIELDS = ['pluginId', 'scopeType', 'scopeId', 'permissionSlug'] as const;
+
+/**
+ * True when a failure is a grant-decision collision — the only failure the
+ * activation transaction retries.
+ *
+ * An unidentifiable P2002 answers FALSE. `constraintIdentity` cannot tell
+ * "not that constraint" from "could not tell", and the safe reading here is
+ * the second: retrying a violation this transaction cannot explain would
+ * replay a deterministic write that fails identically, turning one honest
+ * error into the same error, later.
+ */
+function isGrantDecisionCollision(error: unknown): boolean {
+  return identifiesConstraint(constraintIdentity(error), GRANT_DECISION_UNIQUE_COLUMNS, GRANT_DECISION_UNIQUE_FIELDS);
+}
+
+/**
+ * The `declares[]` catalog diff, shared by the read that RENDERS it and the
+ * transaction that APPLIES it. One function because the screen showing
+ * "approving deletes these permissions" and the code deleting them must not
+ * be able to disagree — the same reason the two paths share one comparison.
+ */
+function declaredSlugDiff(
+  active: PluginManifestValidationResult,
+  next: PluginManifestValidationResult,
+): PluginUpdateDeclaresDiff {
+  const activeDeclares = new Set(active.declaredPermissions.map((declared) => declared.canonicalSlug));
+  const nextDeclares = new Set(next.declaredPermissions.map((declared) => declared.canonicalSlug));
+
+  return {
+    added: [...nextDeclares].filter((slug) => !activeDeclares.has(slug)),
+    removed: [...activeDeclares].filter((slug) => !nextDeclares.has(slug)),
+  };
+}
+
+/**
  * Typed update provenance, mirroring install's shape: `bundled = false
  * ⇒ pendingSha256` is unrepresentable-when-violated. URL/registry
  * provenance columns keep describing the INSTALL; #84 extends this when its
@@ -110,16 +153,66 @@ export interface PluginUpdateApproveInput {
   readonly confirmCriticalSlugs?: readonly string[];
 }
 
+/** One household unit an approval suspended, with the slugs that unit must decide before it serves again (#321). */
+export interface PluginUpdateSuspendedHouseholdUnit {
+  readonly householdId: string;
+  readonly outstanding: readonly string[];
+}
+
+/** One user unit an approval suspended — the household shape's user-axis mirror (#225). */
+export interface PluginUpdateSuspendedUserUnit {
+  readonly userId: string;
+  readonly outstanding: readonly string[];
+}
+
 export interface PluginUpdateApproveResult {
   readonly plugin: Plugin;
   readonly comparison: UpdateEscalationComparison;
   /** Server-scope grants seeded by this approval — the new server-consentable checks. */
   readonly seededGrants: readonly PluginGrant[];
+  /**
+   * Units THIS approval suspended pending re-consent, per axis (#321):
+   * the admin who approved needs the consequence synchronously, and the
+   * activation transaction already knows the exact set — the events carry
+   * the same units, but an event stream is not a response body.
+   */
+  readonly suspendedHouseholdUnits: readonly PluginUpdateSuspendedHouseholdUnit[];
+  readonly suspendedUserUnits: readonly PluginUpdateSuspendedUserUnit[];
 }
 
 export interface PluginUpdateRejectInput {
   readonly slug: string;
   readonly rejectorId: string;
+}
+
+/**
+ * The `declares[]` catalog diff between the active and pending manifests:
+ * the plugin-namespaced permissions activation will INSERT into the catalog,
+ * and the ones it will delete — taking their grants with them.
+ *
+ * Not derivable from `checks[]` or from the escalations: a declaration the
+ * plugin never requests still appears in the catalog, and no escalation kind
+ * describes a declaration change. The approval screen needs it because
+ * `removed` is the destructive half of approving.
+ */
+export interface PluginUpdateDeclaresDiff {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+}
+
+/**
+ * What the pending-update read returns (#321): the row, when the
+ * update was staged, the `declares[]` diff activation would apply, and the
+ * escalation comparison RECOMPUTED against today's decisions — never
+ * replayed from staging, mirroring `approve()`'s posture, so the approval
+ * screen and the approval itself cannot disagree.
+ */
+export interface PluginUpdatePendingDescription {
+  readonly plugin: Plugin;
+  readonly comparison: UpdateEscalationComparison;
+  /** `Plugin.pendingSince` verbatim — nullable because the column is; every staging write this service makes sets it. */
+  readonly pendingSince: Date | null;
+  readonly declares: PluginUpdateDeclaresDiff;
 }
 
 /** One unit activation decided to suspend, with the slugs that forced it. */
@@ -131,6 +224,8 @@ interface SuspensionCandidate<TUnit> {
 
 interface ActivationOutcome {
   readonly plugin: Plugin;
+  /** The checks actually seeded — the caller's set re-filtered against the tx-local decisions (see `activate()`). */
+  readonly seededChecks: readonly NormalizedPermissionRequest[];
   readonly seededGrants: readonly PluginGrant[];
   readonly revokedGrants: readonly PluginGrant[];
   /** Grants deleted because their permission moved consent scope. */
@@ -253,7 +348,7 @@ export class PluginUpdateService {
         input.initiatorId,
         initiatedAt,
       );
-      this.emitActivation(plugin, outcome, next, [], initiatedAt);
+      this.emitActivation(plugin, outcome, next, initiatedAt);
       this.logger.log(
         `Plugin '${plugin.slug}' updated ${plugin.version} → ${next.manifest.version} without staged consent ` +
           `(no server-gating escalation); restart required to load the new code`,
@@ -345,27 +440,7 @@ export class PluginUpdateService {
       throw new PluginUpdateAuthorityError(input.approverId);
     }
 
-    const plugin = await this.loadUpdatablePlugin(input.slug);
-
-    if (plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
-      throw new PluginUpdateNoPendingError(plugin.slug);
-    }
-
-    // bgeCompat ENFORCED at activation, not just staging: BGE itself may
-    // have moved between the two, and approving a version that can no
-    // longer load would trade a typed refusal here for a quarantine at the
-    // next boot.
-    const next = this.validateStoredManifest(plugin, plugin.pendingManifestJson, plugin.pendingVersion, {
-      enforceBgeCompat: true,
-      label: 'pending',
-    });
-    const active = this.validateActiveManifest(plugin);
-    const corePermissions = await this.loadCorePermissions(next);
-
-    // Recomputed rather than replayed from staging: decisions can change
-    // between stage and approve, and the block keys on the denials that survive
-    // NOW.
-    const comparison = await this.compare(plugin, active, next, corePermissions);
+    const { plugin, active, next, corePermissions, comparison } = await this.resolvePendingUpdate(input.slug);
 
     if (comparison.blockedByDenial.length > 0) {
       throw new PluginUpdateBlockedByDenialError(plugin.slug, comparison.blockedByDenial);
@@ -406,9 +481,13 @@ export class PluginUpdateService {
       corePermissions,
       input.approverId,
       initiatedAt,
+      { confirmCriticalSlugs: input.confirmCriticalSlugs ?? [], riskEscalatedChecks },
     );
 
-    this.emitActivation(plugin, outcome, next, checksToSeed, initiatedAt);
+    // The tx-local seeded set, not the pre-transaction one: a concurrent
+    // decision may have shrunk it, and the event must describe what was
+    // actually granted.
+    this.emitActivation(plugin, outcome, next, initiatedAt);
     this.logger.log(
       `Plugin '${plugin.slug}' update approved: ${plugin.version} → ${next.manifest.version}, ` +
         `${outcome.seededGrants.length} server grant(s) seeded, ${outcome.reStampedGrants.length} re-stamped, ` +
@@ -417,7 +496,45 @@ export class PluginUpdateService {
         `unit(s) suspended pending consent; restart required`,
     );
 
-    return { plugin: outcome.plugin, comparison, seededGrants: outcome.seededGrants };
+    return {
+      plugin: outcome.plugin,
+      comparison,
+      seededGrants: outcome.seededGrants,
+      // The post-write candidate lists — applySuspension already dropped
+      // any unit a concurrent writer flipped first, so these report what
+      // THIS approval did, exactly as the events do.
+      suspendedHouseholdUnits: outcome.suspendedHouseholdUnits.map((unit) => ({
+        householdId: unit.before.householdId,
+        outstanding: unit.outstanding,
+      })),
+      suspendedUserUnits: outcome.suspendedUserUnits.map((unit) => ({
+        userId: unit.before.userId,
+        outstanding: unit.outstanding,
+      })),
+    };
+  }
+
+  /**
+   * The approval screen's data source (#321): the pending update resolved
+   * and compared exactly as `approve()` resolves it — literally the same
+   * pipeline, via {@link resolvePendingUpdate} — so the screen and the
+   * approval cannot disagree about what the update escalates.
+   *
+   * A pure read with two deliberate asymmetries from `approve()`: no
+   * server-admin re-verification (reading is not a consent act — the edge
+   * guards it with `read:plugin`), and a durable denial is RENDERED as
+   * `comparison.blockedByDenial` rather than thrown — the screen's job is
+   * to show the block, the approval's job is to refuse over it.
+   */
+  async describePending(slug: string): Promise<PluginUpdatePendingDescription> {
+    const { plugin, active, next, comparison } = await this.resolvePendingUpdate(slug);
+
+    return {
+      plugin,
+      comparison,
+      pendingSince: plugin.pendingSince,
+      declares: declaredSlugDiff(active, next),
+    };
   }
 
   async reject(input: PluginUpdateRejectInput): Promise<Plugin> {
@@ -433,9 +550,48 @@ export class PluginUpdateService {
       throw new PluginUpdateNoPendingError(plugin.slug);
     }
 
-    const rejected = await this.db.plugin.update({
-      where: { id: plugin.id },
-      data: CLEARED_STAGED_UPDATE,
+    // Conditional on the EXACT staging the rejector saw, like every other
+    // staged-update writer: an unconditional clear racing an approve would
+    // report "rejected" for an update that in fact activated — and emit the
+    // update_rejected event #84 keys staged-file cleanup off, against files
+    // that just became the active version's code. Racing a replacement
+    // stage, it would wipe a staged version nobody decided on — and because
+    // a rejected version can be re-staged under the SAME number (only the
+    // ACTIVE version is refused), the version is not identity enough:
+    // pendingSince, written fresh by every staging, is what pins the
+    // staging this rejection targets.
+    const rejected = await this.db.$transaction(async (tx) => {
+      const cleared = await tx.plugin.updateMany({
+        where: {
+          id: plugin.id,
+          pendingVersion: plugin.pendingVersion,
+          pendingSince: plugin.pendingSince,
+          uninstalledAt: null,
+        },
+        data: CLEARED_STAGED_UPDATE,
+      });
+
+      if (cleared.count !== 1) {
+        const current = await tx.plugin.findUnique({
+          where: { id: plugin.id },
+          select: { uninstalledAt: true },
+        });
+
+        if (current?.uninstalledAt != null) {
+          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+        }
+
+        throw new PluginUpdateNoPendingError(plugin.slug);
+      }
+
+      // Read back INSIDE the claim, like the staging and activation writes.
+      // The clear leaves `pendingVersion` null, which is exactly the slot
+      // stage() claims on, so an outside read-back can observe a NEWLY
+      // staged version — handing this response, and the rejected event's
+      // `after` snapshot that #84 keys staged-file cleanup off, a pending
+      // update nobody rejected. The atomic single-statement update this
+      // replaced could not express that state; the guarded updateMany can.
+      return tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
     });
 
     // #84 seam: the staged version's on-disk files are the distribution
@@ -448,6 +604,45 @@ export class PluginUpdateService {
     this.logger.log(`Plugin '${plugin.slug}' pending update ${plugin.pendingVersion} rejected and cleared`);
 
     return rejected;
+  }
+
+  /**
+   * The shared approve/describe prologue: load by slug with the
+   * not-found / tombstoned / no-pending distinctions, re-validate both
+   * stored manifests, and recompute the escalation comparison against
+   * TODAY's decisions — never replayed from staging, because decisions can
+   * change between stage and now. One implementation on purpose: the
+   * pending read exists so the screen and the approval cannot disagree,
+   * and that guarantee is only as strong as both paths running literally
+   * the same pipeline.
+   *
+   * `bgeCompat` is ENFORCED on the stored pending manifest (not just at
+   * staging): BGE itself may have moved since, and describing or approving
+   * a version that can no longer load would trade a typed refusal here for
+   * a quarantine at the next boot.
+   */
+  private async resolvePendingUpdate(slug: string): Promise<{
+    readonly plugin: Plugin;
+    readonly active: PluginManifestValidationResult;
+    readonly next: PluginManifestValidationResult;
+    readonly corePermissions: ReadonlyMap<string, Permission>;
+    readonly comparison: UpdateEscalationComparison;
+  }> {
+    const plugin = await this.loadUpdatablePlugin(slug);
+
+    if (plugin.pendingVersion === null || plugin.pendingManifestJson === null) {
+      throw new PluginUpdateNoPendingError(plugin.slug);
+    }
+
+    const next = this.validateStoredManifest(plugin, plugin.pendingManifestJson, plugin.pendingVersion, {
+      enforceBgeCompat: true,
+      label: 'pending',
+    });
+    const active = this.validateActiveManifest(plugin);
+    const corePermissions = await this.loadCorePermissions(next);
+    const comparison = await this.compare(plugin, active, next, corePermissions);
+
+    return { plugin, active, next, corePermissions, comparison };
   }
 
   /** A tombstoned row is not an update target, and the distinction deserves its own error (#59). */
@@ -695,14 +890,8 @@ export class PluginUpdateService {
   }
 
   /**
-   * The activation transaction, shared by the immediate path and
-   * `approve()`: promote the pending state, apply the `declares[]`
-   * catalog diff (insert added rows, revoke and delete grants on removed
-   * declares with `'permission-removed'` provenance, delete the rows),
-   * seed the approval's server grants, suspend household AND user units
-   * lacking consent on their scope's re-consent escalations (#225),
-   * and set `restartRequired`. Events are collected inside and
-   * emitted by the caller AFTER commit.
+   * The activation entry point: one bounded retry around the transaction,
+   * for the one race the transaction's own reads cannot close.
    */
   private async activate(
     plugin: Plugin,
@@ -714,12 +903,202 @@ export class PluginUpdateService {
     corePermissions: ReadonlyMap<string, Permission>,
     actorId: string,
     initiatedAt: Date,
+    reentry?: {
+      readonly confirmCriticalSlugs: readonly string[];
+      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
+    },
+  ): Promise<ActivationOutcome> {
+    const attempt = (): Promise<ActivationOutcome> =>
+      this.activateInTransaction(
+        plugin,
+        active,
+        next,
+        provenance,
+        comparison,
+        checksToSeed,
+        corePermissions,
+        actorId,
+        initiatedAt,
+        reentry,
+      );
+
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!isGrantDecisionCollision(error)) {
+        throw error;
+      }
+
+      // The transaction's decision read is a snapshot, not a lock on keys
+      // that do not exist yet: a decision committing between that read and
+      // the seeding write still collides on the grant unique. Nothing is
+      // half-done when it does — the violation aborts the transaction
+      // whole, every accumulator lives inside it, and the events emit only
+      // after it commits — so the honest answer is to run the whole thing
+      // again against a snapshot that can SEE the decision. The second
+      // attempt then reaches the verdict on its own terms: a durable denial
+      // refuses, a decided check drops out of the seed set, and a shrunken
+      // authority re-challenges the second factor.
+      //
+      // Once, not until-success. A second collision means a decider is
+      // committing faster than an approval can, and answering that with an
+      // unbounded loop would hold the claim open against it; the violation
+      // propagates instead, exactly as it does today.
+      return await attempt();
+    }
+  }
+
+  /**
+   * The activation transaction, shared by the immediate path and
+   * `approve()`: promote the pending state, apply the `declares[]`
+   * catalog diff (insert added rows, revoke and delete grants on removed
+   * declares with `'permission-removed'` provenance, delete the rows),
+   * seed the approval's server grants, suspend household AND user units
+   * lacking consent on their scope's re-consent escalations (#225),
+   * and set `restartRequired`. Events are collected inside and
+   * emitted by the caller AFTER commit.
+   */
+  private async activateInTransaction(
+    plugin: Plugin,
+    active: PluginManifestValidationResult,
+    next: PluginManifestValidationResult,
+    provenance: PluginUpdateProvenance,
+    comparison: UpdateEscalationComparison,
+    checksToSeed: readonly NormalizedPermissionRequest[],
+    corePermissions: ReadonlyMap<string, Permission>,
+    actorId: string,
+    initiatedAt: Date,
+    /**
+     * `approve()`'s second-factor inputs, re-verified inside the
+     * transaction against the tx-local seed set. Absent on the immediate
+     * `stage()` path, which never seeds through an approval — nothing
+     * escalated to confirm.
+     */
+    reentry?: {
+      readonly confirmCriticalSlugs: readonly string[];
+      readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
+    },
   ): Promise<ActivationOutcome> {
     return this.db.$transaction(async (tx) => {
-      const activeDeclares = new Set(active.declaredPermissions.map((declared) => declared.canonicalSlug));
-      const nextDeclares = new Set(next.declaredPermissions.map((declared) => declared.canonicalSlug));
-      const addedDeclares = [...nextDeclares].filter((slug) => !activeDeclares.has(slug));
-      const removedDeclares = [...activeDeclares].filter((slug) => !nextDeclares.has(slug));
+      // The claim runs FIRST, guarded on the tombstone AND on the exact
+      // pending state this activation was computed from. The tombstone half
+      // is #320's guard: an uninstall committing between the caller's load
+      // and here would strand the writes below on a tombstoned plugin,
+      // where the reinstall's fresh seed collides on the grant unique index
+      // and the plugin can never be installed again. The pending half
+      // closes the concurrent-resolution race the endpoints opened (#321):
+      // two approves both loading the same staged row would both reach
+      // here, and the loser — its update already consumed — would either
+      // die on that same unique index (an untyped 500) or silently
+      // re-activate; on the immediate stage() path (pending columns null)
+      // the same predicate keeps a concurrently staged update from being
+      // clobbered by this write's cleared columns. pendingSince rides the
+      // predicate as the staging IDENTITY: a rejected version can be
+      // re-staged under the same number with different content, so the
+      // version alone would let this claim promote a payload the approver
+      // never reviewed — the staging timestamp is fresh per staging write
+      // and cannot be re-entered. Claiming before any other write means
+      // the loser exits with a typed refusal while the transaction has
+      // touched nothing.
+      const claimed = await tx.plugin.updateMany({
+        where: {
+          id: plugin.id,
+          uninstalledAt: null,
+          pendingVersion: plugin.pendingVersion,
+          pendingSince: plugin.pendingSince,
+        },
+        data: {
+          version: next.manifest.version,
+          // Row identity columns follow the manifest they mirror — a version
+          // may legitimately re-categorize or re-scope. `executionMode` is
+          // deliberately NOT refreshed: the manifest value is an install-time
+          // hint and the column is admin-owned after that (#197).
+          category: MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category],
+          scope: MANIFEST_SCOPE_TO_PRISMA[next.manifest.scope],
+          manifestJson: next.manifest as Prisma.InputJsonValue,
+          ...(provenance.bundled ? {} : { installedSha256: provenance.pendingSha256 }),
+          ...CLEARED_STAGED_UPDATE,
+          // The running instance is still the prior code; the loader
+          // clears this on the boot that actually loads the new version.
+          restartRequired: true,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        const current = await tx.plugin.findUnique({
+          where: { id: plugin.id },
+          select: { uninstalledAt: true, pendingVersion: true },
+        });
+
+        if (current?.uninstalledAt != null) {
+          throw new PluginUpdateTombstonedError(plugin.slug, current.uninstalledAt);
+        }
+
+        // The pending state moved. Which refusal is right depends on which
+        // caller this is: an approval's staged update was consumed or
+        // replaced (nothing left for THIS approval to resolve), while the
+        // immediate stage() path lost the empty slot to a concurrent stage
+        // — the same refuse-don't-supersede answer the staging write gives.
+        if (plugin.pendingVersion !== null) {
+          throw new PluginUpdateNoPendingError(plugin.slug);
+        }
+
+        throw new PluginUpdatePendingConflictError(
+          plugin.slug,
+          current?.pendingVersion ?? 'unknown',
+          next.manifest.version,
+        );
+      }
+
+      // The server-scope decisions re-read under the SAME transaction as
+      // the claim, and everything downstream of them re-derived. The gates
+      // in approve() ran before this transaction opened, and a decision —
+      // #322's decide() seam — can land in between: a fresh durable denial
+      // on a required check must refuse HERE, where the throw takes the
+      // claim back with it, and a check decided since the caller computed
+      // its seed set must drop out of the seeding rather than collide on
+      // the grant unique index as an untyped 500.
+      const serverGrants = await tx.pluginGrant.findMany({
+        where: { pluginId: plugin.id, scopeType: PluginGrantScope.Server },
+        select: { permissionSlug: true, status: true },
+      });
+      const deniedServerSlugs = new Set(
+        serverGrants.filter((grant) => grant.status === PluginGrantStatus.Denied).map((grant) => grant.permissionSlug),
+      );
+      // Same rule the comparator applies: a Server-scope denial blocks only
+      // a check the NEXT manifest requires at server consent.
+      const blockedByDenial = next.permissionChecks
+        .filter(
+          (check) => check.consentScope === 'server' && check.required && deniedServerSlugs.has(check.canonicalSlug),
+        )
+        .map((check) => check.canonicalSlug);
+
+      if (blockedByDenial.length > 0) {
+        throw new PluginUpdateBlockedByDenialError(plugin.slug, blockedByDenial);
+      }
+
+      const decidedServerSlugs = new Set(serverGrants.map((grant) => grant.permissionSlug));
+      const seededChecks = checksToSeed.filter((check) => !decidedServerSlugs.has(check.canonicalSlug));
+
+      // The second factor, re-verified against what this transaction will
+      // actually GRANT: a concurrent decision that shrank the seed set
+      // shrank the authority this approval confers, and a confirmation for
+      // the old, larger set no longer matches — re-challenging with the
+      // current expectation is the same exact-re-entry answer approve()
+      // gives before the transaction.
+      if (reentry !== undefined) {
+        const expectedCritical = criticalConfirmationExpectation(
+          [...seededChecks, ...reentry.riskEscalatedChecks],
+          corePermissions,
+        );
+        const confirmation = compareExactReentry(expectedCritical, reentry.confirmCriticalSlugs);
+
+        if (!confirmation.exact) {
+          throw new PluginUpdateCriticalConfirmationError(plugin.slug, confirmation.expected, confirmation.received);
+        }
+      }
+
+      const { added: addedDeclares, removed: removedDeclares } = declaredSlugDiff(active, next);
 
       // Grants on removed declares are deleted with
       // 'permission-removed' provenance — collected BEFORE deletion because
@@ -727,11 +1106,15 @@ export class PluginUpdateService {
       let revokedGrants: PluginGrant[] = [];
 
       if (removedDeclares.length > 0) {
+        // Copied because Prisma's `in` takes a mutable array and the diff is
+        // shared with the read that renders it, which must not hand out one.
+        const removed = [...removedDeclares];
+
         revokedGrants = await tx.pluginGrant.findMany({
-          where: { pluginId: plugin.id, permissionSlug: { in: removedDeclares } },
+          where: { pluginId: plugin.id, permissionSlug: { in: removed } },
         });
-        await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id, permissionSlug: { in: removedDeclares } } });
-        await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id, slug: { in: removedDeclares } } });
+        await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id, permissionSlug: { in: removed } } });
+        await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id, slug: { in: removed } } });
       }
 
       for (const slug of addedDeclares) {
@@ -796,7 +1179,7 @@ export class PluginUpdateService {
 
       const seededGrants: PluginGrant[] = [];
 
-      for (const check of checksToSeed) {
+      for (const check of seededChecks) {
         seededGrants.push(
           await tx.pluginGrant.create({
             data: {
@@ -815,38 +1198,6 @@ export class PluginUpdateService {
             },
           }),
         );
-      }
-
-      // Guarded on the tombstone, not just the id: an uninstall committing
-      // between this flow's load and here would leave the grants and catalog
-      // rows written above stranded on a tombstoned plugin, where the
-      // reinstall's fresh seed collides with them on the grant unique index
-      // and the plugin can never be installed again. Failing the guard rolls
-      // this whole transaction back, which is the only safe answer — the
-      // admin re-runs against the reinstalled plugin.
-      const claimed = await tx.plugin.updateMany({
-        where: { id: plugin.id, uninstalledAt: null },
-        data: {
-          version: next.manifest.version,
-          // Row identity columns follow the manifest they mirror — a version
-          // may legitimately re-categorize or re-scope. `executionMode` is
-          // deliberately NOT refreshed: the manifest value is an install-time
-          // hint and the column is admin-owned after that (#197).
-          category: MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category],
-          scope: MANIFEST_SCOPE_TO_PRISMA[next.manifest.scope],
-          manifestJson: next.manifest as Prisma.InputJsonValue,
-          ...(provenance.bundled ? {} : { installedSha256: provenance.pendingSha256 }),
-          ...CLEARED_STAGED_UPDATE,
-          // The running instance is still the prior code; the loader
-          // clears this on the boot that actually loads the new version.
-          restartRequired: true,
-        },
-      });
-
-      if (claimed.count !== 1) {
-        const current = await tx.plugin.findUnique({ where: { id: plugin.id }, select: { uninstalledAt: true } });
-
-        throw new PluginUpdateTombstonedError(plugin.slug, current?.uninstalledAt ?? initiatedAt);
       }
 
       const updated = await tx.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
@@ -958,6 +1309,7 @@ export class PluginUpdateService {
 
       return {
         plugin: updated,
+        seededChecks,
         seededGrants,
         revokedGrants,
         scopeMovedGrants,
@@ -973,10 +1325,11 @@ export class PluginUpdateService {
     before: Plugin,
     outcome: ActivationOutcome,
     next: PluginManifestValidationResult,
-    seededChecks: readonly NormalizedPermissionRequest[],
     initiatedAt: Date,
   ): void {
-    const grantedPermissions: GrantedPermissionRecord[] = seededChecks.map((check) => ({
+    // The tx-local seeded set: a concurrent decision may have shrunk the
+    // caller's, and the event must describe what was actually granted.
+    const grantedPermissions: GrantedPermissionRecord[] = outcome.seededChecks.map((check) => ({
       slug: check.canonicalSlug,
       required: check.required,
       consentScope: check.consentScope,

@@ -79,6 +79,8 @@
     "enabled": "Plugin '{slug}' enabled successfully",
     "disabled": "Plugin '{slug}' disabled successfully",
     "config_updated": "Configuration for plugin '{slug}' updated successfully",
-    "uninstalled": "Plugin '{slug}' uninstalled successfully"
+    "uninstalled": "Plugin '{slug}' uninstalled successfully",
+    "update_approved": "Update for plugin '{slug}' approved — version {version} loads on the next restart",
+    "update_rejected": "Pending update for plugin '{slug}' rejected and cleared"
   }
 }

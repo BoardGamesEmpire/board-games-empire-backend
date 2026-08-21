@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AbilityService } from '@bge/permissions';
-import { PluginLifecycleService } from '@bge/plugin';
+import { PluginConsentPresentationService, PluginLifecycleService, PluginUpdateService } from '@bge/plugin';
 import { Global, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
@@ -11,9 +11,9 @@ import { PluginsApiModule } from './plugins-api.module';
 /**
  * Stand-ins for the app's global modules, visible everywhere exactly as the
  * real ones are: `I18nService` (nestjs-i18n's `@Global` I18nModule),
- * `AbilityService` (the `@Global` PermissionsModule), and
- * `PluginLifecycleService` (the `@Global` plugin runtime, configured once by
- * the host's forRootAsync). This test asserts DI wiring, not behavior — the
+ * `AbilityService` (the `@Global` PermissionsModule), and the `@Global`
+ * plugin runtime's controller-injected services (configured once by the
+ * host's forRootAsync). This test asserts DI wiring, not behavior — the
  * wiring under guard is still PluginsApiModule's own AuditContextModule
  * import.
  */
@@ -23,8 +23,10 @@ import { PluginsApiModule } from './plugins-api.module';
     { provide: I18nService, useValue: { translate: () => '' } },
     { provide: AbilityService, useValue: {} },
     { provide: PluginLifecycleService, useValue: {} },
+    { provide: PluginUpdateService, useValue: {} },
+    { provide: PluginConsentPresentationService, useValue: {} },
   ],
-  exports: [I18nService, AbilityService, PluginLifecycleService],
+  exports: [I18nService, AbilityService, PluginLifecycleService, PluginUpdateService, PluginConsentPresentationService],
 })
 class StubGlobalsModule {}
 

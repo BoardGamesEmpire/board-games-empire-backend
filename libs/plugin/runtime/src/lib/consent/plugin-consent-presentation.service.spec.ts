@@ -380,5 +380,37 @@ describe('PluginConsentPresentationService', () => {
         PluginConsentPresentationManifestError,
       );
     });
+
+    describe('presentPendingFromRow (snapshot-taking form)', () => {
+      it('presents from the caller-supplied row without re-reading the plugin — the snapshot guarantee', async () => {
+        const row = pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest });
+
+        const presentation = await service.presentPendingFromRow(row, SERVER_UNIT);
+
+        expect(presentation).toMatchObject({ manifestVersion: '1.3.0', source: 'pending' });
+        // No row re-read: a re-read could observe a replacement staging —
+        // possibly under the same version — and the composed response would
+        // mix two updates.
+        expect(db.plugin.findUnique).not.toHaveBeenCalled();
+      });
+
+      it('keeps the loading form’s null contract: tombstoned or nothing staged has no pending surface', async () => {
+        await expect(
+          service.presentPendingFromRow(
+            pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest, uninstalledAt: new Date() }),
+            SERVER_UNIT,
+          ),
+        ).resolves.toBeNull();
+        await expect(service.presentPendingFromRow(pluginRow(), SERVER_UNIT)).resolves.toBeNull();
+      });
+
+      it('rejects a structurally invalid unit at the boundary, exactly as the loading form does', async () => {
+        await expect(
+          service.presentPendingFromRow(pluginRow({ pendingVersion: '1.3.0', pendingManifestJson: pendingManifest }), {
+            scopeType: 'Household',
+          } as unknown as PluginUnit),
+        ).rejects.toThrow(RangeError);
+      });
+    });
   });
 });
