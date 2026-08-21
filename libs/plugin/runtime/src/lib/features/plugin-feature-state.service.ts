@@ -1,12 +1,17 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, loadPluginUnitEnablement } from '@bge/database';
+import { DatabaseService, loadPluginUnitEnablement, PluginScope } from '@bge/database';
 import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { unitConsumesConsentScope, type ConsentCheckClassification } from '../consent/consent-classification.types';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { PluginFeatureStateManifestError } from './feature-state.errors';
+import { PluginUnitScopeError } from '../units/unit.errors';
+import {
+  PluginFeatureStateManifestError,
+  PluginFeatureStateNotFoundError,
+  PluginFeatureStateTombstonedError,
+} from './feature-state.errors';
 
 /**
  * Why a feature is not active, strongest-first. `denied` and `pending` are
@@ -102,6 +107,97 @@ export class PluginFeatureStateService {
     private readonly classifier: PluginConsentCheckClassifier,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
+
+  /**
+   * The slug-addressed entry point for the HTTP edge (#323): the 404/410
+   * distinction as typed errors, then the id-addressed derivation below.
+   * The tombstone throw deliberately diverges from `resolveForUnit`'s
+   * served-false short-circuit — see {@link PluginFeatureStateTombstonedError}.
+   *
+   * A HOUSEHOLD viewpoint on a server-scope plugin is refused the same way
+   * the household writers refuse it: the manifest gate forbids
+   * household-scope consent there, so no enablement row can exist, and a
+   * served-false body would present impossible unit state as a real
+   * degraded unit — indistinguishable from never-enabled, with an "enable
+   * it" lever that 422s. The USER viewpoint is deliberately NOT refused:
+   * user-scope consent is permitted at ANY plugin scope (#225), a
+   * `Granted` user decision creates a real `UserPlugin` anchor on a
+   * server-scope plugin, and the user's own enable/disable operates on it
+   * — refusing the read would leave them toggling a unit whose blocked
+   * features they could never see.
+   *
+   * The guards BRACKET the derivation rather than merely preceding it. Run
+   * only before, they read a strictly earlier snapshot than the state they
+   * are vouching for, and the failure is not symmetric: an uninstall landing
+   * in the gap renders `served: false` where this entry point promises 410 —
+   * differently true of an unserved unit — but a household→server activation
+   * landing there produces `served: true` for a surface the scope rule says
+   * cannot exist, because activation retires no unit rows (#369) and the
+   * derivation never re-reads `scope`. That one is simply wrong, so a body
+   * now reaches the client only if the plugin was still living and still
+   * addressable on a read taken AFTER the derivation.
+   *
+   * A second small read rather than one transaction: the derivation is
+   * shared with in-process callers that must not inherit a repeatable-read
+   * transaction, and the guards need to bracket it, not serialize it. What
+   * remains open is only the tail — nothing stops an activation committing
+   * after the closing read — but a `served: true` body then describes a
+   * scope that was correct at a point after the state was computed, which is
+   * the same guarantee every uncached read gives.
+   */
+  async resolveForUnitBySlug(slug: string, unit: PluginUnit, locale?: string): Promise<PluginFeatureUnitState> {
+    const plugin = await this.db.plugin.findUnique({
+      where: { slug },
+      select: { id: true, scope: true, uninstalledAt: true },
+    });
+
+    if (plugin === null) {
+      throw new PluginFeatureStateNotFoundError(slug);
+    }
+
+    this.assertAddressable(slug, unit, plugin);
+
+    const state = await this.resolveForUnit(plugin.id, unit, locale);
+
+    // Unreachable while Plugin rows are tombstoned rather than deleted;
+    // kept as the honest rendering should that ever change under this read.
+    if (state === null) {
+      throw new PluginFeatureStateNotFoundError(slug);
+    }
+
+    const after = await this.db.plugin.findUnique({
+      where: { id: plugin.id },
+      select: { scope: true, uninstalledAt: true },
+    });
+
+    if (after === null) {
+      throw new PluginFeatureStateNotFoundError(slug);
+    }
+
+    this.assertAddressable(slug, unit, after);
+
+    return state;
+  }
+
+  /**
+   * The entry point's two refusals, applied to one snapshot of the plugin
+   * row. Shared by the reads that open and close the derivation so the pair
+   * cannot drift apart — a closing guard that checked less than the opening
+   * one would be worse than none, since it would read as a bracket.
+   */
+  private assertAddressable(
+    slug: string,
+    unit: PluginUnit,
+    plugin: { readonly scope: PluginScope; readonly uninstalledAt: Date | null },
+  ): void {
+    if (plugin.uninstalledAt !== null) {
+      throw new PluginFeatureStateTombstonedError(slug, plugin.uninstalledAt);
+    }
+
+    if (plugin.scope === PluginScope.Server && unit.scopeType === 'Household') {
+      throw new PluginUnitScopeError(slug, plugin.scope.toLowerCase());
+    }
+  }
 
   /**
    * Resolves the feature states for one (plugin, unit). Returns `null`

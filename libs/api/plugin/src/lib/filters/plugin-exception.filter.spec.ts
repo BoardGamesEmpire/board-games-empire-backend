@@ -1,10 +1,13 @@
 import { PluginGrantScope } from '@bge/database';
 import * as pluginRuntime from '@bge/plugin';
 import {
+  type PluginConfigIssue,
   PluginConsentPresentationManifestError,
   PluginConsentPresentationNotFoundError,
   PluginConsentPresentationTombstonedError,
   PluginFeatureStateManifestError,
+  PluginFeatureStateNotFoundError,
+  PluginFeatureStateTombstonedError,
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
@@ -25,6 +28,14 @@ import {
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
   PluginStaticAnalysisUnavailableError,
+  PluginUnitAuthorityError,
+  PluginUnitConfigRequiredError,
+  PluginUnitManifestError,
+  PluginUnitNotEnrolledError,
+  PluginUnitPluginChangedError,
+  PluginUnitPluginNotFoundError,
+  PluginUnitPluginTombstonedError,
+  PluginUnitScopeError,
   PluginUpdateAuthorityError,
   PluginUpdateBlockedByDenialError,
   PluginUpdateCriticalConfirmationError,
@@ -58,6 +69,17 @@ const SCHEMA_ISSUE: ManifestIssue = {
   code: ManifestErrorCode.BGE_COMPAT_UNSATISFIED,
   path: 'bgeCompat',
   message: 'range not satisfied',
+};
+
+const TOMBSTONED_AT = new Date('2026-08-01T00:00:00.000Z');
+
+// A config-schema violation, NOT a manifest issue — the config gate carries
+// ajv output (path/keyword/message), and the client's schema-driven form
+// renders from it.
+const CONFIG_ISSUE: PluginConfigIssue = {
+  path: '/webhookUrl',
+  keyword: 'required',
+  message: "must have required property 'webhookUrl'",
 };
 
 describe('PluginExceptionFilter', () => {
@@ -303,6 +325,102 @@ describe('PluginExceptionFilter', () => {
       expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
       expect(body()['message']).toBe(`t:errors.plugin.${key}`);
       expect(body()['code']).toBe(exception.name);
+    });
+  });
+
+  // The unit-enablement and feature-state families (#323) render statuses,
+  // catalog keys, and body fields the clients build their levers from. The
+  // vocabulary-completeness test below proves only that these classes reach
+  // @Catch — it cannot catch a wrong status, a wrong key, or a dropped
+  // field, so the renderings are asserted here (PR #363 review).
+  describe('unit enablement and feature state (#323)', () => {
+    it('maps the authority refusal to 403', () => {
+      filter.catch(new PluginUnitAuthorityError('user-1'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Forbidden);
+      expect(body()['message']).toBe('t:errors.plugin.unit_authority');
+      expect(body()['code']).toBe('PluginUnitAuthorityError');
+    });
+
+    it.each([
+      [new PluginUnitPluginNotFoundError('sample'), 'unit_plugin_not_found'],
+      [new PluginFeatureStateNotFoundError('sample'), 'feature_state_not_found'],
+    ] as const)('maps %s to 404 with the slug', (exception, key) => {
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['slug']).toBe('sample');
+      expect(body()['code']).toBe(exception.name);
+    });
+
+    it('maps the not-enrolled 404 with the addressed axis, so the client knows WHICH unit has no row', () => {
+      filter.catch(new PluginUnitNotEnrolledError('sample', 'Household'), host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(body()['message']).toBe('t:errors.plugin.unit_not_enrolled');
+      expect(body()['slug']).toBe('sample');
+      expect(body()['scopeType']).toBe('Household');
+    });
+
+    it.each([
+      [new PluginUnitPluginTombstonedError('sample', TOMBSTONED_AT), 'unit_plugin_tombstoned'],
+      [new PluginFeatureStateTombstonedError('sample', TOMBSTONED_AT), 'feature_state_tombstoned'],
+    ] as const)('maps %s to 410 carrying uninstalledAt', (exception, key) => {
+      filter.catch(exception, host);
+
+      expect(rendered().getStatus()).toBe(Http.Gone);
+      expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+      expect(body()['uninstalledAt']).toEqual(TOMBSTONED_AT);
+    });
+
+    it('maps the config gate to 409 carrying issues[] — the client renders its form from them', () => {
+      filter.catch(new PluginUnitConfigRequiredError('sample', [CONFIG_ISSUE]), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['message']).toBe('t:errors.plugin.unit_config_required');
+      expect(body()['slug']).toBe('sample');
+      expect(body()['issues']).toEqual([CONFIG_ISSUE]);
+    });
+
+    it('the config gate renders an EMPTY issues[] rather than omitting it when nothing was retained', () => {
+      filter.catch(new PluginUnitConfigRequiredError('sample', []), host);
+
+      expect(body()['issues']).toEqual([]);
+    });
+
+    it('maps a mid-request activation to 409 naming both versions, so the retry is informed', () => {
+      filter.catch(new PluginUnitPluginChangedError('sample', 'version-activated', '1.2.0', '1.3.0'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['message']).toBe('t:errors.plugin.unit_plugin_changed');
+      expect(body()['kind']).toBe('version-activated');
+      expect(body()['expectedVersion']).toBe('1.2.0');
+      expect(body()['actualVersion']).toBe('1.3.0');
+    });
+
+    it('distinguishes a same-version reinstall by kind, since the version pair cannot', () => {
+      filter.catch(new PluginUnitPluginChangedError('sample', 'reinstalled', '1.2.0', '1.2.0'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['kind']).toBe('reinstalled');
+      expect(body()['expectedVersion']).toBe(body()['actualVersion']);
+    });
+
+    it('maps the scope refusal to 422 with the offending scope', () => {
+      filter.catch(new PluginUnitScopeError('sample', 'server'), host);
+
+      expect(rendered().getStatus()).toBe(Http.UnprocessableEntity);
+      expect(body()['message']).toBe('t:errors.plugin.unit_scope');
+      expect(body()['slug']).toBe('sample');
+    });
+
+    it('maps a corrupt stored manifest on a unit write to 500, not to a caller error', () => {
+      filter.catch(new PluginUnitManifestError('sample', 'schema drift', [SCHEMA_ISSUE]), host);
+
+      expect(rendered().getStatus()).toBe(Http.InternalServerError);
+      expect(body()['message']).toBe('t:errors.plugin.stored_manifest_invalid');
+      expect(body()['issues']).toEqual([SCHEMA_ISSUE]);
     });
   });
 

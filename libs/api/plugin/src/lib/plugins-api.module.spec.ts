@@ -2,8 +2,10 @@ import { AuditContextService } from '@bge/actor-context';
 import { AbilityService } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
+  PluginFeatureStateService,
   PluginGrantService,
   PluginLifecycleService,
+  PluginUnitLifecycleService,
   PluginUpdateService,
 } from '@bge/plugin';
 import { Global, Module } from '@nestjs/common';
@@ -31,6 +33,8 @@ import { PluginsApiModule } from './plugins-api.module';
     { provide: PluginUpdateService, useValue: {} },
     { provide: PluginGrantService, useValue: {} },
     { provide: PluginConsentPresentationService, useValue: {} },
+    { provide: PluginUnitLifecycleService, useValue: {} },
+    { provide: PluginFeatureStateService, useValue: {} },
   ],
   exports: [
     I18nService,
@@ -39,6 +43,8 @@ import { PluginsApiModule } from './plugins-api.module';
     PluginUpdateService,
     PluginGrantService,
     PluginConsentPresentationService,
+    PluginUnitLifecycleService,
+    PluginFeatureStateService,
   ],
 })
 class StubGlobalsModule {}

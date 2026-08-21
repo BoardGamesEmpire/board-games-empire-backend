@@ -11,7 +11,8 @@ import { IsObject } from 'class-validator';
  */
 export class UpdatePluginConfigDto {
   @ApiProperty({
-    description: "The full server-scope configuration object, validated against the plugin manifest's config.schema",
+    description:
+      "The full configuration object for the addressed scope (server or household), validated against the plugin manifest's config.schema",
     type: 'object',
     additionalProperties: true,
   })

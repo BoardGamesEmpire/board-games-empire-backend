@@ -11,10 +11,12 @@ import {
 } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';
 import {
   HouseholdPluginConfigUpdatedEvent,
+  HouseholdPluginEnabledEvent,
   HouseholdPluginUnitDisabledEvent,
   PluginConfigUpdatedEvent,
   PluginDisabledEvent,
@@ -24,6 +26,7 @@ import {
   PluginLoadFailedEvent,
   PluginUninstalledEvent,
   PluginUpdateCheckCompletedEvent,
+  UserPluginDisabledEvent,
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
   type PluginProvenance,
@@ -291,6 +294,96 @@ describe('PluginLifecycleListener', () => {
             decidedRiskLevel: RiskLevel.Medium,
             reason: 'membership-removed',
           },
+        }),
+      );
+    });
+
+    it('persists a household unit-switch flip with Household scope and the PLUGIN id — never the unit row id (#323)', async () => {
+      // These classes share plugin.enabled/plugin.disabled with the
+      // server-scope events; without their own identity branches the
+      // subject-guarded fallback would refuse them.
+      const event = new HouseholdPluginEnabledEvent(
+        null,
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.Enabled, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.Enabled,
+          pluginId: 'plugin-1',
+          pluginSlug: 'demo-sink',
+          scopeType: PluginGrantScope.Household,
+          scopeId: 'household-1',
+          payload: {},
+        }),
+      );
+    });
+
+    it('records the born-suspended slugs on a creation-shaped enable — the suspension’s only durable "why" (#323)', async () => {
+      const event = new HouseholdPluginEnabledEvent(
+        null,
+        { id: 'hp-1', householdId: 'household-1', pluginId: 'plugin-1', enabled: true, suspendedForConsent: true },
+        initiatedAt,
+        ['plugin|demo-sink|manage:digest'],
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.Enabled, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          payload: { bornSuspendedSlugs: ['plugin|demo-sink|manage:digest'] },
+        }),
+      );
+    });
+
+    it('refuses — loudly, without a row — a non-Plugin-subject event no identity branch claims', async () => {
+      // The fallback reads snapshot.id as the PLUGIN id; for a unit-subject
+      // event that is the unit row's id, which would be silent provenance
+      // corruption. A missing row plus an error log is the honest failure.
+      class UnmappedUnitEvent extends MutationEvent<{ id: string }> {
+        readonly subject = ResourceType.HouseholdPlugin;
+        readonly subjectId: string;
+
+        constructor(after: { id: string }) {
+          super(null, after, initiatedAt);
+          this.subjectId = after.id;
+        }
+      }
+
+      const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      emitter.emit(PluginEvent.Enabled, new UnmappedUnitEvent({ id: 'hp-9' }));
+      await flush();
+
+      expect(db.pluginLifecycleEvent.create).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('No lifecycle identity mapping'));
+      errorSpy.mockRestore();
+    });
+
+    it('persists a USER unit-switch flip with User scope coordinates (#323)', async () => {
+      const event = new UserPluginDisabledEvent(
+        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: true, suspendedForConsent: false },
+        { id: 'up-1', userId: 'user-9', pluginId: 'plugin-1', enabled: false, suspendedForConsent: false },
+        initiatedAt,
+      );
+      db.plugin.findUnique.mockResolvedValue({ slug: 'demo-sink' } as Plugin);
+
+      emitter.emit(PluginEvent.Disabled, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          event: PluginLifecycleEventType.Disabled,
+          pluginId: 'plugin-1',
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-9',
         }),
       );
     });

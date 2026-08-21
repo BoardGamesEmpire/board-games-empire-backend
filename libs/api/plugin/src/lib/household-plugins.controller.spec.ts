@@ -1,7 +1,14 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, PluginGrantScope, PluginGrantStatus } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
-import type { PluginConsentPresentation, PluginConsentPresentationService, PluginGrantService } from '@bge/plugin';
+import type {
+  PluginConsentPresentation,
+  PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginFeatureUnitState,
+  PluginGrantService,
+  PluginUnitLifecycleService,
+} from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
 import { ForbiddenException, RequestMethod } from '@nestjs/common';
 import 'reflect-metadata';
@@ -15,11 +22,23 @@ const PRESENTATION = {
   checks: [],
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
+const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
+const FEATURE_STATE = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink' },
+  unit: { scopeType: 'Household', householdId: 'hh-1' },
+  served: true,
+  suspendedForConsent: false,
+  features: [],
+} as unknown as PluginFeatureUnitState;
 
 describe('HouseholdPluginsController (delegation + household instance gate)', () => {
   let controller: HouseholdPluginsController;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentForUnitBySlug'>>;
+  let units: jest.Mocked<
+    Pick<PluginUnitLifecycleService, 'enableHousehold' | 'disableHousehold' | 'updateHouseholdConfig'>
+  >;
+  let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
   let can: jest.Mock;
@@ -27,6 +46,12 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
     presentation = { presentForUnitBySlug: jest.fn().mockResolvedValue(PRESENTATION) };
+    units = {
+      enableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
+      disableHousehold: jest.fn().mockResolvedValue(UNIT_ROW),
+      updateHouseholdConfig: jest.fn().mockResolvedValue(UNIT_ROW),
+    };
+    featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     can = jest.fn().mockReturnValue(true);
     abilityService = createMockAbilityService();
@@ -37,6 +62,8 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       grants as never,
       abilityService as never,
       presentation as never,
+      units as never,
+      featureState as never,
       auditContext as never,
     );
   });
@@ -82,6 +109,57 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     expect(result).toEqual({ presentation: PRESENTATION });
   });
 
+  it('enable passes the route household, the CLS actor, and the nested config through to the unit writer', async () => {
+    const result = await firstValueFrom(
+      controller.enable('hh-1', 'demo-sink', { config: { webhookUrl: 'https://x' } }),
+    );
+
+    expect(units.enableHousehold).toHaveBeenCalledWith({
+      slug: 'demo-sink',
+      householdId: 'hh-1',
+      actorId: MOCK_ACTING_USER_ID,
+      config: { webhookUrl: 'https://x' },
+    });
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.plugin.enabled', args: { slug: 'demo-sink' } }),
+      unit: UNIT_ROW,
+    });
+  });
+
+  it('disable and config PATCH delegate to the unit writer for the route household', async () => {
+    await firstValueFrom(controller.disable('hh-1', 'demo-sink'));
+    expect(units.disableHousehold).toHaveBeenCalledWith({
+      slug: 'demo-sink',
+      householdId: 'hh-1',
+      actorId: MOCK_ACTING_USER_ID,
+    });
+
+    const result = await firstValueFrom(controller.updateConfig('hh-1', 'demo-sink', { config: { a: 1 } }));
+    expect(units.updateHouseholdConfig).toHaveBeenCalledWith({
+      slug: 'demo-sink',
+      householdId: 'hh-1',
+      actorId: MOCK_ACTING_USER_ID,
+      config: { a: 1 },
+    });
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.plugin.config_updated', args: { slug: 'demo-sink' } }),
+      unit: UNIT_ROW,
+    });
+  });
+
+  it('featureStates renders the route household as the unit, locale from CLS', async () => {
+    auditContext.getLocale.mockReturnValue('de');
+
+    const result = await firstValueFrom(controller.featureStates('hh-1', 'demo-sink'));
+
+    expect(featureState.resolveForUnitBySlug).toHaveBeenCalledWith(
+      'demo-sink',
+      { scopeType: 'Household', householdId: 'hh-1' },
+      'de',
+    );
+    expect(result).toEqual({ featureState: FEATURE_STATE });
+  });
+
   /**
    * The household INSTANCE gate: the `manage:plugin:household` /
    * `read:plugin:household` seeds render one conditioned rule per
@@ -116,6 +194,24 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(grants.decide).not.toHaveBeenCalled();
     });
 
+    it('binds every #323 write and read to ITS household before the service is asked', async () => {
+      can.mockReturnValue(false);
+
+      expect(() => controller.enable('hh-other', 'demo-sink', {})).toThrow(ForbiddenException);
+      expect(() => controller.disable('hh-other', 'demo-sink')).toThrow(ForbiddenException);
+      expect(() => controller.updateConfig('hh-other', 'demo-sink', { config: {} })).toThrow(ForbiddenException);
+      expect(() => controller.featureStates('hh-other', 'demo-sink')).toThrow(ForbiddenException);
+
+      expect(units.enableHousehold).not.toHaveBeenCalled();
+      expect(units.disableHousehold).not.toHaveBeenCalled();
+      expect(units.updateHouseholdConfig).not.toHaveBeenCalled();
+      expect(featureState.resolveForUnitBySlug).not.toHaveBeenCalled();
+      // The read gate asks for read, the writes for manage — mirroring the
+      // routes' own @CheckPolicies split.
+      expect(can).toHaveBeenCalledWith(Action.manage, expect.objectContaining({ householdId: 'hh-other' }));
+      expect(can).toHaveBeenCalledWith(Action.read, expect.objectContaining({ householdId: 'hh-other' }));
+    });
+
     it('EVERY primed ability must allow — an API key floor clamps the household gate too', async () => {
       const keyCan = jest.fn().mockReturnValue(false);
       abilityService.getCurrentAbilities.mockReturnValue([
@@ -144,19 +240,30 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     it.each([
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
+      ['enable', ':slug/enable', RequestMethod.POST],
+      ['disable', ':slug/disable', RequestMethod.POST],
+      ['updateConfig', ':slug/config', RequestMethod.PATCH],
+      ['featureStates', ':slug/features', RequestMethod.GET],
     ] as const)('binds %s to %s', (handler, path, method) => {
       expect(Reflect.getMetadata('path', HouseholdPluginsController.prototype[handler])).toBe(path);
       expect(Reflect.getMetadata('method', HouseholdPluginsController.prototype[handler])).toBe(method);
     });
 
-    it('registers exactly the grant-consent routes', () => {
+    it('registers exactly the grant-consent and unit-enablement routes', () => {
       const handlers = Object.getOwnPropertyNames(HouseholdPluginsController.prototype).filter(
         (name) =>
           name !== 'constructor' &&
           Reflect.getMetadata('path', HouseholdPluginsController.prototype[name as never]) !== undefined,
       );
 
-      expect(handlers).toEqual(['decideGrant', 'consentPresentation']);
+      expect(handlers).toEqual([
+        'decideGrant',
+        'consentPresentation',
+        'enable',
+        'disable',
+        'updateConfig',
+        'featureStates',
+      ]);
     });
   });
 });

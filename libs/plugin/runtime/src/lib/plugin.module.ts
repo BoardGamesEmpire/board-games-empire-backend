@@ -19,6 +19,7 @@ import { PluginInstanceRegistry } from './loader/plugin-instance-registry';
 import { PluginLoaderService } from './loader/plugin-loader.service';
 import { DynamicImportPluginModuleImporter, PLUGIN_MODULE_IMPORTER } from './loader/plugin-module-importer';
 import { ConfigurableModuleClass } from './plugin-module.options';
+import { PluginUnitLifecycleService } from './units/plugin-unit-lifecycle.service';
 import { PluginUpdateService } from './update/plugin-update.service';
 
 /**
@@ -67,6 +68,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginLifecycleService,
     PluginLoaderService,
     PluginStaticAnalysisService,
+    PluginUnitLifecycleService,
     PluginUpdateService,
   ],
   exports: [
@@ -81,6 +83,9 @@ import { PluginUpdateService } from './update/plugin-update.service';
     // lifecycle writer. Its collaborators (schema validation, authority,
     // registry) stay internal.
     PluginLifecycleService,
+    // #323's endpoint-facing unit writer — same boundary shape as the
+    // server lifecycle export above; its collaborators stay internal.
+    PluginUnitLifecycleService,
     PluginUpdateService,
   ],
 })

@@ -1,7 +1,12 @@
 import { AuditContextService, isUserActor, type UserPluginUnit } from '@bge/actor-context';
 import { PluginGrantScope } from '@bge/database';
 import { t } from '@bge/i18n';
-import { PluginConsentPresentationService, PluginGrantService } from '@bge/plugin';
+import {
+  PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginGrantService,
+  PluginUnitLifecycleService,
+} from '@bge/plugin';
 import { NoCache } from '@bge/shared';
 import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, UseFilters } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -34,6 +39,8 @@ export class UserPluginsController {
   constructor(
     private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
+    private readonly units: PluginUnitLifecycleService,
+    private readonly featureState: PluginFeatureStateService,
     private readonly auditContext: AuditContextService,
   ) {}
 
@@ -96,6 +103,68 @@ export class UserPluginsController {
 
     return from(this.presentation.presentForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
       map((presentation) => ({ presentation })),
+    );
+  }
+
+  // ─── Unit enablement (#323): the user's own switch ─────────────────────────
+
+  @ApiOperation({
+    summary: 'Enable your own unit for this plugin',
+    description:
+      'Flips your own switch (enabled) back on. The enablement row is created by your first Granted user-scope ' +
+      'consent decision (#225) — without one there is nothing to enable (404). Consent suspension is separate ' +
+      'state this endpoint never writes: a suspended unit stays suspended until late acceptance clears it.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or no enablement anchor exists' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @HttpCode(Http.Ok)
+  @Post(':slug/enable')
+  enable(@Param('slug') slug: string) {
+    return from(this.units.enableUser({ slug, userId: this.selfUserId() })).pipe(
+      map((unit) => ({ message: t('success.plugin.enabled', { slug }), unit })),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Disable your own unit for this plugin',
+    description:
+      'Flips your own switch off. Your consent decisions keep their records, and re-enabling restores exactly ' +
+      'the state you left.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or no enablement anchor exists' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @HttpCode(Http.Ok)
+  @Post(':slug/disable')
+  disable(@Param('slug') slug: string) {
+    return from(this.units.disableUser({ slug, userId: this.selfUserId() })).pipe(
+      map((unit) => ({ message: t('success.plugin.disabled', { slug }), unit })),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Per-feature activation state for your own unit (#60)',
+    description:
+      'Why a feature is or is not running for you: per-feature active|disabled with a denied|pending|suspended ' +
+      'reason paired with the blocking permission slugs, plus the unit-level served and suspendedForConsent state.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  // Consent decisions must be visible on the next read (#60 keeps this
+  // surface uncached) — and the response cache keys without the resolved
+  // locale (#358), which would cross-serve localized bodies.
+  @NoCache()
+  @Get(':slug/features')
+  featureStates(@Param('slug') slug: string) {
+    const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };
+
+    return from(this.featureState.resolveForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
+      map((featureState) => ({ featureState })),
     );
   }
 
