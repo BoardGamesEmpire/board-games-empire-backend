@@ -249,6 +249,10 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @ApiResponse({
+    status: Http.UnprocessableEntity,
+    description: 'The plugin is server-scoped: this household has no enablement surface to report on',
+  })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
   // Consent decisions must be visible on the next read (#60 keeps this
   // surface uncached) — and the response cache keys without the resolved

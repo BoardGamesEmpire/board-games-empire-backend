@@ -113,11 +113,18 @@ export class PluginFeatureStateService {
    * distinction as typed errors, then the id-addressed derivation below.
    * The tombstone throw deliberately diverges from `resolveForUnit`'s
    * served-false short-circuit — see {@link PluginFeatureStateTombstonedError}.
-   * A household/user viewpoint on a server-scope plugin is refused the
-   * same way the unit writers refuse it: no enablement row can exist
-   * there, so a served-false body would present impossible unit state as
-   * a real degraded unit — indistinguishable from never-enabled, and the
-   * "enable it" lever the client would offer 422s.
+   *
+   * A HOUSEHOLD viewpoint on a server-scope plugin is refused the same way
+   * the household writers refuse it: the manifest gate forbids
+   * household-scope consent there, so no enablement row can exist, and a
+   * served-false body would present impossible unit state as a real
+   * degraded unit — indistinguishable from never-enabled, with an "enable
+   * it" lever that 422s. The USER viewpoint is deliberately NOT refused:
+   * user-scope consent is permitted at ANY plugin scope (#225), a
+   * `Granted` user decision creates a real `UserPlugin` anchor on a
+   * server-scope plugin, and the user's own enable/disable operates on it
+   * — refusing the read would leave them toggling a unit whose blocked
+   * features they could never see.
    */
   async resolveForUnitBySlug(slug: string, unit: PluginUnit, locale?: string): Promise<PluginFeatureUnitState> {
     const plugin = await this.db.plugin.findUnique({
@@ -133,7 +140,7 @@ export class PluginFeatureStateService {
       throw new PluginFeatureStateTombstonedError(slug, plugin.uninstalledAt);
     }
 
-    if (plugin.scope === PluginScope.Server && unit.scopeType !== 'Server') {
+    if (plugin.scope === PluginScope.Server && unit.scopeType === 'Household') {
       throw new PluginUnitScopeError(slug, plugin.scope.toLowerCase());
     }
 

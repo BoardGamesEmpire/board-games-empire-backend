@@ -513,7 +513,7 @@ export class PluginUnitLifecycleService {
     }
   }
 
-  /** A server-scope plugin has no per-unit enablement surface (the manifest gate's rule, enforced at the writer too). */
+  /** A server-scope plugin has no per-household enablement surface (the manifest gate's rule, enforced at the writer too). */
   private assertHouseholdSurface(plugin: LivingPluginRef): void {
     if (plugin.scope !== PluginScope.Household) {
       throw new PluginUnitScopeError(plugin.slug, plugin.scope.toLowerCase());

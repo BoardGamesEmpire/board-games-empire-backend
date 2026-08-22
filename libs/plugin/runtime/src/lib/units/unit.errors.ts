@@ -40,12 +40,15 @@ export class PluginUnitPluginTombstonedError extends Error {
 }
 
 /**
- * A per-unit surface was addressed for a `scope: 'server'` plugin. The
+ * The HOUSEHOLD surface was addressed for a `scope: 'server'` plugin. The
  * manifest gate's scope-coherence rule — a server-scope plugin has no
- * `HouseholdPlugin`/`UserPlugin` enable/config surface, so per-unit
- * consent has no collection point — enforced at the writer and the
- * feature read too, so no meaningless unit rows accumulate and the read
- * never presents impossible unit state as a real degraded unit.
+ * `HouseholdPlugin` enable/config surface, so household-scope consent has
+ * no collection point — enforced at the writers and at the feature read
+ * too, so no meaningless unit rows accumulate and the read never presents
+ * impossible unit state as a real degraded unit.
+ *
+ * The user axis is NOT covered by this rule: `UserPlugin` is a real
+ * surface at any plugin scope (#225), so this error never describes it.
  */
 export class PluginUnitScopeError extends Error {
   override readonly name = 'PluginUnitScopeError';
@@ -54,7 +57,7 @@ export class PluginUnitScopeError extends Error {
     public readonly pluginSlug: string,
     public readonly scope: string,
   ) {
-    super(`Plugin '${pluginSlug}' is ${scope}-scoped and has no per-household or per-user enablement surface`);
+    super(`Plugin '${pluginSlug}' is ${scope}-scoped and has no per-household enablement surface`);
   }
 }
 

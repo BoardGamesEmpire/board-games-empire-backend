@@ -371,6 +371,37 @@ describe('plugin unit enablement + feature state (#323)', () => {
       const enabled = await enableUser(user, plugin.slug).expect(200);
       expect(enabled.body.unit.enabled).toBe(true);
     });
+
+    it('the user axis is a real surface on a SERVER-scope plugin — the switch and the read both work there', async () => {
+      // The manifest gate refuses household consent on a server-scope
+      // plugin but permits user consent at any scope (#225), and decide()
+      // creates a real anchor there. So the household 422 must not
+      // generalize to this axis: the user would be toggling a unit whose
+      // blocked features they could never read.
+      const user = await actors.user();
+      const plugin = await arrangePlugin({
+        scope: 'server',
+        permissions: { checks: [MANAGE_DIGEST_CHECK, { ...USER_CHECK, required: true, feature: 'weekly-digest' }] },
+      });
+
+      // Readable before any anchor exists: never-enabled, not impossible.
+      const rowless = await readUserFeatures(user, plugin.slug).expect(200);
+      expect(rowless.body.featureState).toMatchObject({
+        served: false,
+        unit: { scopeType: 'User', userId: user.user.id },
+      });
+
+      await decideUser(user, plugin.slug, {
+        permissionSlug: 'update:user:profile:own',
+        status: PluginGrantStatus.Granted,
+      }).expect(200);
+
+      const served = await readUserFeatures(user, plugin.slug).expect(200);
+      expect(served.body.featureState.served).toBe(true);
+
+      await disableUser(user, plugin.slug).expect(200);
+      expect((await readUserFeatures(user, plugin.slug).expect(200)).body.featureState.served).toBe(false);
+    });
   });
 
   describe('feature-state read (#60)', () => {

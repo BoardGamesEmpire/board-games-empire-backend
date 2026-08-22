@@ -216,17 +216,29 @@ describe('PluginFeatureStateService', () => {
       expect(result.served).toBe(true);
     });
 
-    it('refuses a household or user viewpoint on a server-scope plugin — impossible unit state must not read as real', async () => {
+    it('refuses a HOUSEHOLD viewpoint on a server-scope plugin — impossible unit state must not read as real', async () => {
       db.plugin.findUnique.mockResolvedValue(pluginRow({ scope: PluginScope.Server }) as never);
 
       await expect(service.resolveForUnitBySlug('demo-sink', HOUSEHOLD_UNIT)).rejects.toBeInstanceOf(
         PluginUnitScopeError,
       );
-      await expect(service.resolveForUnitBySlug('demo-sink', USER_UNIT)).rejects.toBeInstanceOf(PluginUnitScopeError);
 
       // The server viewpoint stays servable.
       await expect(service.resolveForUnitBySlug('demo-sink', SERVER_UNIT)).resolves.toMatchObject({
         plugin: { slug: 'demo-sink' },
+      });
+    });
+
+    it('serves the USER viewpoint on a server-scope plugin — UserPlugin is a real surface at any plugin scope', async () => {
+      // A user-consented check is permitted on a server-scope manifest
+      // (#225) and a Granted decision creates the anchor this reads, which
+      // the user's own enable/disable then toggles. Refusing the read would
+      // leave them switching a unit whose blocked features they cannot see.
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ scope: PluginScope.Server }) as never);
+
+      await expect(service.resolveForUnitBySlug('demo-sink', USER_UNIT)).resolves.toMatchObject({
+        plugin: { slug: 'demo-sink' },
+        unit: USER_UNIT,
       });
     });
 
