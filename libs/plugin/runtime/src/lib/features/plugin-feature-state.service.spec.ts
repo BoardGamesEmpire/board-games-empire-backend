@@ -1,10 +1,15 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import { DatabaseService, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
-import { PluginFeatureStateManifestError } from './feature-state.errors';
+import { PluginUnitScopeError } from '../units/unit.errors';
+import {
+  PluginFeatureStateManifestError,
+  PluginFeatureStateNotFoundError,
+  PluginFeatureStateTombstonedError,
+} from './feature-state.errors';
 import { PluginFeatureStateService } from './plugin-feature-state.service';
 
 describe('PluginFeatureStateService', () => {
@@ -102,11 +107,14 @@ describe('PluginFeatureStateService', () => {
   const HOUSEHOLD_UNIT: PluginUnit = { scopeType: 'Household', householdId: 'hh-1' };
   const USER_UNIT: PluginUnit = { scopeType: 'User', userId: 'u-1' };
 
-  const pluginRow = (overrides: Partial<{ enabled: boolean; uninstalledAt: Date | null }> = {}) => ({
+  const pluginRow = (
+    overrides: Partial<{ enabled: boolean; uninstalledAt: Date | null; scope: PluginScope }> = {},
+  ) => ({
     id: 'plg_1',
     slug: 'demo-sink',
     version: '1.2.0',
     enabled: true,
+    scope: PluginScope.Household,
     uninstalledAt: null,
     manifestJson: manifest,
     ...overrides,
@@ -194,6 +202,69 @@ describe('PluginFeatureStateService', () => {
       RangeError,
     );
     expect(db.plugin.findUnique).not.toHaveBeenCalled();
+  });
+
+  describe('resolveForUnitBySlug (the HTTP edge, #323)', () => {
+    it('resolves the slug and hands back the id-addressed derivation', async () => {
+      const result = await service.resolveForUnitBySlug('demo-sink', HOUSEHOLD_UNIT, 'de');
+
+      expect(db.plugin.findUnique).toHaveBeenCalledWith({
+        where: { slug: 'demo-sink' },
+        select: { id: true, scope: true, uninstalledAt: true },
+      });
+      expect(result.plugin).toEqual({ id: 'plg_1', slug: 'demo-sink' });
+      expect(result.served).toBe(true);
+    });
+
+    it('refuses a HOUSEHOLD viewpoint on a server-scope plugin — impossible unit state must not read as real', async () => {
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ scope: PluginScope.Server }) as never);
+
+      await expect(service.resolveForUnitBySlug('demo-sink', HOUSEHOLD_UNIT)).rejects.toBeInstanceOf(
+        PluginUnitScopeError,
+      );
+
+      // The server viewpoint stays servable.
+      await expect(service.resolveForUnitBySlug('demo-sink', SERVER_UNIT)).resolves.toMatchObject({
+        plugin: { slug: 'demo-sink' },
+      });
+    });
+
+    it('serves the USER viewpoint on a server-scope plugin — UserPlugin is a real surface at any plugin scope', async () => {
+      // A user-consented check is permitted on a server-scope manifest
+      // (#225) and a Granted decision creates the anchor this reads, which
+      // the user's own enable/disable then toggles. Refusing the read would
+      // leave them switching a unit whose blocked features they cannot see.
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ scope: PluginScope.Server }) as never);
+
+      await expect(service.resolveForUnitBySlug('demo-sink', USER_UNIT)).resolves.toMatchObject({
+        plugin: { slug: 'demo-sink' },
+        unit: USER_UNIT,
+      });
+    });
+
+    it('throws the typed 404 for an unknown slug — the edge cannot draw 404-vs-410 from a null', async () => {
+      db.plugin.findUnique.mockResolvedValue(null as never);
+
+      await expect(service.resolveForUnitBySlug('ghost', HOUSEHOLD_UNIT)).rejects.toBeInstanceOf(
+        PluginFeatureStateNotFoundError,
+      );
+    });
+
+    it('throws the typed 410 for a tombstone, where the id-addressed read short-circuits to served-false', async () => {
+      const uninstalledAt = new Date('2026-08-01T00:00:00.000Z');
+      db.plugin.findUnique.mockResolvedValue(pluginRow({ uninstalledAt }) as never);
+
+      await expect(service.resolveForUnitBySlug('demo-sink', HOUSEHOLD_UNIT)).rejects.toMatchObject({
+        constructor: PluginFeatureStateTombstonedError,
+        uninstalledAt,
+      });
+
+      // The in-process contract is unchanged: same tombstone, no throw.
+      await expect(service.resolveForUnit('plg_1', HOUSEHOLD_UNIT)).resolves.toMatchObject({
+        served: false,
+        features: [],
+      });
+    });
   });
 
   describe('derivation', () => {

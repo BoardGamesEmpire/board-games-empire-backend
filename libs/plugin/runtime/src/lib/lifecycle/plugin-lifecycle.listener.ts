@@ -1,11 +1,19 @@
 import { actorUserId, AuditContextService, MutationEvent, type SystemActor } from '@bge/actor-context';
-import { DatabaseService, PluginGrantScope, type PluginLifecycleEventType, type Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  PluginGrantScope,
+  ResourceType,
+  type PluginLifecycleEventType,
+  type Prisma,
+} from '@bge/database';
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';
 import { PLUGIN_EVENT_TO_LIFECYCLE_TYPE } from '../events/plugin-lifecycle-event-type.map';
 import {
   HouseholdPluginConfigUpdatedEvent,
+  HouseholdPluginDisabledEvent,
+  HouseholdPluginEnabledEvent,
   HouseholdPluginUnitDisabledEvent,
   HouseholdPluginUnitEnabledEvent,
   PluginConfigUpdatedEvent,
@@ -18,6 +26,8 @@ import {
   PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   PluginUpdatePendingEvent,
+  UserPluginDisabledEvent,
+  UserPluginEnabledEvent,
   UserPluginUnitDisabledEvent,
   UserPluginUnitEnabledEvent,
 } from '../events/plugin.events';
@@ -135,6 +145,19 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
 
   private async persist(lifecycleType: PluginLifecycleEventType, event: MutationEvent): Promise<void> {
     const identity = this.buildIdentity(event);
+
+    // A wrong row is worse than a missing one here: the fallback would
+    // record a unit row's id as the pluginId and 'unknown' as the slug —
+    // corrupted provenance nothing downstream can detect. Refuse loudly
+    // instead; the fix is always an identity branch for the new class.
+    if (identity === null) {
+      this.logger.error(
+        `No lifecycle identity mapping for ${event.constructor.name} (subject ${event.subject}) — ` +
+          'refusing to record a provenance row with wrong coordinates; add a buildIdentity branch for this class',
+      );
+      return;
+    }
+
     const actor = this.auditContext.getActor() ?? UNATTRIBUTED_LIFECYCLE_ACTOR;
     const pluginSlug = identity.pluginSlug ?? (await this.resolveSlug(identity.pluginId));
 
@@ -158,13 +181,14 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Per-class identity + context extraction. The class hierarchy is the
-   * dispatch mechanism (two classes share the `plugin.config_updated`
-   * routing key, so `instanceof` — not the key — is authoritative). Context
-   * fields deliberately kept OFF the before/after snapshots by the event
-   * classes (provenance, grants, findings, error detail) are recovered here
-   * into the row's `payload`.
+   * dispatch mechanism (several classes share routing keys, so
+   * `instanceof` — not the key — is authoritative). Context fields
+   * deliberately kept OFF the before/after snapshots by the event classes
+   * (provenance, grants, findings, error detail) are recovered here into
+   * the row's `payload`. Returns `null` for an event no branch claims and
+   * the Plugin-subject fallback cannot honestly describe.
    */
-  private buildIdentity(event: MutationEvent): LifecycleRowIdentity {
+  private buildIdentity(event: MutationEvent): LifecycleRowIdentity | null {
     if (event instanceof PluginInstalledEvent) {
       return {
         pluginId: event.after.id,
@@ -194,6 +218,40 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         pluginSlug: null,
         scopeType: PluginGrantScope.Household,
         scopeId: event.after.householdId,
+        manifestVersion: null,
+        payload: {},
+      };
+    }
+
+    // Unit-switch flips (#323) share the plugin.enabled/plugin.disabled
+    // routing keys with the server-scope classes; without these branches
+    // the plugin-subject fallback below would record the UNIT row's id as
+    // the pluginId. The class IS the scope, exactly as for the two-class
+    // ConfigUpdated precedent.
+    if (event instanceof HouseholdPluginEnabledEvent || event instanceof HouseholdPluginDisabledEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.Household,
+        scopeId: event.after.householdId,
+        manifestVersion: null,
+        // A born-suspended creation gets its "why" recorded here: no
+        // UnitDisabled event fires for a birth state, so this row is the
+        // suspension's only durable record — the same contract every
+        // consent-machinery suspension satisfies through its own event.
+        payload:
+          event instanceof HouseholdPluginEnabledEvent && event.bornSuspendedSlugs.length > 0
+            ? { bornSuspendedSlugs: event.bornSuspendedSlugs }
+            : {},
+      };
+    }
+
+    if (event instanceof UserPluginEnabledEvent || event instanceof UserPluginDisabledEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.User,
+        scopeId: event.after.userId,
         manifestVersion: null,
         payload: {},
       };
@@ -339,7 +397,14 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
 
     // Remaining Plugin-subject events (Enabled, Disabled,
     // ConfigUpdated, UpdateRejected): id + slug live on
-    // whichever snapshot is non-null; no extra context payload.
+    // whichever snapshot is non-null; no extra context payload. Guarded on
+    // the subject: for any OTHER subject the snapshot's id is a unit or
+    // grant row's, and recording it as the pluginId is silent provenance
+    // corruption — the caller refuses those loudly instead.
+    if (event.subject !== ResourceType.Plugin) {
+      return null;
+    }
+
     const snapshot = (event.after ?? event.before) as { id?: unknown; slug?: unknown };
 
     return this.pluginRowIdentity({

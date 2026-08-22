@@ -1,12 +1,17 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, loadPluginUnitEnablement } from '@bge/database';
+import { DatabaseService, loadPluginUnitEnablement, PluginScope } from '@bge/database';
 import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { unitConsumesConsentScope, type ConsentCheckClassification } from '../consent/consent-classification.types';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
-import { PluginFeatureStateManifestError } from './feature-state.errors';
+import { PluginUnitScopeError } from '../units/unit.errors';
+import {
+  PluginFeatureStateManifestError,
+  PluginFeatureStateNotFoundError,
+  PluginFeatureStateTombstonedError,
+} from './feature-state.errors';
 
 /**
  * Why a feature is not active, strongest-first. `denied` and `pending` are
@@ -102,6 +107,53 @@ export class PluginFeatureStateService {
     private readonly classifier: PluginConsentCheckClassifier,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
+
+  /**
+   * The slug-addressed entry point for the HTTP edge (#323): the 404/410
+   * distinction as typed errors, then the id-addressed derivation below.
+   * The tombstone throw deliberately diverges from `resolveForUnit`'s
+   * served-false short-circuit — see {@link PluginFeatureStateTombstonedError}.
+   *
+   * A HOUSEHOLD viewpoint on a server-scope plugin is refused the same way
+   * the household writers refuse it: the manifest gate forbids
+   * household-scope consent there, so no enablement row can exist, and a
+   * served-false body would present impossible unit state as a real
+   * degraded unit — indistinguishable from never-enabled, with an "enable
+   * it" lever that 422s. The USER viewpoint is deliberately NOT refused:
+   * user-scope consent is permitted at ANY plugin scope (#225), a
+   * `Granted` user decision creates a real `UserPlugin` anchor on a
+   * server-scope plugin, and the user's own enable/disable operates on it
+   * — refusing the read would leave them toggling a unit whose blocked
+   * features they could never see.
+   */
+  async resolveForUnitBySlug(slug: string, unit: PluginUnit, locale?: string): Promise<PluginFeatureUnitState> {
+    const plugin = await this.db.plugin.findUnique({
+      where: { slug },
+      select: { id: true, scope: true, uninstalledAt: true },
+    });
+
+    if (plugin === null) {
+      throw new PluginFeatureStateNotFoundError(slug);
+    }
+
+    if (plugin.uninstalledAt !== null) {
+      throw new PluginFeatureStateTombstonedError(slug, plugin.uninstalledAt);
+    }
+
+    if (plugin.scope === PluginScope.Server && unit.scopeType === 'Household') {
+      throw new PluginUnitScopeError(slug, plugin.scope.toLowerCase());
+    }
+
+    const state = await this.resolveForUnit(plugin.id, unit, locale);
+
+    // Unreachable while Plugin rows are tombstoned rather than deleted;
+    // kept as the honest rendering should that ever change under this read.
+    if (state === null) {
+      throw new PluginFeatureStateNotFoundError(slug);
+    }
+
+    return state;
+  }
 
   /**
    * Resolves the feature states for one (plugin, unit). Returns `null`

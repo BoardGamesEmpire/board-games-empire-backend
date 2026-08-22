@@ -369,6 +369,27 @@ describe('PluginLifecycleService', () => {
       expect(db.userPlugin.deleteMany).toHaveBeenCalledWith({ where: { pluginId: 'plugin-1' } });
     });
 
+    it('snapshots the units AFTER the tombstone claim — a first enable racing this must not be purged unannounced', async () => {
+      await service.uninstall({ slug: 'demo-sink', actorId: 'admin-1', purgeData: true });
+
+      // The claim's row lock is what orders a concurrent unit writer (whose
+      // path reads the plugin row FOR SHARE) against this snapshot; read
+      // before it, a unit committing in that window is purged without ever
+      // reaching affectedUnits.
+      const claimOrder = db.plugin.updateMany.mock.invocationCallOrder[0];
+
+      expect(claimOrder).toBeLessThan(db.householdPlugin.findMany.mock.invocationCallOrder[0]);
+      expect(claimOrder).toBeLessThan(db.userPlugin.findMany.mock.invocationCallOrder[0]);
+
+      // Still before the purge: under purgeData the rows are gone by commit.
+      expect(db.householdPlugin.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.householdPlugin.deleteMany.mock.invocationCallOrder[0],
+      );
+      expect(db.userPlugin.findMany.mock.invocationCallOrder[0]).toBeLessThan(
+        db.userPlugin.deleteMany.mock.invocationCallOrder[0],
+      );
+    });
+
     it('captures the ENABLED units before the purge and carries them on the event and the result', async () => {
       db.householdPlugin.findMany.mockResolvedValue([{ householdId: 'hh_1' }] as never);
       db.userPlugin.findMany.mockResolvedValue([{ userId: 'usr_1' }] as never);

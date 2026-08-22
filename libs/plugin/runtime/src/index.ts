@@ -38,6 +38,8 @@ export * from './lib/manifest/stored-manifest';
 export * from './lib/plugin-module.options';
 export * from './lib/plugin.module';
 export * from './lib/registry/plugin-category.map';
+export * from './lib/units/plugin-unit-lifecycle.service';
+export * from './lib/units/unit.errors';
 export * from './lib/update/escalation-comparator';
 export * from './lib/update/plugin-update.service';
 export * from './lib/update/update-escalation.types';

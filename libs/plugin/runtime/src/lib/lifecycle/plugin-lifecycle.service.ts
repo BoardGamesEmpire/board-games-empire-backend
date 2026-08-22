@@ -156,18 +156,6 @@ export class PluginLifecycleService {
     }
 
     const { updated, affectedUnits } = await this.db.$transaction(async (tx) => {
-      // Captured BEFORE the purge: under `purgeData` these rows are gone by
-      // commit time, and the event payload is the only durable record of
-      // who the removal affected.
-      const affectedHouseholds = await tx.householdPlugin.findMany({
-        where: { pluginId: plugin.id, enabled: true },
-        select: { householdId: true },
-      });
-      const affectedUsers = await tx.userPlugin.findMany({
-        where: { pluginId: plugin.id, enabled: true },
-        select: { userId: true },
-      });
-
       const claimed = await tx.plugin.updateMany({
         where: { id: plugin.id, uninstalledAt: null },
         data: {
@@ -181,6 +169,27 @@ export class PluginLifecycleService {
       if (claimed.count !== 1) {
         throw new PluginLifecycleTombstonedError(plugin.slug, await this.readTombstone(tx, plugin.slug, initiatedAt));
       }
+
+      // Captured AFTER the claim and BEFORE the purge, and both halves are
+      // load-bearing. Before the purge because under `purgeData` these rows
+      // are gone by commit time, and the event payload is the only durable
+      // record of who the removal affected. After the claim because a unit
+      // writer racing this transaction is ordered by the claim's row lock,
+      // not by anything earlier: the unit paths read the plugin row
+      // `FOR SHARE` (#323), so one that got its share lock first blocks the
+      // claim until it commits — and is then visible to this read — while
+      // one arriving later blocks on the claim and refuses over the
+      // tombstone it sees. Read before the claim, a first enable committing
+      // in that window is purged without ever being announced, and the
+      // household is never told the plugin it just turned on is gone.
+      const affectedHouseholds = await tx.householdPlugin.findMany({
+        where: { pluginId: plugin.id, enabled: true },
+        select: { householdId: true },
+      });
+      const affectedUsers = await tx.userPlugin.findMany({
+        where: { pluginId: plugin.id, enabled: true },
+        select: { userId: true },
+      });
 
       await tx.pluginGrant.deleteMany({ where: { pluginId: plugin.id } });
       await tx.pluginPermission.deleteMany({ where: { pluginId: plugin.id } });
