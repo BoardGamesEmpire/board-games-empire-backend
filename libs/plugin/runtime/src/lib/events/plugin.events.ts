@@ -213,6 +213,106 @@ export class HouseholdPluginConfigUpdatedEvent extends MutationEvent<HouseholdPl
   }
 }
 
+type HouseholdPluginSwitchSnapshot = Readonly<
+  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
+>;
+
+/**
+ * The household admin flipped their unit's `enabled` switch ON — or first
+ * enabled the plugin, creating the row (`before` is `null` exactly then;
+ * #323). Shares the `plugin.enabled` routing key with the server-scope
+ * class (the documented `ConfigUpdated` two-class precedent): listeners
+ * discriminate on `instanceof` / `subject`, never on the key. Deliberately
+ * NOT `UnitEnabled` — that key means a consent suspension lifted, and
+ * listeners for consent transitions must not have to filter admin
+ * kill-switch flips.
+ */
+export class HouseholdPluginEnabledEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.Enabled;
+
+  declare readonly before: HouseholdPluginSwitchSnapshot | null;
+  declare readonly after: HouseholdPluginSwitchSnapshot;
+
+  readonly subject = ResourceType.HouseholdPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: HouseholdPluginSwitchSnapshot | null,
+    after: HouseholdPluginSwitchSnapshot,
+    initiatedAt: Date,
+    /**
+     * Required household-scope permissions whose durable denial made the
+     * row be CREATED suspended — non-empty only on a born-suspended
+     * creation. Context for the lifecycle row, not row state: no
+     * consent-machinery suspension event fires for a birth state (nothing
+     * transitioned), so without this the durable record of WHY the unit
+     * started suspended would not exist — every other suspension leaves
+     * one.
+     */
+    public readonly bornSuspendedSlugs: readonly string[] = [],
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/** The household admin flipped their unit's `enabled` switch OFF (#323) — see {@link HouseholdPluginEnabledEvent}. */
+export class HouseholdPluginDisabledEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.Disabled;
+
+  declare readonly before: HouseholdPluginSwitchSnapshot;
+  declare readonly after: HouseholdPluginSwitchSnapshot;
+
+  readonly subject = ResourceType.HouseholdPlugin;
+  readonly subjectId: string;
+
+  constructor(before: HouseholdPluginSwitchSnapshot, after: HouseholdPluginSwitchSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+type UserPluginSwitchSnapshot = Readonly<
+  Pick<UserPlugin, 'id' | 'userId' | 'pluginId' | 'enabled' | 'suspendedForConsent'>
+>;
+
+/**
+ * The user flipped their own unit's `enabled` switch ON (#323). Never
+ * creation-shaped: `decide()` remains the only creator of `UserPlugin`
+ * rows (#225), so this event always carries a real `before`. Shares the
+ * `plugin.enabled` routing key; `subject` disambiguates.
+ */
+export class UserPluginEnabledEvent extends MutationEvent<UserPlugin> {
+  static readonly eventName = PluginEvent.Enabled;
+
+  declare readonly before: UserPluginSwitchSnapshot;
+  declare readonly after: UserPluginSwitchSnapshot;
+
+  readonly subject = ResourceType.UserPlugin;
+  readonly subjectId: string;
+
+  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/** The user flipped their own unit's `enabled` switch OFF (#323) — see {@link UserPluginEnabledEvent}. */
+export class UserPluginDisabledEvent extends MutationEvent<UserPlugin> {
+  static readonly eventName = PluginEvent.Disabled;
+
+  declare readonly before: UserPluginSwitchSnapshot;
+  declare readonly after: UserPluginSwitchSnapshot;
+
+  readonly subject = ResourceType.UserPlugin;
+  readonly subjectId: string;
+
+  constructor(before: UserPluginSwitchSnapshot, after: UserPluginSwitchSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
 type PluginUpdateCheckSnapshot = Readonly<
   Pick<Plugin, 'id' | 'slug' | 'lastUpdateCheckAt' | 'latestKnownVersion' | 'latestKnownChannel' | 'securityAdvisory'>
 >;
