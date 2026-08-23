@@ -5,8 +5,6 @@ import type { UserSearchResult } from './interfaces/user-search-results.interfac
 
 @Injectable()
 export class UserService {
-  private readonly MAX_SEARCH_RESULTS = 20;
-
   constructor(private readonly db: DatabaseService) {}
 
   async findById(id: string) {
@@ -22,7 +20,6 @@ export class UserService {
   }
 
   async searchUsers(requestingUserId: string, query: UserSearchQueryDto): Promise<UserSearchResult[]> {
-    const take = Math.min(query?.limit || 10, this.MAX_SEARCH_RESULTS);
     return this.db.user.findMany({
       where: {
         AND: [
@@ -51,8 +48,8 @@ export class UserService {
           },
         },
       },
-      take,
-      skip: query.offset,
+      take: query.pageSize,
+      skip: query.skip,
       orderBy: { username: 'asc' },
     });
   }

@@ -1,7 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsOptional, IsPositive, Max } from 'class-validator';
-import { DEFAULT_MAX_PAGE_SIZE, PaginationQueryDto } from './pagination-query.dto';
+import { Exclude, Type } from 'class-transformer';
+import { IsInt, IsOptional, IsPositive, Max } from 'class-validator';
+import {
+  DEFAULT_MAX_PAGE_SIZE,
+  DEFAULT_PAGE_SIZE,
+  OffsetPaginationQueryDto,
+  PaginationQueryDto,
+} from './pagination-query.dto';
 
 /**
  * Builds a concrete `PaginationQueryDto` subclass whose `limit` is capped at
@@ -22,25 +27,81 @@ import { DEFAULT_MAX_PAGE_SIZE, PaginationQueryDto } from './pagination-query.dt
  * property replaces the parent's metadata for it, so declaring `@Max` alone
  * would drop the inherited `@IsPositive` and let `limit=-50` through as
  * `take:-50` (oldest rows on a newest-first endpoint) / `limit=0` as an empty
- * page. `offset` is intentionally NOT re-declared, so its base
- * `@Max(DEFAULT_MAX_OFFSET)` is inherited unchanged.
+ * page. `page` is intentionally NOT re-declared, so its base validators — and
+ * the derived-skip ceiling — are inherited unchanged.
+ *
+ * `declare` (not a plain re-declaration) matters under the repo's `es2024`
+ * target: define-semantics class fields would emit `limit = undefined` here and
+ * clobber whatever the pipe transformed. `declare` emits nothing and only
+ * carries the decorators.
+ *
+ * `defaultPageSize` overrides what `pageSize` resolves to when the caller omits
+ * `limit`. Pass it only where the endpoint has a deliberate, named default
+ * (audit logs page at 50); leaving it off adopts the shared `DEFAULT_PAGE_SIZE`,
+ * which is what D-230-3 wants for endpoints whose old default was an arbitrary
+ * service-local literal. It belongs here rather than in the service because
+ * `skip` is derived from it — a service-local default would desynchronise the
+ * rows from the page they claim to be.
  *
  * The return type is a concrete constructor (`new () => PaginationQueryDto`)
  * rather than `typeof PaginationQueryDto`: the base is `abstract`, and an
  * abstract constructor type cannot be extended, so the produced (concrete)
  * class is typed concretely to keep `extends CappedPaginationQueryDto(n)` valid.
  */
-export function CappedPaginationQueryDto(maxLimit: number = DEFAULT_MAX_PAGE_SIZE): new () => PaginationQueryDto {
+export function CappedPaginationQueryDto(
+  maxLimit: number = DEFAULT_MAX_PAGE_SIZE,
+  defaultPageSize: number = DEFAULT_PAGE_SIZE,
+): new () => PaginationQueryDto {
+  // A default above the cap would serve more rows than `?limit=` is allowed to
+  // ask for, because the default is applied in the getter and never sees `@Max`.
+  // Contradictory arguments are a wiring mistake, so fail at module load.
+  if (defaultPageSize > maxLimit) {
+    throw new RangeError(`defaultPageSize (${defaultPageSize}) cannot exceed maxLimit (${maxLimit})`);
+  }
+
   class CappedPaginationQuery extends PaginationQueryDto {
+    @ApiPropertyOptional({
+      description: 'Maximum items per page',
+      maximum: maxLimit,
+      default: defaultPageSize,
+    })
+    @Type(() => Number)
+    @IsInt()
+    @IsPositive()
+    @Max(maxLimit)
+    @IsOptional()
+    declare limit?: number;
+
+    @Exclude()
+    override get pageSize(): number {
+      return this.limit ?? defaultPageSize;
+    }
+  }
+
+  return CappedPaginationQuery;
+}
+
+/**
+ * The offset-native counterpart of {@link CappedPaginationQueryDto}, for the
+ * gateway search transports described on {@link OffsetPaginationQueryDto}. The
+ * cap reasoning above applies verbatim; the two factories are kept separate
+ * rather than generic over their base because the `@Max`-union hazard is worth
+ * reading in full at each declaration site.
+ */
+export function CappedOffsetPaginationQueryDto(
+  maxLimit: number = DEFAULT_MAX_PAGE_SIZE,
+): new () => OffsetPaginationQueryDto {
+  class CappedOffsetPaginationQuery extends OffsetPaginationQueryDto {
     @ApiPropertyOptional({ description: 'Maximum items per page', maximum: maxLimit })
     @Type(() => Number)
+    @IsInt()
     @IsPositive()
     @Max(maxLimit)
     @IsOptional()
     declare limit?: number;
   }
 
-  return CappedPaginationQuery;
+  return CappedOffsetPaginationQuery;
 }
 
 /**

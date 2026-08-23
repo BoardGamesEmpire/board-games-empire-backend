@@ -1,7 +1,12 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
 import { Action, GameMedium, GameRemovalReason, Prisma, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import {
+  batchTransactionCall,
+  createTestingModuleWithDb,
+  paginationQuery,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { GameCollectionService } from './game-collection.service';
 
@@ -62,7 +67,7 @@ describe('GameCollectionService', () => {
     it('scopes to the acting user and excludes tombstones by default', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
-      await service.listOwn({ offset: 0, limit: 20 });
+      await service.listOwn(paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -74,7 +79,7 @@ describe('GameCollectionService', () => {
     it('includeDeleted lifts the tombstone filter', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
-      await service.listOwn({ offset: 0, limit: 20, includeDeleted: true });
+      await service.listOwn(Object.assign(paginationQuery({ limit: 20 }), { includeDeleted: true }));
 
       const where = db.gameCollection.findMany.mock.calls[0][0]?.where;
       expect(where).not.toHaveProperty('deletedAt');
@@ -83,7 +88,7 @@ describe('GameCollectionService', () => {
     it('deletedOnly returns the resurrection view', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
-      await service.listOwn({ offset: 0, limit: 20, deletedOnly: true });
+      await service.listOwn(Object.assign(paginationQuery({ limit: 20 }), { deletedOnly: true }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -92,17 +97,50 @@ describe('GameCollectionService', () => {
       );
     });
 
+    // The count is what `pagination.total` reports, so it must carry the SAME
+    // scope as the rows: a count over a wider `where` inflates the total, and a
+    // client pages towards rows it will never be shown (#230).
+    it('counts over the same scope it reads, and returns that as the total', async () => {
+      // One row instance, stubbed and asserted: `entry()` stamps createdAt and
+      // updatedAt with `new Date()`, so a second call yields a row that differs
+      // from the stubbed one whenever the two straddle a millisecond.
+      const row = entry();
+      db.gameCollection.findMany.mockResolvedValue([row]);
+      db.gameCollection.count.mockResolvedValue(37);
+
+      const page = await service.listOwn(Object.assign(paginationQuery({ limit: 20 }), { medium: GameMedium.Digital }));
+
+      expect(db.gameCollection.count).toHaveBeenCalledWith({
+        where: db.gameCollection.findMany.mock.calls[0][0]?.where,
+      });
+      expect(page).toEqual({ rows: [row], total: 37 });
+    });
+
+    // The count only agrees with the rows because both read one snapshot, and
+    // the transaction mock resolves the operation array at any isolation level —
+    // so the guarantee has to be pinned or it can regress silently.
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(0);
+
+      await service.listOwn(paginationQuery({ limit: 20 }));
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
     it('applies medium, favorite, and updatedSince filters', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
       const updatedSince = new Date('2026-06-01');
 
-      await service.listOwn({
-        offset: 0,
-        limit: 20,
-        medium: GameMedium.Digital,
-        favorite: false,
-        updatedSince,
-      });
+      await service.listOwn(
+        Object.assign(paginationQuery({ limit: 20 }), {
+          medium: GameMedium.Digital,
+          favorite: false,
+          updatedSince,
+        }),
+      );
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -120,7 +158,7 @@ describe('GameCollectionService', () => {
     it('applies CASL read conditions for an authenticated viewer', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
-      await service.listForUser('user-2', { offset: 0, limit: 20 });
+      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -129,11 +167,23 @@ describe('GameCollectionService', () => {
       );
     });
 
+    it("counts the viewer-visible scope, not the target user's whole collection", async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(4);
+
+      const page = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(db.gameCollection.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ userId: 'user-2', deletedAt: null, AND: [COND] }),
+      });
+      expect(page.total).toBe(4);
+    });
+
     it('falls back to Public-only for an anonymous viewer', async () => {
       abilityService.getCurrentAbilities.mockReturnValue([]);
       db.gameCollection.findMany.mockResolvedValue([]);
 
-      await service.listForUser('user-2', { offset: 0, limit: 20 });
+      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -141,6 +191,19 @@ describe('GameCollectionService', () => {
         }),
       );
       expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+    });
+
+    it('counts only Public entries for an anonymous viewer', async () => {
+      abilityService.getCurrentAbilities.mockReturnValue([]);
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(2);
+
+      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(db.gameCollection.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ visibility: Visibility.Public }),
+      });
+      expect(db.gameCollection.count.mock.calls[0][0]?.where).not.toHaveProperty('AND');
     });
   });
 

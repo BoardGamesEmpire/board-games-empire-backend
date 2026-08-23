@@ -49,6 +49,7 @@ zenstack/
 .private/
 .env
 dist-schema/
+*.tsbuildinfo
 
 # System Files
 .DS_Store

@@ -1,9 +1,9 @@
-import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 
-export class SearchQueryDto extends CappedPaginationQueryDto(100) {
+export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100) {
   @ApiProperty({ description: 'Search query string' })
   @IsString()
   query!: string;
@@ -36,5 +36,7 @@ export class SearchQueryDto extends CappedPaginationQueryDto(100) {
   locale?: string;
 
   // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
-  // are inherited from CappedPaginationQueryDto — see #17.
+  // are inherited from CappedOffsetPaginationQueryDto — see #17. Search stays
+  // offset-native rather than page-based because the value is forwarded to
+  // gateways and their upstream vendor APIs unchanged (D-230-5 on #230).
 }

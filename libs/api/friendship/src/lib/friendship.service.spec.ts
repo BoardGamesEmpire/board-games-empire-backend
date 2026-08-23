@@ -2,7 +2,7 @@ import type { Friendship } from '@bge/database';
 import { Action, FriendshipStatus, ResourceType } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService } from '@bge/permissions';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import { createTestingModuleWithDb, paginationQuery, type MockDatabaseService } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FriendshipService } from './friendship.service';
 
@@ -238,7 +238,7 @@ describe('FriendshipService', () => {
     it('listForUser scopes by read conditions and applies the status filter', async () => {
       db.friendship.findMany.mockResolvedValue([]);
 
-      await service.listForUser({ status: FriendshipStatus.Accepted, offset: 0, limit: 10 });
+      await service.listForUser(Object.assign(paginationQuery({ limit: 10 }), { status: FriendshipStatus.Accepted }));
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Friendship, Action.read);
       expect(db.friendship.findMany).toHaveBeenCalledWith(
@@ -251,7 +251,7 @@ describe('FriendshipService', () => {
     it('listIncomingRequests filters to pending requests addressed to the acting user', async () => {
       db.friendship.findMany.mockResolvedValue([]);
 
-      await service.listIncomingRequests({ offset: 0, limit: 10 });
+      await service.listIncomingRequests(paginationQuery({ limit: 10 }));
 
       expect(db.friendship.findMany).toHaveBeenCalledWith(
         expect.objectContaining({

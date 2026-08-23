@@ -2,7 +2,13 @@ import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService, PermissionsService } from '@bge/permissions';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import {
+  batchTransactionCall,
+  createTestingModuleWithDb,
+  paginationQuery,
+  unwrapTransaction,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaError } from '@status/codes';
 import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
@@ -42,13 +48,29 @@ describe('HouseholdService', () => {
 
   it('getHouseholdsForUser → read', async () => {
     db.household.findMany.mockResolvedValue([]);
+    db.household.count.mockResolvedValue(0);
 
-    await service.getHouseholdsForUser({ offset: 0, limit: 10 } as never);
+    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
     expect(db.household.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) }),
     );
+  });
+
+  // #230: `total` is only trustworthy against the rows because both come from
+  // one snapshot, and nothing in the read itself enforces that — the mock
+  // resolves the operation array at any isolation level, so a regression to the
+  // Prisma default would be invisible without pinning it here.
+  it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+    db.household.findMany.mockResolvedValue([]);
+    db.household.count.mockResolvedValue(0);
+
+    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
+
+    const { operations, options } = batchTransactionCall(db);
+    expect(operations).toHaveLength(2);
+    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   });
 
   it('getHouseholdById → read', async () => {
@@ -326,7 +348,7 @@ describe('HouseholdService', () => {
 
   it('deleteHousehold soft-deletes under the delete policy, revokes pending invites, and evicts member caches', async () => {
     db.household.count.mockResolvedValue(1);
-    db.$transaction.mockImplementation((cb) => cb(db));
+    unwrapTransaction(db);
     db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
     db.invite.updateMany.mockResolvedValue({ count: 2 } as never);
     db.householdMember.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
@@ -369,7 +391,7 @@ describe('HouseholdService', () => {
 
   it('deleteHousehold 403s when it exists but the actor may not delete it (scoped update misses)', async () => {
     db.household.count.mockResolvedValue(1);
-    db.$transaction.mockImplementation((cb) => cb(db));
+    unwrapTransaction(db);
     db.household.update.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('no rows', {
         code: PrismaError.DependentRecordNotFound,
@@ -384,8 +406,9 @@ describe('HouseholdService', () => {
 
   it('reads exclude soft-deleted households (deletedAt: null filter)', async () => {
     db.household.findMany.mockResolvedValue([]);
+    db.household.count.mockResolvedValue(0);
 
-    await service.getHouseholdsForUser({ offset: 0, limit: 10 } as never);
+    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
 
     expect(db.household.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
@@ -397,7 +420,7 @@ describe('HouseholdService', () => {
       throw new ForbiddenException();
     });
 
-    await expect(service.getHouseholdsForUser({ offset: 0, limit: 10 } as never)).rejects.toThrow(ForbiddenException);
+    await expect(service.getHouseholdsForUser(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
   });
 });
 

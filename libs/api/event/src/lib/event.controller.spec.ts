@@ -1,7 +1,7 @@
 import { Event } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
-import { createTestingModuleWithDb, makeEvent } from '@bge/testing';
+import { createTestingModuleWithDb, makeEvent, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
@@ -44,9 +44,10 @@ describe('EventController', () => {
       const events = [stubEvent(), stubEvent()];
       service.getEvents.mockResolvedValue(events);
 
-      const result = await firstValueFrom(controller.getEvents({ limit: 10, offset: 0 }));
+      const pagination = paginationQuery({ limit: 10 });
+      const result = await firstValueFrom(controller.getEvents(pagination));
 
-      expect(service.getEvents).toHaveBeenCalledWith({ limit: 10, offset: 0 });
+      expect(service.getEvents).toHaveBeenCalledWith(pagination);
       expect(result).toEqual({ events });
     });
   });

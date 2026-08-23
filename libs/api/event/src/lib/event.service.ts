@@ -43,9 +43,10 @@ export class EventService {
         },
         policy: true,
       },
-      skip: pagination.offset,
-      take: pagination.limit || 20,
-      orderBy: { createdAt: 'desc' },
+      skip: pagination.skip,
+      take: pagination.pageSize,
+      // `id` breaks ties on `createdAt` so page boundaries hold between requests.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   }
 

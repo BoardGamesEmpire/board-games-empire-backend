@@ -48,8 +48,6 @@ const JOB_SELECT = {
 
 type JobRow = Prisma.JobGetPayload<{ select: typeof JOB_SELECT }>;
 
-const DEFAULT_LIST_LIMIT = 20;
-
 /**
  * Base job first (parentJobId null), then expansions. All rows of a batch are
  * created in one transaction and share an identical createdAt (Postgres holds
@@ -100,8 +98,8 @@ export class GameImportStatusService {
       // batchId tiebreaker: batches sharing a _max(createdAt) would otherwise
       // shift across page boundaries between requests.
       orderBy: [{ _max: { createdAt: 'desc' } }, { batchId: 'desc' }],
-      skip: pagination.offset,
-      take: pagination.limit ?? DEFAULT_LIST_LIMIT,
+      skip: pagination.skip,
+      take: pagination.pageSize,
     });
 
     const batchIds = groups.map((group) => group.batchId).filter((id): id is string => id !== null);

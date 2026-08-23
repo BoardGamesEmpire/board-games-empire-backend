@@ -1,11 +1,11 @@
 import type { PaginationQueryDto } from '@bge/shared';
-import { createTestingModuleWithDb } from '@bge/testing';
+import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { firstValueFrom } from 'rxjs';
 import type { CreateGameDto, UpdateGameDto } from './dto';
 import { GameController } from './game.controller';
 import { GameService } from './game.service';
 
-const PAGINATION: PaginationQueryDto = { offset: 0, limit: 20 };
+const PAGINATION: PaginationQueryDto = paginationQuery({ limit: 20 });
 
 describe('GameController', () => {
   let controller: GameController;

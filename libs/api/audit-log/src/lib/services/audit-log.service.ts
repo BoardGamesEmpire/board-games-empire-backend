@@ -1,7 +1,6 @@
 import { actorUserId } from '@bge/actor-context';
 import { DatabaseService, Prisma, type AuditLog } from '@bge/database';
 import { Injectable } from '@nestjs/common';
-import { AUDIT_LOG_DEFAULT_PAGE_SIZE } from '../constants/audit-log.constants';
 import type { ListAuditLogsQueryDto } from '../dto';
 import type { RecordAuditEntry } from '../interfaces/record-audit-entry.interface';
 import { toJsonValue } from '../utils/audit-snapshot.util';
@@ -58,9 +57,11 @@ export class AuditLogService {
 
     return this.db.auditLog.findMany({
       where,
-      orderBy: { occurredAt: 'desc' },
-      skip: query.offset,
-      take: query.limit ?? AUDIT_LOG_DEFAULT_PAGE_SIZE,
+      // `id` breaks ties on `occurredAt`: entries emitted in one transaction
+      // share a timestamp, so a tie-less sort lets them drift across pages.
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+      skip: query.skip,
+      take: query.pageSize,
     });
   }
 }

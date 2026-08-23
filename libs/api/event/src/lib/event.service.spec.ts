@@ -5,6 +5,7 @@ import {
   createMockAbilityService,
   createTestingModuleWithDb,
   makeEvent,
+  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -44,7 +45,7 @@ describe('EventService', () => {
   it('getEvents → read', async () => {
     db.event.findMany.mockResolvedValue([]);
 
-    await service.getEvents({ offset: 0, limit: 20 } as never);
+    await service.getEvents(paginationQuery({ limit: 20 }));
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
     expect(db.event.findMany).toHaveBeenCalledWith(

@@ -61,8 +61,17 @@ export interface ReadHouseholdEnvelope {
   readonly household: HouseholdDetail;
 }
 
+export interface PaginationWire {
+  readonly page: number;
+  readonly limit: number;
+  readonly total: number;
+  readonly totalPages: number;
+  readonly hasMore: boolean;
+}
+
 export interface ListHouseholdsEnvelope {
   readonly households: readonly HouseholdWire[];
+  readonly pagination: PaginationWire;
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/household/household-wire.ts');
@@ -121,7 +130,47 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
   return { household: household as unknown as HouseholdDetail };
 }
 
-/** `GET /api/households`: `{ households: [...] }`. */
+const isNonNegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
+
+/**
+ * Narrows the shared pagination envelope (#230). Every field is checked, unlike
+ * the household rows above: this envelope is the contract the endpoint gained,
+ * so a missing or mistyped member of it is exactly the regression worth failing
+ * on — and a client that reads `hasMore` off `undefined` pages forever.
+ *
+ * The types alone are not the contract, so the ranges and the two derived
+ * relations are checked as well: `page` is 1-based, `totalPages` is the ceiling
+ * of `total / limit` (zero rows meaning zero pages), and `hasMore` says whether
+ * a page follows this one. A response satisfying the types but not the
+ * arithmetic — `page: -1`, `limit: 0`, a `totalPages` that contradicts `total`
+ * — is a server bug the suite should fail on, not narrow past.
+ */
+function asPagination(value: unknown): PaginationWire | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const { page, limit, total, totalPages, hasMore } = value;
+
+  if (![page, limit, total, totalPages].every(isNonNegativeInteger) || typeof hasMore !== 'boolean') {
+    return undefined;
+  }
+
+  // Narrowed by the guard above; destructured members do not carry it through.
+  const [pageNumber, pageSize, rowCount, pageCount] = [page, limit, total, totalPages] as number[];
+
+  if (pageNumber < 1 || pageSize < 1) {
+    return undefined;
+  }
+
+  if (pageCount !== Math.ceil(rowCount / pageSize) || hasMore !== pageNumber < pageCount) {
+    return undefined;
+  }
+
+  return value as unknown as PaginationWire;
+}
+
+/** `GET /api/households`: `{ households: [...], pagination }`. */
 export function listEnvelope(response: HttpResponseLike, request: RequestDescription): ListHouseholdsEnvelope {
   if (!isRecord(response.body)) {
     return fail('the body is not an object', request, response);
@@ -142,7 +191,57 @@ export function listEnvelope(response: HttpResponseLike, request: RequestDescrip
     rows.push(row);
   }
 
-  return { households: rows };
+  const pagination = asPagination(response.body['pagination']);
+  if (pagination === undefined) {
+    return fail(
+      "it carried no 'pagination' envelope whose page, limit, total, totalPages and hasMore agree",
+      request,
+      response,
+    );
+  }
+
+  // Both bounds on the row count, and only the upper ones. `limit` is the page's
+  // declared capacity, so a longer page means a `take` stopped being applied —
+  // the unbounded read the pagination caps exist to prevent (#11). `total` counts
+  // the same actor-scoped set the rows came from, so a page longer than the total
+  // means the two disagree about scope, which is what the shared snapshot exists
+  // to rule out (#230).
+  //
+  // A SHORT page stays legitimate under both — it is the last page, or a read
+  // that filters rows after the query — so the tempting stronger rules ("full
+  // whenever hasMore is set", "equal to total on a single page") would fail the
+  // suite for correct responses.
+  if (rows.length > pagination.limit) {
+    return fail(
+      `it carried ${rows.length} households, more than its pagination limit of ${pagination.limit}`,
+      request,
+      response,
+    );
+  }
+
+  if (rows.length > pagination.total) {
+    return fail(
+      `it carried ${rows.length} households, more than the total of ${pagination.total} it declares`,
+      request,
+      response,
+    );
+  }
+
+  // The third of the three server-side arguments, one check each: `take` (limit),
+  // the scoped count (total), and now `skip`. Past the final page the derived
+  // skip exceeds every matching row, so rows there mean the skip was dropped or
+  // mis-derived — a regression the other two bounds sail past, since those rows
+  // fit both the page size and the total. An EMPTY out-of-range page is the
+  // honest answer and stays valid.
+  if (rows.length > 0 && pagination.page > pagination.totalPages) {
+    return fail(
+      `it carried ${rows.length} households for page ${pagination.page}, after its final page ${pagination.totalPages}`,
+      request,
+      response,
+    );
+  }
+
+  return { households: rows, pagination };
 }
 
 /**

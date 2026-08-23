@@ -1,9 +1,10 @@
 import { FriendshipStatus } from '@bge/database';
+import { paginationQuery } from '@bge/testing';
 import { firstValueFrom } from 'rxjs';
 import { FriendshipController } from './friendship.controller';
 import { FriendshipService } from './friendship.service';
 
-const PAGINATION = { offset: 0, limit: 10 } as never;
+const PAGINATION = paginationQuery({ limit: 10 });
 
 describe('FriendshipController (delegation)', () => {
   let controller: FriendshipController;

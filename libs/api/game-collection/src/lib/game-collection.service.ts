@@ -8,6 +8,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   CreateGameCollectionDto,
@@ -21,6 +22,22 @@ import {
 const pickDefined = <T extends object>(obj: T): Partial<T> =>
   Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as Partial<T>;
 
+/** Joined summary needed to render a collection list/detail without extra fetches. */
+const COLLECTION_INCLUDE = {
+  platformGame: {
+    select: {
+      id: true,
+      image: true,
+      thumbnail: true,
+      platform: { select: { id: true, name: true, slug: true } },
+      game: { select: { id: true, title: true, subtitle: true, image: true, thumbnail: true } },
+    },
+  },
+  release: { select: { id: true, editionName: true, releaseYear: true } },
+} satisfies Prisma.GameCollectionInclude;
+
+export type GameCollectionWithRelations = Prisma.GameCollectionGetPayload<{ include: typeof COLLECTION_INCLUDE }>;
+
 @Injectable()
 export class GameCollectionService {
   private readonly logger = new Logger(GameCollectionService.name);
@@ -30,50 +47,25 @@ export class GameCollectionService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  /** Joined summary needed to render a collection list/detail without extra fetches. */
-  private readonly collectionInclude = {
-    platformGame: {
-      select: {
-        id: true,
-        image: true,
-        thumbnail: true,
-        platform: { select: { id: true, name: true, slug: true } },
-        game: { select: { id: true, title: true, subtitle: true, image: true, thumbnail: true } },
-      },
-    },
-    release: { select: { id: true, editionName: true, releaseYear: true } },
-  } satisfies Prisma.GameCollectionInclude;
-
   /**
    * The acting user's own collection. Tombstoned (previously owned) entries are
    * excluded by default; `includeDeleted` adds them (delta sync), `deletedOnly`
    * is the resurrection view.
    */
-  async listOwn({
-    offset,
-    limit,
-    includeDeleted,
-    deletedOnly,
-    medium,
-    favorite,
-    updatedSince,
-  }: ListGameCollectionsQueryDto) {
+  async listOwn(query: ListGameCollectionsQueryDto) {
+    const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
     const userId = this.abilityService.getActingUserId();
 
-    return this.db.gameCollection.findMany({
-      where: {
-        userId,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
-        ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
-        ...(medium ? { medium } : {}),
-        ...(favorite !== undefined ? { favorite } : {}),
-        ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
-      },
-      include: this.collectionInclude,
-      orderBy: { updatedAt: 'desc' },
-      skip: offset,
-      take: limit || 20,
-    });
+    const where = {
+      userId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
+      ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
+      ...(medium ? { medium } : {}),
+      ...(favorite !== undefined ? { favorite } : {}),
+      ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+    } satisfies Prisma.GameCollectionWhereInput;
+
+    return this.paginate(where, query);
   }
 
   /**
@@ -82,27 +74,55 @@ export class GameCollectionService {
    * public scopes; an anonymous viewer (primed with no abilities) sees Public
    * entries only. Tombstones are never exposed through this view.
    */
-  async listForUser(targetUserId: string, { offset, limit, medium }: ListUserGameCollectionsQueryDto) {
+  async listForUser(targetUserId: string, query: ListUserGameCollectionsQueryDto) {
     // Anonymous actors have no ability surface yet (`resolveAbilitiesForActor`
     // throws for 'anonymous'; the middleware primes `[]` — see issue #68), so
     // the Public filter is applied explicitly here. When an anonymous ability
     // set lands, this branch collapses into the CASL path below.
     const isAnonymous = this.abilityService.getCurrentAbilities().length === 0;
 
-    return this.db.gameCollection.findMany({
-      where: {
-        userId: targetUserId,
-        deletedAt: null,
-        ...(medium ? { medium } : {}),
-        ...(isAnonymous
-          ? { visibility: Visibility.Public }
-          : { AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read) }),
-      },
-      include: this.collectionInclude,
-      orderBy: { updatedAt: 'desc' },
-      skip: offset,
-      take: limit || 20,
-    });
+    const where = {
+      userId: targetUserId,
+      deletedAt: null,
+      ...(query.medium ? { medium: query.medium } : {}),
+      ...(isAnonymous
+        ? { visibility: Visibility.Public }
+        : { AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read) }),
+    } satisfies Prisma.GameCollectionWhereInput;
+
+    return this.paginate(where, query);
+  }
+
+  /**
+   * One page of collection entries plus the total matching count for the
+   * response envelope (#230).
+   *
+   * REPEATABLE READ because Prisma's default batch isolation snapshots each
+   * statement separately, which can report fewer total rows than the page
+   * itself contains. The identical `where` keeps the count scoped to what the
+   * actor may see, and `id` breaks ties on `updatedAt` so a row cannot drift
+   * across a page boundary between requests.
+   */
+  private async paginate(
+    where: Prisma.GameCollectionWhereInput,
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedRows<GameCollectionWithRelations>> {
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.gameCollection.findMany({
+          where,
+          include: COLLECTION_INCLUDE,
+          orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.gameCollection.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   /** A single entry the acting user may read (owner sees own tombstones). */
@@ -112,7 +132,7 @@ export class GameCollectionService {
         id,
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
       },
-      include: this.collectionInclude,
+      include: COLLECTION_INCLUDE,
     });
 
     if (!collection) {
@@ -153,7 +173,7 @@ export class GameCollectionService {
         where: { userId_platformGameId_medium: { userId, platformGameId, medium } },
         create: { userId, platformGameId, medium, ...provided, lastUpdated },
         update: { ...provided, deletedAt: null, deleteReason: null, lastUpdated },
-        include: this.collectionInclude,
+        include: COLLECTION_INCLUDE,
       });
     } catch (error) {
       this.logger.error(`Error adding platform game ${platformGameId} to collection for user ${userId}`, error);
@@ -202,7 +222,7 @@ export class GameCollectionService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
         },
         data: { ...data, lastUpdated: new Date() },
-        include: this.collectionInclude,
+        include: COLLECTION_INCLUDE,
       });
     } catch (error) {
       throw this.mapMissingToNotFound(error, id);
@@ -228,7 +248,7 @@ export class GameCollectionService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
         },
         data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },
-        include: this.collectionInclude,
+        include: COLLECTION_INCLUDE,
       });
     } catch (error) {
       throw this.mapMissingToNotFound(error, id);

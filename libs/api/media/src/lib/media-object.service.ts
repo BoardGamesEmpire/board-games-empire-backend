@@ -222,8 +222,12 @@ export class MediaObjectService {
   async list(pagination: PaginationQueryDto) {
     return this.db.mediaObject.findMany({
       where: { AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
-      skip: pagination.offset,
-      take: pagination.limit ?? 10, // ?? not ||: a real limit of 0 isn't silently bumped to 10
+      // A total order, `id` breaking ties on a shared `createdAt`. Without it
+      // the database is free to return rows in any order at all, so page 2 can
+      // repeat a row from page 1 and silently omit another (#230).
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: pagination.skip,
+      take: pagination.pageSize,
     });
   }
 

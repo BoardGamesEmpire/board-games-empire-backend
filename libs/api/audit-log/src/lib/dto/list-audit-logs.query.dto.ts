@@ -3,7 +3,7 @@ import { CappedPaginationQueryDto } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsDate, IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
-import { AUDIT_LOG_MAX_PAGE_SIZE } from '../constants/audit-log.constants';
+import { AUDIT_LOG_DEFAULT_PAGE_SIZE, AUDIT_LOG_MAX_PAGE_SIZE } from '../constants/audit-log.constants';
 
 const ACTOR_KINDS = [
   'user',
@@ -25,7 +25,10 @@ const EVENT_SOURCES = ['http', 'grpc', 'queue', 'ws', 'system'] as const satisfi
  * instead of quietly returning everything. (Enum filters are already guarded by
  * `@IsIn`, which rejects `''`.)
  */
-export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(AUDIT_LOG_MAX_PAGE_SIZE) {
+export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(
+  AUDIT_LOG_MAX_PAGE_SIZE,
+  AUDIT_LOG_DEFAULT_PAGE_SIZE,
+) {
   @ApiPropertyOptional({ description: 'Filter by domain model name (ResourceType value, e.g. "Event")' })
   @IsOptional()
   @IsString()

@@ -4,6 +4,7 @@ export * from './game.fixture.js';
 export * from './household.fixture.js';
 export * from './invite.fixture.js';
 export * from './job.fixture.js';
+export * from './pagination.fixture.js';
 export * from './permission.fixture.js';
 export * from './platform.fixture.js';
 export * from './role.fixture.js';
