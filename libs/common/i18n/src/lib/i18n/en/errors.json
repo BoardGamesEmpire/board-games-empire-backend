@@ -233,6 +233,8 @@
     "unit_config_required": "Plugin '{slug}' requires household configuration before it can be enabled — supply a config document with the enable request",
     "unit_plugin_changed": "Plugin '{slug}' changed while your request was in flight — retry to act on the current version",
     "feature_state_not_found": "Plugin '{slug}' is not installed",
-    "feature_state_tombstoned": "Plugin '{slug}' was uninstalled and has no feature state"
+    "feature_state_tombstoned": "Plugin '{slug}' was uninstalled and has no feature state",
+    "inventory_not_found": "Plugin '{slug}' is not installed",
+    "inventory_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again"
   }
 }

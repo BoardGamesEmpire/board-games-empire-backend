@@ -5,16 +5,19 @@ import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginGrantService,
+  PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
-import { NoCache } from '@bge/shared';
-import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, UseFilters } from '@nestjs/common';
+import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { DecidePluginGrantDto } from './dto';
+import { DecidePluginGrantDto, PluginUnitInventoryEntryDto } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+
+const PaginatedUserPluginsResponse = PaginatedResponseDto(PluginUnitInventoryEntryDto, 'plugins');
 
 /**
  * User-scope plugin consent (#59 Phase C4, #322): each user's own grant
@@ -41,8 +44,35 @@ export class UserPluginsController {
     private readonly presentation: PluginConsentPresentationService,
     private readonly units: PluginUnitLifecycleService,
     private readonly featureState: PluginFeatureStateService,
+    private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
   ) {}
+
+  // ─── Installed-plugin inventory for the acting user (#354) ────────────────
+
+  @ApiOperation({
+    summary: 'List the plugins you can enable, with your own enablement state',
+    description:
+      'Every installed plugin, narrowed by no scope at all: user-scope consent is legal at any plugin scope ' +
+      '(#225), so unlike the household axis there is no plugin you cannot be anchored on. `unit.anchored` is ' +
+      'false until your first Granted decision creates the anchor — which is why an empty enablement history ' +
+      'shows a populated list of not-yet-enabled plugins rather than nothing. Carries no version, provenance or ' +
+      'install history, and never tombstones: this surface exists to decide your own participation, not to ' +
+      'inspect the server.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PaginatedUserPluginsResponse })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'API keys cannot read a user consent surface' })
+  // Localized body; the response cache keys without the resolved locale (#358).
+  @NoCache()
+  @Get()
+  list(@Query() query: DefaultPaginationQueryDto) {
+    return from(
+      this.inventory.listForUser(this.selfUserId(), query, {
+        locale: this.auditContext.getLocale() ?? undefined,
+      }),
+    ).pipe(map((page) => paginated('plugins', page, query)));
+  }
 
   @ApiOperation({
     summary: 'Record an own-user consent decision for one requested permission',

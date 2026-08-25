@@ -6,18 +6,29 @@ import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginGrantService,
+  PluginInventoryService,
   PluginLifecycleService,
   PluginUpdateNoPendingError,
   PluginUpdateService,
 } from '@bge/plugin';
-import { NoCache } from '@bge/shared';
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, UseFilters, UseGuards } from '@nestjs/common';
+import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { ApprovePluginUpdateDto, DecidePluginGrantDto, UninstallPluginDto, UpdatePluginConfigDto } from './dto';
+import {
+  ApprovePluginUpdateDto,
+  DecidePluginGrantDto,
+  ListPluginsQueryDto,
+  PluginInventoryDetailResponseDto,
+  PluginInventoryEntryDto,
+  UninstallPluginDto,
+  UpdatePluginConfigDto,
+} from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+
+const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, 'plugins');
 
 /**
  * Server-level plugin lifecycle (#59 Phase C4, #320): the admin's
@@ -46,8 +57,39 @@ export class PluginsController {
     private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
     private readonly featureState: PluginFeatureStateService,
+    private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
   ) {}
+
+  // ─── Installed-plugin inventory (#354) ────────────────────────────────────
+
+  @ApiOperation({
+    summary: 'List the plugins installed on this server',
+    description:
+      "The plugin management screen's first read, and the only plugin read that answers before a slug is known: " +
+      'installed set, server enablement, restart-required and pending-update state, and typed provenance ' +
+      '(bundled vs installed). Paginated per #230 — `?page=` (1-based) and `?limit=`, with a `pagination` ' +
+      'envelope. Tombstoned plugins are excluded unless `?includeUninstalled=true`. A plugin whose stored ' +
+      'manifest cannot be read is still listed, marked `manifestUnreadable` with its localized fields null, ' +
+      'rather than failing the page.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PaginatedPluginsResponse })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  // Localized body, and the response cache keys without the resolved locale
+  // (#358) — the same reason every other localized plugin read is uncached.
+  // It is also read immediately after the lifecycle writes that change it.
+  @NoCache()
+  @Get()
+  list(@Query() query: ListPluginsQueryDto) {
+    return from(
+      this.inventory.listForServer(query, {
+        includeUninstalled: query.includeUninstalled,
+        locale: this.auditContext.getLocale() ?? undefined,
+      }),
+    ).pipe(map((page) => paginated('plugins', page, query)));
+  }
 
   // ─── Grant decisions + consent presentation (#322): Server scope ──────────
 
@@ -327,6 +369,38 @@ export class PluginsController {
     return from(
       this.featureState.resolveForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
     ).pipe(map((featureState) => ({ featureState })));
+  }
+
+  // ─── Single installed plugin (#354) ───────────────────────────────────────
+  // Declared LAST deliberately. Every other route on this controller lives
+  // under `:slug/<literal>`, so none can be shadowed by a one-segment
+  // parametric path today — but a future single-segment LITERAL GET (say
+  // `@Get('summary')`) declared after this one would be swallowed by `:slug`
+  // and never reached. Keeping the catch-all at the bottom makes that
+  // ordering structural instead of a comment somebody has to find.
+
+  @ApiOperation({
+    summary: 'One installed plugin, with its manifest detail',
+    description:
+      'The list entry plus what a page has no room for: the effective execution mode and the localized ' +
+      'features[] the plugin declares. A tombstoned plugin is 410 here unconditionally — the ' +
+      '`includeUninstalled` flag is a LIST filter and has no counterpart on this route, because a flag able to ' +
+      'turn a 410 into a 200 would make one route report two statuses for identical state. Unlike the list, a ' +
+      'stored manifest that cannot be read is a 500: the unreadable row is the entire response, and there is ' +
+      'nothing left worth serving.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PluginInventoryDetailResponseDto })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @NoCache()
+  @Get(':slug')
+  getBySlug(@Param('slug') slug: string) {
+    return from(this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined)).pipe(
+      map((plugin) => ({ plugin })),
+    );
   }
 
   /**

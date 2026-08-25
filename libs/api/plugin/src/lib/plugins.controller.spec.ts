@@ -1,12 +1,14 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
+import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
   PluginGrantService,
+  PluginInventoryService,
   PluginLifecycleService,
   PluginUpdateService,
   UpdateEscalationComparison,
@@ -50,6 +52,11 @@ const ACTIVE_PRESENTATION = {
   checks: [],
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as never;
+const INVENTORY_PAGE = {
+  rows: [{ id: 'plugin-1', slug: 'demo-sink', displayName: 'Demo Sink', manifestUnreadable: false }],
+  total: 1,
+};
+const DETAIL = { id: 'plugin-1', slug: 'demo-sink', executionMode: 'InProcess', features: [] } as never;
 const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: SERVER_PLUGIN_UNIT,
@@ -77,6 +84,7 @@ describe('PluginsController (delegation)', () => {
   >;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
+  let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
 
@@ -109,6 +117,10 @@ describe('PluginsController (delegation)', () => {
     };
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
+    inventory = {
+      listForServer: jest.fn().mockResolvedValue(INVENTORY_PAGE as never),
+      getBySlug: jest.fn().mockResolvedValue(DETAIL),
+    };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
     controller = new PluginsController(
@@ -118,6 +130,7 @@ describe('PluginsController (delegation)', () => {
       grants as never,
       presentation as never,
       featureState as never,
+      inventory as never,
       auditContext as never,
     );
   });
@@ -334,12 +347,117 @@ describe('PluginsController (delegation)', () => {
     });
   });
 
-  describe('route registration', () => {
-    // Every route lives under `:slug/<literal>`, so no parametric route can
-    // shadow another and declaration order carries no constraint TODAY. The
-    // paths and verbs are pinned so a future plain `:slug` or literal
-    // sibling route must revisit ordering deliberately.
+  describe('installed-plugin inventory (#354)', () => {
+    const query = (overrides: Record<string, unknown> = {}) =>
+      ({ page: 1, limit: 25, skip: 0, pageSize: 25, ...overrides }) as never;
+
+    it('wraps the rows in the #230 envelope, echoing the paging the read used (D-CD)', async () => {
+      const result = await firstValueFrom(controller.list(query({ page: 2, skip: 25 })));
+
+      expect(result).toEqual({
+        plugins: INVENTORY_PAGE.rows,
+        pagination: { page: 2, limit: 25, total: 1, totalPages: 1, hasMore: false },
+      });
+    });
+
+    it('passes the query straight through as the paging, so skip and the echoed limit cannot disagree', async () => {
+      await firstValueFrom(controller.list(query({ page: 3, skip: 50 })));
+
+      expect(inventory.listForServer).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 50, pageSize: 25 }),
+        expect.anything(),
+      );
+    });
+
+    it('forwards the tombstone opt-in and the CLS locale (D-CH)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      await firstValueFrom(controller.list(query({ includeUninstalled: true })));
+
+      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), {
+        includeUninstalled: true,
+        locale: 'de',
+      });
+    });
+
+    it('an omitted opt-in stays undefined — the service owns the default', async () => {
+      await firstValueFrom(controller.list(query()));
+
+      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), {
+        includeUninstalled: undefined,
+        locale: undefined,
+      });
+    });
+
+    it('getBySlug takes no tombstone flag — 410 is unconditional there (D-CH)', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.getBySlug('demo-sink'));
+
+      expect(inventory.getBySlug).toHaveBeenCalledWith('demo-sink', 'de');
+      expect(result).toEqual({ plugin: DETAIL });
+    });
+  });
+
+  // The controller specs instantiate the class directly, so a dropped
+  // @CheckPolicies would change nothing they assert. These read the decorator
+  // metadata instead: without them, deleting the `read:plugin` gate from a
+  // route that serves installedSha256/installedFromUrl/installedAt would pass
+  // the whole suite.
+  describe('policy gates', () => {
+    const policiesFor = (handler: keyof PluginsController) =>
+      Reflect.getMetadata(CHECK_POLICIES_KEY, PluginsController.prototype[handler]) as
+        | Array<(ability: AppAbility) => boolean>
+        | undefined;
+
     it.each([
+      ['list', Action.read],
+      ['getBySlug', Action.read],
+      ['featureStates', Action.read],
+      ['consentPresentation', Action.read],
+      ['pendingUpdate', Action.read],
+      ['decideGrant', Action.manage],
+      ['enable', Action.manage],
+      ['disable', Action.manage],
+      ['updateConfig', Action.manage],
+      ['uninstall', Action.manage],
+      ['approveUpdate', Action.manage],
+      ['rejectUpdate', Action.manage],
+    ] as const)('%s gates on %s:Plugin', (handler, action) => {
+      const handlers = policiesFor(handler);
+      expect(handlers).toHaveLength(1);
+
+      const can = jest.fn().mockReturnValue(true);
+      handlers?.[0]({ can } as unknown as AppAbility);
+
+      expect(can).toHaveBeenCalledWith(action, ResourceType.Plugin);
+    });
+
+    it('attaches PoliciesGuard at the class level, so every route above is actually evaluated', () => {
+      const guards = Reflect.getMetadata('__guards__', PluginsController) as unknown[] | undefined;
+
+      expect(guards?.length).toBeGreaterThan(0);
+    });
+
+    it('every route carries a gate — a new one cannot ship ungated by omission', () => {
+      const routes = Object.getOwnPropertyNames(PluginsController.prototype).filter(
+        (name) =>
+          name !== 'constructor' &&
+          Reflect.getMetadata('path', PluginsController.prototype[name as never]) !== undefined,
+      );
+
+      expect(routes.filter((name) => policiesFor(name as keyof PluginsController) === undefined)).toEqual([]);
+    });
+  });
+
+  describe('route registration', () => {
+    // `:slug` now exists as a one-segment parametric GET, so ordering DOES
+    // carry a constraint: it is declared last, after every `:slug/<literal>`
+    // route, and a future single-segment LITERAL route (`@Get('summary')`)
+    // must go BEFORE it or be swallowed. The handler-order assertion below
+    // is what forces that decision to be made rather than discovered.
+    it.each([
+      ['list', '/', RequestMethod.GET],
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
@@ -350,6 +468,7 @@ describe('PluginsController (delegation)', () => {
       ['rejectUpdate', ':slug/update/reject', RequestMethod.POST],
       ['pendingUpdate', ':slug/update/pending', RequestMethod.GET],
       ['featureStates', ':slug/features', RequestMethod.GET],
+      ['getBySlug', ':slug', RequestMethod.GET],
     ] as const)('binds %s to %s', (handler, path, method) => {
       expect(Reflect.getMetadata('path', PluginsController.prototype[handler])).toBe(path);
       expect(Reflect.getMetadata('method', PluginsController.prototype[handler])).toBe(method);
@@ -363,6 +482,7 @@ describe('PluginsController (delegation)', () => {
       );
 
       expect(handlers).toEqual([
+        'list',
         'decideGrant',
         'consentPresentation',
         'enable',
@@ -373,6 +493,9 @@ describe('PluginsController (delegation)', () => {
         'rejectUpdate',
         'pendingUpdate',
         'featureStates',
+        // Last, and it must stay last: a one-segment `:slug` declared ahead
+        // of a one-segment literal route would shadow it.
+        'getBySlug',
       ]);
     });
   });

@@ -4,6 +4,7 @@ import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginGrantService,
+  PluginInventoryService,
   PluginLifecycleService,
   PluginUnitLifecycleService,
   PluginUpdateService,
@@ -35,6 +36,7 @@ import { PluginsApiModule } from './plugins-api.module';
     { provide: PluginConsentPresentationService, useValue: {} },
     { provide: PluginUnitLifecycleService, useValue: {} },
     { provide: PluginFeatureStateService, useValue: {} },
+    { provide: PluginInventoryService, useValue: {} },
   ],
   exports: [
     I18nService,
@@ -45,6 +47,7 @@ import { PluginsApiModule } from './plugins-api.module';
     PluginConsentPresentationService,
     PluginUnitLifecycleService,
     PluginFeatureStateService,
+    PluginInventoryService,
   ],
 })
 class StubGlobalsModule {}

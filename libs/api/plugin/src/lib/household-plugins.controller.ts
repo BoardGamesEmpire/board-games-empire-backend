@@ -6,9 +6,10 @@ import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginGrantService,
+  PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
-import { NoCache } from '@bge/shared';
+import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
 import { subject } from '@casl/ability';
 import {
   Body,
@@ -19,6 +20,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseFilters,
   UseGuards,
 } from '@nestjs/common';
@@ -26,8 +28,15 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTag
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { DecidePluginGrantDto, EnableHouseholdPluginDto, UpdatePluginConfigDto } from './dto';
+import {
+  DecidePluginGrantDto,
+  EnableHouseholdPluginDto,
+  PluginHouseholdInventoryEntryDto,
+  UpdatePluginConfigDto,
+} from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+
+const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdInventoryEntryDto, 'plugins');
 
 /**
  * Household-scope plugin consent (#59 Phase C4, #322): the household
@@ -59,8 +68,43 @@ export class HouseholdPluginsController {
     private readonly presentation: PluginConsentPresentationService,
     private readonly units: PluginUnitLifecycleService,
     private readonly featureState: PluginFeatureStateService,
+    private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
   ) {}
+
+  // ─── Installed-plugin inventory for this household (#354) ─────────────────
+
+  @ApiOperation({
+    summary: 'List the plugins this household can enable, with its own enablement state',
+    description:
+      "Driven from the installed set, not from this household's enablement rows: every plugin the household axis " +
+      'admits appears, with `unit.anchored` false where no row exists yet — so a household that has enabled ' +
+      'nothing still sees what it could enable. A plugin whose scope no longer admits household enablement but ' +
+      'which this household still holds a row for is listed too, flagged `scopeOrphaned` (see #369): it is ' +
+      'enabled and serving nothing, which is exactly what an admin needs to see. Tombstoned plugins never ' +
+      'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +
+      'flag to admit them.',
+  })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiResponse({ status: Http.Ok, type: PaginatedHouseholdPluginsResponse })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
+  // Localized body; the response cache keys without the resolved locale (#358).
+  @NoCache()
+  @Get()
+  list(@Param('householdId') householdId: string, @Query() query: DefaultPaginationQueryDto) {
+    // The instance half of the D-AZ gate. This read has no service seam to
+    // re-verify authority, so without it a type-level `can()` would serve one
+    // household's enablement states to another household's admin.
+    this.assertHouseholdScope(Action.read, householdId);
+
+    return from(
+      this.inventory.listForHousehold(householdId, query, {
+        locale: this.auditContext.getLocale() ?? undefined,
+      }),
+    ).pipe(map((page) => paginated('plugins', page, query)));
+  }
 
   @ApiOperation({
     summary: 'Record a household-scope consent decision for one requested permission',

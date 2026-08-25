@@ -1,11 +1,13 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
+import { CHECK_POLICIES_KEY } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
   PluginGrantService,
+  PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { ForbiddenException, RequestMethod } from '@nestjs/common';
@@ -23,6 +25,10 @@ const PRESENTATION = {
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'up-1', userId: USER_ID, pluginId: 'plugin-1', enabled: true } as never;
+const INVENTORY_PAGE = {
+  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false } }],
+  total: 1,
+};
 const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: { scopeType: 'User', userId: USER_ID },
@@ -37,6 +43,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let presentation: jest.Mocked<Pick<PluginConsentPresentationService, 'presentForUnitBySlug'>>;
   let units: jest.Mocked<Pick<PluginUnitLifecycleService, 'enableUser' | 'disableUser'>>;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
+  let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForUser'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale' | 'getActor'>>;
 
   beforeEach(() => {
@@ -47,6 +54,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       disableUser: jest.fn().mockResolvedValue(UNIT_ROW),
     };
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
+    inventory = { listForUser: jest.fn().mockResolvedValue(INVENTORY_PAGE as never) };
     auditContext = {
       getLocale: jest.fn().mockReturnValue(null),
       getActor: jest.fn().mockReturnValue({ kind: 'user', userId: USER_ID } as Actor),
@@ -56,6 +64,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       presentation as never,
       units as never,
       featureState as never,
+      inventory as never,
       auditContext as never,
     );
   });
@@ -196,10 +205,78 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     });
   });
 
+  describe('installed-plugin inventory (#354)', () => {
+    const query = (overrides: Record<string, unknown> = {}) =>
+      ({ page: 1, limit: 25, skip: 0, pageSize: 25, ...overrides }) as never;
+
+    it('resolves the user from CLS and wraps the rows in the #230 envelope', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.list(query()));
+
+      expect(inventory.listForUser).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ skip: 0, pageSize: 25 }), {
+        includeUninstalled: undefined,
+        locale: 'de',
+      });
+      expect(result).toEqual({
+        plugins: INVENTORY_PAGE.rows,
+        pagination: { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // The actor-KIND floor, not a permission check: with no seed for this
+    // axis there is nothing for PoliciesGuard to clamp an API key against, so
+    // a key acting as its owner must not read the owner's consent surface.
+    it('refuses a non-user actor before touching the service', () => {
+      auditContext.getActor.mockReturnValue({ kind: 'apiKey', apiKeyId: 'key-1' } as unknown as Actor);
+
+      expect(() => controller.list(query())).toThrow(ForbiddenException);
+      expect(inventory.listForUser).not.toHaveBeenCalled();
+    });
+  });
+
+  // This axis has no permission seed (D-BA seeded only the server and
+  // household pairs), so PoliciesGuard is deliberately absent and the gate is
+  // the actor KIND. Pinned both ways: no route may quietly acquire a CASL gate
+  // that would have nothing to clamp, and none may skip the kind check.
+  describe('gate shape', () => {
+    const routes = () =>
+      Object.getOwnPropertyNames(UserPluginsController.prototype).filter(
+        (name) =>
+          name !== 'constructor' &&
+          Reflect.getMetadata('path', UserPluginsController.prototype[name as never]) !== undefined,
+      );
+
+    it('declares no CASL policies and no class-level PoliciesGuard', () => {
+      expect(Reflect.getMetadata('__guards__', UserPluginsController)).toBeUndefined();
+
+      for (const name of routes()) {
+        expect(Reflect.getMetadata(CHECK_POLICIES_KEY, UserPluginsController.prototype[name as never])).toBeUndefined();
+      }
+    });
+
+    it('every route refuses a non-user actor', () => {
+      for (const name of routes()) {
+        auditContext.getActor.mockReturnValue({ kind: 'apiKey', userId: USER_ID, apiKeyId: 'k' } as unknown as Actor);
+
+        // Each handler takes (slug) or (slug, dto) or (query); the kind check
+        // runs before any of them are used, so the arguments are immaterial.
+        expect(() =>
+          (controller[name as keyof UserPluginsController] as (...args: unknown[]) => unknown).call(
+            controller,
+            'demo-sink',
+            { permissionSlug: 'read:public_content', status: PluginGrantStatus.Granted },
+          ),
+        ).toThrow(ForbiddenException);
+      }
+    });
+  });
+
   describe('route registration', () => {
     // Same `:slug/<literal>` discipline as PluginsController. #323 extends
     // this class; its routes join this list.
     it.each([
+      ['list', '/', RequestMethod.GET],
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
@@ -217,7 +294,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
           Reflect.getMetadata('path', UserPluginsController.prototype[name as never]) !== undefined,
       );
 
-      expect(handlers).toEqual(['decideGrant', 'consentPresentation', 'enable', 'disable', 'featureStates']);
+      expect(handlers).toEqual(['list', 'decideGrant', 'consentPresentation', 'enable', 'disable', 'featureStates']);
     });
   });
 });

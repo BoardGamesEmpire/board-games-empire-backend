@@ -1,12 +1,13 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { Action, PluginGrantScope, PluginGrantStatus } from '@bge/database';
-import type { AppAbility } from '@bge/permissions';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
+import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
   PluginFeatureStateService,
   PluginFeatureUnitState,
   PluginGrantService,
+  PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
@@ -23,6 +24,10 @@ const PRESENTATION = {
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
+const INVENTORY_PAGE = {
+  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false }, scopeOrphaned: false }],
+  total: 1,
+};
 const FEATURE_STATE = {
   plugin: { id: 'plugin-1', slug: 'demo-sink' },
   unit: { scopeType: 'Household', householdId: 'hh-1' },
@@ -39,6 +44,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     Pick<PluginUnitLifecycleService, 'enableHousehold' | 'disableHousehold' | 'updateHouseholdConfig'>
   >;
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
+  let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForHousehold'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
   let can: jest.Mock;
@@ -52,6 +58,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       updateHouseholdConfig: jest.fn().mockResolvedValue(UNIT_ROW),
     };
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
+    inventory = { listForHousehold: jest.fn().mockResolvedValue(INVENTORY_PAGE as never) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     can = jest.fn().mockReturnValue(true);
     abilityService = createMockAbilityService();
@@ -64,6 +71,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       presentation as never,
       units as never,
       featureState as never,
+      inventory as never,
       auditContext as never,
     );
   });
@@ -233,11 +241,88 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     });
   });
 
+  describe('installed-plugin inventory (#354)', () => {
+    const query = (overrides: Record<string, unknown> = {}) =>
+      ({ page: 1, limit: 25, skip: 0, pageSize: 25, ...overrides }) as never;
+
+    it('scopes the read to the route household and wraps it in the #230 envelope', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.list('hh-1', query()));
+
+      expect(inventory.listForHousehold).toHaveBeenCalledWith(
+        'hh-1',
+        expect.objectContaining({ skip: 0, pageSize: 25 }),
+        { includeUninstalled: undefined, locale: 'de' },
+      );
+      expect(result).toEqual({
+        plugins: INVENTORY_PAGE.rows,
+        pagination: { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // The read has no service seam to re-verify authority, so the instance
+    // gate is the only thing between an admin of household A and household
+    // B's enablement states.
+    it('refuses a household the caller has no instance-level read on, before touching the service', async () => {
+      can.mockReturnValue(false);
+
+      expect(() => controller.list('hh-2', query())).toThrow(ForbiddenException);
+      expect(inventory.listForHousehold).not.toHaveBeenCalled();
+    });
+
+    it('checks the instance gate against THIS household as a HouseholdPlugin subject', async () => {
+      await firstValueFrom(controller.list('hh-1', query()));
+
+      expect(can).toHaveBeenCalledWith(Action.read, expect.objectContaining({ householdId: 'hh-1' }));
+    });
+  });
+
+  // Read from the decorators, not the instance: these specs construct the
+  // controller directly, so a deleted @CheckPolicies would be invisible to
+  // every other test here. The instance gate (assertHouseholdScope) is
+  // asserted per-route above; this covers the coarse CASL half it layers on.
+  describe('policy gates', () => {
+    const policiesFor = (handler: string) =>
+      Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdPluginsController.prototype[handler as never]) as
+        | Array<(ability: AppAbility) => boolean>
+        | undefined;
+
+    it.each([
+      ['list', Action.read],
+      ['consentPresentation', Action.read],
+      ['featureStates', Action.read],
+      ['decideGrant', Action.manage],
+      ['enable', Action.manage],
+      ['disable', Action.manage],
+      ['updateConfig', Action.manage],
+    ] as const)('%s gates on %s:HouseholdPlugin', (handler, action) => {
+      const handlers = policiesFor(handler);
+      expect(handlers).toHaveLength(1);
+
+      const gate = jest.fn().mockReturnValue(true);
+      handlers?.[0]({ can: gate } as unknown as AppAbility);
+
+      expect(gate).toHaveBeenCalledWith(action, ResourceType.HouseholdPlugin);
+    });
+
+    it('every route carries a gate — a new one cannot ship ungated by omission', () => {
+      const routes = Object.getOwnPropertyNames(HouseholdPluginsController.prototype).filter(
+        (name) =>
+          name !== 'constructor' &&
+          Reflect.getMetadata('path', HouseholdPluginsController.prototype[name as never]) !== undefined,
+      );
+
+      expect(routes.filter((name) => policiesFor(name) === undefined)).toEqual([]);
+    });
+  });
+
   describe('route registration', () => {
     // Same `:slug/<literal>` discipline as PluginsController — pinned so a
     // future plain `:slug` or literal sibling must revisit ordering
     // deliberately. #323 extends this class; its routes join this list.
     it.each([
+      ['list', '/', RequestMethod.GET],
       ['decideGrant', ':slug/grants', RequestMethod.POST],
       ['consentPresentation', ':slug/consent', RequestMethod.GET],
       ['enable', ':slug/enable', RequestMethod.POST],
@@ -257,6 +342,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       );
 
       expect(handlers).toEqual([
+        'list',
         'decideGrant',
         'consentPresentation',
         'enable',
