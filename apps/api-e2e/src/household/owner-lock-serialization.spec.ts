@@ -1,8 +1,14 @@
 import { SystemRole } from '@bge/database';
-import { expectBlocked, expectNotBlocked, withBarrier, type Barrier } from '../support/lock-barrier';
+import { expectBlocked, expectNotBlocked, withBarrier, type BarrierConnection } from '../support/lock-barrier';
 import { readShippedSql } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeHouseholdWithRoles, memberWithRole, type LockFixture } from './lock-fixtures';
+import {
+  arrangeHouseholdWithRoles,
+  FK_PARENT_LOCK,
+  memberWithRole,
+  SOFT_DELETE_HOUSEHOLD,
+  type LockFixture,
+} from './lock-fixtures';
 
 /**
  * The mechanics half of #239: what the household's role locks actually do
@@ -116,12 +122,16 @@ describe('household role-transition locking', () => {
   };
 
   /** What `transferOwnership` writes: promote the target, demote the actor. */
-  const writeTransfer = async (barrier: Barrier, promotedMemberId: string, demotedMemberId: string): Promise<void> => {
-    await barrier.holder.query('UPDATE household_roles SET role_id = $1 WHERE household_member_id = $2', [
+  const writeTransfer = async (
+    connection: BarrierConnection,
+    promotedMemberId: string,
+    demotedMemberId: string,
+  ): Promise<void> => {
+    await connection.query('UPDATE household_roles SET role_id = $1 WHERE household_member_id = $2', [
       roleId(SystemRole.HouseholdOwner),
       promotedMemberId,
     ]);
-    await barrier.holder.query('UPDATE household_roles SET role_id = $1 WHERE household_member_id = $2', [
+    await connection.query('UPDATE household_roles SET role_id = $1 WHERE household_member_id = $2', [
       roleId(SystemRole.HouseholdAdmin),
       demotedMemberId,
     ]);
@@ -266,7 +276,7 @@ describe('household role-transition locking', () => {
 
         await holder.begin();
         await holder.query(ownerLock.text, ownerParams(fixture.householdId));
-        await writeTransfer(barrier, member.memberId, owner.memberId);
+        await writeTransfer(holder, member.memberId, owner.memberId);
 
         await waiter.begin();
         const pending = waiter.issue<{ household_member_id: string }>(
@@ -313,7 +323,7 @@ describe('household role-transition locking', () => {
         await holder.begin();
         await holder.query(transitionLock.text, [fixture.householdId]);
         await holder.query(ownerLock.text, ownerParams(fixture.householdId));
-        await writeTransfer(barrier, member.memberId, owner.memberId);
+        await writeTransfer(holder, member.memberId, owner.memberId);
 
         await waiter.begin();
         const pending = waiter.issue<{ id: string }>(
@@ -347,11 +357,7 @@ describe('household role-transition locking', () => {
         await holder.query(transitionLock.text, [fixture.householdId]);
 
         await waiter.begin();
-        const pending = waiter.issue<{ id: string }>(
-          'UPDATE households SET deleted_at = now(), updated_at = now() WHERE id = $1 RETURNING id',
-          [fixture.householdId],
-          'the soft-delete',
-        );
+        const pending = waiter.issue<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [fixture.householdId], 'the soft-delete');
 
         await expectBlocked(barrier, pending);
         await holder.commit();
@@ -378,7 +384,7 @@ describe('household role-transition locking', () => {
 
         await waiter.begin();
         const pending = waiter.issue<{ id: string }>(
-          'SELECT h.id FROM households h WHERE h.id = $1 FOR KEY SHARE',
+          FK_PARENT_LOCK,
           [fixture.householdId],
           "a member insert's implicit parent lock",
         );

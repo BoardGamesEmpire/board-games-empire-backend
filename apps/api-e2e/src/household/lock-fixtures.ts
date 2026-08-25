@@ -3,8 +3,8 @@ import type { HouseholdRoleName } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 
 /**
- * Row arrangement for the LOCK MECHANICS specs (#239), which need real rows to
- * contend over and nothing else.
+ * Rows and probe statements shared by the LOCK MECHANICS specs (#239), which
+ * need something real to contend over and nothing else.
  *
  * Deliberately not `@bge/testing-e2e`'s `createHouseholdWithMembers`: that
  * factory takes `SessionActor`s, because every suite it serves goes on to make
@@ -16,6 +16,27 @@ import { randomUUID } from 'node:crypto';
  *
  * The HTTP race spec in this same folder uses the real factories, as it must.
  */
+/**
+ * What `deleteHousehold` does to a household row, as a statement a barrier can
+ * hold open. Prisma writes `SET deleted_at = $1, updated_at = $2`; what matters
+ * for every lock question here is that both columns are non-key, which is what
+ * makes the write a `FOR NO KEY UPDATE`.
+ *
+ * Defined once because two suites probe against it — the share lock must block
+ * it, the role-transition lock must block it — and a copy that drifted would
+ * change what one of them proves without failing the other.
+ */
+export const SOFT_DELETE_HOUSEHOLD =
+  'UPDATE households SET deleted_at = now(), updated_at = now() WHERE id = $1 RETURNING id';
+
+/**
+ * The lock a `household_members` insert takes on its parent row implicitly,
+ * through the foreign key. Stated explicitly so a spec can ask what that mode
+ * does — it is the mode that does NOT close the admission race, and the one a
+ * role transition deliberately leaves unblocked.
+ */
+export const FK_PARENT_LOCK = 'SELECT h.id FROM households h WHERE h.id = $1 FOR KEY SHARE';
+
 export interface LockFixtureMember {
   readonly memberId: string;
   readonly userId: string;

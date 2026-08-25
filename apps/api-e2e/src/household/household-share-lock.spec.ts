@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { expectBlocked, expectNotBlocked, withBarrier } from '../support/lock-barrier';
 import { readShippedSql } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { arrangeEmptyHousehold } from './lock-fixtures';
+import { arrangeEmptyHousehold, FK_PARENT_LOCK, SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**
  * `lockExistingHousehold`'s share lock (#276), under #239's 2026-08-10
@@ -40,17 +40,6 @@ describe('household share lock (FOR SHARE)', () => {
     after: 'lockExistingHousehold',
     matching: /FOR SHARE/,
   });
-
-  /**
-   * Stand-in for `deleteHousehold`'s soft delete. Prisma writes
-   * `SET deleted_at = $1, updated_at = $2`; what matters for the lock is that
-   * every column it touches is a non-key column, which is what makes it a
-   * `FOR NO KEY UPDATE` — the weaker mode the FK fails to block.
-   */
-  const SOFT_DELETE = 'UPDATE households SET deleted_at = now(), updated_at = now() WHERE id = $1 RETURNING id';
-
-  /** What a member insert takes on the parent row, stated explicitly. */
-  const FK_STYLE_LOCK = 'SELECT h.id FROM households h WHERE h.id = $1 FOR KEY SHARE';
 
   let db: TestDatabase;
 
@@ -96,7 +85,7 @@ describe('household share lock (FOR SHARE)', () => {
       await expect(holder.query(shareLock.text, [householdId])).resolves.toHaveLength(1);
 
       await waiter.begin();
-      const pending = waiter.issue<{ id: string }>(SOFT_DELETE, [householdId], 'the soft-delete');
+      const pending = waiter.issue<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [householdId], 'the soft-delete');
 
       await expectBlocked(barrier, pending);
 
@@ -126,7 +115,7 @@ describe('household share lock (FOR SHARE)', () => {
       const { holder, waiter } = barrier;
 
       await holder.begin();
-      await expect(holder.query<{ id: string }>(SOFT_DELETE, [householdId])).resolves.toHaveLength(1);
+      await expect(holder.query<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [householdId])).resolves.toHaveLength(1);
 
       await waiter.begin();
       const pending = waiter.issue<{ id: string }>(shareLock.text, [householdId], 'the admission probe');
@@ -151,10 +140,10 @@ describe('household share lock (FOR SHARE)', () => {
       const { holder, waiter } = barrier;
 
       await holder.begin();
-      await expect(holder.query(FK_STYLE_LOCK, [householdId])).resolves.toHaveLength(1);
+      await expect(holder.query(FK_PARENT_LOCK, [householdId])).resolves.toHaveLength(1);
 
       await waiter.begin();
-      const pending = waiter.issue<{ id: string }>(SOFT_DELETE, [householdId], 'the soft-delete');
+      const pending = waiter.issue<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [householdId], 'the soft-delete');
 
       await expectNotBlocked(barrier, pending);
       await expect(pending.result()).resolves.toHaveLength(1);
@@ -181,7 +170,7 @@ describe('household share lock (FOR SHARE)', () => {
       );
 
       await waiter.begin();
-      const pending = waiter.issue<{ id: string }>(SOFT_DELETE, [householdId], 'the soft-delete');
+      const pending = waiter.issue<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [householdId], 'the soft-delete');
 
       await expectNotBlocked(barrier, pending);
 

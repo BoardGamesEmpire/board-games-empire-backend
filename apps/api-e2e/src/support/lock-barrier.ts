@@ -3,7 +3,8 @@ import { Client, type QueryResultRow } from 'pg';
 import { schemaFromDatabaseUrl } from './e2e-env';
 
 /**
- * Two-connection lock barriers against the harness's Postgres (#239).
+ * Lock barriers against the harness's Postgres: two contending transactions,
+ * watched from a third connection (#239).
  *
  * The suite is black-box everywhere else: specs assert application behavior
  * over HTTP. This module is the deliberate exception, and it is narrow. Some
