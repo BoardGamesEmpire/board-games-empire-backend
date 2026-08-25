@@ -12,6 +12,7 @@ import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.ser
 import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginInstallerService } from './install/plugin-installer.service';
 import { PluginStaticAnalysisService } from './install/plugin-static-analysis.service';
+import { PluginInventoryService } from './inventory/plugin-inventory.service';
 import { PluginLifecycleListener } from './lifecycle/plugin-lifecycle.listener';
 import { PluginLifecycleService } from './lifecycle/plugin-lifecycle.service';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
@@ -64,6 +65,7 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginGrantAuthorityService,
     PluginGrantService,
     PluginInstallerService,
+    PluginInventoryService,
     PluginLifecycleListener,
     PluginLifecycleService,
     PluginLoaderService,
@@ -79,6 +81,9 @@ import { PluginUpdateService } from './update/plugin-update.service';
     PluginContextFactory,
     PluginGrantService,
     PluginInstallerService,
+    // #354's endpoint-facing inventory reader — the only read surface that
+    // answers before a slug is known.
+    PluginInventoryService,
     // The one export #320 widened the boundary by: the endpoint-facing
     // lifecycle writer. Its collaborators (schema validation, authority,
     // registry) stay internal.

@@ -23,6 +23,8 @@ export * from './lib/install/manifest-enum.maps';
 export * from './lib/install/plugin-installer.service';
 export * from './lib/install/plugin-static-analysis.service';
 export * from './lib/install/static-analysis.types';
+export * from './lib/inventory/inventory.errors';
+export * from './lib/inventory/plugin-inventory.service';
 export * from './lib/lifecycle/lifecycle.errors';
 export * from './lib/lifecycle/plugin-lifecycle.listener';
 export * from './lib/lifecycle/plugin-lifecycle.service';

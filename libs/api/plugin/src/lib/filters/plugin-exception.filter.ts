@@ -28,6 +28,9 @@ import {
   PluginInstallProvenanceMismatchError,
   PluginInstallStaticAnalysisError,
   PluginInstallUnknownCorePermissionError,
+  PluginInventoryManifestError,
+  PluginInventoryNotFoundError,
+  PluginInventoryTombstonedError,
   PluginLifecycleAuthorityError,
   PluginLifecycleManifestError,
   PluginLifecycleNotFoundError,
@@ -175,7 +178,8 @@ function buildRenderers(): RendererMap {
       | PluginFeatureStateManifestError
       | PluginConsentPresentationManifestError
       | PluginLifecycleManifestError
-      | PluginUnitManifestError,
+      | PluginUnitManifestError
+      | PluginInventoryManifestError,
   ): PluginErrorRendering => ({
     status: Http.InternalServerError,
     message: t('errors.plugin.stored_manifest_invalid', { slug: exception.pluginSlug }),
@@ -268,6 +272,12 @@ function buildRenderers(): RendererMap {
     fields: { slug: exception.pluginSlug },
   }));
 
+  renders(PluginInventoryNotFoundError, (exception) => ({
+    status: Http.NotFound,
+    message: t('errors.plugin.inventory_not_found', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug },
+  }));
+
   // ─── 410 — tombstoned (the record exists and says so; not a 404) ─────────
 
   renders(PluginUpdateTombstonedError, (exception) => ({
@@ -303,6 +313,15 @@ function buildRenderers(): RendererMap {
   renders(PluginFeatureStateTombstonedError, (exception) => ({
     status: Http.Gone,
     message: t('errors.plugin.feature_state_tombstoned', { slug: exception.pluginSlug }),
+    fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
+  }));
+
+  // Unconditional (D-CH): the list read takes an opt-in flag for tombstones,
+  // the single read takes none. `uninstalledAt` rides along so the client can
+  // say WHEN without a second request.
+  renders(PluginInventoryTombstonedError, (exception) => ({
+    status: Http.Gone,
+    message: t('errors.plugin.inventory_tombstoned', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug, uninstalledAt: exception.uninstalledAt },
   }));
 
@@ -504,6 +523,10 @@ function buildRenderers(): RendererMap {
   renders(PluginConsentPresentationManifestError, storedManifestInvalid);
   renders(PluginLifecycleManifestError, storedManifestInvalid);
   renders(PluginUnitManifestError, storedManifestInvalid);
+  // Reachable only from the SINGLE-plugin read: the list reads degrade the
+  // offending row instead of raising (D-CG), so this 500 always describes a
+  // response that had exactly one subject.
+  renders(PluginInventoryManifestError, storedManifestInvalid);
 
   // A config.schema the server cannot compile passed manifest validation
   // (which never interprets it) and surfaced on first use — the plugin's
