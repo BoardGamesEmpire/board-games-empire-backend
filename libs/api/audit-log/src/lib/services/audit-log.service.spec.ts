@@ -1,7 +1,8 @@
 import type { Actor } from '@bge/actor-context';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { plainToInstance } from 'class-transformer';
 import { AUDIT_LOG_DEFAULT_PAGE_SIZE } from '../constants/audit-log.constants';
-import type { ListAuditLogsQueryDto } from '../dto';
+import { ListAuditLogsQueryDto } from '../dto';
 import type { RecordAuditEntry } from '../interfaces/record-audit-entry.interface';
 import { AuditLogService } from './audit-log.service';
 
@@ -18,6 +19,14 @@ const baseEntry: RecordAuditEntry = {
   initiatedAt: new Date('2026-01-15T10:00:00.000Z'),
   occurredAt: new Date('2026-01-15T10:00:01.000Z'),
 };
+
+/**
+ * A bound `ListAuditLogsQueryDto`. Built through the DTO rather than cast from a
+ * literal because `skip`/`pageSize` are derived accessors (#230) — a cast object
+ * would let a test assert paging the DTO never computed.
+ */
+const auditQuery = (init: Partial<ListAuditLogsQueryDto> = {}) =>
+  plainToInstance(ListAuditLogsQueryDto, init, { enableImplicitConversion: true });
 
 describe('AuditLogService', () => {
   let db: MockDatabaseService;
@@ -87,29 +96,31 @@ describe('AuditLogService', () => {
     });
 
     it('excludes soft-deleted rows, sorts newest first, and applies default paging', async () => {
-      await service.list({ offset: 0 } as ListAuditLogsQueryDto);
+      await service.list(auditQuery());
 
       expect(db.auditLog.findMany).toHaveBeenCalledWith({
         where: { deletedAt: null },
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         skip: 0,
         take: AUDIT_LOG_DEFAULT_PAGE_SIZE,
       });
     });
 
     it('applies scalar filters when present', async () => {
-      await service.list({
-        offset: 10,
-        limit: 25,
-        subject: 'Event',
-        subjectId: 'e1',
-        actorKind: 'user',
-        actorUserId: 'u1',
-        event: 'event.created',
-        action: 'create',
-        source: 'http',
-        correlationId: 'corr-1',
-      } as ListAuditLogsQueryDto);
+      await service.list(
+        auditQuery({
+          page: 3,
+          limit: 5,
+          subject: 'Event',
+          subjectId: 'e1',
+          actorKind: 'user',
+          actorUserId: 'u1',
+          event: 'event.created',
+          action: 'create',
+          source: 'http',
+          correlationId: 'corr-1',
+        }),
+      );
 
       expect(db.auditLog.findMany).toHaveBeenCalledWith({
         where: {
@@ -123,9 +134,9 @@ describe('AuditLogService', () => {
           source: 'http',
           correlationId: 'corr-1',
         },
-        orderBy: { occurredAt: 'desc' },
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
         skip: 10,
-        take: 25,
+        take: 5,
       });
     });
 
@@ -133,7 +144,7 @@ describe('AuditLogService', () => {
       const occurredFrom = new Date('2026-01-01T00:00:00.000Z');
       const occurredTo = new Date('2026-02-01T00:00:00.000Z');
 
-      await service.list({ offset: 0, occurredFrom, occurredTo } as ListAuditLogsQueryDto);
+      await service.list(auditQuery({ occurredFrom, occurredTo }));
 
       const args = db.auditLog.findMany.mock.calls[0][0];
       expect(args?.where?.occurredAt).toEqual({ gte: occurredFrom, lt: occurredTo });
@@ -142,7 +153,7 @@ describe('AuditLogService', () => {
     it('supports a one-sided range', async () => {
       const occurredFrom = new Date('2026-01-01T00:00:00.000Z');
 
-      await service.list({ offset: 0, occurredFrom } as ListAuditLogsQueryDto);
+      await service.list(auditQuery({ occurredFrom }));
 
       const args = db.auditLog.findMany.mock.calls[0][0];
       expect(args?.where?.occurredAt).toEqual({ gte: occurredFrom });

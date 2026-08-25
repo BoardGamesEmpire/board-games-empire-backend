@@ -13,11 +13,55 @@ import {
 import { t } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
 import { AbilityService, PermissionsService } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
+
+/**
+ * Relations returned with every household in the list read. Extracted so the
+ * payload type below stays in step with what the query actually selects.
+ */
+const HOUSEHOLD_LIST_INCLUDE = {
+  languageTag: {
+    select: {
+      id: true,
+      tag: true,
+      name: true,
+    },
+  },
+
+  members: {
+    include: {
+      user: {
+        select: {
+          id: true,
+          username: true,
+          profile: {
+            select: {
+              avatarUrl: true,
+              displayName: true,
+            },
+          },
+        },
+      },
+
+      role: {
+        include: {
+          role: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+      },
+    },
+  },
+} satisfies Prisma.HouseholdInclude;
+
+export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
 
 @Injectable()
 export class HouseholdService {
@@ -401,54 +445,41 @@ export class HouseholdService {
     }
   }
 
-  async getHouseholdsForUser(pagination: PaginationQueryDto) {
-    return this.db.household.findMany({
-      where: {
-        deletedAt: null,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
-      },
+  /**
+   * Paginated households the actor may read, with the total matching row count
+   * for the response envelope (#230).
+   *
+   * Rows and count share a REPEATABLE READ transaction: Prisma's default batch
+   * isolation is the database default (READ COMMITTED on Postgres), where each
+   * statement takes its own snapshot and a concurrent create or delete between
+   * the two makes `hasMore` disagree with the rows actually sent.
+   *
+   * The order is total: `createdAt` alone would let rows created in the same
+   * transaction share a key and drift across page boundaries between requests —
+   * page 2 re-showing a row page 1 already had, and dropping another.
+   */
+  async getHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
+    const where = {
+      deletedAt: null,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
+    } satisfies Prisma.HouseholdWhereInput;
 
-      include: {
-        languageTag: {
-          select: {
-            id: true,
-            tag: true,
-            name: true,
-          },
-        },
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.household.findMany({
+          where,
+          include: HOUSEHOLD_LIST_INCLUDE,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
 
-        members: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                profile: {
-                  select: {
-                    avatarUrl: true,
-                    displayName: true,
-                  },
-                },
-              },
-            },
+        this.db.household.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
-            role: {
-              include: {
-                role: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-
-      skip: pagination.offset,
-      take: pagination.limit || 10,
-    });
+    return { rows, total };
   }
 
   /**

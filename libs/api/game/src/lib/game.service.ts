@@ -20,8 +20,12 @@ export class GameService {
       where: {
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
       },
-      skip: pagination.offset,
-      take: pagination.limit || 20,
+      // A catalog reads best alphabetically, and `title` is not unique — two
+      // editions of the same game share one — so `id` completes the order.
+      // Without a total order the database may return page 2 overlapping page 1.
+      orderBy: [{ title: 'asc' }, { id: 'asc' }],
+      skip: pagination.skip,
+      take: pagination.pageSize,
     });
   }
 

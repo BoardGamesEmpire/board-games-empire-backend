@@ -5,6 +5,7 @@ import { AbilityService } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
+  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -42,7 +43,7 @@ describe('GameGatewayService', () => {
   it('getAll → read, composed with the deletedAt filter', async () => {
     db.gameGateway.findMany.mockResolvedValue([]);
 
-    await service.getAll({ offset: 0, limit: 20 } as never);
+    await service.getAll(paginationQuery({ limit: 20 }));
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.GameGateway, Action.read);
     expect(db.gameGateway.findMany).toHaveBeenCalledWith(

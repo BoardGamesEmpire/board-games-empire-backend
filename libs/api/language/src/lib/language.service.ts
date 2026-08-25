@@ -8,8 +8,7 @@ export class LanguageService {
   constructor(private readonly db: DatabaseService) {}
 
   async getLanguages(languageDto: LanguageQueryDto) {
-    const { limit = 20, offset = 0, ...filters } = languageDto;
-    const actualLimit = Math.max(1, Math.min(limit, 50));
+    const { skip, pageSize, ...filters } = languageDto;
 
     // systemSupported lives on LanguageTag: a language "is supported" when
     // any of its tags is.
@@ -26,8 +25,11 @@ export class LanguageService {
         tags: supportedFilter,
       },
       include: { tags: { orderBy: { tag: 'asc' } } },
-      take: actualLimit,
-      skip: offset,
+      // `Language.name` is `@unique`, so sorting by it is a total order; the
+      // nested `tags` order above is unrelated to how the page is cut.
+      orderBy: { name: 'asc' },
+      take: pageSize,
+      skip,
     });
   }
 

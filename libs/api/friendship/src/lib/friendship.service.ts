@@ -112,21 +112,23 @@ export class FriendshipService {
     }
   }
 
-  async listForUser({ status, offset, limit }: ListFriendshipsQueryDto) {
+  async listForUser({ status, skip, pageSize }: ListFriendshipsQueryDto) {
     return this.db.friendship.findMany({
       where: {
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
         ...(status ? { status } : {}),
       },
       include: this.participantInclude,
-      orderBy: { updatedAt: 'desc' },
-      skip: offset,
-      take: limit || 10,
+      // `id` breaks ties on `updatedAt`: a batch status change stamps several
+      // rows identically, which a tie-less sort lets drift across pages.
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      skip,
+      take: pageSize,
     });
   }
 
   /** Incoming pending requests where the acting user is the addressee. */
-  async listIncomingRequests({ offset, limit }: ListFriendshipsQueryDto) {
+  async listIncomingRequests({ skip, pageSize }: ListFriendshipsQueryDto) {
     const userId = this.abilityService.getActingUserId();
 
     return this.db.friendship.findMany({
@@ -136,9 +138,9 @@ export class FriendshipService {
         status: FriendshipStatus.Pending,
       },
       include: this.participantInclude,
-      orderBy: { createdAt: 'desc' },
-      skip: offset,
-      take: limit || 10,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip,
+      take: pageSize,
     });
   }
 

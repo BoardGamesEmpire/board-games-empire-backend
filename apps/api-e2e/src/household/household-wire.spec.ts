@@ -77,9 +77,13 @@ describe('household wire parsers (pure logic)', () => {
   });
 
   describe('listEnvelope', () => {
+    const PAGINATION = { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false };
+
     it('accepts an empty list and a populated one', () => {
-      expect(listEnvelope(response({ households: [] }), 'GET').households).toEqual([]);
-      expect(listEnvelope(response({ households: [{ id: 'h1' }] }), 'GET').households).toHaveLength(1);
+      expect(listEnvelope(response({ households: [], pagination: PAGINATION }), 'GET').households).toEqual([]);
+      expect(
+        listEnvelope(response({ households: [{ id: 'h1' }], pagination: PAGINATION }), 'GET').households,
+      ).toHaveLength(1);
     });
 
     it('rejects a body whose households key is absent or not an array', () => {
@@ -88,7 +92,150 @@ describe('household wire parsers (pure logic)', () => {
     });
 
     it('rejects a list with a malformed entry rather than carrying it through', () => {
-      expect(() => listEnvelope(response({ households: [{ id: 'h1' }, null] }), 'GET')).toThrow(/not an object/);
+      expect(() => listEnvelope(response({ households: [{ id: 'h1' }, null], pagination: PAGINATION }), 'GET')).toThrow(
+        /not an object/,
+      );
+    });
+
+    // #230: the envelope is the contract the endpoint gained, so a response
+    // missing it is a regression rather than an older-but-valid shape.
+    it('carries the pagination envelope through', () => {
+      expect(listEnvelope(response({ households: [{ id: 'h1' }], pagination: PAGINATION }), 'GET').pagination).toEqual(
+        PAGINATION,
+      );
+    });
+
+    it('rejects a body with no pagination envelope', () => {
+      expect(() => listEnvelope(response({ households: [] }), 'GET')).toThrow(/no 'pagination' envelope/);
+    });
+
+    // The arithmetic is part of the contract, so a body that satisfies the types
+    // and contradicts itself is still a server bug worth failing on.
+    it('rejects a page number below one', () => {
+      expect(() => listEnvelope(response({ households: [], pagination: { ...PAGINATION, page: 0 } }), 'GET')).toThrow(
+        /no 'pagination' envelope/,
+      );
+    });
+
+    it('rejects a zero page size', () => {
+      expect(() => listEnvelope(response({ households: [], pagination: { ...PAGINATION, limit: 0 } }), 'GET')).toThrow(
+        /no 'pagination' envelope/,
+      );
+    });
+
+    it('rejects a totalPages that contradicts total and limit', () => {
+      expect(() =>
+        listEnvelope(
+          response({ households: [], pagination: { page: 1, limit: 25, total: 60, totalPages: 1, hasMore: true } }),
+          'GET',
+        ),
+      ).toThrow(/no 'pagination' envelope/);
+    });
+
+    it('rejects a hasMore that disagrees with the page count', () => {
+      expect(() =>
+        listEnvelope(
+          response({ households: [], pagination: { page: 3, limit: 25, total: 60, totalPages: 3, hasMore: true } }),
+          'GET',
+        ),
+      ).toThrow(/no 'pagination' envelope/);
+    });
+
+    it('accepts a coherent middle page', () => {
+      const middle = { page: 2, limit: 25, total: 60, totalPages: 3, hasMore: true };
+
+      expect(listEnvelope(response({ households: [], pagination: middle }), 'GET').pagination).toEqual(middle);
+    });
+
+    it('accepts an empty result reporting zero pages', () => {
+      const empty = { page: 1, limit: 25, total: 0, totalPages: 0, hasMore: false };
+
+      expect(listEnvelope(response({ households: [], pagination: empty }), 'GET').pagination).toEqual(empty);
+    });
+
+    it('rejects a page carrying more rows than its own limit', () => {
+      expect(() =>
+        listEnvelope(
+          response({
+            households: [{ id: 'h1' }, { id: 'h2' }],
+            pagination: { page: 1, limit: 1, total: 2, totalPages: 2, hasMore: true },
+          }),
+          'GET',
+        ),
+      ).toThrow(/more than its pagination limit/);
+    });
+
+    it('accepts a page filled exactly to its limit', () => {
+      const full = { page: 1, limit: 2, total: 2, totalPages: 1, hasMore: false };
+
+      expect(
+        listEnvelope(response({ households: [{ id: 'h1' }, { id: 'h2' }], pagination: full }), 'GET').households,
+      ).toHaveLength(2);
+    });
+
+    it('rejects rows arriving under a total that cannot account for them', () => {
+      expect(() =>
+        listEnvelope(
+          response({
+            households: [{ id: 'h1' }],
+            pagination: { page: 1, limit: 25, total: 0, totalPages: 0, hasMore: false },
+          }),
+          'GET',
+        ),
+      ).toThrow(/more than the total of 0/);
+    });
+
+    it('rejects rows outnumbering the total even when the page fits its limit', () => {
+      expect(() =>
+        listEnvelope(
+          response({
+            households: [{ id: 'h1' }, { id: 'h2' }, { id: 'h3' }],
+            pagination: { page: 1, limit: 25, total: 2, totalPages: 1, hasMore: false },
+          }),
+          'GET',
+        ),
+      ).toThrow(/more than the total of 2/);
+    });
+
+    it('rejects rows on a page after the last one', () => {
+      expect(() =>
+        listEnvelope(
+          response({
+            households: [{ id: 'h1' }],
+            pagination: { page: 2, limit: 25, total: 1, totalPages: 1, hasMore: false },
+          }),
+          'GET',
+        ),
+      ).toThrow(/after its final page 1/);
+    });
+
+    // The case a dropped `skip` produces: a full page of rows that fits both the
+    // limit and the total, but arrives on a page that should be past the end.
+    it('rejects a full page arriving beyond the final page', () => {
+      expect(() =>
+        listEnvelope(
+          response({
+            households: [{ id: 'h1' }, { id: 'h2' }],
+            pagination: { page: 5, limit: 2, total: 8, totalPages: 4, hasMore: false },
+          }),
+          'GET',
+        ),
+      ).toThrow(/after its final page 4/);
+    });
+
+    it('accepts an empty page past the end, which is the honest answer', () => {
+      const pastEnd = { page: 9, limit: 25, total: 30, totalPages: 2, hasMore: false };
+
+      expect(listEnvelope(response({ households: [], pagination: pastEnd }), 'GET').pagination).toEqual(pastEnd);
+    });
+
+    it('rejects a pagination envelope with a mistyped member', () => {
+      expect(() =>
+        listEnvelope(response({ households: [], pagination: { ...PAGINATION, hasMore: 'yes' } }), 'GET'),
+      ).toThrow(/no 'pagination' envelope/);
+      expect(() =>
+        listEnvelope(response({ households: [], pagination: { ...PAGINATION, total: '3' } }), 'GET'),
+      ).toThrow(/no 'pagination' envelope/);
     });
   });
 

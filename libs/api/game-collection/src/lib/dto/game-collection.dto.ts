@@ -145,11 +145,6 @@ export class GameCollectionDto implements Pick<
   release!: CollectionReleaseSummaryDto | null;
 }
 
-export class GameCollectionListResponseDto {
-  @ApiProperty({ type: [GameCollectionDto] })
-  collections!: GameCollectionDto[];
-}
-
 export class GameCollectionResponseDto {
   @ApiProperty({ type: GameCollectionDto })
   collection!: GameCollectionDto;

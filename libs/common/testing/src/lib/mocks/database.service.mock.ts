@@ -76,7 +76,15 @@ export function createMockDatabaseService(): MockDatabaseService {
     $connect: jest.fn().mockResolvedValue(undefined),
     // @ts-expect-error -- mocked as jest.MockedFunction
     $disconnect: jest.fn().mockResolvedValue(undefined),
-    $transaction: jest.fn(),
+    // The ARRAY form resolves like Prisma's does — every operation settles and
+    // the results come back positionally — because a paginated read issues its
+    // rows and its `count` as one transaction (#230), and an unstubbed mock
+    // returning `undefined` would fail at the destructure rather than at an
+    // assertion. The callback form is left inert for a spec to stub, which is
+    // the behaviour every existing caller was written against.
+    $transaction: jest.fn((operations: unknown) =>
+      Array.isArray(operations) ? Promise.all(operations) : undefined,
+    ) as unknown as MockDatabaseService['$transaction'],
     // Raw helpers resolve to their real empty shapes rather than `undefined`.
     // A bare jest.fn() models a client that returns nothing, which no Prisma raw
     // query ever does: `$queryRaw` yields a row array and `$executeRaw` an
@@ -179,4 +187,40 @@ export function createMockDatabaseService(): MockDatabaseService {
     userRole: mockDelegate(),
     webhookSubscription: mockDelegate(),
   } as unknown as MockDatabaseService;
+}
+
+/**
+ * Installs a `$transaction` implementation that handles BOTH Prisma forms:
+ * the callback form runs against the mock itself (so writes land on the mock
+ * delegates), and the array form resolves positionally.
+ *
+ * Needed wherever one service does both — `HouseholdService` wraps its writes
+ * in a callback transaction and reads its paginated list as
+ * `$transaction([findMany, count])` (#230). Stubbing only `(cb) => cb(db)` in a
+ * shared `beforeEach` makes the array-form read fail with "cb is not a
+ * function", which reads as a mock bug rather than a stubbing gap.
+ */
+export function unwrapTransaction(db: MockDatabaseService): void {
+  db.$transaction.mockImplementation(((operations: unknown) =>
+    Array.isArray(operations)
+      ? Promise.all(operations)
+      : (operations as (tx: MockDatabaseService) => Promise<unknown>)(db)) as never);
+}
+
+/**
+ * The `(operations, options)` a batch `$transaction` was called with.
+ *
+ * The mock's `$transaction` is typed for the callback form, so reading the
+ * second argument needs a cast; keeping that cast here means a spec asserting an
+ * isolation level does not have to carry one. Pinning the options matters
+ * because the mock resolves the operation array whatever isolation is asked for
+ * — the snapshot guarantee is invisible to a test that only checks the rows.
+ */
+export function batchTransactionCall(
+  db: MockDatabaseService,
+  index = 0,
+): { operations: unknown[]; options?: { isolationLevel?: unknown } } {
+  const call = db.$transaction.mock.calls[index] as unknown as [unknown[], { isolationLevel?: unknown }?];
+
+  return { operations: call[0], options: call[1] };
 }

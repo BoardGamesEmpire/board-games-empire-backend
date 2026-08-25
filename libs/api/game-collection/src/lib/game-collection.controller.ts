@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { NoCache } from '@bge/shared';
+import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -10,7 +10,7 @@ import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
   CreateGameCollectionDto,
-  GameCollectionListResponseDto,
+  GameCollectionDto,
   GameCollectionMessageResponseDto,
   GameCollectionResponseDto,
   ListGameCollectionsQueryDto,
@@ -19,6 +19,9 @@ import {
   UpdateGameCollectionDto,
 } from './dto';
 import { GameCollectionService } from './game-collection.service';
+
+/** Swagger model for the paginated list envelope both collection reads return. */
+const PaginatedGameCollectionResponse = PaginatedResponseDto(GameCollectionDto, 'collections');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -32,14 +35,19 @@ import { GameCollectionService } from './game-collection.service';
 export class GameCollectionController {
   constructor(private readonly gameCollectionService: GameCollectionService) {}
 
-  @ApiOperation({ summary: "List the acting user's game collection" })
-  @ApiResponse({ status: Http.Ok, type: GameCollectionListResponseDto })
+  @ApiOperation({
+    summary: "List the acting user's game collection",
+    description:
+      'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
+      '`total`, `totalPages` and `hasMore`. See #230.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PaginatedGameCollectionResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get()
   getOwnCollection(@Query() query: ListGameCollectionsQueryDto) {
-    return from(this.gameCollectionService.listOwn(query)).pipe(map((collections) => ({ collections })));
+    return from(this.gameCollectionService.listOwn(query)).pipe(map((page) => paginated('collections', page, query)));
   }
 
   @ApiOperation({
@@ -49,11 +57,13 @@ export class GameCollectionController {
       'viewers; public only for anonymous viewers.',
   })
   @ApiParam({ name: 'userId', type: String })
-  @ApiResponse({ status: Http.Ok, type: GameCollectionListResponseDto })
+  @ApiResponse({ status: Http.Ok, type: PaginatedGameCollectionResponse })
   @AllowAnonymous()
   @Get('user/:userId')
   getUserCollection(@Param('userId') userId: string, @Query() query: ListUserGameCollectionsQueryDto) {
-    return from(this.gameCollectionService.listForUser(userId, query)).pipe(map((collections) => ({ collections })));
+    return from(this.gameCollectionService.listForUser(userId, query)).pipe(
+      map((page) => paginated('collections', page, query)),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single collection entry' })

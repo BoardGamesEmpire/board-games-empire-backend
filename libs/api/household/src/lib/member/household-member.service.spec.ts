@@ -2,7 +2,14 @@ import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, Sy
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
-import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import { DEFAULT_PAGE_SIZE } from '@bge/shared';
+import {
+  batchTransactionCall,
+  createTestingModuleWithDb,
+  paginationQuery,
+  unwrapTransaction,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
@@ -49,7 +56,7 @@ const rawText = (value: unknown): string => {
 const isHouseholdLockSql = (value: unknown): boolean => /\bFROM\s+households\b/.test(rawText(value));
 
 const COND = { id: 'sentinel-condition' };
-const PAGINATION = { offset: 0, limit: 10 };
+const PAGINATION = paginationQuery({ limit: 10 });
 
 const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations =>
   ({
@@ -187,7 +194,7 @@ describe('HouseholdMemberService', () => {
     // Household exists by default; individual tests override the probe.
     db.household.count.mockResolvedValue(1);
     // Mutations run inside a transaction; unwrap onto the mock delegates.
-    db.$transaction.mockImplementation((cb) => cb(db));
+    unwrapTransaction(db);
     // The owner lock is taken on EVERY membership mutation now, not only when the
     // departing member looks like an owner, so it needs a default — an unstubbed
     // `$queryRaw` resolves `undefined` and the lock's `.map` throws. Two owners
@@ -233,10 +240,11 @@ describe('HouseholdMemberService', () => {
         expect.objectContaining({
           where: expect.objectContaining({ householdId: 'hh-1', AND: [COND] }),
           include: MEMBER_INCLUDE,
-          orderBy: { createdAt: 'asc' },
+          // `id` breaks ties on a shared createdAt, so page boundaries hold.
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         }),
       );
-      expect(result).toHaveLength(1);
+      expect(result.rows).toHaveLength(1);
     });
 
     it('asserts the household exists (excluding soft-deleted) before querying', async () => {
@@ -247,14 +255,41 @@ describe('HouseholdMemberService', () => {
       expect(db.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null } });
     });
 
-    it('forwards pagination as skip/take with the 10-row default', async () => {
+    it('derives skip/take from the page, defaulting to the shared page size', async () => {
       db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      stubCounts({ scoped: 30, unscoped: 30 });
 
-      await service.getMembers('hh-1', { offset: 20, limit: 5 });
+      await service.getMembers('hh-1', paginationQuery({ page: 5, limit: 5 }));
       expect(db.householdMember.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 5 }));
 
-      await service.getMembers('hh-1', { offset: 0 });
-      expect(db.householdMember.findMany).toHaveBeenLastCalledWith(expect.objectContaining({ skip: 0, take: 10 }));
+      await service.getMembers('hh-1', paginationQuery());
+      expect(db.householdMember.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({ skip: 0, take: DEFAULT_PAGE_SIZE }),
+      );
+    });
+
+    // The scoped total is also what decides the 403 below, so rows and count
+    // sharing one snapshot is a correctness property here, not just tidiness: at
+    // the Prisma default a removal landing between the two statements would read
+    // as a permission miss. The mock is insensitive to isolation, hence the pin.
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      stubCounts({ scoped: 1, unscoped: 1 });
+
+      await service.getMembers('hh-1', PAGINATION);
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // #230: `total` is scoped exactly like the rows, so a caller who may see two
+    // of five members is told two — the roster size stays hidden.
+    it('reports a total scoped to what the actor may read', async () => {
+      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      stubCounts({ scoped: 2, unscoped: 5 });
+
+      await expect(service.getMembers('hh-1', PAGINATION)).resolves.toMatchObject({ total: 2 });
     });
 
     it('throws NotFound when the household does not exist', async () => {
@@ -276,37 +311,47 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.count).toHaveBeenCalledWith({ where: { householdId: 'hh-1' } });
     });
 
-    it('returns an empty array — not Forbidden — for a household with no members at all', async () => {
+    it('returns an empty page — not Forbidden — for a household with no members at all', async () => {
       // Guards against depending on a "household always has >= 1 member"
       // invariant that nothing in the schema enforces (see #157).
       db.householdMember.findMany.mockResolvedValue([]);
       stubCounts({ scoped: 0, unscoped: 0 });
 
-      await expect(service.getMembers('hh-1', PAGINATION)).resolves.toEqual([]);
+      await expect(service.getMembers('hh-1', PAGINATION)).resolves.toEqual({ rows: [], total: 0 });
     });
 
-    it('returns an empty page when an authorized reader pages past the end', async () => {
+    it('returns an empty page — with the real total — when an authorized reader pages past the end', async () => {
       db.householdMember.findMany.mockResolvedValue([]);
       stubCounts({ scoped: 3, unscoped: 3 });
 
-      await expect(service.getMembers('hh-1', { offset: 50, limit: 10 })).resolves.toEqual([]);
+      await expect(service.getMembers('hh-1', paginationQuery({ page: 6, limit: 10 }))).resolves.toEqual({
+        rows: [],
+        total: 3,
+      });
     });
 
-    it('skips the unscoped probe when rows are visible to the actor', async () => {
+    // The list's own `total` already answers "can this actor see anything here?",
+    // so a past-the-end page costs one count, not the old scoped-then-unscoped
+    // pair (#230).
+    it('skips the hidden-members probe when the actor can see rows', async () => {
       db.householdMember.findMany.mockResolvedValue([]);
       stubCounts({ scoped: 3, unscoped: 3 });
 
-      await service.getMembers('hh-1', { offset: 50, limit: 10 });
+      await service.getMembers('hh-1', paginationQuery({ page: 6, limit: 10 }));
 
       expect(db.householdMember.count).toHaveBeenCalledTimes(1);
     });
 
-    it('skips both probes entirely when the page is non-empty', async () => {
+    it('counts once for a non-empty page and never probes', async () => {
       db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      stubCounts({ scoped: 1, unscoped: 1 });
 
       await service.getMembers('hh-1', PAGINATION);
 
-      expect(db.householdMember.count).not.toHaveBeenCalled();
+      expect(db.householdMember.count).toHaveBeenCalledTimes(1);
+      expect(db.householdMember.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ householdId: 'hh-1', AND: [COND] }),
+      });
     });
   });
 

@@ -1,7 +1,7 @@
-import { CappedPaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
-export class SearchStartDto extends CappedPaginationQueryDto(100) {
+export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
   @IsUUID()
   correlationId!: string;
 
@@ -39,7 +39,8 @@ export class SearchStartDto extends CappedPaginationQueryDto(100) {
   locale?: string;
 
   // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
-  // are inherited from CappedPaginationQueryDto — see #17.
+  // are inherited from CappedOffsetPaginationQueryDto — see #17. Offset-native
+  // for the same reason as SearchQueryDto (D-230-5 on #230).
 }
 
 export class SearchCancelDto {

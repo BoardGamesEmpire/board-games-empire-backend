@@ -97,12 +97,16 @@ describe('household authorization', () => {
 
       const ownList = listEnvelope(await listHouseholds(owner).expect(200), 'GET /api/households as owner');
       expect(ownList.households.map((household) => household.id)).toEqual([fixture.household.id]);
+      // #230: `total` is scoped like the rows, so it counts the actor's page set
+      // rather than every household on the server.
+      expect(ownList.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
 
       // The same rule that yields 403 on the detail route yields absence here:
       // a scoped `findMany` has no existence probe to disambiguate against, so
       // an unauthorized household is simply not in the page.
       const outsiderList = listEnvelope(await listHouseholds(outsider).expect(200), 'GET /api/households as outsider');
       expect(outsiderList.households).toEqual([]);
+      expect(outsiderList.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
     });
   });
 

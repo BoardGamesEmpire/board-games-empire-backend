@@ -5,6 +5,7 @@ import {
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
+  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -48,7 +49,7 @@ describe('GameService', () => {
   it('getGames → read', async () => {
     db.game.findMany.mockResolvedValue([]);
 
-    await service.getGames({ offset: 0, limit: 20 });
+    await service.getGames(paginationQuery({ limit: 20 }));
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
     expect(db.game.findMany).toHaveBeenCalledWith(

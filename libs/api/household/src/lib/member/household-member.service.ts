@@ -15,7 +15,7 @@ import {
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import {
   BadRequestException,
@@ -199,7 +199,10 @@ export class HouseholdMemberService {
    * permission miss (403); no rows at all — or a page past the end — is an
    * honest empty result (200).
    */
-  async getMembers(householdId: string, pagination: PaginationQueryDto): Promise<HouseholdMemberWithRelations[]> {
+  async getMembers(
+    householdId: string,
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedRows<HouseholdMemberWithRelations>> {
     await assertHouseholdExists(this.db, householdId);
 
     const scopedWhere = {
@@ -207,23 +210,45 @@ export class HouseholdMemberService {
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.read),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
-    const members = await this.db.householdMember.findMany({
-      where: scopedWhere,
-      include: MEMBER_INCLUDE,
-      orderBy: { createdAt: 'asc' },
-      skip: pagination.offset,
-      take: pagination.limit || 10,
-    });
+    // REPEATABLE READ, so `total` and the rows come from one snapshot (#230):
+    // under Prisma's default batch isolation each statement snapshots
+    // separately, and a removal landing between them yields rows with a total
+    // of zero — which the check below would read as a permission miss.
+    //
+    // The count is scoped identically to the rows, so it reports what this actor
+    // may see, never the household's real roster size.
+    //
+    // `id` breaks ties on `createdAt`: members added in one transaction share a
+    // creation timestamp, so without it a member can shift across a page
+    // boundary between two requests.
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.householdMember.findMany({
+          where: scopedWhere,
+          include: MEMBER_INCLUDE,
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
 
-    if (members.length === 0 && (await this.isHiddenFromActor(scopedWhere, { householdId }))) {
+        this.db.householdMember.count({ where: scopedWhere }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    // `total` already answers the question {@link isHiddenFromActor} asks first
+    // — "are any rows visible to this actor?" — so the list path skips straight
+    // to the unscoped probe rather than counting the scoped set twice. A page
+    // past the end still has a non-zero total, so it stays an honest 200.
+    if (total === 0 && rows.length === 0 && (await this.householdHasHiddenMembers(householdId))) {
       throw new ForbiddenException(t('common.forbidden.view'));
     }
 
     this.logger.debug(
-      `getMembers(${householdId}) → ${members.length} rows (offset ${pagination.offset}, limit ${pagination.limit})`,
+      `getMembers(${householdId}) → ${rows.length} of ${total} rows (page ${pagination.page}, limit ${pagination.pageSize})`,
     );
 
-    return members;
+    return { rows, total };
   }
 
   /**
@@ -1148,7 +1173,20 @@ export class HouseholdMemberService {
   }
 
   /**
-   * Single disambiguation primitive for both read paths: given a scoped query
+   * Whether a household has members at all, ignoring the actor's read scope.
+   * Only meaningful once the scoped count is known to be zero: rows existing
+   * unscoped then means the actor is being denied a view (403) rather than
+   * looking at an empty roster (200).
+   *
+   * The list path uses this instead of {@link isHiddenFromActor} because its own
+   * `total` already answers the scoped half of that question (#230).
+   */
+  private async householdHasHiddenMembers(householdId: string): Promise<boolean> {
+    return (await this.db.householdMember.count({ where: { householdId } })) > 0;
+  }
+
+  /**
+   * Disambiguation primitive for the single-member read: given a scoped query
    * that produced nothing, decide whether that is a permission miss or an
    * honest absence.
    *
@@ -1161,7 +1199,7 @@ export class HouseholdMemberService {
    * unscoped is exact either way.
    *
    * The unscoped count runs only when the scoped count is zero, so an authorized
-   * reader paging past the end never triggers the second query.
+   * reader looking at a row they may not see never triggers the second query.
    */
   private async isHiddenFromActor(
     scopedWhere: Prisma.HouseholdMemberWhereInput,

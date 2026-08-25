@@ -25,8 +25,11 @@ export class GameGatewayService {
           { deletedAt: null },
         ],
       },
-      skip: pagination.offset,
-      take: pagination.limit || 20,
+      // `GameGateway.name` is `@unique`, so this is already a total order and
+      // needs no tie-breaker of its own.
+      orderBy: { name: 'asc' },
+      skip: pagination.skip,
+      take: pagination.pageSize,
     });
   }
 

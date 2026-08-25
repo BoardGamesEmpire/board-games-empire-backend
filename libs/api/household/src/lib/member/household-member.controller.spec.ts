@@ -1,11 +1,12 @@
 import { SystemRole } from '@bge/database';
+import { paginationQuery } from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdMemberController } from './household-member.controller';
 import { HouseholdMemberService, type HouseholdMemberWithRelations } from './household-member.service';
 
-const PAGINATION = { offset: 0, limit: 10 } as never;
+const PAGINATION = paginationQuery({ limit: 10 });
 
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
 const PROMOTED = { id: 'member-2', householdId: 'hh-1' } as HouseholdMemberWithRelations;
@@ -21,7 +22,7 @@ describe('HouseholdMemberController (delegation)', () => {
 
   beforeEach(() => {
     service = {
-      getMembers: jest.fn().mockResolvedValue([MEMBER]),
+      getMembers: jest.fn().mockResolvedValue({ rows: [MEMBER], total: 1 }),
       getMember: jest.fn().mockResolvedValue(MEMBER),
       updateMemberRole: jest.fn().mockResolvedValue(MEMBER),
       transferOwnership: jest.fn().mockResolvedValue({ owner: PROMOTED, previousOwner: MEMBER }),
@@ -33,11 +34,14 @@ describe('HouseholdMemberController (delegation)', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getMembers forwards householdId and pagination, wrapping the result', async () => {
+  it('getMembers forwards householdId and pagination, wrapping the result in the envelope', async () => {
     const result = await firstValueFrom(controller.getMembers('hh-1', PAGINATION));
 
     expect(service.getMembers).toHaveBeenCalledWith('hh-1', PAGINATION);
-    expect(result).toEqual({ members: [MEMBER] });
+    expect(result).toEqual({
+      members: [MEMBER],
+      pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
   });
 
   it('getMember forwards householdId and memberId, wrapping the result', async () => {

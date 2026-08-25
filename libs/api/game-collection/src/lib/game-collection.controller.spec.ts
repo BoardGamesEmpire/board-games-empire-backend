@@ -1,10 +1,11 @@
 import { GameMedium, GameRemovalReason } from '@bge/database';
 import { t } from '@bge/i18n';
+import { paginationQuery } from '@bge/testing';
 import { firstValueFrom } from 'rxjs';
 import { GameCollectionController } from './game-collection.controller';
 import { GameCollectionService } from './game-collection.service';
 
-const PAGINATION = { offset: 0, limit: 20 } as never;
+const PAGINATION = paginationQuery({ limit: 20 });
 
 describe('GameCollectionController (delegation)', () => {
   let controller: GameCollectionController;
@@ -14,8 +15,8 @@ describe('GameCollectionController (delegation)', () => {
 
   beforeEach(() => {
     service = {
-      listOwn: jest.fn().mockResolvedValue([]),
-      listForUser: jest.fn().mockResolvedValue([]),
+      listOwn: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+      listForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
       getById: jest.fn().mockResolvedValue({ id: 'gc-1' }),
       addToCollection: jest.fn().mockResolvedValue({ id: 'gc-1' }),
       update: jest.fn().mockResolvedValue({ id: 'gc-1' }),
@@ -26,10 +27,13 @@ describe('GameCollectionController (delegation)', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getOwnCollection forwards the query and wraps the result', async () => {
+  it('getOwnCollection forwards the query and wraps the result in the envelope', async () => {
     const result = await firstValueFrom(controller.getOwnCollection(PAGINATION));
     expect(service.listOwn).toHaveBeenCalledWith(PAGINATION);
-    expect(result).toEqual({ collections: [] });
+    expect(result).toEqual({
+      collections: [],
+      pagination: { page: 1, limit: 20, total: 0, totalPages: 0, hasMore: false },
+    });
   });
 
   it('getUserCollection forwards the user id and query', async () => {

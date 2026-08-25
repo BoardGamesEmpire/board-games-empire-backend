@@ -213,9 +213,10 @@ export class MediaContributionService {
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.read),
         ...(query.status ? { status: query.status } : {}),
       },
-      orderBy: { createdAt: 'desc' },
-      skip: query.offset,
-      take: query.limit || 20,
+      // `id` breaks ties on `createdAt`, so page boundaries hold across requests.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: query.skip,
+      take: query.pageSize,
     });
   }
 

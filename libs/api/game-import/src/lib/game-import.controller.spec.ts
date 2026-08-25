@@ -1,7 +1,7 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { JobStatus } from '@bge/database';
 import { PoliciesGuard } from '@bge/permissions';
-import { createTestingModuleWithDb } from '@bge/testing';
+import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { firstValueFrom, of } from 'rxjs';
 import { GameImportController } from './game-import.controller';
 import { ImportBatchStatus } from './interfaces/import-job.interface';
@@ -77,7 +77,7 @@ describe('GameImportController', () => {
   describe('listImports', () => {
     it("lists the session user's batches with the given pagination", async () => {
       const session = { user: { id: 'user-7' } } as Parameters<GameImportController['listImports']>[0];
-      const pagination = { offset: 0, limit: 5 };
+      const pagination = paginationQuery({ limit: 5 });
 
       const response = await firstValueFrom(controller.listImports(session, pagination));
 

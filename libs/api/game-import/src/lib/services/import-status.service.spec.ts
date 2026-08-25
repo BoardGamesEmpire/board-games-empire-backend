@@ -1,5 +1,6 @@
 import { DatabaseService, JobStatus, JobType } from '@bge/database';
 import { t } from '@bge/i18n';
+import { paginationQuery } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { GameImportStatusService } from './import-status.service';
@@ -146,7 +147,7 @@ describe('GameImportStatusService', () => {
     it('returns an empty list when the user has no import batches', async () => {
       db.job.groupBy.mockResolvedValue([]);
 
-      await expect(service.listBatchesForUser('user-7', { offset: 0 })).resolves.toEqual({ batches: [] });
+      await expect(service.listBatchesForUser('user-7', paginationQuery())).resolves.toEqual({ batches: [] });
       expect(db.job.findMany).not.toHaveBeenCalled();
     });
 
@@ -161,14 +162,14 @@ describe('GameImportStatusService', () => {
         row({ id: 'job-2', batchId: 'batch-2', status: JobStatus.Running, gameId: null, completedAt: null }),
       ]);
 
-      const response = await service.listBatchesForUser('user-7', { offset: 5, limit: 10 });
+      const response = await service.listBatchesForUser('user-7', paginationQuery({ page: 2, limit: 5 }));
 
       expect(db.job.groupBy).toHaveBeenCalledWith(
         expect.objectContaining({
           by: ['batchId'],
           where: expect.objectContaining({ userId: 'user-7' }),
           skip: 5,
-          take: 10,
+          take: 5,
         }),
       );
       // Defense-in-depth: the row fetch re-applies userId even though the
