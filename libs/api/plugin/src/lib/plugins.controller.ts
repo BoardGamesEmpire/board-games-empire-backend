@@ -4,6 +4,7 @@ import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
+  PluginFeatureStateService,
   PluginGrantService,
   PluginLifecycleService,
   PluginUpdateNoPendingError,
@@ -44,6 +45,7 @@ export class PluginsController {
     private readonly updates: PluginUpdateService,
     private readonly grants: PluginGrantService,
     private readonly presentation: PluginConsentPresentationService,
+    private readonly featureState: PluginFeatureStateService,
     private readonly auditContext: AuditContextService,
   ) {}
 
@@ -294,6 +296,37 @@ export class PluginsController {
   @Get(':slug/update/pending')
   pendingUpdate(@Param('slug') slug: string) {
     return from(this.loadPendingPresentation(slug));
+  }
+
+  // ─── Per-feature activation state (#354): the D-BX server axis ───────────
+
+  @ApiOperation({
+    summary: 'Per-feature activation state for the Server unit (#60)',
+    description:
+      'Why a feature is or is not running server-wide: per-feature active|disabled with a denied|pending reason ' +
+      'paired with the blocking permission slugs. `perUnitSlugs` matters most from this viewpoint — the ' +
+      'household/user-consented checks a server answer does NOT determine, so `active` here reads as "the gates ' +
+      'this viewpoint owns are open", never as a fleet-wide green.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  // Consent decisions must be visible on the next read (#60 keeps this
+  // surface uncached) — and the response cache keys without the resolved
+  // locale (#358), which would cross-serve localized bodies.
+  @NoCache()
+  @Get(':slug/features')
+  featureStates(@Param('slug') slug: string) {
+    // No scope refusal to make here, unlike the household axis: the
+    // household-viewpoint-on-server-scope rule is
+    // `scope === Server && unit.scopeType === 'Household'`, so a Server unit
+    // passes it at any plugin scope. The 404/410 pair and the guards that
+    // bracket the derivation both come from the slug entry point.
+    return from(
+      this.featureState.resolveForUnitBySlug(slug, SERVER_PLUGIN_UNIT, this.auditContext.getLocale() ?? undefined),
+    ).pipe(map((featureState) => ({ featureState })));
   }
 
   /**

@@ -4,6 +4,8 @@ import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
+  PluginFeatureStateService,
+  PluginFeatureUnitState,
   PluginGrantService,
   PluginLifecycleService,
   PluginUpdateService,
@@ -48,6 +50,23 @@ const ACTIVE_PRESENTATION = {
   checks: [],
 } as unknown as PluginConsentPresentation;
 const GRANT = { id: 'grant-1', permissionSlug: 'feedback:read', status: PluginGrantStatus.Granted } as never;
+const FEATURE_STATE = {
+  plugin: { id: 'plugin-1', slug: 'demo-sink' },
+  unit: SERVER_PLUGIN_UNIT,
+  served: true,
+  suspendedForConsent: false,
+  features: [
+    {
+      name: 'digest',
+      displayName: 'Digest',
+      description: 'Weekly digest',
+      state: 'active',
+      reason: null,
+      blockingSlugs: [],
+      perUnitSlugs: ['plugin|demo-sink|read:household'],
+    },
+  ],
+} as unknown as PluginFeatureUnitState;
 
 describe('PluginsController (delegation)', () => {
   let controller: PluginsController;
@@ -57,6 +76,7 @@ describe('PluginsController (delegation)', () => {
     Pick<PluginConsentPresentationService, 'presentPendingFromRow' | 'presentForUnitBySlug'>
   >;
   let grants: jest.Mocked<Pick<PluginGrantService, 'decide'>>;
+  let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
 
@@ -88,6 +108,7 @@ describe('PluginsController (delegation)', () => {
       presentForUnitBySlug: jest.fn().mockResolvedValue(ACTIVE_PRESENTATION),
     };
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
+    featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
     controller = new PluginsController(
@@ -96,6 +117,7 @@ describe('PluginsController (delegation)', () => {
       updates as never,
       grants as never,
       presentation as never,
+      featureState as never,
       auditContext as never,
     );
   });
@@ -287,6 +309,31 @@ describe('PluginsController (delegation)', () => {
     });
   });
 
+  describe('server-axis feature state (#354, D-BX)', () => {
+    it('renders the Server unit through the slug entry point, locale from CLS', async () => {
+      auditContext.getLocale.mockReturnValue('de');
+
+      const result = await firstValueFrom(controller.featureStates('demo-sink'));
+
+      expect(featureState.resolveForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, 'de');
+      expect(result).toEqual({ featureState: FEATURE_STATE });
+    });
+
+    it('an unresolved CLS locale is passed as undefined — the derivation falls back to the default locale', async () => {
+      auditContext.getLocale.mockReturnValue(null);
+
+      await firstValueFrom(controller.featureStates('demo-sink'));
+
+      expect(featureState.resolveForUnitBySlug).toHaveBeenCalledWith('demo-sink', SERVER_PLUGIN_UNIT, undefined);
+    });
+
+    it('surfaces perUnitSlugs — the field the server viewpoint exists to report', async () => {
+      const result = await firstValueFrom(controller.featureStates('demo-sink'));
+
+      expect(result.featureState.features[0].perUnitSlugs).toEqual(['plugin|demo-sink|read:household']);
+    });
+  });
+
   describe('route registration', () => {
     // Every route lives under `:slug/<literal>`, so no parametric route can
     // shadow another and declaration order carries no constraint TODAY. The
@@ -302,6 +349,7 @@ describe('PluginsController (delegation)', () => {
       ['approveUpdate', ':slug/update/approve', RequestMethod.POST],
       ['rejectUpdate', ':slug/update/reject', RequestMethod.POST],
       ['pendingUpdate', ':slug/update/pending', RequestMethod.GET],
+      ['featureStates', ':slug/features', RequestMethod.GET],
     ] as const)('binds %s to %s', (handler, path, method) => {
       expect(Reflect.getMetadata('path', PluginsController.prototype[handler])).toBe(path);
       expect(Reflect.getMetadata('method', PluginsController.prototype[handler])).toBe(method);
@@ -324,6 +372,7 @@ describe('PluginsController (delegation)', () => {
         'approveUpdate',
         'rejectUpdate',
         'pendingUpdate',
+        'featureStates',
       ]);
     });
   });
