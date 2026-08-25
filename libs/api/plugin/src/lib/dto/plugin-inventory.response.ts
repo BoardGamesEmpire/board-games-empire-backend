@@ -14,12 +14,19 @@ import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
 /**
  * OpenAPI models for the installed-plugin reads (#354).
  *
- * Every class here `implements` its runtime counterpart from `@bge/plugin`.
- * That is the whole point of declaring them: the row shapes are defined by
- * the inventory service, and a documented shape that merely resembles the
- * served one drifts silently — a field added to the service would leave the
- * generated client blind to it, with nothing failing. With `implements`, the
- * omission is a compile error in this file.
+ * Every class that models a runtime shape `implements` it — including the two
+ * arms of the provenance union, which are reached through `Extract` since the
+ * runtime side is a union rather than a named interface per arm. That is the
+ * whole point of declaring these: the row shapes are defined by the inventory
+ * service, and a documented shape that merely resembles the served one drifts
+ * silently — a field added to the service would leave the generated client
+ * blind to it, with nothing failing. With `implements`, the omission is a
+ * compile error in this file.
+ *
+ * The one class with no `implements` is
+ * {@link PluginInventoryDetailResponseDto}: it models the transport ENVELOPE
+ * (`{ plugin: … }`), which the runtime never names because wrapping is the
+ * controller's business.
  *
  * Modelled rather than declared unknown (`paginatedEnvelopeSchema`, which
  * households still use pending #376) because this issue OWNS the row shape:
@@ -27,13 +34,23 @@ import { ApiExtraModels, ApiProperty, getSchemaPath } from '@nestjs/swagger';
  * guessing at.
  */
 
+/**
+ * The provenance union's arms, named so the DTOs below can implement them.
+ * The runtime side is a discriminated union, not two interfaces, so there is
+ * nothing to reference directly — without these the drift guard would stop at
+ * the union's edge and a new field on the `installed` arm could go
+ * undocumented with nothing failing.
+ */
+type BundledProvenance = Extract<PluginInventoryEntry['provenance'], { kind: 'bundled' }>;
+type InstalledProvenance = Extract<PluginInventoryEntry['provenance'], { kind: 'installed' }>;
+
 /** Bundled: ships with BGE, so there is no artifact to describe. */
-class BundledProvenanceDto {
+class BundledProvenanceDto implements BundledProvenance {
   @ApiProperty({ enum: ['bundled'] })
   kind!: 'bundled';
 }
 
-class InstalledProvenanceDto {
+class InstalledProvenanceDto implements InstalledProvenance {
   @ApiProperty({ enum: ['installed'] })
   kind!: 'installed';
 

@@ -11,8 +11,8 @@ import { PluginFeatureStateService } from './features/plugin-feature-state.servi
 import { PluginGrantAuthorityService } from './grants/plugin-grant-authority.service';
 import { PluginGrantService } from './grants/plugin-grant.service';
 import { PluginInstallerService } from './install/plugin-installer.service';
-import { PluginInventoryService } from './inventory/plugin-inventory.service';
 import { PluginStaticAnalysisService } from './install/plugin-static-analysis.service';
+import { PluginInventoryService } from './inventory/plugin-inventory.service';
 import { PluginLifecycleListener } from './lifecycle/plugin-lifecycle.listener';
 import { PluginLifecycleService } from './lifecycle/plugin-lifecycle.service';
 import { PluginDirectoryResolverService } from './loader/plugin-directory-resolver.service';
