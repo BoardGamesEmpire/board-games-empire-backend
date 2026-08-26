@@ -14,7 +14,70 @@ export interface ShippedStatement {
   readonly params: readonly string[];
 }
 
-const TAG = 'Prisma.sql';
+/**
+ * The opening backtick of a tagged raw-SQL template.
+ *
+ * Three tags, because the repo ships two idioms: the household services wrap
+ * their statements in `Prisma.sql`, and the plugin runtime tags them straight
+ * on the client (`tx.$queryRaw`, `tx.$executeRaw`). Both are correct Prisma;
+ * neither is going away before #387 settles which one the repo keeps, and until
+ * then a lifter that knew only one would leave every plugin lock provable only
+ * against a copy (D-360-1).
+ *
+ * The optional `<…>` steps over a generic row type — `tx.$queryRaw<Row[]>` puts
+ * one exactly where the backtick would otherwise be. It is lazy, so a type that
+ * closes with `>>` still resolves: the match must end at a backtick, and the
+ * engine backtracks to the outer `>` to get there.
+ *
+ * That group excludes backticks, and the exclusion is load-bearing rather than
+ * tidy. Allowed to match anything, it backtracks straight out of
+ * `$queryRaw<A[]>(Prisma.sql\`…\`)` and on to the NEXT statement's `>`,
+ * swallowing both into a single match — so a file holding two statements looks
+ * like a file holding one, the "refuses to guess" gate never fires, and the
+ * lift silently returns the second statement. A type argument cannot contain a
+ * backtick, so nothing legitimate is lost.
+ *
+ * A wrapped statement (`tx.$queryRaw(Prisma.sql\`…\`)`) carries both tags but
+ * matches ONCE: the backtick must follow the tag, and `$queryRaw` here is
+ * followed by `(`. Counting the pair twice would make every existing
+ * single-statement file look ambiguous and refuse to lift anything.
+ */
+const SQL_TEMPLATE = /(?:Prisma\.sql|\$queryRaw|\$executeRaw)\s*(?:<[^`]*?>\s*)?`/;
+
+/**
+ * The opening backtick of an UNTAGGED template — one assigned to a name, or
+ * passed straight into a call.
+ *
+ * Advisory locks are keyed on a string the application builds in TypeScript,
+ * one line above the statement that hashes it, so lifting only the statement
+ * leaves a spec free to invent its own key format. A barrier whose two sides
+ * agree on a format production no longer uses blocks beautifully and proves
+ * nothing (D-360-1).
+ *
+ * A tagged template can never match this: its backtick is preceded by an
+ * identifier, never by `=`, `(` or `,`.
+ */
+const VALUE_TEMPLATE = /[=(,]\s*`/;
+
+/**
+ * One liftable template shape: how to find it, what to call it in a failure,
+ * and whether its surrounding whitespace is formatting or content.
+ */
+interface TemplateForm {
+  readonly pattern: RegExp;
+  readonly noun: string;
+
+  /**
+   * SQL is laid out across lines, so its indentation is formatting and `pg`
+   * should not receive it. A key format is the string itself — trimming it
+   * would leave both sides of a barrier agreeing on a key production never
+   * takes, blocking exactly as expected and proving nothing.
+   */
+  readonly trim: boolean;
+}
+
+const SQL_FORM: TemplateForm = { pattern: SQL_TEMPLATE, noun: 'raw SQL', trim: true };
+const VALUE_FORM: TemplateForm = { pattern: VALUE_TEMPLATE, noun: 'value', trim: false };
 
 export interface ExtractOptions {
   /**
@@ -38,7 +101,7 @@ export interface ExtractOptions {
 const ROOT_WALK_LIMIT = 8;
 
 /**
- * Lifts the single `Prisma.sql` tagged template out of a source file's TEXT.
+ * Lifts the single raw SQL template out of a source file's TEXT.
  *
  * The concurrency suite (#239) has to execute the statement the application
  * ships, not a copy of it. A copy passes forever: it keeps proving that some
@@ -53,60 +116,65 @@ const ROOT_WALK_LIMIT = 8;
  * alternative — falling back to a hardcoded copy — reintroduces exactly the
  * drift this function exists to prevent.
  */
-export function extractPrismaSql(source: string, sourceLabel: string, options: ExtractOptions = {}): ShippedStatement {
-  const anchor = options.after;
+export function extractSqlTemplate(
+  source: string,
+  sourceLabel: string,
+  options: ExtractOptions = {},
+): ShippedStatement {
+  return extract(source, sourceLabel, options, SQL_FORM);
+}
 
-  if (anchor !== undefined) {
-    const mentions = occurrences(source, anchor);
-    const anchorAt = mentions.find((offset) => !isOnACommentLine(source, offset));
+/**
+ * Lifts the single untagged template out of a source file's TEXT — the string
+ * an advisory lock is keyed on, rather than a statement.
+ *
+ * Same contract as {@link extractSqlTemplate}, and the same reason: a spec that
+ * rebuilds `plugin_grant:household_unit:${id}:${pluginId}` by hand is asserting
+ * its own format. Lift the format, bind values into it with
+ * {@link bindTemplate}, and a change to it either fails the lift or produces
+ * the new key.
+ */
+export function extractValueTemplate(
+  source: string,
+  sourceLabel: string,
+  options: ExtractOptions = {},
+): ShippedStatement {
+  return extract(source, sourceLabel, options, VALUE_FORM);
+}
 
-    if (anchorAt === undefined) {
-      if (mentions.length > 0) {
-        // The quiet one. A `{@link thisFunction}` added to a NEIGHBOURING
-        // docstring sits above the real declaration, so a naive search anchors
-        // there and lifts the neighbour's statement instead — and when both
-        // statements bind the same parameters, nothing downstream notices.
-        throw new Error(
-          `'${anchor}' appears in ${sourceLabel} only inside comments, never as a declaration. A spec must ` +
-            `anchor on the code that issues the statement, not on prose that mentions it.`,
-        );
-      }
+/**
+ * Substitutes values into a lifted template, reproducing the string the
+ * application would have built.
+ *
+ * Arity is enforced rather than tolerated. An unsubstituted `$2` is still a
+ * perfectly valid advisory key, so both sides of a barrier would agree on it
+ * and block exactly as the spec expects — while saying nothing about the key
+ * production takes.
+ */
+export function bindTemplate(statement: ShippedStatement, values: readonly string[]): string {
+  if (values.length !== statement.params.length) {
+    throw new Error(
+      `This template interpolates ${statement.params.length} value(s) — [${statement.params.join(', ')}] — but ` +
+        `${values.length} were supplied. Bind one per interpolation, in order.`,
+    );
+  }
 
+  return statement.text.replace(/\$(\d+)/g, (_match, index: string) => {
+    const value = values[Number(index) - 1];
+
+    if (value === undefined) {
+      // Not unreachable: a literal `$5` written in the template body is
+      // indistinguishable from a placeholder once the text is built. Refusing
+      // by name beats substituting something arbitrary into a key.
       throw new Error(
-        `No '${anchor}' in ${sourceLabel}, so the statement this spec means cannot be located. It was ` +
-          `renamed or moved — point the spec at the new name rather than letting it read whichever ` +
-          `statement happens to be first.`,
+        `This template's text carries $${index}, but it interpolates only ${statement.params.length} value(s). ` +
+          `A literal '$' followed by digits cannot be told apart from a placeholder — bind it outside the ` +
+          `template, or escape it.`,
       );
     }
 
-    const start = templateStarts(source).find((offset) => offset > anchorAt);
-
-    if (start === undefined) {
-      throw new Error(`No ${TAG} template after '${anchor}' in ${sourceLabel} — the statement has moved or changed.`);
-    }
-
-    return scanTemplate(source, start, sourceLabel);
-  }
-
-  const starts = templateStarts(source);
-
-  if (starts.length === 0) {
-    throw new Error(
-      `No ${TAG} template found in ${sourceLabel}. The raw statement this suite executes has moved or ` +
-        `changed shape — point the spec at its new home rather than pasting a copy of the SQL here.`,
-    );
-  }
-
-  if (starts.length > 1) {
-    // Picking one of several would produce a green test for a statement
-    // nobody asked about, which is worse than no test at all.
-    throw new Error(
-      `Found ${starts.length} ${TAG} templates in ${sourceLabel}; this extractor can only be trusted when ` +
-        `there is exactly one. Give the spec a way to name the statement it means before adding another.`,
-    );
-  }
-
-  return scanTemplate(source, starts[0] as number, sourceLabel);
+    return value;
+  });
 }
 
 /**
@@ -172,13 +240,47 @@ export function readShippedSql(
   expectedParams: readonly string[],
   options: ExtractOptions = {},
 ): ShippedStatement {
+  return readShipped(relativePath, expectedParams, options, extractSqlTemplate);
+}
+
+/**
+ * The {@link extractValueTemplate} half of {@link readShippedSql} — for the
+ * advisory keys, which are strings rather than statements.
+ */
+export function readShippedValue(
+  relativePath: string,
+  expectedParams: readonly string[],
+  options: ExtractOptions = {},
+): ShippedStatement {
+  return readShipped(relativePath, expectedParams, options, extractValueTemplate);
+}
+
+/**
+ * A workspace-relative source file's text, for the rare pin that is neither a
+ * statement nor a template.
+ *
+ * `QuotaService.advisoryLockKey` is the case: its digest recipe (sha1, first
+ * eight bytes, big-endian) is ordinary TypeScript, and a spec that recomputes
+ * the key has to know that recipe has not changed underneath it. Failing here
+ * names the file, the same as every other lift.
+ */
+export function readShippedSource(relativePath: string): string {
   const absolute = join(workspaceRoot(), relativePath);
 
   if (!existsSync(absolute)) {
     throw new Error(`Expected to find ${relativePath} at ${absolute} — the file has moved or been renamed.`);
   }
 
-  const statement = extractPrismaSql(readFileSync(absolute, 'utf8'), relativePath, options);
+  return readFileSync(absolute, 'utf8');
+}
+
+function readShipped(
+  relativePath: string,
+  expectedParams: readonly string[],
+  options: ExtractOptions,
+  lift: (source: string, sourceLabel: string, options: ExtractOptions) => ShippedStatement,
+): ShippedStatement {
+  const statement = lift(readShippedSource(relativePath), relativePath, options);
   const mismatch =
     parameterMismatch(statement, expectedParams, relativePath) ??
     (options.matching ? shapeMismatch(statement, options.matching, relativePath) : undefined);
@@ -190,11 +292,120 @@ export function readShippedSql(
   return statement;
 }
 
-/** Every offset at which `needle` appears. */
+/** The shared body of both extractors; the form names the shape in every failure. */
+function extract(source: string, sourceLabel: string, options: ExtractOptions, form: TemplateForm): ShippedStatement {
+  const { pattern, noun } = form;
+  const anchor = options.after;
+
+  if (anchor !== undefined) {
+    const mentions = occurrences(source, anchor);
+    const anchorAt = mentions.find((offset) => !isOnACommentLine(source, offset));
+
+    if (anchorAt === undefined) {
+      if (mentions.length > 0) {
+        // The quiet one. A `{@link thisFunction}` added to a NEIGHBOURING
+        // docstring sits above the real declaration, so a naive search anchors
+        // there and lifts the neighbour's statement instead — and when both
+        // statements bind the same parameters, nothing downstream notices.
+        throw new Error(
+          `'${anchor}' appears in ${sourceLabel} only inside comments, never as a declaration. A spec must ` +
+            `anchor on the code that issues the statement, not on prose that mentions it.`,
+        );
+      }
+
+      throw new Error(
+        `No '${anchor}' in ${sourceLabel}, so the statement this spec means cannot be located. It was ` +
+          `renamed or moved — point the spec at the new name rather than letting it read whichever ` +
+          `statement happens to be first.`,
+      );
+    }
+
+    const starts = templateStarts(source, pattern);
+    const start = starts.find((offset) => offset > anchorAt);
+
+    if (start === undefined) {
+      throw new Error(`No ${noun} template after '${anchor}' in ${sourceLabel} — the statement has moved or changed.`);
+    }
+
+    // A name is mentioned at its declaration AND at every call site, and an
+    // anchor takes the first non-comment mention — which in
+    // `household-member.service.ts` is a call 600 lines above the declaration.
+    // That is harmless only while every mention leads to the same statement.
+    // The moment they diverge, the earliest call site retargets the lift onto a
+    // neighbour's statement, and when both bind the same parameters nothing
+    // downstream notices. Same instinct as refusing to pick one of two
+    // templates: say so rather than choose.
+    const resolved = new Set(
+      mentions
+        .filter((offset) => !isOnACommentLine(source, offset))
+        .map((offset) => starts.find((candidate) => candidate > offset))
+        .filter((candidate): candidate is number => candidate !== undefined),
+    );
+
+    if (resolved.size > 1) {
+      throw new Error(
+        `'${anchor}' appears in ${sourceLabel} more than once — at its declaration and at a call site — and ` +
+          `the mentions lead to different ${noun} templates. Anchor on something that appears only at the ` +
+          `declaration (the name with its modifiers, say) so the statement this spec means is not decided by ` +
+          `which mention happens to come first.`,
+      );
+    }
+
+    return scanTemplate(source, start, sourceLabel, form);
+  }
+
+  const starts = templateStarts(source, pattern);
+
+  if (starts.length === 0) {
+    throw new Error(
+      `No ${noun} template found in ${sourceLabel}. The raw statement this suite executes has moved or ` +
+        `changed shape — point the spec at its new home rather than pasting a copy of the SQL here.`,
+    );
+  }
+
+  if (starts.length > 1) {
+    // Picking one of several would produce a green test for a statement
+    // nobody asked about, which is worse than no test at all.
+    throw new Error(
+      `Found ${starts.length} ${noun} templates in ${sourceLabel}; this extractor can only be trusted when ` +
+        `there is exactly one. Give the spec a way to name the statement it means before adding another.`,
+    );
+  }
+
+  return scanTemplate(source, starts[0] as number, sourceLabel, form);
+}
+
+/** A single decimal digit — see the placeholder-ambiguity refusal in {@link scanTemplate}. */
+const DIGIT = /[0-9]/;
+
+/** Identifier characters, for deciding where one name ends and another begins. */
+const IDENTIFIER_CHARACTER = /[A-Za-z0-9_$]/;
+
+/**
+ * Every offset at which `needle` appears AS A WHOLE NAME.
+ *
+ * The boundary check is load-bearing rather than tidy. `lockHouseholdUnit` is a
+ * prefix of `lockHouseholdUnitScope`, and the plugin runtime ships both — with
+ * the longer one imported at the top of the file, far above either statement.
+ * A substring anchor resolves to that import and lifts whichever template
+ * follows it, which is silently wrong precisely when the two statements bind
+ * the same parameters and nothing downstream notices.
+ */
 function occurrences(source: string, needle: string): number[] {
   const found: number[] = [];
 
   for (let at = source.indexOf(needle); at !== -1; at = source.indexOf(needle, at + 1)) {
+    const before = source[at - 1];
+    const after = source[at + needle.length];
+
+    if (before !== undefined && IDENTIFIER_CHARACTER.test(before)) {
+      continue;
+    }
+
+    if (after !== undefined && IDENTIFIER_CHARACTER.test(after)) {
+      continue;
+    }
+
     found.push(at);
   }
 
@@ -216,12 +427,25 @@ function isOnACommentLine(source: string, offset: number): boolean {
   return before.startsWith('*') || before.startsWith('//') || before.startsWith('/*');
 }
 
-/** Offsets of the backtick that opens each `Prisma.sql` template. */
-function templateStarts(source: string): number[] {
+/**
+ * Offsets just past the backtick that opens each template of the wanted shape,
+ * skipping any that lives inside a comment.
+ *
+ * Doc comments in this repo quote code, and a quoted key format is
+ * indistinguishable from a real one to a pattern that only inspects the
+ * character before the backtick — `unit-scope-lock.ts` already carries such a
+ * mention. Counted, it inflates the ambiguity check; anchored past, it is
+ * lifted in preference to the statement the spec meant.
+ */
+function templateStarts(source: string, pattern: RegExp): number[] {
   const starts: number[] = [];
-  const pattern = new RegExp(`${TAG.replace('.', '\\.')}\\s*\``, 'g');
+  const scanner = new RegExp(pattern.source, 'g');
 
-  for (let match = pattern.exec(source); match !== null; match = pattern.exec(source)) {
+  for (let match = scanner.exec(source); match !== null; match = scanner.exec(source)) {
+    if (isOnACommentLine(source, match.index)) {
+      continue;
+    }
+
     starts.push(match.index + match[0].length);
   }
 
@@ -235,7 +459,8 @@ function templateStarts(source: string): number[] {
  * expression such as `${pick({ a: 1 })}` survives; a backtick inside an
  * interpolation (a nested template) is refused rather than mis-parsed.
  */
-function scanTemplate(source: string, start: number, sourceLabel: string): ShippedStatement {
+function scanTemplate(source: string, start: number, sourceLabel: string, form: TemplateForm): ShippedStatement {
+  const { noun } = form;
   const params: string[] = [];
   let text = '';
 
@@ -249,7 +474,7 @@ function scanTemplate(source: string, start: number, sourceLabel: string): Shipp
     }
 
     if (char === '`') {
-      return { text: text.trim(), params };
+      return { text: form.trim ? text.trim() : text, params };
     }
 
     if (char === '$' && source[index + 1] === '{') {
@@ -282,6 +507,21 @@ function scanTemplate(source: string, start: number, sourceLabel: string): Shipp
         throw new Error(`Unterminated interpolation in ${sourceLabel} — no closing brace before end of file.`);
       }
 
+      // `${prefix}2` would render as `$12` — placeholder twelve to everything
+      // downstream. Under twelve interpolations that is a confusing throw at
+      // bind time; at twelve or more it silently binds the wrong value, which
+      // in a key format is the exact drift this module exists to prevent. The
+      // scheme cannot express it, so refuse rather than emit it.
+      const next = source[index + 1];
+
+      if (next !== undefined && DIGIT.test(next)) {
+        throw new Error(
+          `An interpolation in ${sourceLabel} is immediately followed by the digit '${next}', which makes its ` +
+            `positional placeholder ambiguous ($${params.length + 1} followed by ${next} reads as ` +
+            `$${params.length + 1}${next}). Separate them, or bind the value outside the template.`,
+        );
+      }
+
       params.push(expression.trim());
       text += `$${params.length}`;
       continue;
@@ -291,7 +531,7 @@ function scanTemplate(source: string, start: number, sourceLabel: string): Shipp
   }
 
   throw new Error(
-    `Unterminated ${TAG} template in ${sourceLabel} — no closing backtick before end of file. ` +
+    `Unterminated ${noun} template in ${sourceLabel} — no closing backtick before end of file. ` +
       `The file is probably truncated, or the statement is built some other way now.`,
   );
 }
