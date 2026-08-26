@@ -337,6 +337,34 @@ describe('shipped-function', () => {
       ).toMatch(/takes 'unit row' before 'advisory key'/);
     });
 
+    it('finds a branch inside a transaction callback, which is where the real ones live', () => {
+      // Deliberate, and load-bearing. Every service pinned by `lock-order.ts`
+      // does its work inside `db.$transaction(async (tx) => …)`, so the branch
+      // that takes the locks is nested in a function expression rather than
+      // sitting directly in the method body. A traversal that stopped at
+      // nested functions — a reasonable-sounding way to keep a stray callback
+      // from answering for the path — would find nothing here at all.
+      //
+      // The cost is bounded by the refusals rather than by the walk: a stray
+      // callback whose `if` also matches makes TWO matches, which is refused,
+      // not silently chosen.
+      const wrapped = `
+        class Service {
+          async decide(input: Input): Promise<void> {
+            return this.db.$transaction(async (tx) => {
+              if (input.status === Granted && input.scopeType === Scope.User) {
+                await lockUserUnitScope(tx);
+              }
+            });
+          }
+        }
+      `;
+
+      expect(extractBranchBody(wrapped, 'decide', /Granted && input\.scopeType/, 'service.ts').body).toMatch(
+        /lockUserUnitScope/,
+      );
+    });
+
     it('refuses a condition no branch tests', () => {
       expect(() => extractBranchBody(source, 'decide', /Revoked/, 'service.ts')).toThrow(/No branch of 'decide'/);
     });

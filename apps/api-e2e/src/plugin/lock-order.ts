@@ -27,12 +27,19 @@ import type { OrderedStage } from '../support/shipped-function';
 export const CLAIMED_LOCK_ORDER = [
   {
     /**
-     * Taken by the unit paths as a `FOR SHARE` read, and by uninstall and
+     * Taken by the unit paths through `assertStillLiving`, and by uninstall and
      * activation as the claiming write they already make. Both are the plugin
      * row; what matters is that nothing else is taken before it.
+     *
+     * The SQL alternative is scoped to the `plugins` table, as the two stages
+     * below already scope theirs. A bare `FOR SHARE` would let a share lock on
+     * ANY table date this stage — and since order is judged by first
+     * occurrence, one taken earlier in a body would report the plugin row as
+     * held before it was. It is only reached by the replayed statement today,
+     * which is exactly when a loose pattern goes unnoticed.
      */
     name: 'plugin row',
-    pattern: /assertStillLiving\(|FOR SHARE|tx\.plugin\.update|plugin\.updateMany/,
+    pattern: /assertStillLiving\(|FROM plugins[^`]*?FOR SHARE|tx\.plugin\.update|plugin\.updateMany/,
   },
   {
     /**

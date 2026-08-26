@@ -11,7 +11,14 @@ import {
   arrangeServerGrant,
   GRANT_DECISION_CLAIM,
 } from './lock-fixtures';
-import { CLAIMED_LOCK_ORDER, LOCK_ORDER_PATHS, LOCK_SOURCES, stagesNamed, type LockStageName } from './lock-order';
+import {
+  CLAIMED_LOCK_ORDER,
+  LOCK_ORDER_PATHS,
+  LOCK_SOURCES,
+  stageNamed,
+  stagesNamed,
+  type LockStageName,
+} from './lock-order';
 
 /**
  * The claimed total order — `plugin row -> grant row -> advisory key -> unit
@@ -125,6 +132,20 @@ describe('the plugin consent path is one lock order (#360)', () => {
       expect(() => stagesNamed([])).toThrow(/asserts nothing/);
       expect(() => stagesNamed(['grant row', 'grant row'])).toThrow(/more than once/);
       expect(() => stagesNamed(['grant row', 'plugin roe'])).toThrow(/is not a stage of the claimed lock order/);
+    });
+
+    it('does not let a share lock on another table stand in for the plugin row', () => {
+      // Order is judged by first occurrence, so a stage pattern that matches
+      // something it did not mean does not merely over-match — it DATES the
+      // stage to the wrong statement, and a plugin row genuinely taken later
+      // reports as taken early. The two stages that lock by raw SQL below
+      // scope themselves to their table; this is the one that has to be held
+      // to the same rule, and nothing in a pinned body reaches its SQL
+      // alternative today, which is precisely when looseness goes unnoticed.
+      const pluginRow = stageNamed('plugin row');
+
+      expect('SELECT id FROM households WHERE id = $1 FOR SHARE').not.toMatch(pluginRow.pattern);
+      expect('SELECT uninstalled_at FROM plugins WHERE id = $1 FOR SHARE').toMatch(pluginRow.pattern);
     });
 
     it('recognises every stage of the claimed order in some shipped body', () => {
