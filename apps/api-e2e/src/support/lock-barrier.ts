@@ -318,6 +318,122 @@ export async function expectNotBlocked(
   }
 }
 
+/**
+ * A backend waiting on an advisory lock the holder is holding — and what it is
+ * running while it waits.
+ *
+ * The pid-keyed assertions above cannot reach an application transaction: the
+ * API's request runs on a connection from its own pool, and a spec that never
+ * imports application code has no way to learn which backend that is. So the
+ * question is turned around. Rather than "is this pid blocked", ask "is anyone
+ * blocked on the key I am holding", which is answerable from `pg_locks` alone
+ * and is the same fact from the other side.
+ *
+ * Three predicates keep that from meaning "anyone, anywhere, is waiting":
+ *
+ *  - the join against the holder's own GRANTED rows narrows it to this key;
+ *  - `database` is compared because advisory locks are per-database while
+ *    `pg_locks` is cluster-wide, so the same key in another database on a
+ *    shared server would otherwise join;
+ *  - `exclude` lets the caller rule out the barrier's own connections, without
+ *    which a spec that contends holder against waiter would report the waiter
+ *    and read as though the application had queued.
+ *
+ * Ordered by pid so a scenario with more than one contender returns the same
+ * one every run rather than whichever row Postgres happened to emit first.
+ */
+export interface AdvisoryWaiter {
+  readonly pid: number;
+
+  /** The statement the waiting backend is running, per `pg_stat_activity`. */
+  readonly query: string;
+}
+
+export async function advisoryWaiters(
+  observer: BarrierConnection,
+  heldBy: number,
+  exclude: readonly number[] = [],
+): Promise<AdvisoryWaiter[]> {
+  return observer.query<AdvisoryWaiter>(
+    `SELECT DISTINCT waiting.pid, coalesce(activity.query, '') AS query
+     FROM pg_locks waiting
+     JOIN pg_locks held
+       ON held.locktype = 'advisory'
+      AND held.granted
+      AND held.classid = waiting.classid
+      AND held.objid = waiting.objid
+      AND held.objsubid = waiting.objsubid
+      AND held.database = waiting.database
+     LEFT JOIN pg_stat_activity activity ON activity.pid = waiting.pid
+     WHERE waiting.locktype = 'advisory'
+       AND NOT waiting.granted
+       AND held.pid = $1
+       AND waiting.pid <> ALL($2::int[])
+     ORDER BY waiting.pid`,
+    [heldBy, [heldBy, ...exclude]],
+  );
+}
+
+/**
+ * Asserts that some other backend is waiting on the advisory lock `heldBy`
+ * holds, and returns it.
+ *
+ * The positive form of "the request has not come back yet", which on a loaded
+ * machine is a statement about the machine. Same discipline {@link expectBlocked}
+ * applies (#239), reached the only way it can be when the blocked party is the
+ * application rather than a barrier connection.
+ *
+ * `settledEarly` is how a fixture problem stops looking like a lock problem. A
+ * request refused by an authorization gate never reaches the lock, and from
+ * `pg_locks` that is indistinguishable from one that took a different key — so
+ * the caller passes a probe for its own request, and a request that answered is
+ * reported as answered instead of timing out with three guesses.
+ */
+export async function expectAdvisoryWaiter(
+  barrier: Barrier,
+  options: {
+    readonly heldBy: number;
+    readonly description: string;
+    readonly timeoutMs?: number;
+    readonly exclude?: readonly number[];
+    readonly settledEarly?: () => string | undefined;
+  },
+): Promise<AdvisoryWaiter> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_BLOCKED_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+
+  for (;;) {
+    const waiters = await advisoryWaiters(barrier.observer, options.heldBy, options.exclude);
+    const waiter = waiters[0];
+
+    if (waiter !== undefined) {
+      return waiter;
+    }
+
+    const settled = options.settledEarly?.();
+
+    if (settled !== undefined) {
+      throw new Error(
+        `${options.description} answered without ever queueing behind the advisory key held by pid ` +
+          `${options.heldBy}: ${settled}. Most likely something in front of the lock refused it — an ` +
+          `authorization gate, a missing fixture, a rejected body — so this case raced nothing. A 5xx here ` +
+          `means the opposite: it reached the lock and its own transaction budget ran out while waiting.`,
+      );
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${options.description} never waited on the advisory key held by pid ${options.heldBy}: after ` +
+          `${timeoutMs}ms no other backend held an ungranted lock on it, and it had not answered either. ` +
+          `Either it takes a different key, or it is still working its way toward the lock — which on a cold ` +
+          `run can take longer than this budget.`,
+      );
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
 /** The ungranted locks a backend is waiting on, if any. */
 export async function ungrantedLocks(observer: BarrierConnection, pid: number): Promise<UngrantedLock[]> {
   return observer.query<UngrantedLock>(
