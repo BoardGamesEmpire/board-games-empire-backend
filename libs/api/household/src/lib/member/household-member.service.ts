@@ -35,7 +35,11 @@ import {
 } from '../constants/household.constants';
 import { isAssignableHouseholdRole, UpdateMemberRoleDto, type AssignableHouseholdRole } from '../dto';
 import { HouseholdOwnershipTransferredEvent, type HouseholdOwnershipSnapshot } from '../events/household.events';
-import { assertHouseholdExists, lockExistingHousehold } from '../household-access.helpers';
+import {
+  assertHouseholdExists,
+  lockExistingHousehold,
+  lockHouseholdForRoleTransition,
+} from '../household-access.helpers';
 
 /**
  * Include object for member queries, so consistent user/profile/role data is
@@ -331,7 +335,36 @@ export class HouseholdMemberService {
           throw new BadRequestException(t('errors.household.member_role_self'));
         }
 
-        if (member.role?.role.name === SystemRole.HouseholdOwner) {
+        // Taken AFTER the scoped read, so a 403 or 404 still costs no
+        // household-wide lock, and BEFORE the owner check below, which is the
+        // decision it protects (#239).
+        await lockHouseholdForRoleTransition(tx, householdId);
+
+        // Re-read the member AND its role under the lock rather than trusting
+        // the read above. Two things can have changed while this transaction
+        // waited, and both of them are writes this endpoint must not make:
+        //
+        //  - A concurrent `transferOwnership` promoted this very member. The
+        //    pre-lock read saw a plain member, so the upsert below would
+        //    overwrite the household's brand-new owner back down to a member and
+        //    leave nobody holding the role. Same rule #248 applied to
+        //    `deleteMembership` — decide from locked state, never from a
+        //    pre-lock read.
+        //  - A concurrent removal deleted the member outright. The upsert's
+        //    `where` would then match nothing and INSERT, whose FK raises P2003
+        //    — which `rethrowMutationFailure` does not classify, so the caller
+        //    gets a 500 where 404 is the honest answer. `transferOwnership`
+        //    avoids the same hazard by reading its target after the lock.
+        const locked = await tx.householdMember.findUnique({
+          where: { id: member.id },
+          select: { role: { select: { role: { select: { name: true } } } } },
+        });
+
+        if (!locked) {
+          throw new NotFoundException(t('errors.household.member_not_found', { memberId, householdId }));
+        }
+
+        if (locked.role?.role.name === SystemRole.HouseholdOwner) {
           throw new BadRequestException(t('errors.household.member_role_owner'));
         }
 
@@ -432,6 +465,13 @@ export class HouseholdMemberService {
         // Reading after the lock is also what collapses the guards: there is no
         // longer a pre-lock check to repeat, because every fact below is read
         // from locked state.
+        //
+        // The household row comes FIRST, and it is what actually serializes two
+        // role transitions — the owner-row lock cannot, because the set it
+        // covers is defined by the very column a transfer rewrites (#239; see
+        // `lockHouseholdForRoleTransition`). Consistent ordering everywhere:
+        // household row, then owner rows.
+        await lockHouseholdForRoleTransition(tx, householdId);
         const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, householdId);
 
         // Authorization strictly before validation: resolving the actor first
@@ -942,9 +982,17 @@ export class HouseholdMemberService {
         // first would have done.
         //
         // The cost is that concurrent departures within one household serialize
-        // on its owner rows. That is the price of correctness under READ
-        // COMMITTED: there is no way to know whether the lock is needed without
-        // first taking it. Households are small and departures are rare.
+        // on it. That is the price of correctness under READ COMMITTED: there is
+        // no way to know whether the lock is needed without first taking it.
+        // Households are small and departures are rare.
+        //
+        // The household row is what does the serializing (#239). Taking only
+        // the owner rows left this path's worst case open: a transfer that
+        // promotes the departing member commits while this transaction waits,
+        // and the re-checked owner set comes back EMPTY — the old owner dropped
+        // out of it, the new owner was never in it — so the guard below sees no
+        // owners at all and deletes the household's only one.
+        await lockHouseholdForRoleTransition(tx, scopedWhere.householdId);
         const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, scopedWhere.householdId);
 
         if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
@@ -1013,9 +1061,15 @@ export class HouseholdMemberService {
    * transaction and returns the `HouseholdMember.id`s holding them.
    *
    * The lock, not the count, is the point. Under READ COMMITTED two concurrent
-   * owner transitions each read the pre-image and each conclude they are safe;
-   * `FOR UPDATE OF hr` serializes them so the second observes the first. Both
-   * callers need that, for different invariants:
+   * owner transitions each read the pre-image and each conclude they are safe.
+   *
+   * `FOR UPDATE OF hr` is HALF of the answer, and on its own it is the wrong
+   * half: the rows it covers are selected by `roles.name`, the column a
+   * transfer rewrites, so a blocked statement re-checks the demoted owner out
+   * of its result and never sees the promoted one (#239). Mutual exclusion
+   * comes from {@link lockHouseholdForRoleTransition}, which every caller takes
+   * first; this statement pins the rows this transaction is about to act on and
+   * returns them. Both callers need the set, for different invariants:
    *
    * - {@link deleteMembership} — a household must keep at least one owner.
    * - {@link transferOwnership} — the acting owner must still be an owner, and
@@ -1026,8 +1080,9 @@ export class HouseholdMemberService {
    *
    * NOTE: the raw SQL is never executed by the unit suite ($queryRaw is
    * mocked). Its identifiers are pinned against the checked-in Prisma models by
-   * a spec in this lib, which catches a later `@map` rename; that it actually
-   * serializes is #239's integration work.
+   * a spec in this lib, which catches a later `@map` rename; what it does
+   * against a real database — including the re-check behaviour described above
+   * — is pinned by `apps/api-e2e/src/household` (#239).
    */
   private async lockHouseholdOwnerRows(tx: Prisma.TransactionClient, householdId: string): Promise<string[]> {
     const owners = await tx.$queryRaw<Array<{ household_member_id: string }>>(Prisma.sql`

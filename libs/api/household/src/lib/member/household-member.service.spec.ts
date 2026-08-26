@@ -41,10 +41,12 @@ import {
  * `Prisma.sql` exposes both `strings` and a `text` getter; reading either
  * structurally avoids depending on which the installed client version keeps.
  *
- * Module-scoped because two independent raw statements are now issued from this
- * service — the owner lock and the household share-lock — and both the
- * dispatching `$queryRaw` stub and the identifier-pinning suite need to tell
- * them apart.
+ * Module-scoped because THREE independent raw statements now reach this
+ * service — the household role-transition lock, the owner-row lock, and the
+ * household share-lock — and both the dispatching `$queryRaw` stub and the
+ * identifier-pinning suite need to tell them apart. Two of the three read
+ * `households`, so they are discriminated by their locking clause rather than
+ * by their FROM list.
  */
 const rawText = (value: unknown): string => {
   const sql = value as { strings?: readonly string[]; text?: string };
@@ -52,8 +54,18 @@ const rawText = (value: unknown): string => {
   return sql.strings?.join(' ') ?? sql.text ?? '';
 };
 
-/** True for the household share-lock statement, false for the owner lock. */
-const isHouseholdLockSql = (value: unknown): boolean => /\bFROM\s+households\b/.test(rawText(value));
+/** The admission guard: household row, `FOR SHARE` (#276). */
+const isHouseholdShareLockSql = (value: unknown): boolean => /FOR SHARE/.test(rawText(value));
+
+/** The role-transition mutex: household row, `FOR NO KEY UPDATE` (#239). */
+const isRoleTransitionLockSql = (value: unknown): boolean => /FOR NO KEY UPDATE/.test(rawText(value));
+
+/** The owner-row lock, which returns the member ids holding HouseholdOwner. */
+const isOwnerLockSql = (value: unknown): boolean => /FOR UPDATE OF hr/.test(rawText(value));
+
+/** Either statement that reads the `households` row rather than the roster. */
+const isHouseholdLockSql = (value: unknown): boolean =>
+  isHouseholdShareLockSql(value) || isRoleTransitionLockSql(value);
 
 const COND = { id: 'sentinel-condition' };
 const PAGINATION = paginationQuery({ limit: 10 });
@@ -414,6 +426,9 @@ describe('HouseholdMemberService', () => {
 
     beforeEach(() => {
       db.role.findUnique.mockResolvedValue({ id: 'role-admin' } as never);
+      // The locked re-read (#239): a plain member by default, so each case
+      // below overrides only the state it is actually about.
+      db.householdMember.findUnique.mockResolvedValue(makeMember() as never);
     });
 
     it('scopes the target by manage conditions, upserts the 1:1 role, and evicts the target cache', async () => {
@@ -498,9 +513,54 @@ describe('HouseholdMemberService', () => {
     });
 
     it('rejects changing an owner (400) — owner transitions belong to transfer-ownership (#158)', async () => {
+      // Decided from the role read UNDER the household lock, not from the
+      // pre-lock scoped read: a concurrent `transferOwnership` promoting this
+      // member is the case that matters, and the pre-lock read cannot see it
+      // (#239). The scoped read still returns an owner here so the two agree.
       db.householdMember.findFirst.mockResolvedValue(makeOwner());
+      db.householdMember.findUnique.mockResolvedValue(makeOwner() as never);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
+
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('refuses a member promoted to owner concurrently, whose pre-lock read said otherwise', async () => {
+      // The race the lock exists for, stated as the state it produces: the
+      // scoped read saw a plain member, the transfer committed in between, and
+      // the locked re-read is what stops this upsert from overwriting the
+      // household's only owner back down to a member.
+      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findUnique.mockResolvedValue(makeOwner() as never);
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
+
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
+    it('takes the household lock before deciding, and before the write', async () => {
+      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findUniqueOrThrow.mockResolvedValue(makeMember() as never);
+
+      await service.updateMemberRole('hh-1', 'member-1', DTO);
+
+      expect(db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).filter(isRoleTransitionLockSql)).toHaveLength(1);
+
+      const lockOrder = db.$queryRaw.mock.invocationCallOrder[0];
+      expect(lockOrder).toBeLessThan(db.householdMember.findUnique.mock.invocationCallOrder[0]);
+      expect(lockOrder).toBeLessThan(db.householdRole.upsert.mock.invocationCallOrder[0]);
+    });
+
+    it('answers 404 when the member is removed while this transaction waits for the lock', async () => {
+      // Without the locked re-read the upsert's `where` matches nothing, so it
+      // INSERTs against a deleted member and the FK raises P2003 —
+      // unclassified, and therefore a 500 describing nothing.
+      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findUnique.mockResolvedValue(null);
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(NotFoundException);
 
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
@@ -556,13 +616,20 @@ describe('HouseholdMemberService', () => {
         ResourceType.HouseholdMember,
         Action.manage,
       );
-      // The lock is now taken unconditionally and the last-owner refusal is
+      // Both locks are taken unconditionally and the last-owner refusal is
       // decided from the LOCKED set, not from the pre-lock read of `member.role`.
       // #157 skipped the lock for non-owner departures, which was sound only
       // while nothing could promote a member to owner concurrently — #158's
       // transfer path is exactly that, so a member promoted between the read and
       // the commit would have been deleted with no check at all.
-      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      //
+      // The household row comes first and is what actually serializes two
+      // transitions; the owner-row lock alone cannot, because a concurrent
+      // transfer rewrites the very column that defines its result set (#239).
+      const rawStatements = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]);
+      expect(rawStatements.filter(isRoleTransitionLockSql)).toHaveLength(1);
+      expect(rawStatements.filter(isOwnerLockSql)).toHaveLength(1);
+      expect(rawStatements.findIndex(isRoleTransitionLockSql)).toBeLessThan(rawStatements.findIndex(isOwnerLockSql));
       // Not among the locked owners, so the refusal does not apply.
       expect(db.householdMember.delete).toHaveBeenCalled();
 
@@ -589,7 +656,7 @@ describe('HouseholdMemberService', () => {
 
       await service.removeMember('hh-1', 'member-1');
 
-      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw).toHaveBeenCalledTimes(2);
       expect(db.householdMember.delete).toHaveBeenCalled();
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
     });
@@ -886,14 +953,21 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
-    it('takes the owner lock before issuing either write', async () => {
+    it('takes the household lock, then the owner lock, before issuing either write', async () => {
       stubMembers(ACTOR(), TARGET());
 
       await service.transferOwnership('hh-1', 'member-2');
 
-      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      const rawStatements = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]);
+
+      // Household row first: it is the mutex. The owner-row lock cannot serialize
+      // two transitions on its own, because the set it covers is selected by the
+      // column a transfer rewrites (#239).
+      expect(rawStatements.map((query: unknown) => isRoleTransitionLockSql(query))).toEqual([true, false]);
+      expect(rawStatements.filter(isOwnerLockSql)).toHaveLength(1);
+
       // Locked before either write, or it guards nothing.
-      const lockOrder = db.$queryRaw.mock.invocationCallOrder[0];
+      const lockOrder = db.$queryRaw.mock.invocationCallOrder[1];
       const firstUpsert = db.householdRole.upsert.mock.invocationCallOrder[0];
       expect(lockOrder).toBeLessThan(firstUpsert);
     });
@@ -1796,9 +1870,7 @@ describe('HouseholdMemberService', () => {
 
       await service.removeMember('hh-1', 'member-1');
 
-      const ownerLock = db.$queryRaw.mock.calls
-        .map((call: unknown[]) => call[0])
-        .find((query: unknown) => !isHouseholdLockSql(query));
+      const ownerLock = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isOwnerLockSql);
       expect(ownerLock).toBeDefined();
 
       return rawText(ownerLock);
@@ -1823,9 +1895,54 @@ describe('HouseholdMemberService', () => {
     });
 
     it('locks the household_roles rows rather than merely reading them', async () => {
-      // Without FOR UPDATE two concurrent owner transitions both pass their
-      // checks and the household is left ownerless.
+      // Necessary but NOT sufficient: this statement pins the rows that are
+      // owners at snapshot time, and `lockHouseholdForRoleTransition` is what
+      // excludes a concurrent transition (#239).
       await expect(captureLockSql()).resolves.toMatch(/FOR UPDATE OF hr/);
+    });
+
+    describe('household role-transition lock', () => {
+      const captureTransitionLockSql = async (): Promise<string> => {
+        db.householdMember.findFirst.mockResolvedValue(makeOwner());
+        db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
+        db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
+        db.householdMember.delete.mockResolvedValue(makeOwner() as never);
+        stubRawQueries({ owners: ['member-1', 'member-2'] });
+
+        await service.removeMember('hh-1', 'member-1');
+
+        const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isRoleTransitionLockSql);
+        expect(query).toBeDefined();
+
+        return rawText(query);
+      };
+
+      it('references only identifiers the Prisma models actually map to', async () => {
+        const text = await captureTransitionLockSql();
+        const schema = readSchema();
+
+        for (const identifier of [table(schema, 'Household'), column(schema, 'Household', 'id')]) {
+          expect(text).toMatch(new RegExp(`\\b${identifier}\\b`));
+        }
+      });
+
+      it('takes the mode that excludes another transition without blocking admissions', async () => {
+        // FOR NO KEY UPDATE conflicts with itself and with the soft-delete's
+        // non-key UPDATE, while leaving the FOR KEY SHARE that a member insert
+        // takes through its FK unblocked. FOR UPDATE would block those too, for
+        // no invariant; FOR SHARE would not exclude a second transition at all.
+        const text = await captureTransitionLockSql();
+
+        expect(text).toMatch(/FOR NO KEY UPDATE/);
+        expect(text).not.toMatch(/FOR UPDATE OF/);
+      });
+
+      it('locks the household even while it is being soft-deleted', async () => {
+        // Deliberately no `deleted_at IS NULL` predicate, unlike the admission
+        // guard: the mutex must still serialize against a soft-delete in flight,
+        // and the callers have already established existence.
+        await expect(captureTransitionLockSql()).resolves.not.toMatch(/deleted_at/);
+      });
     });
 
     describe('household share lock', () => {
@@ -1841,7 +1958,7 @@ describe('HouseholdMemberService', () => {
           addedById: 'user-inviter',
         });
 
-        const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isHouseholdLockSql);
+        const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isHouseholdShareLockSql);
         expect(query).toBeDefined();
 
         return rawText(query);

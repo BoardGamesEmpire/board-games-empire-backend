@@ -2,7 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiExtraModels,
@@ -94,6 +94,11 @@ export class HouseholdMemberController {
   @ApiResponse({ status: Http.Forbidden, description: 'Not the current owner of this household' })
   @ApiResponse({ status: Http.NotFound, description: 'Member or household not found' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.HouseholdRole))
+  // A POST that creates nothing — ownership moves between two rows that already
+  // exist — so 200, matching the documented response above and the sibling
+  // mutations either side of it. Without the pin Nest answers 201 and the
+  // generated client is built against a status the server never sends.
+  @HttpCode(Http.Ok)
   @Post(':memberId/transfer-ownership')
   transferOwnership(@Param('householdId') householdId: string, @Param('memberId') memberId: string) {
     return from(this.memberService.transferOwnership(householdId, memberId)).pipe(
