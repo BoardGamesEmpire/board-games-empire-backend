@@ -150,14 +150,35 @@ describe('quota advisory lock (pg_advisory_xact_lock)', () => {
   /**
    * `consume()` sorts its keys before taking them, because one call can hold
    * several — an instance row and a type-level default, across scopes. The sort
-   * is the no-deadlock argument for two calls whose key sets overlap, and it is
-   * one line with no test.
+   * is the no-deadlock argument for two calls whose key sets overlap.
+   *
+   * The two barrier cases below are facts about POSTGRES: a consistent order
+   * queues, an inconsistent one deadlocks. Neither says the application sorts,
+   * because both order their keys themselves — so on their own they would stay
+   * green if the sort were deleted tomorrow. {@link pinsTheAcquisitionOrder} is
+   * what closes that, the same way the digest recipe pin above makes the
+   * recomputed key legitimate: `consume()` is an internal seam with no HTTP
+   * caller, and this suite never imports application code, so the shipped
+   * source is the only place the ordering can be read from.
    */
   describe('the sorted acquisition order', () => {
+    it('pins the ascending sort consume() takes its keys in', () => {
+      // Named above as the guard on both cases below. Fails if the sort is
+      // removed, reversed, or applied to something the acquisition loop does
+      // not then iterate — each of which reopens the deadlock the sort exists
+      // to prevent, and none of which a barrier can observe from outside.
+      const source = readShippedSource(QUOTA_SERVICE).replace(/\s+/g, ' ');
+
+      expect(source).toMatch(
+        /const lockKeys =.*?\.sort\(\(a, b\) => \(a < b \? -1 : a > b \? 1 : 0\)\); for \(const key of lockKeys\)/,
+      );
+    });
+
     const twoKeys = (): [string, string] => {
+      // The comparator pinned above, applied to the same values — `consume()`
+      // compares `bigint`s, and these are the decimal strings `pg` binds.
       const keys = [advisoryKey(RESOURCE, SCOPE, randomUUID()), advisoryKey(RESOURCE, SCOPE, randomUUID())];
 
-      // The comparator `consume()` uses, on the same values.
       keys.sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0));
 
       return [keys[0] as string, keys[1] as string];
