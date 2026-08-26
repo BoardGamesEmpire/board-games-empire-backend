@@ -127,11 +127,10 @@ describe('concurrent household owner transitions', () => {
       transferOwnership(owner, fixture.household.id, secondMember.member.id),
     ]);
 
-    // 201 because the route is a POST (Nest's default for one), and 403 rather
-    // than 400 for the loser: its authority is re-derived from the locked owner
-    // set, and by then it is no longer an owner.
+    // 403 rather than 400 for the loser: its authority is re-derived from the
+    // locked owner set, and by then it is no longer an owner.
     expect(outcomes(responses)).toEqual([
-      expect.objectContaining({ status: 201 }),
+      expect.objectContaining({ status: 200 }),
       expect.objectContaining({ status: 403 }),
     ]);
 
@@ -178,7 +177,7 @@ describe('concurrent household owner transitions', () => {
     // The transfer succeeds under BOTH orderings — promoting a guest is as
     // legal as promoting a member — so it is the role change that reports which
     // one happened, and branching on the transfer would assert nothing.
-    expect(outcome(transfer)).toMatchObject({ status: 201 });
+    expect(outcome(transfer)).toMatchObject({ status: 200 });
 
     if (roleChange.status === 400) {
       // The promotion landed first, so the role change is now aimed at an owner
@@ -224,7 +223,7 @@ describe('concurrent household owner transitions', () => {
       await expect(memberCount(fixture.household.id)).resolves.toBe(1);
     } else {
       // The promotion landed first, so the departure is now the last owner's.
-      expect(outcome(transfer)).toMatchObject({ status: 201 });
+      expect(outcome(transfer)).toMatchObject({ status: 200 });
       expect(outcome(departure)).toMatchObject({ status: 400, message: expect.stringMatching(/transfer ownership/i) });
       await expect(memberCount(fixture.household.id)).resolves.toBe(2);
     }

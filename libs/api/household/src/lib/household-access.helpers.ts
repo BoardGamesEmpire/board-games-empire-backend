@@ -126,9 +126,9 @@ export async function lockExistingHousehold(tx: Prisma.TransactionClient, househ
  * rather than be filtered out by one. Callers establish liveness with
  * {@link assertHouseholdExists} BEFORE the transaction, which is an unlocked
  * probe — so a soft-delete that commits in between leaves the caller mutating
- * roles on a dead household. Pre-existing, unchanged by this lock, and worth its
- * own decision: the honest fix is a liveness re-check here, which would make
- * every role transition on a soft-deleted household a 404.
+ * roles on a dead household, and emitting events for it. Tracked as #386, which
+ * carries the decision the fix depends on: whether a member may leave a
+ * soft-deleted household.
  *
  * NOTE: raw SQL because Prisma exposes no row-locking clause. The identifiers
  * are pinned against the checked-in Prisma models by a spec in this lib.
