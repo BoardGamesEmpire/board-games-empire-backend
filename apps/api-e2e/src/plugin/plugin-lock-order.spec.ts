@@ -11,7 +11,7 @@ import {
   arrangeServerGrant,
   GRANT_DECISION_CLAIM,
 } from './lock-fixtures';
-import { CLAIMED_LOCK_ORDER, LOCK_ORDER_PATHS, LOCK_SOURCES, stagesNamed } from './lock-order';
+import { CLAIMED_LOCK_ORDER, LOCK_ORDER_PATHS, LOCK_SOURCES, stagesNamed, type LockStageName } from './lock-order';
 
 /**
  * The claimed total order — `plugin row -> grant row -> advisory key -> unit
@@ -111,6 +111,21 @@ describe('the plugin consent path is one lock order (#360)', () => {
         expect(orderMismatch(body, stagesNamed(stages), `${label} — ${because}`)).toBeUndefined();
       },
     );
+
+    it('refuses a claim that cannot mean what it says, rather than passing it', () => {
+      // The guard on the pins above. `orderMismatch` judges an empty claim in
+      // order vacuously and a repeated name collapses in the filter, so either
+      // one turns a pin that reads as asserting an order into one that asserts
+      // nothing — the same silent-pass this file exists to close, arriving
+      // through the claim instead of through the service.
+      //
+      // `LockStageName` already refuses a misspelt or empty claim written in
+      // this repo. These are the runtime half, which is what catches a list
+      // built from data and what makes the reason readable when it fires.
+      expect(() => stagesNamed([])).toThrow(/asserts nothing/);
+      expect(() => stagesNamed(['grant row', 'grant row'])).toThrow(/more than once/);
+      expect(() => stagesNamed(['grant row', 'plugin roe'])).toThrow(/is not a stage of the claimed lock order/);
+    });
 
     it('recognises every stage of the claimed order in some shipped body', () => {
       // Catches the quiet failure of this whole file: a stage whose pattern
@@ -310,7 +325,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // from restating the `matching:` option the lift already enforced: a stage
       // pattern that grew loose enough to claim a neighbour's statement fails
       // here even though every lift still succeeds.
-      const replayed: ReadonlyArray<readonly [string, string]> = [
+      const replayed: ReadonlyArray<readonly [LockStageName, string]> = [
         ['plugin row', pluginShareLock.text],
         ['grant row', grantRowLock.text],
         ['advisory key', advisoryLock.text],

@@ -1,6 +1,6 @@
 import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
-import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
+import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -8,6 +8,7 @@ import { expectAdvisoryWaiter, withBarrier, type Barrier } from '../support/lock
 import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { LOCK_SOURCES } from './lock-order';
+import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 
 /**
  * The race a row lock cannot reach: two transactions writing a unit's state
@@ -71,15 +72,6 @@ describe('the pre-row races (#360)', () => {
   afterAll(async () => {
     await db.close();
   });
-
-  type Check = PluginManifest['permissions']['checks'][number];
-
-  const MANAGE_DIGEST_CHECK: Check = {
-    slug: 'manage:digest',
-    required: true,
-    reason: { en: 'Stores and manages the digest configuration it owns.' },
-    consentScope: 'server',
-  };
 
   const HOUSEHOLD_CHECK: Check = {
     slug: 'read:household_member',

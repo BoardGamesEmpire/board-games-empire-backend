@@ -75,26 +75,7 @@ export function blankComments(source: string): string {
  */
 export function extractFunctionBody(source: string, functionName: string, sourceLabel: string): ShippedFunction {
   const file = parse(source, sourceLabel);
-  const bodies = declaredBodies(file, functionName);
-  const body = bodies[0];
-
-  if (body === undefined) {
-    throw new Error(
-      `Could not find a declaration of '${functionName}' in ${sourceLabel}. A mention in prose or a call site ` +
-        `is not a declaration — if the function was renamed, rename the pin with it rather than letting it ` +
-        `resolve to a neighbour.`,
-    );
-  }
-
-  if (bodies.length > 1) {
-    // Two classes in one file, or a name reused. Guessing which one the caller
-    // meant is exactly the judgement this module refuses to make.
-    throw new Error(
-      `'${functionName}' is declared ${bodies.length} times with a body in ${sourceLabel}, so this pin cannot ` +
-        `say which one it means. Give the declarations distinct names, or pin them where they are distinct.`,
-    );
-  }
-
+  const body = singleDeclaredBody(file, functionName, sourceLabel);
   const blanked = blankCommentRanges(source, file);
 
   // `getStart` is the `{`; `end` is one past the `}`.
@@ -128,15 +109,23 @@ export function extractBranchBody(
   condition: RegExp,
   sourceLabel: string,
 ): ShippedFunction {
-  const file = parse(source, sourceLabel);
-  const bodies = declaredBodies(file, functionName);
-  const enclosing = bodies[0];
-
-  if (enclosing === undefined || bodies.length > 1) {
-    // Same refusals, same reasons — reuse them rather than restate them.
-    extractFunctionBody(source, functionName, sourceLabel);
+  if (condition.global || condition.sticky) {
+    // `test` advances `lastIndex` on these, so consecutive matches alternate
+    // true, false, true. Two branches testing the same condition would then
+    // look like one and this pin would take the FIRST without ever reaching
+    // the ambiguity refusal below — the exact silent answer the refusals exist
+    // to prevent, arriving through the flag rather than through the source.
+    throw new Error(
+      `The branch condition ${String(condition)} carries a 'g' or 'y' flag, and this pin tests it once per ` +
+        `\`if\`. A stateful pattern makes every second match report false, which turns an ambiguous branch ` +
+        `into a silently chosen one. Drop the flag.`,
+    );
   }
 
+  const file = parse(source, sourceLabel);
+  // The same refusals, for the same reasons: a name that resolves to nothing,
+  // or to more than one body, is not a branch this pin can be about.
+  const enclosing = singleDeclaredBody(file, functionName, sourceLabel);
   const blanked = blankCommentRanges(source, file);
   const branches: ts.Statement[] = [];
   const visit = (node: ts.Node): void => {
@@ -147,7 +136,7 @@ export function extractBranchBody(
     ts.forEachChild(node, visit);
   };
 
-  visit(enclosing as ts.Block);
+  visit(enclosing);
 
   const branch = branches[0];
 
@@ -250,6 +239,40 @@ function declaredBodies(file: ts.SourceFile, functionName: string): ts.Block[] {
   visit(file);
 
   return bodies;
+}
+
+/**
+ * The one body declared under the given name, or a refusal saying which way it
+ * was ambiguous.
+ *
+ * Both lifters go through here rather than one calling the other for its
+ * throw. A refusal reached as a SIDE EFFECT is a refusal the typechecker
+ * cannot see: the caller still holds a possibly-undefined body afterwards, and
+ * the cast that silences it is what would turn this module's deliberate
+ * message into a `TypeError` the day the shape changed.
+ */
+function singleDeclaredBody(file: ts.SourceFile, functionName: string, sourceLabel: string): ts.Block {
+  const bodies = declaredBodies(file, functionName);
+  const body = bodies[0];
+
+  if (body === undefined) {
+    throw new Error(
+      `Could not find a declaration of '${functionName}' in ${sourceLabel}. A mention in prose or a call site ` +
+        `is not a declaration — if the function was renamed, rename the pin with it rather than letting it ` +
+        `resolve to a neighbour.`,
+    );
+  }
+
+  if (bodies.length > 1) {
+    // Two classes in one file, or a name reused. Guessing which one the caller
+    // meant is exactly the judgement this module refuses to make.
+    throw new Error(
+      `'${functionName}' is declared ${bodies.length} times with a body in ${sourceLabel}, so this pin cannot ` +
+        `say which one it means. Give the declarations distinct names, or pin them where they are distinct.`,
+    );
+  }
+
+  return body;
 }
 
 function bodyOfDeclaration(node: ts.Node, functionName: string): ts.Block | undefined {

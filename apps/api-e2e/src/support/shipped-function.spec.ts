@@ -342,10 +342,52 @@ describe('shipped-function', () => {
     });
 
     it('names the branch by its condition, not by what it contains', () => {
-      // Matching on the lock would make the pin agree with whatever it found.
-      const { name } = extractBranchBody(source, 'decide', /Granted && input\.scopeType/, 'service.ts');
+      // Matching on the lock would make the pin agree with whatever it found,
+      // so the CONDITION has to be what a failure reports. Asserting only that
+      // the function name is in there passes for a name that is the function
+      // name and nothing else, which is the whole thing this case denies.
+      const condition = /Granted && input\.scopeType/;
+      const { name } = extractBranchBody(source, 'decide', condition, 'service.ts');
 
-      expect(name).toMatch(/decide/);
+      expect(name).toContain('decide');
+      expect(name).toContain(String(condition));
+      expect(name).not.toMatch(/lockUserUnitScope|userPlugin/);
+    });
+
+    it('refuses a name that is not declared, rather than searching the file for ifs', () => {
+      expect(() => extractBranchBody(source, 'settle', /Granted/, 'service.ts')).toThrow(
+        /Could not find a declaration of 'settle'/,
+      );
+    });
+
+    it('refuses an ambiguous name, rather than branching inside one of them', () => {
+      const twice = `
+        class A { async decide(i: I) { if (i.x) { await one(); } } }
+        class B { async decide(i: I) { if (i.x) { await two(); } } }
+      `;
+
+      expect(() => extractBranchBody(twice, 'decide', /i\.x/, 'service.ts')).toThrow(/declared 2 times/);
+    });
+
+    it('refuses a stateful condition, which would hide an ambiguous branch', () => {
+      // `test` advances `lastIndex` on a global or sticky pattern, so the
+      // second of two matching branches reports false. Left unguarded, the
+      // ambiguity refusal below never fires and the pin silently takes the
+      // first branch — the flag doing what the module refuses to do.
+      const ambiguous = `
+        class S {
+          async decide(i: I) {
+            if (i.status === Granted) { await first(); }
+            if (i.status === Granted) { await second(); }
+          }
+        }
+      `;
+
+      expect(() => extractBranchBody(ambiguous, 'decide', /status === Granted/, 's.ts')).toThrow(/2 branches/);
+
+      for (const stateful of [/status === Granted/g, /status === Granted/y]) {
+        expect(() => extractBranchBody(ambiguous, 'decide', stateful, 's.ts')).toThrow(/'g' or 'y' flag/);
+      }
     });
   });
 

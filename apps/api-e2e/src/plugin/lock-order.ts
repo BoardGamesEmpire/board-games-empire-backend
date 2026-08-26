@@ -24,7 +24,7 @@ import type { OrderedStage } from '../support/shipped-function';
  * no lock at all. Two specs in one PR cannot call the same statement locked and
  * unlocked.
  */
-export const CLAIMED_LOCK_ORDER: readonly OrderedStage[] = [
+export const CLAIMED_LOCK_ORDER = [
   {
     /**
      * Taken by the unit paths as a `FOR SHARE` read, and by uninstall and
@@ -59,7 +59,18 @@ export const CLAIMED_LOCK_ORDER: readonly OrderedStage[] = [
     pattern:
       /lock(?:Household|User)Unit\(|suspend(?:Household|User)Unit\(|tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)|FROM (?:household_plugins|user_plugins)[^`]*?FOR UPDATE/,
   },
-];
+] as const satisfies readonly OrderedStage[];
+
+/**
+ * The stage names, as a type.
+ *
+ * A path's stage list is data, and until now a typo in one was only reported
+ * when the spec ran — by which time it had already been committed and reviewed
+ * as if it named a stage. Deriving the union from the claim itself means the
+ * constant stays the single place the order is stated AND the place a misspelt
+ * claim is refused, at the point it is written.
+ */
+export type LockStageName = (typeof CLAIMED_LOCK_ORDER)[number]['name'];
 
 /** One writer, and the stages of the claimed order it says it takes. */
 export interface LockOrderPath {
@@ -72,8 +83,14 @@ export interface LockOrderPath {
   /**
    * A subset of {@link CLAIMED_LOCK_ORDER}, by name. Every stage listed must be
    * taken — a claimed stage that stops matching is a failure, not a skip.
+   *
+   * Typed as a NON-EMPTY list of stage names rather than as strings. A path
+   * that lost its entries would otherwise still typecheck, and an empty claim
+   * is judged in order vacuously — the no-op pin this whole module is a
+   * reaction to, arriving through the one door the runtime guard could not
+   * watch.
    */
-  readonly stages: readonly string[];
+  readonly stages: readonly [LockStageName, ...LockStageName[]];
 
   /** Why this path takes that subset — the part a reader cannot infer. */
   readonly because: string;
@@ -199,14 +216,40 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
 
 /**
  * The named stages, in the CLAIMED order rather than the order they were asked
- * for, refusing a name that is not a stage.
+ * for, refusing a claim that cannot mean what it says.
  *
- * Both halves matter. A typo would silently drop a stage from a path's pin,
- * leaving it asserting less than it reads as asserting; and a path entry that
- * listed its stages in the wrong order would otherwise define its own claim and
- * pass, which is the single thing this constant exists to prevent.
+ * Reordering matters most: a path entry that listed its stages in the wrong
+ * order would otherwise define its own claim and pass, which is the single
+ * thing this constant exists to prevent.
+ *
+ * The three refusals are all the same failure wearing different clothes — a
+ * pin that reads as asserting something and asserts less:
+ *
+ *  - **A name that is not a stage** would silently drop that stage from the
+ *    pin. `LockStageName` catches this in the repo's own source; the throw is
+ *    what catches a list assembled from data, and what makes the reason legible
+ *    when it does.
+ *  - **An empty claim** is judged in order vacuously — `orderMismatch` finds
+ *    nothing missing and has no pair to compare — so the pin passes over any
+ *    body at all.
+ *  - **A duplicated name** collapses in the filter below, so a claim of two
+ *    stages becomes one, the comparison loop never runs, and the pin reports
+ *    "in order" having ordered nothing against anything.
  */
 export function stagesNamed(names: readonly string[]): readonly OrderedStage[] {
+  if (names.length === 0) {
+    throw new Error('A lock-order claim naming no stages asserts nothing; name the stages the path takes.');
+  }
+
+  const duplicated = names.filter((name, at) => names.indexOf(name) !== at);
+
+  if (duplicated.length > 0) {
+    throw new Error(
+      `A lock-order claim names '${[...new Set(duplicated)].join("', '")}' more than once. Repeats collapse, so ` +
+        `the pin would compare fewer stages than it reads as comparing. Claimed: ${names.join(' -> ')}.`,
+    );
+  }
+
   for (const name of names) {
     if (!CLAIMED_LOCK_ORDER.some((stage) => stage.name === name)) {
       throw new Error(
@@ -226,7 +269,7 @@ export function stagesNamed(names: readonly string[]): readonly OrderedStage[] {
  * through a `find` and a cast — a cast to an anonymous shape switches off the
  * typechecking on the very code whose job is to notice drift.
  */
-export function stageNamed(name: string): OrderedStage {
+export function stageNamed(name: LockStageName): OrderedStage {
   const stage = stagesNamed([name])[0];
 
   if (stage === undefined) {

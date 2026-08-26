@@ -11,6 +11,7 @@ import {
   arrangeServerGrant,
   arrangeUserUnit,
   GRANT_DECISION_CLAIM,
+  SERVER_GRANT_INSERT,
   UNIT_ANCHOR_INSERT,
   UNIT_SUSPEND_CLAIM,
 } from './lock-fixtures';
@@ -364,11 +365,7 @@ describe('the consent path row locks (FOR UPDATE)', () => {
 
         await waiter.begin();
         const insertion = waiter.issue(
-          `INSERT INTO plugin_grants
-             (id, plugin_id, scope_type, scope_id, permission_slug, status, manifest_version, decided_risk_level,
-              decided_at, updated_at)
-           VALUES ($1, $2, 'Server', '', $3, 'Granted', '1.0.0', 'Low', now(), now())
-           RETURNING id`,
+          SERVER_GRANT_INSERT,
           [randomUUID(), plugin.pluginId, 'read:game'],
           'a decision on a slug with no row yet',
         );

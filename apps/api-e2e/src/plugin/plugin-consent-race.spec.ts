@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
 
 /**
  * The invariants, raced over HTTP (#360 tier 1).
@@ -56,15 +57,6 @@ describe('consent decisions under concurrency (#360)', () => {
   afterAll(async () => {
     await db.close();
   });
-
-  type Check = PluginManifest['permissions']['checks'][number];
-
-  const MANAGE_DIGEST_CHECK: Check = {
-    slug: 'manage:digest',
-    required: true,
-    reason: { en: 'Stores and manages the digest configuration it owns.' },
-    consentScope: 'server',
-  };
 
   const POLICY_READ_CHECK: Check = {
     slug: 'read:safe_http_policy',
@@ -222,7 +214,12 @@ describe('consent decisions under concurrency (#360)', () => {
       // read OPTIONAL and the pending one requires it, so the denial is legal
       // right up until the approval commits — and illegal under the
       // required-denial rule immediately after. Exactly one of them can win.
+      // Two admins, for the reason the household case above gives: one session
+      // issuing both requests leaves "something above the service serialized
+      // them" as a live explanation for a green run, and this case is the one
+      // 356's row lock exists for.
       const admin = await actors.admin();
+      const approver = await actors.admin();
       const pending = manifestWith('1.3.0', [
         MANAGE_DIGEST_CHECK,
         { ...POLICY_READ_CHECK, required: true },
@@ -240,7 +237,7 @@ describe('consent decisions under concurrency (#360)', () => {
           permissionSlug: POLICY_READ_CHECK.slug,
           status: PluginGrantStatus.Denied,
         }),
-        approve(admin, plugin.slug),
+        approve(approver, plugin.slug),
       ]);
 
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
