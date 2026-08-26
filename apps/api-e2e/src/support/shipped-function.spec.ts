@@ -345,9 +345,19 @@ describe('shipped-function', () => {
       // nested functions — a reasonable-sounding way to keep a stray callback
       // from answering for the path — would find nothing here at all.
       //
-      // The cost is bounded by the refusals rather than by the walk: a stray
-      // callback whose `if` also matches makes TWO matches, which is refused,
-      // not silently chosen.
+      // Two matching `if`s are refused rather than silently chosen. ONE is
+      // not, and that is the honest residual: if the real branch were
+      // restructured away and some unrelated callback happened to test the
+      // same condition, its body would answer for the path.
+      //
+      // Admitting only the transaction callback does not close that. The
+      // `.filter` and `.map` arrows in the real `decide` sit INSIDE the
+      // transaction callback, so any rule that still reaches the branch
+      // reaches them too — and teaching a general source lifter what a Prisma
+      // transaction is would couple it to the one caller it is about to stop
+      // being for. What actually bounds it is a condition specific enough that
+      // an `if` matching it IS the branch wherever it moved to, and the stage
+      // assertions the lifted body still has to satisfy afterwards.
       const wrapped = `
         class Service {
           async decide(input: Input): Promise<void> {

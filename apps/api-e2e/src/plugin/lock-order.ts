@@ -37,9 +37,18 @@ export const CLAIMED_LOCK_ORDER = [
      * occurrence, one taken earlier in a body would report the plugin row as
      * held before it was. It is only reached by the replayed statement today,
      * which is exactly when a loose pattern goes unnoticed.
+     *
+     * The `\b` is that same rule taken to the end of the name. Without it the
+     * table is a PREFIX, so a `plugins_archive` added later would satisfy this
+     * stage without being the plugin row. All three raw-SQL stages carry it,
+     * because a boundary on only the stage someone happened to look at is not
+     * scoping — it is one table that got checked, and the next stage written
+     * from these as a template inherits the looseness. No table shares a prefix
+     * with another today; the point is that adding one must not silently
+     * re-point a stage.
      */
     name: 'plugin row',
-    pattern: /assertStillLiving\(|FROM plugins[^`]*?FOR SHARE|tx\.plugin\.update|plugin\.updateMany/,
+    pattern: /assertStillLiving\(|FROM plugins\b[^`]*?FOR SHARE|tx\.plugin\.update|plugin\.updateMany/,
   },
   {
     /**
@@ -49,7 +58,7 @@ export const CLAIMED_LOCK_ORDER = [
      * to a read that orders nothing.
      */
     name: 'grant row',
-    pattern: /pluginGrant\.upsert\(|FROM plugin_grants[^`]*?FOR UPDATE/,
+    pattern: /pluginGrant\.upsert\(|FROM plugin_grants\b[^`]*?FOR UPDATE/,
   },
   {
     /** The `(scopeId, pluginId)` key, which exists before the unit row does. */
@@ -64,7 +73,7 @@ export const CLAIMED_LOCK_ORDER = [
      */
     name: 'unit row',
     pattern:
-      /lock(?:Household|User)Unit\(|suspend(?:Household|User)Unit\(|tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)|FROM (?:household_plugins|user_plugins)[^`]*?FOR UPDATE/,
+      /lock(?:Household|User)Unit\(|suspend(?:Household|User)Unit\(|tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)|FROM (?:household_plugins|user_plugins)\b[^`]*?FOR UPDATE/,
   },
 ] as const satisfies readonly OrderedStage[];
 

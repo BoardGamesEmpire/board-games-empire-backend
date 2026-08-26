@@ -148,6 +148,32 @@ describe('the plugin consent path is one lock order (#360)', () => {
       expect('SELECT uninstalled_at FROM plugins WHERE id = $1 FOR SHARE').toMatch(pluginRow.pattern);
     });
 
+    it('holds every table-scoped stage to the whole table name, not a prefix of it', () => {
+      // The same failure one character further out, and the reason the fix
+      // above is not finished by scoping alone: `FROM plugins` with nothing
+      // after it is a PREFIX match, so a `plugins_archive` added later would
+      // date the plugin-row stage without being the plugin row.
+      //
+      // All three raw-SQL stages get the case rather than only the one that
+      // was noticed. A boundary on a single stage is not a rule — it is one
+      // table that happened to get checked, and the next stage written from
+      // these as a template inherits the looseness. Nothing in the schema
+      // shares a prefix today, which is exactly why this is cheap now and
+      // would be a puzzle later.
+      const cases = [
+        { stage: 'plugin row', suffix: 'FOR SHARE', table: 'plugins' },
+        { stage: 'grant row', suffix: 'FOR UPDATE', table: 'plugin_grants' },
+        { stage: 'unit row', suffix: 'FOR UPDATE', table: 'household_plugins' },
+      ] as const;
+
+      for (const { stage, suffix, table } of cases) {
+        const { pattern } = stageNamed(stage);
+
+        expect(`SELECT id FROM ${table} WHERE id = $1 ${suffix}`).toMatch(pattern);
+        expect(`SELECT id FROM ${table}_archive WHERE id = $1 ${suffix}`).not.toMatch(pattern);
+      }
+    });
+
     it('recognises every stage of the claimed order in some shipped body', () => {
       // Catches the quiet failure of this whole file: a stage whose pattern
       // stopped matching anything. Comparing the two hand-written lists in
