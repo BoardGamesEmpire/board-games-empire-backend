@@ -20,7 +20,8 @@ import { schemaFromDatabaseUrl } from './e2e-env';
  *
  *  - `holder` takes the lock and keeps its transaction open.
  *  - `waiter` issues the contending statement, which is expected to block.
- *  - `observer` reads `pg_locks` — the waiter cannot answer while it waits.
+ *  - `observer` reads `pg_locks` — a blocked backend cannot answer for itself,
+ *    and in the deadlock cases BOTH contenders are blocked at once.
  *
  * D-239-1: these live here rather than in `@bge/testing-e2e` until a second
  * consumer shapes the API (#383, tracked for promotion by #384).
@@ -77,6 +78,17 @@ export interface BarrierTimeouts {
  */
 export interface PendingStatement<TRow extends QueryResultRow = QueryResultRow> {
   readonly description: string;
+
+  /**
+   * The backend that issued it — the one whose wait is under test.
+   *
+   * Carried on the statement rather than looked up on `barrier.waiter`, because
+   * the holder can issue a pending statement too: the deadlock case (#383) has
+   * both sides waiting at once. Judging a holder-issued statement against the
+   * waiter's backend passes while the holder never blocked at all, which is the
+   * single outcome these assertions exist to rule out.
+   */
+  readonly pid: number;
 
   /** True once the statement has completed OR failed. */
   settled(): boolean;
@@ -247,19 +259,19 @@ export async function expectBlocked(
       );
     }
 
-    const locks = await ungrantedLocks(barrier.observer, barrier.waiter.pid);
+    const locks = await ungrantedLocks(barrier.observer, pending.pid);
 
     if (locks.length > 0) {
       return;
     }
 
     if (Date.now() >= deadline) {
-      const activity = await backendActivity(barrier.observer, barrier.waiter.pid);
+      const activity = await backendActivity(barrier.observer, pending.pid);
 
       throw new Error(
-        `${pending.description} never blocked: after ${timeoutMs}ms the waiter (pid ${barrier.waiter.pid}) held ` +
-          `no ungranted lock. Backend state: ${activity}. Either the holder's statement does not take a ` +
-          `conflicting lock, or the waiter's statement does not contend for it.`,
+        `${pending.description} never blocked: after ${timeoutMs}ms its backend (pid ${pending.pid}) held ` +
+          `no ungranted lock. Backend state: ${activity}. Either the other transaction's statement does not ` +
+          `take a conflicting lock, or this one does not contend for it.`,
       );
     }
 
@@ -293,11 +305,11 @@ export async function expectNotBlocked(
     }
 
     if (Date.now() >= deadline) {
-      const locks = await ungrantedLocks(barrier.observer, barrier.waiter.pid);
+      const locks = await ungrantedLocks(barrier.observer, pending.pid);
 
       throw new Error(
         `${pending.description} was expected to proceed, but had not completed after ${timeoutMs}ms ` +
-          `(waiter pid ${barrier.waiter.pid}: ${describeUngrantedLocks(locks)}). A lock mode that blocks here ` +
+          `(pid ${pending.pid}: ${describeUngrantedLocks(locks)}). A lock mode that blocks here ` +
           `is stronger than the invariant needs.`,
       );
     }
@@ -383,6 +395,7 @@ function buildConnection(label: string, pid: number, client: Client): BarrierCon
 
       return {
         description,
+        pid,
         settled: () => settled,
         result: () => promise,
         failure: () => failure,

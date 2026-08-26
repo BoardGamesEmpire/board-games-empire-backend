@@ -4,7 +4,12 @@ import {
   BARRIER_STATEMENT_TIMEOUT_MS,
   barrierSessionSettings,
   describeUngrantedLocks,
+  expectBlocked,
+  expectNotBlocked,
   quoteIdentifier,
+  type Barrier,
+  type BarrierConnection,
+  type PendingStatement,
   type UngrantedLock,
 } from './lock-barrier';
 
@@ -68,5 +73,81 @@ describe('describeUngrantedLocks', () => {
     // This string lands in a failure message, and an empty one reads as a
     // truncated error rather than as "the statement was never blocked".
     expect(describeUngrantedLocks([])).toBe('no ungranted locks');
+  });
+});
+
+/**
+ * Which backend the blocking assertions actually watch.
+ *
+ * They accept any {@link PendingStatement} but used to read `barrier.waiter.pid`
+ * unconditionally, so a statement issued by the HOLDER — which the quota
+ * deadlock case is the first in the suite to need — would have been judged
+ * against the waiter's backend. The assertion passes while the holder never
+ * blocked at all, which is the one outcome these helpers exist to rule out.
+ */
+describe('the blocking assertions watch the backend that issued the statement', () => {
+  const HOLDER_PID = 1;
+  const WAITER_PID = 2;
+
+  const connection = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
+    label,
+    pid,
+    query,
+    begin: async () => undefined,
+    commit: async () => undefined,
+    rollback: async () => undefined,
+    issue: () => {
+      throw new Error('not used in this spec');
+    },
+    close: async () => undefined,
+  });
+
+  /** Records every pid the observer is asked about, answering `locks` for each. */
+  const observing = (asked: number[], locks: readonly UngrantedLock[]): BarrierConnection =>
+    connection('observer', 3, (async (sql: string, params: readonly unknown[] = []) => {
+      asked.push(params[0] as number);
+
+      return sql.includes('pg_locks') ? [...locks] : [];
+    }) as BarrierConnection['query']);
+
+  const pendingFrom = (pid: number, label: string): PendingStatement => ({
+    description: `${label}: SELECT 1`,
+    pid,
+    settled: () => false,
+    result: () => new Promise(() => undefined),
+    failure: () => undefined,
+  });
+
+  const barrierWith = (observer: BarrierConnection): Barrier => ({
+    holder: connection('holder', HOLDER_PID, (async () => []) as BarrierConnection['query']),
+    waiter: connection('waiter', WAITER_PID, (async () => []) as BarrierConnection['query']),
+    observer,
+  });
+
+  const held: UngrantedLock = { locktype: 'advisory', mode: 'ExclusiveLock', relation: null };
+
+  it('asks about the holder’s backend for a holder-issued statement', async () => {
+    const asked: number[] = [];
+
+    await expectBlocked(barrierWith(observing(asked, [held])), pendingFrom(HOLDER_PID, 'holder'), { timeoutMs: 100 });
+
+    expect(asked).toContain(HOLDER_PID);
+    expect(asked).not.toContain(WAITER_PID);
+  });
+
+  it('names the issuing backend when a holder-issued statement never blocks', async () => {
+    const asked: number[] = [];
+
+    await expect(
+      expectBlocked(barrierWith(observing(asked, [])), pendingFrom(HOLDER_PID, 'holder'), { timeoutMs: 50 }),
+    ).rejects.toThrow(new RegExp(`pid ${HOLDER_PID}`));
+  });
+
+  it('reports the issuing backend from expectNotBlocked too', async () => {
+    const asked: number[] = [];
+
+    await expect(
+      expectNotBlocked(barrierWith(observing(asked, [held])), pendingFrom(HOLDER_PID, 'holder'), { timeoutMs: 50 }),
+    ).rejects.toThrow(new RegExp(`pid ${HOLDER_PID}`));
   });
 });
