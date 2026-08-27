@@ -257,7 +257,14 @@ describe('PluginUpdateService', () => {
         return Promise.resolve(grantLockQueue.shift() ?? []);
       }
 
-      return Promise.resolve([pluginConfigLockRow]);
+      if (sql.includes('FROM plugins')) {
+        return Promise.resolve([pluginConfigLockRow]);
+      }
+
+      // A third raw query landing here by default would get the config
+      // lock's row shape regardless of what it actually asked for, and the
+      // test driving it would pass or fail for the wrong reason.
+      throw new Error(`Unrouted $queryRaw in test: ${sql}`);
     }) as never);
   });
 
