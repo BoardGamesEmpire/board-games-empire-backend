@@ -631,6 +631,34 @@ describe('PluginUnitLifecycleService', () => {
       expect((await service.enableHousehold(enableInput)).dormantReason).toBeNull();
     });
 
+    /**
+     * The `config` column is Json, so its type admits arrays, `null` and
+     * scalars, and a permissive schema accepts every one of them. Reconciliation
+     * calls such a document nonconforming; this gate must agree, or the pass
+     * that condemned the row and the write that returns it to service would
+     * disagree about what a valid retained document is. Not reachable through
+     * the API — both config DTOs are `@IsObject` — so the mock is the only way
+     * to hold the cast to it.
+     */
+    it('refuses a retained document that is not a JSON object, however permissive the schema', async () => {
+      const permissive = householdManifest({ schema: {}, requiresHouseholdConfig: true });
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: permissive as unknown as Prisma.JsonValue }));
+      db.householdPlugin.findUnique.mockResolvedValue(
+        makeHouseholdRow({
+          enabled: true,
+          config: [] as unknown as Prisma.JsonValue,
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          dormantAt: new Date(0),
+        }),
+      );
+
+      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+        constructor: PluginUnitConfigRequiredError,
+        issues: [expect.objectContaining({ keyword: 'type' })],
+      });
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+    });
+
     it('leaves an ordinary enable ungated: optional config, no dormancy, and a document nothing ever judged', async () => {
       const optional = householdManifest({
         schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },

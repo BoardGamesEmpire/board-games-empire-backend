@@ -652,11 +652,29 @@ export class PluginUnitLifecycleService {
       throw new PluginUnitConfigRequiredError(plugin.slug, []);
     }
 
+    // `config` is a Json column, so its Prisma type admits arrays, `null` and
+    // scalars — shapes a permissive schema like `{}` accepts and that a bare
+    // `as Record<string, unknown>` would wave through as an object. No API path
+    // can store one today (both config DTOs are `@IsObject`, which rejects
+    // arrays and null, and every writer of this column takes its value from
+    // them), so this guards the cast rather than a reachable state. It is here
+    // because it is the same judgment `configConforms` makes during
+    // reconciliation, and the two cannot be allowed to disagree about what a
+    // valid retained document is: that pass condemns the row, and this gate is
+    // what puts it back into service.
+    const retained = existing.config;
+
+    if (typeof retained !== 'object' || retained === null || Array.isArray(retained)) {
+      throw new PluginUnitConfigRequiredError(plugin.slug, [
+        { path: '', keyword: 'type', message: 'retained configuration is not a JSON object' },
+      ]);
+    }
+
     const issues = this.configSchema.validate({
       slug: plugin.slug,
       version: plugin.version,
       schema,
-      config: existing.config as Record<string, unknown>,
+      config: retained,
     });
 
     if (issues.length > 0) {
