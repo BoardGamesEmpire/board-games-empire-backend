@@ -89,15 +89,19 @@ export async function reconcileHouseholdDormancy(args: {
   // way out. A row whose scope dormancy is lifting may still hold a document the
   // manifest now in force rejects, and reviving it into service with that
   // document is the exact failure #370 describes.
-  const { schema, requiresHouseholdConfig } = manifest.config;
+  // NOT gated on `requiresHouseholdConfig`. That flag decides whether a document
+  // is MANDATORY, not whether the schema binds the document a row already holds:
+  // `updateHouseholdConfig` validates every write against `config.schema`
+  // unconditionally, so a retained document the schema rejects is one no config
+  // write could have produced. Gating this check on the flag would revive such a
+  // row into service holding exactly that document whenever the manifest made
+  // household config optional — the failure #370 describes, through the one door
+  // D-CP was written to close.
+  const { schema } = manifest.config;
 
-  if (requiresHouseholdConfig) {
-    configSchema.warm({ slug: manifest.slug, version: manifest.version, schema });
-  }
+  configSchema.warm({ slug: manifest.slug, version: manifest.version, schema });
 
-  const nonConforming = requiresHouseholdConfig
-    ? orphaned.filter((row) => !configConforms(configSchema, manifest, row))
-    : [];
+  const nonConforming = orphaned.filter((row) => !configConforms(configSchema, manifest, row));
   const condemned = new Set(nonConforming.map((row) => row.id));
   const conforming = orphaned.filter((row) => !condemned.has(row.id));
 

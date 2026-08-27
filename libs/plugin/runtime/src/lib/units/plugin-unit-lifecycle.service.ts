@@ -179,9 +179,10 @@ export class PluginUnitLifecycleService {
    * Enable the plugin for a household, creating the enablement row on
    * first enable (the single row creator, #323). Optional inline config is
    * validated against the active `config.schema` and written atomically
-   * with the enable; when the manifest requires household config and none
-   * is supplied, a retained row config must satisfy the ACTIVE schema —
-   * a stale retained document fails the gate with its violations.
+   * with the enable; when none is supplied, a retained row config must satisfy
+   * the ACTIVE schema — because the manifest requires household config, or
+   * because the row is dormant for config and this write would cure it — and a
+   * stale retained document fails the gate with its violations.
    */
   async enableHousehold(input: HouseholdUnitEnableInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
@@ -204,10 +205,17 @@ export class PluginUnitLifecycleService {
       if (issues.length > 0) {
         throw new PluginConfigValidationError(plugin.slug, issues);
       }
-    } else if (requiresConfig) {
+    } else {
       // The retained-config validation below runs inside the transaction;
       // compiling the schema is CPU time that must not sit inside the lock
       // window (see PluginConfigSchemaService.warm).
+      //
+      // Warmed for EVERY config-less enable, not just the `requiresConfig` ones:
+      // the second trigger for that validation is a row already dormant for
+      // config, and whether this row is one cannot be known until it is read
+      // inside the transaction. Warming a schema this call turns out not to
+      // validate costs one cached compile per version; discovering the need
+      // inside the lock window would cost that compile inside it.
       this.configSchema.warm({ slug: plugin.slug, version: plugin.version, schema });
     }
 
@@ -231,7 +239,19 @@ export class PluginUnitLifecycleService {
         return { kind: 'unchanged', row: existing };
       }
 
-      if (requiresConfig && input.config === undefined) {
+      // Two triggers, one gate. `requiresConfig` is the manifest demanding a
+      // document at all; a `NeedsConfiguration` row is one whose retained
+      // document a manifest replacement already judged and rejected. The second
+      // does not imply the first — a later manifest may make household config
+      // optional while the row still holds the document that condemned it — and
+      // clearing the dormancy below without re-judging it would put that exact
+      // document back into service. So the flag cannot be the whole condition:
+      // the write below is what cures a config dormancy, and it may only do that
+      // on a document this gate has proven against the ACTIVE schema.
+      if (
+        input.config === undefined &&
+        (requiresConfig || existing?.dormantReason === PluginUnitDormantReason.NeedsConfiguration)
+      ) {
         this.assertRetainedConfigSatisfiesGate(plugin, schema, existing);
       }
 

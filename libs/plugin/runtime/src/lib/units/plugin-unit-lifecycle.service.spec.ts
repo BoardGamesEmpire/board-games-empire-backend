@@ -582,6 +582,73 @@ describe('PluginUnitLifecycleService', () => {
       expect(db.householdPlugin.update).not.toHaveBeenCalled();
     });
 
+    /**
+     * The gate's second trigger. `requiresHouseholdConfig` is the manifest
+     * demanding a document at all; it does not decide whether the schema binds
+     * one the row already holds. A later manifest can make household config
+     * optional while the row still carries the document that condemned it — and
+     * the write this enable performs is what CURES a config dormancy, so without
+     * the dormancy arm of the condition it would clear the reason without ever
+     * re-judging the document and put it straight back into service.
+     */
+    it('still judges the retained document for a dormant row when the manifest no longer requires config', async () => {
+      const optional = householdManifest({
+        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        requiresHouseholdConfig: false,
+      });
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
+      db.householdPlugin.findUnique.mockResolvedValue(
+        makeHouseholdRow({
+          enabled: true,
+          config: {},
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          dormantAt: new Date(0),
+        }),
+      );
+
+      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+        constructor: PluginUnitConfigRequiredError,
+        issues: [expect.objectContaining({ keyword: 'required' })],
+      });
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+    });
+
+    it('heals that same row from a conforming retained document under the optional-config manifest', async () => {
+      const optional = householdManifest({
+        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        requiresHouseholdConfig: false,
+      });
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
+      const dormant = makeHouseholdRow({
+        enabled: true,
+        config: { webhookUrl: 'https://retained' },
+        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+        dormantAt: new Date(0),
+      });
+      db.householdPlugin.findUnique.mockResolvedValue(dormant);
+      db.householdPlugin.update.mockResolvedValue({ ...dormant, dormantReason: null, dormantAt: null });
+
+      expect((await service.enableHousehold(enableInput)).dormantReason).toBeNull();
+    });
+
+    it('leaves an ordinary enable ungated: optional config, no dormancy, and a document nothing ever judged', async () => {
+      const optional = householdManifest({
+        schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        requiresHouseholdConfig: false,
+      });
+      db.plugin.findUnique.mockResolvedValue(makePlugin({ manifestJson: optional as unknown as Prisma.JsonValue }));
+      const before = makeHouseholdRow({ enabled: false, config: {} });
+      db.householdPlugin.findUnique.mockResolvedValue(before);
+      db.householdPlugin.update.mockResolvedValue({ ...before, enabled: true });
+
+      await service.enableHousehold(enableInput);
+
+      // The widened gate must not start refusing this: an optional-config
+      // manifest never demanded a document here, and no reconciliation ever
+      // condemned the one the row holds.
+      expect(db.householdPlugin.update).toHaveBeenCalledWith({ where: { id: 'hp-1' }, data: { enabled: true } });
+    });
+
     it('clears a config dormancy when the enable supplies a conforming document (#370)', async () => {
       const before = makeHouseholdRow({
         enabled: false,

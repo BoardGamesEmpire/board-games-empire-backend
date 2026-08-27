@@ -1163,6 +1163,65 @@ describe('PluginUpdateService', () => {
         expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
       });
 
+      /**
+       * The same re-derivation, with `requiresHouseholdConfig` FALSE. That flag
+       * decides whether a document is mandatory, not whether the schema binds the
+       * one a row already holds — `updateHouseholdConfig` validates every write
+       * against `config.schema` unconditionally, so this document is one no
+       * config write could have produced. Gating the check on the flag would
+       * revive the row holding exactly it.
+       */
+      it('re-derives the config reason even when the new manifest makes household config optional', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: { webhookUrl: 42 },
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+            dormantAt: new Date(0),
+          }),
+        ]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: false,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
+        });
+        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
+      });
+
+      it('revives under an optional-config manifest when the retained document does conform', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: conforming,
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+            dormantAt: new Date(0),
+          }),
+        ]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: false,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: null, dormantAt: null },
+        });
+      });
+
       it('leaves a household-scope activation with no dormant rows completely alone', async () => {
         db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
 
