@@ -45,8 +45,7 @@ describe('household authorization', () => {
 
   const listHouseholds = (actor: SessionActor) => request(baseUrl).get(HOUSEHOLDS_PATH).set(actor.headers);
 
-  const listOwnHouseholds = (actor: SessionActor) =>
-    request(baseUrl).get(`${HOUSEHOLDS_PATH}/mine`).set(actor.headers);
+  const listOwnHouseholds = (actor: SessionActor) => request(baseUrl).get(`${HOUSEHOLDS_PATH}/mine`).set(actor.headers);
 
   /**
    * An accepted friendship, arranged directly (no fixture covers this yet).

@@ -507,7 +507,7 @@ describe('HouseholdService', () => {
     // whether a plugin acting for a user should be admitted here.
     it('rejects an actor kind that has no memberships of its own', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException('Actor kind \'plugin\' cannot perform user-attributed writes.');
+        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
       });
 
       await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
@@ -525,7 +525,7 @@ describe('HouseholdService', () => {
     // caller, which is the regression worth catching.
     it('does not answer a read with a message about writes', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException('Actor kind \'plugin\' cannot perform user-attributed writes.');
+        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
       });
 
       const rejection: unknown = await service
