@@ -23,6 +23,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { retainedServerConfig } from '../config/retained-server-config';
 import { PluginInstalledEvent, type GrantedPermissionRecord, type PluginProvenance } from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
@@ -486,7 +487,7 @@ export class PluginInstallerService {
           },
         });
       } else {
-        const retained = this.retainedServerConfig(manifest, existing.config);
+        const retained = retainedServerConfig(this.configSchema, manifest, existing.config);
         retainedConfigReset = retained.reset;
 
         // Reinstall clears the tombstone in place. Consent starts from zero
@@ -593,43 +594,6 @@ export class PluginInstallerService {
 
       return { plugin, declaredPermissions, seededGrants, retainedConfigReset, dormancyTransitions };
     });
-  }
-
-  /**
-   * Reinstall's retained-config rule: SERVER config rides the retained
-   * `Plugin` row through an uninstall regardless of `purgeData` (that flag
-   * scopes to the household/user rows, #320), and is carried forward ONLY if
-   * it satisfies the NEW manifest's schema; otherwise it resets to `{}` and
-   * the event records the reset. Failing the reinstall instead was rejected —
-   * an admin whose only escape hatch destroys retained unit config is being
-   * offered no choice at all. A schema that cannot compile proves nothing
-   * about the retained value, so it resets too; the broken schema itself
-   * surfaces loudly on the first config write.
-   */
-  private retainedServerConfig(
-    manifest: PluginManifestValidationResult['manifest'],
-    retained: Prisma.JsonValue,
-  ): { config: Record<string, unknown>; reset: boolean } {
-    const isPlainObject = typeof retained === 'object' && retained !== null && !Array.isArray(retained);
-
-    if (!isPlainObject) {
-      return { config: {}, reset: true };
-    }
-
-    const config = retained as Record<string, unknown>;
-
-    try {
-      const issues = this.configSchema.validate({
-        slug: manifest.slug,
-        version: manifest.version,
-        schema: manifest.config.schema,
-        config,
-      });
-
-      return issues.length === 0 ? { config, reset: false } : { config: {}, reset: true };
-    } catch {
-      return { config: {}, reset: true };
-    }
   }
 
   private riskFor(

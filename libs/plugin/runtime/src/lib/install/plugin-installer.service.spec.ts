@@ -876,6 +876,43 @@ describe('PluginInstallerService', () => {
         );
       });
 
+      /**
+       * The general pass' household half of #370, exercised through the
+       * OTHER manifest-replacing transaction. The two tests above only ever
+       * revalidate a row already dormant for scope (#369); this is the case
+       * #370 added — a row still SERVING loses to a schema the reinstalled
+       * manifest tightens underneath it. The pass itself lives once in
+       * `reconcileHouseholdDormancy` and is proven there via activation; this
+       * is the reinstall caller's wiring into that same pass.
+       */
+      it('marks a serving household row NeedsConfiguration when reinstall tightens the schema underneath it (#370)', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
+        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(
+          buildPluginManifest({
+            scope: 'household',
+            config: {
+              schema: {
+                type: 'object',
+                properties: { webhookUrl: { type: 'string' }, apiKey: { type: 'string' } },
+                required: ['webhookUrl', 'apiKey'],
+              },
+            },
+          }),
+        );
+
+        await service.install(input());
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
+        });
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitDormantEvent.eventName,
+          expect.objectContaining({ reason: PluginUnitDormantReason.NeedsConfiguration }),
+        );
+      });
+
       it('leaves household rows alone on a FRESH install — there is no plugin row for one to reference', async () => {
         db.plugin.findUnique.mockResolvedValue(null);
 

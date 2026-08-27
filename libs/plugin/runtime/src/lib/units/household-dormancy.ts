@@ -18,7 +18,7 @@ export interface HouseholdDormancyTransition {
 
 /**
  * Reconcile every household row for one plugin against the scope and config
- * schema a manifest replacement is promoting (#369, #370, D-CK–D-CP).
+ * schema a manifest replacement is promoting (#369, #370, D-CK–D-CR).
  *
  * Lives here rather than in either caller because BOTH transactions that
  * replace a manifest have to run it: a version activation, and a reinstall over
@@ -75,13 +75,26 @@ export async function reconcileHouseholdDormancy(args: {
     return applyDormancy(tx, stale, PluginUnitDormantReason.ScopeOrphaned, initiatedAt);
   }
 
-  // The scope admits households again. Only rows dormant FOR SCOPE are this
-  // pass's business — a `NeedsConfiguration` row's cure is an admin supplying a
-  // document, and re-validating every row at every manifest replacement is
-  // #370's pass, not this one.
+  // The scope admits households — this manifest keeps a household surface.
+  // Two disjoint sets need this manifest's schema (#370, folded into #369's
+  // widening branch per D-CR on #59): rows dormant FOR SCOPE, whose revival
+  // depends on whether the document they still hold satisfies the schema now
+  // taking effect (unchanged from #369); and rows not dormant at all, which
+  // #369 left unchecked and #370 exists to close — a manifest replacement that
+  // tightens `config.schema` must not leave an already-serving row holding a
+  // document the new schema rejects.
+  //
+  // A row already `NeedsConfiguration` is left alone by BOTH sets. Its cure is
+  // an admin write — a config PATCH or an enable call, either of which
+  // re-judges the SPECIFIC document a human just supplied or is re-affirming
+  // against the active schema (`plugin-unit-lifecycle.service.ts`). This pass
+  // only ever ADDS the reason, matching the enum's own contract: healed by an
+  // admin supplying a conforming document, not by a later manifest happening
+  // to loosen the schema back on its own.
   const orphaned = rows.filter((row) => row.dormantReason === PluginUnitDormantReason.ScopeOrphaned);
+  const serving = rows.filter((row) => row.dormantReason === null);
 
-  if (orphaned.length === 0) {
+  if (orphaned.length === 0 && serving.length === 0) {
     return [];
   }
 
@@ -96,18 +109,26 @@ export async function reconcileHouseholdDormancy(args: {
   // write could have produced. Gating this check on the flag would revive such a
   // row into service holding exactly that document whenever the manifest made
   // household config optional — the failure #370 describes, through the one door
-  // D-CP was written to close.
+  // D-CP was written to close. The same reasoning governs the `serving` set
+  // below: a currently-serving row is condemned on the same unconditional terms.
   const { schema } = manifest.config;
 
   configSchema.warm({ slug: manifest.slug, version: manifest.version, schema });
 
-  const nonConforming = orphaned.filter((row) => !configConforms(configSchema, manifest, row));
-  const condemned = new Set(nonConforming.map((row) => row.id));
-  const conforming = orphaned.filter((row) => !condemned.has(row.id));
+  const nonConformingOrphaned = orphaned.filter((row) => !configConforms(configSchema, manifest, row));
+  const condemnedOrphaned = new Set(nonConformingOrphaned.map((row) => row.id));
+  const revivedOrphaned = orphaned.filter((row) => !condemnedOrphaned.has(row.id));
+
+  const newlyNonConforming = serving.filter((row) => !configConforms(configSchema, manifest, row));
 
   return [
-    ...(await applyDormancy(tx, nonConforming, PluginUnitDormantReason.NeedsConfiguration, initiatedAt)),
-    ...(await revive(tx, conforming, PluginUnitDormantReason.ScopeOrphaned)),
+    ...(await applyDormancy(
+      tx,
+      [...nonConformingOrphaned, ...newlyNonConforming],
+      PluginUnitDormantReason.NeedsConfiguration,
+      initiatedAt,
+    )),
+    ...(await revive(tx, revivedOrphaned, PluginUnitDormantReason.ScopeOrphaned)),
   ];
 }
 
@@ -146,9 +167,17 @@ function snapshot(unit: HouseholdPlugin) {
 
 /**
  * Does a retained household document satisfy the manifest being promoted? An
- * unusable schema proves nothing about the document, so it does not condemn the
- * row — the first config write raises that loudly (the same posture
- * `retainedServerConfig` takes, inverted only in what it does with the value).
+ * unusable schema proves nothing about the document, so this pass leaves the
+ * row exactly as it stood — not a symmetric inversion of what
+ * `retainedServerConfig` does on the same condition, but a deliberately
+ * OPPOSITE verdict, sized to the blast radius each axis risks: a single
+ * server row can be reset outright, while condemning every household row for
+ * a plugin over a schema bug — possibly thousands, possibly transient, fixed
+ * in the next patch version — would be the row-scale version of the failure
+ * D-CP was written to avoid. Either way, `PluginConfigSchemaUnusableError`
+ * still raises the break loudly the moment anyone actually writes through
+ * the schema: the enable/config-PATCH gate for a household row, the first
+ * config write for a server one.
  */
 function configConforms(
   configSchema: PluginConfigSchemaService,

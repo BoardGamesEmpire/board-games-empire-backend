@@ -4,6 +4,7 @@ import {
   PluginGrantStatus,
   PluginLifecycleEventType,
   PluginScope,
+  PluginUnitDormantReason,
   RiskLevel,
   type Plugin,
 } from '@bge/database';
@@ -101,20 +102,37 @@ describe('plugin update consent (approve/reject/pending)', () => {
   const arrangeStagedPlugin = async (
     pendingChecks: readonly Check[],
     pendingDeclares?: readonly string[],
+    overrides: {
+      /** Defaults to 'server' — every existing caller's plugin. */
+      readonly scope?: PluginManifest['scope'];
+      /** The ACTIVE row's retained config, pre-activation. Defaults to `{}`. */
+      readonly activeConfig?: Record<string, unknown>;
+      /** Merged onto the pending manifest's `config` section (D-CN, #370). */
+      readonly pendingConfig?: Partial<PluginManifest['config']>;
+    } = {},
   ): Promise<{ plugin: Plugin; pending: PluginManifest }> => {
-    const active = activeManifest();
-    const pending = manifestWithChecks('1.3.0', pendingChecks, pendingDeclares);
+    const scope = overrides.scope ?? 'server';
+    const active: PluginManifest = { ...activeManifest(), scope };
+    const pendingBase = manifestWithChecks('1.3.0', pendingChecks, pendingDeclares);
+    const pending: PluginManifest = {
+      ...pendingBase,
+      scope,
+      ...(overrides.pendingConfig === undefined
+        ? {}
+        : { config: { ...pendingBase.config, ...overrides.pendingConfig } }),
+    };
 
     const plugin = await db.client.plugin.create({
       data: {
         slug: active.slug,
         version: active.version,
         category: PluginCategory.FeedbackSink,
-        scope: PluginScope.Server,
+        scope: scope === 'server' ? PluginScope.Server : PluginScope.Household,
         manifestJson: active as never,
         enabled: true,
         bundled: false,
         installedSha256: randomUUID(),
+        config: (overrides.activeConfig ?? {}) as never,
         pendingVersion: pending.version,
         pendingManifestJson: pending as never,
         pendingSha256: 'e2e-new-sha',
@@ -229,6 +247,74 @@ describe('plugin update consent (approve/reject/pending)', () => {
 
       const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateApproved);
       expect(rows).toHaveLength(1);
+    });
+
+    /**
+     * D-CN on #59/#370: activation rides the same retained-config rule a
+     * reinstall-over-tombstone applies — the reinstall half has no HTTP
+     * ingress to drive over the wire (#84's), but approve() does, so this is
+     * where the rule gets a real-Postgres round-trip.
+     */
+    it('resets retained server config to {} when the pending manifest schema no longer admits it (D-CN)', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+        activeConfig: { webhookUrl: 42 },
+        pendingConfig: {
+          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        },
+      });
+
+      const response = await approve(admin, plugin.slug).expect(200);
+
+      expect(response.body.plugin.config).toEqual({});
+
+      const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.id } });
+      expect(row.config).toEqual({});
+
+      const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateApproved);
+      expect(rows[0]?.payload).toEqual(expect.objectContaining({ retainedConfigReset: true }));
+    });
+
+    it('carries retained server config forward when it still satisfies the new schema', async () => {
+      const admin = await actors.admin();
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+        activeConfig: { webhookUrl: 'https://retained.example.test' },
+        pendingConfig: {
+          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        },
+      });
+
+      const response = await approve(admin, plugin.slug).expect(200);
+
+      expect(response.body.plugin.config).toEqual({ webhookUrl: 'https://retained.example.test' });
+
+      const rows = await awaitLifecycleRow(plugin, PluginLifecycleEventType.UpdateApproved);
+      expect(rows[0]?.payload).toEqual(expect.objectContaining({ retainedConfigReset: false }));
+    });
+
+    /**
+     * The household half of #370's general pass: #369 only re-validated rows
+     * already dormant for scope, so an already-serving household row never
+     * faced a manifest replacement that came after it.
+     */
+    it('marks an already-serving household row NeedsConfiguration when activation tightens the schema underneath it (#370)', async () => {
+      const admin = await actors.admin();
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const { plugin } = await arrangeStagedPlugin([MANAGE_DIGEST_CHECK], undefined, {
+        scope: 'household',
+        pendingConfig: {
+          schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+        },
+      });
+      const unit = await db.client.householdPlugin.create({
+        data: { householdId: household.id, pluginId: plugin.id, enabled: true, config: { webhookUrl: 42 } },
+      });
+
+      await approve(admin, plugin.slug).expect(200);
+
+      const row = await db.client.householdPlugin.findUniqueOrThrow({ where: { id: unit.id } });
+      expect(row).toMatchObject({ enabled: true, dormantReason: PluginUnitDormantReason.NeedsConfiguration });
     });
 
     it('re-stamps a risk-escalated server grant at today’s risk and the new version', async () => {

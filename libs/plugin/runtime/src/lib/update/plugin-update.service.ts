@@ -27,6 +27,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
+import { retainedServerConfig } from '../config/retained-server-config';
 import {
   HouseholdPluginUnitDisabledEvent,
   PluginGrantRevokedEvent,
@@ -243,6 +244,14 @@ interface ActivationOutcome {
   readonly suspendedUserUnits: readonly SuspensionCandidate<UserPlugin>[];
   /** Household rows whose dormancy this activation wrote or lifted (#369, D-CK). */
   readonly dormancyTransitions: readonly HouseholdDormancyTransition[];
+  /**
+   * Server config found invalid under the manifest this activation is
+   * promoting and reset to `{}` (D-CN on #59/#370) — the same rule a
+   * reinstall-over-tombstone applies via `retainedServerConfig`, ridden along
+   * here so activation is not the one manifest-replacing path that leaves
+   * `Plugin.config` unchecked.
+   */
+  readonly retainedConfigReset: boolean;
 }
 
 /**
@@ -917,6 +926,16 @@ export class PluginUpdateService {
       readonly riskEscalatedChecks: readonly NormalizedPermissionRequest[];
     },
   ): Promise<ActivationOutcome> {
+    // Compiled here rather than inside the transaction: the retained-config
+    // validation below (D-CN) runs holding the claimed row, and ajv's codegen
+    // has no business inside that window (mirrors `install()`'s own warm
+    // call, and `reconcileHouseholdDormancy`'s for the household axis).
+    this.configSchema.warm({
+      slug: next.manifest.slug,
+      version: next.manifest.version,
+      schema: next.manifest.config.schema,
+    });
+
     const attempt = (): Promise<ActivationOutcome> =>
       this.activateInTransaction(
         plugin,
@@ -989,6 +1008,32 @@ export class PluginUpdateService {
     },
   ): Promise<ActivationOutcome> {
     return this.db.$transaction(async (tx) => {
+      // Row-LOCKED, not a plain read (D-CN). `PluginLifecycleService.updateConfig`
+      // is a plain UPDATE with no version precondition ("last-writer-wins by
+      // decision") targeting the same living-row state (`uninstalledAt: null`)
+      // the claim below does. An unlocked read here could snapshot `config`
+      // right before that PATCH commits, and the write below would then
+      // silently overwrite the admin's fresh document with the stale one —
+      // worse than ordinary last-writer-wins, since the write that "wins"
+      // was never the actual last writer's intent. `FOR UPDATE` makes the two
+      // mutually exclusive, same reasoning as the grant lock below: the
+      // PATCH's UPDATE either commits before this SELECT (and is read here)
+      // or blocks until this transaction commits (and lands after
+      // activation). Raw SQL because Prisma's query API cannot express FOR
+      // UPDATE; unqualified table name so the search_path (per-worker test
+      // schemas) resolves it. Placed first in the transaction, ahead of the
+      // grant lock below, matching the plugin row → grant row → advisory →
+      // unit row total order `household-dormancy.ts` and `unit-scope-lock.ts`
+      // already document.
+      const [current] = await tx.$queryRaw<{ config: Prisma.JsonValue }[]>`
+        SELECT config FROM plugins WHERE id = ${plugin.id} FOR UPDATE`;
+
+      if (current === undefined) {
+        throw new Error(`Plugin '${plugin.slug}' row vanished mid-activation`);
+      }
+
+      const retainedConfig = retainedServerConfig(this.configSchema, next.manifest, current.config);
+
       // The claim runs FIRST, guarded on the tombstone AND on the exact
       // pending state this activation was computed from. The tombstone half
       // is #320's guard: an uninstall committing between the caller's load
@@ -1025,6 +1070,10 @@ export class PluginUpdateService {
           category: MANIFEST_CATEGORY_TO_PRISMA[next.manifest.category],
           scope: MANIFEST_SCOPE_TO_PRISMA[next.manifest.scope],
           manifestJson: next.manifest as Prisma.InputJsonValue,
+          // D-CN: rides the same reset-on-mismatch rule reinstall applies,
+          // so activation is not the one manifest-replacing path that leaves
+          // a stale server config in force.
+          config: retainedConfig.config as Prisma.InputJsonValue,
           ...(provenance.bundled ? {} : { installedSha256: provenance.pendingSha256 }),
           ...CLEARED_STAGED_UPDATE,
           // The running instance is still the prior code; the loader
@@ -1358,6 +1407,7 @@ export class PluginUpdateService {
         suspendedHouseholdUnits,
         suspendedUserUnits,
         dormancyTransitions,
+        retainedConfigReset: retainedConfig.reset,
       };
     });
   }
@@ -1387,6 +1437,7 @@ export class PluginUpdateService {
         this.stagingSnapshot(before),
         this.stagingSnapshot(outcome.plugin),
         grantedPermissions,
+        outcome.retainedConfigReset,
         initiatedAt,
       ),
     );

@@ -53,7 +53,14 @@ describe('the consent path row locks (FOR UPDATE)', () => {
     after: 'private async lockUserUnit',
     matching: /user_plugins/,
   });
-  const serverGrantLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], { matching: /FOR UPDATE/ });
+  // Anchored on the declaration — D-CN (#370) added a second `FOR UPDATE`
+  // statement to this file (the plugin-config lock, guarding `Plugin.config`
+  // against a concurrent server config PATCH), so a bare `/FOR UPDATE/` no
+  // longer resolves to one statement without help locating it.
+  const serverGrantLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
+    after: 'lockedGrantRows',
+    matching: /FOR UPDATE/,
+  });
 
   const householdKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
     after: 'lockHouseholdUnitScope',

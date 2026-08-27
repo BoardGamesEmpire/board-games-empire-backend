@@ -386,6 +386,14 @@ export class PluginUpdateApprovedEvent extends MutationEvent<Plugin> {
      * `plugin.installed`; per-grant events are deliberately not emitted.
      */
     public readonly grantedPermissions: readonly GrantedPermissionRecord[],
+    /**
+     * Activation found the retained server config invalid under the NEW
+     * manifest's `config.schema` and reset it to `{}` (D-CN) — the same
+     * "did my old settings survive" question `PluginInstalledEvent`
+     * answers for a reinstall, ridden along here so activation is not the
+     * one manifest-replacing path that leaves it unanswered.
+     */
+    public readonly retainedConfigReset: boolean,
     initiatedAt: Date,
   ) {
     super(before, after, initiatedAt);

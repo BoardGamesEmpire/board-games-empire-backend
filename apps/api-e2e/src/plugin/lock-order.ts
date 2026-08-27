@@ -31,12 +31,20 @@ export const CLAIMED_LOCK_ORDER = [
      * activation as the claiming write they already make. Both are the plugin
      * row; what matters is that nothing else is taken before it.
      *
-     * The SQL alternative goes through `relationLock`, which is what scopes it
-     * to the `plugins` table and to that name entire. A bare `FOR SHARE` would
-     * let a share lock on ANY table date this stage — and since order is judged
-     * by first occurrence, one taken earlier in a body would report the plugin
-     * row as held before it was. It is only reached by the replayed statement
-     * today, which is exactly when a loose pattern goes unnoticed.
+     * Activation also takes it by raw `FOR UPDATE` (D-CN, #370): the
+     * server-config read guarding `Plugin.config` against a concurrent PATCH,
+     * which now runs BEFORE the claiming `plugin.updateMany` below it — so
+     * without this alternative, this stage would date to the later write and
+     * a future statement placed between the two would silently order behind a
+     * lock that, on the page, no longer looks like the first thing taken.
+     *
+     * The SQL alternatives go through `relationLock`, which is what scopes them
+     * to the `plugins` table and to that name entire. A bare `FOR SHARE` or
+     * `FOR UPDATE` would let a lock on ANY table date this stage — and since
+     * order is judged by first occurrence, one taken earlier in a body would
+     * report the plugin row as held before it was. It is only reached by the
+     * replayed statement today, which is exactly when a loose pattern goes
+     * unnoticed.
      *
      * Where the name is allowed to end is stated once, at `RELATION_END`,
      * rather than per stage. Three hand-written copies is how that rule got
@@ -47,6 +55,7 @@ export const CLAIMED_LOCK_ORDER = [
     pattern: anyOf(
       /assertStillLiving\(/,
       relationLock('plugins', 'FOR SHARE'),
+      relationLock('plugins', 'FOR UPDATE'),
       /tx\.plugin\.update/,
       /plugin\.updateMany/,
     ),
@@ -219,10 +228,11 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     functionName: 'activateInTransaction',
     stages: ['plugin row', 'grant row', 'unit row'],
     because:
-      'Activation claims the plugin row through its own guarded write, then locks server grants (#356), then ' +
-      'WRITES units — its unit-set read comes earlier and is deliberately not the stage, because that read ' +
-      'takes no lock at all (#361). It never takes the advisory key, which is exactly why the unit paths need ' +
-      "the plugin row's share lock to order against it.",
+      "Activation takes the plugin row first via D-CN's `FOR UPDATE` config read, ahead of the claiming write " +
+      'that used to be this stage on its own (#370) — both are the plugin row, and either dates it. Then it ' +
+      'locks server grants (#356), then WRITES units — its unit-set read comes earlier and is deliberately not ' +
+      'the stage, because that read takes no lock at all (#361). It never takes the advisory key, which is ' +
+      "exactly why the unit paths need the plugin row's share lock to order against it.",
   },
   {
     label: 'uninstall (the purge)',

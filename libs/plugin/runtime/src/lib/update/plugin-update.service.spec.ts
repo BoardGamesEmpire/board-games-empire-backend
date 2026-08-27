@@ -113,6 +113,12 @@ describe('PluginUpdateService', () => {
     status,
   });
 
+  /** The grant-lock call(s) among `db.$queryRaw`'s calls — never `mock.calls[0]`, since the plugin-config lock (D-CN) runs first. */
+  const grantLockCalls = (): [TemplateStringsArray, ...unknown[]][] =>
+    (db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]).filter(([template]) =>
+      template.join('').includes('FROM plugin_grants'),
+    );
+
   const makeGrant = (overrides: Partial<PluginGrant> = {}): PluginGrant => ({
     id: 'grant-1',
     pluginId: 'plugin-1',
@@ -160,6 +166,16 @@ describe('PluginUpdateService', () => {
   let analyzer: jest.Mocked<Pick<PluginStaticAnalysisService, 'analyze'>>;
   let emitter: { emit: jest.Mock };
   let service: PluginUpdateService;
+  /**
+   * Queues one grant-lock answer (FIFO — one entry per activation attempt
+   * a test drives). `$queryRaw` now also carries the plugin-config lock
+   * (D-CN), routed separately by table name in `beforeEach` below, so a
+   * test's grant-lock sequence is never disturbed by the plugin-config
+   * lock's calls interleaved ahead of it.
+   */
+  let queueGrantLock: (rows: readonly ReturnType<typeof lockedRow>[]) => void;
+  /** The row the plugin-config lock (D-CN) answers with — defaults to an empty retained config. */
+  let setPluginConfigLock: (config: unknown) => void;
 
   const directory = (bundled = false): InstalledPluginDirectory => ({
     slug: 'demo-sink',
@@ -220,6 +236,36 @@ describe('PluginUpdateService', () => {
     db.plugin.updateMany.mockResolvedValue({ count: 1 });
 
     db.$transaction.mockImplementation((cb) => cb(db));
+
+    // Routes `$queryRaw` by table name: the plugin-config lock (D-CN)
+    // answers with `pluginConfigLockRow` (settable per test, defaults to an
+    // empty retained config), and the grant lock draws from a FIFO queue —
+    // one entry per activation attempt a test drives — falling back to
+    // "nothing locked" (today's default) once the queue is empty.
+    const grantLockQueue: (readonly ReturnType<typeof lockedRow>[])[] = [];
+    let pluginConfigLockRow: { config: unknown } = { config: {} };
+
+    queueGrantLock = (rows) => grantLockQueue.push(rows);
+    setPluginConfigLock = (config) => {
+      pluginConfigLockRow = { config };
+    };
+
+    db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) => {
+      const sql = strings.join('');
+
+      if (sql.includes('FROM plugin_grants')) {
+        return Promise.resolve(grantLockQueue.shift() ?? []);
+      }
+
+      if (sql.includes('FROM plugins')) {
+        return Promise.resolve([pluginConfigLockRow]);
+      }
+
+      // A third raw query landing here by default would get the config
+      // lock's row shape regardless of what it actually asked for, and the
+      // test driving it would pass or fail for the wrong reason.
+      throw new Error(`Unrouted $queryRaw in test: ${sql}`);
+    }) as never);
   });
 
   afterEach(async () => {
@@ -379,7 +425,7 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany.mockResolvedValueOnce([]); // compare(): nothing denied, nothing escalates
       // The tx-local locking re-read sees a denial on the fixture's required
       // server check, committed after the comparison ran.
-      db.$queryRaw.mockResolvedValue([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Denied)]);
+      queueGrantLock([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Denied)]);
       await writeManifest(nextManifest());
 
       await expect(service.stage(input())).rejects.toThrow(PluginUpdateBlockedByDenialError);
@@ -581,7 +627,7 @@ describe('PluginUpdateService', () => {
       // The tx-local locking re-read: a denial committed between the gates
       // and the claim. The durable-denial rule must hold at the moment of
       // activation, not the moment of the request.
-      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
+      queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateBlockedByDenialError,
@@ -612,7 +658,7 @@ describe('PluginUpdateService', () => {
       // decide() that committed after the gates. FOR UPDATE is what
       // guarantees this ordering: the flip either commits before the lock
       // (and refuses here) or blocks on it until this transaction resolves.
-      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
+      queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateBlockedByDenialError,
@@ -622,8 +668,8 @@ describe('PluginUpdateService', () => {
 
       // The re-read must be the LOCKING form — a plain snapshot cannot
       // order itself against decide()'s update, which is the whole point.
-      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
-      const [template, pluginId] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, string];
+      expect(grantLockCalls()).toHaveLength(1);
+      const [template, pluginId] = grantLockCalls()[0] as [TemplateStringsArray, string];
       const sql = template.join('?').replace(/\s+/g, ' ');
       expect(sql).toContain('FOR UPDATE');
       expect(sql).toContain('FROM plugin_grants');
@@ -687,13 +733,13 @@ describe('PluginUpdateService', () => {
       db.pluginGrant.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       // A denial from the locked read: the shortest path that still issues
       // the lock statement and touches nothing after it.
-      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
+      queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
       await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toThrow(
         PluginUpdateBlockedByDenialError,
       );
 
-      const [template] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray];
+      const [template] = grantLockCalls()[0] as [TemplateStringsArray];
       const sql = template.join('?').replace(/\s+/g, ' ');
 
       expect(sql).toContain(`FROM ${table}`);
@@ -715,7 +761,7 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([]); // serverChecksToSeed(): both checks undecided
       // feedback:read was decided while this approval was in flight; only
       // the still-undecided check may seed.
-      db.$queryRaw.mockResolvedValue([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
+      queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
       const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
 
@@ -757,7 +803,7 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([]); // serverChecksToSeed(): user:impersonate undecided — expectation is [user:impersonate]
       // Decided while in flight: the seed set shrinks, so the confirmed
       // set no longer matches what this transaction grants.
-      db.$queryRaw.mockResolvedValue([lockedRow('user:impersonate', PluginGrantStatus.Granted)]);
+      queueGrantLock([lockedRow('user:impersonate', PluginGrantStatus.Granted)]);
 
       const failure = await service
         .approve({ slug: 'demo-sink', approverId: 'admin-1', confirmCriticalSlugs: ['user:impersonate'] })
@@ -788,11 +834,10 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
           .mockResolvedValueOnce([]); // serverChecksToSeed()
-        db.$queryRaw
-          .mockResolvedValueOnce([]) // first attempt's locked read: nothing decided, so it seeds both and loses the race
-          // The retry's locked read SEES the decision the first attempt
-          // collided with, so the check drops out rather than colliding again.
-          .mockResolvedValueOnce([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
+        queueGrantLock([]); // first attempt's locked read: nothing decided, so it seeds both and loses the race
+        // The retry's locked read SEES the decision the first attempt
+        // collided with, so the check drops out rather than colliding again.
+        queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Granted)]);
 
         const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
 
@@ -822,9 +867,8 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
           .mockResolvedValueOnce([]); // serverChecksToSeed()
-        db.$queryRaw
-          .mockResolvedValueOnce([]) // first attempt's locked read: seeds, and collides with the denial being written
-          .mockResolvedValueOnce([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
+        queueGrantLock([]); // first attempt's locked read: seeds, and collides with the denial being written
+        queueGrantLock([lockedRow('feedback:read', PluginGrantStatus.Denied)]);
 
         // The durable-denial rule, not a 500: what the collision was hiding
         // is a refusal the retry can finally see.
@@ -842,9 +886,8 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
           .mockResolvedValueOnce([]); // serverChecksToSeed()
-        db.$queryRaw
-          .mockResolvedValueOnce([]) // first attempt's locked read
-          .mockResolvedValueOnce([]); // retry: still undecided in ITS read, so it seeds and loses again
+        queueGrantLock([]); // first attempt's locked read
+        queueGrantLock([]); // retry: still undecided in ITS read, so it seeds and loses again
 
         await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(collision);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(2);
@@ -867,7 +910,7 @@ describe('PluginUpdateService', () => {
         db.pluginGrant.findMany
           .mockResolvedValueOnce([]) // compare()
           .mockResolvedValueOnce([]); // serverChecksToSeed()
-        db.$queryRaw.mockResolvedValue([]); // the only attempt's locked read
+        queueGrantLock([]); // the only attempt's locked read
 
         await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(failure);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
@@ -982,7 +1025,7 @@ describe('PluginUpdateService', () => {
           }),
         ]) // serverChecksToSeed()
         .mockResolvedValueOnce([]); // activate() – household grants for the unit
-      db.$queryRaw.mockResolvedValue([
+      queueGrantLock([
         lockedRow('feedback:read', PluginGrantStatus.Granted),
         lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted),
       ]); // tx-local locked server re-read: unchanged since the gates
@@ -1230,6 +1273,104 @@ describe('PluginUpdateService', () => {
         expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
       });
 
+      /**
+       * The general pass folded into this branch (#370, D-CR on #59): #369
+       * only re-validated rows already dormant for scope, so an
+       * already-serving row's config never faced a manifest that came after
+       * it. A household-scope activation that tightens `config.schema` must
+       * not leave such a row serving a document the new schema rejects.
+       */
+      it('marks an already-serving row NeedsConfiguration when the activation tightens the schema underneath it', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: { webhookUrl: 42 } })]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: true,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
+        });
+        // The admin switch survives, same discipline as the scope pass.
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ enabled: false }) }),
+        );
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitDormantEvent.eventName,
+          expect.objectContaining({ reason: PluginUnitDormantReason.NeedsConfiguration }),
+        );
+      });
+
+      it('leaves an already-serving row alone when its retained document still conforms to a tightened schema', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: true,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      });
+
+      /**
+       * A row already `NeedsConfiguration` is out of scope for this pass —
+       * its cure is an admin write (config PATCH or enable), not a later
+       * manifest happening to loosen the schema back on its own
+       * (`plugin-unit-lifecycle.service.ts`).
+       */
+      it('does not re-derive a row already dormant for config, even when its retained document would now conform', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: conforming,
+            dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+            dormantAt: new Date(0),
+          }),
+        ]);
+
+        await activateWith(nextManifest({ scope: 'household' }));
+
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
+      });
+
+      it('combines a re-derived scope-dormant row and a newly non-conforming serving row into one write', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: { webhookUrl: 42 },
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+            dormantAt: new Date(0),
+          }),
+          makeUnit({ id: 'hp-2', householdId: 'household-2', config: { webhookUrl: 42 } }),
+        ]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: true,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1', 'hp-2'] } },
+          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
+        });
+      });
+
       it('reads the rows once, whatever the household count — the transaction must not scale with installs', async () => {
         db.householdPlugin.findMany.mockResolvedValue([
           makeUnit({ config: conforming }),
@@ -1245,6 +1386,82 @@ describe('PluginUpdateService', () => {
           where: { id: { in: ['hp-1', 'hp-2', 'hp-3'] } },
           data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
         });
+      });
+    });
+
+    /**
+     * D-CN on #59/#370: activation rides the same retained-config rule a
+     * reinstall-over-tombstone applies via `retainedServerConfig` — the
+     * household dormancy pass above closes the household axis, and this
+     * closes the server one, so activation is not the last manifest-replacing
+     * path that leaves `Plugin.config` unchecked.
+     */
+    describe('server config retained-value rule (D-CN)', () => {
+      const activateWith = async (manifest: PluginManifest, existingConfig: Prisma.JsonValue): Promise<void> => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(manifest));
+        // The locked, in-transaction read the claim's write depends on — NOT
+        // the pre-transaction `plugin.findUnique` load, which a concurrent
+        // config PATCH could have already moved past.
+        setPluginConfigLock(existingConfig);
+
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      };
+
+      it('carries retained server config forward when it still satisfies the new schema', async () => {
+        await activateWith(nextManifest(), { webhookUrl: 'https://retained.example.test' });
+
+        expect(db.plugin.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ config: { webhookUrl: 'https://retained.example.test' } }),
+          }),
+        );
+        expect(emitter.emit).toHaveBeenCalledWith(
+          PluginUpdateApprovedEvent.eventName,
+          expect.objectContaining({ retainedConfigReset: false }),
+        );
+      });
+
+      it('resets schema-invalid retained config to {} and records the reset on the event', async () => {
+        await activateWith(
+          nextManifest({
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: false,
+            },
+          }),
+          { webhookUrl: 42 },
+        );
+
+        expect(db.plugin.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ config: {} }) }),
+        );
+        expect(emitter.emit).toHaveBeenCalledWith(
+          PluginUpdateApprovedEvent.eventName,
+          expect.objectContaining({ retainedConfigReset: true }),
+        );
+      });
+
+      it('resets a non-object retained value the same way a fresh tombstone-less config would', async () => {
+        await activateWith(nextManifest(), 'not-an-object' as unknown as Prisma.JsonValue);
+
+        expect(db.plugin.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ config: {} }) }),
+        );
+      });
+
+      it('reads the config fresh inside the transaction rather than the caller-loaded plugin, so a concurrent server config PATCH is not clobbered', async () => {
+        // The pre-transaction load sees a stale value; only the tx-local
+        // locked read below is what the write must be computed from.
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest(), { config: { webhookUrl: 'stale' } }));
+        setPluginConfigLock({ webhookUrl: 'https://fresh.example.test' });
+
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+        expect(db.plugin.updateMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({ config: { webhookUrl: 'https://fresh.example.test' } }),
+          }),
+        );
       });
     });
 
@@ -1449,7 +1666,7 @@ describe('PluginUpdateService', () => {
         .mockResolvedValueOnce([makeGrant({ permissionSlug: 'plugin|demo-sink|manage:digest' })])
         .mockResolvedValueOnce([]);
       // tx-local locked server re-read
-      db.$queryRaw.mockResolvedValue([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted)]);
+      queueGrantLock([lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted)]);
       db.householdPlugin.findMany.mockResolvedValueOnce([
         makeUnit(),
         makeUnit({ id: 'hp-2', householdId: 'household-2' }),
@@ -1682,7 +1899,7 @@ describe('PluginUpdateService', () => {
           }),
         ]); // activate() – user grants for the unit
       // tx-local locked server re-read: both server checks decided, no denial
-      db.$queryRaw.mockResolvedValue([
+      queueGrantLock([
         lockedRow('feedback:read', PluginGrantStatus.Granted),
         lockedRow('plugin|demo-sink|manage:digest', PluginGrantStatus.Granted),
       ]);
