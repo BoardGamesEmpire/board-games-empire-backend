@@ -407,7 +407,13 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         // Approval is the consent act for the update's new server checks;
         // per-grant events are deliberately not emitted (install parity),
         // so this payload is where the seed's provenance lives.
-        payload: { grantedPermissions: event.grantedPermissions },
+        payload: {
+          grantedPermissions: event.grantedPermissions,
+          // Whether activation dropped retained server config as
+          // schema-invalid under the manifest just promoted (D-CN) — same
+          // "asked of this table directly" contract as install's field.
+          retainedConfigReset: event.retainedConfigReset,
+        },
       };
     }
 

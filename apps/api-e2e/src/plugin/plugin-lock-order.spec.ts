@@ -53,8 +53,16 @@ describe('the plugin consent path is one lock order (#360)', () => {
   /** Stage 1: the plugin row, as the unit paths take it. */
   const pluginShareLock = readShippedSql(UNIT_LIFECYCLE, ['plugin.id'], { matching: /FOR SHARE/ });
 
-  /** Stage 2: the server grant rows, as activation takes them (#356). */
-  const grantRowLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], { matching: /FOR UPDATE/ });
+  /**
+   * Stage 2: the server grant rows, as activation takes them (#356).
+   * Anchored on the declaration — D-CN (#370) added a second `FOR UPDATE`
+   * statement to this file (the plugin-config lock), so a bare
+   * `/FOR UPDATE/` no longer resolves to one statement without help.
+   */
+  const grantRowLock = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
+    after: 'lockedGrantRows',
+    matching: /FOR UPDATE/,
+  });
 
   /** Stage 3: the `(scopeId, pluginId)` key, and the format it is built from. */
   const advisoryLock = readShippedSql(UNIT_SCOPE_LOCK, ['scopeKey'], {
@@ -168,6 +176,9 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // this is cheap now and would be a puzzle later.
       const cases = [
         { stage: 'plugin row', suffix: 'FOR SHARE', table: 'plugins' },
+        // D-CN (#370): the plugin row is now also recognised by a raw
+        // `FOR UPDATE`, since activation's config lock takes it that way.
+        { stage: 'plugin row', suffix: 'FOR UPDATE', table: 'plugins' },
         { stage: 'grant row', suffix: 'FOR UPDATE', table: 'plugin_grants' },
         { stage: 'unit row', suffix: 'FOR UPDATE', table: 'household_plugins' },
       ] as const;

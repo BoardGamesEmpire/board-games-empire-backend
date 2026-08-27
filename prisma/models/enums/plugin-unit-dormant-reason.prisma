@@ -19,8 +19,11 @@ enum PluginUnitDormantReason {
   ScopeOrphaned
 
   /// The retained `config` document no longer satisfies the active
-  /// `config.schema`, and the manifest requires household config (#370).
-  /// Healed by an admin supplying a conforming document — which is exactly
-  /// what the enable/config-PATCH gate validates.
+  /// `config.schema` (#370). Set unconditionally on that mismatch — NOT
+  /// gated on the manifest's `requiresHouseholdConfig`, which decides only
+  /// whether a document is mandatory, not whether the schema binds the one
+  /// a row already holds. Healed by an admin supplying a conforming
+  /// document — which is exactly what the enable/config-PATCH gate
+  /// validates.
   NeedsConfiguration
 }

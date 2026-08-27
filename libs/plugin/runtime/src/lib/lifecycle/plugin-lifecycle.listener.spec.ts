@@ -28,6 +28,7 @@ import {
   PluginInstalledEvent,
   PluginLoadFailedEvent,
   PluginUninstalledEvent,
+  PluginUpdateApprovedEvent,
   PluginUpdateCheckCompletedEvent,
   UserPluginDisabledEvent,
   UserPluginUnitDisabledEvent,
@@ -176,6 +177,34 @@ describe('PluginLifecycleListener', () => {
             auditFindings: null,
             staticAnalysis: [],
             acknowledgedForbiddenImports: [],
+          }),
+        }),
+      );
+    });
+
+    /** D-CN on #59/#370: the reset flag rides the same payload the seeded grants already do. */
+    it('persists an UpdateApproved row carrying granted permissions and the retained-config reset flag', async () => {
+      const event = new PluginUpdateApprovedEvent(
+        { id: 'plugin-1', slug: 'demo-sink', version: '1.2.0', pendingVersion: '1.3.0' },
+        { id: 'plugin-1', slug: 'demo-sink', version: '1.3.0', pendingVersion: null },
+        [{ slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' }],
+        true,
+        initiatedAt,
+      );
+
+      emitter.emit(PluginEvent.UpdateApproved, event);
+      await flush();
+
+      expect(createdRow()).toEqual(
+        expect.objectContaining({
+          pluginId: 'plugin-1',
+          pluginSlug: 'demo-sink',
+          event: PluginLifecycleEventType.UpdateApproved,
+          payload: expect.objectContaining({
+            grantedPermissions: [
+              { slug: 'plugin.demo-sink.send', required: true, consentScope: 'server', reason: 'Send digests' },
+            ],
+            retainedConfigReset: true,
           }),
         }),
       );
