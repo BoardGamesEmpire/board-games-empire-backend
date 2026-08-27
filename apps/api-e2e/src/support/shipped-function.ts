@@ -118,8 +118,18 @@ export function relationLock(relations: string | readonly string[], mode: RowLoc
  * Flags are refused rather than dropped. `g` and `y` make `test` stateful, and
  * a stage pattern is tested against many bodies — every second one would report
  * false, which is a silent pass rather than a visible failure.
+ *
+ * An empty list is refused for a worse version of the same reason. Joining
+ * nothing gives `/(?:)/`, which matches at offset 0 of every body — so the
+ * stage is never reported missing AND always sorts before every real one. Both
+ * halves of the order check pass, and a path that stopped taking the lock reads
+ * as taking it first.
  */
 export function anyOf(...alternatives: readonly RegExp[]): RegExp {
+  if (alternatives.length === 0) {
+    throw new Error('A stage pattern combining no alternatives matches every body at offset 0; give it one.');
+  }
+
   const flagged = alternatives.filter((alternative) => alternative.flags !== '');
 
   if (flagged.length > 0) {

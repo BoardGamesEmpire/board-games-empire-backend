@@ -583,6 +583,15 @@ describe('shipped-function', () => {
       expect('await this.lockHouseholdUnit(tx);').not.toMatch(stage);
     });
 
+    it('refuses combining nothing, which would match every body at offset 0', () => {
+      // The worst shape a stage pattern can take, and it is silent twice over.
+      // Joining no alternatives gives `/(?:)/`, which `search` answers with 0
+      // for any body — so `orderMismatch` never reports the stage missing, and
+      // dates it before every stage that really was taken. A path that stopped
+      // taking the lock would read as taking it first.
+      expect(() => anyOf()).toThrow(/matches every body at offset 0/);
+    });
+
     it('refuses flags rather than dropping them', () => {
       // Combining sources silently discards flags, and `g` is the one that
       // matters: it makes `test` stateful, so a stage pattern checked against
