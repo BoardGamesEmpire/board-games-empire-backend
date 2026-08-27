@@ -52,6 +52,86 @@ export interface OrderedStage {
   readonly pattern: RegExp;
 }
 
+/** The four row-lock modes Postgres has. A stage is recognised by exactly one. */
+export type RowLockMode = 'FOR UPDATE' | 'FOR NO KEY UPDATE' | 'FOR SHARE' | 'FOR KEY SHARE';
+
+/**
+ * Where a relation name is allowed to end.
+ *
+ * Not `\b`, which ends the name at any non-word character — and two of those
+ * are still INSIDE a Postgres relation reference. `$` is a legal identifier
+ * character, so `plugins$archive` would pass as `plugins`; a trailing `.` makes
+ * the name a SCHEMA, so `plugins.audit` is a lock on some other table wearing
+ * this one's name.
+ *
+ * Not an enumeration of the delimiters that may follow, either. Listing `\s`,
+ * `,`, `;` and the comment openers rejects valid syntax nobody listed — a
+ * subquery's `FROM plugins)` among them. Saying the identifier ENDS here covers
+ * the forms without having to have thought of them.
+ */
+const RELATION_END = '(?![\\w$.])';
+
+const SAFE_RELATION = /^[a-z_][a-z0-9_]*$/i;
+
+/**
+ * A pattern matching a row lock taken on the given relation by raw SQL.
+ *
+ * The boundary rule lives HERE rather than in each stage that needs it. Three
+ * hand-written copies is how it got tightened three times in review and had to
+ * be corrected in three places each time — and the copy nobody looked at is the
+ * one that stays loose, which for an order claim is not a near miss. Order is
+ * judged by FIRST occurrence, so a pattern matching something it did not mean
+ * dates the stage to the wrong statement, and a lock genuinely taken later
+ * reports as held early.
+ *
+ * The mode is matched literally and needs no boundary of its own: no Postgres
+ * lock mode contains another as a substring — `FOR KEY SHARE` notably does not
+ * contain `FOR SHARE` — so the four are already mutually exclusive.
+ */
+export function relationLock(relations: string | readonly string[], mode: RowLockMode): RegExp {
+  const names = typeof relations === 'string' ? [relations] : relations;
+
+  if (names.length === 0) {
+    throw new Error(`A ${mode} stage matching no relation would match every ${mode} in the body; name the table.`);
+  }
+
+  for (const name of names) {
+    if (!SAFE_RELATION.test(name)) {
+      // A name carrying regex syntax would silently widen the pattern rather
+      // than fail — `plugins|households` reads as one table and matches two.
+      throw new Error(
+        `'${name}' is not a plain relation name. This builds a regex, so anything else changes what the stage ` +
+          `matches instead of failing.`,
+      );
+    }
+  }
+
+  const alternation = names.length > 1 ? `(?:${names.join('|')})` : names.join('|');
+
+  return new RegExp(`FROM ${alternation}${RELATION_END}[^\`]*?${mode}`);
+}
+
+/**
+ * One stage pattern from several alternatives, so a stage recognised more than
+ * one way still states each way as its own readable pattern.
+ *
+ * Flags are refused rather than dropped. `g` and `y` make `test` stateful, and
+ * a stage pattern is tested against many bodies — every second one would report
+ * false, which is a silent pass rather than a visible failure.
+ */
+export function anyOf(...alternatives: readonly RegExp[]): RegExp {
+  const flagged = alternatives.filter((alternative) => alternative.flags !== '');
+
+  if (flagged.length > 0) {
+    throw new Error(
+      `Alternatives carry flags (${flagged.map(String).join(', ')}), which combining would drop. State a stage ` +
+        `pattern without them.`,
+    );
+  }
+
+  return new RegExp(alternatives.map((alternative) => alternative.source).join('|'));
+}
+
 /**
  * Replaces every comment with spaces, preserving length and therefore every
  * offset into the source.

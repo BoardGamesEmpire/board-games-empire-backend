@@ -1,8 +1,10 @@
 import {
+  anyOf,
   blankComments,
   extractBranchBody,
   extractFunctionBody,
   orderMismatch,
+  relationLock,
   type OrderedStage,
 } from './shipped-function';
 
@@ -501,6 +503,92 @@ describe('shipped-function', () => {
       `;
 
       expect(orderMismatch(body, STAGES, 'openHouseholdUnit')).toMatch(/plugin row/);
+    });
+  });
+
+  describe('relationLock', () => {
+    /**
+     * The boundary these cases defend was tightened three times in review, each
+     * time across three hand-written copies. It is one function now, so this is
+     * where the rule is tested and a stage spec only has to show it is wired to
+     * it.
+     */
+    const pluginRow = relationLock('plugins', 'FOR SHARE');
+
+    it('matches the lock it is about', () => {
+      expect('SELECT uninstalled_at, scope FROM plugins WHERE id = $1 FOR SHARE').toMatch(pluginRow);
+      expect('SELECT id\n FROM plugins\n WHERE id = $1\n FOR SHARE').toMatch(pluginRow);
+    });
+
+    it('does not match a lock on a different relation', () => {
+      // The failure this whole builder exists for. Order is judged by FIRST
+      // occurrence, so a stage matching a statement it did not mean does not
+      // merely over-match — it dates the stage to that statement, and a lock
+      // genuinely taken later reports as held early.
+      expect('SELECT id FROM households WHERE id = $1 FOR SHARE').not.toMatch(pluginRow);
+    });
+
+    it('ends the relation name where the identifier ends, not at any non-word byte', () => {
+      // `\b` would accept all three of these. `$` is a legal Postgres
+      // identifier character, and a trailing `.` makes the name a SCHEMA, so
+      // `plugins.audit` is a lock on some other table wearing this one's name.
+      expect('SELECT id FROM plugins_archive WHERE id = $1 FOR SHARE').not.toMatch(pluginRow);
+      expect('SELECT id FROM plugins$archive WHERE id = $1 FOR SHARE').not.toMatch(pluginRow);
+      expect('SELECT id FROM plugins.audit WHERE id = $1 FOR SHARE').not.toMatch(pluginRow);
+    });
+
+    it('keeps a form an enumeration of delimiters would have dropped', () => {
+      // The reason the guard says where the name ENDS rather than listing what
+      // may follow it. A list has to have thought of every delimiter; this one
+      // was not on the obvious list, and dropping it silently stops the stage
+      // matching a real lock.
+      expect('SELECT id FROM (SELECT id FROM plugins) x WHERE id = $1 FOR SHARE').toMatch(pluginRow);
+    });
+
+    it('does not match the same relation under a different mode', () => {
+      // `FOR SHARE` and `FOR KEY SHARE` are different locks against different
+      // conflict sets, and the stage claims one of them.
+      expect('SELECT id FROM plugins WHERE id = $1 FOR KEY SHARE').not.toMatch(pluginRow);
+      expect('SELECT id FROM plugins WHERE id = $1 FOR KEY SHARE').toMatch(relationLock('plugins', 'FOR KEY SHARE'));
+    });
+
+    it('matches either relation when a stage is taken on more than one', () => {
+      const unitRow = relationLock(['household_plugins', 'user_plugins'], 'FOR UPDATE');
+
+      expect('SELECT id FROM household_plugins WHERE id = $1 FOR UPDATE').toMatch(unitRow);
+      expect('SELECT id FROM user_plugins WHERE id = $1 FOR UPDATE').toMatch(unitRow);
+      expect('SELECT id FROM plugins WHERE id = $1 FOR UPDATE').not.toMatch(unitRow);
+    });
+
+    it('refuses a name that is regex rather than a relation', () => {
+      // This builds a pattern, so syntax in the name WIDENS it instead of
+      // failing — `plugins|households` reads as one table and matches two,
+      // which is the silent answer every refusal in this module exists to
+      // prevent.
+      expect(() => relationLock('plugins|households', 'FOR SHARE')).toThrow(/not a plain relation name/);
+      expect(() => relationLock(['plugins', 'plugin.*'], 'FOR UPDATE')).toThrow(/not a plain relation name/);
+    });
+
+    it('refuses naming no relation at all', () => {
+      expect(() => relationLock([], 'FOR UPDATE')).toThrow(/name the table/);
+    });
+  });
+
+  describe('anyOf', () => {
+    it('matches any alternative, and nothing it was not given', () => {
+      const stage = anyOf(/assertStillLiving\(/, relationLock('plugins', 'FOR SHARE'));
+
+      expect('await this.assertStillLiving(tx);').toMatch(stage);
+      expect('FROM plugins WHERE id = $1 FOR SHARE').toMatch(stage);
+      expect('await this.lockHouseholdUnit(tx);').not.toMatch(stage);
+    });
+
+    it('refuses flags rather than dropping them', () => {
+      // Combining sources silently discards flags, and `g` is the one that
+      // matters: it makes `test` stateful, so a stage pattern checked against
+      // many bodies would report false on every second one. That is a pin
+      // passing, not a pin failing.
+      expect(() => anyOf(/assertStillLiving\(/g)).toThrow(/carry flags/);
     });
   });
 });

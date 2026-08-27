@@ -148,18 +148,24 @@ describe('the plugin consent path is one lock order (#360)', () => {
       expect('SELECT uninstalled_at FROM plugins WHERE id = $1 FOR SHARE').toMatch(pluginRow.pattern);
     });
 
-    it('holds every table-scoped stage to the whole table name, not a prefix of it', () => {
+    it('holds every table-scoped stage to the whole table name, not to something that starts with it', () => {
       // The same failure one character further out, and the reason the fix
       // above is not finished by scoping alone: `FROM plugins` with nothing
       // after it is a PREFIX match, so a `plugins_archive` added later would
       // date the plugin-row stage without being the plugin row.
       //
-      // All three raw-SQL stages get the case rather than only the one that
-      // was noticed. A boundary on a single stage is not a rule — it is one
-      // table that happened to get checked, and the next stage written from
-      // these as a template inherits the looseness. Nothing in the schema
-      // shares a prefix today, which is exactly why this is cheap now and
-      // would be a puzzle later.
+      // The other two forms are why the boundary is a lookahead rather than
+      // `\b`: a word boundary ends the name at any non-word character, but `$`
+      // is a legal Postgres identifier character and a trailing `.` makes the
+      // name a SCHEMA — `FROM plugins.audit` locks some other table entirely,
+      // and would have dated this stage while doing it.
+      //
+      // `relationLock` states that rule once and `shipped-function.spec.ts`
+      // tests it directly, so this case is not the rule's test — it is the
+      // wiring's. Each stage is asserted separately because what it denies is
+      // a stage that stopped going through the builder, which no test of the
+      // builder can see. Nothing in the schema collides today, which is why
+      // this is cheap now and would be a puzzle later.
       const cases = [
         { stage: 'plugin row', suffix: 'FOR SHARE', table: 'plugins' },
         { stage: 'grant row', suffix: 'FOR UPDATE', table: 'plugin_grants' },
@@ -171,6 +177,8 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         expect(`SELECT id FROM ${table} WHERE id = $1 ${suffix}`).toMatch(pattern);
         expect(`SELECT id FROM ${table}_archive WHERE id = $1 ${suffix}`).not.toMatch(pattern);
+        expect(`SELECT id FROM ${table}.audit WHERE id = $1 ${suffix}`).not.toMatch(pattern);
+        expect(`SELECT id FROM ${table}$archive WHERE id = $1 ${suffix}`).not.toMatch(pattern);
       }
     });
 

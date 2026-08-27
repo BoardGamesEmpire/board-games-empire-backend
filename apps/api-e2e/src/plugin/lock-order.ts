@@ -1,4 +1,4 @@
-import type { OrderedStage } from '../support/shipped-function';
+import { anyOf, type OrderedStage, relationLock } from '../support/shipped-function';
 
 /**
  * The claimed total lock order of the plugin consent path, in ONE place.
@@ -31,24 +31,25 @@ export const CLAIMED_LOCK_ORDER = [
      * activation as the claiming write they already make. Both are the plugin
      * row; what matters is that nothing else is taken before it.
      *
-     * The SQL alternative is scoped to the `plugins` table, as the two stages
-     * below already scope theirs. A bare `FOR SHARE` would let a share lock on
-     * ANY table date this stage — and since order is judged by first
-     * occurrence, one taken earlier in a body would report the plugin row as
-     * held before it was. It is only reached by the replayed statement today,
-     * which is exactly when a loose pattern goes unnoticed.
+     * The SQL alternative goes through `relationLock`, which is what scopes it
+     * to the `plugins` table and to that name entire. A bare `FOR SHARE` would
+     * let a share lock on ANY table date this stage — and since order is judged
+     * by first occurrence, one taken earlier in a body would report the plugin
+     * row as held before it was. It is only reached by the replayed statement
+     * today, which is exactly when a loose pattern goes unnoticed.
      *
-     * The `\b` is that same rule taken to the end of the name. Without it the
-     * table is a PREFIX, so a `plugins_archive` added later would satisfy this
-     * stage without being the plugin row. All three raw-SQL stages carry it,
-     * because a boundary on only the stage someone happened to look at is not
-     * scoping — it is one table that got checked, and the next stage written
-     * from these as a template inherits the looseness. No table shares a prefix
-     * with another today; the point is that adding one must not silently
-     * re-point a stage.
+     * Where the name is allowed to end is stated once, at `RELATION_END`,
+     * rather than per stage. Three hand-written copies is how that rule got
+     * tightened three times in review and needed correcting in three places
+     * each time, and the copy nobody looks at is the one that stays loose.
      */
     name: 'plugin row',
-    pattern: /assertStillLiving\(|FROM plugins\b[^`]*?FOR SHARE|tx\.plugin\.update|plugin\.updateMany/,
+    pattern: anyOf(
+      /assertStillLiving\(/,
+      relationLock('plugins', 'FOR SHARE'),
+      /tx\.plugin\.update/,
+      /plugin\.updateMany/,
+    ),
   },
   {
     /**
@@ -58,7 +59,7 @@ export const CLAIMED_LOCK_ORDER = [
      * to a read that orders nothing.
      */
     name: 'grant row',
-    pattern: /pluginGrant\.upsert\(|FROM plugin_grants\b[^`]*?FOR UPDATE/,
+    pattern: anyOf(/pluginGrant\.upsert\(/, relationLock('plugin_grants', 'FOR UPDATE')),
   },
   {
     /** The `(scopeId, pluginId)` key, which exists before the unit row does. */
@@ -72,8 +73,12 @@ export const CLAIMED_LOCK_ORDER = [
      * just as surely. Reads are excluded: see the note above.
      */
     name: 'unit row',
-    pattern:
-      /lock(?:Household|User)Unit\(|suspend(?:Household|User)Unit\(|tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)|FROM (?:household_plugins|user_plugins)\b[^`]*?FOR UPDATE/,
+    pattern: anyOf(
+      /lock(?:Household|User)Unit\(/,
+      /suspend(?:Household|User)Unit\(/,
+      /tx\.(?:householdPlugin|userPlugin)\.(?:create|update|updateMany|upsert|delete|deleteMany)/,
+      relationLock(['household_plugins', 'user_plugins'], 'FOR UPDATE'),
+    ),
   },
 ] as const satisfies readonly OrderedStage[];
 
