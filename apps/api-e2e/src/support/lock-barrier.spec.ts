@@ -4,9 +4,11 @@ import {
   BARRIER_STATEMENT_TIMEOUT_MS,
   barrierSessionSettings,
   describeUngrantedLocks,
+  expectAdvisoryWaiter,
   expectBlocked,
   expectNotBlocked,
   quoteIdentifier,
+  type AdvisoryWaiter,
   type Barrier,
   type BarrierConnection,
   type PendingStatement,
@@ -149,5 +151,119 @@ describe('the blocking assertions watch the backend that issued the statement', 
     await expect(
       expectNotBlocked(barrierWith(observing(asked, [held])), pendingFrom(HOLDER_PID, 'holder'), { timeoutMs: 50 }),
     ).rejects.toThrow(new RegExp(`pid ${HOLDER_PID}`));
+  });
+});
+
+/**
+ * Watching the LOCK rather than a backend.
+ *
+ * The pre-row races contend an application transaction against a barrier, and
+ * the application's backend is not knowable from here: the request runs on a
+ * connection from the API's own pool, and this suite never imports application
+ * code. So the assertion is inverted — the holder asks whether anyone is queued
+ * behind the key it holds — and the join against its own granted rows, plus the
+ * caller's exclusion list, is what keeps that from meaning "anyone, anywhere".
+ */
+describe('expectAdvisoryWaiter', () => {
+  const HOLDER_PID = 11;
+
+  const stub = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
+    label,
+    pid,
+    query,
+    begin: async () => undefined,
+    commit: async () => undefined,
+    rollback: async () => undefined,
+    issue: () => {
+      throw new Error('not used in this spec');
+    },
+    close: async () => undefined,
+  });
+
+  const barrierWatching = (rows: readonly AdvisoryWaiter[], seen: unknown[][] = []): Barrier => ({
+    holder: stub('holder', HOLDER_PID, (async () => []) as BarrierConnection['query']),
+    waiter: stub('waiter', 12, (async () => []) as BarrierConnection['query']),
+    observer: stub('observer', 13, (async (sql: string, params: readonly unknown[] = []) => {
+      seen.push([sql, ...params]);
+
+      return [...rows];
+    }) as BarrierConnection['query']),
+  });
+
+  it('returns the waiting backend and what it is running', async () => {
+    const waiter: AdvisoryWaiter = { pid: 99, query: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))' };
+
+    await expect(
+      expectAdvisoryWaiter(barrierWatching([waiter]), { heldBy: HOLDER_PID, description: 'the enable request' }),
+    ).resolves.toEqual(waiter);
+  });
+
+  it('asks about the key the HOLDER holds, not about a pid it hopes is blocked', async () => {
+    const seen: unknown[][] = [];
+
+    await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: HOLDER_PID,
+      description: 'the enable request',
+    });
+
+    expect(seen[0]?.[0]).toMatch(/NOT waiting\.granted/);
+    expect(seen[0]?.[1]).toBe(HOLDER_PID);
+  });
+
+  it('scopes the join to one database and orders the result', async () => {
+    // pg_locks is cluster-wide while advisory locks are per-database, so
+    // without the database predicate the same key on a shared server joins
+    // across databases; without ORDER BY, a scenario with two contenders
+    // returns a different one per run.
+    const seen: unknown[][] = [];
+
+    await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: HOLDER_PID,
+      description: 'the enable request',
+    });
+
+    expect(seen[0]?.[0]).toMatch(/held\.database = waiting\.database/);
+    expect(seen[0]?.[0]).toMatch(/ORDER BY waiting\.pid/);
+  });
+
+  it('excludes the barrier’s own connections when the caller names them', async () => {
+    // Without this a spec holding a key on `holder` and contending on `waiter`
+    // reports the waiter and reads as though the application had queued — and
+    // the query guard cannot catch it, because the barrier issues the shipped
+    // advisory statement too.
+    const seen: unknown[][] = [];
+
+    await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: HOLDER_PID,
+      description: 'the enable request',
+      exclude: [12, 13],
+    });
+
+    expect(seen[0]?.[2]).toEqual([HOLDER_PID, 12, 13]);
+  });
+
+  it('reports a request that answered instead of waiting, rather than timing out', async () => {
+    // The failure this helper is most likely to see is a fixture problem — a
+    // request that 403s never queues — and a timeout naming three possible
+    // causes sends the reader to the lock instead of to the arrange.
+    await expect(
+      expectAdvisoryWaiter(barrierWatching([]), {
+        heldBy: HOLDER_PID,
+        description: 'the enable request',
+        timeoutMs: 5_000,
+        settledEarly: () => 'HTTP 403',
+      }),
+    ).rejects.toThrow(/answered without ever queueing behind the advisory key.*HTTP 403/s);
+  });
+
+  it('still times out when the request has neither queued nor answered', async () => {
+    await expect(
+      expectAdvisoryWaiter(barrierWatching([]), {
+        heldBy: HOLDER_PID,
+        description: 'the enable request',
+        timeoutMs: 50,
+        settledEarly: () => undefined,
+      }),
+    ).rejects.toThrow(/never waited on the advisory key/);
   });
 });
