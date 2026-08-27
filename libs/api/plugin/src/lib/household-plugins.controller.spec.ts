@@ -25,7 +25,7 @@ const PRESENTATION = {
 const GRANT = { id: 'grant-1', permissionSlug: 'update:calendar', status: PluginGrantStatus.Granted } as never;
 const UNIT_ROW = { id: 'hp-1', householdId: 'hh-1', pluginId: 'plugin-1', enabled: true } as never;
 const INVENTORY_PAGE = {
-  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false }, scopeOrphaned: false }],
+  rows: [{ id: 'plugin-1', slug: 'demo-sink', serverEnabled: true, unit: { anchored: false }, dormantReason: null }],
   total: 1,
 };
 const FEATURE_STATE = {

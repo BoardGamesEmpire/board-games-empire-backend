@@ -1,4 +1,11 @@
-import { DatabaseService, PluginCategory, PluginExecutionMode, PluginScope, Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  PluginCategory,
+  PluginExecutionMode,
+  PluginScope,
+  Prisma,
+  type PluginUnitDormantReason,
+} from '@bge/database';
 import { resolveLocalizedString, type PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { revalidateStoredManifest } from '../manifest/stored-manifest';
@@ -166,19 +173,22 @@ export interface PluginUnitInventoryEntry extends PluginInventoryIdentity {
 
 export interface PluginHouseholdInventoryEntry extends PluginUnitInventoryEntry {
   /**
-   * D-CF: this household holds an enablement row for a plugin whose CURRENT
-   * scope has no household axis. Activation writes `scope` from the new
-   * manifest and reconciles no unit rows (#369, D-CB), so a
-   * household→server narrowing leaves rows like this behind — enabled, and
-   * serving nothing.
+   * Why this household's retained row cannot serve, or `null` when it can
+   * (#369, #370, D-CM). `ScopeOrphaned` is the case D-CF's boolean used to
+   * report — the household holds a row for a plugin whose current scope has no
+   * household axis — and `NeedsConfiguration` is the retained document that no
+   * longer satisfies the active schema.
    *
-   * Listed rather than filtered out deliberately. While #369 is unresolved
-   * these rows are invisible outside the database, and an enabled row that
-   * serves nothing is exactly what an admin needs to see; a read that hides
-   * one costs a support ticket, where showing a soon-to-be-retired row costs
-   * a glance.
+   * Read from the row rather than recomputed from `scope` and `unit.anchored`,
+   * which is what replaced the boolean: dormancy is written where it is decided
+   * (activation, reinstall), so the list reports the same state the serving
+   * predicate uses instead of a second derivation that can disagree with it.
+   *
+   * Listed rather than filtered out deliberately: a row that exists and serves
+   * nothing is exactly what an admin needs to see, and hiding one costs a
+   * support ticket where showing it costs a glance.
    */
-  readonly scopeOrphaned: boolean;
+  readonly dormantReason: PluginUnitDormantReason | null;
 }
 
 /** The single-plugin read: the list entry plus what the manifest adds. */
@@ -321,8 +331,10 @@ export class PluginInventoryService {
       // Unconditional, unlike the server list: no unit read serves tombstones.
       uninstalledAt: null,
       // The D-CF arm is the second one. A plain `scope: Household` filter
-      // would hide exactly the rows #369 leaves behind, since a narrowing
-      // activation rewrites `scope` without retiring them.
+      // would hide exactly the rows a narrowing activation leaves behind: it
+      // rewrites `scope` and marks the rows dormant (#369, D-CK) rather than
+      // retiring them, so the row set has to admit a plugin this household
+      // holds a row for whatever its scope says today.
       OR: [{ scope: PluginScope.Household }, { householdPlugins: { some: { householdId } } }],
     };
 
@@ -332,7 +344,13 @@ export class PluginInventoryService {
           where,
           select: {
             ...UNIT_SELECT,
-            householdPlugins: { where: { householdId }, select: UNIT_STATE_SELECT },
+            householdPlugins: {
+              where: { householdId },
+              // Dormancy is household-only (#225 leaves the user axis without
+              // it), so it is selected here rather than in the shared
+              // UNIT_STATE_SELECT the user list also binds.
+              select: { ...UNIT_STATE_SELECT, dormantReason: true },
+            },
           },
           orderBy: { slug: 'asc' },
           skip: paging.skip,
@@ -352,7 +370,10 @@ export class PluginInventoryService {
         return {
           ...this.toUnitEntry(row, options.locale),
           unit,
-          scopeOrphaned: row.scope === PluginScope.Server && unit.anchored,
+          // `null` for a plugin this household holds no row for — there is
+          // nothing to be dormant. Anchored rows carry whatever activation
+          // wrote.
+          dormantReason: row.householdPlugins[0]?.dormantReason ?? null,
         };
       }),
       total,

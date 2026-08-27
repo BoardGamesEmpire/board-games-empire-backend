@@ -4,9 +4,11 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
+  PluginUnitDormantReason,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
   type DatabaseService,
+  type HouseholdPlugin,
   type Permission,
   type Plugin,
   type PluginGrant,
@@ -21,7 +23,11 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
-import { PluginInstalledEvent } from '../events/plugin.events';
+import {
+  HouseholdPluginUnitDormantEvent,
+  HouseholdPluginUnitRevivedEvent,
+  PluginInstalledEvent,
+} from '../events/plugin.events';
 import { PluginGrantAuthorityService } from '../grants/plugin-grant-authority.service';
 import type { PluginModuleOptions } from '../plugin-module.options';
 import {
@@ -84,6 +90,21 @@ describe('PluginInstallerService', () => {
     pendingSince: null,
     restartRequired: false,
     uninstalledAt: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...overrides,
+  });
+
+  const householdRow = (overrides: Partial<HouseholdPlugin> = {}): HouseholdPlugin => ({
+    id: 'hp-1',
+    householdId: 'hh-1',
+    pluginId: 'plugin-1',
+    enabled: true,
+    suspendedForConsent: false,
+    suspendedAt: null,
+    config: { webhookUrl: 'https://example.test/hook' },
+    dormantReason: null,
+    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -179,6 +200,7 @@ describe('PluginInstallerService', () => {
     db.pluginPermission.create.mockResolvedValue(makePluginPermission());
     db.pluginGrant.create.mockResolvedValue(makePluginGrant());
     db.permission.findMany.mockResolvedValue([feedbackRead]);
+    db.householdPlugin.findMany.mockResolvedValue([]);
 
     authority = { isServerAdmin: jest.fn() } satisfies Partial<jest.Mocked<PluginGrantAuthorityService>> as jest.Mocked<
       Pick<PluginGrantAuthorityService, 'isServerAdmin'>
@@ -795,13 +817,72 @@ describe('PluginInstallerService', () => {
         expect(installedEvent().retainedConfigReset).toBe(false);
       });
 
-      it('never touches the retained household/user config rows — reinstall is what the tombstone preserved them for', async () => {
+      it('never deletes or rewrites the retained household/user config — reinstall is what the tombstone preserved it for', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
+
         await service.install(input());
 
         expect(db.householdPlugin.deleteMany).not.toHaveBeenCalled();
         expect(db.userPlugin.deleteMany).not.toHaveBeenCalled();
-        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
         expect(db.userPlugin.updateMany).not.toHaveBeenCalled();
+        // Dormancy is the ONLY household column a reinstall may write (#369):
+        // re-validating every retained document at a manifest replacement is
+        // #370's pass, and destroying one was never on the table.
+        for (const [call] of db.householdPlugin.updateMany.mock.calls) {
+          expect(Object.keys(call.data as Record<string, unknown>).sort()).toEqual(['dormantAt', 'dormantReason']);
+        }
+      });
+
+      /**
+       * The reinstall half of #369. `sharedColumns` rewrites `scope` from the
+       * new manifest exactly as activation does, and `purgeData: false` retained
+       * the household rows — so without this pass a household enabled under the
+       * old scope comes back serving a plugin with no household surface, and the
+       * serving predicate has no live scope check to catch it.
+       */
+      it('makes retained household rows dormant when the new manifest is server-scope', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([householdRow()]);
+        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(buildPluginManifest({ scope: 'server' }));
+
+        await service.install(input());
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
+        });
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitDormantEvent.eventName,
+          expect.objectContaining({ reason: PluginUnitDormantReason.ScopeOrphaned }),
+        );
+      });
+
+      it('revives a scope-dormant row when the new manifest admits households again', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          householdRow({ dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: new Date(0) }),
+        ]);
+        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
+        await writeManifest(buildPluginManifest({ scope: 'household' }));
+
+        await service.install(input());
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: null, dormantAt: null },
+        });
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitRevivedEvent.eventName,
+          expect.objectContaining({ clearedReason: PluginUnitDormantReason.ScopeOrphaned }),
+        );
+      });
+
+      it('leaves household rows alone on a FRESH install — there is no plugin row for one to reference', async () => {
+        db.plugin.findUnique.mockResolvedValue(null);
+
+        await service.install(input());
+
+        expect(db.householdPlugin.findMany).not.toHaveBeenCalled();
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
       });
     });
 

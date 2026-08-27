@@ -1,5 +1,5 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, loadPluginUnitEnablement, PluginScope } from '@bge/database';
+import { DatabaseService, loadPluginUnitEnablement, PluginScope, type PluginUnitDormantReason } from '@bge/database';
 import { resolveLocalizedString, type NormalizedPermissionRequest } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable } from '@nestjs/common';
 import { unitConsumesConsentScope, type ConsentCheckClassification } from '../consent/consent-classification.types';
@@ -58,14 +58,25 @@ export interface PluginFeatureUnitState {
   /**
    * The full operational predicate: plugin enabled and not tombstoned, AND
    * (for Household/User units) the unit's enablement row exists with
-   * `enabled && !suspendedForConsent`. Deliberately separate from feature
-   * `state`: a feature is active iff its owned checks are granted
-   * and the unit is not consent-suspended — a unit that merely switched the
-   * plugin off keeps its consent-derived states, and `served: false` is
+   * `enabled && !suspendedForConsent && dormantReason === null`. Deliberately
+   * separate from feature `state`: a feature is active iff its owned checks are
+   * granted and the unit is not consent-suspended — a unit that merely switched
+   * the plugin off keeps its consent-derived states, and `served: false` is
    * what tells the caller nothing runs right now.
    */
   readonly served: boolean;
   readonly suspendedForConsent: boolean;
+  /**
+   * Why this unit's retained row cannot serve, independent of the household's
+   * own switch and of consent (#369, #370, D-CK). `null` for every unit that is
+   * not dormant, and always `null` on the Server and User axes.
+   *
+   * Reported alongside `served` rather than folded into the feature `reason`
+   * slot: dormancy is not a per-feature consent state, and it is not something
+   * the reading household can act on by deciding anything — the cure is an
+   * admin re-scoping the plugin back or supplying a conforming document.
+   */
+  readonly dormantReason: PluginUnitDormantReason | null;
   readonly features: readonly PluginFeatureState[];
 }
 
@@ -235,6 +246,7 @@ export class PluginFeatureStateService {
         unit,
         served: false,
         suspendedForConsent: unitState.suspendedForConsent,
+        dormantReason: unitState.dormantReason,
         features: [],
       };
     }
@@ -244,7 +256,12 @@ export class PluginFeatureStateService {
       this.options,
       (pluginSlug, detail, issues) => new PluginFeatureStateManifestError(pluginSlug, detail, issues),
     );
-    const served = plugin.enabled && unitState.enabled && !unitState.suspendedForConsent;
+    // Dormancy joins the predicate as an independent component (D-CK): the
+    // household's `enabled` intent survives a scope narrowing or a schema
+    // tightening, so a row can be enabled, unsuspended, and still serve
+    // nothing.
+    const served =
+      plugin.enabled && unitState.enabled && !unitState.suspendedForConsent && unitState.dormantReason === null;
 
     const featureBound = validated.permissionChecks.filter((check) => check.feature !== undefined);
     const consumedChecks = featureBound.filter((check) => unitConsumesConsentScope(check.consentScope, unit));
@@ -280,6 +297,7 @@ export class PluginFeatureStateService {
       unit,
       served,
       suspendedForConsent: unitState.suspendedForConsent,
+      dormantReason: unitState.dormantReason,
       features,
     };
   }

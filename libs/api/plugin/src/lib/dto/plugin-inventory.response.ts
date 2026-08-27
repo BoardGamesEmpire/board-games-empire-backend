@@ -1,4 +1,4 @@
-import { PluginCategory, PluginExecutionMode, PluginScope } from '@bge/database';
+import { PluginCategory, PluginExecutionMode, PluginScope, PluginUnitDormantReason } from '@bge/database';
 import type {
   PluginHouseholdInventoryEntry,
   PluginInventoryDetail,
@@ -198,12 +198,16 @@ export class PluginHouseholdInventoryEntryDto
   implements PluginHouseholdInventoryEntry
 {
   @ApiProperty({
+    enum: PluginUnitDormantReason,
+    nullable: true,
     description:
-      'This household holds an enablement row for a plugin whose current scope has no household axis — an ' +
-      'activation narrowed the scope without retiring the row (#369). Listed rather than hidden: it is enabled and ' +
-      'serving nothing, which is precisely what an admin needs to see.',
+      "Why this household's retained enablement row cannot serve, or null when it can. ScopeOrphaned: an " +
+      'activation re-scoped the plugin so it no longer has a household axis, and only a re-scope back restores ' +
+      'the row. NeedsConfiguration: the retained configuration no longer satisfies the active schema, and ' +
+      'supplying a conforming document heals it. Such a row is listed rather than hidden — it exists and serves ' +
+      'nothing, which is precisely what an admin needs to see.',
   })
-  scopeOrphaned!: boolean;
+  dormantReason!: PluginUnitDormantReason | null;
 }
 
 class InventoryFeatureDto implements PluginInventoryFeature {

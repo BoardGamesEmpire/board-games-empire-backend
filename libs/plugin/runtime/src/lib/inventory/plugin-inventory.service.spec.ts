@@ -1,4 +1,11 @@
-import { DatabaseService, PluginCategory, PluginExecutionMode, PluginScope, Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  PluginCategory,
+  PluginExecutionMode,
+  PluginScope,
+  PluginUnitDormantReason,
+  Prisma,
+} from '@bge/database';
 import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import type { PluginModuleOptions } from '../plugin-module.options';
@@ -304,7 +311,7 @@ describe('PluginInventoryService', () => {
         suspendedForConsent: false,
         suspendedAt: null,
       });
-      expect(rows[0].scopeOrphaned).toBe(false);
+      expect(rows[0].dormantReason).toBeNull();
     });
 
     it('an anchored row carries its enablement and suspension state', async () => {
@@ -319,25 +326,54 @@ describe('PluginInventoryService', () => {
       expect(rows[0].unit).toEqual({ anchored: true, enabled: true, suspendedForConsent: true, suspendedAt });
     });
 
-    it('flags a row the plugin scope no longer admits — the #369 orphan (D-CF)', async () => {
+    it('reports the dormancy the row carries — the #369 orphan, as activation wrote it (D-CM)', async () => {
       db.plugin.findMany.mockResolvedValue([
-        householdRow({ scope: PluginScope.Server }, [{ enabled: true, suspendedForConsent: false, suspendedAt: null }]),
+        householdRow({ scope: PluginScope.Server }, [
+          {
+            enabled: true,
+            suspendedForConsent: false,
+            suspendedAt: null,
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+          },
+        ]),
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
 
-      expect(rows[0].scopeOrphaned).toBe(true);
+      expect(rows[0].dormantReason).toBe(PluginUnitDormantReason.ScopeOrphaned);
+      // Dormancy is not a disable: the admin's own switch is untouched, which
+      // is what makes a re-scope back restore their choice.
       expect(rows[0].unit.enabled).toBe(true);
     });
 
-    it('a server-scope plugin with NO household row is not an orphan — it was never enabled here', async () => {
+    it('reports a config dormancy under a household-scope plugin — the reason is read, not inferred from scope', async () => {
+      db.plugin.findMany.mockResolvedValue([
+        householdRow({ scope: PluginScope.Household }, [
+          {
+            enabled: true,
+            suspendedForConsent: false,
+            suspendedAt: null,
+            dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          },
+        ]),
+      ] as never);
+      db.plugin.count.mockResolvedValue(1 as never);
+
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+
+      // The replaced boolean could not have said this: the scope admits
+      // households, so `scope === Server && anchored` was false here.
+      expect(rows[0].dormantReason).toBe(PluginUnitDormantReason.NeedsConfiguration);
+    });
+
+    it('a server-scope plugin with NO household row is not dormant — there is no row to be dormant', async () => {
       db.plugin.findMany.mockResolvedValue([householdRow({ scope: PluginScope.Server })] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
       const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
 
-      expect(rows[0].scopeOrphaned).toBe(false);
+      expect(rows[0].dormantReason).toBeNull();
     });
   });
 

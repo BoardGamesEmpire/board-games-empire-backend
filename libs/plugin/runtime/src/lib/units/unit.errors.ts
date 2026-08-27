@@ -47,13 +47,17 @@ export class PluginUnitPluginTombstonedError extends Error {
  * too, so this surface never CREATES a row the rule says cannot exist and
  * never presents one as a real degraded unit.
  *
- * It cannot retire one, either. Activation writes `scope` from the new
- * manifest and reconciles no unit rows, so a household→server version
- * leaves whatever rows were already enabled in place: they survive, this
- * error then refuses every operation on them, and the household's admin
- * can see a unit they cannot switch off. No race is needed — a row enabled
- * last week is enough — and the remedy is a policy choice in the update
- * service rather than a guard here (#369).
+ * It does not retire one, either — activation does that. A household→server
+ * version marks every row for the plugin DORMANT (#369, D-CK): the rows
+ * survive, so a re-scope back restores the household's settings, and nothing
+ * serves them meanwhile. This error is what keeps the two write paths that
+ * would have to invent a surface — enable and config PATCH — from acting on
+ * such a row.
+ *
+ * DISABLE is deliberately exempt (D-CL). A dormant row is on the household
+ * admin's screen with its reason attached, and refusing the only operation that
+ * could act on it would leave them looking at a unit with no lever; disabling
+ * records an intent about a row that already exists rather than creating one.
  *
  * The user axis is NOT covered by this rule: `UserPlugin` is a real
  * surface at any plugin scope (#225), so this error never describes it.

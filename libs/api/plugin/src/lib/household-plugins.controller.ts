@@ -80,8 +80,9 @@ export class HouseholdPluginsController {
       "Driven from the installed set, not from this household's enablement rows: every plugin the household axis " +
       'admits appears, with `unit.anchored` false where no row exists yet — so a household that has enabled ' +
       'nothing still sees what it could enable. A plugin whose scope no longer admits household enablement but ' +
-      'which this household still holds a row for is listed too, flagged `scopeOrphaned` (see #369): it is ' +
-      'enabled and serving nothing, which is exactly what an admin needs to see. Tombstoned plugins never ' +
+      'which this household still holds a row for is listed too, carrying a top-level `dormantReason` — a retained row ' +
+      'that serves nothing is exactly what an admin needs to see, and the reason says whether a re-scope or a ' +
+      'fresh configuration is what would revive it. Tombstoned plugins never ' +
       'appear — there is no path to participate in one again — and unlike `GET /plugins` this route accepts no ' +
       'flag to admit them.',
   })
@@ -234,17 +235,16 @@ export class HouseholdPluginsController {
     summary: 'Disable the plugin for this household',
     description:
       "Flips the household's own switch off. Consent state is untouched: a durable denial or suspension keeps " +
-      'its record, and re-enabling restores exactly the consent state the unit had.',
+      'its record, and re-enabling restores exactly the consent state the unit had. Unlike enable and the config ' +
+      'write, this route accepts a row whose plugin scope no longer admits household enablement (`dormantReason`): ' +
+      'the row is listed for this household, and switching it off is the only action left that makes sense. The ' +
+      "dormancy itself is not cleared — it is not the switch, and lifting it is an activation's business.",
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not an owner/admin of this household' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or never enabled for this household' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @ApiResponse({
-    status: Http.UnprocessableEntity,
-    description: 'The plugin is server-scoped: this household has no enablement surface to switch',
-  })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
   @Post(':slug/disable')

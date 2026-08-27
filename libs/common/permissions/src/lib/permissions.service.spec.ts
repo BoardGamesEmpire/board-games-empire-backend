@@ -307,10 +307,20 @@ describe('PermissionsService', () => {
         expect(db.pluginGrant.findMany).not.toHaveBeenCalled();
       });
 
-      it.each<[string, { enabled: boolean; suspendedForConsent: boolean } | null]>([
+      it.each<[string, { enabled: boolean; suspendedForConsent: boolean; dormantReason?: string | null } | null]>([
         ['the household enablement row is missing', null],
         ['the household unit is disabled', { enabled: false, suspendedForConsent: false }],
         ['the household unit is suspended for consent', { enabled: true, suspendedForConsent: true }],
+        // Dormancy is the third, independent component (#369, D-CK): the row is
+        // enabled and unsuspended, and abilities must still stop resolving.
+        [
+          'the household row is dormant for scope',
+          { enabled: true, suspendedForConsent: false, dormantReason: 'ScopeOrphaned' },
+        ],
+        [
+          'the household row is dormant for configuration',
+          { enabled: true, suspendedForConsent: false, dormantReason: 'NeedsConfiguration' },
+        ],
       ])('is not servable when %s', async (_label, row) => {
         db.householdPlugin.findUnique.mockResolvedValue(row as never);
 

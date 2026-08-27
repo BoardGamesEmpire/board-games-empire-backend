@@ -15,7 +15,9 @@ import {
   HouseholdPluginDisabledEvent,
   HouseholdPluginEnabledEvent,
   HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginUnitDormantEvent,
   HouseholdPluginUnitEnabledEvent,
+  HouseholdPluginUnitRevivedEvent,
   PluginConfigUpdatedEvent,
   PluginGrantCreatedEvent,
   PluginGrantRejectedEvent,
@@ -279,6 +281,32 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
         scopeId: event.after.householdId,
         manifestVersion: event.manifestVersion,
         payload: { grantedPermissionSlug: event.grantedPermissionSlug },
+      };
+    }
+
+    // Dormancy (#369, #370) is household-only: the user axis has no orphan
+    // state, since user consent is legal at any plugin scope (#225), and
+    // per-user config is #228's. The reason is the durable "why" here, exactly
+    // as the escalated slugs are for a suspension.
+    if (event instanceof HouseholdPluginUnitDormantEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.Household,
+        scopeId: event.after.householdId,
+        manifestVersion: event.manifestVersion,
+        payload: { reason: event.reason },
+      };
+    }
+
+    if (event instanceof HouseholdPluginUnitRevivedEvent) {
+      return {
+        pluginId: event.after.pluginId,
+        pluginSlug: null,
+        scopeType: PluginGrantScope.Household,
+        scopeId: event.after.householdId,
+        manifestVersion: event.manifestVersion,
+        payload: { clearedReason: event.clearedReason },
       };
     }
 

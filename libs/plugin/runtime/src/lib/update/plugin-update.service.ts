@@ -26,6 +26,7 @@ import {
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { readFile } from 'node:fs/promises';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   HouseholdPluginUnitDisabledEvent,
   PluginGrantRevokedEvent,
@@ -51,6 +52,11 @@ import { PluginStaticAnalysisService } from '../install/plugin-static-analysis.s
 import { gatingFindings, type StaticAnalysisReport } from '../install/static-analysis.types';
 import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module.options';
 import { MANIFEST_CATEGORY_TO_PRISMA } from '../registry/plugin-category.map';
+import {
+  emitHouseholdDormancy,
+  reconcileHouseholdDormancy,
+  type HouseholdDormancyTransition,
+} from '../units/household-dormancy';
 import { compareForEscalations } from './escalation-comparator';
 import { CLEARED_STAGED_UPDATE } from './staged-update.columns';
 import type { ManifestComparisonView, UpdateEscalation, UpdateEscalationComparison } from './update-escalation.types';
@@ -235,6 +241,8 @@ interface ActivationOutcome {
   readonly suspendedHouseholdUnits: readonly SuspensionCandidate<HouseholdPlugin>[];
   /** User units suspended pending re-consent — the household pass's exact user-scope mirror (#225). */
   readonly suspendedUserUnits: readonly SuspensionCandidate<UserPlugin>[];
+  /** Household rows whose dormancy this activation wrote or lifted (#369, D-CK). */
+  readonly dormancyTransitions: readonly HouseholdDormancyTransition[];
 }
 
 /**
@@ -276,6 +284,7 @@ export class PluginUpdateService {
     private readonly db: DatabaseService,
     private readonly authority: PluginGrantAuthorityService,
     private readonly staticAnalysis: PluginStaticAnalysisService,
+    private readonly configSchema: PluginConfigSchemaService,
     private readonly emitter: EventEmitter2,
     @Inject(MODULE_OPTIONS_TOKEN) private readonly options: PluginModuleOptions,
   ) {}
@@ -1328,6 +1337,17 @@ export class PluginUpdateService {
         }
       }
 
+      // Runs AFTER the suspension passes so a row this activation both
+      // suspends and makes dormant carries both, and the dormancy snapshots
+      // describe the row as it finally stands.
+      const dormancyTransitions = await reconcileHouseholdDormancy({
+        tx,
+        pluginId: plugin.id,
+        manifest: next.manifest,
+        configSchema: this.configSchema,
+        initiatedAt,
+      });
+
       return {
         plugin: updated,
         seededChecks,
@@ -1337,6 +1357,7 @@ export class PluginUpdateService {
         reStampedGrants,
         suspendedHouseholdUnits,
         suspendedUserUnits,
+        dormancyTransitions,
       };
     });
   }
@@ -1413,6 +1434,8 @@ export class PluginUpdateService {
         ),
       );
     }
+
+    emitHouseholdDormancy(this.emitter, outcome.dormancyTransitions, next.manifest.version, initiatedAt);
   }
 
   /**

@@ -33,6 +33,22 @@ model HouseholdPlugin {
   /// the shape; requiresHouseholdConfig gates first enable).
   config Json @default("{}")
 
+  /// Dormancy: the row is retained but cannot legitimately serve, and the
+  /// unit did not ask for that (#369, #370). `null` is the ordinary case.
+  /// Written ONLY by the transactions that replace a manifest — activation
+  /// and reinstall-over-tombstone — never by a unit's own writer, which is
+  /// what separates it from `enabled` (the admin's intent) and from
+  /// `suspendedForConsent` (an unmet consent requirement). All three are
+  /// independent: the full serving predicate is
+  /// `enabled && !suspendedForConsent && dormantReason == null`.
+  dormantReason PluginUnitDormantReason? @map("dormant_reason")
+
+  /// When the CURRENT dormancy began. Carried for the same two reasons
+  /// `suspendedAt` is: an admin surface needs a "since", and the writer needs
+  /// to identify the rows its own batched `updateMany` actually moved
+  /// (the read-back in activation's passes keys on it).
+  dormantAt DateTime? @map("dormant_at") @db.Timestamptz(3)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

@@ -1,5 +1,5 @@
 import { MutationEvent, type PluginUnit } from '@bge/actor-context';
-import type { HouseholdPlugin, Plugin, PluginGrant, UserPlugin } from '@bge/database';
+import type { HouseholdPlugin, Plugin, PluginGrant, PluginUnitDormantReason, UserPlugin } from '@bge/database';
 import { ResourceType } from '@bge/database';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import type { PluginConsentScopeValue } from '@boardgamesempire/plugin-manifest';
@@ -571,6 +571,85 @@ export class HouseholdPluginUnitEnabledEvent extends MutationEvent<HouseholdPlug
     /** The decision that cleared the last outstanding requirement. */
     public readonly grantedPermissionSlug: string,
     /** The active manifest version whose requirements are now fully consented. */
+    public readonly manifestVersion: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+type HouseholdPluginDormancySnapshot = Readonly<
+  Pick<HouseholdPlugin, 'id' | 'householdId' | 'pluginId' | 'enabled' | 'suspendedForConsent' | 'dormantReason'>
+>;
+
+/**
+ * A retained household unit row became DORMANT: it still exists, and nothing
+ * will serve it, and the household did not ask for that (#369, #370, D-CK).
+ * Emitted by the transactions that replace a manifest — a scope narrowing
+ * leaves the row with no surface, a schema tightening leaves its retained
+ * config non-conforming.
+ *
+ * Its own routing key rather than `UnitDisabled`, which means consent
+ * suspension and carries the escalated permission slugs as its durable "why".
+ * Dormancy has no slugs and a different cause and a different cure, so sharing
+ * that key would force every consent listener to inspect a payload to find out
+ * whether the event was about consent at all — and would record a lie in
+ * `plugin_lifecycle_events`, where the kind IS the explanation.
+ *
+ * `enabled` is deliberately part of the snapshot and deliberately untouched by
+ * the writer: dormancy is not the admin's intent, so their switch survives it
+ * and a revival restores exactly the state they chose — the same discipline
+ * consent suspension follows.
+ */
+export class HouseholdPluginUnitDormantEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.UnitDormant;
+
+  declare readonly before: HouseholdPluginDormancySnapshot;
+  declare readonly after: HouseholdPluginDormancySnapshot;
+
+  readonly subject = ResourceType.HouseholdPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: HouseholdPluginDormancySnapshot,
+    after: HouseholdPluginDormancySnapshot,
+    /** Why the row cannot serve — single-valued, scope outranking config (D-CP). */
+    public readonly reason: PluginUnitDormantReason,
+    /** The manifest version whose activation made the row dormant. */
+    public readonly manifestVersion: string,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/**
+ * A dormant household unit row is serviceable again: an activation restored the
+ * household axis, so the row's surface exists once more and the retained
+ * document conforms to the schema now in force (#369, D-CP).
+ *
+ * Symmetric with {@link HouseholdPluginUnitDormantEvent} and, like it, distinct
+ * from `UnitEnabled` — that key means a consent decision lifted a suspension,
+ * which is a different act by a different actor. A revival is a side effect of
+ * an admin activating a version, and no household consented to anything.
+ */
+export class HouseholdPluginUnitRevivedEvent extends MutationEvent<HouseholdPlugin> {
+  static readonly eventName = PluginEvent.UnitRevived;
+
+  declare readonly before: HouseholdPluginDormancySnapshot;
+  declare readonly after: HouseholdPluginDormancySnapshot;
+
+  readonly subject = ResourceType.HouseholdPlugin;
+  readonly subjectId: string;
+
+  constructor(
+    before: HouseholdPluginDormancySnapshot,
+    after: HouseholdPluginDormancySnapshot,
+    /** The dormancy that was lifted — what the row is no longer. */
+    public readonly clearedReason: PluginUnitDormantReason,
+    /** The manifest version whose activation revived the row. */
     public readonly manifestVersion: string,
     initiatedAt: Date,
   ) {
