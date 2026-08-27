@@ -1,5 +1,12 @@
 import type { PluginUnit } from '@bge/actor-context';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, PluginScope, RiskLevel } from '@bge/database';
+import {
+  DatabaseService,
+  PluginGrantScope,
+  PluginGrantStatus,
+  PluginScope,
+  PluginUnitDormantReason,
+  RiskLevel,
+} from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { PluginConsentCheckClassifier } from '../consent/plugin-consent-check-classifier.service';
@@ -470,6 +477,43 @@ describe('PluginFeatureStateService', () => {
 
       expect(result).toMatchObject({ served: false, suspendedForConsent: false });
       expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
+    });
+
+    /**
+     * The third component of the predicate (#369, D-CK). A dormant row is
+     * enabled and unsuspended — the household asked for nothing — so without
+     * this the read answers `served: true` for a unit the manifest moved out
+     * from under.
+     */
+    it('a dormant row is not served, and the read says why', async () => {
+      db.householdPlugin.findUnique.mockResolvedValue({
+        enabled: true,
+        suspendedForConsent: false,
+        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+      } as never);
+
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({
+        served: false,
+        suspendedForConsent: false,
+        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+      });
+      // Dormancy is not a consent state: the features keep the states their
+      // grants earned, exactly as for a switched-off unit.
+      expect(result?.features.every((feature) => feature.state === 'active')).toBe(true);
+    });
+
+    it('reports no dormancy for an ordinary served unit', async () => {
+      const result = await service.resolveForUnit('plg_1', HOUSEHOLD_UNIT);
+
+      expect(result).toMatchObject({ served: true, dormantReason: null });
+    });
+
+    it('never reports dormancy on the user axis — user consent is legal at any plugin scope (#225)', async () => {
+      const result = await service.resolveForUnit('plg_1', USER_UNIT);
+
+      expect(result?.dormantReason).toBeNull();
     });
 
     it.each<[string, Partial<{ enabled: boolean; uninstalledAt: Date | null }>]>([

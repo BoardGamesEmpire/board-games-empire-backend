@@ -497,15 +497,21 @@ export class PermissionsService {
   }
 
   /**
-   * The unit half of the serving predicate: `enabled && !suspendedForConsent`
-   * on the unit's enablement row (#225), read through the shared
+   * The unit half of the serving predicate:
+   * `enabled && !suspendedForConsent && dormantReason === null` on the unit's
+   * enablement row (#225, #369), read through the shared
    * `loadPluginUnitEnablement` so this predicate and the feature-state
    * derivation cannot drift on what "served" means.
+   *
+   * Dormancy is the third component and not a variant of the other two: a
+   * dormant row is one the manifest moved out from under (a scope narrowing, a
+   * schema tightening), so the household's own `enabled` intent survives it and
+   * abilities must stop resolving regardless of that intent (D-CK).
    */
   private async isUnitServed(pluginId: string, unit: PluginUnit): Promise<boolean> {
     const state = await loadPluginUnitEnablement(this.db, pluginId, unit);
 
-    return state.enabled && !state.suspendedForConsent;
+    return state.enabled && !state.suspendedForConsent && state.dormantReason === null;
   }
 
   private loadApiKeyGraph(apiKeyId: string) {

@@ -1,4 +1,11 @@
-import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
+import {
+  PluginCategory,
+  PluginGrantStatus,
+  PluginScope,
+  PluginUnitDormantReason,
+  RiskLevel,
+  type Plugin,
+} from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
@@ -203,6 +210,42 @@ describe('plugin unit enablement + feature state (#323)', () => {
       // "enable it" lever the client offers from it would 422.
       const read = await readHouseholdFeatures(owner, household.id, plugin.slug).expect(422);
       expect(read.body.code).toBe('PluginUnitScopeError');
+    });
+
+    /**
+     * D-CL over the wire. The row a scope narrowing left behind is dormant, and
+     * #354's list puts it in front of the household admin — so the one lever
+     * they could sensibly pull has to work, while the two writers that would
+     * have to invent a surface keep refusing.
+     */
+    it('lets an admin switch OFF a dormant row on a re-scoped plugin, while enable and config still refuse', async () => {
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+      const plugin = await arrangePlugin({ scope: 'server', permissions: { checks: [MANAGE_DIGEST_CHECK] } });
+      await db.client.householdPlugin.create({
+        data: {
+          householdId: household.id,
+          pluginId: plugin.id,
+          enabled: true,
+          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+          dormantAt: new Date(),
+        },
+      });
+
+      const disabled = await disableHousehold(owner, household.id, plugin.slug).expect(200);
+      expect(disabled.body.unit).toMatchObject({ enabled: false });
+
+      // The dormancy survives the switch: the two are independent, and a
+      // re-scope back must restore the admin's own intent.
+      const row = await unitRow(household.id, plugin.id);
+      expect(row).toMatchObject({ enabled: false, dormantReason: PluginUnitDormantReason.ScopeOrphaned });
+
+      const enabled = await enableHousehold(owner, household.id, plugin.slug).expect(422);
+      expect(enabled.body.code).toBe('PluginUnitScopeError');
+      const patched = await patchHouseholdConfig(owner, household.id, plugin.slug, {
+        webhookUrl: 'https://example.test/hook',
+      }).expect(422);
+      expect(patched.body.code).toBe('PluginUnitScopeError');
     });
 
     it('410s a tombstone and 404s an unknown slug', async () => {

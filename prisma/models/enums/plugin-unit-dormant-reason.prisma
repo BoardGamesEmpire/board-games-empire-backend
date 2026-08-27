@@ -1,0 +1,26 @@
+/// Why a retained unit enablement row is DORMANT — present, not serving, and
+/// not the unit's own doing (#369, #370, D-CK on #59).
+///
+/// Dormancy is the answer to "what is a row that cannot legitimately serve?".
+/// The row is kept rather than retired, for the same reason uninstall retains
+/// unit rows behind a tombstone (D-AS, D-BJ): a re-scope back or a conforming
+/// config restores the household's settings instead of destroying them. The
+/// serving predicate excludes a dormant row, so nothing consumes it meanwhile.
+///
+/// SINGLE-valued with a precedence, per D-CP: one activation can both narrow
+/// scope and tighten `config.schema`, and ScopeOrphaned outranks
+/// NeedsConfiguration because a row whose plugin scope no longer admits
+/// household enablement cannot be healed by supplying config — naming the
+/// config reason there would be unactionable advice.
+enum PluginUnitDormantReason {
+  /// The plugin's scope no longer admits household enablement: an activation
+  /// re-scoped it household→server, and household-scope consent has no
+  /// collection point there (#369). Healed only by a re-scope back.
+  ScopeOrphaned
+
+  /// The retained `config` document no longer satisfies the active
+  /// `config.schema`, and the manifest requires household config (#370).
+  /// Healed by an admin supplying a conforming document — which is exactly
+  /// what the enable/config-PATCH gate validates.
+  NeedsConfiguration
+}

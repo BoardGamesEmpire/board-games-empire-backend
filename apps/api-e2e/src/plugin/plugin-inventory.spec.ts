@@ -1,4 +1,4 @@
-import { PluginCategory, PluginScope, RiskLevel, type Plugin } from '@bge/database';
+import { PluginCategory, PluginScope, PluginUnitDormantReason, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
@@ -245,25 +245,49 @@ describe('installed-plugin inventory (#354)', () => {
 
       expect(entryFor(response.body, plugin.slug)).toMatchObject({
         serverEnabled: true,
-        scopeOrphaned: false,
+        dormantReason: null,
         unit: { anchored: false, enabled: false, suspendedForConsent: false },
       });
     });
 
-    it('flags a row whose plugin scope no longer admits the household axis (D-CF, #369)', async () => {
+    it('reports the dormancy a row carries, and the reason distinguishes the two causes (D-CF, D-CM)', async () => {
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner });
-      // Server-scope plugin the household nonetheless holds a row for: the
-      // state a narrowing activation leaves behind, arranged directly.
-      const plugin = await arrangePlugin({ scope: PluginScope.Server });
+      // The state a narrowing activation leaves behind, arranged directly:
+      // a server-scope plugin the household nonetheless holds a row for.
+      const orphaned = await arrangePlugin({ scope: PluginScope.Server });
       await db.client.householdPlugin.create({
-        data: { householdId: fixture.household.id, pluginId: plugin.id, enabled: true },
+        data: {
+          householdId: fixture.household.id,
+          pluginId: orphaned.id,
+          enabled: true,
+          dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+          dormantAt: new Date(),
+        },
+      });
+      // And the other cause, under a plugin whose scope is perfectly fine —
+      // which the replaced boolean could not have expressed at all.
+      const stale = await arrangePlugin({ scope: PluginScope.Household });
+      await db.client.householdPlugin.create({
+        data: {
+          householdId: fixture.household.id,
+          pluginId: stale.id,
+          enabled: true,
+          dormantReason: PluginUnitDormantReason.NeedsConfiguration,
+          dormantAt: new Date(),
+        },
       });
 
       const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
 
-      expect(entryFor(response.body, plugin.slug)).toMatchObject({
-        scopeOrphaned: true,
+      expect(entryFor(response.body, orphaned.slug)).toMatchObject({
+        dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+        // Retained with the admin's own switch intact, so a re-scope back
+        // restores their choice rather than a default (#369, D-CK).
+        unit: { anchored: true, enabled: true },
+      });
+      expect(entryFor(response.body, stale.slug)).toMatchObject({
+        dormantReason: PluginUnitDormantReason.NeedsConfiguration,
         unit: { anchored: true, enabled: true },
       });
     });
@@ -297,7 +321,7 @@ describe('installed-plugin inventory (#354)', () => {
         serverEnabled: true,
         unit: { anchored: false },
       });
-      expect(entryFor(response.body, serverScoped.slug)).not.toHaveProperty('scopeOrphaned');
+      expect(entryFor(response.body, serverScoped.slug)).not.toHaveProperty('dormantReason');
     });
 
     it('reflects an existing anchor', async () => {

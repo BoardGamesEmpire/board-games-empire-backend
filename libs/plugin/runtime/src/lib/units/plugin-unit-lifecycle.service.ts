@@ -1,5 +1,12 @@
 import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
-import { DatabaseService, PluginGrantScope, PluginGrantStatus, PluginScope, Prisma } from '@bge/database';
+import {
+  DatabaseService,
+  PluginGrantScope,
+  PluginGrantStatus,
+  PluginScope,
+  PluginUnitDormantReason,
+  Prisma,
+} from '@bge/database';
 import type { PluginManifestValidationResult } from '@boardgamesempire/plugin-manifest';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -205,13 +212,22 @@ export class PluginUnitLifecycleService {
     }
 
     const outcome = await this.db.$transaction(async (tx): Promise<HouseholdEnableOutcome> => {
-      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, plugin);
+      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { expected: plugin });
 
       // Idempotency outranks the config gate: an enable that changes
       // nothing must return the unchanged row, not re-litigate a retained
       // document that went stale under a newer schema — the gate guards
       // the transition INTO service, and this unit is already there.
-      if (existing !== null && existing.enabled && input.config === undefined) {
+      //
+      // A DORMANT row is not there, whatever its switch says (#369, D-CK).
+      // Dormancy is written without touching `enabled`, so such a row reads as
+      // enabled while serving nothing, and short-circuiting it would make the
+      // admin's obvious next move — press Enable again — a 200 that changes
+      // nothing and explains nothing. Falling through puts it back through the
+      // gate, which either heals the row (a retained document that satisfies
+      // today's schema clears the dormancy below) or refuses with the
+      // violations that say what to fix.
+      if (existing !== null && existing.enabled && existing.dormantReason === null && input.config === undefined) {
         return { kind: 'unchanged', row: existing };
       }
 
@@ -237,11 +253,14 @@ export class PluginUnitLifecycleService {
         return { kind: 'created', row: created, bornSuspendedSlugs };
       }
 
+      // The enable gate above has just proven a conforming document — supplied
+      // inline or retained — so this write cures a config dormancy.
       const row = await tx.householdPlugin.update({
         where: { id: existing.id },
         data: {
           ...(existing.enabled ? {} : { enabled: true }),
           ...(input.config !== undefined ? { config: input.config as Prisma.InputJsonValue } : {}),
+          ...this.configDormancyCleared(existing),
         },
       });
 
@@ -301,15 +320,25 @@ export class PluginUnitLifecycleService {
     return outcome.row;
   }
 
-  /** Disable the plugin for a household. 404 on a never-enabled household — enable is the row creator. */
+  /**
+   * Disable the plugin for a household. 404 on a never-enabled household —
+   * enable is the row creator.
+   *
+   * The one household operation that does NOT require the household surface to
+   * exist (D-CL): a row left dormant by a scope narrowing (#369) is visible to
+   * the household's admin, and switching it off is the only thing they could
+   * sensibly want to do with it. Disabling does not clear the dormancy — the
+   * two are independent, the row serves nothing either way, and a re-scope back
+   * must restore the admin's own intent rather than an intent this path
+   * invented.
+   */
   async disableHousehold(input: HouseholdUnitActionInput): Promise<HouseholdPlugin> {
     const initiatedAt = new Date();
     const plugin = await this.loadLivingRef(input.slug);
-    this.assertHouseholdSurface(plugin);
     await this.assertHouseholdAdmin(input.actorId, input.householdId);
 
     const outcome = await this.db.$transaction(async (tx) => {
-      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId);
+      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { requireSurface: false });
 
       if (existing === null) {
         throw new PluginUnitNotEnrolledError(plugin.slug, 'Household');
@@ -363,7 +392,7 @@ export class PluginUnitLifecycleService {
     }
 
     const { before, row } = await this.db.$transaction(async (tx) => {
-      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, plugin);
+      const existing = await this.openHouseholdUnit(tx, plugin, input.householdId, { expected: plugin });
 
       if (existing === null) {
         throw new PluginUnitNotEnrolledError(plugin.slug, 'Household');
@@ -371,7 +400,7 @@ export class PluginUnitLifecycleService {
 
       const updated = await tx.householdPlugin.update({
         where: { id: existing.id },
-        data: { config: input.config as Prisma.InputJsonValue },
+        data: { config: input.config as Prisma.InputJsonValue, ...this.configDormancyCleared(existing) },
       });
 
       return { before: existing, row: updated };
@@ -452,15 +481,27 @@ export class PluginUnitLifecycleService {
    * paths that read no manifest (disable, the user toggles) pass nothing: a
    * manifest move changes nothing about flipping a switch, and refusing one
    * would be a failure invented for no reader's benefit.
+   *
+   * `requireSurface: false` is D-CL, and disable is its only caller. A row
+   * whose plugin has been re-scoped to server is dormant, not absent (#369),
+   * and it is on the household's screen with a reason attached — so refusing
+   * the one operation that could act on it would leave an admin looking at a
+   * unit with no lever at all. Enable and config PATCH keep refusing: they
+   * would have to write a surface the scope rule says cannot exist, while
+   * disable only records an intent about a row that already does.
    */
   private async openHouseholdUnit(
     tx: Prisma.TransactionClient,
     plugin: LivingPluginRef,
     householdId: string,
-    expected?: ManifestSnapshotRef,
+    options: { readonly expected?: ManifestSnapshotRef; readonly requireSurface?: boolean } = {},
   ): Promise<HouseholdPlugin | null> {
-    const { scope } = await this.assertStillLiving(tx, plugin, expected);
-    this.assertHouseholdSurface({ ...plugin, scope });
+    const { scope } = await this.assertStillLiving(tx, plugin, options.expected);
+
+    if (options.requireSurface !== false) {
+      this.assertHouseholdSurface({ ...plugin, scope });
+    }
+
     await lockHouseholdUnitScope(tx, householdId, plugin.id);
 
     return tx.householdPlugin.findUnique({
@@ -601,6 +642,24 @@ export class PluginUnitLifecycleService {
     if (issues.length > 0) {
       throw new PluginUnitConfigRequiredError(plugin.slug, issues);
     }
+  }
+
+  /**
+   * The dormancy half of a household write that has just validated a document
+   * against the ACTIVE schema: the document that made the row dormant is gone,
+   * so the dormancy is over (#370, D-CK).
+   *
+   * Narrowed to `NeedsConfiguration` — the only reason a config write can cure.
+   * A `ScopeOrphaned` row never reaches either caller anyway (both require the
+   * household surface), and clearing it here would put a row back into service
+   * on a scope that has no household axis.
+   */
+  private configDormancyCleared(
+    existing: HouseholdPlugin,
+  ): Pick<Prisma.HouseholdPluginUpdateInput, 'dormantReason' | 'dormantAt'> {
+    return existing.dormantReason === PluginUnitDormantReason.NeedsConfiguration
+      ? { dormantReason: null, dormantAt: null }
+      : {};
   }
 
   private async assertHouseholdAdmin(actorId: string, householdId: string): Promise<void> {

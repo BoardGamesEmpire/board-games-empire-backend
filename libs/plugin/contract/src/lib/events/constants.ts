@@ -8,6 +8,13 @@
  * `HouseholdPluginConfigUpdatedEvent` (per-household `HouseholdPlugin.config`).
  * Listeners that care about the distinction discriminate on `instanceof`
  * (or `subject`), not on the routing key.
+ *
+ * `plugin.unit_dormant` / `plugin.unit_revived` are deliberately NOT folded
+ * into `unit_disabled`/`unit_enabled`: those two mean consent suspension and
+ * late acceptance, and their payloads are permission slugs. Dormancy is a
+ * different cause with no slugs (#369, #370, D-CK), so a listener filtering
+ * for consent transitions must not have to inspect a payload to tell them
+ * apart.
  */
 export enum PluginEvent {
   Installed = 'plugin.installed',
@@ -25,6 +32,8 @@ export enum PluginEvent {
   GrantRevoked = 'plugin.grant_revoked',
   UnitDisabled = 'plugin.unit_disabled',
   UnitEnabled = 'plugin.unit_enabled',
+  UnitDormant = 'plugin.unit_dormant',
+  UnitRevived = 'plugin.unit_revived',
 }
 
 /**

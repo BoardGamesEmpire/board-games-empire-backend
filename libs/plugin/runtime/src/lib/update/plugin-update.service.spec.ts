@@ -4,6 +4,7 @@ import {
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
+  PluginUnitDormantReason,
   Prisma,
   RiskLevel,
   type HouseholdPlugin,
@@ -21,8 +22,11 @@ import { readFileSync, statSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   HouseholdPluginUnitDisabledEvent,
+  HouseholdPluginUnitDormantEvent,
+  HouseholdPluginUnitRevivedEvent,
   PluginGrantRevokedEvent,
   PluginUpdateApprovedEvent,
   PluginUpdatePendingEvent,
@@ -133,6 +137,8 @@ describe('PluginUpdateService', () => {
     config: {},
     suspendedForConsent: false,
     suspendedAt: null,
+    dormantReason: null,
+    dormantAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
     ...overrides,
@@ -194,6 +200,7 @@ describe('PluginUpdateService', () => {
       db as never,
       authority as unknown as PluginGrantAuthorityService,
       analyzer as unknown as PluginStaticAnalysisService,
+      new PluginConfigSchemaService(),
       emitter as never,
       options,
     );
@@ -1032,6 +1039,154 @@ describe('PluginUpdateService', () => {
       // approved sees them synchronously, not only on the event stream.
       expect(result.suspendedHouseholdUnits).toEqual([{ householdId: 'household-1', outstanding: ['calendar:read'] }]);
       expect(result.suspendedUserUnits).toEqual([]);
+    });
+
+    /**
+     * Activation reconciles the household rows it used to leave behind
+     * (#369, D-CK–D-CP): a scope that no longer admits households makes every
+     * row dormant, a scope that admits them again revives one — subject to the
+     * document it still holds.
+     */
+    describe('household dormancy', () => {
+      /** A conforming document under the fixture's schema, so config is not what is under test. */
+      const conforming = { webhookUrl: 'https://example.test/hook' };
+
+      const activateWith = async (manifest: PluginManifest): Promise<void> => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(manifest, { scope: PluginScope.Household }));
+        db.plugin.findUniqueOrThrow.mockResolvedValue(pendingPlugin(manifest, { scope: PluginScope.Household }));
+        db.householdPlugin.updateMany.mockResolvedValue({ count: 1 });
+
+        await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+      };
+
+      it('a server-scope manifest makes every household row dormant, leaving the admin switch alone', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
+
+        await activateWith(nextManifest({ scope: 'server' }));
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
+        });
+        // The row survives with the household's own intent intact — that is
+        // what makes a re-scope back restore their settings rather than a
+        // default (D-CK, following the uninstall tombstone's argument).
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ enabled: false }) }),
+        );
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitDormantEvent.eventName,
+          expect.objectContaining({
+            reason: PluginUnitDormantReason.ScopeOrphaned,
+            manifestVersion: '1.3.0',
+            after: expect.objectContaining({ enabled: true, dormantReason: PluginUnitDormantReason.ScopeOrphaned }),
+          }),
+        );
+      });
+
+      it('promotes a config dormancy to scope dormancy — config cannot cure a missing surface (D-CP)', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({ dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: new Date(0) }),
+        ]);
+
+        await activateWith(nextManifest({ scope: 'server' }));
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
+        });
+      });
+
+      it('writes nothing for a row already dormant for scope — the pass is idempotent', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({ dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: new Date(0) }),
+        ]);
+
+        await activateWith(nextManifest({ scope: 'server' }));
+
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitDormantEvent.eventName, expect.anything());
+      });
+
+      it('revives a scope-dormant row when the manifest admits households again', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: conforming,
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+            dormantAt: new Date(0),
+          }),
+        ]);
+
+        await activateWith(nextManifest({ scope: 'household' }));
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: null, dormantAt: null },
+        });
+        expect(emitter.emit).toHaveBeenCalledWith(
+          HouseholdPluginUnitRevivedEvent.eventName,
+          expect.objectContaining({
+            clearedReason: PluginUnitDormantReason.ScopeOrphaned,
+            after: expect.objectContaining({ dormantReason: null }),
+          }),
+        );
+      });
+
+      /**
+       * D-CP's accepted cost: a single-valued reason cannot be nulled blindly.
+       * Reviving this row would put it back into service holding a document the
+       * manifest now in force rejects — the exact state #370 describes.
+       */
+      it('re-derives the config reason instead of reviving a row whose document the new schema rejects', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({
+            config: { webhookUrl: 42 },
+            dormantReason: PluginUnitDormantReason.ScopeOrphaned,
+            dormantAt: new Date(0),
+          }),
+        ]);
+
+        await activateWith(
+          nextManifest({
+            scope: 'household',
+            config: {
+              schema: { type: 'object', properties: { webhookUrl: { type: 'string' } }, required: ['webhookUrl'] },
+              requiresHouseholdConfig: true,
+            },
+          }),
+        );
+
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1'] } },
+          data: { dormantReason: PluginUnitDormantReason.NeedsConfiguration, dormantAt: expect.any(Date) },
+        });
+        expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitRevivedEvent.eventName, expect.anything());
+      });
+
+      it('leaves a household-scope activation with no dormant rows completely alone', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([makeUnit({ config: conforming })]);
+
+        await activateWith(nextManifest({ scope: 'household' }));
+
+        expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+      });
+
+      it('reads the rows once, whatever the household count — the transaction must not scale with installs', async () => {
+        db.householdPlugin.findMany.mockResolvedValue([
+          makeUnit({ config: conforming }),
+          makeUnit({ id: 'hp-2', householdId: 'household-2', config: conforming }),
+          makeUnit({ id: 'hp-3', householdId: 'household-3', config: conforming }),
+        ]);
+
+        await activateWith(nextManifest({ scope: 'server' }));
+
+        expect(db.householdPlugin.findMany).toHaveBeenCalledTimes(1);
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledTimes(1);
+        expect(db.householdPlugin.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ['hp-1', 'hp-2', 'hp-3'] } },
+          data: { dormantReason: PluginUnitDormantReason.ScopeOrphaned, dormantAt: expect.any(Date) },
+        });
+      });
     });
 
     /**
