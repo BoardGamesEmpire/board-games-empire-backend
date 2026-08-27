@@ -24,8 +24,11 @@ export class HouseholdController {
   constructor(private readonly householdService: HouseholdService) {}
 
   @ApiOperation({
-    summary: 'List households the caller may read',
+    summary: 'List households the caller may read (widens with role and friendships)',
     description:
+      'Scope depends on the caller: a plain user receives their own memberships AND friends\u2019 ' +
+      '`Friends`-visible households; Owner/Admin/Moderator receive every household. For a set that means the ' +
+      'same thing for every caller, use `GET /households/mine` (#364). The ambiguity itself is #365. ' +
       'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
       '`total`, `totalPages` and `hasMore`. See #230.',
   })
@@ -36,6 +39,39 @@ export class HouseholdController {
   @Get()
   getHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.householdService.getHouseholdsForUser(pagination)).pipe(
+      map((page) => paginated('households', page, pagination)),
+    );
+  }
+
+  /**
+   * Declared ABOVE `@Get(':id')` and it must stay there: Nest matches in
+   * declaration order, so the reverse makes this a 404 from the detail route.
+   */
+  @ApiOperation({
+    summary: 'List households the caller is a member of, whatever their role',
+    description:
+      'Membership-scoped: households the caller holds a `HouseholdMember` row for, and nothing else. ' +
+      'Unlike `GET /households` — which widens with the caller\u2019s role and friendships — this returns the ' +
+      'same kind of result for every caller, so a **user session** may treat a household it has cached but ' +
+      'does not find here as one it was removed from or one that was deleted. An **API key** is additionally ' +
+      'floored by its own permissions (effective access is key ∩ owner), so absence under a key also admits ' +
+      '\u201coutside this key\u2019s scope\u201d — do not purge a cache from a key-authenticated read. The key ' +
+      'permission model is unbuilt (#270). Paginated identically to `GET /households`: `?page=` (1-based) and ' +
+      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the ' +
+      'caller\u2019s visible memberships. See #364, and #365 for the general question.',
+  })
+  @ApiResponse({ status: Http.Ok, description: 'Paginated households', schema: paginatedEnvelopeSchema('households') })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no memberships of its own (plugin, system, external) — ' +
+      'provisional, see #395',
+  })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
+  @Get('mine')
+  getHouseholdsForMember(@Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.householdService.getHouseholdsForMember(pagination)).pipe(
       map((page) => paginated('households', page, pagination)),
     );
   }

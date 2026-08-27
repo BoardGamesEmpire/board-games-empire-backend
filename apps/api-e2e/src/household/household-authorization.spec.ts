@@ -1,4 +1,4 @@
-import { SystemRole } from '@bge/database';
+import { FriendshipStatus, SystemRole, Visibility } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -45,6 +45,27 @@ describe('household authorization', () => {
 
   const listHouseholds = (actor: SessionActor) => request(baseUrl).get(HOUSEHOLDS_PATH).set(actor.headers);
 
+  const listOwnHouseholds = (actor: SessionActor) =>
+    request(baseUrl).get(`${HOUSEHOLDS_PATH}/mine`).set(actor.headers);
+
+  /**
+   * An accepted friendship, arranged directly (no fixture covers this yet).
+   * `pairKey` is the canonical undirected key the model requires the service to
+   * maintain — two sorted ids joined — so a row written here is indistinguishable
+   * from one the friendship service would have written.
+   */
+  const befriend = async (a: SessionActor, b: SessionActor) => {
+    await db.client.friendship.create({
+      data: {
+        requesterId: a.user.id,
+        addresseeId: b.user.id,
+        pairKey: [a.user.id, b.user.id].sort().join(':'),
+        status: FriendshipStatus.Accepted,
+        respondedAt: new Date(),
+      },
+    });
+  };
+
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
@@ -89,7 +110,11 @@ describe('household authorization', () => {
       await readHousehold(actor, `missing-${randomUUID()}`).expect(404);
     });
 
-    it("scopes the list to the actor's own memberships", async () => {
+    // Titled for what it actually pins. This read is NOT membership-scoped: a
+    // plain user also receives friends' `Friends`-visible households, and these
+    // two actors are strangers, so the union simply never arises here. The
+    // membership-scoped read and the friends case are covered below (#364).
+    it('scopes the list to what the actor may read, and a non-member sees absence', async () => {
       const owner = await actors.user();
       const outsider = await actors.user();
 
@@ -107,6 +132,98 @@ describe('household authorization', () => {
       const outsiderList = listEnvelope(await listHouseholds(outsider).expect(200), 'GET /api/households as outsider');
       expect(outsiderList.households).toEqual([]);
       expect(outsiderList.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+    });
+  });
+
+  /**
+   * #364. `GET /households` answers a different question depending on who asks;
+   * `GET /households/mine` answers the same one for everybody. These four tests
+   * are the difference — each one passes trivially against the role-widened
+   * read, EXCEPT against the thing it is actually pinning.
+   */
+  describe('the membership-scoped list', () => {
+    it('gives an elevated caller only their own memberships, where the wide list gives them everything', async () => {
+      // Rosters before anyone's first authenticated request (the ordering rule).
+      const admin = await actors.admin();
+      const stranger = await actors.user();
+
+      const belongsToAdmin = await actors.householdWithMembers({ owner: admin, name: 'The admin lives here' });
+      const belongsToNobodyRelevant = await actors.householdWithMembers({
+        owner: stranger,
+        name: 'Nothing to do with the admin',
+      });
+
+      const scoped = listEnvelope(await listOwnHouseholds(admin).expect(200), 'GET /api/households/mine as admin');
+      expect(scoped.households.map((household) => household.id)).toEqual([belongsToAdmin.household.id]);
+      expect(scoped.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
+
+      // The control. Without this the test above would also pass if `/mine` had
+      // simply been wired to the widened read on a server with one household.
+      const wide = listEnvelope(await listHouseholds(admin).expect(200), 'GET /api/households as admin');
+      expect(wide.households.map((household) => household.id)).toEqual(
+        expect.arrayContaining([belongsToAdmin.household.id, belongsToNobodyRelevant.household.id]),
+      );
+      expect(wide.pagination.total).toBeGreaterThan(scoped.pagination.total);
+    });
+
+    it("omits a friend's Friends-visible household, which the wide list includes", async () => {
+      // The case `pagination.total` cannot detect at all: this household is in
+      // an ordinary user's list with no membership behind it, so a client
+      // treating absence as removal would be wrong about a household it never
+      // belonged to. D-364-2 is what excludes it.
+      const friend = await actors.user();
+      const viewer = await actors.user();
+
+      const shared = await actors.householdWithMembers({ owner: friend, name: 'Visible to friends' });
+      await db.client.household.update({
+        where: { id: shared.household.id },
+        data: { visibility: Visibility.Friends },
+      });
+      await befriend(viewer, friend);
+
+      const wide = listEnvelope(await listHouseholds(viewer).expect(200), 'GET /api/households as a friend');
+      expect(wide.households.map((household) => household.id)).toEqual([shared.household.id]);
+
+      const scoped = listEnvelope(await listOwnHouseholds(viewer).expect(200), 'GET /api/households/mine as a friend');
+      expect(scoped.households).toEqual([]);
+      expect(scoped.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+    });
+
+    it('omits a soft-deleted household even though the caller\u2019s member row survives it', async () => {
+      // D-364-5. `deleteHousehold` retains member rows by design, so the
+      // membership clause on its own still matches a dead household — the
+      // member row is asserted precisely so this cannot be mistaken for a
+      // fixture that tore itself down.
+      const owner = await actors.user();
+      const fixture = await actors.householdWithMembers({ owner, name: 'About to be deleted' });
+
+      await deleteHousehold(owner, fixture.household.id).expect(200);
+
+      const survivingMembership = await db.client.householdMember.findFirst({
+        where: { householdId: fixture.household.id, userId: owner.user.id },
+        select: { id: true },
+      });
+      expect(survivingMembership).not.toBeNull();
+
+      const scoped = listEnvelope(
+        await listOwnHouseholds(owner).expect(200),
+        'GET /api/households/mine after a soft delete',
+      );
+      expect(scoped.households).toEqual([]);
+      expect(scoped.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+    });
+
+    it('is reachable at all, rather than captured by the :id detail route', async () => {
+      // Nest matches in declaration order. With `@Get(':id')` declared first,
+      // every request here becomes a household lookup for the literal id
+      // "mine" — a 404, or worse a 200 carrying the detail shape.
+      const actor = await actors.user();
+
+      const response = await listOwnHouseholds(actor).expect(200);
+
+      expect(response.body).toHaveProperty('households');
+      expect(response.body).toHaveProperty('pagination');
+      expect(response.body).not.toHaveProperty('household');
     });
   });
 
