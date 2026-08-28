@@ -122,7 +122,17 @@ export class PluginUnitConfigRequiredError extends Error {
  *
  * The distinction reaches the client because the two differ in what
  * survived. A reinstall's uninstall purged every grant for the plugin, so
- * consent starts from zero; an activation kept them.
+ * consent starts from zero. An activation keeps every grant whose permission
+ * the new manifest still declares — it deletes the grants on REMOVED
+ * declares, which is not the same event: those lapsed with the permission
+ * they were consent to, and nothing is left to re-consent to.
+ *
+ * Two arms, and a same-version re-activation (#368) adds no third: the
+ * guard now also refuses an A→B→A pair, which moves the content while
+ * leaving both columns where they were, and that pair is an activation —
+ * consent to what the manifest still declares outlived it. `kind` answers
+ * "does the user start from zero", so the new case needs a different
+ * SENTENCE, not a different kind.
  */
 export type PluginUnitChangeKind = 'version-activated' | 'reinstalled';
 
@@ -131,7 +141,9 @@ export type PluginUnitChangeKind = 'version-activated' | 'reinstalled';
  * pre-transaction read and the plugin row's `FOR SHARE` lock, so every
  * manifest-derived judgment the request already made — the config schema it
  * validated against, the required-check set the born-suspended probe
- * consulted — describes a manifest that is no longer active.
+ * consulted — describes a manifest that is no longer active. Detected by
+ * comparing the manifest content under that lock, so a replacement that
+ * leaves `version` and `installedAt` untouched is seen too (#368).
  *
  * Refused rather than applied. For an activation the stakes are concrete: a
  * stale probe can create a serving row beside a durable denial of a newly
@@ -156,11 +168,14 @@ export class PluginUnitPluginChangedError extends Error {
     public readonly actualVersion: string,
   ) {
     super(
-      kind === 'version-activated'
-        ? `Plugin '${pluginSlug}' was activated from version ${expectedVersion} to ${actualVersion} while this ` +
-            `request was in flight; retry against the current manifest`
-        : `Plugin '${pluginSlug}' was reinstalled at version ${actualVersion} while this request was in flight; ` +
-            `retry against the current manifest`,
+      kind === 'reinstalled'
+        ? `Plugin '${pluginSlug}' was reinstalled at version ${actualVersion} while this request was in flight; ` +
+            `retry against the current manifest`
+        : expectedVersion === actualVersion
+          ? `Plugin '${pluginSlug}' was re-activated at version ${actualVersion} with different manifest content ` +
+            `while this request was in flight; retry against the current manifest`
+          : `Plugin '${pluginSlug}' was activated from version ${expectedVersion} to ${actualVersion} while this ` +
+            `request was in flight; retry against the current manifest`,
     );
   }
 }

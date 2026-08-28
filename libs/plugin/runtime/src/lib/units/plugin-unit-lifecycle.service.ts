@@ -66,21 +66,23 @@ type LivingPluginRef = Pick<Plugin, 'id' | 'slug' | 'scope'>;
 
 /**
  * Identifies the manifest a caller derived its gates from, so the locked
- * re-read can detect a replacement. Two columns because `version` alone
- * cannot: a reinstall over a tombstone can replace the manifest at the SAME
- * version. `installedAt` is the decisive one — the installer is its only
- * writer — see {@link PluginUnitPluginChangedError}.
+ * re-read can detect a replacement.
  *
- * These two columns are not exhaustive, and deliberately so. Staging refuses
+ * `manifestJson` is what DETECTS a replacement, and the other two columns
+ * are what CLASSIFY it. Neither of them can be the detector: staging refuses
  * only a version equal to the CURRENT one, so activations away from and back
- * to a version (A→B→A) are permitted; that pair restores `version` and never
- * touches `installedAt`, leaving a replaced manifest invisible here. Closing
- * it needs the manifest content itself in the comparison, or a counter no
- * writer of it can skip (#368). Not closed because reaching it takes three
- * sequential admin-consented operations inside one request's lock window,
- * whereas the single activation this guard does catch takes one.
+ * to a version (A→B→A) are permitted, and that pair restores `version` while
+ * never touching `installedAt` — the installer is its only writer — leaving a
+ * replaced manifest invisible to both (#368). Comparing the content closes
+ * that, and closes it self-enforcingly: a generation counter would have to be
+ * bumped by every future writer of `manifest_json`, and one that forgot would
+ * reopen this hole with nothing failing.
+ *
+ * They stay for the classification, which content cannot do: a reinstall that
+ * writes a byte-identical manifest still purged every grant, and nothing about
+ * the document says so — see {@link PluginUnitPluginChangedError}.
  */
-type ManifestSnapshotRef = Pick<Plugin, 'version' | 'installedAt'>;
+type ManifestSnapshotRef = Pick<Plugin, 'version' | 'installedAt' | 'manifestJson'>;
 
 type HouseholdEnableOutcome =
   | { readonly kind: 'unchanged'; readonly row: HouseholdPlugin }
@@ -145,8 +147,10 @@ type HouseholdEnableOutcome =
  *   the manifest gate says cannot exist and nothing else cleans up; and a
  *   caller that DERIVED something from the manifest — the config schema it
  *   validated against, the required-check set the born-suspended probe
- *   consulted — refuses on a version move rather than applying a stale
- *   judgment. Activation's own suspension pass cannot cover for it: that
+ *   consulted — refuses when the manifest CONTENT moved rather than applying
+ *   a stale judgment (#368). A version move is one way that happens, not the
+ *   test: an A→B→A activation pair replaces the content and returns the
+ *   version to where the caller found it. Activation's own suspension pass cannot cover for it: that
  *   pass runs inside the activation transaction, so a row created after it
  *   committed is invisible to it, which is the whole reason the probe
  *   exists.
@@ -157,8 +161,8 @@ type HouseholdEnableOutcome =
  * enabled; the gate guards the transition INTO service, and the config
  * PATCH is where stale config heals). Config writes are last-writer-wins
  * between callers — no precondition on the DOCUMENT, matching the server
- * config PATCH — but they do carry the manifest-version precondition above,
- * because the document was judged against one specific schema. Events
+ * config PATCH — but they do carry the manifest precondition above, because
+ * the document was judged against one specific schema. Events
  * are emitted post-commit, one per real transition; a creation with inline
  * config also emits the config event, with the row's `{}` column default
  * as the before — the write is real and its consumers must see it.
@@ -492,15 +496,14 @@ export class PluginUnitLifecycleService {
    *
    * `expected` is supplied by the callers that already DERIVED something
    * from the pre-transaction manifest — the config schema, the
-   * required-check set — and refuses the write if the manifest moved
-   * underneath it. Two independent writers can move it: activation promotes
-   * a new `version`, and a reinstall over a tombstone replaces
-   * `manifestJson` on the same row at any version, same one included, so
-   * `installedAt` is carried too and tested first (the installer is its
-   * only writer, which makes it the one decisive signal). The
-   * paths that read no manifest (disable, the user toggles) pass nothing: a
-   * manifest move changes nothing about flipping a switch, and refusing one
-   * would be a failure invented for no reader's benefit.
+   * required-check set, the dormancy re-derivation — and refuses the write
+   * if the manifest moved underneath it. The move is detected by comparing
+   * the manifest CONTENT under the lock (#368); `version` and `installedAt`
+   * ride along to say WHICH writer moved it, since the two differ in whether
+   * the client's consent starts again from zero. The paths that read no manifest (disable, the user
+   * toggles) pass nothing: a manifest move changes nothing about flipping a
+   * switch, and refusing one would be a failure invented for no reader's
+   * benefit.
    *
    * `requireSurface: false` is D-CL, and disable is its only caller. A row
    * whose plugin has been re-scoped to server is dormant, not absent (#369),
@@ -558,15 +561,41 @@ export class PluginUnitLifecycleService {
    * rather than against the pre-transaction snapshot. Raw SQL because
    * Prisma exposes no row-lock API; the unqualified table name resolves via
    * the per-worker `search_path`.
+   *
+   * The manifest comparison rides this same statement rather than a second
+   * read: it must observe the row this lock froze, and a follow-up SELECT
+   * would be a second observation of a value that had already stopped
+   * moving — one more round trip for no additional truth.
    */
   private async assertStillLiving(
     tx: Prisma.TransactionClient,
     plugin: LivingPluginRef,
     expected?: ManifestSnapshotRef,
   ): Promise<{ scope: PluginScope; version: string }> {
+    // Serialized here and cast, rather than compared in this process, so the
+    // comparison is `jsonb = jsonb`: normalized, so key order and spacing
+    // cannot manufacture a false 409, and performed on the same read that
+    // takes the lock. NULL for the callers that pass no snapshot — the
+    // comparison then yields NULL, which the guard never consults.
+    //
+    // The document has been through JS since it was stored (Prisma parses
+    // jsonb on the way out), which is exact for everything a manifest holds:
+    // strings, booleans, and numbers within double precision, with jsonb
+    // comparing numbers numerically so a lost trailing zero is still equal.
+    // A manifest carrying an integer past 2^53 would round-trip differently
+    // and 409 every request for the plugin — retryable and loud rather than
+    // silent, and no manifest field is a number at all today.
+    const expectedManifest = expected === undefined ? null : JSON.stringify(expected.manifestJson);
     const rows = await tx.$queryRaw<
-      { uninstalled_at: Date | null; scope: PluginScope; version: string; installed_at: Date }[]
-    >`SELECT uninstalled_at, scope, version, installed_at FROM plugins WHERE id = ${plugin.id} FOR SHARE`;
+      {
+        uninstalled_at: Date | null;
+        scope: PluginScope;
+        version: string;
+        installed_at: Date;
+        manifest_matches: boolean | null;
+      }[]
+    >`SELECT uninstalled_at, scope, version, installed_at, manifest_json = ${expectedManifest}::jsonb AS manifest_matches
+        FROM plugins WHERE id = ${plugin.id} FOR SHARE`;
     const row = rows[0];
 
     if (row === undefined) {
@@ -591,6 +620,20 @@ export class PluginUnitLifecycleService {
       }
 
       if (row.version !== expected.version) {
+        throw new PluginUnitPluginChangedError(plugin.slug, 'version-activated', expected.version, row.version);
+      }
+
+      // Neither column moved, so an activation pair returned the version to
+      // where this request found it (#368) — `kind` is still
+      // `version-activated`, because that pair did not send consent back to
+      // zero the way a reinstall does, and the matching versions are what
+      // select the message that says so.
+      //
+      // Anything other than TRUE is a move: the column is NOT NULL and the
+      // bound document is non-null on this branch, so a NULL answer means
+      // the comparison did not run, and a guard that read that as
+      // "unchanged" would be no guard at all.
+      if (row.manifest_matches !== true) {
         throw new PluginUnitPluginChangedError(plugin.slug, 'version-activated', expected.version, row.version);
       }
     }

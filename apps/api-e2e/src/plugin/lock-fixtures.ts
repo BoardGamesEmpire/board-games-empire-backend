@@ -152,8 +152,12 @@ export interface PluginLockFixture {
 /**
  * An installed, living plugin row.
  *
- * `manifestJson` is a placeholder: no code under test in these specs reads it,
- * and nothing here validates it.
+ * `manifestJson` is a minimal document, not a real manifest: nothing here
+ * validates it. It is no longer inert, though — the share lock's statement
+ * compares it (#368) — so a case may read this row's document back and bind
+ * it. What such a case must NOT do is rebuild it from `slug`/`version` and
+ * call that the stored document; the comparison is only worth running against
+ * what Postgres actually holds.
  */
 export async function arrangePlugin(prisma: PrismaClient): Promise<PluginLockFixture> {
   const slug = `lock-fixture-${randomUUID()}`;

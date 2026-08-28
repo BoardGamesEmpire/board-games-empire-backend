@@ -50,8 +50,17 @@ describe('the plugin consent path is one lock order (#360)', () => {
   const { unitLifecycle: UNIT_LIFECYCLE, unitScopeLock: UNIT_SCOPE_LOCK } = LOCK_SOURCES;
   const { grantService: GRANT_SERVICE, updateService: UPDATE_SERVICE } = LOCK_SOURCES;
 
-  /** Stage 1: the plugin row, as the unit paths take it. */
-  const pluginShareLock = readShippedSql(UNIT_LIFECYCLE, ['plugin.id'], { matching: /FOR SHARE/ });
+  /**
+   * Stage 1: the plugin row, as the unit paths take it. Binds the expected
+   * manifest ahead of the id — the content comparison #368 added sits in the
+   * SELECT list — and every replay here binds NULL for it, the calling mode of
+   * the paths that derive nothing from a manifest. What this file pins is the
+   * ORDER stages are taken in, which no predicate of theirs changes.
+   */
+  const pluginShareLock = readShippedSql(UNIT_LIFECYCLE, ['expectedManifest', 'plugin.id'], {
+    matching: /FOR SHARE/,
+  });
+  const NO_SNAPSHOT = null;
 
   /**
    * Stage 2: the server grant rows, as activation takes them (#356).
@@ -220,7 +229,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         // A unit transaction, in full: plugin row, key, unit row.
         await holder.begin();
-        await holder.query(pluginShareLock.text, [plugin.pluginId]);
+        await holder.query(pluginShareLock.text, [NO_SNAPSHOT, plugin.pluginId]);
         await holder.query(advisoryLock.text, [plugin.advisoryKey]);
         await holder.query(unitRowLock.text, [plugin.householdId, plugin.pluginId]);
 
@@ -326,7 +335,11 @@ describe('the plugin consent path is one lock order (#360)', () => {
 
         // Half the cycle: the inverted unit transaction now wants the plugin
         // row the activation is holding.
-        const inverted = holder.issue(pluginShareLock.text, [plugin.pluginId], 'the key-first unit transaction');
+        const inverted = holder.issue(
+          pluginShareLock.text,
+          [NO_SNAPSHOT, plugin.pluginId],
+          'the key-first unit transaction',
+        );
 
         await expectBlocked(barrier, inverted);
 
@@ -357,7 +370,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
         const { holder, waiter } = barrier;
 
         await holder.begin();
-        await holder.query(pluginShareLock.text, [plugin.pluginId]);
+        await holder.query(pluginShareLock.text, [NO_SNAPSHOT, plugin.pluginId]);
         await holder.query(advisoryLock.text, [plugin.advisoryKey]);
 
         await waiter.begin();

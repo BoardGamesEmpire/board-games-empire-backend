@@ -1024,10 +1024,25 @@ export class PluginGrantService {
    * against any activation touching the same grant row, so a version that
    * moved since the pre-transaction judgment is visible here — and a
    * denial the NEW manifest's required set forbids rolls the whole write
-   * back with the same typed error the front door raises. A version that
-   * has not moved was already judged; activation always changes the
-   * version (same-version updates are refused at stage), so equality is a
-   * sound skip.
+   * back with the same typed error the front door raises.
+   *
+   * The `version`-equality skip below is UNSOUND, and now knowingly so. It
+   * was written on the premise that activation always changes the version;
+   * staging refuses only a version equal to the CURRENT one, so an A→B→A
+   * activation pair is permitted, and it restores the version while
+   * replacing the content (#368). A denial this skip waves through can
+   * therefore be a durable `Denied` on a check the now-active manifest
+   * makes required and server-scope — the state D-AV exists to forbid.
+   * Reaching it takes the same three sequential admin-consented operations
+   * #368 describes.
+   *
+   * Left standing rather than patched, because this re-read is #361's: it
+   * rewrites the judgment whole (every non-server decision is unguarded
+   * today, and the create arm has no grant row to order against), and the
+   * skip must be REPLACED by the unit guard's content comparison rather
+   * than have its condition adjusted. Recorded as #361 blocked_by #368,
+   * and stated here so the limitation lives where the discriminator is
+   * rather than in a ticket.
    */
   private async assertDenialStillLegal(
     tx: Prisma.TransactionClient,
