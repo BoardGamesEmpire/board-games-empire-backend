@@ -12,7 +12,7 @@ import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import type { MediaConfig } from '@bge/storage';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
 import type { StorageLocator, StoredObject } from '@boardgamesempire/storage-contract';
@@ -219,16 +219,35 @@ export class MediaObjectService {
     return media;
   }
 
-  async list(pagination: PaginationQueryDto) {
-    return this.db.mediaObject.findMany({
-      where: { AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
-      // A total order, `id` breaking ties on a shared `createdAt`. Without it
-      // the database is free to return rows in any order at all, so page 2 can
-      // repeat a row from page 1 and silently omit another (#230).
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: pagination.skip,
-      take: pagination.pageSize,
-    });
+  /**
+   * One page of readable media objects plus the total matching count for the
+   * response envelope (#372). Both statements share a REPEATABLE READ snapshot,
+   * so an upload or a delete landing mid-request cannot make `total` describe a
+   * set the caller was not served.
+   */
+  async list(pagination: PaginationQueryDto): Promise<PaginatedRows<MediaObject>> {
+    const where: Prisma.MediaObjectWhereInput = {
+      AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.mediaObject.findMany({
+          where,
+          // A total order, `id` breaking ties on a shared `createdAt`. Without it
+          // the database is free to return rows in any order at all, so page 2 can
+          // repeat a row from page 1 and silently omit another (#230).
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.mediaObject.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async createSignedUrl(id: string) {

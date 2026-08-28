@@ -8,10 +8,13 @@ import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
   MOCK_RESOURCE_CONDITION,
+  paginationQuery,
+  unwrapTransaction,
 } from '@bge/testing';
 import type { StoredObject } from '@boardgamesempire/storage-contract';
 import {
@@ -124,7 +127,9 @@ describe('MediaObjectService', () => {
     });
 
     db = ctx.db;
-    db.$transaction.mockImplementation((cb) => cb(db)); // run the tx body with db as the client
+    // This service does both: the upload path wraps its writes in a callback
+    // transaction, and the paginated list reads rows + count as an array batch.
+    unwrapTransaction(db);
     service = ctx.module.get(MediaObjectService);
   });
 
@@ -537,6 +542,34 @@ describe('MediaObjectService', () => {
       signer.verify.mockResolvedValue(undefined);
       storage.get.mockRejectedValue(new DriverNotRegisteredError('localdisk'));
       await expect(service.getVerifiedStream(query)).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('list (#372)', () => {
+    beforeEach(() => {
+      db.mediaObject.findMany.mockResolvedValue([]);
+      db.mediaObject.count.mockResolvedValue(0);
+    });
+
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      await service.list(paginationQuery({ limit: 10 }));
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // The ability conditions are the whole access control on this read, so a
+    // count that skipped them would tell a caller how much media exists that
+    // it is not allowed to see.
+    it('counts through the same ability-scoped where as the rows', async () => {
+      db.mediaObject.count.mockResolvedValue(9);
+
+      const page = await service.list(paginationQuery({ limit: 10 }));
+
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.read);
+      expect(db.mediaObject.count).toHaveBeenCalledWith({ where: { AND: [MOCK_RESOURCE_CONDITION] } });
+      expect(page).toEqual({ rows: [], total: 9 });
     });
   });
 });

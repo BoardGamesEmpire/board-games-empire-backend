@@ -1,16 +1,20 @@
-import { ContributionOrigin, MediaContributionStatus, ResourceType, Visibility } from '@bge/database';
+import { ContributionOrigin, MediaContributionStatus, Prisma, ResourceType, Visibility } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { plainToInstance } from 'class-transformer';
 import { MediaContributionEvents } from './constants/media-contribution-events.constant';
+import { ListContributionsQueryDto } from './dto';
 import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
 
@@ -38,7 +42,7 @@ describe('MediaContributionService', () => {
     });
     db = ctx.db;
     service = ctx.module.get(MediaContributionService);
-    db.$transaction.mockImplementation((cb) => cb(db));
+    unwrapTransaction(db);
   });
 
   describe('contribute', () => {
@@ -283,6 +287,43 @@ describe('MediaContributionService', () => {
         }),
       );
       expect(mediaLink.attachWithin).toHaveBeenCalled();
+    });
+  });
+
+  describe('list (#372)', () => {
+    const query = (init: Partial<{ status: MediaContributionStatus; page: number; limit: number }> = {}) =>
+      plainToInstance(ListContributionsQueryDto, init, { enableImplicitConversion: true });
+
+    beforeEach(() => {
+      db.mediaContribution.findMany.mockResolvedValue([]);
+      db.mediaContribution.count.mockResolvedValue(0);
+    });
+
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      await service.list(query());
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // A moderation queue is read by its length, so a `total` that ignored the
+    // status filter would report the whole history as the work outstanding.
+    it('counts through the same status-filtered where as the rows', async () => {
+      db.mediaContribution.count.mockResolvedValue(6);
+
+      const page = await service.list(query({ status: MediaContributionStatus.Pending }));
+
+      expect(db.mediaContribution.count).toHaveBeenCalledWith({
+        where: expect.objectContaining({ status: MediaContributionStatus.Pending }),
+      });
+      expect(page).toEqual({ rows: [], total: 6 });
+    });
+
+    it('omits the status clause entirely when no status is asked for', async () => {
+      await service.list(query());
+
+      expect(db.mediaContribution.count.mock.calls[0][0]?.where).not.toHaveProperty('status');
     });
   });
 });

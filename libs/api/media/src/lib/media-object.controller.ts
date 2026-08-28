@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import {
   BadRequestException,
   Body,
@@ -16,7 +16,7 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiConsumes, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -25,6 +25,7 @@ import {
   AttachMediaDto,
   ContributeMediaDto,
   DetachMediaDto,
+  MediaObjectResponseDto,
   toMediaContributionResponse,
   toMediaObjectResponse,
 } from './dto';
@@ -34,6 +35,8 @@ import { MediaLinkService } from './link/link.service';
 import { MediaContributionService } from './media-contribution.service';
 import { MediaObjectService } from './media-object.service';
 import { MulterExceptionFilter } from './multer-exception.filter';
+
+const PaginatedMediaResponse = PaginatedResponseDto(MediaObjectResponseDto, 'media');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -85,10 +88,22 @@ export class MediaObjectController {
     );
   }
 
+  @ApiOperation({
+    summary: 'List media objects the caller may read',
+    description:
+      'Newest first. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
+      '`total`, `totalPages` and `hasMore`. See #230.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PaginatedMediaResponse })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
   @Get()
   list(@Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.media.list(pagination)).pipe(map((items) => ({ media: items.map(toMediaObjectResponse) })));
+    // Rows are mapped to their public shape before the envelope is built, so
+    // `total` and the rows describe the same set — the mapper is a projection,
+    // never a filter.
+    return from(this.media.list(pagination)).pipe(
+      map(({ rows, total }) => paginated('media', { rows: rows.map(toMediaObjectResponse), total }, pagination)),
+    );
   }
 
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
