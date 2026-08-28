@@ -1,8 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t, type I18nPath } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -30,6 +31,9 @@ const RESPOND_MESSAGE_KEYS = {
 @ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
 @ApiTags('friendships')
+// Both list responses reference PaginationMetaDto by `$ref` and nothing else in
+// this controller mentions it, so it needs registering explicitly.
+@ApiExtraModels(PaginationMetaDto)
 @Controller('friendships')
 export class FriendshipController {
   constructor(private readonly friendshipService: FriendshipService) {}
@@ -44,20 +48,43 @@ export class FriendshipController {
     );
   }
 
+  @ApiOperation({
+    summary: 'List friendships visible to the caller',
+    description:
+      'Most recent activity first, optionally narrowed to one `status`. Paginated: `?page=` (1-based) and ' +
+      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
+      'the rows matching the status filter. See #230; the row shape is modelled in #402.',
+  })
+  @ApiResponse({
+    status: Http.Ok,
+    description: 'Paginated friendships',
+    schema: paginatedEnvelopeSchema('friendships'),
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))
   @Get()
   list(@Query() query: ListFriendshipsQueryDto) {
-    return from(this.friendshipService.listForUser(query)).pipe(map((friendships) => ({ friendships })));
+    return from(this.friendshipService.listForUser(query)).pipe(map((page) => paginated('friendships', page, query)));
   }
 
+  @ApiOperation({
+    summary: 'List incoming pending friend requests',
+    description:
+      'Requests awaiting the caller\u2019s response — newest first. Paginated identically to ' +
+      '`GET /friendships`, with `total` counting the caller\u2019s outstanding incoming requests. ' +
+      'The `status` filter is not accepted here: the set is pending by definition. See #230; the row ' +
+      'shape is modelled in #402.',
+  })
+  @ApiResponse({ status: Http.Ok, description: 'Paginated requests', schema: paginatedEnvelopeSchema('requests') })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))
   @Get('requests')
   listRequests(@Query() query: ListFriendshipsQueryDto) {
-    return from(this.friendshipService.listIncomingRequests(query)).pipe(map((requests) => ({ requests })));
+    return from(this.friendshipService.listIncomingRequests(query)).pipe(
+      map((page) => paginated('requests', page, query)),
+    );
   }
 
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

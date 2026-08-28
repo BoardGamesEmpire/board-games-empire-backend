@@ -2,10 +2,10 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, GameGateway, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
@@ -15,6 +15,9 @@ import { GameGatewayService } from './game-gateway.service';
 @ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
 @ApiTags('game-gateways')
+// The list response references PaginationMetaDto by `$ref` and nothing else in
+// this controller mentions it, so it needs registering explicitly.
+@ApiExtraModels(PaginationMetaDto)
 @Controller('game-gateways')
 export class GameGatewayController {
   private readonly logger = new Logger(GameGatewayController.name);
@@ -24,12 +27,21 @@ export class GameGatewayController {
     private readonly coordinator: GatewayCoordinatorClientService,
   ) {}
 
+  @ApiOperation({
+    summary: 'List configured game gateways',
+    description:
+      'Alphabetical by name. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope ' +
+      'carrying `total`, `totalPages` and `hasMore`. See #230; the row shape is modelled in #402.',
+  })
+  @ApiResponse({ status: 200, description: 'Paginated gateways', schema: paginatedEnvelopeSchema('gateways') })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameGateway))
   @Get()
   getAll(@Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.gameGatewayService.getAll(pagination)).pipe(map((gateways) => ({ gateways })));
+    return from(this.gameGatewayService.getAll(pagination)).pipe(
+      map((page) => paginated('gateways', page, pagination)),
+    );
   }
 
   @ApiResponse({ status: 401, description: 'Authentication required' })

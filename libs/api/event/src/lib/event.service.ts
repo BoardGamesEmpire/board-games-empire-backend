@@ -7,12 +7,13 @@ import {
   EventStatus,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
+  Prisma,
   ResourceType,
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
@@ -31,23 +32,40 @@ export class EventService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  async getEvents(pagination: PaginationQueryDto): Promise<Event[]> {
-    return this.db.event.findMany({
-      where: {
-        deletedAt: null,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
-      },
-      include: {
-        occurrences: {
-          orderBy: { sortOrder: 'asc' },
-        },
-        policy: true,
-      },
-      skip: pagination.skip,
-      take: pagination.pageSize,
-      // `id` breaks ties on `createdAt` so page boundaries hold between requests.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    });
+  /**
+   * One page of visible events plus the total matching count for the response
+   * envelope (#372). Rows and count come from one REPEATABLE READ snapshot, so
+   * an event created or soft-deleted between the two statements cannot make
+   * `total` describe a list the caller was not served.
+   */
+  async getEvents(pagination: PaginationQueryDto): Promise<PaginatedRows<Event>> {
+    const where: Prisma.EventWhereInput = {
+      deletedAt: null,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.event.findMany({
+          where,
+          include: {
+            occurrences: {
+              orderBy: { sortOrder: 'asc' },
+            },
+            policy: true,
+          },
+          skip: pagination.skip,
+          take: pagination.pageSize,
+          // `id` breaks ties on `createdAt` so page boundaries hold between requests.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }),
+
+        this.db.event.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getEventById(id: string): Promise<Event> {

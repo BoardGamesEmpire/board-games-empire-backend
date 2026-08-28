@@ -3,7 +3,7 @@ import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, 
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 
@@ -17,20 +17,37 @@ export class GameGatewayService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  async getAll(pagination: PaginationQueryDto) {
-    return this.db.gameGateway.findMany({
-      where: {
-        AND: [
-          ...this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.read),
-          { deletedAt: null },
-        ],
-      },
-      // `GameGateway.name` is `@unique`, so this is already a total order and
-      // needs no tie-breaker of its own.
-      orderBy: { name: 'asc' },
-      skip: pagination.skip,
-      take: pagination.pageSize,
-    });
+  /**
+   * One page of gateways plus the total matching count for the response
+   * envelope (#372). Both come from one REPEATABLE READ snapshot, so a gateway
+   * registered or soft-deleted mid-request cannot make `total` disagree with
+   * the rows sent.
+   */
+  async getAll(pagination: PaginationQueryDto): Promise<PaginatedRows<GameGateway>> {
+    const where: Prisma.GameGatewayWhereInput = {
+      AND: [
+        ...this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.read),
+        { deletedAt: null },
+      ],
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.gameGateway.findMany({
+          where,
+          // `GameGateway.name` is `@unique`, so this is already a total order and
+          // needs no tie-breaker of its own.
+          orderBy: { name: 'asc' },
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.gameGateway.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getById(id: string) {

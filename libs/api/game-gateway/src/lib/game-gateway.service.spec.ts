@@ -1,8 +1,9 @@
 import type { GameGateway } from '@bge/database';
-import { Action, ResourceType } from '@bge/database';
+import { Action, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEventsService } from '@bge/gateway-registry';
 import { AbilityService } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   paginationQuery,
@@ -42,6 +43,7 @@ describe('GameGatewayService', () => {
 
   it('getAll → read, composed with the deletedAt filter', async () => {
     db.gameGateway.findMany.mockResolvedValue([]);
+    db.gameGateway.count.mockResolvedValue(0);
 
     await service.getAll(paginationQuery({ limit: 20 }));
 
@@ -49,6 +51,22 @@ describe('GameGatewayService', () => {
     expect(db.gameGateway.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ AND: [COND, { deletedAt: null }] }) }),
     );
+  });
+
+  // #372: one snapshot for rows and count, and the same `where` for both — a
+  // count that dropped the `deletedAt` filter would total the tombstones too.
+  it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {
+    db.gameGateway.findMany.mockResolvedValue([]);
+    db.gameGateway.count.mockResolvedValue(3);
+
+    const page = await service.getAll(paginationQuery({ limit: 20 }));
+
+    expect(db.gameGateway.count).toHaveBeenCalledWith({ where: { AND: [COND, { deletedAt: null }] } });
+    expect(page).toEqual({ rows: [], total: 3 });
+
+    const { operations, options } = batchTransactionCall(db);
+    expect(operations).toHaveLength(2);
+    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   });
 
   it('getById → read, composed with the deletedAt filter', async () => {

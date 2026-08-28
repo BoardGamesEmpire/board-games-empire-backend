@@ -15,8 +15,8 @@ describe('FriendshipController (delegation)', () => {
   beforeEach(() => {
     service = {
       create: jest.fn().mockResolvedValue({ id: 'f-1' }),
-      listForUser: jest.fn().mockResolvedValue([]),
-      listIncomingRequests: jest.fn().mockResolvedValue([]),
+      listForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+      listIncomingRequests: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
       respond: jest.fn().mockResolvedValue({ id: 'f-1' }),
       remove: jest.fn().mockResolvedValue({ id: 'f-1' }),
     };
@@ -38,6 +38,25 @@ describe('FriendshipController (delegation)', () => {
   it('listRequests forwards the query', async () => {
     await firstValueFrom(controller.listRequests(PAGINATION));
     expect(service.listIncomingRequests).toHaveBeenCalledWith(PAGINATION);
+  });
+
+  // #372: the two reads are different resource keys on the same envelope, and
+  // crossing them would hand a client the wrong array name for the rows it got.
+  it('wraps each read under its own resource key', async () => {
+    service.listForUser.mockResolvedValue({ rows: [{ id: 'f-1' }], total: 3 } as never);
+    service.listIncomingRequests.mockResolvedValue({ rows: [{ id: 'f-2' }], total: 1 } as never);
+
+    const friendships = await firstValueFrom(controller.list(paginationQuery({ page: 2, limit: 2 })));
+    const requests = await firstValueFrom(controller.listRequests(PAGINATION));
+
+    expect(friendships).toEqual({
+      friendships: [{ id: 'f-1' }],
+      pagination: { page: 2, limit: 2, total: 3, totalPages: 2, hasMore: false },
+    });
+    expect(requests).toEqual({
+      requests: [{ id: 'f-2' }],
+      pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
   });
 
   it('respond forwards id and status', async () => {

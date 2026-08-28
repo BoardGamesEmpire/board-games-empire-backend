@@ -40,15 +40,32 @@ describe('EventController', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('getEvents', () => {
-    it('delegates to EventService.getEvents and wraps response', async () => {
+    it('delegates to EventService.getEvents and wraps the rows in the paginated envelope', async () => {
       const events = [stubEvent(), stubEvent()];
-      service.getEvents.mockResolvedValue(events);
+      service.getEvents.mockResolvedValue({ rows: events, total: 2 });
 
       const pagination = paginationQuery({ limit: 10 });
       const result = await firstValueFrom(controller.getEvents(pagination));
 
       expect(service.getEvents).toHaveBeenCalledWith(pagination);
-      expect(result).toEqual({ events });
+      expect(result).toEqual({
+        events,
+        pagination: { page: 1, limit: 10, total: 2, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // #372: the echoed paging describes the query the controller was handed, so
+    // a deep page has to report itself as one — not as page 1 of the rows sent.
+    it('echoes the requested page rather than the shape of the rows returned', async () => {
+      service.getEvents.mockResolvedValue({ rows: [stubEvent()], total: 25 });
+
+      const result = await firstValueFrom(controller.getEvents(paginationQuery({ page: 3, limit: 10 })));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          pagination: { page: 3, limit: 10, total: 25, totalPages: 3, hasMore: false },
+        }),
+      );
     });
   });
 

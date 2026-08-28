@@ -2,6 +2,7 @@ import type { Game } from '@bge/database';
 import { Action, Prisma, ResourceType } from '@bge/database';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
@@ -48,6 +49,7 @@ describe('GameService', () => {
 
   it('getGames → read', async () => {
     db.game.findMany.mockResolvedValue([]);
+    db.game.count.mockResolvedValue(0);
 
     await service.getGames(paginationQuery({ limit: 20 }));
 
@@ -55,6 +57,33 @@ describe('GameService', () => {
     expect(db.game.findMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) }),
     );
+  });
+
+  // #372: `total` is only trustworthy against the rows because both come from
+  // one snapshot, and nothing in the read itself enforces that — the mock
+  // resolves the operation array at any isolation level, so a regression to the
+  // Prisma default would be invisible without pinning it here.
+  it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+    db.game.findMany.mockResolvedValue([]);
+    db.game.count.mockResolvedValue(0);
+
+    await service.getGames(paginationQuery({ limit: 20 }));
+
+    const { operations, options } = batchTransactionCall(db);
+    expect(operations).toHaveLength(2);
+    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  });
+
+  // A count over a wider `where` than the rows were read with reports a total
+  // the caller can never page to — the ability conditions have to reach both.
+  it('counts through the same scoped where as the rows', async () => {
+    db.game.findMany.mockResolvedValue([]);
+    db.game.count.mockResolvedValue(7);
+
+    const page = await service.getGames(paginationQuery({ limit: 20 }));
+
+    expect(db.game.count).toHaveBeenCalledWith({ where: expect.objectContaining({ AND: [COND] }) });
+    expect(page).toEqual({ rows: [], total: 7 });
   });
 
   it('getGame → read (single round trip on the happy path)', async () => {

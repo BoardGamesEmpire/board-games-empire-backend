@@ -17,7 +17,7 @@ describe('GameController', () => {
         {
           provide: GameService,
           useValue: {
-            getGames: jest.fn().mockResolvedValue([]),
+            getGames: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
             getGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
             createGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
             updateGame: jest.fn().mockResolvedValue({ id: 'game-1' }),
@@ -37,6 +37,20 @@ describe('GameController', () => {
   it('getGames forwards only pagination', async () => {
     await firstValueFrom(controller.getGames(PAGINATION));
     expect(gameService.getGames).toHaveBeenCalledWith(PAGINATION);
+  });
+
+  // #372: the controller is where the rows the service read become the wire
+  // envelope, so the echoed paging has to come from the query it was given —
+  // not from a page size the service re-defaulted for itself.
+  it('wraps the rows in the paginated envelope, echoing the requested page', async () => {
+    (gameService.getGames as jest.Mock).mockResolvedValue({ rows: [{ id: 'game-1' }], total: 31 });
+
+    const response = await firstValueFrom(controller.getGames(paginationQuery({ page: 2, limit: 10 })));
+
+    expect(response).toEqual({
+      games: [{ id: 'game-1' }],
+      pagination: { page: 2, limit: 10, total: 31, totalPages: 4, hasMore: true },
+    });
   });
 
   it('getGame forwards only the id', async () => {
