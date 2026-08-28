@@ -42,20 +42,30 @@ describe('plugin row share lock (FOR SHARE)', () => {
   const UNIT_LIFECYCLE = 'libs/plugin/runtime/src/lib/units/plugin-unit-lifecycle.service.ts';
 
   /**
-   * The statement `assertStillLiving` ships, binding `${plugin.id}`.
+   * The statement `assertStillLiving` ships, binding the expected manifest and
+   * `${plugin.id}` — in that order, because the comparison sits in the SELECT
+   * list and the id in the WHERE clause (#368).
    *
    * No `after` anchor: the file holds exactly one raw statement, and the
    * extractor refuses loudly the moment it holds two. That refusal is the right
    * failure — whoever adds the second statement names which one this spec means
    * rather than inheriting whichever comes first.
    */
-  const shareLock = readShippedSql(UNIT_LIFECYCLE, ['plugin.id'], { matching: /FOR SHARE/ });
+  const shareLock = readShippedSql(UNIT_LIFECYCLE, ['expectedManifest', 'plugin.id'], { matching: /FOR SHARE/ });
+
+  /**
+   * What the paths that derive nothing from a manifest bind — disable and the
+   * user toggles. Every lock case below is one of those: they contend over the
+   * ROW, and what the statement compares is irrelevant to which lock it takes.
+   */
+  const NO_SNAPSHOT = null;
 
   interface PluginRow {
     readonly uninstalled_at: Date | null;
     readonly scope: string;
     readonly version: string;
     readonly installed_at: Date;
+    readonly manifest_matches: boolean | null;
   }
 
   let db: TestDatabase;
@@ -75,7 +85,7 @@ describe('plugin row share lock (FOR SHARE)', () => {
     const plugin = await arrangePlugin(db.client);
 
     await withBarrier(async ({ holder }) => {
-      const rows = await holder.query<PluginRow>(shareLock.text, [plugin.pluginId]);
+      const rows = await holder.query<PluginRow>(shareLock.text, [NO_SNAPSHOT, plugin.pluginId]);
 
       expect(rows).toHaveLength(1);
       expect(rows[0]?.uninstalled_at).toBeNull();
@@ -87,7 +97,7 @@ describe('plugin row share lock (FOR SHARE)', () => {
   it('matches nothing for a plugin id that does not exist', async () => {
     // The miss `assertStillLiving` turns into `PluginUnitPluginNotFoundError`.
     await withBarrier(async ({ holder }) => {
-      await expect(holder.query(shareLock.text, [randomUUID()])).resolves.toHaveLength(0);
+      await expect(holder.query(shareLock.text, [NO_SNAPSHOT, randomUUID()])).resolves.toHaveLength(0);
     });
   });
 
@@ -101,7 +111,7 @@ describe('plugin row share lock (FOR SHARE)', () => {
       const { holder, waiter } = barrier;
 
       await holder.begin();
-      await expect(holder.query(shareLock.text, [plugin.pluginId])).resolves.toHaveLength(1);
+      await expect(holder.query(shareLock.text, [NO_SNAPSHOT, plugin.pluginId])).resolves.toHaveLength(1);
 
       await waiter.begin();
       const pending = waiter.issue<{ id: string }>(UNINSTALL_CLAIM, [plugin.pluginId], "the uninstall's claim");
@@ -128,10 +138,14 @@ describe('plugin row share lock (FOR SHARE)', () => {
       const { holder, waiter } = barrier;
 
       await holder.begin();
-      await expect(holder.query(shareLock.text, [plugin.pluginId])).resolves.toHaveLength(1);
+      await expect(holder.query(shareLock.text, [NO_SNAPSHOT, plugin.pluginId])).resolves.toHaveLength(1);
 
       await waiter.begin();
-      const pending = waiter.issue<PluginRow>(shareLock.text, [plugin.pluginId], "a second unit write's share lock");
+      const pending = waiter.issue<PluginRow>(
+        shareLock.text,
+        [NO_SNAPSHOT, plugin.pluginId],
+        "a second unit write's share lock",
+      );
 
       await expectNotBlocked(barrier, pending);
       await expect(pending.result()).resolves.toHaveLength(1);
@@ -159,7 +173,11 @@ describe('plugin row share lock (FOR SHARE)', () => {
       await expect(holder.query(UNINSTALL_CLAIM, [plugin.pluginId])).resolves.toHaveLength(1);
 
       await waiter.begin();
-      const pending = waiter.issue<PluginRow>(shareLock.text, [plugin.pluginId], "the unit write's share lock");
+      const pending = waiter.issue<PluginRow>(
+        shareLock.text,
+        [NO_SNAPSHOT, plugin.pluginId],
+        "the unit write's share lock",
+      );
 
       await expectBlocked(barrier, pending);
 
@@ -188,7 +206,11 @@ describe('plugin row share lock (FOR SHARE)', () => {
       await expect(holder.query(ACTIVATION_VERSION_BUMP, [plugin.pluginId, '2.0.0'])).resolves.toHaveLength(1);
 
       await waiter.begin();
-      const pending = waiter.issue<PluginRow>(shareLock.text, [plugin.pluginId], "the unit write's share lock");
+      const pending = waiter.issue<PluginRow>(
+        shareLock.text,
+        [NO_SNAPSHOT, plugin.pluginId],
+        "the unit write's share lock",
+      );
 
       await expectBlocked(barrier, pending);
 
@@ -255,6 +277,98 @@ describe('plugin row share lock (FOR SHARE)', () => {
       const row = await db.client.plugin.findUniqueOrThrow({ where: { id: plugin.pluginId } });
       expect(row.uninstalledAt).not.toBeNull();
       await expect(db.client.householdPlugin.count({ where: { pluginId: plugin.pluginId } })).resolves.toBe(1);
+    });
+  });
+  /**
+   * The manifest comparison the same statement carries (#368, D-CX).
+   *
+   * Its own suite mocks `$queryRaw`, so what it can pin is that the comparison
+   * is IN the statement — not what Postgres answers when it runs. Both
+   * directions matter and neither is visible against a mock:
+   *
+   *  - a replacement at the same version must be seen, since that is the whole
+   *    residual: an A→B→A activation pair leaves `version` and `installed_at`
+   *    exactly where the request found them, so the content is the only thing
+   *    left that differs;
+   *  - a document that differs only in key order or spacing must NOT be, or
+   *    every enable behind a round-tripped manifest 409s forever. That is the
+   *    expensive direction, and it is the one a hand-rolled comparison in the
+   *    application would have had to get right for itself.
+   */
+  describe('the manifest comparison (#368)', () => {
+    it('sees a replacement at the same version, which neither discriminator can', async () => {
+      const plugin = await arrangePlugin(db.client);
+      const before = await db.client.plugin.findUniqueOrThrow({
+        where: { id: plugin.pluginId },
+        select: { manifestJson: true, installedAt: true },
+      });
+
+      // An activation pair as the row ends up after it: content replaced,
+      // version back where it started, and `installed_at` untouched — the
+      // installer is its only writer, and no installer ran.
+      await db.client.plugin.update({
+        where: { id: plugin.pluginId },
+        data: {
+          manifestJson: { ...(before.manifestJson as Record<string, unknown>), permissions: ['feedback:write'] },
+        },
+      });
+
+      await withBarrier(async ({ holder }) => {
+        const rows = await holder.query<PluginRow>(shareLock.text, [
+          JSON.stringify(before.manifestJson),
+          plugin.pluginId,
+        ]);
+
+        expect(rows[0]?.manifest_matches).toBe(false);
+        // The half that makes the first half matter: both classifying columns
+        // still agree with the pre-read, so this refusal exists only because
+        // the content was compared.
+        expect(rows[0]?.version).toBe(plugin.version);
+        expect(rows[0]?.installed_at).toEqual(before.installedAt);
+      });
+    });
+
+    it('does not refuse a document that differs only in key order and whitespace', async () => {
+      // `jsonb` is stored parsed, not as the text it arrived in, so both sides
+      // normalize before they meet. Written as text on purpose: a JS object
+      // literal could not express the difference this denies, since the
+      // serializer would decide the order.
+      const plugin = await arrangePlugin(db.client);
+      const stored = await db.client.plugin.findUniqueOrThrow({
+        where: { id: plugin.pluginId },
+        select: { manifestJson: true },
+      });
+      const keys = Object.keys(stored.manifestJson as Record<string, unknown>);
+      const reordered = `{\n  ${keys
+        .reverse()
+        .map(
+          (key) => `${JSON.stringify(key)} :  ${JSON.stringify((stored.manifestJson as Record<string, unknown>)[key])}`,
+        )
+        .join(',\n  ')}\n}`;
+
+      // Guards the guard: if the fixture ever holds one key, reversing it
+      // proves nothing and this case would pass while testing spacing alone.
+      expect(keys.length).toBeGreaterThan(1);
+      expect(reordered).not.toBe(JSON.stringify(stored.manifestJson));
+
+      await withBarrier(async ({ holder }) => {
+        const rows = await holder.query<PluginRow>(shareLock.text, [reordered, plugin.pluginId]);
+
+        expect(rows[0]?.manifest_matches).toBe(true);
+      });
+    });
+
+    it('answers NULL when the caller bound no manifest', async () => {
+      // Disable and the user toggles. The guard consults this only when it
+      // passed a snapshot, and it treats anything other than TRUE as a move —
+      // so NULL reaching a path that DID pass one would refuse, not pass.
+      const plugin = await arrangePlugin(db.client);
+
+      await withBarrier(async ({ holder }) => {
+        const rows = await holder.query<PluginRow>(shareLock.text, [NO_SNAPSHOT, plugin.pluginId]);
+
+        expect(rows[0]?.manifest_matches).toBeNull();
+      });
     });
   });
 });

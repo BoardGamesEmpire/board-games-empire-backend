@@ -389,6 +389,20 @@ describe('PluginExceptionFilter', () => {
       expect(body()['issues']).toEqual([]);
     });
 
+    it('renders equal versions without implying a reinstall, for the A-B-A activation pair', () => {
+      // #368: an activation away from and back to a version replaces the
+      // manifest while leaving both discriminators where they were. The
+      // version pair is equal here and the cause is still an activation, so
+      // a client reading the pair to infer the cause would read it wrong —
+      // `kind` is the field that answers whether consent survived.
+      filter.catch(new PluginUnitPluginChangedError('sample', 'version-activated', '1.2.0', '1.2.0'), host);
+
+      expect(rendered().getStatus()).toBe(Http.Conflict);
+      expect(body()['kind']).toBe('version-activated');
+      expect(body()['expectedVersion']).toBe('1.2.0');
+      expect(body()['actualVersion']).toBe('1.2.0');
+    });
+
     it('maps a mid-request activation to 409 naming both versions, so the retry is informed', () => {
       filter.catch(new PluginUnitPluginChangedError('sample', 'version-activated', '1.2.0', '1.3.0'), host);
 

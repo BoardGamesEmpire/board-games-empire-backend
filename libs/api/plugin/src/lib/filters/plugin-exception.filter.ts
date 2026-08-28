@@ -387,9 +387,10 @@ function buildRenderers(): RendererMap {
   // request's read and its transaction, so every manifest-derived judgment
   // it made is stale. `kind` names which writer moved it — a reinstall also
   // purged consent, which the client may want to say out loud — and the
-  // version pair makes the retry informed rather than a blind repeat (the
-  // two are equal for a same-version reinstall, which is why `kind` and not
-  // the pair is what distinguishes the causes).
+  // version pair makes the retry informed rather than a blind repeat. The
+  // pair alone distinguishes nothing: it is equal for a same-version
+  // reinstall AND for the A→B→A activation the content comparison catches
+  // (#368), so `kind` is what says whether consent survived.
   renders(PluginUnitPluginChangedError, (exception) => ({
     status: Http.Conflict,
     message: t('errors.plugin.unit_plugin_changed', { slug: exception.pluginSlug }),

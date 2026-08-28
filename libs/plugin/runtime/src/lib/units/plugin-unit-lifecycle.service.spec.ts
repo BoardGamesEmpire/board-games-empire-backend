@@ -64,6 +64,14 @@ describe('PluginUnitLifecycleService', () => {
       config,
     });
 
+  interface LivingRow {
+    readonly uninstalled_at: Date | null;
+    readonly scope: PluginScope;
+    readonly version: string;
+    readonly installed_at: Date;
+    readonly manifest_matches: boolean | null;
+  }
+
   const makePlugin = (overrides: Partial<Plugin> = {}): Plugin => ({
     id: 'plugin-1',
     slug: 'demo-sink',
@@ -95,6 +103,26 @@ describe('PluginUnitLifecycleService', () => {
     uninstalledAt: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
+    ...overrides,
+  });
+
+  /**
+   * A row of the in-transaction `FOR SHARE` re-read.
+   *
+   * `manifest_matches` is the comparison the database performs, not a column:
+   * `manifest_json = $1::jsonb` against the manifest the caller derived its
+   * gates from (#368). It defaults TRUE because an unmoved manifest is the
+   * ordinary case, and the guard treats anything other than TRUE as a move —
+   * so a case that forgets the field refuses loudly instead of quietly
+   * skipping the comparison. NULL is what the database really answers when
+   * the caller passed no snapshot, and the disable case below uses it.
+   */
+  const livingRow = (overrides: Partial<LivingRow> = {}): LivingRow => ({
+    uninstalled_at: null,
+    scope: PluginScope.Household,
+    version: '1.2.0',
+    installed_at: new Date(0),
+    manifest_matches: true,
     ...overrides,
   });
 
@@ -143,9 +171,7 @@ describe('PluginUnitLifecycleService', () => {
     db.$transaction.mockImplementation((cb) => cb(db));
     db.plugin.findUnique.mockResolvedValue(makePlugin());
     // The in-transaction liveness re-read (FOR SHARE): alive by default.
-    db.$queryRaw.mockResolvedValue([
-      { uninstalled_at: null, scope: PluginScope.Household, version: '1.2.0', installed_at: new Date(0) },
-    ] as never);
+    db.$queryRaw.mockResolvedValue([livingRow()] as never);
     db.pluginGrant.findMany.mockResolvedValue([]);
     authority = { isHouseholdAdmin: jest.fn().mockResolvedValue(true) };
     emitter = { emit: jest.fn() };
@@ -260,7 +286,8 @@ describe('PluginUnitLifecycleService', () => {
 
       const [livenessStrings] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray];
       expect(livenessStrings.join('?').replace(/\s+/g, ' ')).toContain(
-        'SELECT uninstalled_at, scope, version, installed_at FROM plugins WHERE id = ? FOR SHARE',
+        'SELECT uninstalled_at, scope, version, installed_at, manifest_json = ?::jsonb AS manifest_matches ' +
+          'FROM plugins WHERE id = ? FOR SHARE',
       );
 
       // The plugin row MUST precede the advisory lock. Uninstall and
@@ -284,9 +311,7 @@ describe('PluginUnitLifecycleService', () => {
       // activation transaction, so a row created after it committed is
       // invisible to it.
       db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Household, version: '1.3.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0' })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
@@ -301,9 +326,7 @@ describe('PluginUnitLifecycleService', () => {
       // row at possibly the same version, stamping a fresh installedAt.
       // Version alone cannot see that, so installedAt is carried too.
       db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Household, version: '1.2.0', installed_at: new Date(9_000) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ installed_at: new Date(9_000) })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
@@ -319,9 +342,7 @@ describe('PluginUnitLifecycleService', () => {
       // this as an activation and tell the client consent survived, when
       // the reinstall's uninstall purged every grant.
       db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Household, version: '1.3.0', installed_at: new Date(9_000) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0', installed_at: new Date(9_000) })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
         name: 'PluginUnitPluginChangedError',
@@ -332,10 +353,87 @@ describe('PluginUnitLifecycleService', () => {
       expect(db.householdPlugin.create).not.toHaveBeenCalled();
     });
 
+    it('refuses an A-B-A activation pair: both discriminators match while the manifest content moved', async () => {
+      // The residual #368 was filed for. Staging refuses only a version equal
+      // to the CURRENT one, so activations away from and back to a version are
+      // permitted, and that pair restores `version` while never touching
+      // `installedAt` — the installer is its only writer. Both discriminators
+      // therefore agree with the pre-read while `manifest_json` has been
+      // replaced twice, and the config schema and the born-suspended probe's
+      // required set are judgments made against a manifest that is gone.
+      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
+
+      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+        name: 'PluginUnitPluginChangedError',
+        // Grants SURVIVED — an activation keeps them — which is the whole of
+        // what `kind` reports, so this needs no third arm.
+        kind: 'version-activated',
+        expectedVersion: '1.2.0',
+        actualVersion: '1.2.0',
+      });
+      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.$executeRaw).not.toHaveBeenCalled();
+    });
+
+    it('says a re-activation REPLACED the content rather than reporting a move from a version to itself', async () => {
+      // The reason `kind` staying two-valued still needs a third phrasing:
+      // the version-move sentence reads 'activated from 1.2.0 to 1.2.0' here,
+      // which describes nothing and reads as a bug in the guard.
+      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: false })] as never);
+
+      await expect(service.enableHousehold(enableInput)).rejects.toThrow(
+        /re-activated at version 1\.2\.0 with different manifest content/,
+      );
+    });
+
+    it('compares the manifest in the DATABASE, against the document the gates were derived from', async () => {
+      // `jsonb = jsonb` is a normalized comparison, so key order and spacing
+      // cannot manufacture a false 409 — which a string or structural compare
+      // in this process would have to reproduce for itself. Binding the
+      // pre-read document (not the re-read row, and not the validated object,
+      // which is a parsed product rather than the stored bytes) is what makes
+      // the comparison mean 'the manifest my gates came from'.
+      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.householdPlugin.create.mockResolvedValue(makeHouseholdRow());
+
+      await service.enableHousehold(enableInput);
+
+      const [strings, ...values] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+      expect(strings.join('?').replace(/\s+/g, ' ')).toContain('manifest_json = ?::jsonb AS manifest_matches');
+      expect(values[0]).toEqual(JSON.stringify(makePlugin().manifestJson));
+    });
+
+    it('treats an unanswered comparison as a move', async () => {
+      // Fail closed. `manifest_json` is NOT NULL and the bound document is
+      // non-null whenever a snapshot was passed, so the comparison cannot
+      // legitimately come back NULL here — and a guard that read 'not false'
+      // as 'unchanged' would pass every row a future refactor forgot to
+      // answer for.
+      db.householdPlugin.findUnique.mockResolvedValue(null);
+      db.$queryRaw.mockResolvedValue([livingRow({ manifest_matches: null })] as never);
+
+      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginChangedError);
+      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+    });
+
+    it('binds no manifest on the paths that derive nothing from one', async () => {
+      // The other half of the deliberate asymmetry below: disable and the
+      // user toggles do not merely tolerate a moved manifest, they never ask.
+      // A NULL parameter makes the comparison NULL, which is why the disable
+      // case can carry that row and still succeed.
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: true }));
+      db.householdPlugin.update.mockResolvedValue(makeHouseholdRow({ enabled: false }));
+
+      await service.disableHousehold(enableInput);
+
+      const [, ...values] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+      expect(values[0]).toBeNull();
+    });
+
     it('refuses a config PATCH judged against a superseded schema', async () => {
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Household, version: '1.3.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0' })] as never);
 
       await expect(
         service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 'https://x' } }),
@@ -348,9 +446,7 @@ describe('PluginUnitLifecycleService', () => {
       // path that derived nothing from the manifest.
       db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: true }));
       db.householdPlugin.update.mockResolvedValue(makeHouseholdRow({ enabled: false }));
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Household, version: '1.3.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ version: '1.3.0', manifest_matches: null })] as never);
 
       await expect(service.disableHousehold(enableInput)).resolves.toMatchObject({ enabled: false });
     });
@@ -360,9 +456,7 @@ describe('PluginUnitLifecycleService', () => {
       // FOR SHARE re-read is what sees it. A household row for a
       // server-scope plugin is an artifact the manifest gate says cannot
       // exist and nothing else cleans up, so the refusal is the whole point.
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Server, version: '1.2.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ scope: PluginScope.Server })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitScopeError);
       expect(db.householdPlugin.create).not.toHaveBeenCalled();
@@ -376,9 +470,7 @@ describe('PluginUnitLifecycleService', () => {
       // re-read is what keeps an enable from committing a fresh row beside
       // a tombstone whose purge promised no such row exists.
       db.householdPlugin.findUnique.mockResolvedValue(null);
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: new Date(7), scope: PluginScope.Household, version: '1.2.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ uninstalled_at: new Date(7) })] as never);
 
       await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
       expect(db.householdPlugin.create).not.toHaveBeenCalled();
@@ -755,9 +847,7 @@ describe('PluginUnitLifecycleService', () => {
      */
     it('switches off a row the plugin scope no longer admits, where enable and config PATCH refuse', async () => {
       db.plugin.findUnique.mockResolvedValue(makePlugin({ scope: PluginScope.Server }));
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: null, scope: PluginScope.Server, version: '1.2.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ scope: PluginScope.Server })] as never);
       const before = makeHouseholdRow({ dormantReason: PluginUnitDormantReason.ScopeOrphaned });
       db.householdPlugin.findUnique.mockResolvedValue(before);
       db.householdPlugin.update.mockResolvedValue({ ...before, enabled: false });
@@ -899,9 +989,7 @@ describe('PluginUnitLifecycleService', () => {
       await expect(service.enableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
 
       db.plugin.findUnique.mockResolvedValue(makePlugin());
-      db.$queryRaw.mockResolvedValue([
-        { uninstalled_at: new Date(6), scope: PluginScope.Household, version: '1.2.0', installed_at: new Date(0) },
-      ] as never);
+      db.$queryRaw.mockResolvedValue([livingRow({ uninstalled_at: new Date(6) })] as never);
       await expect(service.enableUser(userInput)).rejects.toBeInstanceOf(PluginUnitPluginTombstonedError);
     });
   });
