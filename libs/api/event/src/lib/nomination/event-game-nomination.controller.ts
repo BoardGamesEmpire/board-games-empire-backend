@@ -1,8 +1,17 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { Body, Controller, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiExtraModels,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -16,18 +25,35 @@ import { EventGameNominationService } from './event-game-nomination.service';
 @ApiTags('event-game-nominations')
 @ApiParam({ name: 'eventId', type: String })
 @UseGuards(PoliciesGuard)
+// The list response references PaginationMetaDto by `$ref` and nothing else in
+// this controller mentions it, so it needs registering explicitly.
+@ApiExtraModels(PaginationMetaDto)
 @Controller('events/:eventId/nominations')
 export class EventGameNominationController {
   private readonly logger = new Logger(EventGameNominationController.name);
 
   constructor(private readonly nominationService: EventGameNominationService) {}
 
-  @ApiOperation({ summary: 'List nominations for an event' })
-  @ApiResponse({ status: Http.Ok, description: 'Nominations retrieved' })
+  @ApiOperation({
+    summary: 'List nominations for an event',
+    description:
+      'Newest first. **Paginated since #372** — this read used to return every nomination on the event, a ' +
+      'set that grows with the attendees: `?page=` (1-based) and `?limit=`, with a `pagination` envelope ' +
+      'carrying `total`, `totalPages` and `hasMore`. A client that assumed one complete list must now page. ' +
+      'See #230; the row shape is modelled in #402.',
+  })
+  @ApiResponse({
+    status: Http.Ok,
+    description: 'Paginated nominations',
+    schema: paginatedEnvelopeSchema('nominations'),
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventGameNomination))
   @Get()
-  getNominations(@Param('eventId') eventId: string) {
-    return from(this.nominationService.getNominations(eventId)).pipe(map((nominations) => ({ nominations })));
+  getNominations(@Param('eventId') eventId: string, @Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.nominationService.getNominations(eventId, pagination)).pipe(
+      map((page) => paginated('nominations', page, pagination)),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single nomination' })

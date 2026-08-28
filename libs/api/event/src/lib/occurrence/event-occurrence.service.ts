@@ -8,10 +8,12 @@ import {
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
+  Prisma,
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
@@ -39,17 +41,48 @@ export class EventOccurrenceService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  async getOccurrences(eventId: string): Promise<EventOccurrence[]> {
+  /**
+   * One page of an event's occurrences plus the total for the response envelope.
+   *
+   * This read was unpaginated until #372 — it returned every occurrence of the
+   * event, however many that was. A nested list is a tempting exception ("an
+   * event has a handful of dates"), but nothing in the schema bounds it, and an
+   * unbounded list read is the #11 self-DoS with a smaller number in front of
+   * it. D-372-1 paginates it; the response is a truncating change, which
+   * pre-alpha allows without a shim.
+   *
+   * `id` breaks ties on `sortOrder`, which is an `Int @default(0)` and so shares
+   * a value across every occurrence nobody has reordered. Without the
+   * tie-breaker those rows drift across page boundaries between requests — page
+   * 2 repeating a date page 1 already showed, and dropping another.
+   *
+   * The existence probe stays ahead of the read so an unknown event is a 404
+   * rather than an empty page.
+   */
+  async getOccurrences(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventOccurrence>> {
     await assertEventExists(this.db, eventId);
 
-    return this.db.eventOccurrence.findMany({
-      where: {
-        eventId,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
-      },
-      include: OCCURRENCE_INCLUDE,
-      orderBy: { sortOrder: 'asc' },
-    });
+    const where: Prisma.EventOccurrenceWhereInput = {
+      eventId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.eventOccurrence.findMany({
+          where,
+          include: OCCURRENCE_INCLUDE,
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.eventOccurrence.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {

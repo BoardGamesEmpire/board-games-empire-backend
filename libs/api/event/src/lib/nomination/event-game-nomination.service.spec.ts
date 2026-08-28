@@ -6,11 +6,21 @@ import type {
   EventGameVote,
   EventPolicy,
 } from '@bge/database';
-import { Action, GameAdditionMode, NominationStatus, ResourceType, ScheduledGameRole, VoteType } from '@bge/database';
+import {
+  Action,
+  GameAdditionMode,
+  NominationStatus,
+  Prisma,
+  ResourceType,
+  ScheduledGameRole,
+  VoteType,
+} from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
+  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -55,19 +65,55 @@ describe('EventGameNominationService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getNominations → read', async () => {
-    db.event.count.mockResolvedValue(1);
-    db.eventGameNomination.findMany.mockResolvedValue([]);
+  describe('getNominations', () => {
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(1);
+      db.eventGameNomination.findMany.mockResolvedValue([]);
+      db.eventGameNomination.count.mockResolvedValue(0);
+    });
 
-    await service.getNominations('event-1');
+    it('→ read, scoped to the event', async () => {
+      await service.getNominations('event-1', paginationQuery({ limit: 10 }));
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-      ResourceType.EventGameNomination,
-      Action.read,
-    );
-    expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ eventId: 'event-1', AND: [COND] }) }),
-    );
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.EventGameNomination,
+        Action.read,
+      );
+      expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ eventId: 'event-1', AND: [COND] }) }),
+      );
+    });
+
+    // #372 paginates a read that used to return every nomination on the event —
+    // a set that grows with the attendees rather than being bounded by anything.
+    it('takes one page rather than the whole event', async () => {
+      await service.getNominations('event-1', paginationQuery({ page: 3, limit: 5 }));
+
+      expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5, skip: 10 }));
+    });
+
+    // Nominations created in one transaction share a `createdAt`, so the sort
+    // needs `id` to be total; without it those rows drift across page edges.
+    it('breaks ties on id, so nominations sharing a createdAt cannot drift', async () => {
+      await service.getNominations('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
+      );
+    });
+
+    it('counts through the same event-scoped where as the rows, in one REPEATABLE READ transaction', async () => {
+      db.eventGameNomination.count.mockResolvedValue(4);
+
+      const page = await service.getNominations('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventGameNomination.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(page).toEqual({ rows: [], total: 4 });
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
   });
 
   it('getNomination → read', async () => {

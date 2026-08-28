@@ -1,8 +1,17 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  ApiBearerAuth,
+  ApiExtraModels,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+} from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -16,18 +25,35 @@ import { EventOccurrenceService } from './event-occurrence.service';
 @ApiTags('event-occurrences')
 @UseGuards(PoliciesGuard)
 @ApiParam({ name: 'eventId', type: String })
+// The list response references PaginationMetaDto by `$ref` and nothing else in
+// this controller mentions it, so it needs registering explicitly.
+@ApiExtraModels(PaginationMetaDto)
 @Controller('events/:eventId/occurrences')
 export class EventOccurrenceController {
   private readonly logger = new Logger(EventOccurrenceController.name);
 
   constructor(private readonly occurrenceService: EventOccurrenceService) {}
 
-  @ApiOperation({ summary: 'List occurrences for an event' })
-  @ApiResponse({ status: Http.Ok, description: 'Occurrences retrieved' })
+  @ApiOperation({
+    summary: 'List occurrences for an event',
+    description:
+      'In `sortOrder`, then id. **Paginated since #372** — this read used to return every occurrence of ' +
+      'the event: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, ' +
+      '`totalPages` and `hasMore`. A client that assumed one complete list must now page. See #230; the ' +
+      'row shape is modelled in #402.',
+  })
+  @ApiResponse({
+    status: Http.Ok,
+    description: 'Paginated occurrences',
+    schema: paginatedEnvelopeSchema('occurrences'),
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventOccurrence))
   @Get()
-  getOccurrences(@Param('eventId') eventId: string) {
-    return from(this.occurrenceService.getOccurrences(eventId)).pipe(map((occurrences) => ({ occurrences })));
+  getOccurrences(@Param('eventId') eventId: string, @Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.occurrenceService.getOccurrences(eventId, pagination)).pipe(
+      map((page) => paginated('occurrences', page, pagination)),
+    );
   }
 
   @ApiOperation({ summary: 'Get a single occurrence' })

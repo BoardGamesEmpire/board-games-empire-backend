@@ -2,7 +2,7 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -11,8 +11,10 @@ import { Session } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { ImportStartDto } from './dto/import-start.dto';
-import { ImportBatchListResponseDto, ImportBatchStatusResponseDto } from './dto/import-status.dto';
+import { ImportBatchStatusResponseDto } from './dto/import-status.dto';
 import { GameImportStatusService } from './services/import-status.service';
+
+const PaginatedBatchesResponse = PaginatedResponseDto(ImportBatchStatusResponseDto, 'batches');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -71,15 +73,19 @@ export class GameImportController {
       'recent first, each with per-job states and the derived rollup. Use ' +
       'this to recover batch/job ids no longer held client-side (page ' +
       'refresh, reinstall) — they are otherwise only returned when the ' +
-      'import is started.',
+      'import is started. Paginated: `?page=` (1-based) and `?limit=`, with a ' +
+      '`pagination` envelope carrying `total`, `totalPages` and `hasMore`; ' +
+      '`total` counts the caller’s batches, not their jobs. See #230.',
   })
-  @ApiResponse({ status: Http.Ok, type: ImportBatchListResponseDto })
+  @ApiResponse({ status: Http.Ok, type: PaginatedBatchesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Job))
   @Get()
   listImports(@Session() session: UserSession, @Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.importStatus.listBatchesForUser(session.user.id, pagination));
+    return from(this.importStatus.listBatchesForUser(session.user.id, pagination)).pipe(
+      map((page) => paginated('batches', page, pagination)),
+    );
   }
 
   @ApiOperation({
