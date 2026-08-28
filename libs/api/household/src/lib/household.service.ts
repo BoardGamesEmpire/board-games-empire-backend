@@ -446,8 +446,106 @@ export class HouseholdService {
   }
 
   /**
-   * Paginated households the actor may read, with the total matching row count
-   * for the response envelope (#230).
+   * Paginated households the actor may READ — which widens with the caller.
+   * A plain user receives their memberships AND friends' `Friends`-visible
+   * households (`read:households` OR `read:households:friends`, both on the
+   * base `User` role); Owner/Admin/Moderator receive every household via their
+   * unconditioned `subject: 'all'` grants. That is the role- and
+   * friendship-dependent meaning #365 exists to settle.
+   *
+   * Callers that need a set whose absence means something — "this household is
+   * no longer mine" — want {@link getHouseholdsForMember} instead.
+   */
+  async getHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
+    return this.paginateHouseholds(
+      {
+        deletedAt: null,
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
+      },
+      pagination,
+    );
+  }
+
+  /**
+   * Paginated households the caller holds a `HouseholdMember` row for,
+   * whatever their server role (#364). Unlike {@link getHouseholdsForUser}
+   * this means one thing for every caller, which is what lets a client treat
+   * "cached locally but absent here" as "you were removed or it was deleted"
+   * rather than as a scope it has to guess at.
+   *
+   * Three constraints carry that guarantee, and each is asserted rather than
+   * left to the shape of this query:
+   *
+   * - The membership clause is the scope (D-364-2). The ability conditions
+   *   alone would readmit friends' `Friends`-visible households, which the
+   *   caller is not a member of.
+   * - It is ANDed with those conditions, never a substitute for them
+   *   (D-364-3). For an `apiKey` actor the conditions carry the key ∩ owner
+   *   floor, so dropping them would widen a narrow key to the owner's full
+   *   membership list.
+   * - `deletedAt: null` stays (D-364-5). `deleteHousehold` retains member rows
+   *   by design, so the membership clause still matches a soft-deleted
+   *   household.
+   *
+   * `HouseholdMember` has no `deletedAt` — removal is a hard delete — so with
+   * those in place absence is unambiguous FOR A USER SESSION. It is not
+   * unconditional: because the ability conditions are ANDed in, an API key
+   * scoped narrower than its owner makes absence also mean "outside this key's
+   * scope", so a key-authenticated read must not drive a cache purge. That is
+   * the intended trade — a widened key would be the worse bug — and it is
+   * documented on the route. The key permission model is unbuilt (#270).
+   */
+  async getHouseholdsForMember(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
+    const userId = this.resolveMemberUserId();
+
+    return this.paginateHouseholds(
+      {
+        deletedAt: null,
+        members: { some: { userId } },
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
+      },
+      pagination,
+    );
+  }
+
+  /**
+   * The caller's own user id, or a 403 for an actor kind that has none.
+   *
+   * Resolved before the query runs, and the rejection is the intended answer:
+   * "my households" has no meaning for an actor with no user behind it. It must
+   * never soften into an empty page — an empty page tells a client its
+   * memberships were removed.
+   *
+   * PROVISIONAL (D-364-4). A plugin may legitimately act on a user's behalf, so
+   * this may well be the wrong answer for plugin actors; today it reflects the
+   * absence of polymorphic actor attribution (deferred to #59) rather than a
+   * decision about memberships. #395 revisits it, along with anonymous actors,
+   * who could reach household-adjacent access through a game play session or
+   * event linked to a household.
+   *
+   * The message is re-thrown rather than passed through: `getActingUserId`
+   * phrases its rejection as being about user-attributed WRITES — accurate for
+   * its usual callers, wrong on a GET — and does not localise it. A MISSING
+   * actor is a different failure (a plain `Error`, meaning nothing primed the
+   * context) and is left to propagate as the 500 it is.
+   */
+  private resolveMemberUserId(): string {
+    try {
+      return this.abilityService.getActingUserId();
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw new ForbiddenException(t('common.forbidden.access'));
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * The shared read behind both list endpoints: one page of households plus the
+   * total matching row count for the response envelope (#230). Scope is the
+   * caller's business; everything below it is invariant, and shared so a fix to
+   * either invariant cannot land on one read and miss the other.
    *
    * Rows and count share a REPEATABLE READ transaction: Prisma's default batch
    * isolation is the database default (READ COMMITTED on Postgres), where each
@@ -458,12 +556,10 @@ export class HouseholdService {
    * transaction share a key and drift across page boundaries between requests —
    * page 2 re-showing a row page 1 already had, and dropping another.
    */
-  async getHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
-    const where = {
-      deletedAt: null,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
-    } satisfies Prisma.HouseholdWhereInput;
-
+  private async paginateHouseholds(
+    where: Prisma.HouseholdWhereInput,
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedRows<HouseholdWithRelations>> {
     const [rows, total] = await this.db.$transaction(
       [
         this.db.household.findMany({
@@ -484,12 +580,18 @@ export class HouseholdService {
 
   /**
    * Soft-delete: the row is retained (`deletedAt` stamped) and hidden from every
-   * read (`getHouseholdById`/`getHouseholdsForUser`/`updateHousehold` all filter
-   * `deletedAt: null`). Outstanding invites to the household are revoked in the
-   * same transaction so a stale token can never be accepted into a dead
-   * household. Members and game-collection shares are intentionally left in place
-   * — a soft delete is reversible and reads already exclude the household; hard
-   * cascade/cleanup is deferred to the (future) purge path.
+   * read — `getHouseholdById`, `getHouseholdsForUser`, `getHouseholdsForMember`
+   * and `updateHousehold` all filter `deletedAt: null`. Outstanding invites to
+   * the household are revoked in the same transaction so a stale token can never
+   * be accepted into a dead household. Members and game-collection shares are
+   * intentionally left in place — a soft delete is reversible and reads already
+   * exclude the household; hard cascade/cleanup is deferred to the (future)
+   * purge path.
+   *
+   * That retention is load-bearing in the other direction too: because the
+   * member rows survive, a membership clause alone still matches this household,
+   * which is why `getHouseholdsForMember` cannot drop its `deletedAt` filter
+   * (D-364-5). Anything added to that list must filter it as well.
    */
   async deleteHousehold(id: string) {
     try {
