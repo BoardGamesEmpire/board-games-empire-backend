@@ -138,8 +138,14 @@ export class FriendshipService {
     );
   }
 
-  /** Incoming pending requests where the acting user is the addressee. */
-  async listIncomingRequests(query: ListFriendshipsQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
+  /**
+   * Incoming pending requests where the acting user is the addressee.
+   *
+   * Takes the bare page contract, not `ListFriendshipsQueryDto`: this set is
+   * Pending by definition, so there is no status to filter on, and the route
+   * binds a status-less DTO for the same reason.
+   */
+  async listIncomingRequests(query: PaginationQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
     const userId = this.abilityService.getActingUserId();
 
     return this.paginateFriendships(

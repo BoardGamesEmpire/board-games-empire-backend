@@ -624,6 +624,9 @@ const NOMINATION_INCLUDE = {
       },
     },
   },
+  // Unbounded: every vote of every nomination on the page. #372 capped the
+  // outer list; capping or aggregating this is #404, because it changes what the
+  // endpoint serves rather than how it wraps it.
   votes: {
     select: {
       id: true,

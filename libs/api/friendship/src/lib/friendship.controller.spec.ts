@@ -1,6 +1,10 @@
 import { FriendshipStatus } from '@bge/database';
+import { DefaultPaginationQueryDto } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
 import { firstValueFrom } from 'rxjs';
+import { ListFriendshipsQueryDto } from './dto';
 import { FriendshipController } from './friendship.controller';
 import { FriendshipService } from './friendship.service';
 
@@ -56,6 +60,47 @@ describe('FriendshipController (delegation)', () => {
     expect(requests).toEqual({
       requests: [{ id: 'f-2' }],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
+  });
+
+  /**
+   * `?status=` on `/friendships/requests` used to bind through
+   * `ListFriendshipsQueryDto` and be silently ignored — Swagger advertised it,
+   * the pipe accepted it, and the caller got Pending rows whatever they asked
+   * for. Binding the status-less DTO makes it a 400 under the global pipe's
+   * `forbidNonWhitelisted`, which is the plugin-unit-list rule from #354.
+   *
+   * Two halves, because either alone can pass while the contract is broken: the
+   * route has to bind a DTO with no `status`, and that DTO has to be one the
+   * whitelist actually rejects `status` on.
+   */
+  describe('the requests route rejects a status filter rather than ignoring it', () => {
+    /** The class Nest will bind `@Query()` to, as the emitted metadata records it. */
+    const boundQueryDto = () =>
+      (
+        Reflect.getMetadata('design:paramtypes', FriendshipController.prototype, 'listRequests') as
+          | [new () => object]
+          | undefined
+      )?.[0];
+
+    it('binds a query DTO that does not declare status', () => {
+      expect(boundQueryDto()).toBe(DefaultPaginationQueryDto);
+    });
+
+    it('fails whitelist validation when status is supplied', async () => {
+      const dto = plainToInstance(DefaultPaginationQueryDto, { status: FriendshipStatus.Accepted });
+
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+
+      expect(errors.map((error) => error.property)).toContain('status');
+    });
+
+    it('still accepts a status filter on the wide list', async () => {
+      const dto = plainToInstance(ListFriendshipsQueryDto, { status: FriendshipStatus.Accepted });
+
+      const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+
+      expect(errors).toEqual([]);
     });
   });
 

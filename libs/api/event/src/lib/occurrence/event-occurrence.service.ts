@@ -400,7 +400,10 @@ export class EventOccurrenceService {
             },
           },
         },
-        orderBy: { sortOrder: 'asc' },
+        // Same tie-breaker as the paginated read above: `sortOrder` is an
+        // `Int @default(0)`, so un-reordered occurrences share a key and the
+        // summary would otherwise list them differently between requests.
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
       }),
     ]);
 

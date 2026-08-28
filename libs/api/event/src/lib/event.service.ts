@@ -22,6 +22,21 @@ import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { pickSnapshot } from './utils/pick-snapshot.util';
 
+/**
+ * How an event's occurrences are ordered wherever they are embedded.
+ *
+ * `id` completes it for the same reason the dedicated
+ * `GET /events/:eventId/occurrences` read needs it: `sortOrder` is an
+ * `Int @default(0)`, so every occurrence nobody has reordered shares a key, and
+ * a tie-less sort leaves the database free to return them differently between
+ * requests. Shared here so the embedded copies cannot disagree with the
+ * paginated route — or with each other.
+ */
+const OCCURRENCE_ORDER = [
+  { sortOrder: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.EventOccurrenceOrderByWithRelationInput[];
+
 @Injectable()
 export class EventService {
   private readonly logger = new Logger(EventService.name);
@@ -49,8 +64,12 @@ export class EventService {
         this.db.event.findMany({
           where,
           include: {
+            // Unbounded: every occurrence of every event on the page, which is
+            // a larger read than the one `GET /events/:eventId/occurrences` was
+            // paginated to avoid. Capping it is #404 — it changes what this
+            // endpoint serves, not how it wraps it.
             occurrences: {
-              orderBy: { sortOrder: 'asc' },
+              orderBy: OCCURRENCE_ORDER,
             },
             policy: true,
           },
@@ -78,7 +97,7 @@ export class EventService {
 
       include: {
         occurrences: {
-          orderBy: { sortOrder: 'asc' },
+          orderBy: OCCURRENCE_ORDER,
         },
 
         attendees: {
@@ -211,7 +230,7 @@ export class EventService {
         },
 
         include: {
-          occurrences: { orderBy: { sortOrder: 'asc' } },
+          occurrences: { orderBy: OCCURRENCE_ORDER },
           policy: true,
           attendees: {
             include: {
@@ -278,7 +297,7 @@ export class EventService {
           household: householdRelation,
         },
         include: {
-          occurrences: { orderBy: { sortOrder: 'asc' } },
+          occurrences: { orderBy: OCCURRENCE_ORDER },
           policy: true,
         },
       });

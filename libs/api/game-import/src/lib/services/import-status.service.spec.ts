@@ -2,6 +2,8 @@ import { DatabaseService, JobStatus, JobType, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import { paginationQuery } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
+import { readFileSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
 import { GameImportStatusService } from './import-status.service';
 
@@ -226,6 +228,99 @@ describe('GameImportStatusService', () => {
       expect(response.rows).toHaveLength(1);
     });
 
+    /**
+     * The one statement in this service whose identifiers are physical rather
+     * than derived by Prisma: it names `jobs`, `batch_id`, `user_id` and the
+     * `job_types` enum directly. A `@@map` or enum rename in
+     * `prisma/models/system/job.prisma` would compile, satisfy every other test
+     * here, and 500 the route at runtime — so the names are read back out of the
+     * schema rather than trusted.
+     *
+     * The pattern is the raw-lock pin in `household-member.service.spec.ts`,
+     * itself #248's rule applied to source instead of models. Executing the
+     * statement against a real Postgres is the complementary guard and belongs
+     * with the e2e harness's `readShippedSql` machinery (#405).
+     */
+    describe('the identifiers the raw count hardcodes', () => {
+      const JOB_MODEL = 'system/job.prisma';
+
+      const findSchemaDir = (): string => {
+        let dir = __dirname;
+
+        for (let depth = 0; depth < 10; depth += 1) {
+          const candidate = join(dir, 'prisma', 'models');
+
+          try {
+            if (statSync(candidate).isDirectory()) {
+              return candidate;
+            }
+          } catch {
+            // Not this level; keep walking toward the workspace root.
+          }
+
+          dir = resolve(dir, '..');
+        }
+
+        throw new Error('Could not locate prisma/models by walking up from the spec directory');
+      };
+
+      const schema = () => readFileSync(join(findSchemaDir(), JOB_MODEL), 'utf8');
+
+      const block = (source: string, kind: 'model' | 'enum', name: string): string => {
+        const body = new RegExp(`${kind}\\s+${name}\\s*\\{([\\s\\S]*?)\\n\\}`).exec(source)?.[1];
+        expect(body).toBeDefined();
+
+        return body as string;
+      };
+
+      /** `@@map` name, or the declared name when unmapped. */
+      const mapped = (source: string, kind: 'model' | 'enum', name: string): string =>
+        /@@map\("([^"]+)"\)/.exec(block(source, kind, name))?.[1] ?? name;
+
+      /** `@map` name for one field, or the field name when unmapped. */
+      const column = (source: string, model: string, field: string): string => {
+        const line = new RegExp(`^\\s*${field}\\b.*$`, 'm').exec(block(source, 'model', model))?.[0] ?? '';
+
+        return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
+      };
+
+      const capturedSql = async (): Promise<string> => {
+        db.job.groupBy.mockResolvedValue([]);
+        await service.listBatchesForUser('user-7', paginationQuery());
+
+        const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
+
+        return query.sql;
+      };
+
+      it('names only the table, columns and enum the Job model maps to', async () => {
+        const sql = await capturedSql();
+        const source = schema();
+
+        // Word-boundary matched, so `jobs` cannot be satisfied by a longer
+        // identifier that merely contains it.
+        for (const identifier of [
+          mapped(source, 'model', 'Job'),
+          mapped(source, 'enum', 'JobType'),
+          column(source, 'Job', 'batchId'),
+          column(source, 'Job', 'userId'),
+        ]) {
+          expect(sql).toMatch(new RegExp(`\\b${identifier}\\b`));
+        }
+      });
+
+      // The enum literal is bound as a parameter and cast, so a renamed VALUE
+      // (as opposed to the enum type) fails at runtime too. Pinned separately
+      // because it travels in `values`, not in the statement text.
+      it('binds a JobType value the schema still declares', async () => {
+        await capturedSql();
+
+        const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
+        expect(query.values).toContain(JobType.GameImport);
+        expect(block(schema(), 'enum', 'JobType')).toMatch(new RegExp(`\\b${JobType.GameImport}\\b`));
+      });
+    });
+
     it('scopes the count to the caller, matching the groupBy', async () => {
       db.job.groupBy.mockResolvedValue([]);
 
@@ -243,6 +338,21 @@ describe('GameImportStatusService', () => {
      * separate ones a job deleted in between yields a batch with no jobs, and a
      * `total` describing a different set of batches than the rows.
      */
+    /**
+     * The callback form inherits Prisma's 5s default. This read was two untimed
+     * queries before #372, so leaving the default would turn a slow response
+     * into a P2028 500 for the user with the longest import history — the one
+     * this recovery route exists for.
+     */
+    it('raises the interactive transaction timeout above Prisma’s 5s default', async () => {
+      db.job.groupBy.mockResolvedValue([]);
+
+      await service.listBatchesForUser('user-7', paginationQuery());
+
+      const options = db.$transaction.mock.calls[0][1] as { timeout?: number };
+      expect(options.timeout).toBeGreaterThan(5000);
+    });
+
     it('runs the groupBy, the count and the row fetch in one REPEATABLE READ transaction', async () => {
       db.job.groupBy.mockResolvedValue([{ batchId: 'batch-1', _max: { createdAt: startedAt } }]);
       db.job.findMany.mockResolvedValue([row({ id: 'job-1', batchId: 'batch-1' })]);
@@ -252,7 +362,8 @@ describe('GameImportStatusService', () => {
 
       expect(db.$transaction).toHaveBeenCalledTimes(1);
       const options = db.$transaction.mock.calls[0][1] as { isolationLevel?: unknown };
-      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+      // The timeout is asserted on its own above; this pins the isolation level.
+      expect(options).toMatchObject({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
     // The count is taken even on an empty page, so a client that paged past the

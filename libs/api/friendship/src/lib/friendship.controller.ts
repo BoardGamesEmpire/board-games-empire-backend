@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t, type I18nPath } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -73,15 +73,15 @@ export class FriendshipController {
     description:
       'Requests awaiting the caller\u2019s response — newest first. Paginated identically to ' +
       '`GET /friendships`, with `total` counting the caller\u2019s outstanding incoming requests. ' +
-      'The `status` filter is not accepted here: the set is pending by definition. See #230; the row ' +
-      'shape is modelled in #402.',
+      '`?status=` is rejected here rather than ignored: the set is Pending by definition. See #230; the ' +
+      'row shape is modelled in #402.',
   })
   @ApiResponse({ status: Http.Ok, description: 'Paginated requests', schema: paginatedEnvelopeSchema('requests') })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))
   @Get('requests')
-  listRequests(@Query() query: ListFriendshipsQueryDto) {
+  listRequests(@Query() query: DefaultPaginationQueryDto) {
     return from(this.friendshipService.listIncomingRequests(query)).pipe(
       map((page) => paginated('requests', page, query)),
     );

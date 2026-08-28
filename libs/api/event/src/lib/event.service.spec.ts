@@ -55,6 +55,25 @@ describe('EventService', () => {
     );
   });
 
+  /**
+   * The embedded occurrences carry the same tie-breaker as the dedicated
+   * `GET /events/:eventId/occurrences` read. `sortOrder` is an `Int @default(0)`,
+   * so un-reordered rows share a key, and a tie-less embedded sort would let
+   * `GET /events` and the occurrences route disagree about their order — and
+   * let the embedded order change between requests.
+   */
+  it('orders embedded occurrences totally, matching the dedicated occurrences read', async () => {
+    db.event.findMany.mockResolvedValue([]);
+    db.event.count.mockResolvedValue(0);
+
+    await service.getEvents(paginationQuery({ limit: 20 }));
+
+    const include = db.event.findMany.mock.calls[0][0]?.include as {
+      occurrences?: { orderBy?: unknown };
+    };
+    expect(include?.occurrences?.orderBy).toEqual([{ sortOrder: 'asc' }, { id: 'asc' }]);
+  });
+
   // #372: one snapshot for rows and count, and the soft-delete filter has to
   // reach the count too or `total` includes events no caller can page to.
   it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {

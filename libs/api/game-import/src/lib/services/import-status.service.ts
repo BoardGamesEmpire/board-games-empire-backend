@@ -155,7 +155,16 @@ export class GameImportStatusService {
           total,
         };
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        // The array form the sibling reads use takes no timeout; the callback
+        // form inherits Prisma's 5s default, which this read has to raise. It
+        // was two untimed queries before #372, so a user with a long import
+        // history — exactly the caller who needs this recovery route — would
+        // trade a slow response for a P2028 500. Raised rather than removed:
+        // the point of a ceiling is that a runaway read still ends.
+        timeout: 15_000,
+      },
     );
   }
 
