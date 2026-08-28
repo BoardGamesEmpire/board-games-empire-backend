@@ -59,6 +59,7 @@ import * as crypto from 'node:crypto';
 import { configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 import { BGE_VERSION } from './generated/bge-version';
+import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
 import { createThrottlers } from './lib/throttlers';
@@ -268,6 +269,12 @@ import { createThrottlers } from './lib/throttlers';
     // locale-independent markers and this interceptor renders them per request,
     // so a cache hit is never pinned to the locale that first populated it.
     { provide: APP_INTERCEPTOR, useClass: I18nResponseInterceptor },
+
+    // Renders a Postgres deadlock as a typed, retryable 409 rather than a bare
+    // 500 (#398). Declared just inside I18nResponseInterceptor so the marker it
+    // throws is still translated at the edge, and outside everything below so a
+    // deadlock raised by any service on any route is converted exactly once.
+    { provide: APP_INTERCEPTOR, useClass: TransactionDeadlockInterceptor },
 
     { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {

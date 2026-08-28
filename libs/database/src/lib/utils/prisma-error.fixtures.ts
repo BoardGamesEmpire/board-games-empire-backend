@@ -15,10 +15,20 @@ import { Prisma } from '../client';
  */
 
 interface DriverAdapterCause {
-  readonly originalCode: string;
+  readonly originalCode?: string;
   readonly originalMessage: string;
   readonly kind: string;
   readonly constraint?: { readonly fields?: readonly string[]; readonly index?: string };
+  /**
+   * The postgres passthrough fields, present when the adapter has no mapped
+   * `kind` for the error — measured on a real 40P01 (#398). Absent from the
+   * mapped shapes, which is why they are optional rather than required.
+   */
+  readonly code?: string;
+  readonly severity?: string;
+  readonly message?: string;
+  readonly detail?: string;
+  readonly hint?: string;
 }
 
 /**
@@ -145,4 +155,83 @@ export function uniqueViolation(options: UniqueViolationOptions = {}): Prisma.Pr
  */
 export function uniqueViolationWithoutMeta(): Prisma.PrismaClientKnownRequestError {
   return uniqueViolation({ omitMeta: true });
+}
+
+export interface DeadlockOptions {
+  /**
+   * WRAPPED is the shape a deadlock takes when the losing statement was raw
+   * (`$queryRaw`/`$executeRaw`): Prisma wraps it as P2010 and keeps the driver
+   * error under `meta.driverAdapterError`. The default is the UNWRAPPED shape,
+   * which is what a deadlock on an ordinary model write raises — the driver
+   * error escapes with no Prisma class around it at all, and it is the shape
+   * #398's production case actually produced.
+   */
+  readonly wrapped?: boolean;
+
+  /** SQLSTATE. `40P01` is deadlock_detected. */
+  readonly sqlState?: string;
+
+  /**
+   * Drop `cause.originalCode`, leaving only the postgres-passthrough `code`.
+   * Models a driver release that renames the field the reader prefers.
+   */
+  readonly omitOriginalCode?: boolean;
+}
+
+/**
+ * A deadlock in the shape `@prisma/client@7.8.0` + `@prisma/adapter-pg` on
+ * Postgres 17 actually raises, measured 2026-08-27 (#398).
+ *
+ * There are TWO shapes, not one, and the difference is load-bearing: a raw
+ * statement's deadlock arrives as a `PrismaClientKnownRequestError` (P2010),
+ * while a model write's deadlock arrives as a bare `DriverAdapterError` with no
+ * Prisma `code` at all. A predicate that tests only `instanceof
+ * PrismaClientKnownRequestError` is blind to exactly the case that mattered.
+ *
+ * `kind: 'postgres'` rather than a mapped kind, because the adapter maps only
+ * the errors it has names for and passes everything else through — which is why
+ * the extra postgres fields (`severity`, `detail`, `hint`) appear here and not
+ * on {@link uniqueViolation}.
+ */
+export function deadlock(options: DeadlockOptions = {}): Error {
+  const { wrapped = false, sqlState = '40P01', omitOriginalCode = false } = options;
+
+  const driverError = new DriverAdapterError({
+    ...(omitOriginalCode ? {} : { originalCode: sqlState }),
+    originalMessage: 'deadlock detected',
+    kind: 'postgres',
+    code: sqlState,
+    severity: 'ERROR',
+    message: 'deadlock detected',
+    detail:
+      'Process 596 waits for ShareLock on transaction 2646; blocked by process 594.\n' +
+      'Process 594 waits for ShareLock on transaction 2647; blocked by process 596.',
+    hint: 'See server log for query details.',
+  });
+
+  if (!wrapped) {
+    return driverError;
+  }
+
+  return new Prisma.PrismaClientKnownRequestError(
+    '\nInvalid `prisma.$queryRaw()` invocation:\n\n\nRaw query failed. Code: `40P01`. Message: `deadlock detected`',
+    {
+      code: PrismaError.RawQueryFailed,
+      clientVersion: 'test',
+      meta: { driverAdapterError: driverError },
+    },
+  );
+}
+
+/**
+ * Prisma's OWN spelling for a deadlock — P2034, documented as "write conflict or
+ * deadlock". This stack does not emit it (the e2e pin records that), and the
+ * predicate accepts it anyway: the code means, by definition, the thing the
+ * retry answers.
+ */
+export function transactionWriteConflict(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError(
+    'Transaction failed due to a write conflict or a deadlock. Please retry your transaction',
+    { code: PrismaError.TransactionWriteConflict, clientVersion: 'test' },
+  );
 }

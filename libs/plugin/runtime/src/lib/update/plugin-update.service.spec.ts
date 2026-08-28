@@ -13,7 +13,7 @@ import {
   type PluginGrant,
   type UserPlugin,
 } from '@bge/database';
-import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { deadlock, uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -915,6 +915,51 @@ describe('PluginUpdateService', () => {
         await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(failure);
         expect(db.pluginGrant.create).toHaveBeenCalledTimes(1);
         expect(db.plugin.updateMany).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    /**
+     * A deadlock is not a collision: nothing about this transaction was wrong,
+     * Postgres simply chose it as the victim of a cycle. The abort took it
+     * whole, so the recovery is the same one whole retry — and the same bound
+     * (#398, D-398-2).
+     */
+    describe('a deadlock that aborts the activation transaction', () => {
+      it('retries the whole transaction when Postgres picks this one as the victim', async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        const seeded = makeGrant({ id: 'grant-4', permissionSlug: 'plugin|demo-sink|manage:digest' });
+        db.pluginGrant.create.mockRejectedValueOnce(deadlock()).mockResolvedValue(seeded);
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        queueGrantLock([]); // the victim attempt's locked read
+        queueGrantLock([]); // the retry's own read
+
+        const result = await service.approve({ slug: 'demo-sink', approverId: 'admin-1' });
+
+        // The retry seeds the FULL set, unlike the collision case above: a
+        // deadlock says nothing about what any other transaction decided, so
+        // the second attempt's locked read finds the same undecided checks.
+        expect(result.seededGrants).toEqual([seeded, seeded]);
+        expect(db.pluginGrant.create).toHaveBeenCalledTimes(3);
+        // Re-claimed, not carried over: the aborted attempt released it.
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+        expect(emitter.emit).toHaveBeenCalledTimes(1);
+      });
+
+      it('propagates a second deadlock rather than looping on the contention', async () => {
+        db.plugin.findUnique.mockResolvedValue(pendingPlugin(nextManifest()));
+        const second = deadlock();
+        db.pluginGrant.create.mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(second);
+        db.pluginGrant.findMany
+          .mockResolvedValueOnce([]) // compare()
+          .mockResolvedValueOnce([]); // serverChecksToSeed()
+        queueGrantLock([]);
+        queueGrantLock([]);
+
+        await expect(service.approve({ slug: 'demo-sink', approverId: 'admin-1' })).rejects.toBe(second);
+        expect(db.plugin.updateMany).toHaveBeenCalledTimes(2);
+        expect(emitter.emit).not.toHaveBeenCalled();
       });
     });
 

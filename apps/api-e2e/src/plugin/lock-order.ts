@@ -23,6 +23,29 @@ import { anyOf, type OrderedStage, relationLock } from '../support/shipped-funct
  * scan, which the characterization spec beside this one exists to prove takes
  * no lock at all. Two specs in one PR cannot call the same statement locked and
  * unlocked.
+ *
+ * ## What this model cannot see: FK-implied parent locks (#398, #399)
+ *
+ * Every stage here is matched from SOURCE — a written `FOR …` clause, or a
+ * Prisma call known to lock. Postgres also takes locks nobody wrote: an INSERT
+ * into a table with an FK to `plugins` takes `FOR KEY SHARE` on the parent row
+ * from the referential-integrity trigger, and RI checks are AFTER ROW triggers,
+ * so that lock lands only once the child tuple is already written. Four tables
+ * carry that FK — `plugin_grants`, `household_plugins`, `plugin_permissions`,
+ * `user_plugins` — so four child writes take a plugin-row lock this constant
+ * cannot observe, in the LAST position rather than the first.
+ *
+ * `decide()` is how that was found: it claimed `['grant row', 'unit row']`, said
+ * outright that it took no plugin-row lock, and deadlocked against activation's
+ * `FOR UPDATE` on every contended grant INSERT while both the barrier suite and
+ * the pin suite stayed green (#398). Its entries now claim the plugin row it
+ * really does take, first, because the source now says so.
+ *
+ * The general fix — inferring the implicit stage rather than trusting the
+ * written one — is #399. Until then the rule for a writer of any FK-child table
+ * is: claim the plugin row explicitly, or be invisible to this model. The
+ * deadlocks / does-not-deadlock pairs in the barrier spec are what actually hold
+ * the order; a static reader of source cannot observe a trigger.
  */
 export const CLAIMED_LOCK_ORDER = [
   {
@@ -182,19 +205,22 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     label: 'decide() — the required-denial branch',
     file: GRANT_SERVICE,
     functionName: 'decide',
-    stages: ['grant row', 'unit row'],
+    stages: ['plugin row', 'grant row', 'unit row'],
     because:
-      'The upsert takes the grant row, then the suspend mirror rides the same transaction. No plugin-row lock: ' +
-      'the in-transaction re-judgment reads the plugin row unlocked, which is what #361 may change.',
+      'The claim opens the transaction (#398), then the upsert takes the grant row, then the suspend mirror ' +
+      'rides the same transaction. The plugin-row lock is not optional decoration: the grant INSERT takes ' +
+      'FOR KEY SHARE on that row through the FK anyway, and takes it AFTER writing the grant tuple, so ' +
+      'without the claim this path holds the plugin row LAST and deadlocks against activation.',
   },
   {
     label: 'decide() — the grant row precedes the unit-scope key',
     file: GRANT_SERVICE,
     functionName: 'decide',
-    stages: ['grant row', 'advisory key'],
+    stages: ['plugin row', 'grant row', 'advisory key'],
     because:
       'The consent act is the enabling act (#225), so a granted user decision creates the anchor in the ' +
-      'decision transaction — which puts the key after the upsert that already holds the grant row.',
+      'decision transaction — which puts the key after the upsert that already holds the grant row, and ' +
+      'both after the claim that opens the transaction.',
   },
   {
     label: 'decide() — inside the granted user-anchor branch',

@@ -2,6 +2,7 @@ import {
   constraintIdentity,
   DatabaseService,
   identifiesConstraint,
+  isDeadlockError,
   PluginGrantScope,
   PluginGrantStatus,
   Prisma,
@@ -953,7 +954,13 @@ export class PluginUpdateService {
     try {
       return await attempt();
     } catch (error) {
-      if (!isGrantDecisionCollision(error)) {
+      // A deadlock joins the collision on this path (#398, D-398-2). It is not
+      // this transaction being wrong about anything — Postgres chose a victim
+      // of a cycle — but the recovery is identical: the abort took the whole
+      // transaction with it, so the honest answer is to run it again. Sharing
+      // the ONE retry rather than nesting a second is deliberate: two bounded
+      // retries compose into four attempts, and the bound is the point.
+      if (!isGrantDecisionCollision(error) && !isDeadlockError(error)) {
         throw error;
       }
 
