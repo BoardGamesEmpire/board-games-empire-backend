@@ -236,5 +236,8 @@
     "feature_state_tombstoned": "Plugin '{slug}' was uninstalled and has no feature state",
     "inventory_not_found": "Plugin '{slug}' is not installed",
     "inventory_tombstoned": "Plugin '{slug}' was uninstalled — reinstall it to manage it again"
+  },
+  "database": {
+    "deadlock": "Another change was being applied at the same time. Please retry the request."
   }
 }

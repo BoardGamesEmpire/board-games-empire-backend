@@ -1,5 +1,6 @@
 import type { Permission, Plugin, PluginGrant, PluginPermission } from '@bge/database';
 import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
+import { deadlock } from '@bge/database/testing';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
@@ -86,6 +87,25 @@ describe('PluginGrantService', () => {
     db = createMockDatabaseService();
     db.$transaction.mockImplementation((cb) => cb(db));
     db.plugin.findUnique.mockResolvedValue(plugin);
+
+    // Routes `$queryRaw` by table: the plugin-row claim (#398, D-398-1) answers
+    // with the row it locks, and the two unit-row locks keep the mock's default
+    // "no row" answer. A fourth raw statement landing here would otherwise get
+    // whichever row shape happened to match first and the test driving it would
+    // pass or fail for the wrong reason, so it fails loudly instead.
+    db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) => {
+      const sql = strings.join('');
+
+      if (sql.includes('FROM plugins')) {
+        return Promise.resolve([{ id: plugin.id }]);
+      }
+
+      if (sql.includes('FROM household_plugins') || sql.includes('FROM user_plugins')) {
+        return Promise.resolve([]);
+      }
+
+      throw new Error(`Unrouted $queryRaw in test: ${sql}`);
+    }) as never);
     db.permission.findUnique.mockResolvedValue({
       slug: 'feedback:read',
       subject: 'FeedbackSubmission',
@@ -128,6 +148,79 @@ describe('PluginGrantService', () => {
     status: PluginGrantStatus.Granted,
     deciderId: 'user-admin',
   } as const;
+
+  describe('decide — the plugin-row claim (#398)', () => {
+    it('claims the plugin row FOR SHARE before it writes the grant row', async () => {
+      await service.decide(serverDecision);
+
+      const [[template, boundId]] = db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][];
+      const sql = template.join('?').replace(/\s+/g, ' ').trim();
+
+      expect(sql).toBe('SELECT id FROM plugins WHERE id = ? FOR SHARE');
+      expect(boundId).toBe('plg_1');
+
+      // The whole point of the claim is WHERE it sits: the grant INSERT takes
+      // an implicit FOR KEY SHARE on this row through the FK, and it takes it
+      // AFTER the grant tuple is written. Claiming the row after the upsert
+      // would leave that inversion — and the deadlock — in place.
+      const claim = db.$queryRaw.mock.invocationCallOrder[0];
+
+      expect(claim).toBeLessThan(db.pluginGrant.upsert.mock.invocationCallOrder[0]);
+      expect(claim).toBeLessThan(db.pluginGrant.findUnique.mock.invocationCallOrder[0]);
+    });
+
+    it('re-reads the manifest before retrying, so the replay cannot stamp a superseded version', async () => {
+      const activated = {
+        ...plugin,
+        version: '1.4.0',
+        manifestJson: { ...manifest, version: '1.4.0' },
+      } as unknown as Plugin;
+
+      db.plugin.findUnique.mockResolvedValueOnce(plugin).mockResolvedValue(activated);
+      db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockResolvedValue(grantRow({ manifestVersion: '1.4.0' }));
+
+      await service.decide(serverDecision);
+
+      // A deadlock means a writer of this plugin row was live, and the writer
+      // this path deadlocks against is an activation — so a retry that replayed
+      // only the transaction would record the version that just lost, with the
+      // risk level derived from it.
+      expect(db.plugin.findUnique).toHaveBeenCalledTimes(2);
+      expect(db.pluginGrant.upsert).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ manifestVersion: '1.4.0' }),
+          update: expect.objectContaining({ manifestVersion: '1.4.0' }),
+        }),
+      );
+    });
+
+    it('runs the decision again when the first attempt is the deadlock victim', async () => {
+      db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockResolvedValue(grantRow());
+
+      const result = await service.decide(serverDecision);
+
+      expect(result.changed).toBe(true);
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('propagates a second deadlock rather than looping on it', async () => {
+      const second = deadlock();
+
+      db.pluginGrant.upsert.mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(second);
+
+      await expect(service.decide(serverDecision)).rejects.toBe(second);
+      expect(db.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not retry a failure that is not a deadlock', async () => {
+      const boom = new Error('not a deadlock');
+
+      db.pluginGrant.upsert.mockRejectedValue(boom);
+
+      await expect(service.decide(serverDecision)).rejects.toBe(boom);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
 
   describe('decide — happy paths', () => {
     it('creates a Server-scope grant with the sentinel scopeId, the manifest version, and the resolved core risk', async () => {

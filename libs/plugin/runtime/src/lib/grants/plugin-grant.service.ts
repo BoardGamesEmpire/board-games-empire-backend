@@ -4,6 +4,7 @@ import {
   hasBoundingConditions,
   PluginGrantScope,
   PluginGrantStatus,
+  retryOnDeadlock,
   riskCovers,
   RiskLevel,
   SERVER_SCOPE_SENTINEL,
@@ -131,37 +132,6 @@ export class PluginGrantService {
    */
   async decide(input: PluginGrantDecisionInput): Promise<PluginGrantDecisionResult> {
     const initiatedAt = new Date();
-    const plugin = await this.loadPlugin(input.slug);
-    const { check, validated } = this.resolveRequestedCheck(plugin, input.permissionSlug);
-
-    this.assertScopeCoherence(check, input);
-
-    // D-AV (#322): a denial against a check the ACTIVE manifest requires at
-    // server consent scope is refused, not recorded — the decider IS the
-    // kill-switch owner, so the honest levers (disable, uninstall) already
-    // exist as first-class actions, and recording the contradiction would
-    // leave the plugin serving with a permission its author declared
-    // load-bearing. `resolveRequestedCheck` resolves against the ACTIVE
-    // manifest, so a permission that only a PENDING manifest promotes to
-    // required is untouched here: that denial stays legal and blocks at
-    // approve instead (D-AB) — an upgrade's rejected permissions never
-    // coerce the installed plugin.
-    if (input.status === PluginGrantStatus.Denied && check.required && check.consentScope === 'server') {
-      throw new PluginGrantRequiredDenialError(plugin.slug, check.canonicalSlug);
-    }
-
-    const scopeId = this.normalizeScopeId(input);
-    const decidedRiskLevel = await this.resolveRiskLevel(plugin, check);
-    await this.assertDeciderAuthority(input, scopeId);
-
-    const uniqueWhere = {
-      pluginId_scopeType_scopeId_permissionSlug: {
-        pluginId: plugin.id,
-        scopeType: input.scopeType,
-        scopeId,
-        permissionSlug: check.canonicalSlug,
-      },
-    };
 
     type DecisionOutcome =
       | { readonly unchanged: true; readonly grant: PluginGrant }
@@ -172,155 +142,256 @@ export class PluginGrantService {
           readonly suspension: SuspendedUnitState | null;
         };
 
-    const outcome = await this.db.$transaction(async (tx): Promise<DecisionOutcome> => {
-      const existing = await tx.pluginGrant.findUnique({ where: uniqueWhere });
+    /** What one whole attempt resolves to — the outcome, and the reads it judged against. */
+    type DecisionAttempt = {
+      readonly plugin: Plugin;
+      readonly check: NormalizedPermissionRequest;
+      readonly validated: PluginManifestValidationResult;
+      readonly scopeId: string;
+      readonly outcome: DecisionOutcome;
+    };
 
-      if (
-        existing !== null &&
-        existing.status === input.status &&
-        existing.manifestVersion === plugin.version &&
-        existing.decidedRiskLevel === decidedRiskLevel
-      ) {
-        return { unchanged: true, grant: existing };
+    /**
+     * One whole attempt: the manifest read, the gates that judge against it,
+     * and the transaction that writes the decision.
+     *
+     * The READ is inside on purpose. A deadlock means a concurrent writer of
+     * this plugin row was live — most often an activation, since that is the
+     * writer this path deadlocks against (#398) — so replaying only the
+     * transaction would re-derive `manifestVersion` and `decidedRiskLevel` from
+     * a manifest the retry has specific reason to believe just moved. Same rule
+     * activation's own retry states for the same reason: run the whole thing
+     * again against a snapshot that can see what beat it. Reads are all this
+     * replays; nothing above the transaction writes.
+     *
+     * This does NOT make the decision manifest-safe in general — every
+     * non-server-denial still judges against a pre-transaction read, and closing
+     * that is #361 — it keeps the retry from being MORE stale than the attempt
+     * it replaces.
+     */
+    const attempt = async (): Promise<DecisionAttempt> => {
+      const plugin = await this.loadPlugin(input.slug);
+      const { check, validated } = this.resolveRequestedCheck(plugin, input.permissionSlug);
+
+      this.assertScopeCoherence(check, input);
+
+      // D-AV (#322): a denial against a check the ACTIVE manifest requires at
+      // server consent scope is refused, not recorded — the decider IS the
+      // kill-switch owner, so the honest levers (disable, uninstall) already
+      // exist as first-class actions, and recording the contradiction would
+      // leave the plugin serving with a permission its author declared
+      // load-bearing. `resolveRequestedCheck` resolves against the ACTIVE
+      // manifest, so a permission that only a PENDING manifest promotes to
+      // required is untouched here: that denial stays legal and blocks at
+      // approve instead (D-AB) — an upgrade's rejected permissions never
+      // coerce the installed plugin.
+      if (input.status === PluginGrantStatus.Denied && check.required && check.consentScope === 'server') {
+        throw new PluginGrantRequiredDenialError(plugin.slug, check.canonicalSlug);
       }
 
-      const decisionFields = {
-        status: input.status,
-        decidedById: input.deciderId,
-        decidedAt: initiatedAt,
-        manifestVersion: plugin.version,
-        decidedRiskLevel,
-      };
+      const scopeId = this.normalizeScopeId(input);
+      const decidedRiskLevel = await this.resolveRiskLevel(plugin, check);
+      await this.assertDeciderAuthority(input, scopeId);
 
-      // Upsert, not create-vs-update: findUnique-then-create is not atomic
-      // under READ COMMITTED, and two concurrent identical decisions would
-      // otherwise leave the loser with an unhandled P2002 instead of the
-      // documented idempotent outcome. The pre-read still serves the
-      // idempotency short-circuit and the event's before snapshot; in the
-      // narrow race window both writers emit, which is acceptable duplicate
-      // provenance rather than a failure.
-      const written = await tx.pluginGrant.upsert({
-        where: uniqueWhere,
-        create: {
+      const uniqueWhere = {
+        pluginId_scopeType_scopeId_permissionSlug: {
           pluginId: plugin.id,
           scopeType: input.scopeType,
           scopeId,
           permissionSlug: check.canonicalSlug,
-          ...decisionFields,
         },
-        update: decisionFields,
+      };
+
+      const outcome = await this.db.$transaction(async (tx): Promise<DecisionOutcome> => {
+        // The plugin row, claimed FIRST and shared (D-398-1, D-398-3). Not for
+        // what it reads — nothing here interprets the row, and the
+        // in-transaction re-judgment of the manifest stays #361's — but for
+        // WHERE the lock lands. Every INSERT into `plugin_grants` takes
+        // `FOR KEY SHARE` on this row through the FK, and RI checks are AFTER
+        // ROW triggers, so that lock arrives only once the grant tuple is
+        // already written: the upsert below would otherwise take the plugin row
+        // LAST and invert the total order plugin row → grant row → advisory →
+        // unit row that activation's `FOR UPDATE` follows. Against activation
+        // that inversion is a cycle rather than a queue, and the loser rendered
+        // an untyped 500 (#398). Claiming here makes this transaction block
+        // BEFORE it writes the grant tuple, so nothing can be waiting on that
+        // tuple while this transaction waits on the plugin row.
+        //
+        // `FOR SHARE` rather than the FK's weaker `FOR KEY SHARE`: both close
+        // the cycle, and the wider mode also excludes the non-key UPDATE that a
+        // manifest replacement is — which is what #361's re-read needs. Raw SQL
+        // because Prisma's query API cannot express a row lock; unqualified
+        // table name so the search_path (per-worker test schemas) resolves it.
+        // The row is deliberately not read for content: a claim that returned
+        // nothing means a plugin row that does not exist, and the upsert's own
+        // FK is the honest reporter of that.
+        await tx.$queryRaw`SELECT id FROM plugins WHERE id = ${plugin.id} FOR SHARE`;
+
+        const existing = await tx.pluginGrant.findUnique({ where: uniqueWhere });
+
+        if (
+          existing !== null &&
+          existing.status === input.status &&
+          existing.manifestVersion === plugin.version &&
+          existing.decidedRiskLevel === decidedRiskLevel
+        ) {
+          return { unchanged: true, grant: existing };
+        }
+
+        const decisionFields = {
+          status: input.status,
+          decidedById: input.deciderId,
+          decidedAt: initiatedAt,
+          manifestVersion: plugin.version,
+          decidedRiskLevel,
+        };
+
+        // Upsert, not create-vs-update: findUnique-then-create is not atomic
+        // under READ COMMITTED, and two concurrent identical decisions would
+        // otherwise leave the loser with an unhandled P2002 instead of the
+        // documented idempotent outcome. The pre-read still serves the
+        // idempotency short-circuit and the event's before snapshot; in the
+        // narrow race window both writers emit, which is acceptable duplicate
+        // provenance rather than a failure.
+        const written = await tx.pluginGrant.upsert({
+          where: uniqueWhere,
+          create: {
+            pluginId: plugin.id,
+            scopeType: input.scopeType,
+            scopeId,
+            permissionSlug: check.canonicalSlug,
+            ...decisionFields,
+          },
+          update: decisionFields,
+        });
+
+        // The pre-transaction D-AV judgment cannot order itself against a
+        // concurrent update activation: it read the plugin row BEFORE this
+        // transaction, and #356's FOR UPDATE only serializes the activation
+        // against decisions that COMMIT first — a decide() already past its
+        // judgment would just block on the row lock and then write. Re-judge
+        // HERE, after the upsert acquired the grant-row lock (so any
+        // activation that got there first has committed and is visible, and
+        // any activation arriving later blocks until this transaction
+        // resolves and then refuses over the denial it sees). The throw takes
+        // the write back with it.
+        if (input.status === PluginGrantStatus.Denied && check.consentScope === 'server') {
+          await this.assertDenialStillLegal(tx, plugin, check.canonicalSlug);
+        }
+
+        // The suspend half of the unit mirror rides the decision transaction
+        // (#322, PR #359 round 3): recording a required denial while failing
+        // to suspend the unit is fail-OPEN — the endpoint reports success and
+        // the plugin keeps serving after consent was withdrawn, and nothing
+        // in the tree retries a swallowed mirror (the caller got its 200).
+        // Both-or-neither: a suspension that cannot be written takes the
+        // denial back with it, and the caller retries the whole decision.
+        // The lock order this adds is a suffix of the claimed one — plugin row
+        // (the claim opening this transaction), grant row (the upsert above),
+        // then unit row — and activation never lock-waits on unit-scope grant
+        // rows. That last fact is still true, and it was never the whole
+        // argument: the cycle #398 found ran through the FK on `plugin_grants`,
+        // which takes a plugin-row lock no statement here asked for, after the
+        // tuple is already written. The claim above is what closes that, not
+        // this ordering. The
+        // re-enable direction deliberately keeps its own transaction and
+        // never-throw posture: failing to CLEAR a suspension is fail-closed.
+        let suspension: SuspendedUnitState | null = null;
+
+        if (input.status === PluginGrantStatus.Denied && check.required) {
+          if (input.scopeType === PluginGrantScope.Household) {
+            suspension = await this.suspendHouseholdUnit(
+              tx,
+              plugin,
+              validated,
+              scopeId,
+              check.canonicalSlug,
+              initiatedAt,
+            );
+          } else if (input.scopeType === PluginGrantScope.User) {
+            suspension = await this.suspendUserUnit(tx, plugin, validated, scopeId, check.canonicalSlug, initiatedAt);
+          }
+        }
+
+        // The consent act IS the enabling act (#225): a Granted user-scope
+        // decision ensures the user's enablement anchor exists, atomically
+        // with the decision — committing consent without the row would leave
+        // a user who consented but is not enabled, a state only another
+        // decision could heal. The update arm is deliberately empty: the row
+        // may exist suspended or user-disabled, and consent never writes
+        // `enabled` or clears a suspension here — the late-acceptance
+        // re-enable path below owns that transition, with its own predicate.
+        // A Denied decision creates no row: a refusal confers no enablement,
+        // and the durable denial already lives on the grant row itself.
+        //
+        // Born suspended over an existing refusal (#322, PR #359 round 3):
+        // before this row exists, its ABSENCE is what keeps a unit with a
+        // durably Denied required check out of service — a rowless unit does
+        // not serve. Creating the anchor unsuspended would put that unit IN
+        // service the moment any other grant lands, without the outstanding
+        // predicate ever being consulted: the re-enable pass keys on
+        // suspended rows, and this one is brand new. So the row is born with
+        // the state the mirror would otherwise owe it. Denied specifically,
+        // never merely pending — a unit working through its initial consent
+        // set is legitimately enabled; only an explicit refusal contradicts
+        // serving. A concurrent flip of that denial commits either before
+        // this read (born unsuspended, correct) or after it, and the flip's
+        // own re-enable pass then clears the suspension it finds — BOTH of
+        // those orderings exist only because the advisory lock below
+        // serializes this path against every other writer of this unit's
+        // state; without it, two overlapping transactions are each invisible
+        // to the other (see lockUserUnitScope).
+        if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
+          await lockUserUnitScope(tx, scopeId, plugin.id);
+
+          const otherRequiredSlugs = validated.permissionChecks
+            .filter(
+              (candidate) =>
+                candidate.consentScope === 'user' &&
+                candidate.required &&
+                candidate.canonicalSlug !== check.canonicalSlug,
+            )
+            .map((candidate) => candidate.canonicalSlug);
+          const deniedRequired =
+            otherRequiredSlugs.length === 0
+              ? 0
+              : await tx.pluginGrant.count({
+                  where: {
+                    pluginId: plugin.id,
+                    scopeType: PluginGrantScope.User,
+                    scopeId,
+                    status: PluginGrantStatus.Denied,
+                    permissionSlug: { in: otherRequiredSlugs },
+                  },
+                });
+          const bornSuspended = deniedRequired > 0;
+
+          await tx.userPlugin.upsert({
+            where: { userId_pluginId: { userId: scopeId, pluginId: plugin.id } },
+            create: {
+              userId: scopeId,
+              pluginId: plugin.id,
+              suspendedForConsent: bornSuspended,
+              suspendedAt: bornSuspended ? initiatedAt : null,
+            },
+            update: {},
+          });
+        }
+
+        return { unchanged: false, before: existing, after: written, suspension };
       });
 
-      // The pre-transaction D-AV judgment cannot order itself against a
-      // concurrent update activation: it read the plugin row BEFORE this
-      // transaction, and #356's FOR UPDATE only serializes the activation
-      // against decisions that COMMIT first — a decide() already past its
-      // judgment would just block on the row lock and then write. Re-judge
-      // HERE, after the upsert acquired the grant-row lock (so any
-      // activation that got there first has committed and is visible, and
-      // any activation arriving later blocks until this transaction
-      // resolves and then refuses over the denial it sees). The throw takes
-      // the write back with it.
-      if (input.status === PluginGrantStatus.Denied && check.consentScope === 'server') {
-        await this.assertDenialStillLegal(tx, plugin, check.canonicalSlug);
-      }
+      return { plugin, check, validated, scopeId, outcome };
+    };
 
-      // The suspend half of the unit mirror rides the decision transaction
-      // (#322, PR #359 round 3): recording a required denial while failing
-      // to suspend the unit is fail-OPEN — the endpoint reports success and
-      // the plugin keeps serving after consent was withdrawn, and nothing
-      // in the tree retries a swallowed mirror (the caller got its 200).
-      // Both-or-neither: a suspension that cannot be written takes the
-      // denial back with it, and the caller retries the whole decision.
-      // The lock order this introduces is the same for every decide() —
-      // grant row (the upsert above), then unit row — and activation never
-      // lock-waits on unit-scope grant rows, so no cycle exists. The
-      // re-enable direction deliberately keeps its own transaction and
-      // never-throw posture: failing to CLEAR a suspension is fail-closed.
-      let suspension: SuspendedUnitState | null = null;
-
-      if (input.status === PluginGrantStatus.Denied && check.required) {
-        if (input.scopeType === PluginGrantScope.Household) {
-          suspension = await this.suspendHouseholdUnit(
-            tx,
-            plugin,
-            validated,
-            scopeId,
-            check.canonicalSlug,
-            initiatedAt,
-          );
-        } else if (input.scopeType === PluginGrantScope.User) {
-          suspension = await this.suspendUserUnit(tx, plugin, validated, scopeId, check.canonicalSlug, initiatedAt);
-        }
-      }
-
-      // The consent act IS the enabling act (#225): a Granted user-scope
-      // decision ensures the user's enablement anchor exists, atomically
-      // with the decision — committing consent without the row would leave
-      // a user who consented but is not enabled, a state only another
-      // decision could heal. The update arm is deliberately empty: the row
-      // may exist suspended or user-disabled, and consent never writes
-      // `enabled` or clears a suspension here — the late-acceptance
-      // re-enable path below owns that transition, with its own predicate.
-      // A Denied decision creates no row: a refusal confers no enablement,
-      // and the durable denial already lives on the grant row itself.
-      //
-      // Born suspended over an existing refusal (#322, PR #359 round 3):
-      // before this row exists, its ABSENCE is what keeps a unit with a
-      // durably Denied required check out of service — a rowless unit does
-      // not serve. Creating the anchor unsuspended would put that unit IN
-      // service the moment any other grant lands, without the outstanding
-      // predicate ever being consulted: the re-enable pass keys on
-      // suspended rows, and this one is brand new. So the row is born with
-      // the state the mirror would otherwise owe it. Denied specifically,
-      // never merely pending — a unit working through its initial consent
-      // set is legitimately enabled; only an explicit refusal contradicts
-      // serving. A concurrent flip of that denial commits either before
-      // this read (born unsuspended, correct) or after it, and the flip's
-      // own re-enable pass then clears the suspension it finds — BOTH of
-      // those orderings exist only because the advisory lock below
-      // serializes this path against every other writer of this unit's
-      // state; without it, two overlapping transactions are each invisible
-      // to the other (see lockUserUnitScope).
-      if (input.status === PluginGrantStatus.Granted && input.scopeType === PluginGrantScope.User) {
-        await lockUserUnitScope(tx, scopeId, plugin.id);
-
-        const otherRequiredSlugs = validated.permissionChecks
-          .filter(
-            (candidate) =>
-              candidate.consentScope === 'user' &&
-              candidate.required &&
-              candidate.canonicalSlug !== check.canonicalSlug,
-          )
-          .map((candidate) => candidate.canonicalSlug);
-        const deniedRequired =
-          otherRequiredSlugs.length === 0
-            ? 0
-            : await tx.pluginGrant.count({
-                where: {
-                  pluginId: plugin.id,
-                  scopeType: PluginGrantScope.User,
-                  scopeId,
-                  status: PluginGrantStatus.Denied,
-                  permissionSlug: { in: otherRequiredSlugs },
-                },
-              });
-        const bornSuspended = deniedRequired > 0;
-
-        await tx.userPlugin.upsert({
-          where: { userId_pluginId: { userId: scopeId, pluginId: plugin.id } },
-          create: {
-            userId: scopeId,
-            pluginId: plugin.id,
-            suspendedForConsent: bornSuspended,
-            suspendedAt: bornSuspended ? initiatedAt : null,
-          },
-          update: {},
-        });
-      }
-
-      return { unchanged: false, before: existing, after: written, suspension };
-    });
+    // Retried once if Postgres picks this attempt as the deadlock victim
+    // (D-398-2). Replaying is safe because the abort took the transaction
+    // whole — no write outlives it, and the events emit below, after the
+    // commit — and bounded at once for the same reason the activation service
+    // bounds its P2002 retry: a second deadlock means a contender is sustaining
+    // the contention, and the edge renders that as a typed refusal rather than
+    // a bare 500.
+    const { plugin, check, validated, scopeId, outcome } = await retryOnDeadlock(attempt);
 
     // An idempotent re-statement still reconciles the unit: the mirror
     // passes are the only writers of `suspendedForConsent` on the decision

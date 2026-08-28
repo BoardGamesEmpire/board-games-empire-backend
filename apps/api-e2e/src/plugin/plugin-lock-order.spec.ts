@@ -1,4 +1,5 @@
 import { PluginGrantStatus } from '@bge/database';
+import { randomUUID } from 'node:crypto';
 import { expectBlocked, withBarrier } from '../support/lock-barrier';
 import { orderMismatch, readShippedBranch, readShippedFunction } from '../support/shipped-function';
 import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
@@ -10,6 +11,7 @@ import {
   arrangePlugin,
   arrangeServerGrant,
   GRANT_DECISION_CLAIM,
+  SERVER_GRANT_INSERT,
 } from './lock-fixtures';
 import {
   CLAIMED_LOCK_ORDER,
@@ -80,6 +82,33 @@ describe('the plugin consent path is one lock order (#360)', () => {
   });
   const advisoryKeyFormat = readShippedValue(UNIT_SCOPE_LOCK, ['householdId', 'pluginId'], {
     after: 'lockHouseholdUnitScope',
+  });
+
+  /**
+   * Stage 1, as `decide()` now takes it (#398). Lifted from the grant service
+   * rather than reusing `pluginShareLock` above: the two statements are the same
+   * MODE on the same row but not the same text — the unit path's carries #368's
+   * manifest comparison and this one reads `id` and nothing else — and a barrier
+   * case that replayed the wrong file's statement would report a lock the
+   * decision path does not actually take.
+   */
+  const decisionPluginClaim = readShippedSql(GRANT_SERVICE, ['plugin.id'], {
+    after: 'const attempt = async ()',
+    matching: /FOR SHARE/,
+  });
+
+  /**
+   * Activation's own plugin-row claim (D-CN, #370) — the explicit `FOR UPDATE`
+   * over `Plugin.config`, lifted rather than stood in for.
+   *
+   * `ACTIVATION_VERSION_BUMP` cannot serve the #398 cases: it writes non-key
+   * columns only, so it takes `FOR NO KEY UPDATE`, and that mode does NOT
+   * conflict with the `FOR KEY SHARE` an FK takes. The cycle those cases are
+   * about needs the mode activation really holds.
+   */
+  const activationPluginClaim = readShippedSql(UPDATE_SERVICE, ['plugin.id'], {
+    after: 'const [current] = await tx.$queryRaw',
+    matching: /FOR UPDATE/,
   });
 
   /** Stage 4: the unit row, as the mirror passes take it. */
@@ -356,6 +385,106 @@ describe('the plugin consent path is one lock order (#360)', () => {
         // Exactly one, and never which one: the victim is Postgres's choice.
         expect(victims).toHaveLength(1);
         expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      });
+    });
+
+    /**
+     * The cycle #398 reported, and the reason the two source pins below could
+     * both be green while it existed.
+     *
+     * `decide()`'s upsert takes a plugin-row lock nobody wrote: `plugin_grants`
+     * has an FK to `plugins`, referential-integrity checks are AFTER ROW
+     * triggers, and the mode is `FOR KEY SHARE` — which conflicts with the
+     * `FOR UPDATE` activation is holding. Because the trigger fires after the
+     * row is written, the decision ends up holding the grant tuple while it
+     * waits for the plugin row, and activation's own seeding INSERT of the same
+     * key then waits on that tuple. Neither can finish.
+     *
+     * The INSERT arm specifically: a decision on a slug that already has a row
+     * takes the UPDATE arm and collides on the row lock instead, which queues.
+     */
+    it('deadlocks when a decision writes its grant row before claiming the plugin row (#398)', async () => {
+      const plugin = await arrangeContendedPlugin();
+      const undecidedSlug = `probe:${randomUUID()}`;
+
+      await withBarrier(async (barrier) => {
+        const { holder, waiter } = barrier;
+
+        await holder.begin();
+        await holder.query(activationPluginClaim.text, [plugin.pluginId]);
+
+        await waiter.begin();
+
+        // Half the cycle: the tuple is written, then the FK trigger asks for the
+        // plugin row activation is holding.
+        const decision = waiter.issue(
+          SERVER_GRANT_INSERT,
+          [randomUUID(), plugin.pluginId, undecidedSlug],
+          "the decision's grant INSERT",
+        );
+
+        await expectBlocked(barrier, decision);
+
+        // Closing it. Deliberately NOT asserted as blocked: from here Postgres
+        // aborts a victim it chooses, and an assertion that both are waiting
+        // races that abort (#330).
+        const seeding = holder.issue(
+          SERVER_GRANT_INSERT,
+          [randomUUID(), plugin.pluginId, undecidedSlug],
+          "activation's seeding INSERT",
+        );
+        const outcomes = await Promise.allSettled([decision.result(), seeding.result()]);
+        const victims = outcomes.filter(
+          (outcome) => outcome.status === 'rejected' && (outcome.reason as { code?: string }).code === '40P01',
+        );
+
+        // Exactly one, and never which one: the victim is Postgres's choice.
+        expect(victims).toHaveLength(1);
+        expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      });
+    });
+
+    /**
+     * The control that makes the case above about the ORDER rather than about
+     * these two statements. Identical fixtures, identical INSERTs, identical
+     * interleaving — the decision simply claims the plugin row before writing
+     * anything, which is what the fix ships.
+     *
+     * The loser still loses; what changes is HOW. It waits before it has written
+     * anything, so nothing can be waiting on it, and when activation commits it
+     * finds a committed row and raises a unique violation — the failure
+     * activation's bounded retry already exists to answer.
+     */
+    it('does not deadlock when the decision claims the plugin row first, same contention (#398)', async () => {
+      const plugin = await arrangeContendedPlugin();
+      const undecidedSlug = `probe:${randomUUID()}`;
+
+      await withBarrier(async (barrier) => {
+        const { holder, waiter } = barrier;
+
+        await holder.begin();
+        await holder.query(activationPluginClaim.text, [plugin.pluginId]);
+
+        await waiter.begin();
+
+        const claim = waiter.issue(decisionPluginClaim.text, [plugin.pluginId], "the decision's plugin-row claim");
+
+        await expectBlocked(barrier, claim);
+
+        // Free, and that is the whole difference: the decision holds no grant
+        // tuple for this to wait on.
+        await holder.query(SERVER_GRANT_INSERT, [randomUUID(), plugin.pluginId, undecidedSlug]);
+        await holder.commit();
+        await claim.result();
+
+        const collision = await waiter
+          .query(SERVER_GRANT_INSERT, [randomUUID(), plugin.pluginId, undecidedSlug])
+          .then(() => undefined)
+          .catch((error: unknown) => error);
+
+        // unique_violation, not deadlock_detected: P2002, which the activation
+        // service retries and `decide()`'s upsert resolves in place.
+        expect((collision as { code?: string } | undefined)?.code).toBe('23505');
       });
     });
 

@@ -300,8 +300,44 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitEnabledEvent.eventName, expect.anything());
   });
 
+  /**
+   * The unit-row lock among `$queryRaw`'s calls — never `mock.calls[0]`, because
+   * `decide()` opens its transaction with the plugin-row claim (#398) and that is
+   * a raw statement too.
+   */
+  const unitLockCalls = (): [TemplateStringsArray, ...unknown[]][] =>
+    (db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]).filter(([template]) =>
+      /FROM (household_plugins|user_plugins)/.test(template.join('')),
+    );
+
+  /** Its invocation order, for the assertions that pin what precedes it. */
+  const unitLockOrder = (): number => {
+    const index = (db.$queryRaw.mock.calls as [TemplateStringsArray][]).findIndex(([template]) =>
+      /FROM (household_plugins|user_plugins)/.test(template.join('')),
+    );
+
+    expect(index).toBeGreaterThanOrEqual(0);
+
+    return db.$queryRaw.mock.invocationCallOrder[index];
+  };
+
+  /**
+   * Fails the unit-row lock and only it.
+   *
+   * A blanket `$queryRaw` rejection would fail the plugin-row claim instead
+   * (#398) — aborting the decision before it writes anything, which is a
+   * different scenario than any mirror case here means to describe, and one that
+   * would keep some of them green for the wrong reason.
+   */
+  const failUnitLock = (error: Error): void => {
+    db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) =>
+      strings.join('').includes('FROM plugins')
+        ? Promise.resolve([{ id: 'plugin-1' }])
+        : Promise.reject(error)) as never);
+  };
+
   it('never fails the committed decision when the re-enable check errors — logged, not thrown', async () => {
-    db.$queryRaw.mockRejectedValue(new Error('connection reset'));
+    failUnitLock(new Error('connection reset'));
 
     await expect(service.decide(decision())).resolves.toMatchObject({ changed: true });
   });
@@ -401,7 +437,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     });
 
     it('never fails the committed decision when the re-enable check errors — logged, not thrown', async () => {
-      db.$queryRaw.mockRejectedValue(new Error('connection reset'));
+      failUnitLock(new Error('connection reset'));
 
       await expect(service.decide(userDecision())).resolves.toMatchObject({ changed: true });
     });
@@ -453,7 +489,10 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       // Delta-scoped: the mirror does not even look the unit up. A unit
       // legitimately enabled while some OTHER requirement is pending is not
       // this decision's to suspend.
-      expect(db.$queryRaw).not.toHaveBeenCalled();
+      // No unit-row lock, which is what "the mirror never ran" means here. Not
+      // "no raw statement at all": the decision transaction opens with the
+      // plugin-row claim (#398) whatever the mirror does.
+      expect(unitLockCalls()).toHaveLength(0);
       expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
     });
 
@@ -527,7 +566,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
      * it and no event of any kind is announced.
      */
     it('a suspension failure on a changed denial fails the whole decision — nothing commits, nothing emits', async () => {
-      db.$queryRaw.mockRejectedValue(new Error('connection reset'));
+      failUnitLock(new Error('connection reset'));
 
       await expect(service.decide(decision({ status: PluginGrantStatus.Denied }))).rejects.toThrow('connection reset');
       expect(emitter.emit).not.toHaveBeenCalled();
@@ -537,7 +576,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       db.pluginGrant.findUnique.mockResolvedValue(
         makeGrant({ status: PluginGrantStatus.Denied, decidedRiskLevel: RiskLevel.Low }),
       );
-      db.$queryRaw.mockRejectedValue(new Error('connection reset'));
+      failUnitLock(new Error('connection reset'));
 
       await expect(service.decide(decision({ status: PluginGrantStatus.Denied }))).resolves.toMatchObject({
         changed: false,
@@ -592,7 +631,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
    */
   describe('unit-row lock (mirror serialization)', () => {
     const capturedSql = (call: number): string => {
-      const [template] = db.$queryRaw.mock.calls[call] as [TemplateStringsArray];
+      const [template] = unitLockCalls()[call];
 
       return template.join('?').replace(/\s+/g, ' ');
     };
@@ -607,9 +646,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       expect(db.$transaction).toHaveBeenCalledTimes(2);
       // The predicate reads grants; it must do so with the unit already
       // locked, or the answer it computes is not the answer it writes.
-      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-        db.pluginGrant.findMany.mock.invocationCallOrder[0],
-      );
+      expect(unitLockOrder()).toBeLessThan(db.pluginGrant.findMany.mock.invocationCallOrder[0]);
     });
 
     it('both household passes take the household advisory key BEFORE the row lock (#323)', async () => {
@@ -625,7 +662,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       const reenableAdvisory = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, string];
       expect(reenableAdvisory[0].join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
       expect(reenableAdvisory[1]).toBe('plugin_grant:household_unit:household-1:plugin-1');
-      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$queryRaw.mock.invocationCallOrder[0]);
+      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(unitLockOrder());
 
       jest.clearAllMocks();
 
@@ -639,7 +676,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       const suspendAdvisory = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, string];
       expect(suspendAdvisory[0].join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
       expect(suspendAdvisory[1]).toBe('plugin_grant:household_unit:household-1:plugin-1');
-      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$queryRaw.mock.invocationCallOrder[0]);
+      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(unitLockOrder());
     });
 
     it('lets the predicate under the lock overrule the trigger that fired the pass (reconcile path)', async () => {
@@ -883,7 +920,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       // over-serializes.
       expect(denialAdvisory[0].join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
       // Taken before the (empty) unit-row lock, so the order is total.
-      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(db.$queryRaw.mock.invocationCallOrder[0]);
+      expect(db.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(unitLockOrder());
 
       db.permission.findUnique.mockResolvedValue(corePermission('read:public_content', RiskLevel.Low));
       db.pluginGrant.upsert.mockResolvedValue(grantQ());
