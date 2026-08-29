@@ -7,6 +7,9 @@ import {
   batchTransactionCall,
   createTestingModuleWithDb,
   paginationQuery,
+  prismaColumn,
+  prismaTable,
+  readPrismaModels,
   unwrapTransaction,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -21,8 +24,6 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Http, PrismaError } from '@status/codes';
-import { readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { HouseholdEvents } from '../constants/household-events.constant';
 import {
   HOUSEHOLD_MEMBER_UNIQUE_COLUMNS,
@@ -1806,30 +1807,9 @@ describe('HouseholdMemberService', () => {
    * transactions (#239).
    */
   describe('raw lock SQL', () => {
-    const findSchemaDir = (): string => {
-      let dir = __dirname;
-
-      for (let depth = 0; depth < 10; depth += 1) {
-        const candidate = join(dir, 'prisma', 'models');
-
-        try {
-          if (statSync(candidate).isDirectory()) {
-            return candidate;
-          }
-        } catch {
-          // Not this level; keep walking toward the workspace root.
-        }
-
-        dir = resolve(dir, '..');
-      }
-
-      throw new Error('Could not locate prisma/models by walking up from the spec directory');
-    };
-
-    // The three models the lock's SQL touches, read by name. An earlier version
-    // walked `prisma/models` recursively and read every `.prisma` file, which was
-    // slower and — worse — silently found nothing if a model moved. Naming them
-    // fails loudly with the missing path instead.
+    // The three models the lock's SQL touches, read by name. Naming them fails
+    // loudly with the missing path if a model moves, where a directory walk
+    // would silently find nothing.
     const MODEL_FILES = [
       'household/household-role.prisma',
       'household/household-member.prisma',
@@ -1837,29 +1817,10 @@ describe('HouseholdMemberService', () => {
       'permissions/role.prisma',
     ];
 
-    const readSchema = (): string => {
-      const dir = findSchemaDir();
+    const readSchema = (): string => readPrismaModels(__dirname, ...MODEL_FILES);
 
-      return MODEL_FILES.map((file) => readFileSync(join(dir, file), 'utf8')).join('\n');
-    };
-
-    const modelBody = (schema: string, model: string): string => {
-      const body = new RegExp(`model\\s+${model}\\s*\\{([\\s\\S]*?)\\n\\}`).exec(schema)?.[1];
-      expect(body).toBeDefined();
-
-      return body as string;
-    };
-
-    /** `@@map` name, or the model name when unmapped. */
-    const table = (schema: string, model: string): string =>
-      /@@map\("([^"]+)"\)/.exec(modelBody(schema, model))?.[1] ?? model;
-
-    /** `@map` name for one field, or the field name when unmapped. */
-    const column = (schema: string, model: string, field: string): string => {
-      const line = new RegExp(`^\\s*${field}\\b.*$`, 'm').exec(modelBody(schema, model))?.[0] ?? '';
-
-      return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
-    };
+    const table = (schema: string, model: string): string => prismaTable(schema, 'model', model);
+    const column = (schema: string, model: string, field: string): string => prismaColumn(schema, model, field);
 
     const captureLockSql = async (): Promise<string> => {
       db.householdMember.findFirst.mockResolvedValue(makeOwner());

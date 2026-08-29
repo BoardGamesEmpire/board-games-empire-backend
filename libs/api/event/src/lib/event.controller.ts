@@ -1,17 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiExtraModels,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiSecurity,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -23,9 +15,6 @@ import { EventService } from './event.service';
 @ApiSecurity('api_key')
 @ApiTags('events')
 @UseGuards(PoliciesGuard)
-// The list response references PaginationMetaDto by `$ref` and nothing else in
-// this controller mentions it, so it needs registering explicitly.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('events')
 export class EventController {
   private readonly logger = new Logger(EventController.name);
@@ -39,7 +28,7 @@ export class EventController {
       '`pagination` envelope carrying `total`, `totalPages` and `hasMore`. See #230; the row shape is ' +
       'modelled in #402.',
   })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated events', schema: paginatedEnvelopeSchema('events') })
+  @ApiPaginatedEnvelope('events')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Event))

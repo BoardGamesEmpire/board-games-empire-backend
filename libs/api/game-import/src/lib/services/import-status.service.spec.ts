@@ -1,11 +1,9 @@
 import { DatabaseService, JobStatus, JobType, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
-import { paginationQuery } from '@bge/testing';
+import { paginationQuery, prismaBlock, prismaColumn, prismaTable, readPrismaModels } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
-import { readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
-import { GameImportStatusService } from './import-status.service';
+import { BATCH_SCOPE, GameImportStatusService } from './import-status.service';
 
 describe('GameImportStatusService', () => {
   let service: GameImportStatusService;
@@ -244,45 +242,7 @@ describe('GameImportStatusService', () => {
     describe('the identifiers the raw count hardcodes', () => {
       const JOB_MODEL = 'system/job.prisma';
 
-      const findSchemaDir = (): string => {
-        let dir = __dirname;
-
-        for (let depth = 0; depth < 10; depth += 1) {
-          const candidate = join(dir, 'prisma', 'models');
-
-          try {
-            if (statSync(candidate).isDirectory()) {
-              return candidate;
-            }
-          } catch {
-            // Not this level; keep walking toward the workspace root.
-          }
-
-          dir = resolve(dir, '..');
-        }
-
-        throw new Error('Could not locate prisma/models by walking up from the spec directory');
-      };
-
-      const schema = () => readFileSync(join(findSchemaDir(), JOB_MODEL), 'utf8');
-
-      const block = (source: string, kind: 'model' | 'enum', name: string): string => {
-        const body = new RegExp(`${kind}\\s+${name}\\s*\\{([\\s\\S]*?)\\n\\}`).exec(source)?.[1];
-        expect(body).toBeDefined();
-
-        return body as string;
-      };
-
-      /** `@@map` name, or the declared name when unmapped. */
-      const mapped = (source: string, kind: 'model' | 'enum', name: string): string =>
-        /@@map\("([^"]+)"\)/.exec(block(source, kind, name))?.[1] ?? name;
-
-      /** `@map` name for one field, or the field name when unmapped. */
-      const column = (source: string, model: string, field: string): string => {
-        const line = new RegExp(`^\\s*${field}\\b.*$`, 'm').exec(block(source, 'model', model))?.[0] ?? '';
-
-        return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
-      };
+      const schema = () => readPrismaModels(__dirname, JOB_MODEL);
 
       const capturedSql = async (): Promise<string> => {
         db.job.groupBy.mockResolvedValue([]);
@@ -300,10 +260,10 @@ describe('GameImportStatusService', () => {
         // Word-boundary matched, so `jobs` cannot be satisfied by a longer
         // identifier that merely contains it.
         for (const identifier of [
-          mapped(source, 'model', 'Job'),
-          mapped(source, 'enum', 'JobType'),
-          column(source, 'Job', 'batchId'),
-          column(source, 'Job', 'userId'),
+          prismaTable(source, 'model', 'Job'),
+          prismaTable(source, 'enum', 'JobType'),
+          prismaColumn(source, 'Job', 'batchId'),
+          prismaColumn(source, 'Job', 'userId'),
         ]) {
           expect(sql).toMatch(new RegExp(`\\b${identifier}\\b`));
         }
@@ -312,12 +272,32 @@ describe('GameImportStatusService', () => {
       // The enum literal is bound as a parameter and cast, so a renamed VALUE
       // (as opposed to the enum type) fails at runtime too. Pinned separately
       // because it travels in `values`, not in the statement text.
+      /**
+       * The predicate exists twice — `BATCH_SCOPE` for the paged `groupBy`, and
+       * raw SQL for the count, because `COUNT(DISTINCT …)` has no Prisma `where`
+       * form. Nothing in the type system holds them together, so this does:
+       * every key of the scope must be constrained by the statement.
+       *
+       * Adding `status: { not: JobStatus.Cancelled }` to `BATCH_SCOPE` without
+       * adding it to the SQL fails here — which is the bug it prevents, a user
+       * with 3 live and 7 cancelled batches being told `total: 10` and handed an
+       * empty page 2.
+       */
+      it('constrains every column BATCH_SCOPE narrows on', async () => {
+        const sql = await capturedSql();
+        const source = schema();
+
+        for (const field of Object.keys(BATCH_SCOPE('user-7'))) {
+          expect(sql).toMatch(new RegExp(`\\b${prismaColumn(source, 'Job', field)}\\b`));
+        }
+      });
+
       it('binds a JobType value the schema still declares', async () => {
         await capturedSql();
 
         const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
         expect(query.values).toContain(JobType.GameImport);
-        expect(block(schema(), 'enum', 'JobType')).toMatch(new RegExp(`\\b${JobType.GameImport}\\b`));
+        expect(prismaBlock(schema(), 'enum', 'JobType')).toMatch(new RegExp(`\\b${JobType.GameImport}\\b`));
       });
     });
 

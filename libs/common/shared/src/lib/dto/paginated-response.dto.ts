@@ -1,5 +1,5 @@
-import type { Type as NestType } from '@nestjs/common';
-import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
+import { applyDecorators, type Type as NestType } from '@nestjs/common';
+import { ApiExtraModels, ApiProperty, ApiResponse, getSchemaPath } from '@nestjs/swagger';
 
 /** Metadata attached to every paginated list response. */
 export class PaginationMetaDto {
@@ -80,8 +80,11 @@ export function paginated<K extends string, T>(
  * an envelope and that `pagination` is required, which a bare `description`
  * never told it. Modelling those rows is #376.
  *
- * Requires `＠ApiExtraModels(PaginationMetaDto)` on the controller, since the
- * `$ref` is the only mention of that model in the document.
+ * Requires `＠ApiExtraModels(PaginationMetaDto)` alongside it, since the `$ref`
+ * is the only mention of that model in the document. Prefer
+ * {@link ApiPaginatedEnvelope}, which applies both and cannot be half-applied;
+ * reach for this helper directly only when composing a response the decorator
+ * does not cover.
  */
 export function paginatedEnvelopeSchema(resourceKey: string) {
   return {
@@ -95,6 +98,34 @@ export function paginatedEnvelopeSchema(resourceKey: string) {
       pagination: { $ref: getSchemaPath(PaginationMetaDto) },
     },
   };
+}
+
+/**
+ * The 200 response for a paginated list whose rows are not modelled yet:
+ * {@link paginatedEnvelopeSchema} plus the `＠ApiExtraModels` registration that
+ * schema depends on.
+ *
+ * The two exist as one decorator because they are one decision and the failure
+ * mode of splitting them is silent. `paginatedEnvelopeSchema` emits a `$ref` to
+ * `PaginationMetaDto`, and a `$ref` resolves only if something else in the
+ * document registers that model; nothing checks the pairing. Forget the
+ * registration and the build passes, the server runs, and the OpenAPI document
+ * ships a dangling pointer that breaks client generation — the one reader who
+ * would have noticed. Applying both here makes the omission unrepresentable.
+ *
+ *   ＠ApiPaginatedEnvelope('households', { description: 'Paginated households' })
+ *
+ * Endpoints whose rows ARE modelled want {@link PaginatedResponseDto} instead:
+ * a real row schema beats a documented envelope around unknown objects.
+ */
+export function ApiPaginatedEnvelope(
+  resourceKey: string,
+  { status = 200, description = `Paginated ${resourceKey}` }: { status?: number; description?: string } = {},
+): MethodDecorator & ClassDecorator {
+  return applyDecorators(
+    ApiExtraModels(PaginationMetaDto),
+    ApiResponse({ status, description, schema: paginatedEnvelopeSchema(resourceKey) }),
+  );
 }
 
 const responseDtoCache = new WeakMap<NestType<unknown>, Map<string, NestType<unknown>>>();

@@ -7,6 +7,7 @@ export * from './job.fixture.js';
 export * from './pagination.fixture.js';
 export * from './permission.fixture.js';
 export * from './platform.fixture.js';
+export * from './prisma-schema.fixture.js';
 export * from './role.fixture.js';
 export * from './session.fixture.js';
 export * from './user.fixture.js';

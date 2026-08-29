@@ -17,25 +17,11 @@ import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
 import { pickSnapshot } from './utils/pick-snapshot.util';
-
-/**
- * How an event's occurrences are ordered wherever they are embedded.
- *
- * `id` completes it for the same reason the dedicated
- * `GET /events/:eventId/occurrences` read needs it: `sortOrder` is an
- * `Int @default(0)`, so every occurrence nobody has reordered shares a key, and
- * a tie-less sort leaves the database free to return them differently between
- * requests. Shared here so the embedded copies cannot disagree with the
- * paginated route — or with each other.
- */
-const OCCURRENCE_ORDER = [
-  { sortOrder: 'asc' },
-  { id: 'asc' },
-] satisfies Prisma.EventOccurrenceOrderByWithRelationInput[];
 
 @Injectable()
 export class EventService {

@@ -1,17 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiExtraModels,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiSecurity,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -25,9 +17,6 @@ import { EventGameNominationService } from './event-game-nomination.service';
 @ApiTags('event-game-nominations')
 @ApiParam({ name: 'eventId', type: String })
 @UseGuards(PoliciesGuard)
-// The list response references PaginationMetaDto by `$ref` and nothing else in
-// this controller mentions it, so it needs registering explicitly.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('events/:eventId/nominations')
 export class EventGameNominationController {
   private readonly logger = new Logger(EventGameNominationController.name);
@@ -42,11 +31,7 @@ export class EventGameNominationController {
       'carrying `total`, `totalPages` and `hasMore`. A client that assumed one complete list must now page. ' +
       'See #230; the row shape is modelled in #402.',
   })
-  @ApiResponse({
-    status: Http.Ok,
-    description: 'Paginated nominations',
-    schema: paginatedEnvelopeSchema('nominations'),
-  })
+  @ApiPaginatedEnvelope('nominations')
   @ApiResponse({ status: Http.NotFound, description: 'Event not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.EventGameNomination))
   @Get()

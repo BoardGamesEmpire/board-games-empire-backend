@@ -17,6 +17,7 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { pickSnapshot } from '../utils/pick-snapshot.util';
 import { OccurrenceEvents } from './constants';
@@ -56,8 +57,15 @@ export class EventOccurrenceService {
    * tie-breaker those rows drift across page boundaries between requests — page
    * 2 repeating a date page 1 already showed, and dropping another.
    *
-   * The existence probe stays ahead of the read so an unknown event is a 404
-   * rather than an empty page.
+   * The existence probe runs ahead of the read, so an event that does not exist
+   * is a 404 rather than an empty page. It is deliberately NOT inside the
+   * transaction below: pulling it in would mean an interactive transaction, and
+   * holding a pooled connection and an open snapshot across the probe to spare
+   * a check-then-act window is the wrong trade for a read. The window is real
+   * and bounded — an event soft-deleted between the probe and the read answers
+   * 200 with an empty page rather than 404 — and it is the ordinary TOCTOU any
+   * probe-then-read has. It says nothing about the rows and count, which do
+   * share one snapshot.
    */
   async getOccurrences(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventOccurrence>> {
     await assertEventExists(this.db, eventId);
@@ -72,7 +80,7 @@ export class EventOccurrenceService {
         this.db.eventOccurrence.findMany({
           where,
           include: OCCURRENCE_INCLUDE,
-          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+          orderBy: OCCURRENCE_ORDER,
           skip: pagination.skip,
           take: pagination.pageSize,
         }),
@@ -379,6 +387,18 @@ export class EventOccurrenceService {
     return vote;
   }
 
+  /**
+   * UNBOUNDED, knowingly (#404). Every occurrence of the event, every
+   * availability vote on each, and every attendee — the same shape of read
+   * `getOccurrences` above was paginated to remove, and on a big event the
+   * larger of the two.
+   *
+   * Not fixed under #372 because paging a SUMMARY makes it wrong rather than
+   * partial: the counts below are over the whole event, and half a summary
+   * answers a question nobody asked. The fix is an aggregate in the database
+   * (`groupBy` on the votes) or a ceiling on occurrences per event, both of
+   * which change what this route serves. #404 owns it.
+   */
   async getAvailabilitySummary(eventId: string): Promise<AvailabilitySummary> {
     await assertEventExists(this.db, eventId);
 
@@ -400,10 +420,7 @@ export class EventOccurrenceService {
             },
           },
         },
-        // Same tie-breaker as the paginated read above: `sortOrder` is an
-        // `Int @default(0)`, so un-reordered occurrences share a key and the
-        // summary would otherwise list them differently between requests.
-        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+        orderBy: OCCURRENCE_ORDER,
       }),
     ]);
 

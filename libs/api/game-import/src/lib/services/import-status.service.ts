@@ -46,10 +46,19 @@ type JobRow = Prisma.JobGetPayload<{ select: typeof JOB_SELECT }>;
 
 /**
  * The user's import batches: every GameImport job of theirs that belongs to a
- * batch. Shared by the paged `groupBy` and the `COUNT(DISTINCT batch_id)` so
- * the page and its `total` cannot describe different scopes.
+ * batch. The scope of the page.
+ *
+ * It is NOT the only statement of that predicate, and saying otherwise would be
+ * the more dangerous comment: `countBatchesForUser` re-states it in raw SQL,
+ * because a `COUNT(DISTINCT …)` cannot be expressed as a Prisma `where`. So the
+ * two are coupled by agreement rather than by construction — add a clause here
+ * and `total` keeps counting batches the page can no longer reach.
+ *
+ * Exported for the regression test that holds them in step: it reads the keys
+ * of this object and requires the raw statement to constrain each one, so a new
+ * clause fails until the SQL grows it too.
  */
-const BATCH_SCOPE = (userId: string) =>
+export const BATCH_SCOPE = (userId: string) =>
   ({ userId, type: JobType.GameImport, batchId: { not: null } }) satisfies Prisma.JobWhereInput;
 
 /**
@@ -160,9 +169,20 @@ export class GameImportStatusService {
         // The array form the sibling reads use takes no timeout; the callback
         // form inherits Prisma's 5s default, which this read has to raise. It
         // was two untimed queries before #372, so a user with a long import
-        // history — exactly the caller who needs this recovery route — would
-        // trade a slow response for a P2028 500. Raised rather than removed:
-        // the point of a ceiling is that a runaway read still ends.
+        // history — exactly the caller this recovery route exists for — would
+        // trade a slow response for a P2028 500.
+        //
+        // The ceiling stays on the request path rather than being removed with
+        // the transaction, and that is the trade being made: an interactive
+        // transaction holds a pooled connection and an open snapshot for as
+        // long as it runs. Dropping it would return the count to a separate
+        // snapshot from the groups, which is the defect the transaction is
+        // here for, and would bring back the empty-batch case the removed
+        // `jobs.length > 0` filter used to paper over. So the hold is accepted
+        // and bounded instead. 15s is a ceiling, not a budget — the read is a
+        // paged groupBy plus an indexed count. What actually makes this route
+        // scale with a user's whole history is the groupBy itself, which is
+        // #411, and the number here is a guess until that is measured.
         timeout: 15_000,
       },
     );
@@ -183,6 +203,9 @@ export class GameImportStatusService {
    * back as a JS BigInt, and `Math.ceil(total / pageSize)` on a BigInt throws.
    */
   private async countBatchesForUser(tx: Pick<DatabaseService, '$queryRaw'>, userId: string): Promise<number> {
+    // Hand-written twin of {@link BATCH_SCOPE}: user, job type, and "belongs to
+    // a batch". Any clause added there has to be added here, or `total` and the
+    // page describe different sets — the spec enforces the pairing.
     const counted = await tx.$queryRaw<{ total: number }[]>(Prisma.sql`
       SELECT COUNT(DISTINCT batch_id)::int AS total
       FROM jobs

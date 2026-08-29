@@ -1,7 +1,7 @@
 import { PoliciesGuard } from '@bge/permissions';
-import { paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, paginated } from '@bge/shared';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
-import { ApiExtraModels, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
@@ -11,9 +11,6 @@ import { LanguageService } from './language.service';
 
 @ApiTags('languages')
 @UseGuards(PoliciesGuard)
-// The list response references PaginationMetaDto by `$ref` and nothing else in
-// this controller mentions it, so it needs registering explicitly.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('languages')
 export class LanguageController {
   constructor(private languageService: LanguageService) {}
@@ -26,7 +23,7 @@ export class LanguageController {
       '`total`, `totalPages` and `hasMore`; `total` counts the rows matching the filters. See #230; the ' +
       'row shape is modelled in #402.',
   })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated languages', schema: paginatedEnvelopeSchema('languages') })
+  @ApiPaginatedEnvelope('languages')
   @AllowAnonymous()
   @Get()
   getLanguages(@Query() languageDto: LanguageQueryDto) {

@@ -14,14 +14,19 @@ import {
   type UserPlugin,
 } from '@bge/database';
 import { deadlock, uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import {
+  createMockDatabaseService,
+  prismaColumn,
+  prismaTable,
+  readPrismaModels,
+  type MockDatabaseService,
+} from '@bge/testing';
 import type { InstalledPluginDirectory } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { readFileSync, statSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { PluginConfigSchemaService } from '../config/plugin-config-schema.service';
 import {
   HouseholdPluginUnitDisabledEvent,
@@ -688,38 +693,11 @@ describe('PluginUpdateService', () => {
      * SERIALIZES; that needs two real concurrent transactions.
      */
     it('locks with the mapped table/column names and a real enum literal — pinned against the Prisma model files', async () => {
-      const findSchemaDir = (): string => {
-        let dir = __dirname;
+      const grantModel = readPrismaModels(__dirname, 'plugin/plugin-grant.prisma');
+      const scopeEnum = readPrismaModels(__dirname, 'enums/plugin-grant-scope.prisma');
 
-        for (let depth = 0; depth < 10; depth += 1) {
-          const candidate = join(dir, 'prisma', 'models');
-
-          try {
-            if (statSync(candidate).isDirectory()) {
-              return candidate;
-            }
-          } catch {
-            // Not this level; keep walking toward the workspace root.
-          }
-
-          dir = resolve(dir, '..');
-        }
-
-        throw new Error('Could not locate prisma/models by walking up from the spec directory');
-      };
-
-      const schemaDir = findSchemaDir();
-      const grantModel = readFileSync(join(schemaDir, 'plugin', 'plugin-grant.prisma'), 'utf8');
-      const scopeEnum = readFileSync(join(schemaDir, 'enums', 'plugin-grant-scope.prisma'), 'utf8');
-
-      /** `@@map` name, or the model name when unmapped. */
-      const table = /@@map\("([^"]+)"\)/.exec(grantModel)?.[1] ?? 'PluginGrant';
-      /** `@map` name for one field, or the field name when unmapped. */
-      const column = (field: string): string => {
-        const line = new RegExp(`^\\s*${field}\\b.*$`, 'm').exec(grantModel)?.[0] ?? '';
-
-        return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
-      };
+      const table = prismaTable(grantModel, 'model', 'PluginGrant');
+      const column = (field: string): string => prismaColumn(grantModel, 'PluginGrant', field);
 
       const next = nextManifest({
         permissions: {

@@ -1,9 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t, type I18nPath } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -31,9 +31,6 @@ const RESPOND_MESSAGE_KEYS = {
 @ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
 @ApiTags('friendships')
-// Both list responses reference PaginationMetaDto by `$ref` and nothing else in
-// this controller mentions it, so it needs registering explicitly.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('friendships')
 export class FriendshipController {
   constructor(private readonly friendshipService: FriendshipService) {}
@@ -55,11 +52,7 @@ export class FriendshipController {
       '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
       'the rows matching the status filter. See #230; the row shape is modelled in #402.',
   })
-  @ApiResponse({
-    status: Http.Ok,
-    description: 'Paginated friendships',
-    schema: paginatedEnvelopeSchema('friendships'),
-  })
+  @ApiPaginatedEnvelope('friendships')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))
@@ -76,7 +69,7 @@ export class FriendshipController {
       '`?status=` is rejected here rather than ignored: the set is Pending by definition. See #230; the ' +
       'row shape is modelled in #402.',
   })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated requests', schema: paginatedEnvelopeSchema('requests') })
+  @ApiPaginatedEnvelope('requests')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))

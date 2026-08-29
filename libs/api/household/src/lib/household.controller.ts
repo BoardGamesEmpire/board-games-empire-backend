@@ -1,9 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiExtraModels, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -14,9 +14,6 @@ import { HouseholdService } from './household.service';
 @ApiSecurity('api_key')
 @UseGuards(PoliciesGuard)
 @ApiTags('households')
-// The list response references PaginationMetaDto by `$ref` and nothing else in
-// this controller mentions it, so it needs registering explicitly.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('households')
 export class HouseholdController {
   private readonly logger = new Logger(HouseholdController.name);
@@ -32,7 +29,7 @@ export class HouseholdController {
       'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
       '`total`, `totalPages` and `hasMore`. See #230.',
   })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated households', schema: paginatedEnvelopeSchema('households') })
+  @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
@@ -60,7 +57,7 @@ export class HouseholdController {
       '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the ' +
       'caller\u2019s visible memberships. See #364, and #365 for the general question.',
   })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated households', schema: paginatedEnvelopeSchema('households') })
+  @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({
     status: Http.Forbidden,

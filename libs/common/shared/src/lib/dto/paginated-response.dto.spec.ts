@@ -1,4 +1,11 @@
-import { paginated, paginatedEnvelopeSchema, PaginatedResponseDto } from './paginated-response.dto';
+import { DECORATORS } from '@nestjs/swagger';
+import {
+  ApiPaginatedEnvelope,
+  paginated,
+  paginatedEnvelopeSchema,
+  PaginatedResponseDto,
+  PaginationMetaDto,
+} from './paginated-response.dto';
 
 const rowsOf = (count: number) => Array.from({ length: count }, (_, index) => ({ id: index + 1 }));
 
@@ -107,5 +114,54 @@ describe('paginatedEnvelopeSchema — for endpoints with no row model yet', () =
     expect(paginatedEnvelopeSchema('members').properties.pagination).toEqual({
       $ref: '#/components/schemas/PaginationMetaDto',
     });
+  });
+});
+
+/**
+ * The envelope schema emits a `$ref` to `PaginationMetaDto`, which resolves only
+ * if something separately registers that model — and nothing checks the pairing.
+ * Applied by hand it was two decorators a route had to remember; forgetting the
+ * second shipped a document with a dangling pointer, silently, breaking only
+ * client generation. This decorator exists so the two cannot come apart.
+ */
+describe('ApiPaginatedEnvelope — the schema and its model registration, together', () => {
+  class Probe {
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    list() {}
+  }
+
+  beforeAll(() => {
+    ApiPaginatedEnvelope('widgets')(Probe.prototype, 'list', Object.getOwnPropertyDescriptor(Probe.prototype, 'list')!);
+  });
+
+  it('registers PaginationMetaDto, so the envelope’s $ref resolves', () => {
+    const extraModels = Reflect.getMetadata(DECORATORS.API_EXTRA_MODELS, Probe.prototype.list) ?? [];
+
+    expect(extraModels).toContain(PaginationMetaDto);
+  });
+
+  it('declares the same envelope schema the helper builds', () => {
+    const responses = Reflect.getMetadata(DECORATORS.API_RESPONSE, Probe.prototype.list) ?? {};
+
+    expect(responses['200'].schema).toEqual(paginatedEnvelopeSchema('widgets'));
+  });
+
+  it('defaults the description to the resource, and lets a route override it', () => {
+    class Custom {
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      list() {}
+    }
+    ApiPaginatedEnvelope('widgets', { description: 'Only the visible ones' })(
+      Custom.prototype,
+      'list',
+      Object.getOwnPropertyDescriptor(Custom.prototype, 'list')!,
+    );
+
+    expect(Reflect.getMetadata(DECORATORS.API_RESPONSE, Probe.prototype.list)['200'].description).toBe(
+      'Paginated widgets',
+    );
+    expect(Reflect.getMetadata(DECORATORS.API_RESPONSE, Custom.prototype.list)['200'].description).toBe(
+      'Only the visible ones',
+    );
   });
 });

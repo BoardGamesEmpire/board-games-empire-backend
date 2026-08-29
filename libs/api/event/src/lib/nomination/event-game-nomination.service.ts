@@ -58,8 +58,11 @@ export class EventGameNominationService {
    * share a timestamp, and a tie-less sort lets them drift across page
    * boundaries between requests.
    *
-   * The existence probe stays ahead of the read so an unknown event is a 404
-   * rather than an empty page.
+   * The existence probe runs ahead of the read, so an event that does not exist
+   * is a 404 rather than an empty page — with the same caveat as the occurrence
+   * list: it is a separate statement, so an event deleted between the probe and
+   * the read answers 200 with an empty page. That is a check-then-act window,
+   * not the rows-versus-count split the transaction below closes.
    */
   async getNominations(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventGameNomination>> {
     await assertEventExists(this.db, eventId);
