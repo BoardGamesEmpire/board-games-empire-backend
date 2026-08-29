@@ -1,10 +1,17 @@
 import {
   anyOf,
+  auditedWrites,
   blankComments,
+  claimsIncludingDelegates,
   extractBranchBody,
   extractFunctionBody,
+  fieldNamed,
+  modelWrite,
   orderMismatch,
+  relationInsert,
+  relationKeyUpdate,
   relationLock,
+  unconditionalClaimants,
   type OrderedStage,
 } from './shipped-function';
 
@@ -598,6 +605,520 @@ describe('shipped-function', () => {
       // many bodies would report false on every second one. That is a pin
       // passing, not a pin failing.
       expect(() => anyOf(/assertStillLiving\(/g)).toThrow(/carry flags/);
+    });
+  });
+
+  /**
+   * The half of this module that is about locks nobody wrote (#399).
+   *
+   * Every case here is really one question asked twice: does the check still
+   * FAIL on the shape it exists for? A dominance analysis that answered "yes,
+   * claimed" to everything would pass the whole plugin runtime silently, which
+   * is precisely the state #398 shipped in — both suites green over a live
+   * deadlock. So the passing cases are the smaller half; the ones that matter
+   * are the shapes that must stay red.
+   */
+  describe('auditedWrites', () => {
+    const WRITE = [{ pattern: /pluginGrant\.create$/ }];
+    const CLAIM = /FOR SHARE/;
+
+    const audit = (body: string) => auditedWrites(`async function persist(tx) {${body}}`, 'persist.ts', WRITE, CLAIM);
+
+    it('finds the write and calls it claimed when the claim runs before it', () => {
+      const [site] = audit(`
+        await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site).toMatchObject({ enclosing: 'persist', claimed: true });
+      expect(site?.text).toContain('pluginGrant.create');
+    });
+
+    it('reports the write when the claim comes after it', () => {
+      // The #398 shape exactly: the transaction does take the plugin row, and
+      // takes it too late, so the FK's own FOR KEY SHARE has already landed
+      // after the child tuple. A presence check passes this.
+      const [site] = audit(`
+        await tx.pluginGrant.create({ data });
+        await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+      `);
+
+      expect(site?.claimed).toBe(false);
+    });
+
+    it('reports the write when only ONE arm of a branch claims', () => {
+      // `plugin-installer.service.ts` in miniature, and the reason this is
+      // dominance rather than first occurrence. The claim is real on one path
+      // and absent on the other; a search for the earliest match finds it and
+      // says nothing about the path that has no lock in it.
+      const [site] = audit(`
+        if (existing === null) {
+          plugin = await tx.plugin.create({ data });
+        } else {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(false);
+    });
+
+    it('accepts a branch that claims on both arms', () => {
+      const [site] = audit(`
+        if (existing === null) {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        } else {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $2 FOR SHARE\`;
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(true);
+    });
+
+    it('does not accept a claim whose failure a catch swallows', () => {
+      // The reasoning that makes a bare `try` safe — if the claim throws, the
+      // write below is not reached either — stops being true the moment there
+      // is a catch. The throw is swallowed, execution walks on to the write
+      // holding no lock, and the FK's own FOR KEY SHARE lands last: #398,
+      // exactly.
+      const [site] = audit(`
+        try {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        } catch {
+          // best effort
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(false);
+    });
+
+    it('accepts a try whose catch claims as well', () => {
+      const [site] = audit(`
+        try {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        } catch {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $2 FOR SHARE\`;
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(true);
+    });
+
+    it('accepts a try with no catch, where a throw skips the write too', () => {
+      const [site] = audit(`
+        try {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        } finally {
+          release();
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(true);
+    });
+
+    it('is not disturbed by a guard clause that returns before the claim', () => {
+      // Dominance and delegate promotion ask different questions of the same
+      // rule, and this is where they part. A path taking the early return never
+      // reaches the write, so every path that DOES reach it took the lock — the
+      // claim dominates, and reporting otherwise would be a false failure.
+      //
+      // Promotion is the strict one, because a delegate's caller carries on
+      // past it: see `unconditionalClaimants` below.
+      const [site] = audit(`
+        if (plugin.scope !== 'Household') {
+          return;
+        }
+
+        await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(true);
+    });
+
+    it('does not accept a claim taken inside a loop', () => {
+      // A loop over an empty list takes nothing, and an empty list is not an
+      // exotic input — `serverChecks` is empty for a manifest declaring no
+      // server-scope permissions.
+      const [site] = audit(`
+        for (const check of checks) {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(false);
+    });
+
+    it('carries the claim into a write nested inside branches and loops', () => {
+      // The other direction, and the reason the walk goes out level by level
+      // rather than comparing offsets: a write buried three constructs deep is
+      // still dominated by the statement that opened the transaction.
+      const [site] = audit(`
+        await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+
+        if (seeded) {
+          for (const check of checks) {
+            await tx.pluginGrant.create({ data: check });
+          }
+        }
+      `);
+
+      expect(site?.claimed).toBe(true);
+    });
+
+    it('does not let a claim inside a nested function answer for a write outside it', () => {
+      // Whether a callback runs — and in whose transaction — is not something a
+      // reader of source knows. Counting one would let a claim in a callback
+      // defined earlier in the body cover a write in a different transaction.
+      const [site] = audit(`
+        const claim = async () => {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        };
+
+        await tx.pluginGrant.create({ data });
+      `);
+
+      expect(site?.claimed).toBe(false);
+    });
+
+    it('scopes the claim to the innermost function, not the enclosing method', () => {
+      // A claim outside the transaction callback is a claim in a different
+      // transaction, or in none. Widening the scope to the method would let it
+      // answer for every write inside the callback.
+      const source = `
+        class Installer {
+          async persist(tx) {
+            await this.db.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+
+            return this.db.$transaction(async (tx) => {
+              await tx.pluginGrant.create({ data });
+            });
+          }
+        }
+      `;
+      const [site] = auditedWrites(source, 'installer.ts', WRITE, CLAIM);
+
+      expect(site).toMatchObject({ enclosing: 'persist', claimed: false });
+    });
+
+    it('names a class property arrow rather than reporting the site as top level', () => {
+      // `<top level>` matches no exemption's `enclosing`, so a site labelled
+      // that way can never be explained — and a pin written for it would name a
+      // function that does not appear in the source.
+      const source = `
+        class Grants {
+          private readonly persistGrants = async (tx) => {
+            await tx.pluginGrant.create({ data });
+          };
+        }
+      `;
+      const [site] = auditedWrites(source, 'grants.ts', WRITE, CLAIM);
+
+      expect(site?.enclosing).toBe('persistGrants');
+    });
+
+    it('applies an argument guard, so an update counts only when it writes the key', () => {
+      // Postgres skips the RI check on an UPDATE whose key columns are
+      // unchanged, so only a re-parenting update takes the implied lock.
+      // Matching every child update instead would report the dormancy writes
+      // and every `updateMany({ enabled })` in the tree — noise standing where
+      // a real finding would appear.
+      const shapes = [
+        { pattern: /pluginGrant\.updateMany$/, withArguments: fieldNamed(['pluginId']), argumentProperty: 'data' },
+      ];
+      const scan = (body: string) => auditedWrites(`async function f(tx) {${body}}`, 'f.ts', shapes, /FOR SHARE/);
+
+      expect(scan('await tx.pluginGrant.updateMany({ where, data: { pluginId: next } });')).toHaveLength(1);
+      expect(scan('await tx.pluginGrant.updateMany({ where, data: { status } });')).toHaveLength(0);
+    });
+
+    it('asks the guard about `data` alone, not the key the row is addressed by', () => {
+      // Activation's grant re-stamp, in miniature: `where` names the FK because
+      // the row's unique key contains it, and `data` rewrites four other
+      // columns. Judging the whole call reports this — and with it every keyed
+      // child update in the tree, which is all of them.
+      const shapes = [
+        { pattern: /pluginGrant\.update$/, withArguments: fieldNamed(['pluginId']), argumentProperty: 'data' },
+      ];
+      const scan = (body: string) => auditedWrites(`async function f(tx) {${body}}`, 'f.ts', shapes, /FOR SHARE/);
+
+      expect(
+        scan('await tx.pluginGrant.update({ where: { pluginId_slug: { pluginId } }, data: { decidedAt } });'),
+      ).toHaveLength(0);
+    });
+
+    it('reports the write when the guarded payload cannot be enumerated', () => {
+      // A guard that narrows can only CLEAR a site when it sees the whole key
+      // set. Each of these hides the keys somewhere else, and the earlier
+      // whole-call fallback quietly cleared the first three: the argument text
+      // names no FK column, so the write vanished from the audit with no site
+      // and no exemption — the silent-clean-tree failure this module refuses
+      // everywhere else.
+      const shapes = [
+        { pattern: /pluginGrant\.update$/, withArguments: fieldNamed(['pluginId']), argumentProperty: 'data' },
+      ];
+      const scan = (body: string) => auditedWrites(`async function f(tx) {${body}}`, 'f.ts', shapes, /x/);
+
+      expect(scan('const data = { pluginId: n }; await tx.pluginGrant.update({ where, data });')).toHaveLength(1);
+      expect(scan('await tx.pluginGrant.update({ where, data: payload });')).toHaveLength(1);
+      expect(scan('await tx.pluginGrant.update({ where, data: { ...payload } });')).toHaveLength(1);
+      expect(scan('await tx.pluginGrant.update(args);')).toHaveLength(1);
+      // And still settles the one it CAN read.
+      expect(scan('await tx.pluginGrant.update({ where, data: { decidedAt } });')).toHaveLength(0);
+    });
+
+    it('refuses a scan that looks for no write shape at all', () => {
+      // The empty-list failure this module refuses everywhere else: no shapes
+      // means no sites means no violations, reported as a clean tree.
+      expect(() => auditedWrites('', 'x.ts', [], /a/)).toThrow(/reads exactly like a clean tree/);
+    });
+
+    it('reports one site per write, not one per call that contains it', () => {
+      // Matching whole call texts would report `seededGrants.push(...)` as a
+      // grant write too, and two reports of one site is two exemptions to
+      // write and one of them stale from the day it lands.
+      const sites = audit('seededGrants.push(await tx.pluginGrant.create({ data }));');
+
+      expect(sites).toHaveLength(1);
+    });
+
+    it('refuses a stateful pattern rather than answering differently each call', () => {
+      // `g` makes `test` advance `lastIndex`, so the same body reports claimed,
+      // then unclaimed, then claimed. A scan whose answer depends on how many
+      // times it has run is worse than no scan.
+      expect(() => auditedWrites('', 'x.ts', [{ pattern: /a/g }], /b/)).toThrow(/write pattern/);
+      expect(() => auditedWrites('', 'x.ts', [{ pattern: /a/ }], /b/y)).toThrow(/claim pattern/);
+    });
+  });
+
+  describe('claimsIncludingDelegates', () => {
+    const CLAIM = /FOR SHARE/;
+
+    it('recognises a call to a function that claims on every path', () => {
+      // The shape every unit path uses: nothing in `enableHousehold` looks like
+      // a lock, and it is holding one. Without this the check reports a false
+      // failure on the most-travelled compliant path in the tree.
+      const source = `
+        async function assertStillLiving(tx) {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+
+        async function openHouseholdUnit(tx) {
+          await assertStillLiving(tx);
+          await lockHouseholdUnitScope(tx);
+        }
+      `;
+      const claims = claimsIncludingDelegates(source, 'units.ts', CLAIM);
+
+      expect('await this.openHouseholdUnit(tx, plugin);').toMatch(claims);
+      expect('await this.lockHouseholdUnitScope(tx);').not.toMatch(claims);
+    });
+
+    it('does not promote a function that only claims on one path', () => {
+      const source = `
+        async function maybeClaim(tx) {
+          if (needed) {
+            await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+          }
+        }
+      `;
+
+      expect('await maybeClaim(tx);').not.toMatch(claimsIncludingDelegates(source, 'units.ts', CLAIM));
+    });
+
+    it('recognises a delegate whose name carries a `$`', () => {
+      // Two bugs in one shape, both silent: `$` is a regex anchor (so the
+      // interpolated name matches nothing) and `$` is not a word character (so
+      // a leading `\b` demands a word character before it, which `this.` is
+      // not). The delegate would be found and then quietly never match.
+      const source = `
+        async function $claimPluginRow(tx) {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+      `;
+
+      expect('await this.$claimPluginRow(tx);').toMatch(claimsIncludingDelegates(source, 'd.ts', CLAIM));
+    });
+
+    it('follows a delegate through more than one hop', () => {
+      // Resolved to a fixpoint rather than one level deep, so a third link
+      // added later does not turn a compliant path red for the wrong reason.
+      const source = `
+        async function innermost(tx) {
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+
+        async function middle(tx) {
+          await innermost(tx);
+        }
+
+        async function outer(tx) {
+          await middle(tx);
+        }
+      `;
+
+      expect('await outer(tx);').toMatch(claimsIncludingDelegates(source, 'units.ts', CLAIM));
+    });
+  });
+
+  describe('unconditionalClaimants', () => {
+    it('does not promote a helper whose guard clause returns before the lock', () => {
+      // The shape this rule exists for. A delegate answers for EVERY caller's
+      // child write, so crediting one that can return without its lock hands
+      // the #398 deadlock a helper's name to hide behind.
+      const source = `
+        async function claimForHousehold(tx, plugin) {
+          if (plugin.scope !== 'Household') {
+            return;
+          }
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+      `;
+
+      expect(unconditionalClaimants(source, 'g.ts', /FOR SHARE/)).toEqual([]);
+    });
+
+    it('promotes a helper written as a class property arrow', () => {
+      // `private readonly claim = async (tx) => {…}` is a method spelled the
+      // other way. Missing it costs a false failure on the caller; missing the
+      // same shape in `enclosingName` costs a site labelled `<top level>`,
+      // which no exemption can name.
+      const source = `
+        class Units {
+          private readonly claimIt = async (tx) => {
+            await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+          };
+        }
+      `;
+
+      expect(unconditionalClaimants(source, 'u.ts', /FOR SHARE/)).toEqual(['claimIt']);
+    });
+
+    it('does not count a claim that only runs inside a callback', () => {
+      // `enableHousehold` takes its lock inside a `$transaction` arrow. Counting
+      // that would make the METHOD a delegate, so a caller could claim through
+      // it without being in its transaction at all.
+      const source = `
+        async function enableHousehold(input) {
+          return this.db.$transaction(async (tx) => {
+            await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+          });
+        }
+      `;
+
+      expect(unconditionalClaimants(source, 'units.ts', /FOR SHARE/)).toEqual([]);
+    });
+  });
+
+  describe('modelWrite', () => {
+    it('matches the callee it names, and nothing that merely contains it', () => {
+      const write = modelWrite(['pluginGrant', 'userPlugin'], ['create', 'upsert']);
+
+      expect('tx.pluginGrant.create').toMatch(write);
+      expect('pluginGrant.upsert').toMatch(write);
+      // The tail anchor: `create` must not stand in for a method whose name
+      // merely starts with it. Which cuts BOTH ways — `createManyAndReturn` is a
+      // real Prisma 7 insert, and a list that forgets it does not near-miss, it
+      // matches nothing and reports the tree clean. It is named in
+      // FK_CHILD_INSERT_METHODS for that reason.
+      expect('tx.pluginGrant.createIfAbsent').not.toMatch(write);
+      expect('tx.pluginPermission.create').not.toMatch(write);
+      // The head alternation: a name ENDING in an accessor is not that accessor.
+      expect('tx.stalePluginGrant.create').not.toMatch(write);
+    });
+
+    it('matches a chain the formatter wrapped across lines', () => {
+      // A callee is lifted verbatim, so a wrapped chain arrives carrying its
+      // newline and indent. Without whitespace around the separator that write
+      // matches no shape at all — no site, no finding, clean tree — and whether
+      // a chain wraps is a decision the formatter makes on line length.
+      const write = modelWrite(['pluginGrant'], ['create']);
+
+      expect('tx.pluginGrant\n        .create').toMatch(write);
+      expect('tx.pluginGrant.create').toMatch(write);
+    });
+
+    it('escapes a `$` in a name instead of building a pattern that matches nothing', () => {
+      // `$` is a legal identifier character AND a regex anchor, so the naive
+      // interpolation yields `/…(?:$queryRaw)…/` — an assertion, not a literal,
+      // which matches no text at all. In a write pattern that is a scan
+      // reporting a clean tree; the repo is full of `$`-prefixed Prisma names.
+      const write = modelWrite(['$extended'], ['create']);
+
+      expect('tx.$extended.create').toMatch(write);
+      expect(fieldNamed(['$pluginId']).test('data: { $pluginId: next }')).toBe(true);
+    });
+
+    it('refuses regex in an accessor rather than widening what it matches', () => {
+      expect(() => modelWrite(['pluginGrant|plugin'], ['create'])).toThrow(/not a plain identifier/);
+      expect(() => modelWrite([], ['create'])).toThrow(/matches nothing/);
+    });
+  });
+
+  describe('relationInsert', () => {
+    it('holds the table name to the same boundary a lock does', () => {
+      const insert = relationInsert(['plugin_grants']);
+
+      expect('INSERT INTO plugin_grants (id) VALUES ($1)').toMatch(insert);
+      expect('INSERT  INTO  plugin_grants (id)').toMatch(insert);
+      // The rule `relationLock` states once: a prefix match is a different
+      // table, and a trailing dot makes the name a schema.
+      expect('INSERT INTO plugin_grants_archive (id)').not.toMatch(insert);
+      expect('INSERT INTO plugin_grants.audit (id)').not.toMatch(insert);
+    });
+  });
+
+  describe('relationKeyUpdate', () => {
+    const reparent = relationKeyUpdate('plugin_grants', 'plugin_id');
+
+    it('matches an update that writes the key column', () => {
+      expect('UPDATE plugin_grants SET plugin_id = $1 WHERE id = $2').toMatch(reparent);
+      // Multi-line, because this tree writes its SQL in template literals.
+      expect('UPDATE plugin_grants\n   SET plugin_id = $1,\n       updated_at = now()\n WHERE id = $2').toMatch(
+        reparent,
+      );
+    });
+
+    /**
+     * The narrowing that makes the shape usable. Postgres skips the
+     * referential-integrity check when the key columns are unchanged, so these
+     * statements take no parent lock at all — and a pattern matching the whole
+     * statement reports every one of them, producing sites whose exemption
+     * could only say "that was the WHERE clause".
+     */
+    it('does not match an update that only READS the key', () => {
+      expect('UPDATE plugin_grants SET status = $2 WHERE plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants SET status = $2 WHERE id = $1 RETURNING plugin_id').not.toMatch(reparent);
+      // The statement this tree actually ships, which must stay unmatched.
+      expect(
+        'UPDATE plugin_grants SET status = $2, decided_at = now(), updated_at = now() WHERE id = $1 RETURNING id',
+      ).not.toMatch(reparent);
+    });
+
+    it('holds the table name to the same boundary an insert does', () => {
+      expect('UPDATE plugin_grants_archive SET plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants.audit SET plugin_id = $1').not.toMatch(reparent);
+    });
+
+    it('holds the column name to an identifier boundary too', () => {
+      expect('UPDATE plugin_grants SET prior_plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants SET plugin_id_at = $1').not.toMatch(reparent);
+    });
+
+    it('refuses regex in either name rather than widening what it matches', () => {
+      expect(() => relationKeyUpdate('plugin_grants|plugins', 'plugin_id')).toThrow(/not a plain relation name/);
+      expect(() => relationKeyUpdate('plugin_grants', 'plugin_id|id')).toThrow(/not a plain identifier/);
     });
   });
 });

@@ -1,4 +1,21 @@
-import { anyOf, type OrderedStage, relationLock } from '../support/shipped-function';
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { type ChildRelation, childRelationsOf } from '../support/schema-relations';
+import {
+  anyOf,
+  auditedWrites,
+  claimsIncludingDelegates,
+  fieldNamed,
+  modelWrite,
+  type OrderedStage,
+  relationInsert,
+  relationKeyUpdate,
+  relationLock,
+  type SourceSite,
+  type WriteShape,
+} from '../support/shipped-function';
+import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
 
 /**
  * The claimed total lock order of the plugin consent path, in ONE place.
@@ -41,11 +58,21 @@ import { anyOf, type OrderedStage, relationLock } from '../support/shipped-funct
  * the pin suite stayed green (#398). Its entries now claim the plugin row it
  * really does take, first, because the source now says so.
  *
- * The general fix — inferring the implicit stage rather than trusting the
- * written one — is #399. Until then the rule for a writer of any FK-child table
- * is: claim the plugin row explicitly, or be invisible to this model. The
- * deadlocks / does-not-deadlock pairs in the barrier spec are what actually hold
- * the order; a static reader of source cannot observe a trigger.
+ * The rule that gap left in prose is now enforced (#399): every write to an
+ * FK-child table in the plugin runtime must be preceded, on every path that
+ * reaches it, by a plugin-row claim. {@link fkChildWriteAudit} below is that
+ * check, over tables read from the Prisma schema rather than from a list — a
+ * hand-kept list of the four is the same blind spot one level out.
+ *
+ * It is a REQUIREMENT check and deliberately not a fifth stage. A stage is a
+ * first occurrence in a body, and the implied lock's honest position is AFTER
+ * the child write, which `orderMismatch` cannot express; a model that placed
+ * the stage where it can be represented rather than where the lock is would be
+ * less truthful than saying plainly that the parent must be held.
+ *
+ * The deadlocks / does-not-deadlock pairs in the barrier spec remain the proof
+ * of record, and this check is judged against them rather than in place of
+ * them: a static reader of source cannot observe a trigger.
  */
 export const CLAIMED_LOCK_ORDER = [
   {
@@ -164,12 +191,22 @@ const UNIT_LIFECYCLE = 'libs/plugin/runtime/src/lib/units/plugin-unit-lifecycle.
 const UPDATE_SERVICE = 'libs/plugin/runtime/src/lib/update/plugin-update.service.ts';
 const LIFECYCLE_SERVICE = 'libs/plugin/runtime/src/lib/lifecycle/plugin-lifecycle.service.ts';
 
+/**
+ * The installer, which takes no entry in {@link LOCK_ORDER_PATHS}.
+ *
+ * Named here anyway, because the FK-implied-lock audit below has an exemption
+ * pointing at it — and a path spelled out inside an exemption is a path nothing
+ * checks the spelling of.
+ */
+const INSTALLER_SERVICE = 'libs/plugin/runtime/src/lib/install/plugin-installer.service.ts';
+
 /** The files the pinned paths live in, so no spec retypes one. */
 export const LOCK_SOURCES = {
   grantService: GRANT_SERVICE,
   unitLifecycle: UNIT_LIFECYCLE,
   updateService: UPDATE_SERVICE,
   lifecycleService: LIFECYCLE_SERVICE,
+  installerService: INSTALLER_SERVICE,
   unitScopeLock: 'libs/plugin/runtime/src/lib/grants/unit-scope-lock.ts',
 } as const;
 
@@ -334,4 +371,333 @@ export function stageNamed(name: LockStageName): OrderedStage {
   }
 
   return stage;
+}
+
+/* -------------------------------------------------------------------------- *
+ * Locks nobody wrote: the FK-implied parent lock (#399)
+ * -------------------------------------------------------------------------- */
+
+/**
+ * The parent model whose row every FK child implicitly locks.
+ *
+ * Named as the MODEL rather than the table because the schema is what is being
+ * read: `@@map` is the only place the Postgres name is stated, and the whole
+ * point of deriving is not to be the second place that has an opinion.
+ */
+export const FK_CHILD_PARENT = 'Plugin';
+
+/** The parent's own Prisma accessor, which a nested child write goes through. */
+const FK_CHILD_PARENT_ACCESSOR = 'plugin';
+
+/**
+ * The tables carrying an FK to `plugins`, as this suite claims they are.
+ *
+ * Pinned as a literal AND derived from the schema, and the pair is the point.
+ * Deriving alone can quietly find nothing — a relation syntax this reader stops
+ * recognising returns an empty set, and an empty set has no violations in it.
+ * A literal alone goes stale the day a fifth child table lands, which is the
+ * exact event this whole check exists for. Held against each other, a new child
+ * table fails loudly and says to extend the pin.
+ */
+export const FK_CHILD_TABLES = ['household_plugins', 'plugin_grants', 'plugin_permissions', 'user_plugins'] as const;
+
+/**
+ * The tree scanned for writes to them.
+ *
+ * The plugin runtime entire, not the four files `LOCK_SOURCES` names. Scoping
+ * this to the pinned paths would inherit the blind spot it closes:
+ * `plugin-installer.service.ts` writes two of these tables and has no entry in
+ * {@link LOCK_ORDER_PATHS} at all — it is compliant, and nothing here would
+ * have said so.
+ */
+export const FK_CHILD_WRITE_SCOPE = 'libs/plugin/runtime/src/lib';
+
+/**
+ * The Prisma methods that INSERT, which is one of the two ways the implied
+ * parent lock is taken.
+ *
+ * `createManyAndReturn` is here because the client has it (Prisma 7), not
+ * because the tree uses it. `modelWrite` anchors the method name, so a method
+ * this list forgets is not a near miss — the write matches nothing, the audit
+ * finds no site, and the tree reports clean. That is the blind spot the derived
+ * table list closes, one level further down.
+ */
+const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 'upsert'] as const;
+
+/**
+ * The other way: an UPDATE that changes the key.
+ *
+ * Postgres skips the referential-integrity check on an UPDATE whose key columns
+ * are unchanged, so these count only when the payload names the FK field — the
+ * `withArguments` guard below. Without it every dormancy write and every
+ * `updateMany({ enabled })` in the tree reports as an FK-child write and wants
+ * an exemption saying it takes no parent lock, which is noise standing exactly
+ * where a real finding would appear.
+ *
+ * A child DELETE takes no parent lock at all and is absent for that reason.
+ *
+ * The raw counterpart — `UPDATE plugin_grants SET plugin_id = …` — is matched
+ * by its own shape rather than by these, since a raw statement names the mapped
+ * COLUMN and no Prisma method. Note that the tree currently ships no raw child
+ * write of any kind, so both raw shapes match nothing today; that is why the
+ * liveness case below tests every shape against a sample rather than trusting
+ * an empty result to mean a clean tree.
+ */
+const FK_CHILD_REPARENT_METHODS = ['update', 'updateMany', 'updateManyAndReturn'] as const;
+
+/**
+ * A write knowingly not preceded by a claim, and why that is safe anyway.
+ *
+ * An exemption is a claim in its own right, so it is held to the same rule as
+ * every other pin here: {@link fkChildWriteAudit} carries a case asserting
+ * that each one still names a real unclaimed site. An exemption for a site that
+ * started passing on its own is not harmless — it is a comment asserting a
+ * danger that no longer exists, sitting next to the mechanism that would have
+ * reported it.
+ */
+export interface ClaimExemption {
+  readonly file: string;
+
+  /** The enclosing function, as the scan names it. */
+  readonly enclosing: string;
+
+  /** Matched against the site's own text, so a moved line does not break it. */
+  readonly site: RegExp;
+
+  /** The part a reader cannot infer: why no claim is needed. */
+  readonly because: string;
+}
+
+/**
+ * The sites that take no dominating plugin-row claim and are safe regardless.
+ *
+ * One shape, twice. `persist()` reaches both writes through an `if/else` that
+ * claims the plugin row on the REINSTALL arm (`plugin.updateMany`, guarded on
+ * the tombstone) and creates it on the FRESH-INSTALL arm. The reinstall path is
+ * ordered by the claim like every other writer; the fresh path holds no lock
+ * and cannot need one.
+ *
+ * Note what is NOT done here: `tx.plugin.create` is not added to the
+ * `'plugin row'` stage pattern. A `create` on a row this transaction just
+ * inserted is not the ordering claim a `FOR SHARE` is, and admitting it as one
+ * would let a genuinely late claim date early somewhere else — the failure the
+ * stage patterns are scoped so carefully to avoid (#399).
+ */
+export const PLUGIN_ROW_CLAIM_EXEMPTIONS: readonly ClaimExemption[] = [
+  {
+    file: INSTALLER_SERVICE,
+    enclosing: 'persist',
+    site: /pluginPermission\.create/,
+    because:
+      'Fresh install CREATES the plugin row in this transaction (plugin.create), so the FK check locks a tuple ' +
+      'no other transaction can see or queue behind and no cycle is expressible; reinstall claims the row ' +
+      'through the tombstone-guarded plugin.updateMany on the other arm of the same if/else.',
+  },
+  {
+    file: INSTALLER_SERVICE,
+    enclosing: 'persist',
+    site: /pluginGrant\.create/,
+    because: 'The seeded server grants, reached by the same two branches and safe for the same two reasons.',
+  },
+];
+
+/** One FK-child write the scan found, with the exemption covering it if any. */
+export interface AuditedFkChildWrite extends SourceSite {
+  readonly exemption: ClaimExemption | undefined;
+}
+
+let audited: readonly AuditedFkChildWrite[] | undefined;
+
+/**
+ * Every FK-child write in {@link FK_CHILD_WRITE_SCOPE}, audited.
+ *
+ * Computed on first ask and kept, rather than at module load. Three other specs
+ * import this module for `LOCK_SOURCES` alone, and the scan parses the plugin
+ * runtime whole and can REFUSE — an unreadable schema, a child with no `@@map`.
+ * At module load that refusal lands as an import error in a spec that never
+ * asked, naming neither the check nor the reason; here it lands inside the case
+ * that wanted the answer.
+ */
+export function fkChildWriteAudit(): readonly AuditedFkChildWrite[] {
+  audited ??= auditFkChildWrites();
+
+  return audited;
+}
+
+/**
+ * Every file OUTSIDE {@link FK_CHILD_WRITE_SCOPE} that holds an FK-child write.
+ *
+ * The audit reads one directory, which is the same hand-scoping the derived
+ * table list exists to refuse, one level further out. A child write added in
+ * another library, in the app, or in this library above `src/lib` takes the
+ * same implied lock, deadlocks the same way, and every case in the suite stays
+ * green. So the scope is not asserted to be the right one; it is asserted to be
+ * ALL of them.
+ *
+ * Candidates are found by grep and judged by the SHAPES, never by a second and
+ * coarser pattern written for this check alone. A hand-written twin looks for
+ * less than the audit does, and did: naming the child accessors and the child
+ * tables, it could not see the nested write through the parent
+ * (`plugin.update({ data: { grants: { create … } } })`), which names neither —
+ * and being line-oriented it could not see a wrapped chain either. Grep's only
+ * job here is to narrow the tree to the files worth parsing.
+ */
+export function fkChildWritesOutsideScope(): readonly string[] {
+  const children = childRelationsOf(FK_CHILD_PARENT);
+  const writes = fkChildWriteShapes(children);
+  const pluginRow = stageNamed('plugin row').pattern;
+  const root = workspaceRoot();
+  // Identifiers alone, with no method beside them. Whether a candidate actually
+  // holds a write is the shapes' question, and a grep that tried to answer it
+  // would be the twin again.
+  const identifiers = [
+    ...children.map((child) => child.accessor),
+    ...children.map((child) => child.table),
+    FK_CHILD_PARENT_ACCESSOR,
+  ].map((name) => name.replace(/[^A-Za-z0-9_]/g, ''));
+  // `execFileSync` with an argument array: the pattern is built from schema
+  // identifiers rather than typed here, and a shell would give those a second
+  // meaning.
+  const found = execFileSync(
+    'git',
+    [
+      'grep',
+      '-lE',
+      // Untracked files count. A write added in a file nobody has committed yet
+      // is exactly the write this is for, and `git grep` reads the index by
+      // default — so without this the check passes on the change that
+      // introduces the problem and fails on the commit after it. Ignored paths
+      // stay excluded, so `node_modules` is not walked.
+      '--untracked',
+      `(^|[^A-Za-z0-9_])(${identifiers.join('|')})($|[^A-Za-z0-9_])`,
+      '--',
+      '*.ts',
+      ':!*.spec.ts',
+      ':!apps/api-e2e/*',
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
+
+  return found
+    .split('\n')
+    .filter((path) => path.length > 0 && !path.startsWith(`${FK_CHILD_WRITE_SCOPE}/`))
+    .filter((path) => auditedWrites(readFileSync(join(root, path), 'utf8'), path, writes, pluginRow).length > 0);
+}
+
+/**
+ * The write shapes, one per way a child row can be inserted or re-parented.
+ *
+ * Built from the schema so the accessor, the table, the FK field and the mapped
+ * column of each child always agree with each other. Each re-parent shape is
+ * paired with ITS OWN foreign key rather than a pooled guard over all four:
+ * pooling emits the same alternative four times today, and the day one child
+ * keys differently it would count a write of another child's column as a
+ * re-parent, producing a site whose exemption could only say "that is not this
+ * table's key".
+ */
+export function fkChildWriteShapes(children: readonly ChildRelation[]): readonly WriteShape[] {
+  const accessors = children.map((child) => child.accessor);
+
+  return [
+    { pattern: modelWrite(accessors, [...FK_CHILD_INSERT_METHODS]) },
+    { pattern: relationInsert(children.map((child) => child.table)) },
+    // The raw re-parent, paired table-to-column for the same reason the Prisma
+    // re-parent shapes are paired field-to-accessor: pooled, a statement
+    // writing one child's key column would count as a re-parent of another
+    // child's table, and the site it produced could only be explained by
+    // saying it was the wrong table.
+    ...children.map((child) => ({ pattern: relationKeyUpdate(child.table, child.column) })),
+    ...children.map((child) => ({
+      pattern: modelWrite([child.accessor], [...FK_CHILD_REPARENT_METHODS]),
+      withArguments: fieldNamed([child.foreignKey]),
+      // `data`, not the whole call. Activation's grant re-stamp is addressed by
+      // its compound unique key, so `where` names `pluginId` while `data`
+      // rewrites four other columns — a guard over the whole call reports it,
+      // and would report every keyed child update in the tree with it.
+      argumentProperty: 'data',
+    })),
+    {
+      // A NESTED write through the parent accessor
+      // (`plugin.update({ data: { grants: { create: … } } })`) inserts child
+      // rows just as surely, and names no child accessor while doing it.
+      //
+      // Judged on the WHOLE call, deliberately, where every other guard here
+      // narrows to `data`. Narrowing would route this through the unreadable
+      // rule, and a parent write's payload is unreadable most of the time —
+      // `plugin.create` and `plugin.updateMany` both spread their column sets.
+      // That rule is right for a guard asking "does this name the key?", where
+      // not knowing means it might; it is wrong for one asking "is this a
+      // nested write?", where not knowing would report every parent write in
+      // the tree. Seven of them, none a child write.
+      pattern: modelWrite([FK_CHILD_PARENT_ACCESSOR], [...FK_CHILD_INSERT_METHODS, ...FK_CHILD_REPARENT_METHODS]),
+      withArguments: /\b(?:create|createMany|connectOrCreate)\s*:\s*[[{]/,
+    },
+  ];
+}
+
+function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
+  refuseStatefulExemptions();
+
+  const children = childRelationsOf(FK_CHILD_PARENT);
+  const writes = fkChildWriteShapes(children);
+  // The stage's own pattern, not a second copy of it. A hand-written twin is
+  // how the plugin row would come to mean one thing to the order pins and
+  // another to this check, and the day they disagree is the day one of them is
+  // quietly wrong.
+  const pluginRow = stageNamed('plugin row').pattern;
+  // Cheap gate on the expensive part. Resolving delegates parses a file two to
+  // four times over, and 54 of the ~58 files in this tree contain no candidate
+  // write at all — a file that never names a child accessor, a child table or
+  // the parent accessor cannot hold a site under any shape above.
+  const mentions = new RegExp(
+    [...children.map((child) => child.accessor), ...children.map((child) => child.table), FK_CHILD_PARENT_ACCESSOR]
+      .map((name) => name.replace(/[^A-Za-z0-9_]/g, ''))
+      .join('|'),
+  );
+
+  return readShippedTree(FK_CHILD_WRITE_SCOPE)
+    .filter((file) => mentions.test(file.source))
+    .flatMap((file) =>
+      // Delegates are resolved per FILE, because that is the scope they are
+      // resolvable in: `enableHousehold` holds the plugin row through
+      // `openHouseholdUnit` through `assertStillLiving`, and nothing in its own
+      // text looks like a lock.
+      auditedWrites(file.source, file.path, writes, claimsIncludingDelegates(file.source, file.path, pluginRow)).map(
+        (site) => ({ ...site, exemption: exemptionFor(site) }),
+      ),
+    );
+}
+
+/**
+ * Refuses a stateful exemption pattern, over the WHOLE list and before any site
+ * is matched.
+ *
+ * `test` advances `lastIndex` on a `g` or `y` pattern, and `exemptionFor` runs
+ * once per site — so an exemption that matched one site is judged from a
+ * non-zero offset against the next, and covers a different set than it reads as
+ * covering. Every other pattern in this module is refused for exactly that.
+ *
+ * Checked here rather than inside the `find` predicate, which was the earlier
+ * shape: `find` stops at its first match, so a later exemption's flags were
+ * examined only when an earlier one happened not to match. Validation that
+ * depends on list order and on which sites the audit happens to find is not
+ * validation.
+ */
+function refuseStatefulExemptions(): void {
+  for (const exemption of PLUGIN_ROW_CLAIM_EXEMPTIONS) {
+    if (exemption.site.global || exemption.site.sticky) {
+      throw new Error(
+        `The exemption for ${exemption.file} (${exemption.enclosing}) carries a 'g' or 'y' flag on ${String(
+          exemption.site,
+        )}, which makes it stateful across sites. Drop the flag.`,
+      );
+    }
+  }
+}
+
+function exemptionFor(site: SourceSite): ClaimExemption | undefined {
+  return PLUGIN_ROW_CLAIM_EXEMPTIONS.find(
+    (exemption) =>
+      exemption.file === site.file && exemption.enclosing === site.enclosing && exemption.site.test(site.text),
+  );
 }

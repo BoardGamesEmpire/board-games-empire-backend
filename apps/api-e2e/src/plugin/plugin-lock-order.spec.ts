@@ -1,6 +1,7 @@
 import { PluginGrantStatus } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { expectBlocked, withBarrier } from '../support/lock-barrier';
+import { childRelationsOf } from '../support/schema-relations';
 import { orderMismatch, readShippedBranch, readShippedFunction } from '../support/shipped-function';
 import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -15,8 +16,14 @@ import {
 } from './lock-fixtures';
 import {
   CLAIMED_LOCK_ORDER,
+  FK_CHILD_PARENT,
+  FK_CHILD_TABLES,
+  fkChildWriteAudit,
+  fkChildWriteShapes,
+  fkChildWritesOutsideScope,
   LOCK_ORDER_PATHS,
   LOCK_SOURCES,
+  PLUGIN_ROW_CLAIM_EXEMPTIONS,
   stageNamed,
   stagesNamed,
   type LockStageName,
@@ -246,6 +253,157 @@ describe('the plugin consent path is one lock order (#360)', () => {
       const unrecognised = CLAIMED_LOCK_ORDER.filter((stage) => !bodies.some((body) => stage.pattern.test(body)));
 
       expect(unrecognised.map((stage) => stage.name)).toEqual([]);
+    });
+  });
+
+  /**
+   * The stages above are matched from source, and Postgres takes locks no
+   * source mentions. `decide()` is the proof: it claimed the two stages it
+   * wrote, took a third through the `plugin_grants` FK, and deadlocked against
+   * activation while every pin here stayed green (#398).
+   *
+   * This is the general form of that fix (#399) — not a fifth stage, but the
+   * requirement stated directly. A write to any table carrying an FK to
+   * `plugins` must be preceded, on every path that reaches it, by a plugin-row
+   * claim. Where it is not, an exemption has to say why that is safe.
+   */
+  describe('the locks nobody wrote — FK-implied parent locks (#399)', () => {
+    const { installerService: INSTALLER_SERVICE } = LOCK_SOURCES;
+
+    /**
+     * Every FK-child write in the plugin runtime, and what the audit says about
+     * it. Written out rather than counted, because a count is satisfied by the
+     * wrong seven.
+     */
+    const KNOWN_FK_CHILD_WRITES = [
+      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'pluginGrant.upsert', claimed: true },
+      { file: GRANT_SERVICE, enclosing: 'attempt', write: 'userPlugin.upsert', claimed: true },
+      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginPermission.create', claimed: false },
+      { file: INSTALLER_SERVICE, enclosing: 'persist', write: 'pluginGrant.create', claimed: false },
+      { file: UNIT_LIFECYCLE, enclosing: 'enableHousehold', write: 'householdPlugin.create', claimed: true },
+      // The two updates are here because their `data` SPREADS, which makes the
+      // key set unreadable — so the re-parent guard cannot rule them out and
+      // reports them rather than skipping them. Both are claimed anyway, which
+      // is why neither needs an exemption; they are the audit saying what it
+      // could not settle, not a finding.
+      { file: UNIT_LIFECYCLE, enclosing: 'enableHousehold', write: 'householdPlugin.update', claimed: true },
+      { file: UNIT_LIFECYCLE, enclosing: 'updateHouseholdConfig', write: 'householdPlugin.update', claimed: true },
+      { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginPermission.create', claimed: true },
+      { file: UPDATE_SERVICE, enclosing: 'activateInTransaction', write: 'pluginGrant.create', claimed: true },
+    ];
+
+    it('reads the FK-child tables out of the schema rather than trusting the list here', () => {
+      // Both halves are load-bearing. Deriving alone can find nothing — a
+      // relation syntax this reader stops recognising returns an empty set, and
+      // an empty set has no violations in it. The literal alone goes stale on
+      // the fifth child table, which is the event the whole check exists for.
+      expect(
+        childRelationsOf(FK_CHILD_PARENT)
+          .map((child) => child.table)
+          .sort(),
+      ).toEqual([...FK_CHILD_TABLES]);
+    });
+
+    it('finds every FK-child write in the runtime, not only the ones pinned above', () => {
+      // The self-test on the scan. A source scan that quietly matches nothing
+      // reports a clean tree, so what is asserted is the enumeration itself —
+      // and it deliberately reaches `plugin-installer.service.ts`, which writes
+      // two of these tables and has no entry in LOCK_ORDER_PATHS at all.
+      expect(
+        fkChildWriteAudit().map((site) => ({
+          file: site.file,
+          enclosing: site.enclosing,
+          write: /(\w+\.\w+)\(/.exec(site.text)?.[1],
+          claimed: site.claimed,
+        })),
+      ).toEqual(KNOWN_FK_CHILD_WRITES);
+    });
+
+    it('recognises every write shape against a sample, so a dead pattern cannot read as a clean tree', () => {
+      // The enumeration above pins what the tree HAS. It cannot tell a shape
+      // that correctly matches nothing from one that stopped matching — and one
+      // shape genuinely matches nothing today: the tree ships no raw child
+      // write at all, of either kind. So each shape is exercised against a
+      // sample of what it claims to recognise, which is the same guard
+      // `recognises every stage of the claimed order in some shipped body` puts
+      // on the stages.
+      const children = childRelationsOf(FK_CHILD_PARENT);
+      const samples = [
+        ...children.flatMap((child) => [`tx.${child.accessor}.create`, `tx.${child.accessor}.updateMany`]),
+        ...children.map((child) => `INSERT INTO ${child.table} (id) VALUES ($1)`),
+        ...children.map((child) => `UPDATE ${child.table} SET ${child.column} = $1 WHERE id = $2`),
+        'tx.plugin.update',
+      ];
+      // The guards are exercised too. Three shapes carry one and the nested
+      // shape rests on it entirely, so a `withArguments` that stopped matching
+      // would skip every write it guards — the same clean-tree failure, one
+      // field along from the one this case was written for.
+      const payloads = [
+        ...children.map((child) => `{ ${child.foreignKey}: next }`),
+        '{ grants: { create: [{ pluginId }] } }',
+        '{ permissions: { createMany: { data } } }',
+        '{ grants: { connectOrCreate: { where, create } } }',
+      ];
+      const shapes = fkChildWriteShapes(children);
+      const unrecognised = shapes.filter(
+        (shape) =>
+          !samples.some((sample) => shape.pattern.test(sample)) ||
+          (shape.withArguments !== undefined && !payloads.some((payload) => shape.withArguments?.test(payload))),
+      );
+
+      expect(unrecognised.map((shape) => String(shape.pattern))).toEqual([]);
+    });
+
+    it('writes these tables nowhere outside the scanned scope', () => {
+      // The audit reads one directory, which is the same hand-scoping the
+      // derived table list exists to refuse — one level further out. A child
+      // write added in another library, in the app, or in this library above
+      // `src/lib` takes the same implied lock, deadlocks the same way, and
+      // every case above stays green. So the scope is not asserted to be the
+      // right one; it is asserted to be ALL of them.
+      //
+      // The candidates are judged by the audit's own shapes rather than by a
+      // grep pattern written here; `fkChildWritesOutsideScope` says why.
+      expect(fkChildWritesOutsideScope()).toEqual([]);
+    });
+
+    it('leaves no FK-child write both unclaimed and unexplained', () => {
+      // The check itself. Everything above is the guard on it.
+      const unexplained = fkChildWriteAudit()
+        .filter((site) => !site.claimed && site.exemption === undefined)
+        .map(
+          (site) =>
+            `${site.file}:${site.line} (${site.enclosing}) ${site.text} — writes an FK child without claiming the ` +
+            `plugin row first, so the FK's own FOR KEY SHARE lands AFTER the child tuple and this path holds the ` +
+            `plugin row LAST. Against activation's FOR UPDATE that is a cycle, not a queue (#398).`,
+        );
+
+      expect(unexplained).toEqual([]);
+    });
+
+    it('holds every exemption to naming a site that would otherwise fail', () => {
+      // An exemption is a claim too. One whose site started passing on its own
+      // is not harmless — it is a comment asserting a danger that no longer
+      // exists, sitting beside the mechanism that would have reported it, and
+      // the next reader takes it for a live hazard.
+      const stale = PLUGIN_ROW_CLAIM_EXEMPTIONS.filter(
+        (exemption) => !fkChildWriteAudit().some((site) => site.exemption === exemption && !site.claimed),
+      );
+
+      expect(stale.map((exemption) => `${exemption.file} ${exemption.enclosing} ${String(exemption.site)}`)).toEqual(
+        [],
+      );
+    });
+
+    it('recognises the plugin-row claim through the delegates the unit paths use', () => {
+      // `enableHousehold` holds the plugin row and nothing in its own text says
+      // so — the lock is two calls away, in `assertStillLiving`. Asserted here
+      // because it is the difference between this check being usable and it
+      // reporting the most-travelled compliant path in the tree as a violation.
+      const enableHousehold = fkChildWriteAudit().find((site) => site.enclosing === 'enableHousehold');
+
+      expect(enableHousehold).toMatchObject({ claimed: true, exemption: undefined });
+      expect(readShippedFunction(UNIT_LIFECYCLE, 'enableHousehold').body).not.toMatch(stageNamed('plugin row').pattern);
     });
   });
 
