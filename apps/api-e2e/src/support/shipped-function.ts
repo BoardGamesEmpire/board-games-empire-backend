@@ -672,6 +672,35 @@ export function relationInsert(relations: string | readonly string[]): RegExp {
 }
 
 /**
+ * A pattern matching a raw `UPDATE` that REASSIGNS the given key column of the
+ * given relation.
+ *
+ * An insert is not the only way to take a parent's key lock: an update that
+ * writes the foreign-key column fires the same referential-integrity check
+ * against the NEW parent, and this tree writes its lock SQL raw, so the form is
+ * one a reader here should expect rather than a hypothetical.
+ *
+ * Narrowed to the assignment list deliberately. Postgres SKIPS the check when
+ * the key columns are unchanged, so `UPDATE plugin_grants SET status = $2
+ * WHERE plugin_id = $1` takes no parent lock at all — and a pattern matching
+ * the whole statement reports it, producing a site whose exemption could only
+ * say "that was the WHERE clause". The scan therefore stops at the first
+ * `WHERE`, `RETURNING` or statement end and asks only what is being WRITTEN.
+ */
+export function relationKeyUpdate(relation: string, column: string): RegExp {
+  const table = relationAlternation(relation, 'UPDATE');
+  const key = identifierSource(column, 'a key-update pattern');
+  // Lazy, and refusing to cross a clause boundary — so the column has to appear
+  // between `SET` and the end of the assignment list, not merely somewhere in
+  // the statement.
+  const withinClause = String.raw`(?:(?!\bWHERE\b|\bRETURNING\b|;)[\s\S])*?`;
+
+  return new RegExp(
+    String.raw`UPDATE\s+${table}${RELATION_END}${withinClause}\bSET\b${withinClause}${IDENTIFIER_START}${key}${IDENTIFIER_END}`,
+  );
+}
+
+/**
  * A pattern matching a Prisma write, by client accessor and method, against the
  * CALLEE of a call — `tx.pluginGrant.upsert`, and nothing containing it.
  *

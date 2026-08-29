@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { type ChildRelation, childRelationsOf } from '../support/schema-relations';
 import {
   anyOf,
@@ -7,11 +10,12 @@ import {
   modelWrite,
   type OrderedStage,
   relationInsert,
+  relationKeyUpdate,
   relationLock,
   type SourceSite,
   type WriteShape,
 } from '../support/shipped-function';
-import { readShippedTree } from '../support/shipped-sql';
+import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
 
 /**
  * The claimed total lock order of the plugin consent path, in ONE place.
@@ -418,7 +422,7 @@ export const FK_CHILD_WRITE_SCOPE = 'libs/plugin/runtime/src/lib';
  * finds no site, and the tree reports clean. That is the blind spot the derived
  * table list closes, one level further down.
  */
-export const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 'upsert'] as const;
+const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 'upsert'] as const;
 
 /**
  * The other way: an UPDATE that changes the key.
@@ -431,13 +435,15 @@ export const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndRe
  * where a real finding would appear.
  *
  * A child DELETE takes no parent lock at all and is absent for that reason.
- * The one shape not matched is a RAW `UPDATE … SET plugin_id = …`. Note that
- * the tree currently ships NO raw child write of any kind — the `relationInsert`
- * shape matches nothing today, which is why the liveness case below tests every
- * shape against a sample rather than trusting an empty result to mean a clean
- * tree.
+ *
+ * The raw counterpart — `UPDATE plugin_grants SET plugin_id = …` — is matched
+ * by its own shape rather than by these, since a raw statement names the mapped
+ * COLUMN and no Prisma method. Note that the tree currently ships no raw child
+ * write of any kind, so both raw shapes match nothing today; that is why the
+ * liveness case below tests every shape against a sample rather than trusting
+ * an empty result to mean a clean tree.
  */
-export const FK_CHILD_REPARENT_METHODS = ['update', 'updateMany', 'updateManyAndReturn'] as const;
+const FK_CHILD_REPARENT_METHODS = ['update', 'updateMany', 'updateManyAndReturn'] as const;
 
 /**
  * A write knowingly not preceded by a claim, and why that is safe anyway.
@@ -519,14 +525,75 @@ export function fkChildWriteAudit(): readonly AuditedFkChildWrite[] {
 }
 
 /**
+ * Every file OUTSIDE {@link FK_CHILD_WRITE_SCOPE} that holds an FK-child write.
+ *
+ * The audit reads one directory, which is the same hand-scoping the derived
+ * table list exists to refuse, one level further out. A child write added in
+ * another library, in the app, or in this library above `src/lib` takes the
+ * same implied lock, deadlocks the same way, and every case in the suite stays
+ * green. So the scope is not asserted to be the right one; it is asserted to be
+ * ALL of them.
+ *
+ * Candidates are found by grep and judged by the SHAPES, never by a second and
+ * coarser pattern written for this check alone. A hand-written twin looks for
+ * less than the audit does, and did: naming the child accessors and the child
+ * tables, it could not see the nested write through the parent
+ * (`plugin.update({ data: { grants: { create … } } })`), which names neither —
+ * and being line-oriented it could not see a wrapped chain either. Grep's only
+ * job here is to narrow the tree to the files worth parsing.
+ */
+export function fkChildWritesOutsideScope(): readonly string[] {
+  const children = childRelationsOf(FK_CHILD_PARENT);
+  const writes = fkChildWriteShapes(children);
+  const pluginRow = stageNamed('plugin row').pattern;
+  const root = workspaceRoot();
+  // Identifiers alone, with no method beside them. Whether a candidate actually
+  // holds a write is the shapes' question, and a grep that tried to answer it
+  // would be the twin again.
+  const identifiers = [
+    ...children.map((child) => child.accessor),
+    ...children.map((child) => child.table),
+    FK_CHILD_PARENT_ACCESSOR,
+  ].map((name) => name.replace(/[^A-Za-z0-9_]/g, ''));
+  // `execFileSync` with an argument array: the pattern is built from schema
+  // identifiers rather than typed here, and a shell would give those a second
+  // meaning.
+  const found = execFileSync(
+    'git',
+    [
+      'grep',
+      '-lE',
+      // Untracked files count. A write added in a file nobody has committed yet
+      // is exactly the write this is for, and `git grep` reads the index by
+      // default — so without this the check passes on the change that
+      // introduces the problem and fails on the commit after it. Ignored paths
+      // stay excluded, so `node_modules` is not walked.
+      '--untracked',
+      `(^|[^A-Za-z0-9_])(${identifiers.join('|')})($|[^A-Za-z0-9_])`,
+      '--',
+      '*.ts',
+      ':!*.spec.ts',
+      ':!apps/api-e2e/*',
+    ],
+    { cwd: root, encoding: 'utf8' },
+  );
+
+  return found
+    .split('\n')
+    .filter((path) => path.length > 0 && !path.startsWith(`${FK_CHILD_WRITE_SCOPE}/`))
+    .filter((path) => auditedWrites(readFileSync(join(root, path), 'utf8'), path, writes, pluginRow).length > 0);
+}
+
+/**
  * The write shapes, one per way a child row can be inserted or re-parented.
  *
- * Built from the schema so the accessor, the table and the FK field of each
- * child always agree with each other. Each re-parent shape is paired with ITS
- * OWN foreign key rather than a pooled guard over all four: pooling emits the
- * same alternative four times today, and the day one child keys differently it
- * would count a write of another child's column as a re-parent, producing a
- * site whose exemption could only say "that is not this table's key".
+ * Built from the schema so the accessor, the table, the FK field and the mapped
+ * column of each child always agree with each other. Each re-parent shape is
+ * paired with ITS OWN foreign key rather than a pooled guard over all four:
+ * pooling emits the same alternative four times today, and the day one child
+ * keys differently it would count a write of another child's column as a
+ * re-parent, producing a site whose exemption could only say "that is not this
+ * table's key".
  */
 export function fkChildWriteShapes(children: readonly ChildRelation[]): readonly WriteShape[] {
   const accessors = children.map((child) => child.accessor);
@@ -534,6 +601,12 @@ export function fkChildWriteShapes(children: readonly ChildRelation[]): readonly
   return [
     { pattern: modelWrite(accessors, [...FK_CHILD_INSERT_METHODS]) },
     { pattern: relationInsert(children.map((child) => child.table)) },
+    // The raw re-parent, paired table-to-column for the same reason the Prisma
+    // re-parent shapes are paired field-to-accessor: pooled, a statement
+    // writing one child's key column would count as a re-parent of another
+    // child's table, and the site it produced could only be explained by
+    // saying it was the wrong table.
+    ...children.map((child) => ({ pattern: relationKeyUpdate(child.table, child.column) })),
     ...children.map((child) => ({
       pattern: modelWrite([child.accessor], [...FK_CHILD_REPARENT_METHODS]),
       withArguments: fieldNamed([child.foreignKey]),

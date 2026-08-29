@@ -1,10 +1,9 @@
 import { PluginGrantStatus } from '@bge/database';
-import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { expectBlocked, withBarrier } from '../support/lock-barrier';
 import { childRelationsOf } from '../support/schema-relations';
 import { orderMismatch, readShippedBranch, readShippedFunction } from '../support/shipped-function';
-import { bindTemplate, readShippedSql, readShippedValue, workspaceRoot } from '../support/shipped-sql';
+import { bindTemplate, readShippedSql, readShippedValue } from '../support/shipped-sql';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import {
   ACTIVATION_VERSION_BUMP,
@@ -17,13 +16,11 @@ import {
 } from './lock-fixtures';
 import {
   CLAIMED_LOCK_ORDER,
-  FK_CHILD_INSERT_METHODS,
   FK_CHILD_PARENT,
-  FK_CHILD_REPARENT_METHODS,
   FK_CHILD_TABLES,
-  FK_CHILD_WRITE_SCOPE,
   fkChildWriteAudit,
   fkChildWriteShapes,
+  fkChildWritesOutsideScope,
   LOCK_ORDER_PATHS,
   LOCK_SOURCES,
   PLUGIN_ROW_CLAIM_EXEMPTIONS,
@@ -326,13 +323,15 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // The enumeration above pins what the tree HAS. It cannot tell a shape
       // that correctly matches nothing from one that stopped matching — and one
       // shape genuinely matches nothing today: the tree ships no raw child
-      // INSERT. So each shape is exercised against a sample of what it claims
-      // to recognise, which is the same guard `recognises every stage of the
-      // claimed order in some shipped body` puts on the stages.
+      // write at all, of either kind. So each shape is exercised against a
+      // sample of what it claims to recognise, which is the same guard
+      // `recognises every stage of the claimed order in some shipped body` puts
+      // on the stages.
       const children = childRelationsOf(FK_CHILD_PARENT);
       const samples = [
         ...children.flatMap((child) => [`tx.${child.accessor}.create`, `tx.${child.accessor}.updateMany`]),
         ...children.map((child) => `INSERT INTO ${child.table} (id) VALUES ($1)`),
+        ...children.map((child) => `UPDATE ${child.table} SET ${child.column} = $1 WHERE id = $2`),
         'tx.plugin.update',
       ];
       // The guards are exercised too. Three shapes carry one and the nested
@@ -362,35 +361,10 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // `src/lib` takes the same implied lock, deadlocks the same way, and
       // every case above stays green. So the scope is not asserted to be the
       // right one; it is asserted to be ALL of them.
-      const children = childRelationsOf(FK_CHILD_PARENT);
-      const accessors = children.map((child) => child.accessor).join('|');
-      const tables = children.map((child) => child.table).join('|');
-      // Methods come from the same constants the shapes are built from, not a
-      // second copy of the list — a hand-written twin is how this grep would
-      // come to look for less than the audit does, and the day they disagree is
-      // the day one of them is quietly wrong. Raw INSERTs are here too, since
-      // `relationInsert` recognises them and an accessor-only grep would let an
-      // out-of-scope raw child insert past.
-      const methods = [...FK_CHILD_INSERT_METHODS, ...FK_CHILD_REPARENT_METHODS].join('|');
-      // `execFileSync` with an argument array: the pattern is built from schema
-      // identifiers rather than typed here, and a shell would give those a
-      // second meaning.
-      const found = execFileSync(
-        'git',
-        [
-          'grep',
-          '-lE',
-          `\\.(${accessors})\\s*\\.\\s*(${methods})\\(|INSERT[[:space:]]+INTO[[:space:]]+(${tables})`,
-          '--',
-          '*.ts',
-          ':!*.spec.ts',
-          ':!apps/api-e2e/*',
-        ],
-        { cwd: workspaceRoot(), encoding: 'utf8' },
-      );
-      const elsewhere = found.split('\n').filter((path) => path.length > 0 && !path.startsWith(`${FK_CHILD_WRITE_SCOPE}/`));
-
-      expect(elsewhere).toEqual([]);
+      //
+      // The candidates are judged by the audit's own shapes rather than by a
+      // grep pattern written here; `fkChildWritesOutsideScope` says why.
+      expect(fkChildWritesOutsideScope()).toEqual([]);
     });
 
     it('leaves no FK-child write both unclaimed and unexplained', () => {

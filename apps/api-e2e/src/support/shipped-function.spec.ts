@@ -9,6 +9,7 @@ import {
   modelWrite,
   orderMismatch,
   relationInsert,
+  relationKeyUpdate,
   relationLock,
   unconditionalClaimants,
   type OrderedStage,
@@ -1075,6 +1076,49 @@ describe('shipped-function', () => {
       // table, and a trailing dot makes the name a schema.
       expect('INSERT INTO plugin_grants_archive (id)').not.toMatch(insert);
       expect('INSERT INTO plugin_grants.audit (id)').not.toMatch(insert);
+    });
+  });
+
+  describe('relationKeyUpdate', () => {
+    const reparent = relationKeyUpdate('plugin_grants', 'plugin_id');
+
+    it('matches an update that writes the key column', () => {
+      expect('UPDATE plugin_grants SET plugin_id = $1 WHERE id = $2').toMatch(reparent);
+      // Multi-line, because this tree writes its SQL in template literals.
+      expect('UPDATE plugin_grants\n   SET plugin_id = $1,\n       updated_at = now()\n WHERE id = $2').toMatch(
+        reparent,
+      );
+    });
+
+    /**
+     * The narrowing that makes the shape usable. Postgres skips the
+     * referential-integrity check when the key columns are unchanged, so these
+     * statements take no parent lock at all — and a pattern matching the whole
+     * statement reports every one of them, producing sites whose exemption
+     * could only say "that was the WHERE clause".
+     */
+    it('does not match an update that only READS the key', () => {
+      expect('UPDATE plugin_grants SET status = $2 WHERE plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants SET status = $2 WHERE id = $1 RETURNING plugin_id').not.toMatch(reparent);
+      // The statement this tree actually ships, which must stay unmatched.
+      expect(
+        'UPDATE plugin_grants SET status = $2, decided_at = now(), updated_at = now() WHERE id = $1 RETURNING id',
+      ).not.toMatch(reparent);
+    });
+
+    it('holds the table name to the same boundary an insert does', () => {
+      expect('UPDATE plugin_grants_archive SET plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants.audit SET plugin_id = $1').not.toMatch(reparent);
+    });
+
+    it('holds the column name to an identifier boundary too', () => {
+      expect('UPDATE plugin_grants SET prior_plugin_id = $1').not.toMatch(reparent);
+      expect('UPDATE plugin_grants SET plugin_id_at = $1').not.toMatch(reparent);
+    });
+
+    it('refuses regex in either name rather than widening what it matches', () => {
+      expect(() => relationKeyUpdate('plugin_grants|plugins', 'plugin_id')).toThrow(/not a plain relation name/);
+      expect(() => relationKeyUpdate('plugin_grants', 'plugin_id|id')).toThrow(/not a plain identifier/);
     });
   });
 });

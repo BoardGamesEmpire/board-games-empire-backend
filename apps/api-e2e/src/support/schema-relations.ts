@@ -37,6 +37,15 @@ export interface ChildRelation {
   /** The scalar field holding the key, e.g. `pluginId`. */
   readonly foreignKey: string;
 
+  /**
+   * The Postgres column behind that field, from `@map` — what raw SQL names.
+   *
+   * Separate from {@link foreignKey} because the two differ in every model
+   * here, and a raw-statement pattern built from the Prisma spelling matches no
+   * SQL in the tree — which passes.
+   */
+  readonly column: string;
+
   /** The schema file it was declared in, so a refusal can point at it. */
   readonly file: string;
 }
@@ -51,6 +60,19 @@ interface ModelBlock {
 const MODEL_NAME = /^[A-Z][A-Za-z0-9_]*$/;
 
 /**
+ * Kept per parent AND per root, the way the audit that consumes this keeps its
+ * own result. Reading the schema walks 17 directories, strips comments line by
+ * line and runs the model regex over every file, for an answer that cannot
+ * change within a run — and the callers ask more than once.
+ */
+const derived = new Map<string, readonly ChildRelation[]>();
+
+/** Where this repo's models live, when no other root is named. */
+export function defaultModelsRoot(): string {
+  return join(workspaceRoot(), MODELS_DIR);
+}
+
+/**
  * Every model carrying an FK to `parentModel`, in schema-file order.
  *
  * Refuses rather than returns a short answer. A scan that finds no files, a
@@ -58,56 +80,73 @@ const MODEL_NAME = /^[A-Z][A-Za-z0-9_]*$/;
  * the honest result is indistinguishable from a broken reader — and this
  * module's whole value is being the thing that notices a table nobody added to
  * a list, so a silent empty result would be worse than no check at all.
+ *
+ * `modelsRoot` is a parameter so those refusals can be TESTED. Every one of
+ * them describes a schema this repo does not have, and a reader whose only
+ * input is the real schema can be exercised on none of them — which is how the
+ * composite-key guard came to be verified by editing a shipped model by hand
+ * and putting it back.
  */
-/**
- * Kept per parent, the way the audit that consumes this keeps its own result.
- * Reading the schema walks 17 directories, strips comments line by line and
- * runs the model regex over every file, for an answer that cannot change
- * within a run — and the callers ask more than once.
- */
-const derived = new Map<string, readonly ChildRelation[]>();
-
-export function childRelationsOf(parentModel: string): readonly ChildRelation[] {
-  const cached = derived.get(parentModel);
+export function childRelationsOf(
+  parentModel: string,
+  modelsRoot: string = defaultModelsRoot(),
+): readonly ChildRelation[] {
+  // Two components joined by a space. A directory path may contain almost
+  // anything, but a Prisma model name cannot contain a space, so the split
+  // point is unambiguous and one key cannot stand for two questions.
+  const key = `${modelsRoot} ${parentModel}`;
+  const cached = derived.get(key);
 
   if (cached !== undefined) {
     return cached;
   }
 
-  const children = readChildRelations(parentModel);
+  const children = readChildRelations(parentModel, modelsRoot);
 
-  derived.set(parentModel, children);
+  derived.set(key, children);
 
   return children;
 }
 
-function readChildRelations(parentModel: string): readonly ChildRelation[] {
+function readChildRelations(parentModel: string, modelsRoot: string): readonly ChildRelation[] {
   if (!MODEL_NAME.test(parentModel)) {
     // This builds a regex below, so anything else widens the match instead of
     // failing — `Plugin|User` reads as one model and would find both.
     throw new Error(`'${parentModel}' is not a plain Prisma model name.`);
   }
 
-  const blocks = readModelBlocks();
+  const blocks = readModelBlocks(modelsRoot);
 
   if (blocks.length === 0) {
     throw new Error(
-      `No Prisma models found under ${MODELS_DIR}. This reader is what tells the FK-implied-lock check which ` +
+      `No Prisma models found under ${modelsRoot}. This reader is what tells the FK-implied-lock check which ` +
         `tables are in its class, so finding nothing is a broken reader, not an empty schema.`,
     );
   }
 
-  // The field LIST is captured whole rather than a single name, so a composite
-  // key is recognised and refused below instead of failing to match. A pattern
-  // that only accepts one field drops a composite-keyed child silently — and
-  // silently is the whole problem: the empty-result guard never fires, because
-  // the other three children still match, and the audit runs against a set
-  // missing a table nobody was told about.
-  const relation = new RegExp(String.raw`^\s*\w+\s+${parentModel}\??\s+@relation\(\s*fields:\s*\[([^\]]*)\]`, 'gm');
+  // The whole ARGUMENT LIST is captured and `fields` located inside it, rather
+  // than required to come first. Prisma allows an optional relation name ahead
+  // of the named arguments — `@relation("InvitesSent", fields: [inviterId], …)`
+  // — and this schema writes more than forty relations that way. A pattern
+  // anchored on `@relation(fields:` matches none of them, and the miss is
+  // SILENT: the child is skipped, and the empty-result guard below never fires
+  // because the other children still match.
+  //
+  // The field LIST is likewise captured whole rather than as a single name, so
+  // a composite key is recognised and refused below instead of failing to
+  // match. Same failure, same direction: the audit runs against a table set
+  // short by one, and nothing says so.
+  const relation = new RegExp(String.raw`^\s*\w+\s+${parentModel}\??\s+@relation\(([^)]*)\)`, 'gm');
+  const fields = /fields\s*:\s*\[([^\]]*)\]/;
   const children: ChildRelation[] = [];
 
   for (const block of blocks) {
-    const lists = [...block.body.matchAll(relation)].map((match) => (match[1] ?? '').trim());
+    // A relation carrying no `fields` is the BACK reference — the side holding
+    // no key, which takes no implied lock — so it is passed over rather than
+    // refused.
+    const lists = [...block.body.matchAll(relation)]
+      .map((match) => fields.exec(match[1] ?? '')?.[1]?.trim())
+      .filter((list): list is string => list !== undefined);
 
     if (lists.length === 0) {
       continue;
@@ -163,13 +202,14 @@ function readChildRelations(parentModel: string): readonly ChildRelation[] {
       // Prisma's client property is the model name with a lowercased initial.
       accessor: block.name.charAt(0).toLowerCase() + block.name.slice(1),
       foreignKey,
+      column: mappedColumn(block, foreignKey, parentModel),
       file: block.file,
     });
   }
 
   if (children.length === 0) {
     throw new Error(
-      `No model under ${MODELS_DIR} declares an FK to '${parentModel}'. Either the parent was renamed or this ` +
+      `No model under ${modelsRoot} declares an FK to '${parentModel}'. Either the parent was renamed or this ` +
         `reader stopped recognising the relation syntax — both leave the check asserting nothing.`,
     );
   }
@@ -177,8 +217,32 @@ function readChildRelations(parentModel: string): readonly ChildRelation[] {
   return children;
 }
 
-function readModelBlocks(): readonly ModelBlock[] {
-  const root = join(workspaceRoot(), MODELS_DIR);
+/**
+ * The Postgres column behind a scalar field.
+ *
+ * Raw SQL names the COLUMN, and every field in these models is mapped, so a
+ * statement pattern built from the Prisma spelling (`pluginId`) matches nothing
+ * in the tree — the silent direction again. A field with no `@map` keeps its
+ * own name, which is what Prisma does.
+ *
+ * Refuses when the scalar is not declared at all: a relation keyed on a field
+ * the model does not have is a reader that has stopped understanding the
+ * schema, and the answer it would return is indistinguishable from a real one.
+ */
+function mappedColumn(block: ModelBlock, field: string, parentModel: string): string {
+  const declaration = new RegExp(String.raw`^\s*${field}\s+\S+[^\n]*$`, 'm').exec(block.body);
+
+  if (declaration === null) {
+    throw new Error(
+      `Model '${block.name}' (${block.file}) keys its relation to '${parentModel}' on '${field}', but declares no ` +
+        `scalar field of that name, so the column a raw statement would name cannot be read.`,
+    );
+  }
+
+  return /@map\("([^"]+)"\)/.exec(declaration[0])?.[1] ?? field;
+}
+
+function readModelBlocks(root: string): readonly ModelBlock[] {
   const blocks: ModelBlock[] = [];
 
   for (const file of schemaFiles(root)) {
@@ -205,7 +269,7 @@ function readModelBlocks(): readonly ModelBlock[] {
         );
       }
 
-      blocks.push({ name, body, file: join(MODELS_DIR, file) });
+      blocks.push({ name, body, file: join(root, file) });
     }
   }
 
