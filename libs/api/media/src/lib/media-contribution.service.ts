@@ -1,15 +1,17 @@
-import type { MediaContribution, Prisma } from '@bge/database';
 import {
   Action,
   ContributionOrigin,
   DatabaseService,
   MediaContributionStatus,
+  Prisma,
   ResourceType,
   Visibility,
+  type MediaContribution,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ModelResourceType } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
+import type { PaginatedRows } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -207,17 +209,38 @@ export class MediaContributionService {
     });
   }
 
-  async list(query: ListContributionsQueryDto) {
-    return this.db.mediaContribution.findMany({
-      where: {
-        AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.read),
-        ...(query.status ? { status: query.status } : {}),
-      },
-      // `id` breaks ties on `createdAt`, so page boundaries hold across requests.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip: query.skip,
-      take: query.pageSize,
-    });
+  /**
+   * One page of readable contributions plus the total matching count for the
+   * response envelope (#372). The status filter reaches both halves: a
+   * Pending-only page whose `total` counted approved rows too would advertise
+   * a moderation queue several times its real length.
+   *
+   * Rows and count share a REPEATABLE READ snapshot — this list is the view of
+   * exactly the approvals and rejections that would otherwise land between the
+   * two statements.
+   */
+  async list(query: ListContributionsQueryDto): Promise<PaginatedRows<MediaContribution>> {
+    const where: Prisma.MediaContributionWhereInput = {
+      AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.read),
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.mediaContribution.findMany({
+          where,
+          // `id` breaks ties on `createdAt`, so page boundaries hold across requests.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: query.skip,
+          take: query.pageSize,
+        }),
+
+        this.db.mediaContribution.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   private async flipOwnership(

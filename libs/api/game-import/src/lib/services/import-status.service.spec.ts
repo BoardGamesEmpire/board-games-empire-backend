@@ -1,19 +1,37 @@
-import { DatabaseService, JobStatus, JobType } from '@bge/database';
+import { DatabaseService, JobStatus, JobType, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
-import { paginationQuery } from '@bge/testing';
+import { paginationQuery, prismaBlock, prismaColumn, prismaTable, readPrismaModels } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ImportBatchStatus } from '../interfaces/import-job.interface';
-import { GameImportStatusService } from './import-status.service';
+import { BATCH_SCOPE, GameImportStatusService } from './import-status.service';
 
 describe('GameImportStatusService', () => {
   let service: GameImportStatusService;
-  let db: { job: { findMany: jest.Mock; groupBy: jest.Mock } };
+  /**
+   * A narrow fake rather than `createMockDatabaseService()`: this suite drives
+   * the service directly, and the shared mock's mapped type does not resolve
+   * Prisma's generic `groupBy` into a jest mock. `$transaction` runs the
+   * callback against the fake, so the batch list's one interactive transaction
+   * executes; `$queryRaw` answers the `COUNT(DISTINCT batch_id)`.
+   */
+  let db: {
+    job: { findMany: jest.Mock; groupBy: jest.Mock };
+    $queryRaw: jest.Mock;
+    $transaction: jest.Mock;
+  };
 
   const startedAt = new Date('2026-07-06T10:00:00Z');
   const completedAt = new Date('2026-07-06T10:00:05Z');
 
+  /** What `COUNT(DISTINCT batch_id)::int` comes back as. */
+  const countsBatches = (total: number) => db.$queryRaw.mockResolvedValue([{ total }]);
+
   beforeEach(() => {
-    db = { job: { findMany: jest.fn(), groupBy: jest.fn() } };
+    db = {
+      job: { findMany: jest.fn(), groupBy: jest.fn() },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn((run: (tx: unknown) => Promise<unknown>) => run(db)),
+    };
     service = new GameImportStatusService(db as unknown as DatabaseService);
   });
 
@@ -144,10 +162,12 @@ describe('GameImportStatusService', () => {
       ...over,
     });
 
-    it('returns an empty list when the user has no import batches', async () => {
+    beforeEach(() => countsBatches(0));
+
+    it('returns an empty page when the user has no import batches', async () => {
       db.job.groupBy.mockResolvedValue([]);
 
-      await expect(service.listBatchesForUser('user-7', paginationQuery())).resolves.toEqual({ batches: [] });
+      await expect(service.listBatchesForUser('user-7', paginationQuery())).resolves.toEqual({ rows: [], total: 0 });
       expect(db.job.findMany).not.toHaveBeenCalled();
     });
 
@@ -161,6 +181,7 @@ describe('GameImportStatusService', () => {
         row({ id: 'job-1', batchId: 'batch-1' }),
         row({ id: 'job-2', batchId: 'batch-2', status: JobStatus.Running, gameId: null, completedAt: null }),
       ]);
+      countsBatches(9);
 
       const response = await service.listBatchesForUser('user-7', paginationQuery({ page: 2, limit: 5 }));
 
@@ -177,10 +198,164 @@ describe('GameImportStatusService', () => {
       expect(db.job.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ userId: 'user-7' }) }),
       );
-      expect(response.batches.map((batch) => batch.batchId)).toEqual(['batch-2', 'batch-1']);
-      expect(response.batches[0].status).toBe(ImportBatchStatus.Running);
-      expect(response.batches[1].status).toBe(ImportBatchStatus.Completed);
-      expect(response.batches[1].jobs[0]).toEqual(expect.objectContaining({ jobId: 'job-1', externalId: 'ext-1' }));
+      expect(response.rows.map((batch) => batch.batchId)).toEqual(['batch-2', 'batch-1']);
+      expect(response.rows[0].status).toBe(ImportBatchStatus.Running);
+      expect(response.rows[1].status).toBe(ImportBatchStatus.Completed);
+      expect(response.rows[1].jobs[0]).toEqual(expect.objectContaining({ jobId: 'job-1', externalId: 'ext-1' }));
+    });
+
+    /**
+     * #372: a batch is a GROUP, so `total` cannot come from a row count.
+     * `COUNT(DISTINCT batch_id)` does it in the database; the alternatives — a
+     * second unpaged groupBy, or `findMany({ distinct })` — would materialise
+     * every batch the user has ever run in order to count them, which is the
+     * unbounded read this issue exists to remove.
+     */
+    it('counts distinct batches rather than jobs, and reports it as total', async () => {
+      db.job.groupBy.mockResolvedValue([{ batchId: 'batch-1', _max: { createdAt: startedAt } }]);
+      // Two jobs in the one batch: a row count would say 2, the batch count 9.
+      db.job.findMany.mockResolvedValue([
+        row({ id: 'job-1', batchId: 'batch-1' }),
+        row({ id: 'job-2', batchId: 'batch-1', parentJobId: 'job-1' }),
+      ]);
+      countsBatches(9);
+
+      const response = await service.listBatchesForUser('user-7', paginationQuery({ limit: 5 }));
+
+      expect(response.total).toBe(9);
+      expect(response.rows).toHaveLength(1);
+    });
+
+    /**
+     * The one statement in this service whose identifiers are physical rather
+     * than derived by Prisma: it names `jobs`, `batch_id`, `user_id` and the
+     * `job_types` enum directly. A `@@map` or enum rename in
+     * `prisma/models/system/job.prisma` would compile, satisfy every other test
+     * here, and 500 the route at runtime — so the names are read back out of the
+     * schema rather than trusted.
+     *
+     * The pattern is the raw-lock pin in `household-member.service.spec.ts`,
+     * itself #248's rule applied to source instead of models. Executing the
+     * statement against a real Postgres is the complementary guard and belongs
+     * with the e2e harness's `readShippedSql` machinery (#405).
+     */
+    describe('the identifiers the raw count hardcodes', () => {
+      const JOB_MODEL = 'system/job.prisma';
+
+      const schema = () => readPrismaModels(__dirname, JOB_MODEL);
+
+      const capturedSql = async (): Promise<string> => {
+        db.job.groupBy.mockResolvedValue([]);
+        await service.listBatchesForUser('user-7', paginationQuery());
+
+        const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
+
+        return query.sql;
+      };
+
+      it('names only the table, columns and enum the Job model maps to', async () => {
+        const sql = await capturedSql();
+        const source = schema();
+
+        // Word-boundary matched, so `jobs` cannot be satisfied by a longer
+        // identifier that merely contains it.
+        for (const identifier of [
+          prismaTable(source, 'model', 'Job'),
+          prismaTable(source, 'enum', 'JobType'),
+          prismaColumn(source, 'Job', 'batchId'),
+          prismaColumn(source, 'Job', 'userId'),
+        ]) {
+          expect(sql).toMatch(new RegExp(`\\b${identifier}\\b`));
+        }
+      });
+
+      // The enum literal is bound as a parameter and cast, so a renamed VALUE
+      // (as opposed to the enum type) fails at runtime too. Pinned separately
+      // because it travels in `values`, not in the statement text.
+      /**
+       * The predicate exists twice — `BATCH_SCOPE` for the paged `groupBy`, and
+       * raw SQL for the count, because `COUNT(DISTINCT …)` has no Prisma `where`
+       * form. Nothing in the type system holds them together, so this does:
+       * every key of the scope must be constrained by the statement.
+       *
+       * Adding `status: { not: JobStatus.Cancelled }` to `BATCH_SCOPE` without
+       * adding it to the SQL fails here — which is the bug it prevents, a user
+       * with 3 live and 7 cancelled batches being told `total: 10` and handed an
+       * empty page 2.
+       */
+      it('constrains every column BATCH_SCOPE narrows on', async () => {
+        const sql = await capturedSql();
+        const source = schema();
+
+        for (const field of Object.keys(BATCH_SCOPE('user-7'))) {
+          expect(sql).toMatch(new RegExp(`\\b${prismaColumn(source, 'Job', field)}\\b`));
+        }
+      });
+
+      it('binds a JobType value the schema still declares', async () => {
+        await capturedSql();
+
+        const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
+        expect(query.values).toContain(JobType.GameImport);
+        expect(prismaBlock(schema(), 'enum', 'JobType')).toMatch(new RegExp(`\\b${JobType.GameImport}\\b`));
+      });
+    });
+
+    it('scopes the count to the caller, matching the groupBy', async () => {
+      db.job.groupBy.mockResolvedValue([]);
+
+      await service.listBatchesForUser('user-7', paginationQuery());
+
+      const [query] = db.$queryRaw.mock.calls[0] as [Prisma.Sql];
+      expect(query.values).toContain('user-7');
+      expect(query.values).toContain(JobType.GameImport);
+      expect(query.sql).toContain('COUNT(DISTINCT batch_id)');
+    });
+
+    /**
+     * The third statement depends on the first — job rows are fetched by the
+     * batchIds the groupBy resolved — so they have to share a snapshot. Under
+     * separate ones a job deleted in between yields a batch with no jobs, and a
+     * `total` describing a different set of batches than the rows.
+     */
+    /**
+     * The callback form inherits Prisma's 5s default. This read was two untimed
+     * queries before #372, so leaving the default would turn a slow response
+     * into a P2028 500 for the user with the longest import history — the one
+     * this recovery route exists for.
+     */
+    it('raises the interactive transaction timeout above Prisma’s 5s default', async () => {
+      db.job.groupBy.mockResolvedValue([]);
+
+      await service.listBatchesForUser('user-7', paginationQuery());
+
+      const options = db.$transaction.mock.calls[0][1] as { timeout?: number };
+      expect(options.timeout).toBeGreaterThan(5000);
+    });
+
+    it('runs the groupBy, the count and the row fetch in one REPEATABLE READ transaction', async () => {
+      db.job.groupBy.mockResolvedValue([{ batchId: 'batch-1', _max: { createdAt: startedAt } }]);
+      db.job.findMany.mockResolvedValue([row({ id: 'job-1', batchId: 'batch-1' })]);
+      countsBatches(1);
+
+      await service.listBatchesForUser('user-7', paginationQuery());
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      const options = db.$transaction.mock.calls[0][1] as { isolationLevel?: unknown };
+      // The timeout is asserted on its own above; this pins the isolation level.
+      expect(options).toMatchObject({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // The count is taken even on an empty page, so a client that paged past the
+    // end still learns how many batches there are to page back to.
+    it('reports the total on a page that came back empty', async () => {
+      db.job.groupBy.mockResolvedValue([]);
+      countsBatches(4);
+
+      await expect(service.listBatchesForUser('user-7', paginationQuery({ page: 99 }))).resolves.toEqual({
+        rows: [],
+        total: 4,
+      });
     });
   });
 });

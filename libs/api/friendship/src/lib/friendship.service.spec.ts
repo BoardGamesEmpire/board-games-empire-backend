@@ -1,8 +1,13 @@
 import type { Friendship } from '@bge/database';
-import { Action, FriendshipStatus, ResourceType } from '@bge/database';
+import { Action, FriendshipStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { AbilityService } from '@bge/permissions';
-import { createTestingModuleWithDb, paginationQuery, type MockDatabaseService } from '@bge/testing';
+import {
+  batchTransactionCall,
+  createTestingModuleWithDb,
+  paginationQuery,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FriendshipService } from './friendship.service';
 
@@ -235,9 +240,12 @@ describe('FriendshipService', () => {
   });
 
   describe('reads', () => {
-    it('listForUser scopes by read conditions and applies the status filter', async () => {
+    beforeEach(() => {
       db.friendship.findMany.mockResolvedValue([]);
+      db.friendship.count.mockResolvedValue(0);
+    });
 
+    it('listForUser scopes by read conditions and applies the status filter', async () => {
       await service.listForUser(Object.assign(paginationQuery({ limit: 10 }), { status: FriendshipStatus.Accepted }));
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Friendship, Action.read);
@@ -249,8 +257,6 @@ describe('FriendshipService', () => {
     });
 
     it('listIncomingRequests filters to pending requests addressed to the acting user', async () => {
-      db.friendship.findMany.mockResolvedValue([]);
-
       await service.listIncomingRequests(paginationQuery({ limit: 10 }));
 
       expect(db.friendship.findMany).toHaveBeenCalledWith(
@@ -258,6 +264,50 @@ describe('FriendshipService', () => {
           where: expect.objectContaining({ addresseeId: ME, status: FriendshipStatus.Pending, AND: [COND] }),
         }),
       );
+    });
+
+    // #372: both reads go through one shared paginate helper, so the snapshot
+    // guarantee has to hold for each of them — this list is the view of exactly
+    // the writes (a request accepted, a friendship removed) that would otherwise
+    // land between the rows and the count.
+    it.each([
+      ['listForUser', (q: ReturnType<typeof paginationQuery>) => service.listForUser(q)],
+      ['listIncomingRequests', (q: ReturnType<typeof paginationQuery>) => service.listIncomingRequests(q)],
+    ])('%s reads rows and count in one REPEATABLE READ transaction', async (_name, read) => {
+      await read(paginationQuery({ limit: 10 }));
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // The status filter narrows the rows, so it must narrow the count too — an
+    // Accepted-only page whose `total` counted pending requests as well would
+    // advertise pages that come back empty.
+    it('counts through the same scoped, status-filtered where as the rows', async () => {
+      db.friendship.count.mockResolvedValue(5);
+
+      const page = await service.listForUser(
+        Object.assign(paginationQuery({ limit: 10 }), { status: FriendshipStatus.Accepted }),
+      );
+
+      expect(db.friendship.count).toHaveBeenCalledWith({
+        where: { AND: [COND], status: FriendshipStatus.Accepted },
+      });
+      expect(page).toEqual({ rows: [], total: 5 });
+    });
+
+    // The incoming-requests read has a narrower scope than the wide list; a
+    // count that lost the addressee clause would total every pending request on
+    // the instance the caller may read.
+    it('counts incoming requests through the addressee-scoped where', async () => {
+      db.friendship.count.mockResolvedValue(2);
+
+      await service.listIncomingRequests(paginationQuery({ limit: 10 }));
+
+      expect(db.friendship.count).toHaveBeenCalledWith({
+        where: { AND: [COND], addresseeId: ME, status: FriendshipStatus.Pending },
+      });
     });
   });
 });

@@ -1,7 +1,7 @@
 import { AvailabilityResponse, EventAvailabilityVote, EventOccurrence, OccurrenceStatus } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
-import { createTestingModuleWithDb, makeEventOccurrence } from '@bge/testing';
+import { createTestingModuleWithDb, makeEventOccurrence, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
@@ -56,14 +56,32 @@ describe('EventOccurrenceController', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('getOccurrences', () => {
-    it('delegates and wraps in { occurrences }', async () => {
+    it('delegates with the paging and wraps the rows in the envelope', async () => {
       const occurrences = [stubOcc(), stubOcc()];
-      service.getOccurrences.mockResolvedValue(occurrences);
+      service.getOccurrences.mockResolvedValue({ rows: occurrences, total: 2 });
 
-      const result = await firstValueFrom(controller.getOccurrences('event-1'));
+      const pagination = paginationQuery({ limit: 10 });
+      const result = await firstValueFrom(controller.getOccurrences('event-1', pagination));
 
-      expect(service.getOccurrences).toHaveBeenCalledWith('event-1');
-      expect(result).toEqual({ occurrences });
+      expect(service.getOccurrences).toHaveBeenCalledWith('event-1', pagination);
+      expect(result).toEqual({
+        occurrences,
+        pagination: { page: 1, limit: 10, total: 2, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // #372: a nested list is still a list. `total` is what tells a client there
+    // are more dates than the page it received.
+    it('reports more pages when the event has more occurrences than one page', async () => {
+      service.getOccurrences.mockResolvedValue({ rows: [stubOcc()], total: 12 });
+
+      const result = await firstValueFrom(controller.getOccurrences('event-1', paginationQuery({ limit: 5 })));
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          pagination: { page: 1, limit: 5, total: 12, totalPages: 3, hasMore: true },
+        }),
+      );
     });
   });
 

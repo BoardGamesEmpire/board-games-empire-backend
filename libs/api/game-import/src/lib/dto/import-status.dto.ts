@@ -104,11 +104,3 @@ export class ImportBatchStatusResponseDto {
   @ApiProperty({ type: [ImportJobStatusDto], description: 'Base job first, then expansions' })
   jobs!: ImportJobStatusDto[];
 }
-
-export class ImportBatchListResponseDto {
-  @ApiProperty({
-    type: [ImportBatchStatusResponseDto],
-    description: "The requesting user's import batches, most recently started first",
-  })
-  batches!: ImportBatchStatusResponseDto[];
-}

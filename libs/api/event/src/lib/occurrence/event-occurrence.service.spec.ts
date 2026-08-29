@@ -5,13 +5,16 @@ import {
   EventOccurrence,
   EventSchedulingMode,
   OccurrenceStatus,
+  Prisma,
   ResourceType,
 } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
+  batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   makeEventOccurrence,
+  paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -54,11 +57,15 @@ describe('EventOccurrenceService', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('getOccurrences', () => {
+    beforeEach(() => {
+      db.eventOccurrence.findMany.mockResolvedValue([]);
+      db.eventOccurrence.count.mockResolvedValue(0);
+    });
+
     it('filters by read conditions and scopes to the event', async () => {
       db.event.count.mockResolvedValue(1);
-      db.eventOccurrence.findMany.mockResolvedValue([]);
 
-      await service.getOccurrences('event-1');
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
         ResourceType.EventOccurrence,
@@ -71,7 +78,48 @@ describe('EventOccurrenceService', () => {
 
     it('throws NotFound when the event does not exist', async () => {
       db.event.count.mockResolvedValue(0);
-      await expect(service.getOccurrences('missing')).rejects.toThrow(NotFoundException);
+      await expect(service.getOccurrences('missing', paginationQuery({ limit: 10 }))).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+
+    // #372 paginates a read that used to return every occurrence of the event.
+    it('takes one page rather than the whole event', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await service.getOccurrences('event-1', paginationQuery({ page: 2, limit: 5 }));
+
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5, skip: 5 }));
+    });
+
+    /**
+     * `sortOrder` is an `Int @default(0)`, so every occurrence nobody has
+     * reordered shares a sort key. Paging a tie-less sort lets those rows drift
+     * across page boundaries between requests, which is the defect page-based
+     * paging turns from latent into visible.
+     */
+    it('breaks ties on id, so a shared sortOrder cannot drift across pages', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] }),
+      );
+    });
+
+    it('counts through the same event-scoped where as the rows, in one REPEATABLE READ transaction', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventOccurrence.count.mockResolvedValue(7);
+
+      const page = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventOccurrence.count).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+      expect(page).toEqual({ rows: [], total: 7 });
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
   });
 
@@ -298,6 +346,6 @@ describe('EventOccurrenceService', () => {
       throw new ForbiddenException();
     });
 
-    await expect(service.getOccurrences('event-1')).rejects.toThrow(ForbiddenException);
+    await expect(service.getOccurrences('event-1', paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
   });
 });

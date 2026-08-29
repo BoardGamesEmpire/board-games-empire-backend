@@ -10,11 +10,15 @@ import {
   type Plugin,
   type PluginGrant,
 } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import {
+  createMockDatabaseService,
+  prismaColumn,
+  prismaTable,
+  readPrismaModels,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
-import { readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
 import {
   HouseholdPluginUnitDisabledEvent,
   HouseholdPluginUnitEnabledEvent,
@@ -709,36 +713,9 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
      * (Prisma exposes no runtime DMMF) — same pin as #356's grant lock.
      */
     it('locks with the mapped table and column names — pinned against the Prisma model files', async () => {
-      const findSchemaDir = (): string => {
-        let dir = __dirname;
-
-        for (let depth = 0; depth < 10; depth += 1) {
-          const candidate = join(dir, 'prisma', 'models');
-
-          try {
-            if (statSync(candidate).isDirectory()) {
-              return candidate;
-            }
-          } catch {
-            // Not this level; keep walking toward the workspace root.
-          }
-
-          dir = resolve(dir, '..');
-        }
-
-        throw new Error('Could not locate prisma/models by walking up from the spec directory');
-      };
-
-      const schemaDir = findSchemaDir();
-      const model = (file: string): string => readFileSync(join(schemaDir, 'plugin', file), 'utf8');
-      /** `@@map` name, or the model name when unmapped. */
-      const table = (source: string, fallback: string): string => /@@map\("([^"]+)"\)/.exec(source)?.[1] ?? fallback;
-      /** `@map` name for one field, or the field name when unmapped. */
-      const column = (source: string, field: string): string => {
-        const line = new RegExp(`^\\s*${field}\\b.*$`, 'm').exec(source)?.[0] ?? '';
-
-        return /@map\("([^"]+)"\)/.exec(line)?.[1] ?? field;
-      };
+      const model = (file: string): string => readPrismaModels(__dirname, `plugin/${file}`);
+      const table = (source: string, name: string): string => prismaTable(source, 'model', name);
+      const column = (source: string, name: string, field: string): string => prismaColumn(source, name, field);
 
       const householdModel = model('household-plugin.prisma');
       const userModel = model('user-plugin.prisma');
@@ -748,11 +725,11 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
 
       expect(householdSql).toContain(`FROM ${table(householdModel, 'HouseholdPlugin')}`);
       expect(householdSql).toContain(
-        `SELECT ${column(householdModel, 'id')}, ${column(householdModel, 'enabled')}, ` +
-          `${column(householdModel, 'suspendedForConsent')}`,
+        `SELECT ${column(householdModel, 'HouseholdPlugin', 'id')}, ${column(householdModel, 'HouseholdPlugin', 'enabled')}, ` +
+          `${column(householdModel, 'HouseholdPlugin', 'suspendedForConsent')}`,
       );
-      expect(householdSql).toContain(`WHERE ${column(householdModel, 'householdId')} = ?`);
-      expect(householdSql).toContain(`${column(householdModel, 'pluginId')} = ?`);
+      expect(householdSql).toContain(`WHERE ${column(householdModel, 'HouseholdPlugin', 'householdId')} = ?`);
+      expect(householdSql).toContain(`${column(householdModel, 'HouseholdPlugin', 'pluginId')} = ?`);
       expect(householdSql).toContain('FOR UPDATE');
 
       db.$queryRaw.mockClear();
@@ -774,8 +751,8 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
       const userSql = capturedSql(0);
 
       expect(userSql).toContain(`FROM ${table(userModel, 'UserPlugin')}`);
-      expect(userSql).toContain(`WHERE ${column(userModel, 'userId')} = ?`);
-      expect(userSql).toContain(`${column(userModel, 'pluginId')} = ?`);
+      expect(userSql).toContain(`WHERE ${column(userModel, 'UserPlugin', 'userId')} = ?`);
+      expect(userSql).toContain(`${column(userModel, 'UserPlugin', 'pluginId')} = ?`);
       expect(userSql).toContain('FOR UPDATE');
     });
   });

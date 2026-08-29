@@ -1,5 +1,6 @@
 import type { Actor } from '@bge/actor-context';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { Prisma } from '@bge/database';
+import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { AUDIT_LOG_DEFAULT_PAGE_SIZE } from '../constants/audit-log.constants';
 import { ListAuditLogsQueryDto } from '../dto';
@@ -93,6 +94,7 @@ describe('AuditLogService', () => {
   describe('list', () => {
     beforeEach(() => {
       db.auditLog.findMany.mockResolvedValue([]);
+      db.auditLog.count.mockResolvedValue(0);
     });
 
     it('excludes soft-deleted rows, sorts newest first, and applies default paging', async () => {
@@ -157,6 +159,29 @@ describe('AuditLogService', () => {
 
       const args = db.auditLog.findMany.mock.calls[0][0];
       expect(args?.where?.occurredAt).toEqual({ gte: occurredFrom });
+    });
+
+    // #372: rows and count share one snapshot, or the retention sweep running
+    // between them makes `hasMore` promise a page that no longer exists.
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      await service.list(auditQuery());
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // The filters are the expensive part of this read; a count that skipped them
+    // would report the size of the whole table as the size of a filtered view.
+    it('counts through the same filtered where as the rows', async () => {
+      db.auditLog.count.mockResolvedValue(4);
+
+      const page = await service.list(auditQuery({ subject: 'Event', subjectId: 'e1' }));
+
+      expect(db.auditLog.count).toHaveBeenCalledWith({
+        where: { deletedAt: null, subject: 'Event', subjectId: 'e1' },
+      });
+      expect(page).toEqual({ rows: [], total: 4 });
     });
   });
 });

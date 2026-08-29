@@ -1,7 +1,14 @@
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+  type Game,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateGameDto, UpdateGameDto } from './dto';
 
@@ -15,18 +22,36 @@ export class GameService {
     private readonly permissions: PermissionsService,
   ) {}
 
-  async getGames(pagination: PaginationQueryDto) {
-    return this.db.game.findMany({
-      where: {
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
-      },
-      // A catalog reads best alphabetically, and `title` is not unique — two
-      // editions of the same game share one — so `id` completes the order.
-      // Without a total order the database may return page 2 overlapping page 1.
-      orderBy: [{ title: 'asc' }, { id: 'asc' }],
-      skip: pagination.skip,
-      take: pagination.pageSize,
-    });
+  /**
+   * One page of the catalog plus the total matching row count for the response
+   * envelope (#372). Rows and count share a REPEATABLE READ transaction: under
+   * the database default each statement takes its own snapshot, so a concurrent
+   * create between them makes `total` — and the `hasMore` derived from it —
+   * describe a catalog the caller was never served.
+   */
+  async getGames(pagination: PaginationQueryDto): Promise<PaginatedRows<Game>> {
+    const where: Prisma.GameWhereInput = {
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.game.findMany({
+          where,
+          // A catalog reads best alphabetically, and `title` is not unique — two
+          // editions of the same game share one — so `id` completes the order.
+          // Without a total order the database may return page 2 overlapping page 1.
+          orderBy: [{ title: 'asc' }, { id: 'asc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.game.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getGame(id: string) {

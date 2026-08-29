@@ -8,6 +8,7 @@ import {
   InterestedWeight,
   isPrismaDependentRecordNotFoundError,
   NominationStatus,
+  Prisma,
   ResourceType,
   ScheduledGameRole,
   VoteEligibility,
@@ -16,6 +17,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
@@ -43,17 +45,49 @@ export class EventGameNominationService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  async getNominations(eventId: string): Promise<EventGameNomination[]> {
+  /**
+   * One page of an event's nominations plus the total for the response envelope.
+   *
+   * Unpaginated until #372: it returned every nomination on the event. Unlike
+   * occurrences, this list has no natural ceiling at all — it grows with the
+   * attendees, and each nomination accumulates votes — so paging it is the
+   * point rather than a formality (D-372-1). The response is a truncating
+   * change, which pre-alpha allows without a shim.
+   *
+   * `id` breaks ties on `createdAt`: nominations created in one transaction
+   * share a timestamp, and a tie-less sort lets them drift across page
+   * boundaries between requests.
+   *
+   * The existence probe runs ahead of the read, so an event that does not exist
+   * is a 404 rather than an empty page — with the same caveat as the occurrence
+   * list: it is a separate statement, so an event deleted between the probe and
+   * the read answers 200 with an empty page. That is a check-then-act window,
+   * not the rows-versus-count split the transaction below closes.
+   */
+  async getNominations(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventGameNomination>> {
     await assertEventExists(this.db, eventId);
 
-    return this.db.eventGameNomination.findMany({
-      where: {
-        eventId,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
-      },
-      include: NOMINATION_INCLUDE,
-      orderBy: { createdAt: 'desc' },
-    });
+    const where: Prisma.EventGameNominationWhereInput = {
+      eventId,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.eventGameNomination.findMany({
+          where,
+          include: NOMINATION_INCLUDE,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.eventGameNomination.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getNomination(eventId: string, nominationId: string): Promise<EventGameNomination> {
@@ -593,6 +627,9 @@ const NOMINATION_INCLUDE = {
       },
     },
   },
+  // Unbounded: every vote of every nomination on the page. #372 capped the
+  // outer list; capping or aggregating this is #404, because it changes what the
+  // endpoint serves rather than how it wraps it.
   votes: {
     select: {
       id: true,

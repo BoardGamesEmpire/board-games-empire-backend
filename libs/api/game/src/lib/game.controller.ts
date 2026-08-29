@@ -1,14 +1,16 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
-import { CreateGameDto, GameListResponseDto, UpdateGameDto } from './dto';
+import { CreateGameDto, GameDto, GameResponseDto, UpdateGameDto } from './dto';
 import { GameService } from './game.service';
+
+const PaginatedGamesResponse = PaginatedResponseDto(GameDto, 'games');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -20,18 +22,25 @@ export class GameController {
 
   constructor(private readonly gameService: GameService) {}
 
-  @ApiOperation({ summary: 'List games' })
-  @ApiResponse({ status: Http.Ok, type: GameListResponseDto })
+  @ApiOperation({
+    summary: 'List games',
+    description:
+      'Alphabetical by title. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
+      'envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
+  })
+  @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
   getGames(@Query() paginationQuery: DefaultPaginationQueryDto) {
-    return from(this.gameService.getGames(paginationQuery)).pipe(map((games) => ({ games })));
+    return from(this.gameService.getGames(paginationQuery)).pipe(
+      map((page) => paginated('games', page, paginationQuery)),
+    );
   }
 
   @ApiParam({ name: 'id', type: String })
-  @ApiResponse({ status: Http.Ok, type: GameListResponseDto })
+  @ApiResponse({ status: Http.Ok, type: GameResponseDto })
   @ApiResponse({ status: Http.NotFound, description: 'Game not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get(':id')

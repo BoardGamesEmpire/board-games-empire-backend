@@ -9,6 +9,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
+import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -19,6 +20,17 @@ import {
 } from '@nestjs/common';
 import { CreateFriendRequestDto, ListFriendshipsQueryDto, RespondableFriendshipStatus } from './dto';
 
+/**
+ * Both participants, as every friendship read returns them. Extracted to module
+ * scope so the payload type below stays in step with what the queries select.
+ */
+const PARTICIPANT_INCLUDE = {
+  requester: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
+  addressee: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
+} satisfies Prisma.FriendshipInclude;
+
+export type FriendshipWithParticipants = Prisma.FriendshipGetPayload<{ include: typeof PARTICIPANT_INCLUDE }>;
+
 @Injectable()
 export class FriendshipService {
   private readonly logger = new Logger(FriendshipService.name);
@@ -27,11 +39,6 @@ export class FriendshipService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
   ) {}
-
-  private readonly participantInclude = {
-    requester: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
-    addressee: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
-  } satisfies Prisma.FriendshipInclude;
 
   /**
    * Send a friend request. A friendship is always a single row per unordered
@@ -102,7 +109,7 @@ export class FriendshipService {
         where: { pairKey, status: { in: [FriendshipStatus.Declined, FriendshipStatus.Withdrawn] } },
         create: { ...requestData, pairKey },
         update: { ...requestData, respondedAt: null },
-        include: this.participantInclude,
+        include: PARTICIPANT_INCLUDE,
       });
     } catch (error) {
       if (isPrismaUniqueConstraintError(error)) {
@@ -112,36 +119,78 @@ export class FriendshipService {
     }
   }
 
-  async listForUser({ status, skip, pageSize }: ListFriendshipsQueryDto) {
-    return this.db.friendship.findMany({
-      where: {
+  /**
+   * Every friendship visible to the caller, newest activity first, optionally
+   * narrowed to one status. One page plus the total for the envelope (#372).
+   */
+  async listForUser(query: ListFriendshipsQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
+    const { status } = query;
+
+    return this.paginateFriendships(
+      {
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
         ...(status ? { status } : {}),
       },
-      include: this.participantInclude,
       // `id` breaks ties on `updatedAt`: a batch status change stamps several
       // rows identically, which a tie-less sort lets drift across pages.
-      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-      skip,
-      take: pageSize,
-    });
+      [{ updatedAt: 'desc' }, { id: 'desc' }],
+      query,
+    );
   }
 
-  /** Incoming pending requests where the acting user is the addressee. */
-  async listIncomingRequests({ skip, pageSize }: ListFriendshipsQueryDto) {
+  /**
+   * Incoming pending requests where the acting user is the addressee.
+   *
+   * Takes the bare page contract, not `ListFriendshipsQueryDto`: this set is
+   * Pending by definition, so there is no status to filter on, and the route
+   * binds a status-less DTO for the same reason.
+   */
+  async listIncomingRequests(query: PaginationQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
     const userId = this.abilityService.getActingUserId();
 
-    return this.db.friendship.findMany({
-      where: {
+    return this.paginateFriendships(
+      {
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
         addresseeId: userId,
         status: FriendshipStatus.Pending,
       },
-      include: this.participantInclude,
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      skip,
-      take: pageSize,
-    });
+      [{ createdAt: 'desc' }, { id: 'desc' }],
+      query,
+    );
+  }
+
+  /**
+   * The shared read behind both list endpoints: one page of friendships plus
+   * the total matching row count for the response envelope (#372). Scope and
+   * sort key are each read's business; everything else here is invariant, and
+   * shared so a fix to either cannot land on one read and miss the other.
+   *
+   * Rows and count share a REPEATABLE READ transaction: under the database
+   * default each statement takes its own snapshot, and a request accepted
+   * between the two — which this list is precisely the view of — makes
+   * `hasMore` disagree with the rows actually sent.
+   */
+  private async paginateFriendships(
+    where: Prisma.FriendshipWhereInput,
+    orderBy: Prisma.FriendshipOrderByWithRelationInput[],
+    pagination: PaginationQueryDto,
+  ): Promise<PaginatedRows<FriendshipWithParticipants>> {
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.friendship.findMany({
+          where,
+          include: PARTICIPANT_INCLUDE,
+          orderBy,
+          skip: pagination.skip,
+          take: pagination.pageSize,
+        }),
+
+        this.db.friendship.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   /**
@@ -228,7 +277,7 @@ export class FriendshipService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.update),
         },
         data,
-        include: this.participantInclude,
+        include: PARTICIPANT_INCLUDE,
       });
     } catch (error) {
       throw this.mapMissingToForbidden(error, id);

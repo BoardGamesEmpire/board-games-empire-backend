@@ -47,8 +47,3 @@ export class AuditLogEntryDto {
   @ApiProperty({ description: 'Audit-listener insertion time (pipeline debugging)' })
   recordedAt!: Date;
 }
-
-export class AuditLogListResponseDto {
-  @ApiProperty({ type: [AuditLogEntryDto] })
-  auditLogs!: AuditLogEntryDto[];
-}

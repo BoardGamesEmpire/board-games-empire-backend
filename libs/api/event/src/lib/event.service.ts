@@ -7,15 +7,17 @@ import {
   EventStatus,
   isPrismaDependentRecordNotFoundError,
   OccurrenceStatus,
+  Prisma,
   ResourceType,
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
-import { PaginationQueryDto } from '@bge/shared';
+import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
 import { EventCreatedEvent, EventDeletedEvent, EventUpdatedEvent } from './events/event.events';
@@ -31,23 +33,44 @@ export class EventService {
     private readonly abilityService: AbilityService,
   ) {}
 
-  async getEvents(pagination: PaginationQueryDto): Promise<Event[]> {
-    return this.db.event.findMany({
-      where: {
-        deletedAt: null,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
-      },
-      include: {
-        occurrences: {
-          orderBy: { sortOrder: 'asc' },
-        },
-        policy: true,
-      },
-      skip: pagination.skip,
-      take: pagination.pageSize,
-      // `id` breaks ties on `createdAt` so page boundaries hold between requests.
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-    });
+  /**
+   * One page of visible events plus the total matching count for the response
+   * envelope (#372). Rows and count come from one REPEATABLE READ snapshot, so
+   * an event created or soft-deleted between the two statements cannot make
+   * `total` describe a list the caller was not served.
+   */
+  async getEvents(pagination: PaginationQueryDto): Promise<PaginatedRows<Event>> {
+    const where: Prisma.EventWhereInput = {
+      deletedAt: null,
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
+    };
+
+    const [rows, total] = await this.db.$transaction(
+      [
+        this.db.event.findMany({
+          where,
+          include: {
+            // Unbounded: every occurrence of every event on the page, which is
+            // a larger read than the one `GET /events/:eventId/occurrences` was
+            // paginated to avoid. Capping it is #404 — it changes what this
+            // endpoint serves, not how it wraps it.
+            occurrences: {
+              orderBy: OCCURRENCE_ORDER,
+            },
+            policy: true,
+          },
+          skip: pagination.skip,
+          take: pagination.pageSize,
+          // `id` breaks ties on `createdAt` so page boundaries hold between requests.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        }),
+
+        this.db.event.count({ where }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return { rows, total };
   }
 
   async getEventById(id: string): Promise<Event> {
@@ -60,7 +83,7 @@ export class EventService {
 
       include: {
         occurrences: {
-          orderBy: { sortOrder: 'asc' },
+          orderBy: OCCURRENCE_ORDER,
         },
 
         attendees: {
@@ -193,7 +216,7 @@ export class EventService {
         },
 
         include: {
-          occurrences: { orderBy: { sortOrder: 'asc' } },
+          occurrences: { orderBy: OCCURRENCE_ORDER },
           policy: true,
           attendees: {
             include: {
@@ -260,7 +283,7 @@ export class EventService {
           household: householdRelation,
         },
         include: {
-          occurrences: { orderBy: { sortOrder: 'asc' } },
+          occurrences: { orderBy: OCCURRENCE_ORDER },
           policy: true,
         },
       });

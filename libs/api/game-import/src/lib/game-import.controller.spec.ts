@@ -34,7 +34,7 @@ describe('GameImportController', () => {
   beforeEach(async () => {
     importStatus = {
       getBatchStatus: jest.fn().mockResolvedValue(batchStatus),
-      listBatchesForUser: jest.fn().mockResolvedValue({ batches: [batchStatus] }),
+      listBatchesForUser: jest.fn().mockResolvedValue({ rows: [batchStatus], total: 1 }),
     };
 
     const { module } = await createTestingModuleWithDb({
@@ -82,7 +82,25 @@ describe('GameImportController', () => {
       const response = await firstValueFrom(controller.listImports(session, pagination));
 
       expect(importStatus.listBatchesForUser).toHaveBeenCalledWith('user-7', pagination);
-      expect(response).toEqual({ batches: [batchStatus] });
+      expect(response).toEqual({
+        batches: [batchStatus],
+        pagination: { page: 1, limit: 5, total: 1, totalPages: 1, hasMore: false },
+      });
+    });
+
+    // #372: the batches are the rows, so `total` is a batch count — the value a
+    // client needs to say how far back the import history goes.
+    it('echoes the requested page and the service total', async () => {
+      const session = { user: { id: 'user-7' } } as Parameters<GameImportController['listImports']>[0];
+      importStatus.listBatchesForUser.mockResolvedValue({ rows: [batchStatus], total: 23 });
+
+      const response = await firstValueFrom(controller.listImports(session, paginationQuery({ page: 3, limit: 5 })));
+
+      expect(response).toEqual(
+        expect.objectContaining({
+          pagination: { page: 3, limit: 5, total: 23, totalPages: 5, hasMore: true },
+        }),
+      );
     });
   });
 });

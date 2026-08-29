@@ -1,17 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, paginatedEnvelopeSchema, PaginationMetaDto } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiExtraModels,
-  ApiOperation,
-  ApiParam,
-  ApiResponse,
-  ApiSecurity,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -22,9 +14,6 @@ import { HouseholdMemberService } from './household-member.service';
 @ApiSecurity('api_key')
 @ApiTags('household-members')
 @UseGuards(PoliciesGuard)
-// See the note on HouseholdController: the envelope's `$ref` is the only
-// mention of PaginationMetaDto here.
-@ApiExtraModels(PaginationMetaDto)
 @Controller('households/:householdId/members')
 export class HouseholdMemberController {
   constructor(private readonly memberService: HouseholdMemberService) {}
@@ -37,7 +26,7 @@ export class HouseholdMemberController {
       'see, so it never reveals a hidden roster size. See #230.',
   })
   @ApiParam({ name: 'householdId', type: String })
-  @ApiResponse({ status: Http.Ok, description: 'Paginated members', schema: paginatedEnvelopeSchema('members') })
+  @ApiPaginatedEnvelope('members')
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdMember))

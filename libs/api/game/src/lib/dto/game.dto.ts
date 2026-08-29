@@ -98,11 +98,6 @@ export class GameDto implements Pick<
   updatedAt!: Date;
 }
 
-export class GameListResponseDto {
-  @ApiProperty({ type: [GameDto] })
-  games!: GameDto[];
-}
-
 export class GameResponseDto {
   @ApiProperty({ type: GameDto })
   game!: GameDto;
