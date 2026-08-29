@@ -563,13 +563,19 @@ export function readShippedTree(relativeDir: string): readonly ShippedFile[] {
 
   const files = readdirSync(absolute, { recursive: true, encoding: 'utf8' })
     .filter((entry) => entry.endsWith('.ts') && !entry.endsWith('.spec.ts') && !entry.endsWith('.d.ts'))
-    .sort()
     .map((entry) => ({
       // POSIX separators, because the path doubles as the label a spec asserts
       // on and a Windows checkout must not rewrite what the pin says.
       path: `${relativeDir}/${entry.split(sep).join('/')}`,
-      source: readFileSync(join(absolute, entry), 'utf8'),
-    }));
+      at: join(absolute, entry),
+    }))
+    // Sorted AFTER normalising, which is the half that makes the sentence above
+    // true. Sorting raw entries orders by the platform separator — `\` is 0x5C
+    // and `/` is 0x2F — so `units/x.ts` and `unitsA.ts` come out in opposite
+    // orders on Windows, and the pinned enumeration compares against a fixed
+    // array. Codepoint order, not `localeCompare`, which is itself locale-bound.
+    .sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0))
+    .map(({ path, at }) => ({ path, source: readFileSync(at, 'utf8') }));
 
   if (files.length === 0) {
     throw new Error(

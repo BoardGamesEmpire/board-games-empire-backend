@@ -97,14 +97,40 @@ function readChildRelations(parentModel: string): readonly ChildRelation[] {
     );
   }
 
-  const relation = new RegExp(String.raw`^\s*\w+\s+${parentModel}\??\s+@relation\(\s*fields:\s*\[\s*(\w+)\s*\]`, 'gm');
+  // The field LIST is captured whole rather than a single name, so a composite
+  // key is recognised and refused below instead of failing to match. A pattern
+  // that only accepts one field drops a composite-keyed child silently — and
+  // silently is the whole problem: the empty-result guard never fires, because
+  // the other three children still match, and the audit runs against a set
+  // missing a table nobody was told about.
+  const relation = new RegExp(String.raw`^\s*\w+\s+${parentModel}\??\s+@relation\(\s*fields:\s*\[([^\]]*)\]`, 'gm');
   const children: ChildRelation[] = [];
 
   for (const block of blocks) {
-    const keys = [...block.body.matchAll(relation)].map((match) => match[1]);
+    const lists = [...block.body.matchAll(relation)].map((match) => (match[1] ?? '').trim());
 
-    if (keys.length === 0) {
+    if (lists.length === 0) {
       continue;
+    }
+
+    const composite = lists.filter((list) => list.includes(','));
+
+    if (composite.length > 0) {
+      throw new Error(
+        `Model '${block.name}' (${block.file}) declares a composite foreign key to '${parentModel}' ` +
+          `([${composite.join('], [')}]). This reader describes a child by ONE key column, so it cannot state ` +
+          `which of these the implied parent lock follows — and dropping the model instead would leave the audit ` +
+          `running against a child table set that is short by one.`,
+      );
+    }
+
+    const keys = lists.filter((list) => /^\w+$/.test(list));
+
+    if (keys.length !== lists.length) {
+      throw new Error(
+        `Model '${block.name}' (${block.file}) declares a relation to '${parentModel}' whose field list this ` +
+          `reader does not recognise ([${lists.join('], [')}]).`,
+      );
     }
 
     if (keys.length > 1) {

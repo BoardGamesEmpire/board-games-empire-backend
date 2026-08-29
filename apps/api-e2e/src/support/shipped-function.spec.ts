@@ -1037,6 +1037,17 @@ describe('shipped-function', () => {
       expect('tx.stalePluginGrant.create').not.toMatch(write);
     });
 
+    it('matches a chain the formatter wrapped across lines', () => {
+      // A callee is lifted verbatim, so a wrapped chain arrives carrying its
+      // newline and indent. Without whitespace around the separator that write
+      // matches no shape at all — no site, no finding, clean tree — and whether
+      // a chain wraps is a decision the formatter makes on line length.
+      const write = modelWrite(['pluginGrant'], ['create']);
+
+      expect('tx.pluginGrant\n        .create').toMatch(write);
+      expect('tx.pluginGrant.create').toMatch(write);
+    });
+
     it('escapes a `$` in a name instead of building a pattern that matches nothing', () => {
       // `$` is a legal identifier character AND a regex anchor, so the naive
       // interpolation yields `/…(?:$queryRaw)…/` — an assertion, not a literal,

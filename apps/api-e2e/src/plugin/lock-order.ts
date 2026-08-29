@@ -418,7 +418,7 @@ export const FK_CHILD_WRITE_SCOPE = 'libs/plugin/runtime/src/lib';
  * finds no site, and the tree reports clean. That is the blind spot the derived
  * table list closes, one level further down.
  */
-const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 'upsert'] as const;
+export const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 'upsert'] as const;
 
 /**
  * The other way: an UPDATE that changes the key.
@@ -437,7 +437,7 @@ const FK_CHILD_INSERT_METHODS = ['create', 'createMany', 'createManyAndReturn', 
  * shape against a sample rather than trusting an empty result to mean a clean
  * tree.
  */
-const FK_CHILD_REPARENT_METHODS = ['update', 'updateMany', 'updateManyAndReturn'] as const;
+export const FK_CHILD_REPARENT_METHODS = ['update', 'updateMany', 'updateManyAndReturn'] as const;
 
 /**
  * A write knowingly not preceded by a claim, and why that is safe anyway.
@@ -563,6 +563,8 @@ export function fkChildWriteShapes(children: readonly ChildRelation[]): readonly
 }
 
 function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
+  refuseStatefulExemptions();
+
   const children = childRelationsOf(FK_CHILD_PARENT);
   const writes = fkChildWriteShapes(children);
   // The stage's own pattern, not a second copy of it. A hand-written twin is
@@ -593,21 +595,36 @@ function auditFkChildWrites(): readonly AuditedFkChildWrite[] {
     );
 }
 
-function exemptionFor(site: SourceSite): ClaimExemption | undefined {
-  return PLUGIN_ROW_CLAIM_EXEMPTIONS.find((exemption) => {
+/**
+ * Refuses a stateful exemption pattern, over the WHOLE list and before any site
+ * is matched.
+ *
+ * `test` advances `lastIndex` on a `g` or `y` pattern, and `exemptionFor` runs
+ * once per site — so an exemption that matched one site is judged from a
+ * non-zero offset against the next, and covers a different set than it reads as
+ * covering. Every other pattern in this module is refused for exactly that.
+ *
+ * Checked here rather than inside the `find` predicate, which was the earlier
+ * shape: `find` stops at its first match, so a later exemption's flags were
+ * examined only when an earlier one happened not to match. Validation that
+ * depends on list order and on which sites the audit happens to find is not
+ * validation.
+ */
+function refuseStatefulExemptions(): void {
+  for (const exemption of PLUGIN_ROW_CLAIM_EXEMPTIONS) {
     if (exemption.site.global || exemption.site.sticky) {
-      // The last door this module left open. `test` advances `lastIndex` on
-      // these, and this runs once per site — so an exemption that matched one
-      // site is then judged from a non-zero offset against the next, and
-      // covers a different set of sites than it reads as covering. Every other
-      // pattern here is refused for exactly this; so is this one.
       throw new Error(
         `The exemption for ${exemption.file} (${exemption.enclosing}) carries a 'g' or 'y' flag on ${String(
           exemption.site,
         )}, which makes it stateful across sites. Drop the flag.`,
       );
     }
+  }
+}
 
-    return exemption.file === site.file && exemption.enclosing === site.enclosing && exemption.site.test(site.text);
-  });
+function exemptionFor(site: SourceSite): ClaimExemption | undefined {
+  return PLUGIN_ROW_CLAIM_EXEMPTIONS.find(
+    (exemption) =>
+      exemption.file === site.file && exemption.enclosing === site.enclosing && exemption.site.test(site.text),
+  );
 }

@@ -495,13 +495,15 @@ export interface WriteShape {
    * its value is a name rather than a literal. The guard settles a site only
    * when it can see the whole set of keys and the FK is not among them.
    *
-   * One hole remains and is deliberate: a spread of an opaque value INSIDE an
-   * otherwise readable literal (`data: { ...payload, enabled: true }`) is
-   * judged on the visible text, which does not name the key. Treating every
-   * spread as unreadable would report the config and dormancy writes this tree
-   * already makes, each wanting an exemption that says nothing — noise standing
-   * exactly where a real finding would appear. The barrier cases remain what
-   * actually holds the order.
+   * A spread counts as unreadable, so `data: { ...payload, enabled: true }` is
+   * REPORTED. That is the two config/dormancy updates this tree already makes,
+   * and both are pinned in the audit — they carry a dominating claim, so
+   * reporting them costs an enumeration entry rather than an exemption. The
+   * cheaper reading, judging such a literal on its visible text, cannot see
+   * what `...payload` contributes, and the point of a narrowing guard is that
+   * it clears a site only when it has seen every key.
+   *
+   * The barrier cases remain what actually holds the order.
    */
   readonly argumentProperty?: string;
 }
@@ -687,7 +689,12 @@ export function modelWrite(accessors: readonly string[], methods: readonly strin
   const named = (names: readonly string[]): string =>
     names.map((name) => identifierSource(name, 'a write pattern')).join('|');
 
-  return new RegExp(String.raw`(?:^|\.)(?:${named(accessors)})\.(?:${named(methods)})$`);
+  // Whitespace around the separator, because a callee is lifted verbatim and a
+  // chain may be WRAPPED: `tx.pluginGrant\n  .create(…)` reaches this as text
+  // carrying the newline and the indent. Without it that write matches no
+  // shape, the audit finds no site, and the tree reports clean — the silent
+  // direction, again.
+  return new RegExp(String.raw`(?:^|\.)\s*(?:${named(accessors)})\s*\.\s*(?:${named(methods)})$`);
 }
 
 /**
