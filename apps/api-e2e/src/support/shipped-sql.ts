@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
 
 /**
  * A raw statement lifted out of application source, in a form `pg` can
@@ -536,8 +536,61 @@ function scanTemplate(source: string, start: number, sourceLabel: string, form: 
   );
 }
 
-/** Bounded upward walk to the workspace root, identified by `nx.json`. */
-function workspaceRoot(): string {
+/** One shipped source file, labelled the way every lift in this suite labels one. */
+export interface ShippedFile {
+  /** Workspace-relative, so a failure names the path a reader can open. */
+  readonly path: string;
+  readonly source: string;
+}
+
+/**
+ * Every shipped `.ts` file under a workspace-relative directory, specs excluded.
+ *
+ * The lifts above all name ONE file, which is right when a spec is pinning a
+ * path it can name. The FK-implied-lock check (#399) cannot: its whole point is
+ * to reach a writer nobody added to a list, so it has to enumerate the tree
+ * instead of being handed it.
+ *
+ * Refuses an empty result. A scan of the wrong directory returns no files and
+ * therefore no violations, which is indistinguishable from a clean tree.
+ */
+export function readShippedTree(relativeDir: string): readonly ShippedFile[] {
+  const absolute = join(workspaceRoot(), relativeDir);
+
+  if (!existsSync(absolute)) {
+    throw new Error(`Expected to find ${relativeDir} at ${absolute} — the directory has moved or been renamed.`);
+  }
+
+  const files = readdirSync(absolute, { recursive: true, encoding: 'utf8' })
+    .filter((entry) => entry.endsWith('.ts') && !entry.endsWith('.spec.ts') && !entry.endsWith('.d.ts'))
+    .sort()
+    .map((entry) => ({
+      // POSIX separators, because the path doubles as the label a spec asserts
+      // on and a Windows checkout must not rewrite what the pin says.
+      path: `${relativeDir}/${entry.split(sep).join('/')}`,
+      source: readFileSync(join(absolute, entry), 'utf8'),
+    }));
+
+  if (files.length === 0) {
+    throw new Error(
+      `No shipped .ts files under ${relativeDir}. A scan of an empty tree reports no findings, which reads ` +
+        `exactly like a scan that found nothing wrong.`,
+    );
+  }
+
+  return files;
+}
+
+/**
+ * The repo root, found by walking up for `nx.json`.
+ *
+ * Exported because two other support modules resolve workspace-relative paths
+ * the same way — the Prisma schema reader and the source scanner behind the
+ * FK-implied-lock check (#399). A second copy of the walk is a second thing to
+ * correct when the layout moves, and the copy nobody looks at is the one that
+ * silently resolves to the wrong directory.
+ */
+export function workspaceRoot(): string {
   let dir = __dirname;
 
   for (let level = 0; level < ROOT_WALK_LIMIT; level += 1) {
