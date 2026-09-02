@@ -1,9 +1,9 @@
 import { AuditContextInternalService, type Actor } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
-import { firstValue, resolveCorrelationId } from '@bge/utils';
+import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import type { Request } from 'express';
 import { from, type Observable } from 'rxjs';
 import { mergeMap, tap } from 'rxjs/operators';
@@ -20,6 +20,7 @@ export const API_KEY_HEADER = 'x-api-key' as const;
  *     - Success → `{ kind: 'apiKey', apiKeyId, userId }`.
  *     - Failure → throws `UnauthorizedException` (explicit auth attempt).
  *  2. Otherwise → delegate to AuthService.getSessionFromHeaders.
+ *     - Impersonated   → throws `ForbiddenException` (#408).
  *     - Anonymous user → `{ kind: 'anonymous', userId }`.
  *     - Regular user  → `{ kind: 'user', userId }`.
  *     - No session    → actor remains `null`.
@@ -33,6 +34,11 @@ export const API_KEY_HEADER = 'x-api-key' as const;
  *
  * Requires an outer `ClsInterceptor` (or `ClsMiddleware`) to have opened a
  * CLS scope. Register globally after the CLS interceptor.
+ *
+ * NOTE: this class is currently neither wired nor exported from the lib's
+ * public index — `HttpActorMiddleware` is what runs, because it resolves the
+ * actor BEFORE guards, which an interceptor cannot do. It is kept in step with
+ * the middleware by hand; whether it should exist at all is #423.
  */
 @Injectable()
 export class HttpActorInterceptor extends ActorInterceptor {
@@ -107,6 +113,16 @@ export class HttpActorInterceptor extends ActorInterceptor {
     }
 
     const user = session.user as AnonymousUserSession;
+
+    // #408: refuse rather than mint `{ kind: 'user', userId: <target> }`, which
+    // would attribute every audit row to the impersonated user. Ids and the
+    // issue reference go to the log, never to the caller.
+    const impersonatorId = sessionImpersonatorId(session);
+    if (impersonatorId) {
+      this.logger.warn(`Refusing impersonated session (#408): target=${user?.id} impersonatedBy=${impersonatorId}`);
+      throw new ForbiddenException('Impersonated sessions are not supported');
+    }
+
     if (user.isAnonymous) {
       return { kind: 'anonymous', userId: user.id };
     }

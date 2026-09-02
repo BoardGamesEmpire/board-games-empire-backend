@@ -6,7 +6,7 @@ import {
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
-import { Logger, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type { NextFunction, Request, Response } from 'express';
@@ -149,6 +149,71 @@ describe('HttpActorMiddleware', () => {
         kind: 'user',
         userId: 'user-bearer',
       });
+    });
+  });
+
+  describe('impersonated sessions', () => {
+    beforeEach(() => authMock.hasSessionCredential.mockReturnValue(true));
+
+    const impersonated = (): Awaited<ReturnType<AuthService['getSessionFromHeaders']>> =>
+      ({
+        user: { id: 'target-1', isAnonymous: false } as unknown as UserSession['user'],
+        session: { id: 'sess-imp', userId: 'target-1', impersonatedBy: 'admin-1' },
+        // `impersonatedBy` is absent from the adapter's session type (the
+        // admin plugin adds the column), so the cast needs the `unknown` hop.
+      }) as unknown as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>;
+
+    it('refuses the request rather than minting an actor for the target user', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(impersonated());
+
+      const captured = await run(buildRequest({ authorization: 'Bearer imp' }));
+
+      expect(captured.nextArg).toBeInstanceOf(ForbiddenException);
+      // Never populated: an actor of `{ kind: 'user', userId: 'target-1' }`
+      // is precisely the audit-attribution hole this guard closes.
+      expect(captured.actor).toBeUndefined();
+    });
+
+    it('does not leak the acting admin to the caller', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(impersonated());
+
+      const captured = await run(buildRequest({ authorization: 'Bearer imp' }));
+
+      expect((captured.nextArg as ForbiddenException).message).not.toContain('admin-1');
+    });
+
+    it('logs the acting admin and the target so the attempt is traceable', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(impersonated());
+
+      await run(buildRequest({ authorization: 'Bearer imp' }));
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('admin-1'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('target-1'));
+    });
+
+    it('refuses a session whose impersonatedBy is present but empty', async () => {
+      // Fails open if the helper reads `''` as absent.
+      authMock.getSessionFromHeaders.mockResolvedValue({
+        user: { id: 'target-1', isAnonymous: false } as unknown as UserSession['user'],
+        session: { id: 'sess-imp', userId: 'target-1', impersonatedBy: '' },
+      } as unknown as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>);
+
+      const captured = await run(buildRequest({ authorization: 'Bearer imp' }));
+
+      expect(captured.nextArg).toBeInstanceOf(ForbiddenException);
+      expect(captured.actor).toBeUndefined();
+    });
+
+    it('admits an ordinary session whose impersonatedBy is null', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue({
+        user: { id: 'user-1', isAnonymous: false } as unknown as UserSession['user'],
+        session: { id: 'sess-1', userId: 'user-1', impersonatedBy: null },
+      } as unknown as Awaited<ReturnType<AuthService['getSessionFromHeaders']>>);
+
+      const captured = await run(buildRequest({ authorization: 'Bearer ok' }));
+
+      expect(captured.actor).toEqual({ kind: 'user', userId: 'user-1' });
+      expect(captured.nextArg).toBeUndefined();
     });
   });
 
