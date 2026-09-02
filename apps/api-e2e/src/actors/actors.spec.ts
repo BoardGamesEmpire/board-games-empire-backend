@@ -33,20 +33,39 @@ describe('actor fixtures (#256)', () => {
     await db.close();
   });
 
+  /**
+   * Every GLOBAL role the user holds, sorted. `UserRole` carries global roles
+   * only — household roles live on `HouseholdRole` (keyed on the membership
+   * row) and event roles on `EventAttendeeRole` — so this is the whole global
+   * picture and nothing else.
+   */
+  const globalRoleNames = async (userId: string): Promise<string[]> =>
+    (
+      await db.client.userRole.findMany({
+        where: { userId },
+        select: { role: { select: { name: true } } },
+      })
+    )
+      .map((userRole) => userRole.role.name)
+      .sort();
+
   describe('the Owner sentinel', () => {
-    it('mints the first human through the real signup path with the Owner role and its provisioning side effects', async () => {
+    it('mints the first human through the real signup path with both role rows and its provisioning side effects', async () => {
       const owner = await actors.owner();
 
       // The credential works over the wire.
       const response = await request(baseUrl).get('/api/households').set(owner.headers);
       expect(response.status).toBe(200);
 
-      // Provisioning ran to completion: role, profile, preferences.
-      const userRole = await db.client.userRole.findFirst({
-        where: { userId: owner.user.id },
-        select: { role: { select: { name: true } } },
-      });
-      expect(userRole?.role.name).toBe(SystemRole.Owner);
+      // Provisioning ran to completion: roles, profile, preferences. Both role
+      // rows, because elevation is additive (#410) — `manage:all` sits on top
+      // of an independently-held base rather than replacing it, so dropping
+      // the `Owner` row would leave an ordinary user's ABILITIES behind rather
+      // than less than one. That is a property of the ability layer only: the
+      // better-auth `user.role` column asserted below is a separate elevation
+      // channel with no base beneath it, and whether it survives at all is
+      // #422's question, not this issue's.
+      await expect(globalRoleNames(owner.user.id)).resolves.toEqual([SystemRole.Owner, SystemRole.User].sort());
 
       await expect(db.client.userProfile.count({ where: { userId: owner.user.id } })).resolves.toBe(1);
       await expect(db.client.userPreferences.count({ where: { userId: owner.user.id } })).resolves.toBe(1);
@@ -73,11 +92,7 @@ describe('actor fixtures (#256)', () => {
       const after = await actors.owner();
 
       expect(after.user.id).not.toBe(before.user.id);
-      const userRole = await db.client.userRole.findFirst({
-        where: { userId: after.user.id },
-        select: { role: { select: { name: true } } },
-      });
-      expect(userRole?.role.name).toBe(SystemRole.Owner);
+      await expect(globalRoleNames(after.user.id)).resolves.toEqual([SystemRole.Owner, SystemRole.User].sort());
     });
 
     it('refuses the Owner seat when a human user already exists, loudly', async () => {
@@ -94,11 +109,8 @@ describe('actor fixtures (#256)', () => {
       // No explicit owner() call — user() must ensure the sentinel itself.
       const user = await actors.user();
 
-      const userRole = await db.client.userRole.findFirst({
-        where: { userId: user.user.id },
-        select: { role: { select: { name: true } } },
-      });
-      expect(userRole?.role.name).toBe(SystemRole.User);
+      // The base role alone — no elevation on top.
+      await expect(globalRoleNames(user.user.id)).resolves.toEqual([SystemRole.User]);
 
       // Exactly one Owner exists and it is not this actor.
       const owners = await db.client.userRole.findMany({
@@ -119,16 +131,7 @@ describe('actor fixtures (#256)', () => {
     it('grants a server-scope admin the Admin catalog role additively', async () => {
       const admin = await actors.admin();
 
-      const roleNames = (
-        await db.client.userRole.findMany({
-          where: { userId: admin.user.id },
-          select: { role: { select: { name: true } } },
-        })
-      )
-        .map((userRole) => userRole.role.name)
-        .sort();
-
-      expect(roleNames).toEqual([SystemRole.Admin, SystemRole.User].sort());
+      await expect(globalRoleNames(admin.user.id)).resolves.toEqual([SystemRole.Admin, SystemRole.User].sort());
     });
   });
 

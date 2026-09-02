@@ -1,3 +1,4 @@
+import { SystemRole } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { createTestingModuleWithDb, makeUser, MockDatabaseService } from '@bge/testing';
 import { UserProvisioningService } from './user-provisioning.service';
@@ -26,27 +27,68 @@ describe('UserProvisioningService', () => {
     jest.clearAllMocks();
   });
 
-  it('makes the first human Owner (ignoring service accounts) and seeds the service account', async () => {
+  it('gives the first human the base User role AND Owner, and seeds the service account', async () => {
     db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u1', username: 'a', email: 'a@x.io' }));
     db.user.count.mockResolvedValue(1);
-    db.role.findUniqueOrThrow.mockResolvedValue({ id: 'role-owner' } as never);
+    // Distinct ids per role is what keeps the assertion below non-vacuous: a
+    // single shared id would pass even if only one role were ever resolved.
+    db.role.findMany.mockResolvedValue([
+      { id: 'role-user', name: SystemRole.User },
+      { id: 'role-owner', name: SystemRole.Owner },
+    ] as never);
     db.$transaction.mockImplementation((cb) => cb(db));
 
     await service.provisionNewUser('u1');
 
     expect(db.user.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'u1' } });
     expect(db.user.count).toHaveBeenCalledWith({ where: { isServiceAccount: false } });
+    expect(db.userRole.createMany).toHaveBeenCalledWith({
+      data: [
+        { userId: 'u1', roleId: 'role-user' },
+        { userId: 'u1', roleId: 'role-owner' },
+      ],
+    });
+
+    // The first-human side effects, asserted positively rather than only by
+    // their absence for later humans. `emailVerified` and the better-auth
+    // `role` column had no unit coverage at all before.
+    expect(db.user.update).toHaveBeenCalledWith({
+      where: { id: 'u1' },
+      data: { role: 'admin', emailVerified: true },
+    });
     expect(serviceAccount.ensure).toHaveBeenCalledTimes(1);
   });
 
-  it('makes subsequent humans User and does not touch the service account', async () => {
+  it('gives everyone after the first human the base User role alone, and no service account', async () => {
     db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u2', username: 'b', email: 'b@x.io' }));
     db.user.count.mockResolvedValue(2);
-    db.role.findUniqueOrThrow.mockResolvedValue({ id: 'role-user' } as never);
+    db.role.findMany.mockResolvedValue([{ id: 'role-user', name: SystemRole.User }] as never);
     db.$transaction.mockImplementation((cb) => cb(db));
 
     await service.provisionNewUser('u2');
 
+    expect(db.userRole.createMany).toHaveBeenCalledWith({ data: [{ userId: 'u2', roleId: 'role-user' }] });
+    expect(db.user.update).not.toHaveBeenCalled();
     expect(serviceAccount.ensure).not.toHaveBeenCalled();
+  });
+
+  it('refuses to provision against an unseeded catalog rather than granting a partial role set', async () => {
+    db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u1', username: 'a', email: 'a@x.io' }));
+    db.user.count.mockResolvedValue(1);
+    // The catalog holds `User` but not `Owner` — the shape a half-run seed
+    // leaves behind. `findMany` returns the short list without complaint,
+    // which is what the replaced `findUniqueOrThrow` used to catch.
+    db.role.findMany.mockResolvedValue([{ id: 'role-user', name: SystemRole.User }] as never);
+    db.$transaction.mockImplementation((cb) => cb(db));
+
+    await expect(service.provisionNewUser('u1')).rejects.toThrow(/role 'Owner' is missing from the catalog/);
+
+    // Nothing was written, and no transaction was even opened: the catalog is
+    // resolved before the transaction, so a half-seeded database costs one
+    // read per signup rather than two inserts and a rollback.
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.userRole.createMany).not.toHaveBeenCalled();
+    expect(db.userPreferences.create).not.toHaveBeenCalled();
+    expect(db.userProfile.create).not.toHaveBeenCalled();
   });
 });
