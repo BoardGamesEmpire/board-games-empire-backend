@@ -6,7 +6,7 @@ import {
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
-import { ExecutionContext, Logger, UnauthorizedException } from '@nestjs/common';
+import { ExecutionContext, ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Request } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
@@ -15,7 +15,11 @@ import { API_KEY_HEADER, HttpActorInterceptor } from './http-actor.interceptor';
 
 type UserSession = NonNullable<Awaited<ReturnType<AuthService['getSessionFromHeaders']>>>;
 
-const stubSession = (userOverrides: { id: string; isAnonymous: boolean }, sessionId: string): UserSession => {
+const stubSession = (
+  userOverrides: { id: string; isAnonymous: boolean },
+  sessionId: string,
+  impersonatedBy: string | null = null,
+): UserSession => {
   const now = new Date(0);
   return {
     user: {
@@ -34,7 +38,9 @@ const stubSession = (userOverrides: { id: string; isAnonymous: boolean }, sessio
       createdAt: now,
       updatedAt: now,
       expiresAt: new Date(Date.now() + 86_400_000),
-    } as UserSession['session'],
+      // Absent from the adapter's session type; the admin plugin adds it.
+      impersonatedBy,
+    } as unknown as UserSession['session'],
   };
 };
 
@@ -185,6 +191,82 @@ describe('HttpActorInterceptor', () => {
         kind: 'user',
         userId: 'user-bearer',
       });
+    });
+  });
+
+  /**
+   * #408. This interceptor is neither wired nor exported today — the
+   * middleware is what runs (`app.module.ts`). It is guarded anyway so the
+   * dead copy cannot become a hole if anyone wires it; whether it survives at
+   * all is #423.
+   */
+  describe('impersonated sessions', () => {
+    beforeEach(() => authMock.hasSessionCredential.mockReturnValue(true));
+
+    it('refuses the request rather than minting an actor for the target user', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(
+        stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', 'admin-1'),
+      );
+
+      await expect(run(buildRequest({ authorization: 'Bearer imp' }))).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('does not leak the acting admin to the caller', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(
+        stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', 'admin-1'),
+      );
+
+      const error: unknown = await run(buildRequest({ authorization: 'Bearer imp' })).catch(
+        (thrown: unknown) => thrown,
+      );
+
+      expect((error as ForbiddenException).message).not.toContain('admin-1');
+    });
+
+    it('logs the acting admin and the target so the attempt is traceable', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(
+        stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', 'admin-1'),
+      );
+
+      await run(buildRequest({ authorization: 'Bearer imp' })).catch(() => undefined);
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('admin-1'));
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('target-1'));
+    });
+
+    it('never populates an actor for the target user', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(
+        stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', 'admin-1'),
+      );
+
+      let populated: unknown = 'untouched';
+      await cls.run(async () => {
+        const result$ = await interceptor.intercept(
+          buildExecutionContext(buildRequest({ authorization: 'Bearer imp' })),
+          { handle: () => of('next-result') },
+        );
+        await firstValueFrom(result$).catch(() => undefined);
+        populated = cls.get(ACTOR_CLS_KEY);
+      });
+
+      expect(populated).toBeUndefined();
+    });
+
+    it('refuses a session whose impersonatedBy is present but empty', async () => {
+      // Fails open if the helper reads `''` as absent.
+      authMock.getSessionFromHeaders.mockResolvedValue(
+        stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', ''),
+      );
+
+      await expect(run(buildRequest({ authorization: 'Bearer imp' }))).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('admits an ordinary session whose impersonatedBy is null', async () => {
+      authMock.getSessionFromHeaders.mockResolvedValue(stubSession({ id: 'user-1', isAnonymous: false }, 'sess-1'));
+
+      const captured = await run(buildRequest({ authorization: 'Bearer ok' }));
+
+      expect(captured.actor).toEqual({ kind: 'user', userId: 'user-1' });
     });
   });
 

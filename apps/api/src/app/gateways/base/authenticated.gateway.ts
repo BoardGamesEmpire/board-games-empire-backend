@@ -32,22 +32,28 @@ export abstract class AuthenticatedGateway implements OnGatewayConnection {
       return;
     }
 
-    const data = buildWsClientData(session, client.handshake.headers);
-    if (!data) {
-      this.logger.warn(`Anonymous session not permitted over WS: socketId=${client.id}`);
-      client.emit('auth:error', { status: 'FORBIDDEN', message: 'Anonymous access not permitted' });
+    // The refusal reason comes back discriminated so the log and the
+    // client-facing error both name the actual rule (#408) — an impersonated
+    // session and an anonymous one are not interchangeable.
+    const outcome = buildWsClientData(session, client.handshake.headers);
+    if (!outcome.ok) {
+      const detail = outcome.detail ? ` ${outcome.detail}` : '';
+      this.logger.warn(`WS connection refused (${outcome.reason}): socketId=${client.id}${detail}`);
+      client.emit('auth:error', { status: 'FORBIDDEN', message: outcome.message });
       await setTimeout(100);
       client.disconnect(true);
       return;
     }
 
-    client.data = data satisfies BaseClientData;
+    client.data = outcome.data satisfies BaseClientData;
 
     client.onAny((event, ...args) => {
       this.logger.debug(`[RAW EVENT] event=${event} args=${JSON.stringify(args)}`);
     });
 
-    this.logger.log(`WS connected: socketId=${client.id} userId=${data.userId} correlationId=${data.correlationId}`);
+    this.logger.log(
+      `WS connected: socketId=${client.id} userId=${outcome.data.userId} correlationId=${outcome.data.correlationId}`,
+    );
     return session;
   }
 }

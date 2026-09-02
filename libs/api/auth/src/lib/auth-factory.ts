@@ -23,6 +23,7 @@ import {
 } from 'better-auth/plugins';
 import type { User } from 'better-auth/types';
 import process from 'node:process';
+import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import { AUTH_BASE_PATH } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 
@@ -134,7 +135,12 @@ export function authFactory(
 
   // TODO: Make plugins configurable
   const plugins = [
-    admin(),
+    // Impersonation is deliberately blocked, not removed (#408): the role map
+    // withholds `user:impersonate`, so `POST /admin/impersonate-user` is denied
+    // for every principal while the route and `Session.impersonatedBy` stay in
+    // place. `adminUserIds` must never be added here — `hasPermission`
+    // short-circuits it ahead of the role map.
+    admin(ADMIN_PLUGIN_OPTIONS),
     anonymous(),
     apiKey(),
     bearer(),
