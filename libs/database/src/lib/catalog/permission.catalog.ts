@@ -762,7 +762,8 @@ export const PERMISSION_CATALOG = [
   // `can(update, HouseholdRole)` is exactly "is an owner of some household".
   //
   // INVARIANT: `update`/`manage` on HouseholdRole must never be granted to
-  // HouseholdAdmin — see `disallowedHouseholdAdminPermissions` below. #234's
+  // HouseholdAdmin — see `HOUSEHOLD_OWNER_ONLY` in role-permission.catalog.ts,
+  // which withholds this slug from the derived HouseholdAdmin list. #234's
   // walker is where this becomes machine-checked.
   {
     action: Action.update,
@@ -1202,8 +1203,9 @@ export const PERMISSION_CATALOG = [
   },
 
   // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
-  // Server-scope pair: no explicit role assignment below — Owner holds it via
-  // `manage:all`, Admin via `allPermsExceptManageAll` — Owner/Admin only,
+  // Server-scope pair: no explicit role assignment in ROLE_PERMISSION_CATALOG
+  // — Owner holds it via `manage:all`, Admin via that catalog's derived
+  // every-slug-except-`manage:all` list — Owner/Admin only,
   // per the locked role assignment on #59. Plugin principals can NEVER hold the `manage:` pair regardless of
   // rows: the runtime's hard exclusion matches `manage:plugin*` by pattern
   // on purpose (both slugs are pinned against it by the runtime's

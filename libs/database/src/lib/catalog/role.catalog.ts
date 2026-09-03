@@ -25,7 +25,7 @@ export const ROLE_CATALOG = [
   { name: SystemRole.EventModerator, description: 'Moderator scoped to an event' },
   { name: SystemRole.EventParticipant, description: 'Active participant in an event' },
 
-  // is there are difference?
+  // Is there a difference between these two? Open question, carried over from the seed.
   { name: SystemRole.EventGuest, description: 'Limited access event guest' },
   { name: SystemRole.EventSpectator, description: 'Read-only observer for an event' },
 ] as const satisfies readonly RoleSeedDefinition[];

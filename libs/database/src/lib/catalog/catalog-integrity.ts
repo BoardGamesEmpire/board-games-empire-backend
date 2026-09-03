@@ -3,10 +3,12 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
 
 /**
  * Structural integrity of the seeded catalogs, asserted where the catalogs
- * are DEFINED so a defect fails the first import — build, test, or boot —
- * rather than the seed run that happens to reach it. These were runtime
- * throws inside the seed's `assignPermissions` loop (#233 promoted them);
- * the seed keeps its own copies as defense, but nothing should reach them.
+ * are DEFINED so a defect fails the first runtime import — a test, API boot,
+ * or the seed's own import before it writes a row — rather than partway
+ * through the seed run that happens to reach it. The typecheck does not
+ * evaluate the module, so it cannot catch these. These were runtime throws
+ * inside the seed's `assignPermissions` loop (#233 promoted them); the seed
+ * keeps its own copies as defense, but nothing should reach them.
  *
  * Every function takes the catalog it checks as an argument rather than
  * importing the shipped one, so the negative cases can be exercised with
