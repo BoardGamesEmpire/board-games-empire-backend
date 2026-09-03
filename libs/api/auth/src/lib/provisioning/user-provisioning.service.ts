@@ -39,7 +39,7 @@ export class UserProvisioningService {
     // today: `manage:all` subsumes everything `User` grants, and no seeded
     // role permission is inverted, so the extra rules have nothing to collide
     // with under CASL's last-rule-wins (asserted by the seed invariant in
-    // apps/api-e2e/src/plugin/plugin-permission-seeds.spec.ts).
+    // apps/api-e2e/src/auth/role-model-invariants.spec.ts).
     const roleNames = isFirstHuman ? [SystemRole.User, SystemRole.Owner] : [SystemRole.User];
 
     // Resolved BEFORE the transaction opens. An unseeded catalog is a constant

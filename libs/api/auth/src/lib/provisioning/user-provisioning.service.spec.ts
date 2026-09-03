@@ -30,11 +30,16 @@ describe('UserProvisioningService', () => {
   it('gives the first human the base User role AND Owner, and seeds the service account', async () => {
     db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u1', username: 'a', email: 'a@x.io' }));
     db.user.count.mockResolvedValue(1);
-    // Distinct ids per role is what keeps the assertion below non-vacuous: a
-    // single shared id would pass even if only one role were ever resolved.
+    // Two deliberate properties, both load-bearing. Distinct ids per role keep
+    // the assertion below non-vacuous — a single shared id would pass even if
+    // only one role were ever resolved. And the rows come back in the OPPOSITE
+    // order to the role list, because `in` carries no ORDER BY: returning them
+    // in `roleNames` order would let an implementation that maps the query
+    // result straight through pass this test, which is exactly the heap-order
+    // dependency the ordering is there to remove. Do not "tidy" this order.
     db.role.findMany.mockResolvedValue([
-      { id: 'role-user', name: SystemRole.User },
       { id: 'role-owner', name: SystemRole.Owner },
+      { id: 'role-user', name: SystemRole.User },
     ] as never);
     db.$transaction.mockImplementation((cb) => cb(db));
 
