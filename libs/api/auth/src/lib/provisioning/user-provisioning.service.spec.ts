@@ -77,6 +77,26 @@ describe('UserProvisioningService', () => {
     expect(serviceAccount.ensure).not.toHaveBeenCalled();
   });
 
+  it('refuses a role set naming the same role twice rather than quietly deduplicating it', async () => {
+    // Unreachable through `provisionNewUser`, whose role list is a literal, so
+    // this reaches the seam directly in the repo's idiom for a private. The
+    // caller that WILL pass a computed set is the promotion path (#422), and
+    // the failure without this guard is an opaque P2002 from
+    // `@@unique([userId, roleId])`, raised inside the transaction in a
+    // detached provisioning handler where no client ever sees it.
+    const seam = service as unknown as {
+      resolveRoleAssignments(userId: string, roleNames: readonly SystemRole[]): Promise<unknown>;
+    };
+
+    await expect(seam.resolveRoleAssignments('u1', [SystemRole.User, SystemRole.User])).rejects.toThrow(
+      /role\(s\) requested more than once: User/,
+    );
+
+    // Rejected before the catalog is queried: a malformed role set is the
+    // caller's bug, not something to spend a round trip discovering.
+    expect(db.role.findMany).not.toHaveBeenCalled();
+  });
+
   it('refuses to provision against an unseeded catalog rather than granting a partial role set', async () => {
     db.user.findUniqueOrThrow.mockResolvedValue(makeUser({ id: 'u1', username: 'a', email: 'a@x.io' }));
     db.user.count.mockResolvedValue(1);

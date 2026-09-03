@@ -91,11 +91,27 @@ export class UserProvisioningService {
    * throw the way the `findUniqueOrThrow` it replaced did, and without this an
    * unseeded catalog would hand back a short list and provision an actor
    * holding fewer roles than its role set claims, silently.
+   *
+   * Throws on a repeated name too, rather than deduplicating it. The argument
+   * is a set expressed as an ordered list, and `@@unique([userId, roleId])`
+   * makes a repeat fatal anyway — as a P2002 raised inside the transaction, in
+   * a handler detached from the request, where no client sees it. Silently
+   * collapsing the duplicate would instead hide the caller's bug, which is the
+   * opposite of what a seam about to grow a computed caller (#422) wants.
    */
   private async resolveRoleAssignments(
     userId: string,
     roleNames: readonly SystemRole[],
   ): Promise<{ userId: string; roleId: string }[]> {
+    const repeated = [...new Set(roleNames.filter((name, index) => roleNames.indexOf(name) !== index))];
+
+    if (repeated.length > 0) {
+      throw new Error(
+        `Cannot provision user ${userId}: role(s) requested more than once: ${repeated.join(', ')}. ` +
+          `Each role must appear at most once in a provisioned role set.`,
+      );
+    }
+
     const roles = await this.db.role.findMany({
       where: { name: { in: [...roleNames] } },
       select: { id: true, name: true },
