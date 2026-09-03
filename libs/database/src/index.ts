@@ -1,3 +1,4 @@
+export * from './lib/catalog';
 export * from './lib/client';
 export * from './lib/configuration/database.config';
 export * from './lib/database.module';
