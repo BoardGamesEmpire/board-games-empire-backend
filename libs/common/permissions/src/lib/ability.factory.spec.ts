@@ -1,4 +1,5 @@
-import { Action, Permission, ResourceType, RiskLevel } from '@bge/database';
+import type { Permission, PermissionSeedDefinition, PermissionSlug } from '@bge/database';
+import { Action, PERMISSION_CATALOG, ResourceType, RiskLevel } from '@bge/database';
 import { subject } from '@casl/ability';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
@@ -511,50 +512,14 @@ describe('AbilityFactory', () => {
   }
 
   describe('household member rules (#155)', () => {
-    // Mirrors the seeded relational clause meaning "this User node is an
-    // accepted friend of the acting user".
-    const ACCEPTED_FRIEND_OF_ACTING_USER = {
-      OR: [
-        { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
-        { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
-      ],
-    };
-
-    const readHouseholdMember = () =>
-      makePermission({
-        action: Action.read,
-        subject: ResourceType.HouseholdMember,
-        slug: 'read:household_member',
-        conditions: { householdId: '{{ householdId }}' },
-      });
-
-    const readHouseholdMemberFriends = () =>
-      makePermission({
-        action: Action.read,
-        subject: ResourceType.HouseholdMember,
-        slug: 'read:household_member:friends',
-        conditions: {
-          household: { visibility: 'Friends', members: { some: { user: ACCEPTED_FRIEND_OF_ACTING_USER } } },
-        },
-      });
-
-    const manageHouseholdMember = () =>
-      makePermission({
-        action: Action.manage,
-        subject: ResourceType.HouseholdMember,
-        slug: 'manage:household_member',
-        conditions: {
-          householdId: '{{ householdId }}',
-          household: {
-            members: {
-              some: {
-                userId: '{{ user.id }}',
-                role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
-              },
-            },
-          },
-        },
-      });
+    // The fixtures are the REAL catalog entries, so a change to a seeded
+    // condition is a change to what these specs render (#233 closed the
+    // drift gap the hand-kept mirror left open). The expectations below stay
+    // literal on purpose: they are the independent statement of what the
+    // catalog must say.
+    const readHouseholdMember = () => catalogPermission('read:household_member');
+    const readHouseholdMemberFriends = () => catalogPermission('read:household_member:friends');
+    const manageHouseholdMember = () => catalogPermission('manage:household_member');
 
     /** A user whose only authority comes from household memberships. */
     const memberOf = (roleName: string, householdIds: string[], permissions = [readHouseholdMember()]) =>
@@ -746,33 +711,9 @@ describe('AbilityFactory', () => {
   describe('ownership transfer rules (#158, #160)', () => {
     const OWNER_OR_ADMIN = { in: ['HouseholdOwner', 'HouseholdAdmin'] };
 
-    const transferOwnership = () =>
-      makePermission({
-        action: Action.update,
-        subject: ResourceType.HouseholdRole,
-        slug: 'update:household_role:transfer-ownership',
-        conditions: {
-          householdMember: {
-            household: {
-              id: '{{ householdId }}',
-              members: {
-                some: { userId: '{{ user.id }}', role: { role: { name: 'HouseholdOwner' } } },
-              },
-            },
-          },
-        },
-      });
-
-    const updateHousehold = () =>
-      makePermission({
-        action: Action.update,
-        subject: ResourceType.Household,
-        slug: 'update:household',
-        conditions: {
-          id: '{{ householdId }}',
-          members: { some: { userId: '{{ user.id }}', role: { role: { name: OWNER_OR_ADMIN } } } },
-        },
-      });
+    // Real catalog entries, as in the #155 block above.
+    const transferOwnership = () => catalogPermission('update:household_role:transfer-ownership');
+    const updateHousehold = () => catalogPermission('update:household');
 
     const holder = (roleName: string, permissions: ReturnType<typeof makePermission>[]) =>
       makeUser({
@@ -1230,6 +1171,31 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
     updatedAt: new Date(),
     ...overrides,
   };
+}
+
+/**
+ * A `Permission` row built from the shipped catalog entry for `slug`, so a
+ * spec exercises the condition template that actually seeds rather than a
+ * copy of it. Conditions go through a JSON round-trip only to turn the
+ * readonly `as const` literal into the plain `JsonValue` a `Permission` row
+ * carries; the factory never mutates what it renders.
+ */
+function catalogPermission(slug: PermissionSlug): Permission {
+  const catalog: readonly PermissionSeedDefinition[] = PERMISSION_CATALOG;
+  const entry = catalog.find((definition) => definition.slug === slug);
+  if (!entry) {
+    throw new Error(`PERMISSION_CATALOG has no entry for '${slug}'`);
+  }
+
+  return makePermission({
+    action: entry.action,
+    subject: entry.subject,
+    slug: entry.slug,
+    riskLevel: entry.riskLevel,
+    reason: entry.reason,
+    fields: [...(entry.fields ?? [])],
+    conditions: JSON.parse(JSON.stringify(entry.conditions ?? {})),
+  });
 }
 
 function makeRole(name: string, permissions: Permission[]): RoleWithPermissions {
