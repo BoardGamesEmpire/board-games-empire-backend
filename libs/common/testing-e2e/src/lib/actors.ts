@@ -16,9 +16,10 @@ import type { ActorDeps, SessionActor } from './types.js';
  */
 export interface Actors {
   /**
-   * The server-scope Owner sentinel. `UserProvisioningService` grants
-   * `SystemRole.Owner` to the FIRST human user in the database, and the
-   * between-test sweep truncates users — so without a designated first
+   * The server-scope Owner sentinel. `UserProvisioningService` grants the
+   * FIRST human user in the database the base `SystemRole.User` role plus
+   * `SystemRole.Owner` on top; elevation is additive (#410), never a swap.
+   * The between-test sweep truncates users, so without a designated first
    * signup, whichever actor a test happened to create first would silently
    * become a superuser and authorization denials would stop being asserted
    * at all. Every other factory method ensures this sentinel exists before
@@ -33,9 +34,11 @@ export interface Actors {
   owner(): Promise<SessionActor>;
 
   /**
-   * A plain `SystemRole.User` actor. Implicitly ensures the Owner sentinel
-   * first. Fails loudly if provisioning hands back any other role — that
-   * means the first-human-becomes-Owner ordering was violated.
+   * A plain `SystemRole.User` actor — the base role alone, with nothing on
+   * top. Implicitly ensures the Owner sentinel first. Fails loudly if
+   * provisioning hands back any other role SET, which is how the sentinel is
+   * caught masquerading as an ordinary user: it holds `User` as well, so only
+   * an exact-set check separates the two.
    */
   user(options?: SignupOptions): Promise<SessionActor>;
 
@@ -61,15 +64,31 @@ export interface Actors {
 /** How long a factory waits for the asynchronous provisioning listener. */
 const PROVISIONING_TIMEOUT_MS = 15_000;
 
-async function waitForProvisionedRoleName(prisma: PrismaClient, userId: string, username: string): Promise<string> {
+/**
+ * Blocks until provisioning has written the actor's global roles, then hands
+ * back every role name it granted, sorted.
+ *
+ * The barrier trips on the first non-empty read rather than on a read that
+ * matches what the caller expects, and that is safe for a specific reason:
+ * provisioning writes the whole set in one `createMany` inside one
+ * transaction, so a visible row means a visible *set*. Keeping the barrier
+ * dumb keeps two failures distinct — "provisioning never ran" times out here
+ * with the message below, while "provisioning granted the wrong set" fails at
+ * the caller, which can name both sets.
+ */
+async function waitForProvisionedRoleNames(
+  prisma: PrismaClient,
+  userId: string,
+  username: string,
+): Promise<readonly string[]> {
   return pollUntil(
     async () => {
-      const userRole = await prisma.userRole.findFirst({
+      const userRoles = await prisma.userRole.findMany({
         where: { userId },
         select: { role: { select: { name: true } } },
       });
 
-      return userRole?.role.name;
+      return userRoles.length > 0 ? userRoles.map((userRole) => userRole.role.name).sort() : undefined;
     },
     {
       description:
@@ -103,16 +122,32 @@ export function createActors(deps: ActorDeps): Actors {
 
   let sentinelPromise: Promise<SessionActor> | undefined;
 
-  async function signUpProvisionedActor(options: SignupOptions, expectedRole: SystemRole): Promise<SessionActor> {
+  /**
+   * Asserts the EXACT set provisioning granted, not merely that the expected
+   * role is among them. Containment would be the smaller check and it is
+   * wrong: elevation is additive (#410), so an Owner holds `User` too — and a
+   * containment check for `User` would therefore accept the Owner sentinel as
+   * an ordinary user, quietly retiring the ordering guard that is this
+   * factory's whole reason for existing.
+   */
+  async function signUpProvisionedActor(
+    options: SignupOptions,
+    expectedRoles: readonly SystemRole[],
+  ): Promise<SessionActor> {
     const signup = await performSignup(baseUrl, options, fetchFn);
-    const roleName = await waitForProvisionedRoleName(prisma, signup.userId, signup.username);
+    const granted = (await waitForProvisionedRoleNames(prisma, signup.userId, signup.username)).join(', ');
+    const expected = [...expectedRoles].sort().join(', ');
 
-    if (roleName !== expectedRole) {
+    // Both sides are sorted, so string equality IS set equality here — and it
+    // avoids an indexed walk whose in-range-ness depends on a preceding
+    // length check that a later edit could reorder away.
+    if (granted !== expected) {
       throw new Error(
-        `User '${signup.username}' was provisioned with role '${roleName}', expected '${expectedRole}'. ` +
-          `Provisioning grants Owner to the first human user and User to everyone after — an unexpected ` +
-          `role means actor-creation ordering was violated (something created a user outside the factories, ` +
-          `or the Owner sentinel was skipped).`,
+        `User '${signup.username}' was provisioned with role(s) [${granted}], expected ` +
+          `[${expected}]. Provisioning grants the base 'User' role to every human and adds ` +
+          `'Owner' on top for the first one — a mismatch means either actor-creation ordering was ` +
+          `violated (something created a user outside the factories, or the Owner sentinel was skipped), ` +
+          `or provisioning's role set changed without this factory being taught the new shape.`,
       );
     }
 
@@ -130,7 +165,10 @@ export function createActors(deps: ActorDeps): Actors {
       );
     }
 
-    return signUpProvisionedActor({ username: `e2e-owner-${randomUUID().slice(0, 8)}` }, SystemRole.Owner);
+    return signUpProvisionedActor({ username: `e2e-owner-${randomUUID().slice(0, 8)}` }, [
+      SystemRole.User,
+      SystemRole.Owner,
+    ]);
   }
 
   /**
@@ -183,7 +221,7 @@ export function createActors(deps: ActorDeps): Actors {
 
   async function user(options: SignupOptions = {}): Promise<SessionActor> {
     await owner();
-    return signUpProvisionedActor(options, SystemRole.User);
+    return signUpProvisionedActor(options, [SystemRole.User]);
   }
 
   async function admin(options: SignupOptions = {}): Promise<SessionActor> {

@@ -20,7 +20,19 @@ interface FakeWorld {
   clearUsers(): void;
 }
 
-function createFakeWorld(options: { preexistingHumans?: number } = {}): FakeWorld {
+function createFakeWorld(
+  options: {
+    preexistingHumans?: number;
+    firstHumanRoles?: readonly SystemRole[];
+    laterHumanRoles?: readonly SystemRole[];
+  } = {},
+): FakeWorld {
+  // What "provisioning" grants. Both branches are overridable so a spec can
+  // arrange either wrong set: an Owner missing its base row, and — the case
+  // the exact-set check actually exists for — an ordinary user that came back
+  // holding the elevated set.
+  const firstHumanRoles = options.firstHumanRoles ?? [SystemRole.User, SystemRole.Owner];
+  const laterHumanRoles = options.laterHumanRoles ?? [SystemRole.User];
   const users = new Map<string, User>();
   const ownerIds = new Set<string>();
   let signups = 0;
@@ -61,9 +73,10 @@ function createFakeWorld(options: { preexistingHumans?: number } = {}): FakeWorl
       count: async () => users.size,
     },
     userRole: {
-      findFirst: async (args: { where: { userId: string } }) => ({
-        role: { name: ownerIds.has(args.where.userId) ? SystemRole.Owner : SystemRole.User },
-      }),
+      findMany: async (args: { where: { userId: string } }) =>
+        (ownerIds.has(args.where.userId) ? firstHumanRoles : laterHumanRoles).map((name) => ({
+          role: { name },
+        })),
       create: async () => ({ id: 'ur_fake' }),
     },
     role: {
@@ -124,6 +137,29 @@ describe('createActors — sentinel concurrency', () => {
     const owner = await actors.owner();
     expect(world.ownerCount()).toBe(1);
     expect(owner.user.id).toBe('usr_1');
+  });
+
+  it('rejects an ordinary user that came back holding the elevated set', async () => {
+    // The masquerade the exact-set check exists for, and the one a containment
+    // check cannot see: an Owner holds `User` too, so `expected ⊆ granted`
+    // accepts this actor and the sentinel gets handed out as an ordinary user
+    // — retiring the first-human ordering guard without a single test going
+    // red. Weakening the check in actors.ts to containment fails HERE.
+    const world = createFakeWorld({ laterHumanRoles: [SystemRole.User, SystemRole.Owner] });
+    const actors = createActors({ baseUrl, prisma: world.prisma, fetchFn: world.fetchFn });
+
+    await expect(actors.user()).rejects.toThrow(/\[Owner, User\], expected \[User\]/);
+  });
+
+  it('rejects an Owner provisioned without its base User row', async () => {
+    // The pre-#410 shape: `Owner` alone, with no independently-held base. A
+    // containment check would accept this; the exact-set check must not,
+    // because an Owner without `User` holds LESS than an ordinary user
+    // outside `manage:all`.
+    const world = createFakeWorld({ firstHumanRoles: [SystemRole.Owner] });
+    const actors = createActors({ baseUrl, prisma: world.prisma, fetchFn: world.fetchFn });
+
+    await expect(actors.owner()).rejects.toThrow(/\[Owner\], expected \[Owner, User\]/);
   });
 
   it('re-mints when the memoized sentinel was truncated out from under it', async () => {
