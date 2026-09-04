@@ -1,4 +1,4 @@
-import { SystemRole } from '../client';
+import { Prisma, SystemRole } from '../client';
 import { assertEveryRoleSeeded } from './catalog-integrity';
 import type { RoleScope, RoleSeedDefinition } from './seed-definitions';
 
@@ -57,3 +57,60 @@ export const ROLE_SCOPE: Readonly<Record<SystemRole, RoleScope>> = {
   [SystemRole.EventGuest]: 'event',
   [SystemRole.EventSpectator]: 'event',
 };
+
+/**
+ * `user` in every role pass is the whole `UserWithRoles` graph, but only its
+ * scalar columns are legitimate leaves: a relation such as `user.roles` would
+ * render `[object Object]` into the clause. So the user variables are the
+ * `User` model's scalar fields, read from the generated client rather than
+ * typed by hand — a column added to the model is a variable here without
+ * anyone remembering to list it, and a name that is not a column (`user.userId`,
+ * `user.householdId`) is a typo the guards can see.
+ */
+const USER_VARIABLES: readonly string[] = Object.keys(Prisma.UserScalarFieldEnum).map((field) => `user.${field}`);
+
+/**
+ * The variables each ROLE pass of `AbilityFactory.createForUser` places in
+ * its Mustache context. The `roles` pass renders `{ user, role }`, where
+ * `role` is the role's NAME as a string; the `householdMember` pass adds
+ * `householdId`; the `eventsAttended` pass adds `eventId`. A variable the
+ * pass does not supply renders to `''` — a clause that matches nothing — so
+ * `catalog-guards.ts` joins this map with `ROLE_SCOPE` to find grants that
+ * can never fire (#234, #244, #436).
+ *
+ * Direct user permissions (`applyUserPermissions`) are not a role pass: they
+ * render against `{ user }` alone and are not role↔permission edges, so they
+ * have no key here. The factory documents which templates are safe to assign
+ * directly as an operator concern.
+ *
+ * This is the lower layer, so the map lives here and the factory's spec is
+ * checked against it rather than the other way round: `@bge/permissions`
+ * imports this library, and a catalog spec could not import the factory
+ * back without inverting that dependency.
+ */
+export const RENDER_CONTEXT_VARIABLES: Readonly<Record<RoleScope, readonly string[]>> = {
+  global: [...USER_VARIABLES, 'role'],
+  household: [...USER_VARIABLES, 'role', 'householdId'],
+  event: [...USER_VARIABLES, 'role', 'eventId'],
+};
+
+/**
+ * The variables `AbilityFactory.createForPlugin` places in its context —
+ * `{ plugin: { id, slug }, unit: clonePluginUnit(unit) }`, where the unit
+ * always carries `scopeType` and, by variant, `householdId` or `userId`
+ * (#60, #315). No role pass supplies any of these, so a plugin-conditioned
+ * permission granted to a role is caught by the render join, while the
+ * variable itself is not mistaken for a typo.
+ */
+export const PLUGIN_CONTEXT_VARIABLES: readonly string[] = [
+  'plugin.id',
+  'plugin.slug',
+  'unit.scopeType',
+  'unit.householdId',
+  'unit.userId',
+];
+
+/** Every variable a catalog condition may reference: the union of every render context above. */
+export const KNOWN_TEMPLATE_VARIABLES: readonly string[] = [
+  ...new Set([...Object.values(RENDER_CONTEXT_VARIABLES).flat(), ...PLUGIN_CONTEXT_VARIABLES]),
+];

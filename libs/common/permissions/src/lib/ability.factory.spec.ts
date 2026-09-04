@@ -1,5 +1,5 @@
-import type { Permission, PermissionSeedDefinition, PermissionSlug } from '@bge/database';
-import { Action, PERMISSION_CATALOG, ResourceType, RiskLevel } from '@bge/database';
+import type { Permission, PermissionSeedDefinition, PermissionSlug, RoleScope } from '@bge/database';
+import { Action, PERMISSION_CATALOG, RENDER_CONTEXT_VARIABLES, ResourceType, RiskLevel } from '@bge/database';
 import { subject } from '@casl/ability';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
@@ -510,6 +510,89 @@ describe('AbilityFactory', () => {
 
     return acc;
   }
+
+  describe('render contexts (#234)', () => {
+    // One permission templated on every variable a role pass could supply.
+    // Which fields render non-empty is decided by the pass the role arrives
+    // through, and `RENDER_CONTEXT_VARIABLES` in @bge/database is the catalog
+    // guards' statement of exactly that. The literal expectations are the
+    // independent truth about the factory; the final assertion in each case
+    // pins the map to them, so a renamed or dropped context key fails here
+    // before the guards go quietly wrong.
+    const PROBE_FIELD_VARIABLES = { id: 'householdId', name: 'eventId', createdById: 'user.id', slug: 'role' } as const;
+    type ProbeField = keyof typeof PROBE_FIELD_VARIABLES;
+
+    // Every ROLE pass draws its permissions from a role-carrying collection
+    // on `UserWithRoles`, so this literal — keyed by exactly those
+    // collections, valued by the scope each renders — is what turns a new
+    // role pass into a compile error: a new collection is a missing key here
+    // until the map gains a scope for it and a case below renders through it.
+    // Direct user permissions (`permissions`) carry no role and render
+    // `{ user }` alone; they are outside the map by design, and outside this
+    // pin for the same reason.
+    type RoleCarrying = {
+      [K in keyof UserWithRoles]: UserWithRoles[K] extends readonly { role: unknown }[] ? K : never;
+    }[keyof UserWithRoles];
+    const passes: Readonly<Record<RoleCarrying, RoleScope>> = {
+      roles: 'global',
+      householdMember: 'household',
+      eventsAttended: 'event',
+    };
+
+    const probe = () =>
+      makePermission({
+        subject: 'Event',
+        conditions: {
+          id: '{{ householdId }}',
+          name: '{{ eventId }}',
+          createdById: '{{ user.id }}',
+          slug: '{{ role }}',
+        },
+      });
+
+    const renderedThrough = (scope: RoleScope, user: UserWithRoles) => {
+      const conditions = factory.createForUser(user).rules.at(-1)?.conditions as Record<ProbeField, string>;
+      const rendered = (Object.keys(PROBE_FIELD_VARIABLES) as ProbeField[])
+        .filter((field) => conditions[field] !== '')
+        .map((field) => PROBE_FIELD_VARIABLES[field])
+        .sort();
+      const declared = Object.values(PROBE_FIELD_VARIABLES)
+        .filter((variable) => RENDER_CONTEXT_VARIABLES[scope].includes(variable))
+        .sort();
+
+      return { conditions, rendered, declared };
+    };
+
+    it('renders a global role with user and role only', () => {
+      const user = makeUser({ id: 'user-1', roles: [makeRole('Moderator', [probe()])] });
+      const { conditions, rendered, declared } = renderedThrough(passes.roles, user);
+
+      expect(conditions).toEqual({ id: '', name: '', createdById: 'user-1', slug: 'Moderator' });
+      expect(declared).toEqual(rendered);
+    });
+
+    it('renders a household role with householdId added', () => {
+      const user = makeUser({
+        id: 'user-1',
+        householdMember: [{ householdId: 'hh-1', role: makeRole('HouseholdMember', [probe()]) }],
+      });
+      const { conditions, rendered, declared } = renderedThrough(passes.householdMember, user);
+
+      expect(conditions).toEqual({ id: 'hh-1', name: '', createdById: 'user-1', slug: 'HouseholdMember' });
+      expect(declared).toEqual(rendered);
+    });
+
+    it('renders an event role with eventId added', () => {
+      const user = makeUser({
+        id: 'user-1',
+        eventsAttended: [{ eventId: 'ev-1', role: makeRole('EventGuest', [probe()]) }],
+      });
+      const { conditions, rendered, declared } = renderedThrough(passes.eventsAttended, user);
+
+      expect(conditions).toEqual({ id: '', name: 'ev-1', createdById: 'user-1', slug: 'EventGuest' });
+      expect(declared).toEqual(rendered);
+    });
+  });
 
   describe('household member rules (#155)', () => {
     // The fixtures are the REAL catalog entries, so a change to a seeded
