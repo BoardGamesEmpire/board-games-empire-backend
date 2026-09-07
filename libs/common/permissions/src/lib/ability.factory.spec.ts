@@ -539,6 +539,18 @@ describe('AbilityFactory', () => {
       eventsAttended: 'event',
     };
 
+    // `user` in every pass is the permission graph, not the User row, so the
+    // user variables the map may declare are the graph's own scalar keys —
+    // today only `id`. This literal, keyed by exactly the non-collection keys
+    // of `UserWithRoles`, is a compile error the day the graph loads another
+    // scalar, and the first case below holds the map to it: a `{{ user.email }}`
+    // the graph does not load renders `''` in every pass and must stay unknown
+    // to the guards, however real the column is.
+    type UserScalar = {
+      [K in keyof UserWithRoles]: UserWithRoles[K] extends readonly unknown[] ? never : K;
+    }[keyof UserWithRoles];
+    const userVariables: { readonly [K in UserScalar]: `user.${K}` } = { id: 'user.id' };
+
     const probe = () =>
       makePermission({
         subject: 'Event',
@@ -562,6 +574,14 @@ describe('AbilityFactory', () => {
 
       return { conditions, rendered, declared };
     };
+
+    it('declares exactly the user fields the permission graph loads, in every pass', () => {
+      for (const scope of Object.keys(RENDER_CONTEXT_VARIABLES) as RoleScope[]) {
+        const declared = RENDER_CONTEXT_VARIABLES[scope].filter((variable) => variable.startsWith('user.'));
+
+        expect(declared).toEqual(Object.values(userVariables));
+      }
+    });
 
     it('renders a global role with user and role only', () => {
       const user = makeUser({ id: 'user-1', roles: [makeRole('Moderator', [probe()])] });

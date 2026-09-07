@@ -235,15 +235,14 @@ describe('catalog guards', () => {
           slug: 'read:thing',
           conditions: {
             a: '{{ user.id }}',
-            b: '{{ user.email }}',
-            c: '{{ role }}',
-            d: '{{ householdId }}',
-            e: '{{ eventId }}',
-            f: '{{ plugin.id }}',
-            g: '{{ plugin.slug }}',
-            h: '{{ unit.scopeType }}',
-            i: '{{ unit.householdId }}',
-            j: '{{ unit.userId }}',
+            b: '{{ role }}',
+            c: '{{ householdId }}',
+            d: '{{ eventId }}',
+            e: '{{ plugin.id }}',
+            f: '{{ plugin.slug }}',
+            g: '{{ unit.scopeType }}',
+            h: '{{ unit.householdId }}',
+            i: '{{ unit.userId }}',
           },
         }),
       ];
@@ -251,11 +250,19 @@ describe('catalog guards', () => {
       expect(findTemplateDefects(catalog, KNOWN_TEMPLATE_VARIABLES)).toEqual([]);
     });
 
-    it('the shipped known set rejects a bare object, a relation, a sub-path of a scalar and a column User lacks', () => {
+    it('the shipped known set rejects a bare object, a relation, a sub-path of a scalar, and user fields the graph does not load', () => {
       const catalog = [
         definition({
           slug: 'read:thing',
-          conditions: { a: '{{ unit }}', b: '{{ user.roles }}', c: '{{ role.name }}', d: '{{ user.householdId }}' },
+          conditions: {
+            a: '{{ unit }}',
+            b: '{{ user.roles }}',
+            c: '{{ role.name }}',
+            // A real User column that the permission graph never selects...
+            d: '{{ user.email }}',
+            // ...and a name that is not a column at all. Both render to ''.
+            e: '{{ user.householdId }}',
+          },
         }),
       ];
 
@@ -263,6 +270,7 @@ describe('catalog guards', () => {
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'unit' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.roles' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'role.name' },
+        { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.email' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.householdId' },
       ]);
     });

@@ -1,4 +1,4 @@
-import { Prisma, SystemRole } from '../client';
+import { SystemRole } from '../client';
 import { assertEveryRoleSeeded } from './catalog-integrity';
 import type { RoleScope, RoleSeedDefinition } from './seed-definitions';
 
@@ -59,15 +59,16 @@ export const ROLE_SCOPE: Readonly<Record<SystemRole, RoleScope>> = {
 };
 
 /**
- * `user` in every role pass is the whole `UserWithRoles` graph, but only its
- * scalar columns are legitimate leaves: a relation such as `user.roles` would
- * render `[object Object]` into the clause. So the user variables are the
- * `User` model's scalar fields, read from the generated client rather than
- * typed by hand — a column added to the model is a variable here without
- * anyone remembering to list it, and a name that is not a column (`user.userId`,
- * `user.householdId`) is a typo the guards can see.
+ * `user` in every role pass is the permission graph as
+ * `PermissionsService.loadUserGraph` selects it — `id` plus the role-carrying
+ * relations — not the `User` row. A column's existence on the model says
+ * nothing about whether it is loaded: `{{ user.email }}` renders `''` today
+ * because the graph never selects `email`, which is exactly the inert grant
+ * the render join exists to catch. So this list is what the graph loads, and
+ * the factory's spec pins it to `UserWithRoles`, the graph's own type, so the
+ * two cannot drift apart silently.
  */
-const USER_VARIABLES: readonly string[] = Object.keys(Prisma.UserScalarFieldEnum).map((field) => `user.${field}`);
+const USER_VARIABLES: readonly string[] = ['user.id'];
 
 /**
  * The variables each ROLE pass of `AbilityFactory.createForUser` places in
