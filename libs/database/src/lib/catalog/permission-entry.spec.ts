@@ -110,6 +110,21 @@ describe('permission()', () => {
     });
   });
 
+  it('rejects a subject typed as more than one member', () => {
+    // Against a union of subjects the check would widen to every subject's
+    // filters, so a path from another model would pass; each entry names one.
+    const build = (subject: ResourceType) =>
+      // @ts-expect-error -- `subject` is the whole enum here, not one member of it, so the guard argument is demanded
+      permission({
+        ...base,
+        subject,
+        slug: 'bad:widened-subject',
+        conditions: { id: 'x' },
+      });
+
+    expect(build(ResourceType.Event).slug).toBe('bad:widened-subject');
+  });
+
   it('rejects conditions on a subject with no model, and on the wildcard', () => {
     permission({
       ...base,
@@ -139,7 +154,7 @@ describe('permission()', () => {
     defined.reason = 'mutated';
   });
 
-  it('is the only way an entry reaches the catalog element type', () => {
+  it('is the only way a literal reaches the catalog element type', () => {
     const catalog = [
       permission({ ...base, subject: ResourceType.Event, slug: 'ok:built' }),
       // @ts-expect-error -- written without the builder, so nothing checked it against its subject; the element type is unreachable from a literal

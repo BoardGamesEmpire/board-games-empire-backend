@@ -99,7 +99,10 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function describeValue(value: unknown): string {
   if (typeof value === 'object' && value !== null) {
-    return value.constructor.name;
+    // A prototype chain that never reaches Object.prototype has no
+    // `constructor`; the message must not throw on the value it reports.
+    const name: unknown = (value as { constructor?: { name?: unknown } }).constructor?.name;
+    return typeof name === 'string' && name !== '' ? name : 'object';
   }
 
   return typeof value === 'number' ? String(value) : typeof value;

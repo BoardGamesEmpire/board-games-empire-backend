@@ -173,7 +173,10 @@ export type SubjectScalarField = ForEverySubject<{
  * required one in particular, as `riskLevel` is (#60) — is required of every
  * entry without anyone remembering to mirror it. `S` is inferred from
  * `subject`, so the two cannot disagree, and the object literal is fresh, so
- * excess-property checks reach every nested level of `conditions`.
+ * excess-property checks reach every nested level of `conditions`. `S` must
+ * be one member: against a `subject` typed as the whole enum the check would
+ * widen to every subject's filters at once, and a path from some other model
+ * would pass, so {@link permission} refuses such a subject.
  */
 export type PermissionEntryFor<S extends CatalogSubject, Slug extends string> = Readonly<
   Omit<PermissionSeedDefinition, 'subject' | 'slug' | 'conditions' | 'fields'>
@@ -183,6 +186,20 @@ export type PermissionEntryFor<S extends CatalogSubject, Slug extends string> = 
   readonly conditions?: SubjectWhereInput[S];
   readonly fields?: readonly SubjectScalarField[S][];
 };
+
+/** `true` when `T` is a union of more than one member. */
+type IsUnion<T, U = T> = T extends unknown ? ([U] extends [T] ? false : true) : never;
+
+/**
+ * The rest parameter of {@link permission}: empty when `subject` is one
+ * member, and a required argument that cannot be supplied when it is a union,
+ * so the call fails "an argument for 'subjectMustBeOneMember' was not
+ * provided". A guard on the entry's own type would sit in the contextual type
+ * of `subject` and widen the `'all'` literal to `string` during inference,
+ * refusing the wildcard entries instead; a parameter after the entry leaves
+ * that inference alone. Every catalog entry names its subject as a literal.
+ */
+type OneSubjectGuard<S extends CatalogSubject> = IsUnion<S> extends true ? [subjectMustBeOneMember: never] : [];
 
 /**
  * Marks a definition as having come through {@link permission}. Declared and
@@ -199,9 +216,17 @@ declare const checkedAgainstSubject: unique symbol;
  * consumer reads, with `subject` and `slug` kept literal. Readonly, as the
  * `as const` catalog was before the builder: the seed, the guards and the
  * reconciler all read the one module-level array, and none of them may
- * change it. `PERMISSION_CATALOG` is typed as an array of these, so only the
- * builder can put an entry in it; every consumer still reads the array as
- * `readonly PermissionSeedDefinition[]`.
+ * change it. `PERMISSION_CATALOG` is typed as an array of these, so an entry
+ * written as a plain literal cannot be put in it; every consumer still reads
+ * the array as `readonly PermissionSeedDefinition[]`. A spread of a built
+ * entry keeps the marker, so `{ ...built, conditions: {...} }` compiles with
+ * conditions nobody checked. No member typing closes that: retyping
+ * `conditions` here by the subject either changes nothing (intersected with
+ * the JSON object type, its index signature admits any key) or breaks the
+ * seed's `PermissionSeedDefinition` view (a `WhereInput` is not JSON), and a
+ * spread can also drop `conditions` or swap `subject`. That is a review
+ * matter; the import-time assertions and the placeholder tripwire still run
+ * over whatever the array holds, but neither checks paths.
  */
 export type DefinedPermission<S extends CatalogSubject, Slug extends string> = Readonly<PermissionSeedDefinition> & {
   readonly subject: S;
@@ -226,6 +251,10 @@ export type DefinedPermission<S extends CatalogSubject, Slug extends string> = R
  * cast true: it walks every entry as the module loads and names the slug and
  * path of any value that is not JSON as written.
  */
+export function permission<S extends CatalogSubject, const Slug extends string>(
+  entry: PermissionEntryFor<S, Slug>,
+  ...guard: OneSubjectGuard<S>
+): DefinedPermission<S, Slug>;
 export function permission<S extends CatalogSubject, const Slug extends string>(
   entry: PermissionEntryFor<S, Slug>,
 ): DefinedPermission<S, Slug> {

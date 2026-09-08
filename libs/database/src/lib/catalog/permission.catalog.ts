@@ -31,10 +31,12 @@ const acceptedFriendOfActingUser = {
  * `conditions` paths and `fields` against the Prisma types of its own
  * `subject` as this file compiles (#234), and keeps `subject` and `slug`
  * literal so slugs stay a literal union (`PermissionSlug`) for downstream
- * consumers. The array's element type is what the builder returns and
- * nothing else produces, so an entry written without it — and so never
- * checked against its subject — does not compile. Consumers still read the
- * array as `readonly PermissionSeedDefinition[]`.
+ * consumers. The array's element type is what the builder returns, so an
+ * entry written as a plain literal — and so never checked against its
+ * subject — does not compile; a spread of a built entry with a member
+ * overridden keeps that type and is a review matter (see
+ * `DefinedPermission`). Consumers still read the array as
+ * `readonly PermissionSeedDefinition[]`.
  */
 export const PERMISSION_CATALOG = [
   // --- Global Admin/Owner ---

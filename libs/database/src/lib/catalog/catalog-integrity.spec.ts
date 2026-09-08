@@ -100,6 +100,13 @@ describe('catalog integrity assertions', () => {
 
       expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.OR\[0\].*undefined/);
     });
+
+    it('still names the path when the value has no constructor to describe', () => {
+      const orphan = Object.create(Object.create(null) as object) as Prisma.InputJsonObject;
+      const catalog = [definition({ slug: 'read:game', conditions: { deletedAt: orphan } })];
+
+      expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.deletedAt.*object/);
+    });
   });
 
   describe('assertRolePermissionCatalog', () => {
