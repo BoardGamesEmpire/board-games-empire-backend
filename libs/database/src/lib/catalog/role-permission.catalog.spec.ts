@@ -38,6 +38,66 @@ describe('the shipped catalogs', () => {
     );
   });
 
+  it('bind every template placeholder to an identifier column', () => {
+    // Every render-context variable is an identifier — `user.id`, `householdId`,
+    // `eventId` — and the compiler cannot tell a placeholder from any other
+    // string where a column accepts strings (DateTime, Decimal, Json). So a
+    // placeholder belongs under an identifier column and nowhere else: the
+    // runtime tripwire for the value-type gap the typed catalog leaves (#234).
+    // The column is the nearest enclosing key that is not a Prisma operator,
+    // so `id: { equals: … }` is judged by `id`, `createdAt: { in: [ … ] }` by
+    // `createdAt`, and a string inside an operator's array is judged too.
+    const operators = new Set([
+      ...['AND', 'OR', 'NOT'],
+      ...['some', 'none', 'every', 'is', 'isNot'],
+      ...[
+        'equals',
+        'in',
+        'notIn',
+        'not',
+        'lt',
+        'lte',
+        'gt',
+        'gte',
+        'contains',
+        'startsWith',
+        'endsWith',
+        'search',
+        'mode',
+      ],
+      ...['has', 'hasEvery', 'hasSome', 'isEmpty'],
+    ]);
+    const isIdentifier = (column: string | undefined): boolean => column === 'id' || column?.endsWith('Id') === true;
+    const misplaced: string[] = [];
+    const walk = (slug: string, node: unknown, path: string, column: string | undefined): void => {
+      if (typeof node === 'string') {
+        if (node.includes('{{') && !isIdentifier(column)) {
+          misplaced.push(`${slug}: ${path}`);
+        }
+        return;
+      }
+
+      if (Array.isArray(node)) {
+        node.forEach((item, index) => walk(slug, item, `${path}[${index}]`, column));
+        return;
+      }
+
+      if (node === null || typeof node !== 'object') {
+        return;
+      }
+
+      for (const [key, value] of Object.entries(node)) {
+        walk(slug, value, path === '' ? key : `${path}.${key}`, operators.has(key) ? column : key);
+      }
+    };
+
+    for (const { slug, conditions } of PERMISSION_CATALOG) {
+      walk(slug, conditions, '', undefined);
+    }
+
+    expect(misplaced).toEqual([]);
+  });
+
   describe('derived role lists', () => {
     it('grant Owner exactly the wildcard', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.Owner]).toEqual(['manage:all']);

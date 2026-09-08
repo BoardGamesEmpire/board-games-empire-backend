@@ -1280,8 +1280,9 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
  * A `Permission` row built from the shipped catalog entry for `slug`, so a
  * spec exercises the condition template that actually seeds rather than a
  * copy of it. Conditions go through a JSON round-trip only to turn the
- * readonly `as const` literal into the plain `JsonValue` a `Permission` row
- * carries; the factory never mutates what it renders.
+ * readonly `Prisma.InputJsonObject` the catalog carries into the plain
+ * `JsonValue` a `Permission` row does; the factory never mutates what it
+ * renders.
  */
 function catalogPermission(slug: PermissionSlug): Permission {
   const catalog: readonly PermissionSeedDefinition[] = PERMISSION_CATALOG;

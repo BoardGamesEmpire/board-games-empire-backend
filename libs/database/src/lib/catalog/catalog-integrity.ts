@@ -40,6 +40,75 @@ export function assertValidSubjects(catalog: readonly PermissionSeedDefinition[]
 }
 
 /**
+ * Every `conditions` value is JSON as written: a string, a finite number, a
+ * boolean, `null`, or an array or plain object of those, with no `undefined`
+ * member and no hole. `permission()` types `conditions` as the subject's
+ * `WhereInput`, which also admits a `Date`, a `bigint` or a `FieldRef` the
+ * compiler cannot rule out, and casts the entry to the JSON object the seed
+ * writes; this assertion is what makes that cast true. Nothing downstream
+ * would refuse such a value. The seed hands it to Prisma's Json column write,
+ * which is `JSON.stringify` under a replacer: a `Date` becomes its ISO
+ * string, a `bigint` a string of digits, an `undefined` member is dropped and
+ * a hole is written as `null`. The ability factory then renders the row it
+ * read back, never the catalog object, so the filter would reach a query
+ * silently changed. Names the slug and the path.
+ */
+export function assertJsonConditions(catalog: readonly PermissionSeedDefinition[]): void {
+  for (const { slug, conditions } of catalog) {
+    if (conditions !== undefined) {
+      assertJsonValue(conditions, slug, 'conditions');
+    }
+  }
+}
+
+function assertJsonValue(value: unknown, slug: string, path: string): void {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    // `entries()` visits a hole as `undefined`; `forEach` would skip it.
+    for (const [index, item] of value.entries()) {
+      assertJsonValue(item, slug, `${path}[${index}]`);
+    }
+    return;
+  }
+
+  if (isPlainObject(value)) {
+    for (const [key, member] of Object.entries(value)) {
+      assertJsonValue(member, slug, `${path}.${key}`);
+    }
+    return;
+  }
+
+  throw new Error(`Permission '${slug}' has a value at ${path} that is not JSON as written (${describeValue(value)})`);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function describeValue(value: unknown): string {
+  if (typeof value === 'object' && value !== null) {
+    // A prototype chain that never reaches Object.prototype has no
+    // `constructor`; the message must not throw on the value it reports.
+    const name: unknown = (value as { constructor?: { name?: unknown } }).constructor?.name;
+    return typeof name === 'string' && name !== '' ? name : 'object';
+  }
+
+  return typeof value === 'number' ? String(value) : typeof value;
+}
+
+/**
  * Every key of the role→slugs map is a `SystemRole` member, and every slug it
  * lists is defined by the permission catalog exactly once per role.
  */
