@@ -10,9 +10,14 @@ import type { Action, Prisma, ResourceType, RiskLevel, SystemRole } from '../cli
  * this catalog (plugin-declared permissions; their classification is decided
  * in #59 Phase C).
  *
- * The catalog is declared `as const`, so every array-valued member is
- * `readonly` here: a mutable `string[]` would reject the literal tuples the
- * declaration produces. Prisma's own JSON input types are already readonly.
+ * Every array-valued member is `readonly`: `permission()` types `fields` as a
+ * readonly array and Prisma's own JSON input types are already readonly, so a
+ * mutable `string[]` here would reject both.
+ *
+ * This is the shape every consumer reads. The catalog itself is written
+ * through `permission()` (`permission-entry.ts`), which types `conditions`
+ * and `fields` by the entry's `subject` while the file compiles and returns
+ * this interface (#234).
  */
 export interface PermissionSeedDefinition {
   action: Action;
@@ -35,10 +40,16 @@ export interface PermissionSeedDefinition {
   reason: string;
 
   /**
-   * Mustache-templated ABAC conditions, rendered by the ability factory.
+   * Mustache-templated ABAC conditions, rendered by the ability factory. A
+   * Prisma `where` clause for `subject` with placeholders in its values;
+   * `permission()` checks the paths against the subject's `WhereInput`.
    */
   conditions?: Prisma.InputJsonObject;
 
+  /**
+   * Scalar columns of `subject` the grant is limited to; `permission()`
+   * checks each against the subject's scalar-field enum.
+   */
   fields?: readonly string[];
 }
 

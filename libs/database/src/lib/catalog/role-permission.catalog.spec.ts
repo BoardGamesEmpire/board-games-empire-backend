@@ -38,6 +38,39 @@ describe('the shipped catalogs', () => {
     );
   });
 
+  it('bind every template placeholder to an identifier column', () => {
+    // Every render-context variable is an identifier — `user.id`, `householdId`,
+    // `eventId` — and the compiler cannot tell a placeholder from any other
+    // string where a column accepts strings (DateTime, Decimal, Json). So a
+    // placeholder belongs under an identifier key and nowhere else: the
+    // runtime tripwire for the value-type gap the typed catalog leaves (#234).
+    const misplaced: string[] = [];
+    const walk = (slug: string, node: unknown, path: readonly string[]): void => {
+      if (Array.isArray(node)) {
+        node.forEach((item) => walk(slug, item, path));
+        return;
+      }
+
+      if (node === null || typeof node !== 'object') {
+        return;
+      }
+
+      for (const [key, value] of Object.entries(node)) {
+        if (typeof value === 'string' && value.includes('{{') && key !== 'id' && !key.endsWith('Id')) {
+          misplaced.push(`${slug}: ${[...path, key].join('.')}`);
+        }
+
+        walk(slug, value, [...path, key]);
+      }
+    };
+
+    for (const { slug, conditions } of PERMISSION_CATALOG) {
+      walk(slug, conditions, []);
+    }
+
+    expect(misplaced).toEqual([]);
+  });
+
   describe('derived role lists', () => {
     it('grant Owner exactly the wildcard', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.Owner]).toEqual(['manage:all']);
