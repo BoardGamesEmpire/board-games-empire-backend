@@ -25,6 +25,7 @@ export function assertUniqueSlugs(catalog: readonly PermissionSeedDefinition[]):
     if (seen.has(slug)) {
       throw new Error(`Permission catalog defines slug '${slug}' more than once`);
     }
+
     seen.add(slug);
   }
 }
@@ -58,9 +59,11 @@ export function assertRolePermissionCatalog(
       if (!defined.has(slug)) {
         throw new Error(`Role '${roleName}' references slug '${slug}', which the permission catalog does not define`);
       }
+
       if (listed.has(slug)) {
         throw new Error(`Role '${roleName}' lists slug '${slug}' more than once`);
       }
+
       listed.add(slug);
     }
   }
