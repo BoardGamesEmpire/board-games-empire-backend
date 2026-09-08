@@ -77,7 +77,7 @@ describe('catalog integrity assertions', () => {
       expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.OR\[0\]\.createdAt\.gte.*Date/);
     });
 
-    it('names a bigint, which JSON.stringify would turn into digits', () => {
+    it('names a bigint, which the column write would turn into a string of digits', () => {
       // The definition type refuses a bigint, so the fixture casts; the
       // `WhereInput` the builder accepts for a BigInt column does not.
       const conditions = { sizeBytes: BigInt(5) } as unknown as Prisma.InputJsonObject;
@@ -91,6 +91,14 @@ describe('catalog integrity assertions', () => {
       const catalog = [definition({ slug: 'read:game', conditions: { deletedAt: undefined } })];
 
       expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.deletedAt.*undefined/);
+    });
+
+    it('names a hole in a sparse array, which JSON.stringify would write as null', () => {
+      // An elided literal element fails the builder's type; a length-constructed
+      // array does not, and `forEach` would have walked past the hole.
+      const catalog = [definition({ slug: 'read:game', conditions: { OR: new Array<Prisma.InputJsonValue>(1) } })];
+
+      expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.OR\[0\].*undefined/);
     });
   });
 

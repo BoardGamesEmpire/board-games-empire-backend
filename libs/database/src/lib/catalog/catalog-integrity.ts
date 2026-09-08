@@ -41,15 +41,17 @@ export function assertValidSubjects(catalog: readonly PermissionSeedDefinition[]
 
 /**
  * Every `conditions` value is JSON as written: a string, a finite number, a
- * boolean, `null`, or an array or plain object of those. `permission()` types
- * `conditions` as the subject's `WhereInput`, which also admits a `Date`, a
- * `bigint` or a `FieldRef` the compiler cannot rule out, and casts the entry
- * to the JSON object the seed writes; this assertion is what makes that cast
- * true. Nothing downstream would refuse such a value — the column write and
- * the factory's render both go through `JSON.stringify`, which turns a `Date`
- * into its ISO string, a `bigint` into digits and drops an `undefined` member
- * — so the filter would reach a query silently changed. Names the slug and
- * the path.
+ * boolean, `null`, or an array or plain object of those, with no `undefined`
+ * member and no hole. `permission()` types `conditions` as the subject's
+ * `WhereInput`, which also admits a `Date`, a `bigint` or a `FieldRef` the
+ * compiler cannot rule out, and casts the entry to the JSON object the seed
+ * writes; this assertion is what makes that cast true. Nothing downstream
+ * would refuse such a value. The seed hands it to Prisma's Json column write,
+ * which is `JSON.stringify` under a replacer: a `Date` becomes its ISO
+ * string, a `bigint` a string of digits, an `undefined` member is dropped and
+ * a hole is written as `null`. The ability factory then renders the row it
+ * read back, never the catalog object, so the filter would reach a query
+ * silently changed. Names the slug and the path.
  */
 export function assertJsonConditions(catalog: readonly PermissionSeedDefinition[]): void {
   for (const { slug, conditions } of catalog) {
@@ -69,7 +71,10 @@ function assertJsonValue(value: unknown, slug: string, path: string): void {
   }
 
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJsonValue(item, slug, `${path}[${index}]`));
+    // `entries()` visits a hole as `undefined`; `forEach` would skip it.
+    for (const [index, item] of value.entries()) {
+      assertJsonValue(item, slug, `${path}[${index}]`);
+    }
     return;
   }
 

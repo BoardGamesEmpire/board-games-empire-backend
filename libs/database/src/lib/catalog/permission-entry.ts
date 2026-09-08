@@ -219,11 +219,12 @@ export type DefinedPermission<S extends CatalogSubject, Slug extends string> = R
  * The cast is the one place the two views meet, and `conditions` is the only
  * member it bridges: every other member is the definition's own. A
  * `WhereInput` also admits a `Date`, a `bigint` or a `FieldRef`, so the
- * compiler cannot prove the argument is JSON, and neither the column write
- * nor the factory's render would refuse one — both `JSON.stringify` it into a
- * different filter. `assertJsonConditions` at the catalog's foot is what
- * makes the cast true: it walks every entry as the module loads and names the
- * slug and path of any value that is not JSON as written.
+ * compiler cannot prove the argument is JSON, and nothing downstream would
+ * refuse one: Prisma's Json column write is `JSON.stringify` under a replacer
+ * that turns it into a different filter, and the factory renders the row it
+ * read back. `assertJsonConditions` at the catalog's foot is what makes the
+ * cast true: it walks every entry as the module loads and names the slug and
+ * path of any value that is not JSON as written.
  */
 export function permission<S extends CatalogSubject, const Slug extends string>(
   entry: PermissionEntryFor<S, Slug>,
