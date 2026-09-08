@@ -1,6 +1,7 @@
 import { Action, ResourceType, RiskLevel } from '../client';
-import { permission } from './permission-entry';
-import { acceptedFriendOfActingUser, type PermissionSlug } from './permission.catalog';
+import { assertJsonConditions } from './catalog-integrity';
+import { type CatalogSubject, type DefinedPermission, permission } from './permission-entry';
+import type { PermissionSlug } from './permission.catalog';
 
 // `permission()` is a compile-time guard: an entry's `conditions` and
 // `fields` are checked against the Prisma types of its own `subject` while
@@ -36,8 +37,12 @@ describe('permission()', () => {
     permission({
       ...base,
       subject: ResourceType.GameCollection,
-      slug: 'ok:null-and-shared-clause',
-      conditions: { deletedAt: null, visibility: { in: ['Friends', 'Public'] }, user: acceptedFriendOfActingUser },
+      slug: 'ok:null-and-relation-clause',
+      conditions: {
+        deletedAt: null,
+        visibility: { in: ['Friends', 'Public'] },
+        user: { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
+      },
     });
     permission({ ...base, subject: ResourceType.EventAttendee, slug: 'ok:fields', fields: ['status', 'notes'] });
     permission({ ...base, subject: 'all', slug: 'ok:wildcard' });
@@ -132,6 +137,34 @@ describe('permission()', () => {
 
     // @ts-expect-error -- the seed, the guards and the reconciler all read the one catalog; none may change it
     defined.reason = 'mutated';
+  });
+
+  it('is the only way an entry reaches the catalog element type', () => {
+    const catalog = [
+      permission({ ...base, subject: ResourceType.Event, slug: 'ok:built' }),
+      // @ts-expect-error -- written without the builder, so nothing checked it against its subject; the element type is unreachable from a literal
+      {
+        ...base,
+        subject: ResourceType.HouseholdMember,
+        slug: 'bad:unwrapped',
+        conditions: { members: { some: { userId: '{{ user.id }}' } } },
+      },
+    ] as const satisfies readonly DefinedPermission<CatalogSubject, string>[];
+
+    expect(catalog).toHaveLength(2);
+  });
+
+  it('admits a Date the WhereInput allows; the import-time assertion is what refuses it', () => {
+    // A DateTime column takes a `Date`, and so does Prisma's JSON input type
+    // (anything with `toJSON()`), so the compiler has no grounds to reject this.
+    const entry = permission({
+      ...base,
+      subject: ResourceType.Event,
+      slug: 'bad:date-value',
+      conditions: { createdAt: { gte: new Date(0) } },
+    });
+
+    expect(() => assertJsonConditions([entry])).toThrow(/bad:date-value.*conditions\.createdAt\.gte.*Date/);
   });
 
   it('keeps PermissionSlug a literal union of the shipped slugs', () => {

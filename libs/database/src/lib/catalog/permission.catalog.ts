@@ -1,16 +1,19 @@
 import type { Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
-import { assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
+import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
+import type { CatalogSubject, DefinedPermission } from './permission-entry';
 import { permission } from './permission-entry';
-import type { PermissionSeedDefinition } from './seed-definitions';
 
 // Relational clause meaning "this User node is an accepted friend of the
 // acting user". A friendship is a single directional row, so both directions
 // must be checked. Rendered by the ability factory against `{{ user.id }}`
 // and evaluated live against the friendship table at query time. Typed as the
 // `User` where-clause it is spliced into (not `as const`: a readonly tuple is
-// not a `UserWhereInput[]`), so its paths are checked like any entry's.
-export const acceptedFriendOfActingUser = {
+// not a `UserWhereInput[]`), so its paths are checked like any entry's — and
+// therefore module-private: that type is mutable, and the four entries below
+// hold this one object by reference, so exporting it would hand a consumer a
+// writable alias into shipped conditions the catalog presents as readonly.
+const acceptedFriendOfActingUser = {
   OR: [
     { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
     { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
@@ -28,9 +31,10 @@ export const acceptedFriendOfActingUser = {
  * `conditions` paths and `fields` against the Prisma types of its own
  * `subject` as this file compiles (#234), and keeps `subject` and `slug`
  * literal so slugs stay a literal union (`PermissionSlug`) for downstream
- * consumers. The builder's return type already meets `PermissionSeedDefinition`;
- * `satisfies` stays as the floor, so an entry written without the builder is
- * still a valid definition — merely unchecked against its subject.
+ * consumers. The array's element type is what the builder returns and
+ * nothing else produces, so an entry written without it — and so never
+ * checked against its subject — does not compile. Consumers still read the
+ * array as `readonly PermissionSeedDefinition[]`.
  */
 export const PERMISSION_CATALOG = [
   // --- Global Admin/Owner ---
@@ -1326,10 +1330,11 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Sub-allocate member quotas within own household',
   }),
-] as const satisfies readonly PermissionSeedDefinition[];
+] as const satisfies readonly DefinedPermission<CatalogSubject, string>[];
 
 /** Literal union of every seeded permission slug. */
 export type PermissionSlug = (typeof PERMISSION_CATALOG)[number]['slug'];
 
 assertUniqueSlugs(PERMISSION_CATALOG);
 assertValidSubjects(PERMISSION_CATALOG);
+assertJsonConditions(PERMISSION_CATALOG);

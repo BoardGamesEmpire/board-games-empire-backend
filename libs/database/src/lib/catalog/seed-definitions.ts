@@ -42,7 +42,8 @@ export interface PermissionSeedDefinition {
   /**
    * Mustache-templated ABAC conditions, rendered by the ability factory. A
    * Prisma `where` clause for `subject` with placeholders in its values;
-   * `permission()` checks the paths against the subject's `WhereInput`.
+   * `permission()` checks the paths against the subject's `WhereInput`, and
+   * `assertJsonConditions` that every value is JSON as written.
    */
   conditions?: Prisma.InputJsonObject;
 

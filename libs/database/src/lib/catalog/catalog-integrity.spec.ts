@@ -1,6 +1,8 @@
+import type { Prisma } from '../client';
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
   assertEveryRoleSeeded,
+  assertJsonConditions,
   assertRolePermissionCatalog,
   assertUniqueSlugs,
   assertValidSubjects,
@@ -49,6 +51,46 @@ describe('catalog integrity assertions', () => {
       const catalog = [definition({ slug: 'read:widget', subject: 'Widget' as ResourceType })];
 
       expect(() => assertValidSubjects(catalog)).toThrow(/read:widget.*Widget/);
+    });
+  });
+
+  describe('assertJsonConditions', () => {
+    it('accepts conditions built from strings, numbers, booleans, null, arrays and plain objects', () => {
+      const catalog = [
+        definition({
+          slug: 'read:game',
+          conditions: {
+            deletedAt: null,
+            visibility: { in: ['Public', 'Friends'] },
+            OR: [{ minPlayers: 2 }, { isActive: true }],
+          },
+        }),
+        definition({ slug: 'read:job' }),
+      ];
+
+      expect(() => assertJsonConditions(catalog)).not.toThrow();
+    });
+
+    it('names the slug and path of a Date, which the definition type itself admits', () => {
+      const catalog = [definition({ slug: 'read:game', conditions: { OR: [{ createdAt: { gte: new Date(0) } }] } })];
+
+      expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.OR\[0\]\.createdAt\.gte.*Date/);
+    });
+
+    it('names a bigint, which JSON.stringify would turn into digits', () => {
+      // The definition type refuses a bigint, so the fixture casts; the
+      // `WhereInput` the builder accepts for a BigInt column does not.
+      const conditions = { sizeBytes: BigInt(5) } as unknown as Prisma.InputJsonObject;
+
+      expect(() => assertJsonConditions([definition({ slug: 'read:media_object', conditions })])).toThrow(
+        /read:media_object.*conditions\.sizeBytes.*bigint/,
+      );
+    });
+
+    it('names an undefined member, which JSON.stringify would drop', () => {
+      const catalog = [definition({ slug: 'read:game', conditions: { deletedAt: undefined } })];
+
+      expect(() => assertJsonConditions(catalog)).toThrow(/read:game.*conditions\.deletedAt.*undefined/);
     });
   });
 

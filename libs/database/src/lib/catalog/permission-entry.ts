@@ -25,7 +25,9 @@ import type { PermissionSeedDefinition } from './seed-definitions';
  * fail on the first query. Enum, number and boolean columns reject a
  * placeholder outright. Every render-context variable is an identifier, so
  * the shipped-catalog spec pins placeholders to identifier columns as the
- * runtime tripwire for that gap.
+ * runtime tripwire for that gap. Nor does it see a value kind a `WhereInput`
+ * admits but JSON has no literal for — a `Date`, a `bigint`, a `FieldRef` —
+ * which `assertJsonConditions` refuses when the catalog module loads.
  *
  * Keys are the `ResourceType` literals, which are also the Prisma model
  * names. Both maps are written out and wrapped in {@link ForEverySubject}
@@ -183,15 +185,28 @@ export type PermissionEntryFor<S extends CatalogSubject, Slug extends string> = 
 };
 
 /**
+ * Marks a definition as having come through {@link permission}. Declared and
+ * never present at runtime — the builder returns its argument — so it proves
+ * nothing about the object; its one job is to make the catalog's element type
+ * unreachable from an object literal. An entry written without the builder
+ * was never checked against its subject, and with this member required of
+ * every element, it does not compile instead of shipping unchecked.
+ */
+declare const checkedAgainstSubject: unique symbol;
+
+/**
  * What {@link permission} returns: the {@link PermissionSeedDefinition} every
  * consumer reads, with `subject` and `slug` kept literal. Readonly, as the
  * `as const` catalog was before the builder: the seed, the guards and the
  * reconciler all read the one module-level array, and none of them may
- * change it.
+ * change it. `PERMISSION_CATALOG` is typed as an array of these, so only the
+ * builder can put an entry in it; every consumer still reads the array as
+ * `readonly PermissionSeedDefinition[]`.
  */
 export type DefinedPermission<S extends CatalogSubject, Slug extends string> = Readonly<PermissionSeedDefinition> & {
   readonly subject: S;
   readonly slug: Slug;
+  readonly [checkedAgainstSubject]: true;
 };
 
 /**
@@ -203,10 +218,12 @@ export type DefinedPermission<S extends CatalogSubject, Slug extends string> = R
  *
  * The cast is the one place the two views meet, and `conditions` is the only
  * member it bridges: every other member is the definition's own. A
- * `WhereInput` also admits `Date`, `Decimal` and byte values, so the compiler
- * cannot prove the argument is JSON; a hand-written literal that typechecks
- * as a `WhereInput` with string placeholders is JSON by construction, and the
- * runtime seed would reject anything else at the column.
+ * `WhereInput` also admits a `Date`, a `bigint` or a `FieldRef`, so the
+ * compiler cannot prove the argument is JSON, and neither the column write
+ * nor the factory's render would refuse one — both `JSON.stringify` it into a
+ * different filter. `assertJsonConditions` at the catalog's foot is what
+ * makes the cast true: it walks every entry as the module loads and names the
+ * slug and path of any value that is not JSON as written.
  */
 export function permission<S extends CatalogSubject, const Slug extends string>(
   entry: PermissionEntryFor<S, Slug>,
