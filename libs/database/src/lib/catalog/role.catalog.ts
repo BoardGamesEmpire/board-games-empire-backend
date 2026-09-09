@@ -3,7 +3,8 @@ import { assertEveryRoleSeeded } from './catalog-integrity';
 import type { RoleScope, RoleSeedDefinition } from './seed-definitions';
 
 /**
- * The seeded system roles. Every entry is written with `isSystem: true`.
+ * The seeded system roles. The reconciler writes every entry as
+ * `managedBy: System` (#235) and never mutates a role it does not own.
  */
 export const ROLE_CATALOG = [
   // System

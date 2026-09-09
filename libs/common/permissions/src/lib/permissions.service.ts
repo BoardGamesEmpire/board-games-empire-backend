@@ -206,6 +206,9 @@ export class PermissionsService {
   private loadUserGraph(userId: string) {
     return this.db.user.findUnique({
       where: { id: userId },
+      // Every role → permission hop below filters `permission.retiredAt: null`
+      // (#235): a retired catalog row keeps whatever grants still reference it
+      // and confers nothing through any of them.
       select: {
         id: true,
         roles: {
@@ -214,6 +217,7 @@ export class PermissionsService {
               select: {
                 name: true,
                 permissions: {
+                  where: { permission: { retiredAt: null } },
                   select: {
                     permission: true,
                   },
@@ -236,6 +240,7 @@ export class PermissionsService {
                   select: {
                     name: true,
                     permissions: {
+                      where: { permission: { retiredAt: null } },
                       select: {
                         permission: true,
                       },
@@ -256,6 +261,7 @@ export class PermissionsService {
                   select: {
                     name: true,
                     permissions: {
+                      where: { permission: { retiredAt: null } },
                       select: {
                         permission: true,
                       },
@@ -269,10 +275,12 @@ export class PermissionsService {
 
         // Direct per-user overrides (grants + inverse denials). Already-expired
         // rows are excluded at query time; the factory re-checks `expiresAt` at
-        // build time as the backstop.
+        // build time as the backstop. An override of a retired permission is
+        // excluded the same way (#235).
         permissions: {
           where: {
             OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            permission: { retiredAt: null },
           },
           select: {
             inverted: true,
@@ -409,7 +417,8 @@ export class PermissionsService {
     }
 
     const [corePermissions, ownPermissions] = await Promise.all([
-      coreSlugs.length > 0 ? this.db.permission.findMany({ where: { slug: { in: coreSlugs } } }) : [],
+      // A retired row (#235) is read as missing: the grant survives, confers nothing.
+      coreSlugs.length > 0 ? this.db.permission.findMany({ where: { slug: { in: coreSlugs }, retiredAt: null } }) : [],
       ownSlugs.size > 0
         ? this.db.pluginPermission.findMany({
             where: { pluginId, slug: { in: [...ownSlugs] } },
@@ -519,6 +528,8 @@ export class PermissionsService {
       where: { id: apiKeyId },
       include: {
         scopes: {
+          // A scope over a retired permission (#235) confers nothing.
+          where: { permission: { retiredAt: null } },
           include: {
             permission: {
               select: { action: true, subject: true, inverted: true },

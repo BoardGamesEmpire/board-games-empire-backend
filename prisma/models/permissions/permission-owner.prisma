@@ -1,0 +1,9 @@
+/// Provenance of a catalog row — `Permission`, `Role`, `RolePermission`
+/// (#235). Decides what the catalog reconciler may do to the row: converge a
+/// `System` row to the manifest, leave an `Admin` row alone and report its
+/// drift, refuse to run over a `Plugin` row the manifest also claims.
+enum PermissionOwner {
+  System
+  Admin
+  Plugin
+}

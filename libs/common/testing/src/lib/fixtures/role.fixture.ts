@@ -1,4 +1,5 @@
 import type { Role, UserRole } from '@bge/database';
+import { PermissionOwner } from '@bge/database';
 import { sequence } from './sequence.js';
 
 export function makeRole(overrides: Partial<Role> = {}): Role {
@@ -7,7 +8,7 @@ export function makeRole(overrides: Partial<Role> = {}): Role {
     id: `role-${n}`,
     name: `Role_${n}`,
     description: null,
-    isSystem: false,
+    managedBy: PermissionOwner.System,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,

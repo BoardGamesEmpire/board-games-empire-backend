@@ -1,3 +1,4 @@
+import type { PermissionSlug } from '@bge/database';
 import { hours } from '@nestjs/throttler';
 
 /**
@@ -100,5 +101,10 @@ export const FEEDBACK_THROTTLE_TTL_MS = hours(1);
  * Slug for the `create:feedback_report` permission. Banning a user is
  * implemented as a `UserPermission` row with `inverted: true` against this
  * permission, so the slug is hot-pathed through the ban/unban code.
+ *
+ * Typed against the catalog: dropping the slug from `PERMISSION_CATALOG` while
+ * this code references it fails the build, which is also why the lookup that
+ * resolves it need not filter `retiredAt` (#235) — a catalog slug is never
+ * retired.
  */
-export const FEEDBACK_CREATE_PERMISSION_SLUG = 'create:feedback_report';
+export const FEEDBACK_CREATE_PERMISSION_SLUG = 'create:feedback_report' satisfies PermissionSlug;

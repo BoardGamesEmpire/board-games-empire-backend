@@ -1,5 +1,12 @@
 import type { Permission, PermissionSeedDefinition, PermissionSlug, RoleScope } from '@bge/database';
-import { Action, PERMISSION_CATALOG, RENDER_CONTEXT_VARIABLES, ResourceType, RiskLevel } from '@bge/database';
+import {
+  Action,
+  PERMISSION_CATALOG,
+  PermissionOwner,
+  RENDER_CONTEXT_VARIABLES,
+  ResourceType,
+  RiskLevel,
+} from '@bge/database';
 import { subject } from '@casl/ability';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
@@ -1270,6 +1277,8 @@ function makePermission(overrides: Partial<Permission> = {}): Permission {
     riskLevel: RiskLevel.Low,
     reason: null,
     slug: `slug-${Math.random()}`,
+    managedBy: PermissionOwner.System,
+    retiredAt: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,

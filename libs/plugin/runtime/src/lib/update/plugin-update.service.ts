@@ -782,7 +782,11 @@ export class PluginUpdateService {
 
   private async loadCorePermissions(next: PluginManifestValidationResult): Promise<ReadonlyMap<string, Permission>> {
     const slugs = next.externalPermissionChecks;
-    const rows = slugs.length === 0 ? [] : await this.db.permission.findMany({ where: { slug: { in: [...slugs] } } });
+    // A retired slug (#235) reads as unknown: the new manifest cannot bind to it.
+    const rows =
+      slugs.length === 0
+        ? []
+        : await this.db.permission.findMany({ where: { slug: { in: [...slugs] }, retiredAt: null } });
     const bySlug = new Map(rows.map((row) => [row.slug, row]));
     const missing = slugs.filter((slug) => !bySlug.has(slug));
 

@@ -12,8 +12,10 @@
 /// - Low: scoped reads within the actor's own context, household-scoped
 ///   writes to user-owned resources
 ///
-/// Classification is seed-declared (prisma/seeds/roles-permissions.seed.ts,
-/// authoritative on re-run); admin reclassification is out of scope (#60).
+/// Classification is catalog-declared (`PERMISSION_CATALOG` in `@bge/database`)
+/// and the reconciler converges every `System`-owned row to it on each run; an
+/// `Admin`-owned row keeps its operator-set level (#235). The surface for
+/// making such an edit is out of scope (#60).
 enum RiskLevel {
   Low
   Medium

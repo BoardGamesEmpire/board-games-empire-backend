@@ -44,8 +44,9 @@ model PluginGrant {
   /// `riskLevel` of the permission AT DECISION TIME. Makes the
   /// server-gating "risk escalated" comparison detectable: current risk >
   /// decidedRiskLevel for a still-requested granted slug means the unit
-  /// consented under a weaker classification (including seed
-  /// reclassification, which propagates on re-seed per #60).
+  /// consented under a weaker classification (including catalog
+  /// reclassification, which the reconciler propagates to `System`-owned
+  /// rows per #60 and #235).
   decidedRiskLevel RiskLevel @map("decided_risk_level")
 
   /// When the current status was decided (updated on polarity flips).

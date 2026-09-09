@@ -22,7 +22,7 @@ const acceptedFriendOfActingUser = {
 
 /**
  * The complete seeded permission catalog — the manifest of every permission
- * this code version expects to exist. Data, not behavior: the seed upserts
+ * this code version expects to exist. Data, not behavior: the reconciler (#235) writes
  * it, the ability-factory specs import its real condition objects instead of
  * mirroring them (#155), and the validators (#234) and reconciler (#235) take
  * it as input.

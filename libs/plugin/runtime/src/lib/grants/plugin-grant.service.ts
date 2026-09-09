@@ -967,13 +967,14 @@ export class PluginGrantService {
     const decidedBySlug = new Map(granted.map((row) => [row.permissionSlug, row.decidedRiskLevel]));
 
     // Plugin-declared rows are locked to an explicit Low; core risk is
-    // today's classification, read fresh rather than reconstructed.
+    // today's classification, read fresh rather than reconstructed. A retired
+    // row (#235) reads as missing here as everywhere else on the plugin path.
     const coreSlugs = unitChecks.filter((check) => check.origin === 'core').map((check) => check.canonicalSlug);
     const coreRisks =
       coreSlugs.length === 0
         ? []
         : await client.permission.findMany({
-            where: { slug: { in: coreSlugs } },
+            where: { slug: { in: coreSlugs }, retiredAt: null },
             select: { slug: true, riskLevel: true },
           });
     const currentRiskBySlug = new Map(coreRisks.map((row) => [row.slug, row.riskLevel]));
@@ -1280,7 +1281,9 @@ export class PluginGrantService {
       );
     }
 
-    const permission = await this.db.permission.findUnique({ where: { slug: check.canonicalSlug } });
+    // A retired slug (#235) is unknown here on purpose: a unit must not be
+    // asked to consent to authority the catalog has withdrawn.
+    const permission = await this.db.permission.findUnique({ where: { slug: check.canonicalSlug, retiredAt: null } });
 
     if (permission === null) {
       throw new PluginGrantUnknownPermissionError(

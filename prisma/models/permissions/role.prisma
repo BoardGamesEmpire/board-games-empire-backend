@@ -3,7 +3,12 @@ model Role {
 
   name        String  @unique
   description String?
-  isSystem    Boolean @default(false) @map("is_system")
+
+  /// Provenance (#235). `System` for every catalog role. No default: a writer
+  /// of custom roles (#169) names another owner or fails the typecheck. The
+  /// reconciler leaves a role it does not own alone, but revokes `System`
+  /// grants the manifest does not list.
+  managedBy PermissionOwner @map("managed_by")
 
   permissions RolePermission[]
   invites     Invite[]
@@ -26,6 +31,13 @@ model RolePermission {
 
   permission   Permission @relation(fields: [permissionId], references: [id])
   permissionId String     @map("permission_id")
+
+  /// Provenance (#235). A `System` edge the manifest no longer lists is
+  /// deleted — removing a slug from a role's catalog list is how a grant is
+  /// revoked. An `Admin` edge is left alone either way. No default, as on
+  /// `Permission`: a grant written without an owner must not become
+  /// revocable by omission.
+  managedBy PermissionOwner @map("managed_by")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 

@@ -7,8 +7,8 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
  * or the seed's own import before it writes a row — rather than partway
  * through the seed run that happens to reach it. The typecheck does not
  * evaluate the module, so it cannot catch these. These were runtime throws
- * inside the seed's `assignPermissions` loop (#233 promoted them); the seed
- * keeps its own copies as defense, but nothing should reach them.
+ * inside the seed's `assignPermissions` loop (#233 promoted them); the
+ * reconciler that replaced that loop (#235) trusts them and keeps no copies.
  *
  * Every function takes the catalog it checks as an argument rather than
  * importing the shipped one, so the negative cases can be exercised with
