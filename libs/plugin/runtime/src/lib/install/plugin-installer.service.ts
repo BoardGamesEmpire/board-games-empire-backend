@@ -293,7 +293,11 @@ export class PluginInstallerService {
     }
   }
 
-  /** Validation step 3, DB half: every core `checks[]` slug must exist in `Permission`. Collect-all before failing. */
+  /**
+   * Validation step 3, DB half: every core `checks[]` slug must exist in
+   * `Permission` and not be retired — a retired slug (#235) reads as unknown
+   * here, so a manifest cannot bind to it. Collect-all before failing.
+   */
   private async loadCorePermissions(
     validated: PluginManifestValidationResult,
   ): Promise<ReadonlyMap<string, Permission>> {
@@ -303,7 +307,7 @@ export class PluginInstallerService {
       return new Map();
     }
 
-    const rows = await this.db.permission.findMany({ where: { slug: { in: [...slugs] } } });
+    const rows = await this.db.permission.findMany({ where: { slug: { in: [...slugs] }, retiredAt: null } });
     const bySlug = new Map(rows.map((row) => [row.slug, row]));
     const missing = slugs.filter((slug) => !bySlug.has(slug));
 

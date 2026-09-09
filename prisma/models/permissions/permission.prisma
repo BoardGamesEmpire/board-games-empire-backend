@@ -15,6 +15,24 @@ model Permission {
   /// permissions; their classification is decided in #59 Phase C).
   riskLevel RiskLevel @default(Low) @map("risk_level")
 
+  /// Who owns this row (#235). `System` rows are the catalog's: the reconciler
+  /// updates them to the manifest and retires them when the manifest drops
+  /// their slug. `Admin` rows are operator-modified and are never overwritten;
+  /// the reconciler reports their drift instead. `Plugin` is reserved — no
+  /// path writes it today (`PluginPermission` is its own table) — and a
+  /// `Plugin`-owned row whose slug the catalog claims is a conflict that
+  /// stops the reconcile before its first write. No default: every writer
+  /// names an owner, and one that omits it fails the typecheck, because a row
+  /// claimed as `System` by omission would be retired on the next run.
+  managedBy PermissionOwner @map("managed_by")
+
+  /// Tombstone (#235). Set when the catalog drops a `System`-owned slug and
+  /// cleared when the slug reappears, so a slug is never inserted twice.
+  /// Every ability loader and every plugin core-slug existence gate filters
+  /// `retired_at IS NULL`; grants that still reference the row survive it and
+  /// confer nothing.
+  retiredAt DateTime? @map("retired_at") @db.Timestamptz(3)
+
   apiKeyScopes    ApiKeyScope[]
   rolePermissions RolePermission[]
   userPermissions UserPermission[]

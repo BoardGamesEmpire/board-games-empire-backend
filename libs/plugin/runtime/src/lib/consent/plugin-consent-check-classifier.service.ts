@@ -178,7 +178,9 @@ export class PluginConsentCheckClassifier {
     const [corePermissions, ownPermissions] = await Promise.all([
       coreSlugs.length > 0
         ? this.db.permission.findMany({
-            where: { slug: { in: coreSlugs } },
+            // A retired row (#235) reads as vanished, exactly as the ability
+            // path reads it: the grant confers nothing, so the check is pending.
+            where: { slug: { in: coreSlugs }, retiredAt: null },
             select: { slug: true, riskLevel: true, subject: true, conditions: true },
           })
         : [],

@@ -57,6 +57,8 @@ describe('PermissionsService', () => {
           where: { id: 'key-1' },
           include: expect.objectContaining({
             scopes: expect.objectContaining({
+              // A scope over a retired catalog row confers nothing (#235).
+              where: { permission: { retiredAt: null } },
               include: { permission: { select: { action: true, subject: true, inverted: true } } },
             }),
           }),
@@ -99,12 +101,26 @@ describe('PermissionsService', () => {
         expect.objectContaining({
           where: { id: 'user-1' },
           select: expect.objectContaining({
+            // A retired catalog row (#235) must not reach the graph through a role.
+            roles: {
+              select: {
+                role: {
+                  select: {
+                    name: true,
+                    permissions: { where: { permission: { retiredAt: null } }, select: { permission: true } },
+                  },
+                },
+              },
+            },
             // Soft-deleted households must not contribute household-scoped grants.
             householdMember: expect.objectContaining({
               where: { household: { deletedAt: null } },
             }),
             permissions: expect.objectContaining({
-              where: { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+              where: {
+                OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }],
+                permission: { retiredAt: null },
+              },
               select: expect.objectContaining({
                 inverted: true,
                 resourceType: true,

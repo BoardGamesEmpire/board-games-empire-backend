@@ -1,5 +1,5 @@
 import type { Permission } from '@bge/database';
-import { Action, RiskLevel } from '@bge/database';
+import { Action, PermissionOwner, RiskLevel } from '@bge/database';
 import { sequence } from './sequence.js';
 
 export function makePermission(overrides: Partial<Permission> = {}): Permission {
@@ -16,6 +16,8 @@ export function makePermission(overrides: Partial<Permission> = {}): Permission 
     slug: `read:game:${n}`,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
+    managedBy: PermissionOwner.System,
+    retiredAt: null,
     ...overrides,
   };
 }
