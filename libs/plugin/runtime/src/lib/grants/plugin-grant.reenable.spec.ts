@@ -249,6 +249,26 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitEnabledEvent.eventName, expect.anything());
   });
 
+  it('leaves the suspension in place when a granted REQUIRED slug has been retired from the catalog (#235)', async () => {
+    // calendar:read is required and holds a Granted row, but its catalog row
+    // is retired, so the risk read filters it out. The ability path and the
+    // classifier both read that row as gone; a missing row must not default
+    // to Low here, or a grant that confers nothing would clear the suspension.
+    db.pluginGrant.findMany.mockResolvedValue([
+      makeGrant(),
+      makeGrant({ id: 'grant-2', permissionSlug: 'notify:send', decidedRiskLevel: RiskLevel.Low }),
+    ]);
+    db.permission.findMany.mockResolvedValue([corePermission('notify:send', RiskLevel.Low)]);
+
+    await service.decide(decision({ permissionSlug: 'notify:send' }));
+
+    expect(db.permission.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ retiredAt: null }) }),
+    );
+    expect(db.householdPlugin.updateMany).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalledWith(HouseholdPluginUnitEnabledEvent.eventName, expect.anything());
+  });
+
   it('does nothing for a unit that is not suspended', async () => {
     db.$queryRaw.mockResolvedValue(lockedUnit('hp-1', false));
 

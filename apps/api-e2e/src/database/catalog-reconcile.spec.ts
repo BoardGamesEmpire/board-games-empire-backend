@@ -21,8 +21,10 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * DB-only, like `deadlock-shape.spec.ts`: no HTTP, so `requireBaseUrl` is not
  * called. The harness has already migrated and seeded the database, and the
  * between-test sweep preserves the three catalog tables, so each spec here
- * mutates them and puts them back — by reconciling the shipped manifest, which
- * is also the proof the restore worked.
+ * mutates them and puts them back by reconciling the shipped manifest — which
+ * is also the proof the restore worked. `afterEach` reconciles once more, so
+ * a spec that fails before its own restore hands the next one a converged
+ * catalog rather than its leftovers.
  */
 
 const silent = { log: () => undefined, warn: () => undefined };
@@ -56,13 +58,13 @@ describe('catalog reconciler against Postgres', () => {
     db = createTestDatabase();
   });
 
+  afterEach(async () => {
+    await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+  });
+
   afterAll(async () => {
-    try {
-      await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
-    } finally {
-      // A leaked pool keeps Jest alive; the restore must not be able to skip this.
-      await db.close();
-    }
+    // A leaked pool keeps Jest alive.
+    await db.close();
   });
 
   const grantCount = (role: string, slug: string) =>
@@ -191,8 +193,6 @@ describe('catalog reconciler against Postgres', () => {
     await reconcileCatalog(db.client, withoutGrant(SystemRole.User, 'read:game'), { logger: silent, invalidate });
     expect(calls).toHaveLength(1);
     expect(calls[0]?.rolePermissions.delete).toEqual([{ roleName: 'User', permissionSlug: 'read:game' }]);
-
-    await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
   });
 
   it('reports a failing port instead of failing the reconcile, since the writes are already committed', async () => {
@@ -225,7 +225,5 @@ describe('catalog reconciler against Postgres', () => {
     await reconcileCatalog(db.client, withoutGrant(SystemRole.User, 'read:game'), { logger });
 
     expect(warnings).toEqual([expect.stringContaining('not touched')]);
-
-    await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
   });
 });

@@ -191,11 +191,17 @@ export async function loadCatalogSnapshot(client: Prisma.TransactionClient): Pro
 /**
  * Performs the plan's writes and nothing else, in dependency order:
  * permissions, then roles, then the edges between them (deletes before
- * creates). Every write on an existing row is guarded by `managedBy: System`
- * so a row whose ownership changed under the plan is refused, not clobbered,
- * and every `createMany` skips duplicates so two reconciles racing from the
- * same snapshot both complete (the advisory lock that would serialise them is
- * #236's).
+ * creates). Every write on an existing row is guarded by `managedBy: System`,
+ * so a row whose ownership changed between the snapshot and the write is
+ * never clobbered. What happens next depends on the statement: a single-row
+ * `update` finds no row and throws, rolling the transaction back; the batch
+ * statements — `updateMany`, `deleteMany`, and `createMany` with
+ * `skipDuplicates` — skip that row and commit the rest, so the plan the
+ * caller logs can name a write that did not land. The skipped row is left as
+ * its new owner asked, and the next reconcile reports it as drift or refuses
+ * it as a conflict. `skipDuplicates` is also what lets two reconciles racing
+ * from the same snapshot both complete; the advisory lock that would
+ * serialise them is #236's.
  */
 export async function applyReconcilePlan(
   tx: Prisma.TransactionClient,

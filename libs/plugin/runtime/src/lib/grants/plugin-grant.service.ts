@@ -992,8 +992,19 @@ export class PluginGrantService {
         continue;
       }
 
-      const currentRiskLevel =
-        check.origin === 'plugin' ? RiskLevel.Low : (currentRiskBySlug.get(check.canonicalSlug) ?? RiskLevel.Low);
+      const currentRiskLevel = check.origin === 'plugin' ? RiskLevel.Low : currentRiskBySlug.get(check.canonicalSlug);
+
+      // A core row the read above did not return is retired (#235): the grant
+      // confers nothing — the ability path and the classifier both read the
+      // row as gone — so it counts exactly as an ungranted check does. A
+      // default of Low here would let that grant clear a suspension.
+      if (currentRiskLevel === undefined) {
+        if (check.required) {
+          outstanding.push(check.canonicalSlug);
+        }
+
+        continue;
+      }
 
       if (!riskCovers(decidedRiskLevel, currentRiskLevel)) {
         outstanding.push(check.canonicalSlug);
