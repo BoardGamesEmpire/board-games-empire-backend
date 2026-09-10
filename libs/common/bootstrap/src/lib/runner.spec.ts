@@ -1,5 +1,5 @@
 import type { AppliedMigrationRow } from '@bge/database';
-import type { Span, Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, type Span, type Tracer } from '@opentelemetry/api';
 import type {
   BootstrapLock,
   BootstrapLogger,
@@ -43,6 +43,8 @@ class FakeLock implements BootstrapLock {
   acquireOptions: (LockAcquireOptions | undefined)[] = [];
   /** Simulates time spent blocked on the lock, per acquire call. */
   blockedFor: number[] = [];
+  /** Simulates a slow release round-trip, per release call. */
+  releaseBlockedFor: number[] = [];
   constructor(private readonly clock?: FakeClock) {}
   async acquire(options?: LockAcquireOptions): Promise<void> {
     this.events.push('acquire');
@@ -52,6 +54,8 @@ class FakeLock implements BootstrapLock {
   }
   async release(): Promise<void> {
     this.events.push('release');
+    const blocked = this.releaseBlockedFor.shift();
+    if (blocked && this.clock) this.clock.time += blocked;
   }
 }
 
@@ -267,6 +271,28 @@ describe('the boot sequence', () => {
     expect(lock.events[lock.events.length - 1]).toBe('release');
   });
 
+  it('behind without a migrator: a release that outlives the deadline never turns into a negative sleep', async () => {
+    const ledger = new FakeLedger([finished('20260109_init')]);
+    const slowLock = new FakeLock(clock);
+    // The deadline is checked, then the release round-trip alone takes 11s of a 10s budget.
+    slowLock.releaseBlockedFor = [11_000];
+
+    const run = runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock: slowLock,
+      seeder,
+      logger,
+      clock,
+      waitMs: 10_000,
+      schemaPollMs: 5_000,
+    });
+
+    await expect(run).rejects.toBeInstanceOf(SchemaNotReadyError);
+    // Not `-1_000`: a fake clock would run backwards, and a real one would poll at once, but silently.
+    expect(clock.slept).toEqual([0]);
+  });
+
   it('failed: refuses boot, names the migration and the resolve command, and never calls the migrator', async () => {
     const ledger = new FakeLedger([finished('20260109_init'), unfinished('20260219_games')]);
     const migrator = new FakeMigrator(ledger);
@@ -275,6 +301,8 @@ describe('the boot sequence', () => {
 
     await expect(run).rejects.toBeInstanceOf(FailedMigrationError);
     await expect(run).rejects.toThrow(/prisma migrate resolve --rolled-back 20260219_games/);
+    // A `migrate deploy` in progress leaves the same row; the advice says so before naming `resolve`.
+    await expect(run).rejects.toThrow(/still running looks the same/);
     expect(migrator.calls).toEqual([]);
     expect(seeder.runs).toBe(0);
   });
@@ -320,7 +348,11 @@ describe('the boot sequence', () => {
     const ended: string[] = [];
     const tracer = {
       startActiveSpan: (name: string, run: (span: Span) => unknown) =>
-        run({ end: () => void ended.push(name) } as unknown as Span),
+        run({
+          end: () => void ended.push(name),
+          setStatus: () => undefined,
+          recordException: () => undefined,
+        } as unknown as Span),
     } as unknown as Tracer;
     const refusing: BootstrapLock = {
       acquire: async () => {
@@ -344,6 +376,43 @@ describe('the boot sequence', () => {
     expect(ended).toEqual(['bootstrap.lock', 'bootstrap']);
     // Never acquired, so never released.
     expect(lock.events).toEqual([]);
+  });
+
+  it('marks the failing phase and the root span as errors, so a refused boot shows in the trace', async () => {
+    const statuses: Record<string, number> = {};
+    const exceptions: string[] = [];
+    const tracer = {
+      startActiveSpan: (name: string, run: (span: Span) => unknown) =>
+        run({
+          end: () => undefined,
+          setStatus: ({ code }: { code: number }) => void (statuses[name] = code),
+          recordException: (error: Error) => void exceptions.push(`${name}: ${error.message}`),
+        } as unknown as Span),
+    } as unknown as Tracer;
+    const refusing: BootstrapLock = {
+      acquire: async () => {
+        throw new Error('lock held by a dead session');
+      },
+      release: async () => undefined,
+    };
+
+    await expect(
+      runBootstrapSequence({
+        expected: CHAIN,
+        ledger: new FakeLedger(CHAIN.map(finished)),
+        lock: refusing,
+        seeder,
+        logger,
+        clock,
+        tracer,
+      }),
+    ).rejects.toThrow('lock held by a dead session');
+
+    expect(statuses).toEqual({ 'bootstrap.lock': SpanStatusCode.ERROR, bootstrap: SpanStatusCode.ERROR });
+    expect(exceptions).toEqual([
+      'bootstrap.lock: lock held by a dead session',
+      'bootstrap: lock held by a dead session',
+    ]);
   });
 
   it('releases the lock when a phase throws', async () => {

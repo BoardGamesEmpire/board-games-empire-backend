@@ -49,6 +49,12 @@ describe('migrations manifest', () => {
     it('refuses a missing migrations directory rather than reporting an empty chain', () => {
       expect(() => listMigrationNames(path.join(workspaceRoot, 'nowhere'))).toThrow(/nowhere/);
     });
+
+    it('refuses an empty migrations directory: a build cut from it would read every database as in sync', () => {
+      // A sparse or filtered checkout leaves the directory but not the chain.
+      fs.writeFileSync(path.join(migrationsDir, 'migration_lock.toml'), 'provider = "postgresql"\n');
+      expect(() => listMigrationNames(migrationsDir)).toThrow(/no migrations/);
+    });
   });
 
   describe('renderMigrationsManifest', () => {

@@ -8,12 +8,12 @@ Every Postgres-connected process (`api`, `worker`, `gateway-coordinator`, `gatew
 2. Read `_prisma_migrations` and compare it with the migration list this build was generated from.
 3. Act on what was found:
 
-| The database is…                                      | `api`                                                      | `worker`, `gateway-coordinator`, `gateway-worker`                    |
-| ----------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
-| **in sync**                                           | run the seeds and the catalog reconcile (idempotent), boot | boot                                                                 |
-| **behind** (migrations pending)                       | apply them with `prisma migrate deploy`, then as above     | release the lock, wait, re-check; boot once the api has applied them |
-| **ahead** (holds migrations this build does not know) | warn, boot; the seeds are left to the newer build          | warn, boot                                                           |
-| **failed** (a migration started and never finished)   | refuse to boot                                             | refuse to boot                                                       |
+| The database is…                                      | `api`                                                                                                   | `worker`, `gateway-coordinator`, `gateway-worker`                    |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| **in sync**                                           | run the seeds and the catalog reconcile (idempotent), boot                                              | boot                                                                 |
+| **behind** (migrations pending)                       | apply them with `prisma migrate deploy`, then as **in sync**; as **ahead** if unknown migrations remain | release the lock, wait, re-check; boot once the api has applied them |
+| **ahead** (holds migrations this build does not know) | warn, boot; the seeds are left to the newer build                                                       | warn, boot                                                           |
+| **failed** (a migration started and never finished)   | refuse to boot                                                                                          | refuse to boot                                                       |
 
 4. Release the lock. The application starts; `/health/ready` becomes reachable.
 
@@ -34,7 +34,7 @@ On an empty database the api applies the whole migration chain and seeds the ref
 
 Every later boot is one lock, one query, a few idempotent upserts and a catalog comparison: milliseconds.
 
-If a boot is killed mid-migration, Prisma has applied each completed migration in its own transaction and left the interrupted one marked as started. The next boot refuses with that migration's name and the command to run: inspect the database, then `prisma migrate resolve --rolled-back <name>` (or `--applied` if its statements did complete), and boot again.
+If a boot is killed mid-migration, Prisma has applied each completed migration in its own transaction and left the interrupted one marked as started. The next boot refuses with that migration's name and the command to run: inspect the database, then `prisma migrate resolve --rolled-back <name>` (or `--applied` if its statements did complete), and boot again. A `prisma migrate deploy` still running from another session (`npm run db:migrate` beside a starting worker, say) leaves the same row while it works, and the message says to let it finish first; `migrate resolve` refuses a migration that has finished in the meantime.
 
 ## Development
 

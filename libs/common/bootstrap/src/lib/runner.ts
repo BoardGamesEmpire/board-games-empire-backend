@@ -1,6 +1,7 @@
 import { classifyMigrationState, type MigrationState, type MigrationStateKind } from '@bge/database';
-import { trace, type Span, type Tracer } from '@opentelemetry/api';
+import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
 import {
+  DEFAULT_WAIT_MS,
   systemClock,
   type BootstrapLock,
   type BootstrapLogger,
@@ -10,14 +11,6 @@ import {
   type SeedsPhase,
 } from './ports';
 
-/**
- * How long a process may spend converging before it fails its boot: taking
- * the lock and, for a process without a migrator, waiting for the schema to
- * arrive, out of one budget. Long enough for a first `migrate deploy` on a
- * slow host when the whole compose stack starts at once; a constant, not
- * configuration (#236).
- */
-export const DEFAULT_WAIT_MS = 10 * 60_000;
 /** How often a waiting process re-reads the ledger. */
 export const DEFAULT_SCHEMA_POLL_MS = 5_000;
 
@@ -49,12 +42,18 @@ export interface BootstrapSummary {
   readonly phaseDurationsMs: Readonly<Record<string, number>>;
 }
 
-/** A migration started and neither finished nor rolled back. Nothing safe can run over it. */
+/**
+ * A migration started and neither finished nor rolled back. Nothing safe can
+ * run over it. The ledger cannot tell a crashed migration from one another
+ * session is applying at this moment (a hand-run `migrate deploy` takes no
+ * bootstrap lock), so the message says to rule that out before `resolve`.
+ */
 export class FailedMigrationError extends Error {
   constructor(readonly failed: readonly string[]) {
     super(
       `Refusing to boot: ${failed.length === 1 ? 'migration' : 'migrations'} ${failed.map((name) => `'${name}'`).join(', ')} ` +
-        'started but did not finish. Inspect the database, then mark each one rolled back with ' +
+        'started but did not finish. A `prisma migrate deploy` that is still running looks the same: if one is, ' +
+        'let it finish and boot again. Otherwise inspect the database, then mark each one rolled back with ' +
         failed.map((name) => `\`prisma migrate resolve --rolled-back ${name}\``).join(' and ') +
         ' (or `--applied` if its statements did complete) and boot again. Prisma has no down migrations; fix forward.',
     );
@@ -106,6 +105,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       const started = clock.now();
       try {
         return await run();
+      } catch (error) {
+        failSpan(span, error);
+        throw error;
       } finally {
         phaseDurationsMs[name] = (phaseDurationsMs[name] ?? 0) + (clock.now() - started);
         span.end();
@@ -194,24 +196,30 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         // Not held across the wait: the migrator needs it to do the work we are waiting for.
         await lock.release();
         held = false;
-        // Cut to what is left, so the boot fails at the deadline and not up to a poll after it.
-        await phase('schema.wait', () => clock.sleep(Math.min(schemaPollMs, deadlineAt - clock.now())));
+        // Cut to what is left, so the boot fails at the deadline and not up to a
+        // poll after it; never negative, should the release itself have outlived it.
+        await phase('schema.wait', () => clock.sleep(Math.max(0, Math.min(schemaPollMs, deadlineAt - clock.now()))));
         await phase('lock', () => lock.acquire({ deadlineAt }));
         held = true;
         waitedMs = clock.now() - waitingSince;
       }
 
       // Only the single writer runs the DML phases; an observer checks the schema and goes.
-      // Not over a database that is ahead, either: the seeds include the catalog
-      // reconcile, and this build's manifest would retire the permissions and
-      // revoke the grants a newer build added. That data belongs to the build
-      // that knows those migrations.
-      if (migrator && settledState === 'ahead') {
-        logger.log('Seeds skipped: the database is ahead of this build, so the newer build owns the reference data.');
-      } else if (migrator) {
-        await phase('seeds', () => seeder.run());
-        seedsRun = true;
+      if (migrator) {
+        // Not over a database that is ahead, either: the seeds include the catalog
+        // reconcile, and this build's manifest would retire the permissions and
+        // revoke the grants a newer build added. That data belongs to the build
+        // that knows those migrations.
+        if (settledState === 'ahead') {
+          logger.log('Seeds skipped: the database is ahead of this build, so the newer build owns the reference data.');
+        } else {
+          await phase('seeds', () => seeder.run());
+          seedsRun = true;
+        }
       }
+    } catch (error) {
+      failSpan(root, error);
+      throw error;
     } finally {
       if (held) {
         await lock.release();
@@ -228,4 +236,11 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       phaseDurationsMs,
     };
   });
+}
+
+/** A refused boot is an error on its span, not an unset status beside a stack trace in the log. */
+function failSpan(span: Span, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  span.recordException(error instanceof Error ? error : message);
+  span.setStatus({ code: SpanStatusCode.ERROR, message });
 }

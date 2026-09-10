@@ -29,19 +29,31 @@ export interface Migrator {
   apply(pending: readonly string[]): Promise<void>;
 }
 
+/**
+ * How long a process may spend converging before it fails its boot: taking
+ * the lock and, for a process without a migrator, waiting for the schema to
+ * arrive, out of one budget. Long enough for a first `migrate deploy` on a
+ * slow host when the whole compose stack starts at once; a constant, not
+ * configuration (#236). The lock falls back to it when acquired without a
+ * deadline, so there is one number and no second copy to drift.
+ */
+export const DEFAULT_WAIT_MS = 10 * 60_000;
+
 export interface LockAcquireOptions {
   /**
    * Absolute time (same clock as {@link Clock.now}) after which acquiring
    * gives up: the sequence's one shared deadline, so a process waiting for
    * the schema does not restart its budget every time it re-takes the lock.
+   * Without it the lock bounds itself by {@link DEFAULT_WAIT_MS}.
    */
   readonly deadlineAt?: number;
 }
 
 /**
  * The advisory lock around the whole sequence (#236). `acquire` waits, is
- * bounded by its own limit and by `deadlineAt` when given, and throws when
- * either is reached; `release` is idempotent enough to sit in a `finally`.
+ * bounded by `deadlineAt` when given and by {@link DEFAULT_WAIT_MS} otherwise,
+ * and throws when the bound is reached. `release` unlocks only what `acquire`
+ * took, so it can sit in a `finally` after a failed acquire and run twice.
  */
 export interface BootstrapLock {
   acquire(options?: LockAcquireOptions): Promise<void>;

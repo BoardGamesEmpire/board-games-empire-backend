@@ -32,17 +32,27 @@ function manifestPath(workspaceRoot) {
  * order, and the timestamp prefix is what makes lexical and chronological
  * agree. A directory is a migration only if it carries `migration.sql`;
  * `migration_lock.toml` and anything else in the tree is not.
+ *
+ * A missing directory and an empty one are both refused: this repository has
+ * a chain, so either is a broken checkout, and a manifest baked from it would
+ * read every database as in sync and send the seeds at a schema with no tables.
  */
 function listMigrationNames(migrationsDir) {
   if (!fs.existsSync(migrationsDir)) {
     throw new Error(`migrations directory not found: ${migrationsDir}`);
   }
 
-  return fs
+  const names = fs
     .readdirSync(migrationsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(migrationsDir, entry.name, 'migration.sql')))
     .map((entry) => entry.name)
     .sort();
+
+  if (names.length === 0) {
+    throw new Error(`no migrations found in ${migrationsDir}`);
+  }
+
+  return names;
 }
 
 /** A single-quoted TypeScript string literal; only `\\` and `'` need escaping inside one. */
