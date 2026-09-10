@@ -37,7 +37,10 @@ export interface BootstrapSummary {
   readonly unknownMigrations: readonly string[];
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
-  /** Time spent waiting for another process to bring the schema up. */
+  /**
+   * Time from the start of the sequence to the read that found the schema up,
+   * time blocked on the lock included; 0 when the first read found it up.
+   */
   readonly waitedMs: number;
   readonly phaseDurationsMs: Readonly<Record<string, number>>;
 }
@@ -120,7 +123,8 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     // One deadline for the whole sequence. The first acquire, every re-acquire
     // and the sleeps between polls all spend from it, so a boot is bounded by
     // `waitMs` however the time splits between the lock and the schema.
-    const deadlineAt = clock.now() + waitMs;
+    const started = clock.now();
+    const deadlineAt = started + waitMs;
 
     let firstState: MigrationStateKind | undefined;
     // What the ledger showed when the loop settled: `in-sync` or `ahead`.
@@ -129,7 +133,6 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     let warnedUnknown: string | undefined;
     let migrationsApplied: readonly string[] = [];
     let seedsRun = false;
-    let waitingSince: number | undefined;
     let waitedMs = 0;
 
     let held = false;
@@ -178,10 +181,10 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           break;
         }
 
-        // The clock decides, not a count of sleeps: time blocked on a
-        // re-acquire counts the same as time asleep.
-        waitingSince ??= clock.now();
-        waitedMs = clock.now() - waitingSince;
+        // The clock decides, not a count of sleeps, and it counts from the same
+        // start as the deadline: time blocked on the lock, the first time and on
+        // every re-acquire, was spent waiting for the migrating process too.
+        waitedMs = clock.now() - started;
 
         if (clock.now() >= deadlineAt) {
           throw new SchemaNotReadyError(state.pending, waitedMs);
@@ -201,7 +204,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         await phase('schema.wait', () => clock.sleep(Math.max(0, Math.min(schemaPollMs, deadlineAt - clock.now()))));
         await phase('lock', () => lock.acquire({ deadlineAt }));
         held = true;
-        waitedMs = clock.now() - waitingSince;
+        waitedMs = clock.now() - started;
       }
 
       // Only the single writer runs the DML phases; an observer checks the schema and goes.

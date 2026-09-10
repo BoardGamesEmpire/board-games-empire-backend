@@ -204,7 +204,7 @@ describe('the boot sequence', () => {
     expect(blockingLock.acquireOptions).toEqual([{ deadlineAt: 12_000 }, { deadlineAt: 12_000 }]);
   });
 
-  it('behind without a migrator: time spent taking the lock the first time comes out of the same budget', async () => {
+  it('behind without a migrator: time spent taking the lock the first time comes out of the same budget and is reported as waiting', async () => {
     const ledger = new FakeLedger([finished('20260109_init')]);
     const blockingLock = new FakeLock(clock);
     // 8s blocked on the first acquire leaves 4s of a 12s budget for the schema to arrive.
@@ -227,6 +227,11 @@ describe('the boot sequence', () => {
     expect(clock.slept).toEqual([4_000]);
     expect(clock.now()).toBe(12_000);
     expect(blockingLock.acquireOptions).toEqual([{ deadlineAt: 12_000 }, { deadlineAt: 12_000 }]);
+    // The 8s on the lock were spent waiting for the migrating process too, so the
+    // progress line and the refusal count from the start of the sequence, and
+    // "waited" plus "left" is the budget an operator was promised.
+    expect(logger.lines).toContainEqual(expect.stringMatching(/8s waited, 4s left/));
+    await expect(run).rejects.toThrow(/Waited 12s/);
   });
 
   it('behind without a migrator and holding unknown migrations: warns about them once, not on every poll', async () => {
