@@ -217,13 +217,30 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           seedsRun = true;
         }
       }
+
+      // Handing the lock back is the sequence's last step, so a release that
+      // fails after a clean run is the boot's error like any other.
+      held = false;
+      await lock.release();
     } catch (error) {
       failSpan(root, error);
+      // A release that fails after the sequence has already failed is logged and
+      // recorded, not thrown: the first error is the one naming what the operator
+      // must look at.
+      if (held) {
+        held = false;
+        try {
+          await lock.release();
+        } catch (releaseError) {
+          logger.warn(
+            `The bootstrap lock could not be released after the sequence failed: ${messageOf(releaseError)}. ` +
+              'The session ends with this process, and the lock with it.',
+          );
+          root.recordException(releaseError instanceof Error ? releaseError : messageOf(releaseError));
+        }
+      }
       throw error;
     } finally {
-      if (held) {
-        await lock.release();
-      }
       root.end();
     }
 
@@ -240,7 +257,10 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
 
 /** A refused boot is an error on its span, not an unset status beside a stack trace in the log. */
 function failSpan(span: Span, error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  span.recordException(error instanceof Error ? error : message);
-  span.setStatus({ code: SpanStatusCode.ERROR, message });
+  span.recordException(error instanceof Error ? error : messageOf(error));
+  span.setStatus({ code: SpanStatusCode.ERROR, message: messageOf(error) });
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -1,8 +1,13 @@
-import { attemptWithin, describeHolder } from './advisory-lock';
+import { createServer, type AddressInfo, type Socket } from 'node:net';
+import { performance } from 'node:perf_hooks';
+import { attemptWithin, describeHolder, LockConnectionTimeoutError, PgAdvisoryLock } from './advisory-lock';
+import type { BootstrapLogger } from './ports';
 
 // The lock itself needs Postgres and is exercised in apps/api-e2e. What can be
-// pinned without a database is how an attempt is cut to the deadline and how a
-// holder is named.
+// pinned without a database is how an attempt is cut to the deadline, how a
+// holder is named, and that connecting gives up inside the budget.
+
+const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
 
 describe('the advisory lock', () => {
   describe('attemptWithin', () => {
@@ -41,6 +46,32 @@ describe('the advisory lock', () => {
           { pid: 9, application_name: 'psql', state: 'active' },
         ]),
       ).toBe('pid 7 (unnamed), pid 9 (psql, active)');
+    });
+  });
+
+  describe('connecting', () => {
+    it('gives up inside the sequence deadline when the database accepts the connection and never answers', async () => {
+      // A socket that accepts and stays silent: a black-holed endpoint, a proxy
+      // with nothing behind it. node-postgres alone would wait on it forever.
+      const sockets = new Set<Socket>();
+      const server = createServer((socket) => void sockets.add(socket));
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const { port } = server.address() as AddressInfo;
+      const lock = new PgAdvisoryLock({
+        connectionString: `postgres://bge:bge@127.0.0.1:${port}/bge`,
+        logger: silent,
+        applicationName: 'bge-bootstrap:test',
+      });
+
+      try {
+        const started = performance.now();
+        await expect(lock.acquire({ deadlineAt: started + 300 })).rejects.toBeInstanceOf(LockConnectionTimeoutError);
+        expect(performance.now() - started).toBeLessThan(2_000);
+      } finally {
+        await lock.close();
+        for (const socket of sockets) socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
   });
 });

@@ -17,7 +17,7 @@ Every Postgres-connected process (`api`, `worker`, `gateway-coordinator`, `gatew
 
 4. Release the lock. The application starts; `/health/ready` becomes reachable.
 
-Only the `api` image carries the Prisma CLI and the migration chain, so only the api can apply. The other three processes cannot be misconfigured into migrating: they have nothing to migrate with. When the whole stack starts at once on an empty database, the api migrates while the others log that they are waiting; they fail their boot only if the schema has not arrived within ten minutes of their start, time spent waiting for the lock included.
+Only the `api` image carries the Prisma CLI and the migration chain, so only the api can apply. The other three processes cannot be misconfigured into migrating: they have nothing to migrate with. When the whole stack starts at once on an empty database, the api migrates while the others log that they are waiting; they fail their boot only if the schema has not arrived within ten minutes of their start, time spent waiting for the lock included. The lock's connection is opened from the same budget, so a database that accepts connections and never answers fails the boot instead of hanging it.
 
 The api's database role therefore holds DDL rights, exactly as the `prisma migrate deploy` you would otherwise run by hand requires. Only the schema step needs DDL; the lock, the reconcile and the seeds are ordinary reads and writes. A least-privilege split (a DML-only serving role and a separate migration credential) is #445, post-alpha.
 

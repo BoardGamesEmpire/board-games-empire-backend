@@ -45,6 +45,8 @@ class FakeLock implements BootstrapLock {
   blockedFor: number[] = [];
   /** Simulates a slow release round-trip, per release call. */
   releaseBlockedFor: number[] = [];
+  /** When set, every release rejects with it: the dedicated connection dropped. */
+  releaseError: Error | undefined;
   constructor(private readonly clock?: FakeClock) {}
   async acquire(options?: LockAcquireOptions): Promise<void> {
     this.events.push('acquire');
@@ -56,6 +58,7 @@ class FakeLock implements BootstrapLock {
     this.events.push('release');
     const blocked = this.releaseBlockedFor.shift();
     if (blocked && this.clock) this.clock.time += blocked;
+    if (this.releaseError) throw this.releaseError;
   }
 }
 
@@ -435,5 +438,60 @@ describe('the boot sequence', () => {
       }),
     ).rejects.toThrow('seed exploded');
     expect(lock.events).toEqual(['acquire', 'release']);
+  });
+
+  describe('when the lock cannot be released', () => {
+    /** A tracer that records what each span was told, so the trace of a failed release can be asserted. */
+    function recordingTracer() {
+      const ended: string[] = [];
+      const statuses: Record<string, number> = {};
+      const exceptions: string[] = [];
+      const tracer = {
+        startActiveSpan: (name: string, run: (span: Span) => unknown) =>
+          run({
+            end: () => void ended.push(name),
+            setStatus: ({ code }: { code: number }) => void (statuses[name] = code),
+            recordException: (error: Error) => void exceptions.push(`${name}: ${error.message}`),
+          } as unknown as Span),
+      } as unknown as Tracer;
+      return { tracer, ended, statuses, exceptions };
+    }
+
+    it('after a refused boot: the refusal stays the error, the release failure is logged and on the root span, and the root span still ends', async () => {
+      const ledger = new FakeLedger([finished('20260109_init'), unfinished('20260219_games')]);
+      lock.releaseError = new Error('connection terminated unexpectedly');
+      const { tracer, ended, exceptions } = recordingTracer();
+
+      const run = runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, tracer });
+
+      // Not the release error: that would hide the migration the operator has to look at.
+      await expect(run).rejects.toBeInstanceOf(FailedMigrationError);
+      expect(ended).toContain('bootstrap');
+      expect(exceptions).toContain('bootstrap: connection terminated unexpectedly');
+      expect(logger.lines.some((line) => line.startsWith('warn: ') && /release/i.test(line))).toBe(true);
+    });
+
+    it('after a completed sequence: the release failure fails the boot, marked on the root span, which still ends', async () => {
+      const ledger = new FakeLedger(CHAIN.map(finished));
+      lock.releaseError = new Error('connection terminated unexpectedly');
+      const { tracer, ended, statuses } = recordingTracer();
+
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        logger,
+        clock,
+        tracer,
+        migrator: new FakeMigrator(ledger),
+      });
+
+      await expect(run).rejects.toThrow('connection terminated unexpectedly');
+      // The seeds did run; what failed is handing the lock back.
+      expect(seeder.runs).toBe(1);
+      expect(ended).toEqual(['bootstrap.lock', 'bootstrap.schema.read', 'bootstrap.seeds', 'bootstrap']);
+      expect(statuses).toEqual({ bootstrap: SpanStatusCode.ERROR });
+    });
   });
 });

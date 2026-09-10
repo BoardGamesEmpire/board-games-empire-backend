@@ -39,6 +39,17 @@ export class LockNotAcquiredError extends Error {
   }
 }
 
+/** The dedicated connection could not be opened within the sequence's budget: the database did not answer. */
+export class LockConnectionTimeoutError extends Error {
+  constructor(readonly budgetMs: number) {
+    super(
+      `Refusing to boot: the database did not answer the bootstrap lock's connection within ${Math.round(budgetMs / 1000)}s. ` +
+        'Check that it is up and reachable from this process.',
+    );
+    this.name = 'LockConnectionTimeoutError';
+  }
+}
+
 interface HolderRow {
   pid: number;
   application_name: string;
@@ -61,9 +72,11 @@ interface HolderRow {
  * attempt then costs nothing, and the caller's final read is what turns
  * "still behind" into the error that names the migration.
  *
- * Connecting is not budgeted: it happens once per sequence (the client is
- * kept across re-acquires) and the driver's own connect timeout bounds it well
- * inside any deadline this lock is given.
+ * Connecting spends from the same budget. node-postgres has no connect timeout
+ * of its own, so a database that accepts the TCP connection and never answers
+ * (a black-holed endpoint, a proxy with nothing behind it) would otherwise hang
+ * the boot past any deadline. The client is kept across re-acquires, so this
+ * is paid once per sequence.
  */
 export class PgAdvisoryLock implements BootstrapLock {
   private client: Client | undefined;
@@ -73,14 +86,15 @@ export class PgAdvisoryLock implements BootstrapLock {
   constructor(private readonly options: PgAdvisoryLockOptions) {}
 
   async acquire(options: LockAcquireOptions = {}): Promise<void> {
-    const client = await this.connect();
-    const key = await this.lockKey(client);
     const clock = this.options.clock ?? systemClock;
     const attemptMs = this.options.attemptMs ?? LOCK_ATTEMPT_MS;
     const started = clock.now();
     // The earlier of this lock's own limit and the sequence's shared deadline.
     const deadlineAt = Math.min(started + (this.options.waitMs ?? DEFAULT_WAIT_MS), options.deadlineAt ?? Infinity);
     const waitMs = deadlineAt - started;
+
+    const client = await this.connect(deadlineAt - clock.now());
+    const key = await this.lockKey(client);
 
     for (;;) {
       // Never past the deadline: at or after it the attempt is 1ms, which
@@ -136,14 +150,21 @@ export class PgAdvisoryLock implements BootstrapLock {
     await client?.end();
   }
 
-  private async connect(): Promise<Client> {
+  private async connect(budgetMs: number): Promise<Client> {
     if (this.client) return this.client;
 
     const client = new Client({
       connectionString: this.options.connectionString,
       application_name: this.options.applicationName,
+      // Whole milliseconds and never zero: zero is the driver's "no timeout".
+      connectionTimeoutMillis: Math.max(1, Math.ceil(budgetMs)),
     });
-    await client.connect();
+    try {
+      await client.connect();
+    } catch (error) {
+      if (isConnectTimeout(error)) throw new LockConnectionTimeoutError(budgetMs);
+      throw error;
+    }
     this.client = client;
     return client;
   }
@@ -187,6 +208,11 @@ export function attemptWithin(attemptMs: number, remainingMs: number): number {
 
 function isLockNotAvailable(error: unknown): boolean {
   return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === LOCK_NOT_AVAILABLE;
+}
+
+/** node-postgres destroys the socket with exactly this message when `connectionTimeoutMillis` expires; there is no code. */
+function isConnectTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === 'timeout expired';
 }
 
 export function describeHolder(rows: readonly HolderRow[]): string | undefined {
