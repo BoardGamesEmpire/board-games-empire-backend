@@ -12,7 +12,7 @@ Every Postgres-connected process (`api`, `worker`, `gateway-coordinator`, `gatew
 | ----------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
 | **in sync**                                           | run the seeds and the catalog reconcile (idempotent), boot | boot                                                                 |
 | **behind** (migrations pending)                       | apply them with `prisma migrate deploy`, then as above     | release the lock, wait, re-check; boot once the api has applied them |
-| **ahead** (holds migrations this build does not know) | warn, then as in sync                                      | warn, boot                                                           |
+| **ahead** (holds migrations this build does not know) | warn, boot; the seeds are left to the newer build          | warn, boot                                                           |
 | **failed** (a migration started and never finished)   | refuse to boot                                             | refuse to boot                                                       |
 
 4. Release the lock. The application starts; `/health/ready` becomes reachable.
@@ -23,7 +23,7 @@ The api's database role therefore holds DDL rights, exactly as the `prisma migra
 
 ## Forward only
 
-Prisma has no down migrations. A migration that must be undone is undone by a new migration. Rolling back a **build** is fine as long as the newer migration was additive, which forward-only already requires of every migration; the older build logs the unknown migration as a warning and boots.
+Prisma has no down migrations. A migration that must be undone is undone by a new migration. Rolling back a **build** is fine as long as the newer migration was additive, which forward-only already requires of every migration; the older build logs the unknown migration as a warning and boots. It does not run its seeds over that database: the seeds include the catalog reconcile, and an older manifest would retire the permissions and revoke the grants the newer build added. During a rolling deploy, or after a rollback, the reference data belongs to the build that knows the newer migration.
 
 ## First boot takes longer
 
@@ -47,7 +47,7 @@ The npm scripts are unchanged and remain the way to work with the schema day to 
 | `npm run db:seed`                  | run the seeds (`prisma db seed`, the same `runSeeds` boot uses) |
 | `npm run db:reset`                 | drop, re-migrate, re-seed                                       |
 
-Applying a migration beside a running server needs no restart: the server compares the database with its build only at boot. After `migrate dev` the running build sees the database as "ahead" on its next boot and warns, which is expected until the build is regenerated (`db:generate` rewrites the migration manifest).
+Applying a migration beside a running server needs no restart: the server compares the database with its build only at boot. After `migrate dev` a build that has not been regenerated sees the database as "ahead" on its next boot: it warns and skips its seeds, which is expected until `db:generate` rewrites the migration manifest (every nx `serve` and `build` of an app does that on the way). `npm run db:seed` seeds from the CLI regardless of what the running build knows.
 
 The three processes without a migrator wait for the schema, not for the seeds. A database migrated by hand (`npm run db:migrate`, a restored dump) but never seeded lets a worker boot before any api has seeded it, and the hooks that read seeded tables find them empty. Run `npm run db:seed` after a hand migration, or start the api first. In production the api's boot migrates and seeds under one hold of the lock, so a waiting process sees the schema only after the seeds have run.
 

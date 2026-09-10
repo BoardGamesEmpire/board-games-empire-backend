@@ -215,8 +215,10 @@ describe('the boot sequence', () => {
     });
 
     await expect(run).rejects.toBeInstanceOf(SchemaNotReadyError);
-    // One 5s poll after the 8s already spent: the boot fails at 13s, not after a second full budget.
-    expect(clock.now()).toBe(13_000);
+    // The one poll after the 8s already spent is cut to the 4s left: the boot
+    // fails at 12s exactly, not 13s, and never after a second full budget.
+    expect(clock.slept).toEqual([4_000]);
+    expect(clock.now()).toBe(12_000);
     expect(blockingLock.acquireOptions).toEqual([{ deadlineAt: 12_000 }, { deadlineAt: 12_000 }]);
   });
 
@@ -277,7 +279,7 @@ describe('the boot sequence', () => {
     expect(seeder.runs).toBe(0);
   });
 
-  it('ahead: warns about the unknown migrations and boots', async () => {
+  it('ahead: warns about the unknown migrations and boots, leaving the seeds to the build that knows them', async () => {
     const ledger = new FakeLedger([...CHAIN.map(finished), finished('20260910_from_the_future')]);
 
     const summary = await runBootstrapSequence({
@@ -292,10 +294,26 @@ describe('the boot sequence', () => {
 
     expect(summary.state).toBe('ahead');
     expect(summary.unknownMigrations).toEqual(['20260910_from_the_future']);
-    expect(seeder.runs).toBe(1);
+    // This build's catalog reconcile would retire what the newer build added.
+    expect(seeder.runs).toBe(0);
+    expect(summary.seedsRun).toBe(false);
     expect(logger.lines.some((line) => line.startsWith('warn: ') && line.includes('20260910_from_the_future'))).toBe(
       true,
     );
+    expect(logger.lines.some((line) => line.startsWith('log: ') && /seeds.*skipped/i.test(line))).toBe(true);
+  });
+
+  it('behind with a migrator, the database also holding an unknown migration: applies, then still leaves the seeds alone', async () => {
+    const ledger = new FakeLedger([finished('20260109_init'), finished('20260910_from_the_future')]);
+    const migrator = new FakeMigrator(ledger);
+
+    const summary = await runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, migrator });
+
+    expect(summary.state).toBe('behind');
+    expect(summary.migrationsApplied).toEqual(['20260219_games', '20260301_permissions']);
+    expect(summary.unknownMigrations).toEqual(['20260910_from_the_future']);
+    expect(seeder.runs).toBe(0);
+    expect(summary.seedsRun).toBe(false);
   });
 
   it('ends every span, the root included, when the lock itself cannot be acquired', async () => {

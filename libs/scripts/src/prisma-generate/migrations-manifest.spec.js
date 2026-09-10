@@ -64,6 +64,17 @@ describe('migrations manifest', () => {
     it('renders an empty chain as an empty array, not a syntax error', () => {
       expect(renderMigrationsManifest([])).toContain('export const MIGRATION_NAMES: readonly string[] = [];');
     });
+
+    it('escapes a directory name that would otherwise end the string literal early', () => {
+      // Prisma only reads the directory; nothing stops a hand-made name from
+      // carrying a quote or a backslash, and the manifest must still compile.
+      const names = ["20260910000000_owner's", '20260911000000_back\\slash'];
+      const source = renderMigrationsManifest(names);
+
+      const literal = /= (\[[\s\S]*\]);/.exec(source);
+      expect(literal).not.toBeNull();
+      expect(new Function(`return ${literal[1]}`)()).toEqual(names);
+    });
   });
 
   describe('writeMigrationsManifest', () => {

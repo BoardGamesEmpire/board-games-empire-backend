@@ -42,6 +42,7 @@ export interface BootstrapSummary {
   readonly state: MigrationStateKind;
   readonly migrationsApplied: readonly string[];
   readonly unknownMigrations: readonly string[];
+  /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
   /** Time spent waiting for another process to bring the schema up. */
   readonly waitedMs: number;
@@ -120,6 +121,8 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     const deadlineAt = clock.now() + waitMs;
 
     let firstState: MigrationStateKind | undefined;
+    // What the ledger showed when the loop settled: `in-sync` or `ahead`.
+    let settledState: MigrationStateKind = 'in-sync';
     let unknownMigrations: readonly string[] = [];
     let warnedUnknown: string | undefined;
     let migrationsApplied: readonly string[] = [];
@@ -154,6 +157,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         }
 
         if (state.kind !== 'behind') {
+          settledState = state.kind;
           break;
         }
 
@@ -168,6 +172,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           if (after.pending.length > 0) throw new MigrationsStillPendingError(after.pending);
 
           migrationsApplied = state.pending;
+          settledState = after.kind;
           break;
         }
 
@@ -189,14 +194,21 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         // Not held across the wait: the migrator needs it to do the work we are waiting for.
         await lock.release();
         held = false;
-        await phase('schema.wait', () => clock.sleep(schemaPollMs));
+        // Cut to what is left, so the boot fails at the deadline and not up to a poll after it.
+        await phase('schema.wait', () => clock.sleep(Math.min(schemaPollMs, deadlineAt - clock.now())));
         await phase('lock', () => lock.acquire({ deadlineAt }));
         held = true;
         waitedMs = clock.now() - waitingSince;
       }
 
       // Only the single writer runs the DML phases; an observer checks the schema and goes.
-      if (migrator) {
+      // Not over a database that is ahead, either: the seeds include the catalog
+      // reconcile, and this build's manifest would retire the permissions and
+      // revoke the grants a newer build added. That data belongs to the build
+      // that knows those migrations.
+      if (migrator && settledState === 'ahead') {
+        logger.log('Seeds skipped: the database is ahead of this build, so the newer build owns the reference data.');
+      } else if (migrator) {
         await phase('seeds', () => seeder.run());
         seedsRun = true;
       }

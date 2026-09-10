@@ -1,4 +1,5 @@
 import type { AppliedMigrationRow } from '@bge/database';
+import { performance } from 'node:perf_hooks';
 
 /**
  * The two levels the sequence speaks: progress and outcome on `log`, anything
@@ -55,13 +56,18 @@ export interface SeedsPhase {
   run(): Promise<void>;
 }
 
-/** Injected so the wait-and-retry path is deterministic under test. */
+/**
+ * Injected so the wait-and-retry path is deterministic under test. `now()` is
+ * monotonic milliseconds, not wall-clock time: only differences between two
+ * readings mean anything, so a clock step while a process boots (NTP settling
+ * on a fresh host is the usual one) cannot stretch or shrink a deadline.
+ */
 export interface Clock {
   now(): number;
   sleep(ms: number): Promise<void>;
 }
 
 export const systemClock: Clock = {
-  now: () => Date.now(),
+  now: () => performance.now(),
   sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };

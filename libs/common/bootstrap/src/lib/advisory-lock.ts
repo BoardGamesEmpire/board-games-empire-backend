@@ -57,7 +57,15 @@ interface HolderRow {
  * Each attempt is a genuine blocking wait bounded by `lock_timeout`, so a
  * concurrent boot is visible in `pg_locks` as an ungranted advisory waiter;
  * between attempts the holder is named in a progress line. The total wait is
- * bounded; reaching it fails the boot with the holder in the message.
+ * bounded; reaching it fails the boot with the holder in the message. The
+ * last attempt is cut to the time left, so the deadline is honoured to the
+ * attempt and not only to the nearest one. A free lock is still taken at the
+ * deadline: the attempt then costs nothing, and the caller's final read is
+ * what turns "still behind" into the error that names the migration.
+ *
+ * Connecting is not budgeted: it happens once per sequence (the client is
+ * kept across re-acquires) and the driver's own connect timeout bounds it well
+ * inside any deadline this lock is given.
  */
 export class PgAdvisoryLock implements BootstrapLock {
   private client: Client | undefined;
@@ -78,9 +86,13 @@ export class PgAdvisoryLock implements BootstrapLock {
     );
     const waitMs = deadlineAt - started;
 
-    await client.query(`SET lock_timeout = '${Math.max(1, Math.floor(attemptMs))}ms'`);
-
     for (;;) {
+      // Never past the deadline: the attempt is the shorter of its own length
+      // and what is left. At or after the deadline it is 1ms, which still
+      // takes a free lock and only reports a held one.
+      const attempt = Math.max(1, Math.floor(Math.min(attemptMs, deadlineAt - clock.now())));
+      await client.query(`SET lock_timeout = '${attempt}ms'`);
+
       try {
         await client.query('SELECT pg_advisory_lock($1::bigint)', [key]);
         return;
@@ -137,11 +149,15 @@ export class PgAdvisoryLock implements BootstrapLock {
 
   private async holders(client: Client, key: string): Promise<HolderRow[]> {
     // A bigint advisory key is stored as (classid = high 32 bits, objid = low 32 bits, objsubid = 1).
+    // Advisory locks are per database while `pg_locks` lists the whole cluster,
+    // so without the database filter the same key held in a neighbouring
+    // database (a dev database beside an e2e one) would be named as our blocker.
     const result = await client.query<HolderRow>(
       `SELECT a.pid, a.application_name, a.state, (now() - a.query_start)::text AS held_for
          FROM pg_locks l
          JOIN pg_stat_activity a ON a.pid = l.pid
         WHERE l.locktype = 'advisory' AND l.granted AND l.objsubid = 1
+          AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
           AND l.classid = (($1::bigint >> 32) & 4294967295)::oid
           AND l.objid = ($1::bigint & 4294967295)::oid`,
       [key],

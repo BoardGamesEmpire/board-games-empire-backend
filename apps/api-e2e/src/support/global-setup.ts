@@ -242,7 +242,7 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *  3. `prisma migrate deploy` — the real migration chain, from empty,
  *     is itself under test.
  *  4. `prisma db seed` — the real reference seeds via the `prisma.config.ts`
- *     seed hook (`prisma/seed.ts` → `runSeeds`).
+ *     seed hook (`libs/database/src/seed-cli.ts` → `runSeeds`).
  *  5. The built API bundle as a child process, gated on `/health/ready`;
  *     its base URL is published via `BGE_E2E_BASE_URL`.
  *

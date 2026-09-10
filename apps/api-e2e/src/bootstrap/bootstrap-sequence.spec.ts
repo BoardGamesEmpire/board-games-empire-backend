@@ -2,10 +2,12 @@ import {
   BOOTSTRAP_LOCK_NAME,
   createPrismaCliMigrator,
   FailedMigrationError,
+  LockNotAcquiredError,
   PgAdvisoryLock,
   PrismaSchemaLedger,
   runBootstrapSequence,
   SchemaNotReadyError,
+  systemClock,
   type BootstrapLogger,
   type Migrator,
   type SeedsPhase,
@@ -209,6 +211,30 @@ describe('the boot sequence against Postgres', () => {
         }
       });
     });
+
+    it('gives up at the shared deadline even when a single lock attempt is longer than the time left', async () => {
+      await withBarrier(async (barrier) => {
+        await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+
+        // A 5s attempt against a 300ms budget: the attempt must be cut to the
+        // budget, or the boot runs almost a full attempt past its deadline.
+        const lock = new PgAdvisoryLock({
+          connectionString: requireDatabaseUrl(),
+          logger: silent,
+          applicationName: 'bge-bootstrap:short-deadline',
+          attemptMs: 5_000,
+        });
+        const started = systemClock.now();
+
+        try {
+          await expect(lock.acquire({ deadlineAt: started + 300 })).rejects.toBeInstanceOf(LockNotAcquiredError);
+          expect(systemClock.now() - started).toBeLessThan(2_000);
+        } finally {
+          await lock.close();
+          await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        }
+      });
+    });
   });
 
   describe('on an empty sandbox database', () => {
@@ -334,11 +360,41 @@ describe('the boot sequence against Postgres', () => {
 
         expect(summary.state).toBe('ahead');
         expect(summary.unknownMigrations).toEqual([name]);
-        expect(seeder.spans).toHaveLength(1);
+        expect(summary.seedsRun).toBe(false);
+        expect(seeder.spans).toHaveLength(0);
         expect(logger.lines.some((line) => line.startsWith('warn: ') && line.includes(name))).toBe(true);
       } finally {
         await lock.close();
         await sandboxAdmin.query('DELETE FROM _prisma_migrations WHERE migration_name = $1', [name]);
+      }
+    });
+
+    it('names only holders in its own database: the same key held in another database is not the blocker', async () => {
+      // Advisory keys are per database, but `pg_locks` lists the whole cluster.
+      const sandboxPid = (await sandboxAdmin.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+      await sandboxAdmin.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+
+      try {
+        await withBarrier(async (barrier) => {
+          await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+          const logger = recordingLogger();
+          const lock = lockOn(requireDatabaseUrl(), 'cross-database', logger);
+
+          try {
+            const run = lock.acquire({ deadlineAt: systemClock.now() + 1_200 });
+            await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+            await expect(run).rejects.toThrow(`pid ${barrier.holder.pid}`);
+            await expect(run).rejects.not.toThrow(`pid ${sandboxPid}`);
+            expect(logger.lines.filter((line) => line.includes(`pid ${sandboxPid}`))).toEqual([]);
+          } finally {
+            await lock.close();
+            await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [
+              BOOTSTRAP_LOCK_NAME,
+            ]);
+          }
+        });
+      } finally {
+        await sandboxAdmin.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
       }
     });
 

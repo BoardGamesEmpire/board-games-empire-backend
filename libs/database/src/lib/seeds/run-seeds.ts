@@ -23,8 +23,8 @@ export const SEEDERS: readonly Seeder[] = [
 ];
 
 /**
- * Runs every seeder against the supplied client. Extracted from
- * `prisma/seed.ts` (#255) so callers other than the CLI wrapper can seed a
+ * Runs every seeder against the supplied client. Extracted from the CLI
+ * wrapper (#255, now `src/seed-cli.ts`) so callers other than it can seed a
  * database in-process, and moved into `@bge/database` (#236) so the
  * boot sequence can import it: `@bge/bootstrap` calls this exact function for
  * its seeds phase rather than growing a second seed path.
