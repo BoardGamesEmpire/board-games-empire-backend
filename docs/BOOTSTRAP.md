@@ -56,3 +56,4 @@ The three processes without a migrator wait for the schema, not for the seeds. A
 - `@bge/bootstrap` (`libs/common/bootstrap`): the sequence, the lock, the CLI migrator, the `runBootstrap` entry each `main.ts` calls.
 - `@bge/database`: the migration manifest (`MIGRATION_NAMES`, generated beside the Prisma client by `nx run database:generate`), the state classifier, `readAppliedMigrations`, and the seeds (`runSeeds`, from `@bge/database/seeds`).
 - The api image: `prisma/` and `prisma.config.ts` are copied beside `main.js` and `prisma` is a runtime dependency (`apps/api/webpack.config.js`, `apps/api/package.json`).
+- Building that image downloads Prisma's schema engine for the image's platform during its `npm install` (the `@prisma/engines` postinstall), so the build needs egress to `binaries.prisma.sh`, or a `PRISMA_ENGINES_MIRROR` that serves it.
