@@ -10,6 +10,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./seeds": {
+      "types": "./src/seeds.ts",
+      "import": "./src/seeds.ts",
+      "default": "./src/seeds.ts"
+    },
     "./testing": {
       "types": "./src/testing.ts",
       "import": "./src/testing.ts",

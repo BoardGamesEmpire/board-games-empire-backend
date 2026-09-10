@@ -218,6 +218,9 @@
     },
     {
       "path": "./libs/api/plugin"
+    },
+    {
+      "path": "./libs/common/bootstrap"
     }
   ]
 }

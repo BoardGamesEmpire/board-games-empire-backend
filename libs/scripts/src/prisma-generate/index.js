@@ -26,6 +26,7 @@ const path = require('node:path');
 
 const { createClientState } = require('./client-state');
 const { createLock } = require('./lock');
+const { writeMigrationsManifest } = require('./migrations-manifest');
 
 const workspaceRoot = path.resolve(__dirname, '..', '..', '..', '..');
 const outputDir = path.join(workspaceRoot, 'libs', 'database', 'src', 'lib', 'generated');
@@ -80,6 +81,10 @@ function main(args) {
 
     const status = runPrismaGenerate(args);
     if (status !== 0) return status;
+
+    // Written after the generator so its `rmSync` of the output directory
+    // cannot take it, and before the stamp so a stamped tree always has it.
+    writeMigrationsManifest(workspaceRoot);
 
     client.writeStamp(expectedFingerprint);
 

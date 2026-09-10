@@ -27,9 +27,23 @@ describe('prisma-generate client state', () => {
   /** A complete generated tree: `client.ts` plus however many more files. */
   function writeGeneratedTree(fileCount) {
     fs.writeFileSync(path.join(outputDir, 'client.ts'), 'export {};');
-    for (let i = 1; i < fileCount; i++) {
+    fs.writeFileSync(path.join(outputDir, 'migrations-manifest.ts'), 'export const MIGRATION_NAMES = [];');
+    for (let i = 1; i <= fileCount - 2; i++) {
       fs.writeFileSync(path.join(outputDir, `file-${i}.ts`), 'export {};');
     }
+  }
+
+  /** The inputs `fingerprint()` reads: a schema file, the config, and a migrations tree. */
+  function writeSchemaInputs() {
+    fs.mkdirSync(path.join(workspaceRoot, 'prisma', 'migrations'), { recursive: true });
+    fs.writeFileSync(path.join(workspaceRoot, 'prisma', 'schema.prisma'), 'datasource db { provider = "postgresql" }');
+    fs.writeFileSync(path.join(workspaceRoot, 'prisma.config.ts'), 'export default {};');
+  }
+
+  function addMigration(name) {
+    const dir = path.join(workspaceRoot, 'prisma', 'migrations', name);
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'migration.sql'), `-- ${name}`);
   }
 
   it('is not current before anything has been stamped', () => {
@@ -88,5 +102,59 @@ describe('prisma-generate client state', () => {
 
   it('tolerates clearing a stamp that is not there', () => {
     expect(() => client.clearStamp()).not.toThrow();
+  });
+
+  it('is not current when the migrations manifest is missing from an otherwise complete tree', () => {
+    // The manifest is what lets the three CLI-less processes read their own
+    // schema state (#236); a stamped tree without it is not the tree
+    // this generate produces.
+    writeGeneratedTree(3);
+    client.writeStamp(FINGERPRINT);
+    expect(client.isCurrent(FINGERPRINT)).toBe(true);
+
+    // Swap the manifest for an unrelated file so the file COUNT still matches:
+    // only an explicit check on the manifest can fail this.
+    fs.rmSync(path.join(outputDir, 'migrations-manifest.ts'));
+    fs.writeFileSync(path.join(outputDir, 'unrelated.ts'), 'export {};');
+
+    expect(client.isCurrent(FINGERPRINT)).toBe(false);
+  });
+
+  describe('fingerprint', () => {
+    it('changes when a migration is added even though no schema file changed', () => {
+      // A SQL-only migration (a backfill, an index) touches no `.prisma` file.
+      // Without this the manifest would go stale and api would boot believing
+      // it is in sync with a migration still pending (#236).
+      writeSchemaInputs();
+      addMigration('20260109085042_init');
+      const before = client.fingerprint();
+
+      addMigration('20260910000000_backfill');
+
+      expect(client.fingerprint()).not.toBe(before);
+    });
+
+    it("does not change when an applied migration's SQL is edited in place", () => {
+      // Only migration NAMES feed the manifest and only `.prisma` feeds the
+      // client; editing an existing migration's body (routine before alpha)
+      // must not throw the generated tree away.
+      writeSchemaInputs();
+      addMigration('20260109085042_init');
+      const before = client.fingerprint();
+
+      fs.appendFileSync(
+        path.join(workspaceRoot, 'prisma', 'migrations', '20260109085042_init', 'migration.sql'),
+        '\n-- edited',
+      );
+
+      expect(client.fingerprint()).toBe(before);
+    });
+
+    it('is stable across calls when nothing changed', () => {
+      writeSchemaInputs();
+      addMigration('20260109085042_init');
+
+      expect(client.fingerprint()).toBe(client.fingerprint());
+    });
   });
 });

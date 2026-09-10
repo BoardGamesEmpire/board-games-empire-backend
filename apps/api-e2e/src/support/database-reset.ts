@@ -9,7 +9,7 @@ export interface TableRef {
 /**
  * Tables the between-test sweep must NOT touch: Prisma's migration ledger
  * plus every table populated by the reference/catalog seeds
- * (`prisma/seeds/run-seeds.ts`). Everything else is truncated.
+ * (`libs/database/src/lib/seeds/run-seeds.ts`). Everything else is truncated.
  *
  * Keep this list in lockstep with the seed set — a table seeded once per
  * run but truncated per test would fail every spec after the first.

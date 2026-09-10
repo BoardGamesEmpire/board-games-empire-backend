@@ -7,6 +7,7 @@ import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
 import { AUTH_INSTANCE } from '@bge/auth';
+import { createPrismaCliMigrator, nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -27,6 +28,17 @@ async function bootstrap() {
   }
 
   bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire api in ${env.currentEnv} mode`);
+
+  // Migrations, catalog reconcile and seeds run BEFORE the application module
+  // exists: several of its `onModuleInit` hooks read tables, so on a fresh
+  // database they would fail ahead of any hook that could migrate (#236).
+  // The api is the one build that carries the migrator; what happens is decided
+  // from the database's state, not from a flag.
+  await runBootstrap({
+    applicationName: 'api',
+    logger: nestLoggerFromPino(bootstrapLogger),
+    migrator: createPrismaCliMigrator,
+  });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     bodyParser: false,

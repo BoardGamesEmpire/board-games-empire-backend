@@ -1,5 +1,5 @@
-import { PlatformType, type PrismaClient } from '@bge/database';
 import type { Logger } from '@nestjs/common';
+import { PlatformType, type PrismaClient } from '../client';
 
 /**
  * Seeds system-owned Platform records.

@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@bge/database';
 import type { Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
+import type { PrismaClient } from '../client';
 
 export async function systemSettingsSeed(prisma: PrismaClient, logger: Logger) {
   logger.debug('Seeding system settings...');

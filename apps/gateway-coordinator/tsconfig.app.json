@@ -31,6 +31,9 @@
       "path": "../../libs/api/gateway-host/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/bootstrap/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/queue/actor-context/tsconfig.lib.json"
     },
     {
@@ -40,10 +43,10 @@
       "path": "../../libs/proto/gateway/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/gateway/game-search/tsconfig.lib.json"
+      "path": "../../libs/common/testing/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/testing/tsconfig.lib.json"
+      "path": "../../libs/gateway/game-search/tsconfig.lib.json"
     },
     {
       "path": "../../libs/common/redis/tsconfig.lib.json"

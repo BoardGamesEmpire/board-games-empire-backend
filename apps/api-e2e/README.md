@@ -14,11 +14,11 @@ Note that the api bundle **externalizes its workspace libraries** rather than in
 
 Escape hatches, both optional and both treating the endpoint as **disposable** (migrated, seeded, and swept exactly like a container):
 
-| Variable               | Effect                                                                                                                     |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container.                                                                           |
-| `BGE_E2E_REDIS_URL`    | Use an existing Redis instead of a container. `resetRedis` (FLUSHALL) additionally requires `BGE_E2E_REDIS_FLUSH_OK=true`. |
-| `BGE_E2E_VERBOSE`      | Set to `true` to stream the API child's output live instead of buffering it.                                               |
+| Variable               | Effect                                                                                                                                                                                                   |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container. The role needs `CREATEDB` on PostgreSQL 13 or later: the bootstrap spec creates and drops a sibling database, `bge_bootstrap_e2e`, in the same cluster. |
+| `BGE_E2E_REDIS_URL`    | Use an existing Redis instead of a container. `resetRedis` (FLUSHALL) additionally requires `BGE_E2E_REDIS_FLUSH_OK=true`.                                                                               |
+| `BGE_E2E_VERBOSE`      | Set to `true` to stream the API child's output live instead of buffering it.                                                                                                                             |
 
 ## Isolation model
 

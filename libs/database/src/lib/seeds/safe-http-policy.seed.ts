@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@bge/database';
 import type { Logger } from '@nestjs/common';
+import type { PrismaClient } from '../client';
 
 /**
  * Seeds the singleton `SafeHttpPolicy` row. All field defaults live on the

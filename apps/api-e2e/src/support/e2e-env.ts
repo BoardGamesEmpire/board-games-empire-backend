@@ -186,7 +186,8 @@ export interface ProvisioningDecision {
  * Decides, from an environment snapshot, whether each dependency comes from
  * a testcontainer (the default) or an externally supplied endpoint (the
  * escape hatch). External endpoints are treated as DISPOSABLE: migrations,
- * seeds, and the truncate sweep all run against them.
+ * seeds, and the truncate sweep all run against them, and the bootstrap spec
+ * creates and drops a sibling database in the same cluster (CREATEDB).
  */
 export function decideProvisioning(env: Readonly<Record<string, string | undefined>>): ProvisioningDecision {
   const databaseUrl = env[E2E_DATABASE_URL_VAR]?.trim();

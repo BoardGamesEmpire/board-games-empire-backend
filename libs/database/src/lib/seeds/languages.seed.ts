@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@bge/database';
 import { canonicalizeTag, displayName, nativeDisplayName, parseTag } from '@bge/locale';
 import type { Logger } from '@nestjs/common';
+import type { PrismaClient } from '../client';
 
 // TODO: Expand i18n support
 const systemSupportedTags = ['en'];

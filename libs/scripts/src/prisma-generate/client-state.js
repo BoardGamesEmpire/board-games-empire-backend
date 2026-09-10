@@ -10,6 +10,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { MANIFEST_FILE } = require('./migrations-manifest');
+
 function listFiles(dir, predicate) {
   const found = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true, recursive: true })) {
@@ -26,8 +28,12 @@ function createClientState(workspaceRoot) {
   const stampFile = path.join(workspaceRoot, 'node_modules', '.cache', 'prisma-generate', 'stamp.json');
 
   /**
-   * Everything that changes what `prisma generate` writes: the schema, the
-   * config that points at it, and the generator's own version.
+   * Everything that changes what this target writes: the schema, the config
+   * that points at it, the generator's own version — and the migration
+   * directory names, because the migrations manifest (#236) is written
+   * alongside the client and a SQL-only migration changes it without touching
+   * any `.prisma`. Names only: nothing generated reads a migration's body, so
+   * editing one in place (routine before alpha) must not rebuild the client.
    */
   function fingerprint() {
     const hash = crypto.createHash('sha256');
@@ -35,6 +41,10 @@ function createClientState(workspaceRoot) {
     for (const file of listFiles(schemaDir, (f) => f.endsWith('.prisma'))) {
       hash.update(path.relative(workspaceRoot, file));
       hash.update(fs.readFileSync(file));
+    }
+
+    for (const file of listFiles(schemaDir, (f) => f.endsWith('.sql'))) {
+      hash.update(path.relative(workspaceRoot, file));
     }
 
     hash.update(fs.readFileSync(path.join(workspaceRoot, 'prisma.config.ts')));
@@ -68,7 +78,8 @@ function createClientState(workspaceRoot) {
       stamp.fingerprint === expectedFingerprint &&
       stamp.fileCount > 0 &&
       stamp.fileCount === outputFileCount() &&
-      fs.existsSync(path.join(outputDir, 'client.ts'))
+      fs.existsSync(path.join(outputDir, 'client.ts')) &&
+      fs.existsSync(path.join(outputDir, MANIFEST_FILE))
     );
   }
 
