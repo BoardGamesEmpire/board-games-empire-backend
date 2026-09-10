@@ -181,6 +181,33 @@ describe('the boot sequence', () => {
     expect(logger.lines.some((line) => line.startsWith('log: ') && /waiting/i.test(line))).toBe(true);
   });
 
+  it('behind without a migrator: the read that finds the schema up is part of the wait', async () => {
+    const ledger = new FakeLedger([finished('20260109_init')]);
+    const original = ledger.readApplied.bind(ledger);
+    ledger.readApplied = async () => {
+      const rows = await original();
+      if (ledger.reads === 2) ledger.rows = CHAIN.map(finished);
+      // The read that finds the chain complete is a slow one: a second on a busy database.
+      if (ledger.reads === 3) clock.time += 1_000;
+      return rows;
+    };
+
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      logger,
+      clock,
+      waitMs: 60_000,
+      schemaPollMs: 5_000,
+    });
+
+    // Two 5s polls, then the 1s read that confirmed the schema: it was known to be
+    // up at 11s, not when the lock came back at 10s.
+    expect(summary.waitedMs).toBe(11_000);
+  });
+
   it('behind without a migrator: one deadline from the start of the sequence rides on the first acquire and every re-acquire, and time blocked on the lock counts as waiting', async () => {
     const ledger = new FakeLedger([finished('20260109_init')]);
     const blockingLock = new FakeLock(clock);

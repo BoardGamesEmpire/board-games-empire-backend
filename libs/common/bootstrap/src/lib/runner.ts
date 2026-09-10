@@ -38,8 +38,9 @@ export interface BootstrapSummary {
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
   /**
-   * Time from the start of the sequence to the read that found the schema up,
-   * time blocked on the lock included; 0 when the first read found it up.
+   * Time from the start of the sequence until the read that found the schema up
+   * had answered, time blocked on the lock included; 0 when the first read found
+   * it up.
    */
   readonly waitedMs: number;
   readonly phaseDurationsMs: Readonly<Record<string, number>>;
@@ -133,6 +134,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     let warnedUnknown: string | undefined;
     let migrationsApplied: readonly string[] = [];
     let seedsRun = false;
+    let waiting = false;
     let waitedMs = 0;
 
     let held = false;
@@ -163,6 +165,8 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
 
         if (state.kind !== 'behind') {
           settledState = state.kind;
+          // The wait ends with the read that found the schema up, not when the lock came back.
+          if (waiting) waitedMs = clock.now() - started;
           break;
         }
 
@@ -184,6 +188,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         // The clock decides, not a count of sleeps, and it counts from the same
         // start as the deadline: time blocked on the lock, the first time and on
         // every re-acquire, was spent waiting for the migrating process too.
+        waiting = true;
         waitedMs = clock.now() - started;
 
         if (clock.now() >= deadlineAt) {
@@ -204,7 +209,6 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         await phase('schema.wait', () => clock.sleep(Math.max(0, Math.min(schemaPollMs, deadlineAt - clock.now()))));
         await phase('lock', () => lock.acquire({ deadlineAt }));
         held = true;
-        waitedMs = clock.now() - started;
       }
 
       // Only the single writer runs the DML phases; an observer checks the schema and goes.
