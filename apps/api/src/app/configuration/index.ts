@@ -9,6 +9,7 @@ import redis, { redisConfigValidationSchema } from './redis.config';
 import swagger, { swaggerConfigValidationSchema } from './swagger.config';
 import system, { systemConfigValidationSchema } from './system.config';
 import throttle, { throttleConfigValidationSchema } from './throttle.config';
+export { API_CACHE_NAMESPACE } from './cache.config';
 
 export const configuration = {
   cache,

@@ -7,6 +7,7 @@ import {
   type BootstrapLogger,
   type Clock,
   type Migrator,
+  type ReconcileSummary,
   type SchemaLedger,
   type SeedsPhase,
 } from './ports';
@@ -37,6 +38,11 @@ export interface BootstrapSummary {
   readonly unknownMigrations: readonly string[];
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
+  /**
+   * What the catalog reconcile wrote, by table, and whether the caches were
+   * flushed after it. Absent when the seeds did not run.
+   */
+  readonly reconcile: ReconcileSummary | undefined;
   /**
    * Time from the start of the sequence until the read that found the schema up
    * had answered, time blocked on the lock included; 0 when the first read found
@@ -134,6 +140,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     let warnedUnknown: string | undefined;
     let migrationsApplied: readonly string[] = [];
     let seedsRun = false;
+    let reconcile: ReconcileSummary | undefined;
     let waiting = false;
     let waitedMs = 0;
 
@@ -220,7 +227,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         if (settledState === 'ahead') {
           logger.log('Seeds skipped: the database is ahead of this build, so the newer build owns the reference data.');
         } else {
-          await phase('seeds', () => seeder.run());
+          reconcile = await phase('seeds', () => seeder.run());
           seedsRun = true;
         }
       }
@@ -256,6 +263,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       migrationsApplied,
       unknownMigrations,
       seedsRun,
+      reconcile,
       waitedMs,
       phaseDurationsMs,
     };

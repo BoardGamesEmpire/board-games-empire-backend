@@ -56,7 +56,7 @@ import { ClsMiddleware, ClsModule } from 'nestjs-cls';
 import { I18nValidationExceptionFilter } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
-import { configuration, configurationValidationSchema } from './configuration';
+import { API_CACHE_NAMESPACE, configuration, configurationValidationSchema } from './configuration';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 import { BGE_VERSION } from './generated/bge-version';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
@@ -123,7 +123,7 @@ import { createThrottlers } from './lib/throttlers';
         stores: [
           new Keyv({
             store: new KeyvValkey(cacheClient),
-            namespace: 'api:cache',
+            namespace: API_CACHE_NAMESPACE,
           }),
         ],
         ttl: configService.get<number>('cache.ttl'),

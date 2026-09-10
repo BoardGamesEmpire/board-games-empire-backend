@@ -190,6 +190,39 @@ export function countMutations(plan: ReconcilePlan): number {
   );
 }
 
+/**
+ * The writes by table, as the boot summary reports them (#236). The
+ * per-table numbers are the ones `summarizePlan` prints, so a permission that
+ * is revived and drifted appears in both `permissionsUpdated` and
+ * `permissionsRevived`; `mutations` is {@link countMutations}, which counts
+ * it once. Every field is zero on a converged database.
+ */
+export interface ReconcileCounts {
+  readonly permissionsCreated: number;
+  readonly permissionsUpdated: number;
+  readonly permissionsRevived: number;
+  readonly permissionsRetired: number;
+  readonly rolesCreated: number;
+  readonly rolesUpdated: number;
+  readonly grantsCreated: number;
+  readonly grantsRevoked: number;
+  readonly mutations: number;
+}
+
+export function reconcileCounts(plan: ReconcilePlan): ReconcileCounts {
+  return {
+    permissionsCreated: plan.permissions.create.length,
+    permissionsUpdated: plan.permissions.update.length,
+    permissionsRevived: plan.permissions.revive.length,
+    permissionsRetired: plan.permissions.retire.length,
+    rolesCreated: plan.roles.create.length,
+    rolesUpdated: plan.roles.update.length,
+    grantsCreated: plan.rolePermissions.create.length,
+    grantsRevoked: plan.rolePermissions.delete.length,
+    mutations: countMutations(plan),
+  };
+}
+
 function planPermissions(manifest: CatalogManifest, snapshot: CatalogSnapshot): ReconcilePlan['permissions'] {
   const create: PermissionSeedDefinition[] = [];
   const update: PermissionUpdate[] = [];

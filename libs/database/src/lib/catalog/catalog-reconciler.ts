@@ -31,9 +31,10 @@ import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-defini
  * from anywhere but its caller (the catalog exports are the only production
  * manifest, so CI's checks on them are a complete gate for what gets written).
  *
- * The pieces are exported separately because #236's boot sequence also wants a
- * plan-only mode: `loadCatalogSnapshot` + `planReconcile` + the `describe*`
- * helpers report what a reconcile WOULD do without `applyReconcilePlan`.
+ * The pieces are exported separately because `npm run db:plan` wants a
+ * plan-only mode (#236): `loadCatalogSnapshot` + `planReconcile` + the
+ * `describe*` helpers report what a reconcile WOULD do without
+ * `applyReconcilePlan`.
  */
 
 /** The catalog this code version ships: the only manifest production passes. */
@@ -54,7 +55,7 @@ export interface ReconcileCatalogOptions {
   /**
    * Called exactly once with the applied plan when the apply wrote anything,
    * never when it wrote nothing. Who to evict is the caller's decision — the
-   * in-process boot caller has `PermissionsService`; the seed CLI has no Redis
+   * boot sequence passes its cache flush (#236); the seed CLI has no Redis
    * and passes nothing, and a warning says the caches were not touched.
    */
   readonly invalidate?: (plan: ReconcilePlan) => Promise<void>;
@@ -76,6 +77,32 @@ export class CatalogReconcileConflictError extends Error {
   constructor(readonly conflicts: readonly string[]) {
     super(`Catalog reconcile refused, nothing written: ${conflicts.join('; ')}`);
     this.name = 'CatalogReconcileConflictError';
+  }
+}
+
+/**
+ * A batch statement wrote fewer rows than the plan listed: another writer
+ * touched a row between the snapshot and the write. Thrown inside the
+ * transaction, so nothing is committed.
+ */
+export class CatalogReconcileShortWriteError extends Error {
+  constructor(
+    readonly statement: string,
+    readonly planned: number,
+    readonly written: number,
+  ) {
+    super(
+      `Catalog reconcile rolled back: ${statement} wrote ${written} of ${planned} planned row(s), so a row changed ` +
+        'under the plan between the snapshot and the write. Nothing was committed; run `npm run db:plan` to see the ' +
+        'row, then boot or seed again.',
+    );
+    this.name = 'CatalogReconcileShortWriteError';
+  }
+}
+
+function assertWrote(statement: string, written: number, planned: number): void {
+  if (written !== planned) {
+    throw new CatalogReconcileShortWriteError(statement, planned, written);
   }
 }
 
@@ -137,8 +164,8 @@ export async function reconcileCatalog(
         // lose the only chance to say the caches were missed; the TTL bounds
         // the staleness either way.
         logger.warn(
-          `Catalog reconcile wrote rows but the invalidation port failed (${describeError(error)}): cached ` +
-            'ability graphs were not touched and expire on their own TTL.',
+          `Catalog reconcile wrote rows but the invalidation port failed (${describeError(error)}): whatever it ` +
+            'did not evict expires on its own TTL.',
         );
       }
     } else {
@@ -193,15 +220,17 @@ export async function loadCatalogSnapshot(client: Prisma.TransactionClient): Pro
  * permissions, then roles, then the edges between them (deletes before
  * creates). Every write on an existing row is guarded by `managedBy: System`,
  * so a row whose ownership changed between the snapshot and the write is
- * never clobbered. What happens next depends on the statement: a single-row
- * `update` finds no row and throws, rolling the transaction back; the batch
- * statements — `updateMany`, `deleteMany`, and `createMany` with
- * `skipDuplicates` — skip that row and commit the rest, so the plan the
- * caller logs can name a write that did not land. The skipped row is left as
- * its new owner asked, and the next reconcile reports it as drift or refuses
- * it as a conflict. `skipDuplicates` is also what lets two reconciles racing
- * from the same snapshot both complete; the advisory lock that would
- * serialise them is #236's.
+ * never clobbered. A single-row `update` that finds no row throws on its own.
+ * The batch statements (`updateMany`, `deleteMany`, and `createMany` with
+ * `skipDuplicates`) would skip that row and commit the rest, so each one's
+ * row count is compared to the plan and a short count throws
+ * {@link CatalogReconcileShortWriteError} instead. Either way the transaction
+ * rolls back and the plan the caller logs never names a write that did not
+ * land (#236). Under the boot lock the only writer that can get in between is
+ * an operator or a plugin. The seed CLI takes no lock and is held to the same
+ * check: a hand-run `db:seed` racing an api boot, or another seed, makes one
+ * of the two roll back with this error instead of both committing over each
+ * other; the other converges, and booting or seeding again converges too.
  */
 export async function applyReconcilePlan(
   tx: Prisma.TransactionClient,
@@ -215,7 +244,7 @@ export async function applyReconcilePlan(
   const wantedRoles = new Map<string, RoleSeedDefinition>(manifest.roles.map((wanted) => [wanted.name, wanted]));
 
   if (plan.permissions.create.length > 0) {
-    await tx.permission.createMany({
+    const { count } = await tx.permission.createMany({
       data: plan.permissions.create.map((wanted) => ({
         ...permissionColumns(wanted),
         slug: wanted.slug,
@@ -223,6 +252,7 @@ export async function applyReconcilePlan(
       })),
       skipDuplicates: true,
     });
+    assertWrote('permission.createMany', count, plan.permissions.create.length);
   }
 
   // A revived row converges as well: whatever drifted while it was retired.
@@ -235,14 +265,15 @@ export async function applyReconcilePlan(
   }
 
   if (plan.permissions.retire.length > 0) {
-    await tx.permission.updateMany({
+    const { count } = await tx.permission.updateMany({
       where: { slug: { in: [...plan.permissions.retire] }, managedBy: PermissionOwner.System, retiredAt: null },
       data: { retiredAt: now },
     });
+    assertWrote('permission.updateMany', count, plan.permissions.retire.length);
   }
 
   if (plan.roles.create.length > 0) {
-    await tx.role.createMany({
+    const { count } = await tx.role.createMany({
       data: plan.roles.create.map((wanted) => ({
         name: wanted.name,
         description: wanted.description,
@@ -250,6 +281,7 @@ export async function applyReconcilePlan(
       })),
       skipDuplicates: true,
     });
+    assertWrote('role.createMany', count, plan.roles.create.length);
   }
 
   for (const { name } of plan.roles.update) {
@@ -286,16 +318,18 @@ export async function applyReconcilePlan(
   });
 
   if (plan.rolePermissions.delete.length > 0) {
-    await tx.rolePermission.deleteMany({
+    const { count } = await tx.rolePermission.deleteMany({
       where: { managedBy: PermissionOwner.System, OR: plan.rolePermissions.delete.map(resolve) },
     });
+    assertWrote('rolePermission.deleteMany', count, plan.rolePermissions.delete.length);
   }
 
   if (plan.rolePermissions.create.length > 0) {
-    await tx.rolePermission.createMany({
+    const { count } = await tx.rolePermission.createMany({
       data: plan.rolePermissions.create.map((edge) => ({ ...resolve(edge), managedBy: PermissionOwner.System })),
       skipDuplicates: true,
     });
+    assertWrote('rolePermission.createMany', count, plan.rolePermissions.create.length);
   }
 }
 

@@ -17,6 +17,7 @@
     "db:generate": "nx run database:generate",
     "db:migrate:new": "prisma migrate dev --name",
     "db:migrate": "prisma migrate deploy",
+    "db:plan": "tsx libs/database/src/plan-cli.ts",
     "db:reset": "prisma migrate reset",
     "db:seed": "prisma db seed",
     "dep-graph": "nx dep-graph",
