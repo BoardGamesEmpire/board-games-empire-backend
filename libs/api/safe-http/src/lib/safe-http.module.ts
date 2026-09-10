@@ -7,7 +7,7 @@ import { SafeHttpService } from './safe-http.service';
 /**
  * Admin endpoints for the `SafeHttpPolicy` singleton. Read access is gated
  * by `read:safe_http_policy`, mutation by `manage:safe_http_policy`. Both
- * permissions are seeded by `prisma/seeds/roles-permissions.seed.ts`.
+ * permissions are seeded by `libs/database/src/lib/seeds/roles-permissions.seed.ts`.
  *
  * Imports:
  *   - `DatabaseModule` — Prisma client.

@@ -6,6 +6,7 @@ import { registerShutdownHandlers } from '@bge/otel';
 import { bootstrapLogger, otel } from './app/lib/logger';
 
 // Imports below this line are instrumented by the OTel auto-instrumentations.
+import { nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
 import { NestFactory } from '@nestjs/core';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { WorkerModule } from './app/worker.module';
@@ -16,6 +17,10 @@ async function bootstrap() {
   }
 
   bootstrapLogger.debug(`Bootstrapping BoardgamesEmpire worker in ${env.currentEnv} mode`);
+
+  // No migrator here: the worker checks that the schema matches its build and
+  // waits for the api to bring it up when it does not (#236).
+  await runBootstrap({ applicationName: 'worker', logger: nestLoggerFromPino(bootstrapLogger) });
 
   const app = await NestFactory.createApplicationContext(WorkerModule, {
     bufferLogs: true,

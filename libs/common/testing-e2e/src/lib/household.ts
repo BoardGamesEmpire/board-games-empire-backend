@@ -105,7 +105,7 @@ export async function createHouseholdWithMembers(
   if (missing.length > 0) {
     throw new Error(
       `Role(s) ${missing.join(', ')} are not in the roles table — the reference seed ` +
-        `(prisma/seeds/roles-permissions.seed.ts) did not run, or the isolation sweep stopped preserving it.`,
+        `(libs/database/src/lib/seeds/roles-permissions.seed.ts) did not run, or the isolation sweep stopped preserving it.`,
     );
   }
 

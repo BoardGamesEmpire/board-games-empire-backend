@@ -124,7 +124,7 @@ export class UserProvisioningService {
       if (roleId === undefined) {
         throw new Error(
           `Cannot provision user ${userId}: role '${name}' is missing from the catalog. ` +
-            `The roles seed (prisma/seeds/roles-permissions.seed.ts) has not run against this database.`,
+            `The roles seed (libs/database/src/lib/seeds/roles-permissions.seed.ts) has not run against this database.`,
         );
       }
 

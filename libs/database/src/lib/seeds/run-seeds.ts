@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@bge/database';
 import type { Logger } from '@nestjs/common';
+import type { PrismaClient } from '../client';
 import { gameLengthsSeed } from './game-lengths.seed';
 import { languagesSeed } from './languages.seed';
 import { platformsSeed } from './platforms.seed';
@@ -25,9 +25,9 @@ export const SEEDERS: readonly Seeder[] = [
 /**
  * Runs every seeder against the supplied client. Extracted from
  * `prisma/seed.ts` (#255) so callers other than the CLI wrapper can seed a
- * database in-process — and so #236's bootstrap orchestration can consume
- * this exact function for its reference-data phase rather than growing a
- * second seed path.
+ * database in-process, and moved into `@bge/database` (#236) so the
+ * boot sequence can import it: `@bge/bootstrap` calls this exact function for
+ * its seeds phase rather than growing a second seed path.
  *
  * Connection lifecycle belongs to the caller: this function neither
  * connects nor disconnects the client it is given.

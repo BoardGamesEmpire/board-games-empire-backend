@@ -46,7 +46,7 @@ the tags whose `LanguageTag.systemSupported` flag is `true`. Today that set is `
 ## Source of truth & integrity guard
 
 - The supported-locale set is seeded from `systemSupportedTags` in
-  `prisma/seeds/languages.seed.ts` (`['en']`, pending i18n expansion).
+  `libs/database/src/lib/seeds/languages.seed.ts` (`['en']`, pending i18n expansion).
 - `assertSystemSupportedTags` runs at seed time and throws unless every entry is a canonical
   BCP 47 tag **and** present in the curated vocabulary — catching typos (`en-us`, `english`)
   or un-curated tags that would otherwise silently yield zero supported locales.

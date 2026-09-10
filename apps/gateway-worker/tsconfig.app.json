@@ -28,6 +28,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/common/bootstrap/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/webhooks/tsconfig.lib.json"
     },
     {

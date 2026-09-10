@@ -13,6 +13,7 @@
       },
       "inputs": [
         "{workspaceRoot}/prisma/**/*.prisma",
+        "{workspaceRoot}/prisma/migrations/**/*.sql",
         "{workspaceRoot}/prisma.config.ts",
         "{workspaceRoot}/libs/scripts/src/bin/prisma-generate.js",
         "{workspaceRoot}/libs/scripts/src/prisma-generate/**/*.js",

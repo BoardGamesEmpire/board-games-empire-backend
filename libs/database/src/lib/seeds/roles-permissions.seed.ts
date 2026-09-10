@@ -1,6 +1,6 @@
-import type { PrismaClient } from '@bge/database';
-import { CATALOG_MANIFEST, reconcileCatalog } from '@bge/database';
 import type { Logger } from '@nestjs/common';
+import { CATALOG_MANIFEST, reconcileCatalog } from '../catalog';
+import type { PrismaClient } from '../client';
 
 /**
  * Reconciles the permission and role catalogs into the database.
@@ -12,10 +12,11 @@ import type { Logger } from '@nestjs/common';
  * alone with their drift logged, a `System` grant the manifest no longer lists
  * is revoked, and a `System` permission it no longer defines is retired.
  *
- * This file is the CLI's call into that. It runs under `tsx` with no Redis, so
- * it passes no invalidation port and the reconciler logs that cached ability
- * graphs were not touched; the in-process boot caller (#236) is the one that
- * passes `PermissionsService.invalidateUsers`.
+ * This is the one call into it, reached from `runSeeds` by the CLI and by the
+ * boot sequence alike. Neither passes an invalidation port yet, so the
+ * reconciler warns that cached ability graphs were not touched; the boot
+ * caller's cache flush is the next pull request of #236, which threads it
+ * through `runSeeds`.
  */
 export async function rolesAndPermissionsSeed(prisma: PrismaClient, logger: Logger) {
   logger.log('📋 Reconciling the permission catalog...');

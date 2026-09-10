@@ -14,6 +14,9 @@
       "path": "../../libs/queue/feedback"
     },
     {
+      "path": "../../libs/common/bootstrap"
+    },
+    {
       "path": "../../libs/common/testing-e2e"
     },
     {
