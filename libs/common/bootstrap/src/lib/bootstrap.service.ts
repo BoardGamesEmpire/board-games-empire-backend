@@ -3,6 +3,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PgAdvisoryLock } from './advisory-lock';
 import { BOOTSTRAP_OPTIONS, CACHE_FLUSH, type BootstrapModuleOptions } from './bootstrap-options';
+import { RegistryDataMigrations } from './data-migrations-phase';
 import { structuredLogMessage } from './nest-logger';
 import type { BootstrapLogger, CacheFlush } from './ports';
 import { PrismaSchemaLedger } from './prisma-ledger';
@@ -10,10 +11,11 @@ import { runBootstrapSequence, type BootstrapSummary } from './runner';
 import { RunSeedsSeeder } from './seeder';
 
 /**
- * Wires the real ports to the runner: the app's Prisma client for the ledger
- * and the seeds, a dedicated pg connection for the lock, the api-only migrator
- * from the module options, and the cache flush when the module was given a
- * cache. One `run()` per process boot.
+ * Wires the real ports to the runner: the app's Prisma client for the ledger,
+ * the seeds and the data migrations, a dedicated pg connection for the lock,
+ * the api-only migrator from the module options, and the cache flush when the
+ * module was given a cache, handed to both DML phases. One `run()` per
+ * process boot.
  */
 @Injectable()
 export class BootstrapService {
@@ -41,6 +43,7 @@ export class BootstrapService {
         ledger: new PrismaSchemaLedger(this.db),
         lock,
         seeder: new RunSeedsSeeder(this.db, { flush: this.cacheFlush }),
+        dataMigrations: new RegistryDataMigrations(this.db, { flush: this.cacheFlush }),
         migrator: this.options.migrator?.({ databaseUrl, logger }),
         logger,
         waitMs: this.options.waitMs,

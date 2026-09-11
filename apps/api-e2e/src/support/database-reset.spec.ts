@@ -1,7 +1,9 @@
 import {
   missingPreservedTables,
+  PRESERVED_MAY_BE_EMPTY_TABLE_NAMES,
   PRESERVED_TABLE_NAMES,
   quoteQualifiedTable,
+  tablesToAssertPopulated,
   tablesToTruncate,
   type TableRef,
 } from './database-reset';
@@ -28,7 +30,24 @@ describe('database-reset (pure logic)', () => {
     });
   });
 
+  describe('PRESERVED_MAY_BE_EMPTY_TABLE_NAMES', () => {
+    it('keeps the data-migration ledger out of the sweep without requiring it to hold a row', () => {
+      expect(PRESERVED_MAY_BE_EMPTY_TABLE_NAMES).toEqual(['data_migrations']);
+      expect(PRESERVED_TABLE_NAMES).not.toContain('data_migrations');
+    });
+  });
+
   describe('tablesToTruncate', () => {
+    it('leaves the data-migration ledger alone by default, as it does the schema ledger', () => {
+      const all: TableRef[] = [
+        table('public', 'data_migrations'),
+        table('public', '_prisma_migrations'),
+        table('public', 'users'),
+      ];
+
+      expect(tablesToTruncate(all)).toEqual([table('public', 'users')]);
+    });
+
     it('filters preserved tables and keeps everything else', () => {
       const all: TableRef[] = [
         table('public', 'users'),
@@ -60,10 +79,18 @@ describe('database-reset (pure logic)', () => {
   });
 
   describe('missingPreservedTables', () => {
-    it('returns empty when every preserved name exists', () => {
-      const all = PRESERVED_TABLE_NAMES.map((name) => table('public', name));
+    it('returns empty when every preserved name exists, the may-be-empty ones included', () => {
+      const all = [...PRESERVED_TABLE_NAMES, ...PRESERVED_MAY_BE_EMPTY_TABLE_NAMES].map((name) =>
+        table('public', name),
+      );
 
       expect(missingPreservedTables(all)).toEqual([]);
+    });
+
+    it('names a stale may-be-empty entry too: preserved by name, it drifts the same way', () => {
+      const all = PRESERVED_TABLE_NAMES.map((name) => table('public', name));
+
+      expect(missingPreservedTables(all)).toEqual(['data_migrations']);
     });
 
     it('names preserved entries absent from the schema — the stale-list signal', () => {
@@ -73,6 +100,19 @@ describe('database-reset (pure logic)', () => {
       const all = [table('public', 'roles'), table('public', 'users')];
 
       expect(missingPreservedTables(all, ['roles', 'system_settings'])).toEqual(['system_settings']);
+    });
+  });
+
+  describe('tablesToAssertPopulated', () => {
+    it('checks the seeded tables and the schema ledger for rows, not the data-migration ledger, which may be empty', () => {
+      const all: TableRef[] = [
+        table('public', 'roles'),
+        table('public', '_prisma_migrations'),
+        table('public', 'data_migrations'),
+        table('public', 'users'),
+      ];
+
+      expect(tablesToAssertPopulated(all)).toEqual([table('public', 'roles'), table('public', '_prisma_migrations')]);
     });
   });
 

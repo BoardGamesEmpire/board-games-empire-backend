@@ -7,9 +7,11 @@ export interface TableRef {
 }
 
 /**
- * Tables the between-test sweep must NOT touch: Prisma's migration ledger
- * plus every table populated by the reference/catalog seeds
- * (`libs/database/src/lib/seeds/run-seeds.ts`). Everything else is truncated.
+ * Tables the between-test sweep must NOT touch and must find populated:
+ * Prisma's migration ledger plus every table populated by the
+ * reference/catalog seeds (`libs/database/src/lib/seeds/run-seeds.ts`).
+ * Everything else, bar {@link PRESERVED_MAY_BE_EMPTY_TABLE_NAMES}, is
+ * truncated.
  *
  * Keep this list in lockstep with the seed set — a table seeded once per
  * run but truncated per test would fail every spec after the first.
@@ -27,7 +29,21 @@ export const PRESERVED_TABLE_NAMES: readonly string[] = [
   'system_settings',
 ];
 
-const PRESERVED = new Set(PRESERVED_TABLE_NAMES);
+/**
+ * Tables the sweep leaves alone without requiring a row in them: the
+ * data-migration ledger (#236). `data_migrations` is to the data what
+ * `_prisma_migrations` is to the schema, and the bootstrap e2e specs run the
+ * boot sequence against the harness database: were the ledger truncated
+ * between tests, every such boot would apply the shipped registry's entries
+ * again, over data they already shaped. The registry may be empty, so the
+ * table may be too, and {@link assertPreservedTablesIntact} does not check
+ * it. A spec that writes a ledger row removes it, as one does in
+ * `_prisma_migrations`.
+ */
+export const PRESERVED_MAY_BE_EMPTY_TABLE_NAMES: readonly string[] = ['data_migrations'];
+
+const PRESERVED = new Set([...PRESERVED_TABLE_NAMES, ...PRESERVED_MAY_BE_EMPTY_TABLE_NAMES]);
+const MUST_BE_POPULATED = new Set(PRESERVED_TABLE_NAMES);
 
 /**
  * `TRUNCATE` targets can't be bound as parameters, so identifiers are
@@ -52,16 +68,24 @@ export function tablesToTruncate(all: readonly TableRef[], preserved: ReadonlySe
   return all.filter((table) => !preserved.has(table.tablename));
 }
 
+/** Pure filter for {@link assertPreservedTablesIntact}: the preserved tables that must hold a row after the sweep. */
+export function tablesToAssertPopulated(
+  all: readonly TableRef[],
+  populated: ReadonlySet<string> = MUST_BE_POPULATED,
+): TableRef[] {
+  return all.filter((table) => populated.has(table.tablename));
+}
+
 /**
  * Pure staleness check, separated for unit testing: preserved names that do
- * not exist in the schema. `PRESERVED_TABLE_NAMES` protects tables by name,
- * so a rename in the schema silently strands the old name here while the
- * REAL table — no longer matched — gets truncated. Detecting the stranded
- * name is the only signal that the list has drifted.
+ * not exist in the schema. Both preserved lists protect tables by name, so a
+ * rename in the schema silently strands the old name here while the REAL
+ * table — no longer matched — gets truncated. Detecting the stranded name is
+ * the only signal that a list has drifted.
  */
 export function missingPreservedTables(
   all: readonly TableRef[],
-  preserved: readonly string[] = PRESERVED_TABLE_NAMES,
+  preserved: readonly string[] = [...PRESERVED_TABLE_NAMES, ...PRESERVED_MAY_BE_EMPTY_TABLE_NAMES],
 ): string[] {
   const existing = new Set(all.map((table) => table.tablename));
   return preserved.filter((name) => !existing.has(name));
@@ -81,9 +105,10 @@ async function listUserTables(db: PrismaClient, schema: string): Promise<TableRe
 
 /**
  * The between-test isolation sweep (#255): truncates every user table
- * except {@link PRESERVED_TABLE_NAMES} in a single
+ * except {@link PRESERVED_TABLE_NAMES} and
+ * {@link PRESERVED_MAY_BE_EMPTY_TABLE_NAMES} in a single
  * `TRUNCATE ... RESTART IDENTITY CASCADE` statement, then verifies the
- * preserved tables are still populated.
+ * seeded tables and the schema ledger are still populated.
  *
  * The verification exists because `CASCADE` follows foreign keys: today no
  * preserved table references a mutable one (verified against the schema at
@@ -103,9 +128,10 @@ export async function resetDatabase(db: PrismaClient, schema: string): Promise<v
   const missing = missingPreservedTables(all);
   if (missing.length > 0) {
     throw new Error(
-      `PRESERVED_TABLE_NAMES lists table(s) that do not exist in schema '${schema}': ${missing.join(', ')}. ` +
-        `The list has drifted from the schema (rename? moved seed?) — refusing to sweep, because the renamed ` +
-        `table would be truncated while this guard reported success.`,
+      `The preserved-table lists name table(s) that do not exist in schema '${schema}': ${missing.join(', ')}. ` +
+        `A list has drifted from the schema (rename? moved seed?) — refusing to sweep, because the renamed ` +
+        `table would be truncated while this guard reported success (see PRESERVED_TABLE_NAMES and ` +
+        `PRESERVED_MAY_BE_EMPTY_TABLE_NAMES).`,
     );
   }
 
@@ -121,10 +147,9 @@ export async function resetDatabase(db: PrismaClient, schema: string): Promise<v
 }
 
 export async function assertPreservedTablesIntact(db: PrismaClient, all: readonly TableRef[]): Promise<void> {
-  const present = all.filter((table) => PRESERVED.has(table.tablename));
   const empty: string[] = [];
 
-  for (const table of present) {
+  for (const table of tablesToAssertPopulated(all)) {
     const rows = await db.$queryRawUnsafe<Array<{ populated: boolean }>>(
       `SELECT EXISTS (SELECT 1 FROM ${quoteQualifiedTable(table)}) AS populated`,
     );

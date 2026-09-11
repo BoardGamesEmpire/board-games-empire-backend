@@ -1,0 +1,27 @@
+/// The ledger of one-time data migrations (#236): the backfills, remaps and
+/// corrective deltas a declarative manifest cannot express. The entries live
+/// in code, `DATA_MIGRATIONS` in `@bge/database`, and the api's boot sequence
+/// applies each pending one once, under the bootstrap lock, writing its row
+/// here in the same transaction as the entry's own writes. Prisma's
+/// `_prisma_migrations` is the schema half of the same idea; this is the data
+/// half, and the two are read together at boot and by `npm run db:plan`.
+model DataMigration {
+  id String @id @default(cuid(2))
+
+  /// Timestamp-prefixed like a Prisma migration (`20260910000000_remap_owner_grants`);
+  /// lexical order is apply order.
+  name String @unique
+
+  /// The author's revision of the entry's code at the time it ran. An entry
+  /// whose code changes after it has been applied somewhere must bump this,
+  /// and a build whose revision is above the row's then refuses boot rather
+  /// than re-running or ignoring the edit: a one-time migration is fixed
+  /// forward with a new entry. A build below the row's revision is a rollback
+  /// across that edit; it warns and boots, and the newer build owns the data.
+  revision Int
+
+  appliedAt  DateTime @default(now()) @map("applied_at") @db.Timestamptz(3)
+  durationMs Int      @map("duration_ms")
+
+  @@map("data_migrations")
+}

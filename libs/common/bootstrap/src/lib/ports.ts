@@ -77,8 +77,32 @@ export interface SeedsPhase {
 }
 
 /**
+ * What the data-migrations phase reports back and the boot summary carries
+ * (#236): the entries applied, in order; the ledger rows this build's registry
+ * does not know, left alone as unknown schema migrations are; and whether the
+ * cache flush ran after the entries applied.
+ */
+export interface DataMigrationsSummary {
+  readonly applied: readonly string[];
+  readonly unknown: readonly string[];
+  readonly cachesFlushed: boolean;
+}
+
+/**
+ * The data-migrations phase (#236): the registry's entries the `data_migrations`
+ * ledger does not record, applied once each in name order after the seeds, so
+ * an entry may rely on the reference data and catalog of its own build. An
+ * entry edited after it ran, or one that fails, rejects, and the boot is
+ * refused; one the ledger holds at a newer build's revision is warned about
+ * and left alone, as an unknown row is.
+ */
+export interface DataMigrationsPhase {
+  run(): Promise<DataMigrationsSummary>;
+}
+
+/**
  * Removes every cached ability graph and API-key scope graph after a reconcile
- * that wrote rows (#236). Only the api build has one, passed by its entrypoint
+ * that wrote rows, or a data migration that applied (#236). Only the api build has one, passed by its entrypoint
  * like the migrator; a boot without it leaves the caches to their TTL and the
  * reconcile says so. `flush` resolves to how many keys went and rejects with a
  * {@link CacheFlushError} when it cannot finish; `close` hands the connection

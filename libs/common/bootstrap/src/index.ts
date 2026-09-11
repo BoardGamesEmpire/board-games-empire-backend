@@ -2,6 +2,7 @@ export * from './lib/advisory-lock';
 export * from './lib/bootstrap-options';
 export * from './lib/bootstrap.module';
 export * from './lib/bootstrap.service';
+export * from './lib/data-migrations-phase';
 export * from './lib/nest-logger';
 export * from './lib/ports';
 export * from './lib/prisma-cli-migrator';
