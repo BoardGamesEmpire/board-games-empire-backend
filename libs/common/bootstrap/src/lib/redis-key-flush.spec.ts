@@ -7,7 +7,7 @@ import { RedisKeyFlush } from './redis-key-flush';
 // it cannot finish; and how it hands the connection back. That the keys really
 // go from a Valkey is apps/api-e2e/src/bootstrap/cache-flush.spec.ts.
 
-function fakeClient(batches: Record<string, string[][] | Error>, status = 'ready') {
+function fakeClient(batches: Record<string, string[][] | Error>) {
   const scans: { match: string; count?: number }[] = [];
   const unlinked: string[][] = [];
   const closed: string[] = [];
@@ -15,7 +15,6 @@ function fakeClient(batches: Record<string, string[][] | Error>, status = 'ready
     scans,
     unlinked,
     closed,
-    status,
     scanStream(options: { match: string; count?: number }): AsyncIterable<string[]> {
       scans.push(options);
       const pages = batches[options.match] ?? [];
@@ -34,10 +33,6 @@ function fakeClient(batches: Record<string, string[][] | Error>, status = 'ready
     async unlink(...keys: string[]): Promise<number> {
       unlinked.push(keys);
       return keys.length;
-    },
-    async quit(): Promise<'OK'> {
-      closed.push('quit');
-      return 'OK';
     },
     disconnect(): void {
       closed.push('disconnect');
@@ -91,13 +86,21 @@ describe('RedisKeyFlush', () => {
     await expect(flush).rejects.toThrow(/after removing 3 key\(s\): Connection is closed\./);
   });
 
-  it('close() drops a client that never connected without a round trip, and quits one that did', async () => {
-    const lazy = fakeClient({}, 'wait');
-    await new RedisKeyFlush(lazy, [USERS]).close();
-    expect(lazy.closed).toEqual(['disconnect']);
+  it('close() drops the connection without a round trip, after a flush that finished and after one that failed alike', async () => {
+    const unused = fakeClient({});
+    await new RedisKeyFlush(unused, [USERS]).close();
+    expect(unused.closed).toEqual(['disconnect']);
 
-    const used = fakeClient({}, 'ready');
-    await new RedisKeyFlush(used, [USERS]).close();
-    expect(used.closed).toEqual(['quit']);
+    const finished = fakeClient({ [USERS]: [['api:cache:bge:user:permissions:u1']] });
+    const flush = new RedisKeyFlush(finished, [USERS]);
+    await flush.flush();
+    await flush.close();
+    expect(finished.closed).toEqual(['disconnect']);
+
+    const failed = fakeClient({ [USERS]: new Error('Reached the max retries per request limit (which is 3).') });
+    const failing = new RedisKeyFlush(failed, [USERS]);
+    await expect(failing.flush()).rejects.toBeInstanceOf(CacheFlushError);
+    await expect(failing.close()).resolves.toBeUndefined();
+    expect(failed.closed).toEqual(['disconnect']);
   });
 });

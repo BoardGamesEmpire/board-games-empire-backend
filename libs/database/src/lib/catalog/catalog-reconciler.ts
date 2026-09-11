@@ -93,8 +93,8 @@ export class CatalogReconcileShortWriteError extends Error {
   ) {
     super(
       `Catalog reconcile rolled back: ${statement} wrote ${written} of ${planned} planned row(s), so a row changed ` +
-        'under the plan between the snapshot and the write. Nothing was committed; run `npm run db:plan` to see the ' +
-        'row, then boot or seed again.',
+        'under the plan between the snapshot and the write. Nothing was committed; boot or seed again, which plans ' +
+        'afresh from what is there now. `npm run db:plan` shows what that next reconcile would write.',
     );
     this.name = 'CatalogReconcileShortWriteError';
   }

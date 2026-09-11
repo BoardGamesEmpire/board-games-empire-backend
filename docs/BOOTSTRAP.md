@@ -40,7 +40,7 @@ If a boot is killed mid-migration, Prisma has applied each completed migration i
 
 ## Development
 
-The npm scripts are unchanged and remain the way to work with the schema day to day:
+The npm scripts remain the way to work with the schema day to day. `db:plan` is new with the boot sequence; the others behave as before:
 
 | Script                             | Does                                                                                                                                      |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |

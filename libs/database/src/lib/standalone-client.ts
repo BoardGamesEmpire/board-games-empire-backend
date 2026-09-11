@@ -27,8 +27,13 @@ export function openStandaloneClient(databaseUrl: string): StandaloneClient {
     prisma,
     schema,
     close: async (): Promise<void> => {
-      await prisma.$disconnect();
-      await pool.end();
+      // The pool is ours whatever Prisma's disconnect does; a CLI that kept it
+      // open on the error path would hang at exit instead of reporting the error.
+      try {
+        await prisma.$disconnect();
+      } finally {
+        await pool.end();
+      }
     },
   };
 }

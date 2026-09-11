@@ -2,11 +2,8 @@ import { CacheFlushError, type CacheFlush } from './ports';
 
 /** What the flush needs of a client; iovalkey's `Redis` satisfies it. */
 export interface FlushClient {
-  /** `wait` until the first command on a lazily connecting client; `end` or `close` once closed. */
-  readonly status: string;
   scanStream(options: { match: string; count?: number }): AsyncIterable<string[]>;
   unlink(...keys: string[]): Promise<number>;
-  quit(): Promise<unknown>;
   disconnect(): void;
 }
 
@@ -48,12 +45,16 @@ export class RedisKeyFlush implements CacheFlush {
     return removed;
   }
 
-  /** A client that never connected is dropped without a round trip; one that did is quit so in-flight commands finish. */
+  /**
+   * Closes the socket without a round trip. `flush` awaits every command it
+   * sends, so by the time the sequence closes the flush nothing is in flight
+   * and a QUIT would buy nothing; what it could do is wait. After a flush the
+   * outage failed, the client is reconnecting, and a QUIT queued behind that
+   * is rejected when the retries run out, which would turn a tolerated outage
+   * into a boot failure in the sequence's `finally`. Dropping the socket never
+   * waits on Redis and never rejects.
+   */
   async close(): Promise<void> {
-    if (this.client.status === 'wait' || this.client.status === 'end' || this.client.status === 'close') {
-      this.client.disconnect();
-      return;
-    }
-    await this.client.quit();
+    this.client.disconnect();
   }
 }
