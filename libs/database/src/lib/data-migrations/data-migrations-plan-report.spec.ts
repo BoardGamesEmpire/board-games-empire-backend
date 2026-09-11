@@ -65,21 +65,23 @@ describe('describeDataMigrationsReport', () => {
     expect(report.lines).toContain('  20260905000000_from_a_newer_build');
   });
 
-  it('says the ledger table is missing when the plan could not be read, and counts every entry as pending', () => {
+  it('says the boot would refuse when the ledger table is missing though the schema is current, and exits 2', () => {
     const report = describeMissingLedgerReport([entry('20260901000000_first_backfill')]);
 
-    expect(report.exitCode).toBe(1);
+    expect(report.exitCode).toBe(2);
+    expect(report.lines[0]).toMatch(/would REFUSE to boot/);
     expect(report.lines[0]).toMatch(/data_migrations.*does not exist/);
-    expect(report.lines[0]).toMatch(/npm run db:migrate/);
+    expect(report.lines[0]).toMatch(/dropped|marked applied/);
+    expect(report.lines).toContain('  20260901000000_first_backfill');
     expect(report.lines.at(-1)).toBe(
-      'Data migrations: the ledger table is missing; 1 pending once the schema is migrated.',
+      'Data migrations: the boot would refuse; the ledger table is missing, 1 pending once it exists.',
     );
   });
 
-  it('still exits 1 over a missing ledger table when the registry is empty: the schema is behind', () => {
+  it('still exits 2 over a missing ledger table when the registry is empty: the table is part of the schema', () => {
     const report = describeMissingLedgerReport([]);
 
-    expect(report.exitCode).toBe(1);
-    expect(report.lines.at(-1)).toBe('Data migrations: the ledger table is missing; the schema is behind.');
+    expect(report.exitCode).toBe(2);
+    expect(report.lines.at(-1)).toBe('Data migrations: the boot would refuse; the ledger table is missing.');
   });
 });

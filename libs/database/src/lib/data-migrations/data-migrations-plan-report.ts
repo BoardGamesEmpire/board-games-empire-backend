@@ -43,30 +43,32 @@ export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanRepo
 }
 
 /**
- * The same half when the ledger table is not there, a schema behind this
- * build: every registered entry is pending, and the report says which command
- * creates the table. Exits 1 whatever the registry holds: a database without
- * the table is not converged with this build, and a reading that says the
- * schema is behind must not exit as if nothing were pending. The registry goes
- * through the same guard a plan does.
+ * The same half when the ledger table is not there. The CLI plans nothing
+ * over a schema that is behind, so this is reached only when
+ * `_prisma_migrations` records the migration that creates the table and the
+ * table is nonetheless gone: dropped by hand, or that migration marked
+ * applied without running. The boot's data-migrations phase throws over that,
+ * so the report is a refusal and exits 2 whatever the registry holds. The
+ * registry goes through the same guard a plan does.
  */
 export function describeMissingLedgerReport(entries: readonly DataMigrationEntry[]): PlanReport {
   assertDataMigrationRegistry(entries);
   const names = entries.map((entry) => entry.name).sort();
   const lines = [
-    'The ledger table `data_migrations` does not exist yet: the schema is behind this build, and every registered ' +
-      'data migration is pending until `npm run db:migrate` creates it.',
+    'The next api boot would REFUSE to boot: the ledger table `data_migrations` does not exist, though the schema ' +
+      'ledger records the migration that creates it. The table was dropped, or that migration was marked applied ' +
+      'without running; restore it, or mark the migration rolled back and run `npm run db:migrate` again.',
   ];
   if (names.length > 0) {
-    lines.push('Pending, in the order the next api boot would apply them:', ...names.map(indent));
+    lines.push('Once it exists, the boot would apply, in this order:', ...names.map(indent));
   }
   lines.push(
     '',
     names.length > 0
-      ? `Data migrations: the ledger table is missing; ${names.length} pending once the schema is migrated.`
-      : 'Data migrations: the ledger table is missing; the schema is behind.',
+      ? `Data migrations: the boot would refuse; the ledger table is missing, ${names.length} pending once it exists.`
+      : 'Data migrations: the boot would refuse; the ledger table is missing.',
   );
-  return { lines, exitCode: 1 };
+  return { lines, exitCode: 2 };
 }
 
 function closingLine(pending: number, applied: number, refusing: boolean): string {

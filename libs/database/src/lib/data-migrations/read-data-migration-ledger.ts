@@ -3,12 +3,13 @@ import { Prisma, type PrismaClient } from '../client';
 import type { DataMigrationLedgerRow } from './data-migration-entry';
 
 /**
- * The ledger's rows, or `undefined` when the table itself is not there: a
- * database whose schema is behind this build. `npm run db:plan` runs over
- * whatever schema it finds and reports that as a reading; the boot reads the
- * ledger only once the schema is in sync, where the table's absence is an
- * error. Every other failure surfaces, as `readAppliedMigrations` does for
- * the schema ledger: a broken table is not an absent one.
+ * The ledger's rows, or `undefined` when the table itself is not there. Both
+ * readers reach this only once `_prisma_migrations` says the schema is
+ * current (the boot, and `npm run db:plan`, which plans nothing over a schema
+ * that is behind), so an absent table is a dropped one, or a migration marked
+ * applied without running: the boot refuses, and the plan says it would.
+ * Every other failure surfaces, as `readAppliedMigrations` does for the
+ * schema ledger: a broken table is not an absent one.
  */
 export async function readDataMigrationLedger(
   client: Pick<PrismaClient, 'dataMigration'>,

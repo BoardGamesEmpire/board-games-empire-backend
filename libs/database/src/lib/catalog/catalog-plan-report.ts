@@ -15,8 +15,8 @@ export const indent = (line: string): string => `  ${line}`;
  * A refusal leads: the summary and the write lines are what a reconcile would
  * do, and when a plugin owns a row the manifest claims it does none of it, so
  * saying "would do this" first would mislead a reader who stops at the summary.
- * The CLI prints this, then the data migrations' report, then the one line
- * pointing at `prisma migrate status` for the schema.
+ * The CLI prints the schema's report first, then this, then the data
+ * migrations' report.
  */
 export function describePlanReport(plan: ReconcilePlan): PlanReport {
   const conflicts = describeConflicts(plan);
