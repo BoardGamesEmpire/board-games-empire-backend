@@ -224,6 +224,52 @@ describe('the boot sequence against Postgres', () => {
       expect(await bootstrapLocks(db, true)).toBe(0);
     });
 
+    it("warns and boots over a data migration the ledger holds at a revision above this build's, a rollback, leaving the entry alone", async () => {
+      const name = '20260901000000_e2e_bootstrap_rollback';
+      await db.client.dataMigration.create({ data: { name, revision: 2, durationMs: 0 } });
+      const warnings: string[] = [];
+      const seedLogger = {
+        log: () => undefined,
+        debug: () => undefined,
+        error: () => undefined,
+        warn: (message: unknown) => void warnings.push(String(message)),
+      } as unknown as Logger;
+      const lock = lockOn(requireDatabaseUrl(), 'revision-rollback');
+      const dataMigrations = new RegistryDataMigrations(db.client, {
+        logger: seedLogger,
+        entries: [
+          {
+            name,
+            revision: 1,
+            run: async () => {
+              throw new Error('a rollback must not run the entry again');
+            },
+          },
+        ],
+      });
+
+      try {
+        const summary = await runBootstrapSequence({
+          expected: MIGRATION_NAMES,
+          ledger: new PrismaSchemaLedger(db.client),
+          lock,
+          seeder: new CountingSeeder(),
+          dataMigrations,
+          migrator: new CountingMigrator(),
+          logger: silent,
+        });
+
+        expect(summary.dataMigrations).toEqual({ applied: [], unknown: [], cachesFlushed: false });
+        expect(warnings.some((line) => line.includes(name) && /above this build/.test(line))).toBe(true);
+        expect(await db.client.dataMigration.findUniqueOrThrow({ where: { name } })).toMatchObject({ revision: 2 });
+      } finally {
+        await lock.close();
+        await db.client.dataMigration.deleteMany({ where: { name } });
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
     it('queues a second boot behind the advisory lock as a real blocked waiter, names the holder, and proceeds once it is released', async () => {
       await withBarrier(async (barrier) => {
         await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);

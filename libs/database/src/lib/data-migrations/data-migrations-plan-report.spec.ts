@@ -1,5 +1,9 @@
 import type { DataMigrationEntry } from './data-migration-entry';
-import { describeDataMigrationsReport, describeMissingLedgerReport } from './data-migrations-plan-report';
+import {
+  describeDataMigrationsReport,
+  describeMissingLedgerReport,
+  describeSkippedDataMigrationsReport,
+} from './data-migrations-plan-report';
 import type { DataMigrationsPlan } from './plan-data-migrations';
 
 // The ledger half of what `npm run db:plan` prints and how it exits, over
@@ -9,7 +13,8 @@ const entry = (name: string): DataMigrationEntry => ({ name, revision: 1, run: a
 const plan = (overrides: Partial<DataMigrationsPlan> = {}): DataMigrationsPlan => ({
   pending: [],
   applied: [],
-  mismatched: [],
+  edited: [],
+  ahead: [],
   unknown: [],
   ...overrides,
 });
@@ -41,20 +46,35 @@ describe('describeDataMigrationsReport', () => {
     expect(report.lines).toContain('Data migrations: 2 pending.');
   });
 
-  it('leads with the refusal when an applied entry has changed revision, and exits 2', () => {
+  it("leads with the refusal when an applied entry is at a revision above the ledger's in this build, and exits 2", () => {
     const report = describeDataMigrationsReport(
       plan({
-        mismatched: [{ name: '20260901000000_first_backfill', codeRevision: 2, ledgerRevision: 1 }],
+        edited: [{ name: '20260901000000_first_backfill', codeRevision: 2, ledgerRevision: 1 }],
         pending: [entry('20260902000000_second_remap')],
       }),
     );
 
     expect(report.exitCode).toBe(2);
     expect(report.lines[0]).toMatch(/would REFUSE to boot/);
+    expect(report.lines[0]).toMatch(/edited after/);
     expect(report.lines[1]).toContain(
       "'20260901000000_first_backfill' is at revision 2 in this build and revision 1 in the ledger",
     );
     expect(report.lines).toContain('Data migrations: the boot would refuse.');
+  });
+
+  it("names entries the ledger holds at a revision above this build's, left to the newer build, without changing the exit code", () => {
+    const report = describeDataMigrationsReport(
+      plan({ ahead: [{ name: '20260901000000_first_backfill', codeRevision: 1, ledgerRevision: 2 }] }),
+    );
+
+    expect(report.exitCode).toBe(0);
+    expect(report.lines.some((line) => /above this build/.test(line))).toBe(true);
+    expect(report.lines).toContain(
+      "  '20260901000000_first_backfill' is at revision 1 in this build and revision 2 in the ledger",
+    );
+    expect(report.lines.some((line) => /REFUSE/.test(line))).toBe(false);
+    expect(report.lines).toContain('Data migrations: none pending.');
   });
 
   it('names rows the registry does not know without changing the exit code', () => {
@@ -63,6 +83,15 @@ describe('describeDataMigrationsReport', () => {
     expect(report.exitCode).toBe(0);
     expect(report.lines.some((line) => /registry does not know/.test(line))).toBe(true);
     expect(report.lines).toContain('  20260905000000_from_a_newer_build');
+  });
+
+  it('says the data migrations are not planned over a database ahead of this build, in one line, and exits 0', () => {
+    const report = describeSkippedDataMigrationsReport();
+
+    expect(report.exitCode).toBe(0);
+    expect(report.lines).toHaveLength(1);
+    expect(report.lines[0]).toMatch(/^Data migrations: not planned; .*ahead of this build/);
+    expect(report.lines[0]).not.toMatch(/REFUSE|would apply/);
   });
 
   it('says the boot would refuse when the ledger table is missing though the schema is current, and exits 2', () => {

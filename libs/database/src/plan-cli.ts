@@ -8,6 +8,7 @@ import {
   DATA_MIGRATIONS,
   describeDataMigrationsReport,
   describeMissingLedgerReport,
+  describeSkippedDataMigrationsReport,
   planDataMigrations,
   readDataMigrationLedger,
 } from './lib/data-migrations';
@@ -22,19 +23,21 @@ import { classifyMigrationState, describeSchemaReport, MIGRATION_NAMES, readAppl
  * whole boot: the api would apply the migrations before any seed, or refuse,
  * and a plan of the catalog over the tables as they stand would describe
  * writes against columns about to change, or fail on ones not yet created.
- * Otherwise the two DML halves follow, both read from the live tables: the
- * catalog reconcile, planned by the same planner a boot and `db:seed` apply,
- * and the data migrations, this build's registry against the `data_migrations`
- * ledger. Over a database ahead of this build both are printed as `db:seed`'s
- * preview, but the boot skips them, so they do not decide the exit code.
- * Nothing here takes the bootstrap lock, so the answer is a reading, not a
- * promise. Exits 0 when the boot would write nothing, 1 when it would
- * (migrations, catalog rows or data migrations), 2 when it would refuse (a
- * half-applied migration, a plugin-owned row the manifest claims, an applied
- * data migration at another revision, the ledger table gone), and 3 when no
- * plan could be made, the database being unreadable or the registry
- * malformed, with the error on stderr, so a drift check never mistakes an
- * outage for drift. Runs on the same client as `seed-cli.ts`.
+ * Otherwise the catalog reconcile follows, planned from the live tables by the
+ * same planner a boot and `db:seed` apply, and then the data migrations, this
+ * build's registry against the `data_migrations` ledger. Over a database ahead
+ * of this build the boot skips both, so neither decides the exit code: the
+ * catalog is still planned, as `db:seed`'s preview, and the data migrations
+ * are not, since no CLI applies them and this build's registry is not the one
+ * a newer build's ledger answers to. Nothing here takes the bootstrap lock, so
+ * the answer is a reading, not a promise. Exits 0 when the boot would write
+ * nothing, 1 when it would (migrations, catalog rows or data migrations), 2
+ * when it would refuse (a half-applied migration, a plugin-owned row the
+ * manifest claims, an applied data migration at a revision above the ledger's
+ * in this build, the ledger table gone), and 3 when no plan could be made, the
+ * database being unreadable or the registry malformed, with the error on
+ * stderr, so a drift check never mistakes an outage for drift. Runs on the
+ * same client as `seed-cli.ts`.
  */
 async function main(): Promise<number> {
   const client = openCliClient();
@@ -53,22 +56,27 @@ async function main(): Promise<number> {
     const catalog = await client.prisma.$transaction(async (tx) =>
       planReconcile(CATALOG_MANIFEST, await loadCatalogSnapshot(tx)),
     );
+    const catalogReport = describePlanReport(catalog);
+    print(['', ...catalogReport.lines]);
+
+    if (schema.kind === 'ahead') {
+      // The boot runs neither DML phase over an ahead database: the catalog
+      // plan above is `db:seed`'s, the data migrations are nobody's to run
+      // from this build, and the schema's code is the boot's.
+      print(['', ...describeSkippedDataMigrationsReport().lines]);
+      return schemaReport.exitCode;
+    }
+
     // Outside the transaction: a missing ledger table aborts a Postgres
     // transaction, and the reader turns that one error into a reading.
     const ledger = await readDataMigrationLedger(client.prisma);
-
-    const catalogReport = describePlanReport(catalog);
     const ledgerReport =
       ledger === undefined
         ? describeMissingLedgerReport(DATA_MIGRATIONS)
         : describeDataMigrationsReport(planDataMigrations(DATA_MIGRATIONS, ledger));
-    print(['', ...catalogReport.lines, '', ...ledgerReport.lines]);
+    print(['', ...ledgerReport.lines]);
 
-    // Over an ahead database the boot runs neither DML phase: the plans above
-    // are `db:seed`'s, and the schema's code is the boot's.
-    return schema.kind === 'ahead'
-      ? schemaReport.exitCode
-      : Math.max(schemaReport.exitCode, catalogReport.exitCode, ledgerReport.exitCode);
+    return Math.max(schemaReport.exitCode, catalogReport.exitCode, ledgerReport.exitCode);
   } finally {
     // The plan is printed and its code decided; a connection that fails to
     // close afterwards is reported, not mistaken for an unreadable database.

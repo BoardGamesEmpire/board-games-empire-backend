@@ -12,8 +12,9 @@ import type { MigrationState } from './migration-state';
  * alone: the api would apply the migrations before any seed, or refuse, and
  * a plan of the catalog over the tables as they stand would describe writes
  * against columns about to change, or fail on ones not yet created. Over
- * `ahead` the CLI goes on to plan both DML halves as `db:seed`'s preview,
- * but the boot skips them, so this report's code is the exit code.
+ * `ahead` the CLI goes on to plan the catalog as `db:seed`'s preview and says
+ * the data migrations are not planned; the boot skips both, so this report's
+ * code is the exit code.
  */
 export function describeSchemaReport(state: MigrationState): PlanReport {
   switch (state.kind) {
@@ -57,8 +58,8 @@ function aheadLines({ unknown }: MigrationState): string[] {
     ...unknown.map(indent),
     '',
     'The next api boot would warn and boot, skipping the seeds and the data migrations: the newer build owns the ' +
-      'data. What follows is what `npm run db:seed` would write; the boot would write none of it, so it does not ' +
-      'count toward the exit code.',
+      'data. The catalog plan that follows is what `npm run db:seed` would write; the boot would write none of it, ' +
+      'so it does not count toward the exit code.',
     '',
     `Schema: ahead by ${unknown.length} migration(s); the boot skips the seeds and the data migrations.`,
   ];

@@ -16,8 +16,8 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
  * the entry in package.json is what is tested, with the database chosen
  * through the child's environment. Stderr is not asserted empty: npm, Node
  * and the loader write notices there that say nothing about the CLI. The rows
- * a test adds to `_prisma_migrations`, a table the between-test sweep
- * preserves, are removed here.
+ * a test adds to `_prisma_migrations` and `data_migrations`, tables the
+ * between-test sweep preserves, are removed here.
  */
 
 /** apps/api-e2e/src/database → workspace root; where package.json and the CLI live. */
@@ -113,7 +113,7 @@ describe('db:plan against Postgres', () => {
     expect(await db.client.dataMigration.count({ where: { name: UNKNOWN_ROW } })).toBe(1);
   });
 
-  it('plans the catalog over a database that is ahead, as db:seed would write it, and exits 0 since the boot skips it', async () => {
+  it('plans the catalog over a database that is ahead, as db:seed would write it, leaves the data migrations unplanned, and exits 0 since the boot skips both', async () => {
     await insertMigrationRow(UNKNOWN_MIGRATION, true);
     await db.client.rolePermission.deleteMany(readGameGrant);
 
@@ -125,6 +125,14 @@ describe('db:plan against Postgres', () => {
     expect(result.stdout).toContain(
       'Schema: ahead by 1 migration(s); the boot skips the seeds and the data migrations.',
     );
+    // The boot's data-migrations phase does not run over an ahead database
+    // and no CLI applies them, so a plan of them here would be a plan of
+    // nothing anyone runs, and its wording ("the next api boot would …")
+    // would be false.
+    expect(result.stdout).toContain(
+      'Data migrations: not planned; the boot skips them over a database ahead of this build, and no CLI applies them, so there is nothing to preview.',
+    );
+    expect(result.stdout).not.toContain('Data migrations: none pending.');
     expect(await db.client.rolePermission.count(readGameGrant)).toBe(0);
   });
 

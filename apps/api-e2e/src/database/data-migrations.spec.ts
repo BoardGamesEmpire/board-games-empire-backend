@@ -8,10 +8,10 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * being empty. The decision table is unit-tested over fakes in `@bge/database`;
  * what only Postgres shows is that an entry's writes and its ledger row are
  * one transaction, and that a second run honours the rows the first wrote.
- * DB-only on the harness database. `data_migrations` is deliberately not a
- * preserved table (an empty preserved table fails the sweep's intact check),
- * and the rows each test writes, like the probe table an entry creates, are
- * removed here rather than left to the between-test sweep.
+ * DB-only on the harness database. `data_migrations` is a table the
+ * between-test sweep preserves, as it does `_prisma_migrations`, so the rows
+ * each test writes are removed here; so is the probe table an entry creates,
+ * which the sweep would truncate but not drop.
  */
 
 const silent = {

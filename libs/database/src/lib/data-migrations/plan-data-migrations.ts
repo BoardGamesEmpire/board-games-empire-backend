@@ -1,13 +1,13 @@
 import type { DataMigrationEntry, DataMigrationLedgerRow } from './data-migration-entry';
 
-/** An applied entry the ledger and the build hold at different revisions: edited after it ran, or a rollback across such an edit. */
+/** An applied entry the ledger and the build hold at different revisions; which side is higher says what happened. */
 export interface RevisionMismatch {
   readonly name: string;
   readonly codeRevision: number;
   readonly ledgerRevision: number;
 }
 
-/** One mismatch, worded the same in the refusal and in `db:plan`. */
+/** One mismatch, worded the same in the refusal, the warning and `db:plan`. */
 export function describeMismatch({ name, codeRevision, ledgerRevision }: RevisionMismatch): string {
   return `'${name}' is at revision ${codeRevision} in this build and revision ${ledgerRevision} in the ledger`;
 }
@@ -17,8 +17,19 @@ export interface DataMigrationsPlan {
   readonly pending: readonly DataMigrationEntry[];
   /** Registry entries the ledger records at the same revision. */
   readonly applied: readonly string[];
-  /** Registry entries the ledger records at another revision; any one of them refuses boot. */
-  readonly mismatched: readonly RevisionMismatch[];
+  /**
+   * Registry entries at a revision above the ledger's in this build. The
+   * ledger's revision is the one that ran, so the entry was edited after it
+   * ran, without a new entry; any one of them refuses boot.
+   */
+  readonly edited: readonly RevisionMismatch[];
+  /**
+   * Registry entries the ledger records at a revision above this build's: a
+   * newer build ran them, and this build is a rollback across that edit. Left
+   * alone, as unknown rows and an ahead schema are; the newer build owns the
+   * data.
+   */
+  readonly ahead: readonly RevisionMismatch[];
   /** Ledger rows the registry does not know: a newer build applied them, or an entry was removed. */
   readonly unknown: readonly string[];
 }
@@ -53,7 +64,8 @@ export function planDataMigrations(
 
   const pending: DataMigrationEntry[] = [];
   const applied: string[] = [];
-  const mismatched: RevisionMismatch[] = [];
+  const edited: RevisionMismatch[] = [];
+  const ahead: RevisionMismatch[] = [];
 
   for (const entry of ordered) {
     const ledgerRevision = ledger.get(entry.name);
@@ -61,8 +73,10 @@ export function planDataMigrations(
       pending.push(entry);
     } else if (ledgerRevision === entry.revision) {
       applied.push(entry.name);
+    } else if (entry.revision > ledgerRevision) {
+      edited.push({ name: entry.name, codeRevision: entry.revision, ledgerRevision });
     } else {
-      mismatched.push({ name: entry.name, codeRevision: entry.revision, ledgerRevision });
+      ahead.push({ name: entry.name, codeRevision: entry.revision, ledgerRevision });
     }
   }
 
@@ -71,7 +85,7 @@ export function planDataMigrations(
     .filter((name) => !known.has(name))
     .sort();
 
-  return { pending, applied, mismatched, unknown };
+  return { pending, applied, edited, ahead, unknown };
 }
 
 /**

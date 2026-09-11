@@ -25,7 +25,9 @@ export interface DataMigrationEntry {
    * A database that applied an earlier revision then refuses to boot: the
    * edit cannot be applied again there, and pretending it was never made
    * would leave two databases in different states under one name. Fix
-   * forward with a new entry instead, and restore the revision.
+   * forward with a new entry instead, and restore the revision. A database
+   * that applied a later revision is one a newer build ran: a rollback warns
+   * and boots, and the newer build owns the data.
    */
   readonly revision: number;
   run(tx: Prisma.TransactionClient, logger: Logger): Promise<void>;

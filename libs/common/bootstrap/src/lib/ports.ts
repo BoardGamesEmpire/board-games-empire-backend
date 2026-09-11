@@ -91,8 +91,10 @@ export interface DataMigrationsSummary {
 /**
  * The data-migrations phase (#236): the registry's entries the `data_migrations`
  * ledger does not record, applied once each in name order after the seeds, so
- * an entry may rely on the reference data and catalog of its own build. A
- * revision mismatch or an entry that fails rejects, and the boot is refused.
+ * an entry may rely on the reference data and catalog of its own build. An
+ * entry edited after it ran, or one that fails, rejects, and the boot is
+ * refused; one the ledger holds at a newer build's revision is warned about
+ * and left alone, as an unknown row is.
  */
 export interface DataMigrationsPhase {
   run(): Promise<DataMigrationsSummary>;

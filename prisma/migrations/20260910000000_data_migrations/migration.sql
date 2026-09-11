@@ -5,9 +5,11 @@
 -- trace. The api's boot sequence applies each entry of the registry in
 -- `@bge/database` (`DATA_MIGRATIONS`) exactly once, under the bootstrap lock,
 -- and writes its row here in the same transaction as the entry's own writes;
--- an applied entry whose code revision no longer matches its row refuses the
--- boot. The registry ships empty: the table exists so that the first backfill
--- has a ledger the day it is written, not the day after it was needed.
+-- an applied entry whose code revision is above its row's refuses the boot,
+-- having been edited after it ran, while one below its row's, a rollback, is
+-- left to the newer build. The registry ships empty: the table exists so that
+-- the first backfill has a ledger the day it is written, not the day after it
+-- was needed.
 
 -- CreateTable
 CREATE TABLE "data_migrations" (

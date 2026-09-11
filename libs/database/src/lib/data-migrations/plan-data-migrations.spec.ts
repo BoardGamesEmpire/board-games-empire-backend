@@ -15,7 +15,7 @@ const THIRD = '20260903000000_third_sweep';
 
 describe('planDataMigrations', () => {
   it('has nothing to say over an empty registry and an empty ledger', () => {
-    expect(planDataMigrations([], [])).toEqual({ pending: [], applied: [], mismatched: [], unknown: [] });
+    expect(planDataMigrations([], [])).toEqual({ pending: [], applied: [], edited: [], ahead: [], unknown: [] });
   });
 
   it('lists every entry without a row as pending, in name order whatever the registry order', () => {
@@ -30,13 +30,24 @@ describe('planDataMigrations', () => {
 
     expect(plan.applied).toEqual([FIRST]);
     expect(plan.pending.map((e) => e.name)).toEqual([SECOND]);
-    expect(plan.mismatched).toEqual([]);
+    expect(plan.edited).toEqual([]);
+    expect(plan.ahead).toEqual([]);
   });
 
-  it('reports an applied entry whose code revision differs from the ledger, and neither re-runs nor ignores it', () => {
+  it("reports an applied entry at a revision above the ledger's in this build as edited after it ran, and neither re-runs nor ignores it", () => {
     const plan = planDataMigrations([entry(FIRST, 3), entry(SECOND)], [row(FIRST, 2)]);
 
-    expect(plan.mismatched).toEqual([{ name: FIRST, codeRevision: 3, ledgerRevision: 2 }]);
+    expect(plan.edited).toEqual([{ name: FIRST, codeRevision: 3, ledgerRevision: 2 }]);
+    expect(plan.ahead).toEqual([]);
+    expect(plan.applied).toEqual([]);
+    expect(plan.pending.map((e) => e.name)).toEqual([SECOND]);
+  });
+
+  it("reports an applied entry the ledger holds at a revision above this build's as ahead, run by a newer build, and does not re-run it", () => {
+    const plan = planDataMigrations([entry(FIRST, 1), entry(SECOND)], [row(FIRST, 2)]);
+
+    expect(plan.ahead).toEqual([{ name: FIRST, codeRevision: 1, ledgerRevision: 2 }]);
+    expect(plan.edited).toEqual([]);
     expect(plan.applied).toEqual([]);
     expect(plan.pending.map((e) => e.name)).toEqual([SECOND]);
   });

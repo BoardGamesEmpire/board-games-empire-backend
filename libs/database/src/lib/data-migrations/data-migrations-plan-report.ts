@@ -10,13 +10,14 @@ import { assertDataMigrationRegistry, describeMismatch, type DataMigrationsPlan 
  */
 export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanReport {
   const lines: string[] = [];
-  const refusing = plan.mismatched.length > 0;
+  const refusing = plan.edited.length > 0;
   const pendingNames = plan.pending.map((entry) => entry.name);
 
   if (refusing) {
     lines.push(
-      'The next api boot would REFUSE to boot: applied data migration(s) differ in revision from the ledger.',
-      ...plan.mismatched.map(describeMismatch).map(indent),
+      "The next api boot would REFUSE to boot: applied data migration(s) are at a revision above the ledger's in " +
+        'this build, edited after they ran.',
+      ...plan.edited.map(describeMismatch).map(indent),
     );
     if (pendingNames.length > 0) {
       lines.push('', 'Once those are resolved, it would apply, in this order:', ...pendingNames.map(indent));
@@ -25,6 +26,14 @@ export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanRepo
     lines.push(
       `The next api boot would apply ${pendingNames.length} data migration(s), in this order:`,
       ...pendingNames.map(indent),
+    );
+  }
+
+  if (plan.ahead.length > 0) {
+    if (lines.length > 0) lines.push('');
+    lines.push(
+      "Applied at a revision above this build's, left alone (a newer build ran them, and that build owns the data):",
+      ...plan.ahead.map(describeMismatch).map(indent),
     );
   }
 
@@ -43,8 +52,8 @@ export function describeDataMigrationsReport(plan: DataMigrationsPlan): PlanRepo
 }
 
 /**
- * The same half when the ledger table is not there. The CLI plans nothing
- * over a schema that is behind, so this is reached only when
+ * The same half when the ledger table is not there. The CLI plans the ledger
+ * over a schema in sync only, so this is reached only when
  * `_prisma_migrations` records the migration that creates the table and the
  * table is nonetheless gone: dropped by hand, or that migration marked
  * applied without running. The boot's data-migrations phase throws over that,
@@ -69,6 +78,24 @@ export function describeMissingLedgerReport(entries: readonly DataMigrationEntry
       : 'Data migrations: the boot would refuse; the ledger table is missing.',
   );
   return { lines, exitCode: 2 };
+}
+
+/**
+ * The same half over a database ahead of this build. The boot skips its
+ * data-migrations phase there, leaving the data to the newer build, and no CLI
+ * applies data migrations, so there is no run to preview: a plan of this
+ * build's registry against that ledger would be worded as the boot's ("the
+ * next api boot would …") and be false. One line, exit 0; the schema's code is
+ * the boot's over an ahead database.
+ */
+export function describeSkippedDataMigrationsReport(): PlanReport {
+  return {
+    lines: [
+      'Data migrations: not planned; the boot skips them over a database ahead of this build, and no CLI applies ' +
+        'them, so there is nothing to preview.',
+    ],
+    exitCode: 0,
+  };
 }
 
 function closingLine(pending: number, applied: number, refusing: boolean): string {

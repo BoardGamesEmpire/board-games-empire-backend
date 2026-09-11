@@ -90,7 +90,7 @@ describe('applyDataMigrations', () => {
     expect(logger.lines.filter((line) => /nothing pending|none pending/i.test(line))).toHaveLength(1);
   });
 
-  it('refuses on a revision mismatch before running anything, naming the entry and both revisions', async () => {
+  it("refuses when an applied entry is at a revision above the ledger's in this build, before running anything, naming the entry and both revisions", async () => {
     const { client, transactions } = fakeClient([{ name: FIRST, revision: 1 }]);
     let secondRan = false;
     const entries = [entry(FIRST, 2, async () => undefined), entry(SECOND, 1, async () => void (secondRan = true))];
@@ -99,11 +99,27 @@ describe('applyDataMigrations', () => {
 
     await expect(run).rejects.toBeInstanceOf(DataMigrationRevisionError);
     await expect(run).rejects.toThrow(/20260901000000_first_backfill.*revision 2.*revision 1/);
+    await expect(run).rejects.toThrow(/edited after it ran/);
     expect(transactions).toEqual([]);
     expect(secondRan).toBe(false);
   });
 
-  it('refuses when the ledger table does not exist, naming the schema as behind, and opens no transaction', async () => {
+  it("warns and goes on when the ledger holds an applied entry at a revision above this build's, leaving it alone and applying the rest", async () => {
+    const { client, transactions } = fakeClient([{ name: FIRST, revision: 2 }]);
+    const logger = recordingLogger();
+    const entries = [entry(FIRST, 1, async () => undefined), entry(SECOND, 1, async () => undefined)];
+
+    const result = await applyDataMigrations(client, entries, logger);
+
+    expect(result.applied).toEqual([SECOND]);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]?.created.map((row) => row.name)).toEqual([SECOND]);
+    expect(
+      logger.lines.some((line) => line.startsWith('warn: ') && line.includes(FIRST) && /above this build/.test(line)),
+    ).toBe(true);
+  });
+
+  it('refuses when the ledger table does not exist, saying it was dropped or its migration marked applied, and opens no transaction', async () => {
     const missing = new Prisma.PrismaClientKnownRequestError('The table does not exist in the current database.', {
       code: 'P2021',
       clientVersion: 'test',
@@ -114,7 +130,7 @@ describe('applyDataMigrations', () => {
 
     await expect(
       applyDataMigrations(client, [entry(FIRST, 1, async () => undefined)], recordingLogger()),
-    ).rejects.toThrow(/data_migrations table does not exist.*schema is behind/);
+    ).rejects.toThrow(/data_migrations table does not exist.*(dropped|marked applied)/);
     expect(transactions).toEqual([]);
   });
 

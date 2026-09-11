@@ -42,21 +42,22 @@ export interface ApplyDataMigrationsOptions {
 export const DATA_MIGRATION_TIMEOUT_MS = 10 * 60_000;
 
 /**
- * An applied entry is at another revision in this build than in the ledger.
- * Either its code changed after it ran, without a new entry, or this build is a
- * rollback across such an edit. Nothing can run again over data another
+ * An applied entry is at a revision above the ledger's in this build. The
+ * ledger's revision is the one that ran, so the entry's code changed after it
+ * ran, without a new entry. Nothing can run again over data the earlier
  * revision already shaped, and ignoring the difference would leave two
- * databases in different states under one name, so the boot refuses, and the
- * message says what to do in each direction.
+ * databases in different states under one name, so the boot refuses. The
+ * other direction, a ledger revision above the build's, is a rollback across
+ * such an edit: the newer build owns the data, and the boot warns and goes on,
+ * as it does over a ledger row it does not know.
  */
 export class DataMigrationRevisionError extends Error {
-  constructor(readonly mismatched: readonly RevisionMismatch[]) {
+  constructor(readonly edited: readonly RevisionMismatch[]) {
     super(
-      `Refusing to boot: ${mismatched.length} applied data migration(s) differ in revision from the ledger: ` +
-        mismatched.map(describeMismatch).join('; ') +
-        '. A one-time migration does not run twice. An entry edited after it ran is restored to the revision that ran ' +
-        "and fixed forward with a new entry; a ledger revision above the build's means a newer build ran the entry, " +
-        'and that build owns the data.',
+      `Refusing to boot: ${edited.length} applied data migration(s) are at a revision above the ledger's in this build: ` +
+        edited.map(describeMismatch).join('; ') +
+        '. Each was edited after it ran, and a one-time migration does not run twice. Restore the revision that ran ' +
+        'and fix forward with a new entry.',
     );
     this.name = 'DataMigrationRevisionError';
   }
@@ -66,8 +67,9 @@ export class DataMigrationRevisionError extends Error {
  * Applies every registry entry the ledger does not record, in name order,
  * each in one transaction with its `data_migrations` row (#236). Runs under
  * the bootstrap lock, after the seeds and the catalog reconcile, so an entry
- * sees the reference data of its own build. A revision mismatch refuses before
- * anything runs; an entry that throws stops the loop with its transaction
+ * sees the reference data of its own build. An entry edited after it ran
+ * refuses before anything runs, while one the ledger holds at a newer build's
+ * revision is warned about and left alone; an entry that throws stops the loop with its transaction
  * rolled back, so the ledger never names work that did not land, and the
  * entries before it stay applied, each having committed on its own. The
  * invalidation port runs once, after the last entry that applied, and so also
@@ -83,14 +85,25 @@ export async function applyDataMigrations(
 ): Promise<DataMigrationsResult> {
   const rows = await readDataMigrationLedger(client);
   if (rows === undefined) {
+    // Reached only once the schema read in sync, so the migration that
+    // creates the table is recorded as applied and the table is nonetheless gone.
     throw new Error(
-      'The data_migrations table does not exist: the schema is behind this build. Apply the migrations first.',
+      'The data_migrations table does not exist, though the schema ledger records the migration that creates it: ' +
+        'the table was dropped, or that migration was marked applied without running. Restore it, or mark the ' +
+        'migration rolled back and apply the migrations again.',
     );
   }
   const plan = planDataMigrations(entries, rows);
 
-  if (plan.mismatched.length > 0) {
-    throw new DataMigrationRevisionError(plan.mismatched);
+  if (plan.edited.length > 0) {
+    throw new DataMigrationRevisionError(plan.edited);
+  }
+
+  if (plan.ahead.length > 0) {
+    logger.warn(
+      `The ledger holds ${plan.ahead.length} data migration(s) at a revision above this build's (${plan.ahead.map(describeMismatch).join('; ')}). ` +
+        'Left alone: a newer build ran them, and that build owns the data.',
+    );
   }
 
   if (plan.unknown.length > 0) {
@@ -101,10 +114,12 @@ export async function applyDataMigrations(
   }
 
   if (plan.pending.length === 0) {
-    // The count is of this build's entries; the rows it does not know are the
-    // warning above, and named here so the line never reads as a fresh ledger.
+    // The count is of this build's entries at its own revisions; the rows it
+    // does not know and the ones a newer build ran are the warnings above, and
+    // counted here so the line never reads as a fresh ledger.
+    const ahead = plan.ahead.length > 0 ? `, ${plan.ahead.length} at a newer build's revision` : '';
     const unknown = plan.unknown.length > 0 ? `, ${plan.unknown.length} row(s) this build does not know` : '';
-    logger.log(`Data migrations: none pending (${plan.applied.length} applied${unknown}).`);
+    logger.log(`Data migrations: none pending (${plan.applied.length} applied${ahead}${unknown}).`);
     return { applied: [], unknown: plan.unknown, invalidated: false };
   }
 

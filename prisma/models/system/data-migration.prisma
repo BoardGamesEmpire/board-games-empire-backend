@@ -14,8 +14,10 @@ model DataMigration {
 
   /// The author's revision of the entry's code at the time it ran. An entry
   /// whose code changes after it has been applied somewhere must bump this,
-  /// and the mismatch then refuses boot rather than re-running or ignoring
-  /// the edit: a one-time migration is fixed forward with a new entry.
+  /// and a build whose revision is above the row's then refuses boot rather
+  /// than re-running or ignoring the edit: a one-time migration is fixed
+  /// forward with a new entry. A build below the row's revision is a rollback
+  /// across that edit; it warns and boots, and the newer build owns the data.
   revision Int
 
   appliedAt  DateTime @default(now()) @map("applied_at") @db.Timestamptz(3)
