@@ -69,10 +69,13 @@ export interface UnconditionedScopedGrant {
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
 export interface UnrenderableTemplateGrant {
-  slug: string;
   role: string;
   scope: RoleScope;
-  /** The referenced variables the role's pass does not supply. */
+  slug: string;
+
+  /**
+   * The referenced variables the role's pass does not supply.
+   */
   variables: readonly string[];
 }
 

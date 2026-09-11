@@ -4,6 +4,8 @@ import type {
   BootstrapLock,
   BootstrapLogger,
   Clock,
+  DataMigrationsPhase,
+  DataMigrationsSummary,
   LockAcquireOptions,
   Migrator,
   ReconcileSummary,
@@ -85,6 +87,10 @@ const NO_WRITES: ReconcileSummary = {
   cachesFlushed: false,
 };
 
+const NO_DATA_MIGRATIONS: DataMigrationsSummary = { applied: [], unknown: [], cachesFlushed: false };
+/** The rows above the data-migrations phase's own are about the schema and the seeds; the phase is a no-op there. */
+const noDataMigrations: DataMigrationsPhase = { run: async () => NO_DATA_MIGRATIONS };
+
 class FakeSeeder implements SeedsPhase {
   runs = 0;
   outcome: ReconcileSummary = NO_WRITES;
@@ -133,6 +139,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       migrator: new FakeMigrator(ledger),
@@ -160,6 +167,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       migrator: new FakeMigrator(ledger),
@@ -173,7 +181,16 @@ describe('the boot sequence', () => {
     const ledger = new FakeLedger([finished('20260109_init')]);
     const migrator = new FakeMigrator(ledger);
 
-    const summary = await runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, migrator });
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      dataMigrations: noDataMigrations,
+      logger,
+      clock,
+      migrator,
+    });
 
     expect(migrator.calls).toEqual([['20260219_games', '20260301_permissions']]);
     expect(summary.state).toBe('behind');
@@ -186,7 +203,16 @@ describe('the boot sequence', () => {
     const migrator: Migrator = { apply: async () => undefined };
 
     await expect(
-      runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, migrator }),
+      runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      }),
     ).rejects.toBeInstanceOf(MigrationsStillPendingError);
     expect(seeder.runs).toBe(0);
     expect(lock.events).toEqual(['acquire', 'release']);
@@ -207,6 +233,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 60_000,
@@ -238,6 +265,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 60_000,
@@ -260,6 +288,7 @@ describe('the boot sequence', () => {
       ledger,
       lock: blockingLock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 12_000,
@@ -283,6 +312,7 @@ describe('the boot sequence', () => {
       ledger,
       lock: blockingLock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 12_000,
@@ -316,6 +346,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 60_000,
@@ -336,6 +367,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 12_000,
@@ -358,6 +390,7 @@ describe('the boot sequence', () => {
       ledger,
       lock: slowLock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       waitMs: 10_000,
@@ -373,7 +406,16 @@ describe('the boot sequence', () => {
     const ledger = new FakeLedger([finished('20260109_init'), unfinished('20260219_games')]);
     const migrator = new FakeMigrator(ledger);
 
-    const run = runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, migrator });
+    const run = runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      dataMigrations: noDataMigrations,
+      logger,
+      clock,
+      migrator,
+    });
 
     await expect(run).rejects.toBeInstanceOf(FailedMigrationError);
     await expect(run).rejects.toThrow(/prisma migrate resolve --rolled-back 20260219_games/);
@@ -391,6 +433,7 @@ describe('the boot sequence', () => {
       ledger,
       lock,
       seeder,
+      dataMigrations: noDataMigrations,
       logger,
       clock,
       migrator: new FakeMigrator(ledger),
@@ -412,7 +455,16 @@ describe('the boot sequence', () => {
     const ledger = new FakeLedger([finished('20260109_init'), finished('20260910_from_the_future')]);
     const migrator = new FakeMigrator(ledger);
 
-    const summary = await runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, migrator });
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      dataMigrations: noDataMigrations,
+      logger,
+      clock,
+      migrator,
+    });
 
     expect(summary.state).toBe('behind');
     expect(summary.migrationsApplied).toEqual(['20260219_games', '20260301_permissions']);
@@ -445,6 +497,7 @@ describe('the boot sequence', () => {
         ledger: new FakeLedger(CHAIN.map(finished)),
         lock: refusing,
         seeder,
+        dataMigrations: noDataMigrations,
         logger,
         clock,
         tracer,
@@ -480,6 +533,7 @@ describe('the boot sequence', () => {
         ledger: new FakeLedger(CHAIN.map(finished)),
         lock: refusing,
         seeder,
+        dataMigrations: noDataMigrations,
         logger,
         clock,
         tracer,
@@ -507,6 +561,7 @@ describe('the boot sequence', () => {
         ledger,
         lock,
         seeder: failing,
+        dataMigrations: noDataMigrations,
         logger,
         clock,
         migrator: new FakeMigrator(ledger),
@@ -537,7 +592,16 @@ describe('the boot sequence', () => {
       lock.releaseError = new Error('connection terminated unexpectedly');
       const { tracer, ended, exceptions } = recordingTracer();
 
-      const run = runBootstrapSequence({ expected: CHAIN, ledger, lock, seeder, logger, clock, tracer });
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        tracer,
+      });
 
       // Not the release error: that would hide the migration the operator has to look at.
       await expect(run).rejects.toBeInstanceOf(FailedMigrationError);
@@ -556,6 +620,7 @@ describe('the boot sequence', () => {
         ledger,
         lock,
         seeder,
+        dataMigrations: noDataMigrations,
         logger,
         clock,
         tracer,
@@ -565,8 +630,127 @@ describe('the boot sequence', () => {
       await expect(run).rejects.toThrow('connection terminated unexpectedly');
       // The seeds did run; what failed is handing the lock back.
       expect(seeder.runs).toBe(1);
-      expect(ended).toEqual(['bootstrap.lock', 'bootstrap.schema.read', 'bootstrap.seeds', 'bootstrap']);
+      expect(ended).toEqual([
+        'bootstrap.lock',
+        'bootstrap.schema.read',
+        'bootstrap.seeds',
+        'bootstrap.data-migrations',
+        'bootstrap',
+      ]);
       expect(statuses).toEqual({ bootstrap: SpanStatusCode.ERROR });
     });
+  });
+});
+
+describe('the data-migrations phase', () => {
+  const ENTRY = '20260901000000_first_backfill';
+  const NEWER = '20260905000000_from_a_newer_build';
+
+  /** Records the order the DML phases ran in, shared with the seeder built beside it. */
+  function orderedPhases(
+    events: string[],
+    dataMigrations: { applied?: readonly string[]; unknown?: readonly string[]; error?: Error } = {},
+  ) {
+    const seeder: SeedsPhase = {
+      run: async () => {
+        events.push('seeds');
+        return NO_WRITES;
+      },
+    };
+    const phase: DataMigrationsPhase & { runs: number } = {
+      runs: 0,
+      run: async () => {
+        phase.runs += 1;
+        events.push('data-migrations');
+        if (dataMigrations.error) throw dataMigrations.error;
+        return { applied: dataMigrations.applied ?? [], unknown: dataMigrations.unknown ?? [], cachesFlushed: false };
+      },
+    };
+    return { seeder, dataMigrations: phase };
+  }
+
+  it('in sync with a migrator: applies the data migrations after the seeds, and the summary carries what it applied and the rows it does not know', async () => {
+    const events: string[] = [];
+    const { seeder, dataMigrations } = orderedPhases(events, { applied: [ENTRY], unknown: [NEWER] });
+    const ledger = new FakeLedger(CHAIN.map(finished));
+
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock: new FakeLock(),
+      seeder,
+      dataMigrations,
+      logger: recordingLogger(),
+      clock: new FakeClock(),
+      migrator: new FakeMigrator(ledger),
+    });
+
+    expect(events).toEqual(['seeds', 'data-migrations']);
+    expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: [NEWER], cachesFlushed: false });
+    expect(Object.keys(summary.phaseDurationsMs)).toContain('data-migrations');
+  });
+
+  it('without a migrator: leaves the data migrations to the api, as it leaves the seeds', async () => {
+    const events: string[] = [];
+    const { seeder, dataMigrations } = orderedPhases(events, { applied: [ENTRY] });
+
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger: new FakeLedger(CHAIN.map(finished)),
+      lock: new FakeLock(),
+      seeder,
+      dataMigrations,
+      logger: recordingLogger(),
+      clock: new FakeClock(),
+    });
+
+    expect(events).toEqual([]);
+    expect(dataMigrations.runs).toBe(0);
+    expect(summary.dataMigrations).toBeUndefined();
+  });
+
+  it('ahead: skips the data migrations with the seeds, since the newer build owns the data', async () => {
+    const events: string[] = [];
+    const { seeder, dataMigrations } = orderedPhases(events, { applied: [ENTRY] });
+    const ledger = new FakeLedger([...CHAIN.map(finished), finished('20260910_from_the_future')]);
+    const logger = recordingLogger();
+
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock: new FakeLock(),
+      seeder,
+      dataMigrations,
+      logger,
+      clock: new FakeClock(),
+      migrator: new FakeMigrator(ledger),
+    });
+
+    expect(events).toEqual([]);
+    expect(summary.dataMigrations).toBeUndefined();
+    expect(logger.lines.some((line) => /data migrations.*skipped/i.test(line))).toBe(true);
+  });
+
+  it('a data migration that fails refuses the boot after the seeds ran, and the lock is still released', async () => {
+    const events: string[] = [];
+    const boom = new Error('backfill failed');
+    const { seeder, dataMigrations } = orderedPhases(events, { error: boom });
+    const ledger = new FakeLedger(CHAIN.map(finished));
+    const lock = new FakeLock();
+
+    const run = runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      dataMigrations,
+      logger: recordingLogger(),
+      clock: new FakeClock(),
+      migrator: new FakeMigrator(ledger),
+    });
+
+    await expect(run).rejects.toBe(boom);
+    expect(events).toEqual(['seeds', 'data-migrations']);
+    expect(lock.events).toEqual(['acquire', 'release']);
   });
 });

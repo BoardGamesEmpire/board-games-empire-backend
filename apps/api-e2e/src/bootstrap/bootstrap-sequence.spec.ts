@@ -5,16 +5,24 @@ import {
   LockNotAcquiredError,
   PgAdvisoryLock,
   PrismaSchemaLedger,
+  RegistryDataMigrations,
   runBootstrapSequence,
   RunSeedsSeeder,
   SchemaNotReadyError,
   systemClock,
   type BootstrapLogger,
+  type DataMigrationsPhase,
   type Migrator,
   type ReconcileSummary,
   type SeedsPhase,
 } from '@bge/bootstrap';
-import { CATALOG_MANIFEST, MIGRATION_NAMES, readAppliedMigrations, type PrismaClient } from '@bge/database';
+import {
+  CATALOG_MANIFEST,
+  DataMigrationRevisionError,
+  MIGRATION_NAMES,
+  readAppliedMigrations,
+  type PrismaClient,
+} from '@bge/database';
 import type { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
@@ -92,6 +100,9 @@ const silentSeedLogger = {
 } as unknown as Logger;
 
 const realSeeds = (client: PrismaClient) => () => new RunSeedsSeeder(client, { logger: silentSeedLogger }).run();
+/** The shipped registry is empty; where the seeds are counted rather than run, the ledger phase is a no-op too. */
+const noDataMigrations: DataMigrationsPhase = { run: async () => ({ applied: [], unknown: [], cachesFlushed: false }) };
+const realDataMigrations = (client: PrismaClient) => new RegistryDataMigrations(client, { logger: silentSeedLogger });
 
 class CountingMigrator implements Migrator {
   calls = 0;
@@ -165,6 +176,7 @@ describe('the boot sequence against Postgres', () => {
           ledger: new PrismaSchemaLedger(db.client),
           lock,
           seeder,
+          dataMigrations: noDataMigrations,
           migrator,
           logger: silent,
         });
@@ -175,6 +187,38 @@ describe('the boot sequence against Postgres', () => {
         expect(seeder.spans).toHaveLength(1);
       } finally {
         await lock.close();
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
+    it('refuses over a data migration whose revision changed after it ran, after the seeds, and leaves no lock behind', async () => {
+      const name = '20260901000000_e2e_bootstrap_revision';
+      await db.client.dataMigration.create({ data: { name, revision: 1, durationMs: 0 } });
+      const seeder = new CountingSeeder();
+      const lock = lockOn(requireDatabaseUrl(), 'revision-mismatch');
+      const dataMigrations = new RegistryDataMigrations(db.client, {
+        logger: silentSeedLogger,
+        entries: [{ name, revision: 2, run: async () => undefined }],
+      });
+
+      try {
+        await expect(
+          runBootstrapSequence({
+            expected: MIGRATION_NAMES,
+            ledger: new PrismaSchemaLedger(db.client),
+            lock,
+            seeder,
+            dataMigrations,
+            migrator: new CountingMigrator(),
+            logger: silent,
+          }),
+        ).rejects.toBeInstanceOf(DataMigrationRevisionError);
+        // The refusal lands after the seeds phase, which is idempotent and had run.
+        expect(seeder.spans).toHaveLength(1);
+      } finally {
+        await lock.close();
+        await db.client.dataMigration.deleteMany({ where: { name } });
       }
 
       expect(await bootstrapLocks(db, true)).toBe(0);
@@ -192,6 +236,7 @@ describe('the boot sequence against Postgres', () => {
           ledger: new PrismaSchemaLedger(db.client),
           lock,
           seeder: new CountingSeeder(),
+          dataMigrations: noDataMigrations,
           migrator: new CountingMigrator(),
           logger,
         });
@@ -286,6 +331,7 @@ describe('the boot sequence against Postgres', () => {
               ledger: new PrismaSchemaLedger(sandbox.client),
               lock,
               seeder,
+              dataMigrations: realDataMigrations(sandbox.client),
               migrator,
               logger: silent,
             }),
@@ -339,6 +385,7 @@ describe('the boot sequence against Postgres', () => {
           ledger: new PrismaSchemaLedger(sandbox.client),
           lock,
           seeder: new CountingSeeder(),
+          dataMigrations: noDataMigrations,
           migrator,
           logger: silent,
         });
@@ -368,6 +415,7 @@ describe('the boot sequence against Postgres', () => {
           ledger: new PrismaSchemaLedger(sandbox.client),
           lock,
           seeder,
+          dataMigrations: noDataMigrations,
           migrator: new CountingMigrator(),
           logger,
         });
@@ -442,6 +490,7 @@ describe('the boot sequence against Postgres', () => {
             ledger: new PrismaSchemaLedger(sandbox.client),
             lock,
             seeder,
+            dataMigrations: noDataMigrations,
             logger,
             schemaPollMs: 200,
             waitMs: 15_000,
@@ -477,6 +526,7 @@ describe('the boot sequence against Postgres', () => {
             ledger: new PrismaSchemaLedger(sandbox.client),
             lock,
             seeder: new CountingSeeder(),
+            dataMigrations: noDataMigrations,
             logger: silent,
             schemaPollMs: 200,
             waitMs: 500,

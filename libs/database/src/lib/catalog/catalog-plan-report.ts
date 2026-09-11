@@ -7,13 +7,16 @@ export interface PlanReport {
   readonly exitCode: 0 | 1 | 2;
 }
 
-const indent = (line: string): string => `  ${line}`;
+/** Two spaces, the one indent of every list `db:plan` prints, the ledger half's included. */
+export const indent = (line: string): string => `  ${line}`;
 
 /**
  * What `npm run db:plan` prints, over a plan that nothing has applied (#236).
  * A refusal leads: the summary and the write lines are what a reconcile would
  * do, and when a plugin owns a row the manifest claims it does none of it, so
  * saying "would do this" first would mislead a reader who stops at the summary.
+ * The CLI prints this, then the data migrations' report, then the one line
+ * pointing at `prisma migrate status` for the schema.
  */
 export function describePlanReport(plan: ReconcilePlan): PlanReport {
   const conflicts = describeConflicts(plan);
@@ -44,7 +47,6 @@ export function describePlanReport(plan: ReconcilePlan): PlanReport {
       : mutations === 0
         ? 'Catalog: converged, nothing to write.'
         : `Catalog: ${mutations} row(s) to write.`,
-    'Schema: this covers the catalog only; `npx prisma migrate status` reports pending migrations.',
   );
 
   return { lines, exitCode: conflicts.length > 0 ? 2 : mutations > 0 ? 1 : 0 };

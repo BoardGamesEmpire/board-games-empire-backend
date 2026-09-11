@@ -6,6 +6,8 @@ import {
   type BootstrapLock,
   type BootstrapLogger,
   type Clock,
+  type DataMigrationsPhase,
+  type DataMigrationsSummary,
   type Migrator,
   type ReconcileSummary,
   type SchemaLedger,
@@ -21,6 +23,8 @@ export interface BootstrapSequenceOptions {
   readonly ledger: SchemaLedger;
   readonly lock: BootstrapLock;
   readonly seeder: SeedsPhase;
+  /** Runs after the seeds, in the process that ran them. See {@link DataMigrationsPhase}. */
+  readonly dataMigrations: DataMigrationsPhase;
   readonly logger: BootstrapLogger;
   /** Present only in the api build. See {@link Migrator}. */
   readonly migrator?: Migrator;
@@ -43,6 +47,12 @@ export interface BootstrapSummary {
    * flushed after it. Absent when the seeds did not run.
    */
   readonly reconcile: ReconcileSummary | undefined;
+  /**
+   * What the data-migrations phase applied, in order, the ledger rows this
+   * build does not know, and whether the caches were flushed after it. Absent
+   * when the seeds did not run.
+   */
+  readonly dataMigrations: DataMigrationsSummary | undefined;
   /**
    * Time from the start of the sequence until the read that found the schema up
    * had answered, time blocked on the lock included; 0 when the first read found
@@ -103,7 +113,7 @@ export class MigrationsStillPendingError extends Error {
  * or Nest, so every row of the behaviour table is a unit test.
  */
 export async function runBootstrapSequence(options: BootstrapSequenceOptions): Promise<BootstrapSummary> {
-  const { expected, ledger, lock, seeder, logger, migrator } = options;
+  const { expected, ledger, lock, seeder, dataMigrations: dataMigrationsPhase, logger, migrator } = options;
   const clock = options.clock ?? systemClock;
   const tracer = options.tracer ?? trace.getTracer('@bge/bootstrap');
   const waitMs = options.waitMs ?? DEFAULT_WAIT_MS;
@@ -141,6 +151,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     let migrationsApplied: readonly string[] = [];
     let seedsRun = false;
     let reconcile: ReconcileSummary | undefined;
+    let dataMigrations: DataMigrationsSummary | undefined;
     let waiting = false;
     let waitedMs = 0;
 
@@ -222,13 +233,17 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       if (migrator) {
         // Not over a database that is ahead, either: the seeds include the catalog
         // reconcile, and this build's manifest would retire the permissions and
-        // revoke the grants a newer build added. That data belongs to the build
+        // revoke the grants a newer build added; its data migrations would shape
+        // data the newer build already shaped. That data belongs to the build
         // that knows those migrations.
         if (settledState === 'ahead') {
-          logger.log('Seeds skipped: the database is ahead of this build, so the newer build owns the reference data.');
+          logger.log(
+            'Seeds and data migrations skipped: the database is ahead of this build, so the newer build owns the data.',
+          );
         } else {
           reconcile = await phase('seeds', () => seeder.run());
           seedsRun = true;
+          dataMigrations = await phase('data-migrations', () => dataMigrationsPhase.run());
         }
       }
 
@@ -264,6 +279,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
       unknownMigrations,
       seedsRun,
       reconcile,
+      dataMigrations,
       waitedMs,
       phaseDurationsMs,
     };

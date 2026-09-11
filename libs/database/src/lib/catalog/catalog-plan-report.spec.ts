@@ -35,7 +35,7 @@ describe('describePlanReport', () => {
       '  Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0',
     );
     expect(report.lines).toContain('Catalog: converged, nothing to write.');
-    expect(report.lines.at(-1)).toMatch(/prisma migrate status/);
+    expect(report.lines.at(-1)).toBe('Catalog: converged, nothing to write.');
   });
 
   it('describes pending writes as what the next reconcile would do and exits 1', () => {

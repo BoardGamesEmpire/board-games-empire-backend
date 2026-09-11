@@ -2,12 +2,19 @@ import {
   PgAdvisoryLock,
   PrismaSchemaLedger,
   RedisKeyFlush,
+  RegistryDataMigrations,
   runBootstrapSequence,
   RunSeedsSeeder,
   type BootstrapLogger,
   type Migrator,
 } from '@bge/bootstrap';
-import { CATALOG_MANIFEST, MIGRATION_NAMES, reconcileCatalog, SystemRole } from '@bge/database';
+import {
+  CATALOG_MANIFEST,
+  MIGRATION_NAMES,
+  reconcileCatalog,
+  SystemRole,
+  type DataMigrationEntry,
+} from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import KeyvValkey from '@keyv/valkey';
 import type { Logger } from '@nestjs/common';
@@ -18,16 +25,17 @@ import { REDIS_IMAGE } from '../support/e2e-env';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
- * The cache flush through the real seeds phase (#236). A catalog reconcile
+ * The cache flush through the real DML phases (#236). A catalog reconcile
  * that wrote rows removes every cached ability graph and API-key scope graph
- * from a real Valkey; a reconcile that wrote nothing leaves them, and keys
- * outside the patterns are never touched. The graphs are written the way the
- * api's CacheModule writes them, through Keyv and the Valkey adapter under the
- * api's namespace, so the physical keys here are the ones production has (the
- * api's own spec pins its namespace constant to these patterns). DB-only on
- * the harness database, which is in sync and seeded, so removing one grant is
- * what makes the next reconcile write. The DB-only runner provisions no Redis,
- * so this spec starts its own container.
+ * from a real Valkey, and so does a data migration that applied; a boot that
+ * wrote neither leaves them, and keys outside the patterns are never touched.
+ * The graphs are written the way the api's CacheModule writes them, through
+ * Keyv and the Valkey adapter under the api's namespace, so the physical keys
+ * here are the ones production has (the api's own spec pins its namespace
+ * constant to these patterns). DB-only on the harness database, which is in
+ * sync and seeded, so removing one grant is what makes the next reconcile
+ * write. The DB-only runner provisions no Redis, so this spec starts its own
+ * container.
  */
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
@@ -58,8 +66,10 @@ const GRAPHS = [
 ];
 const CACHED = GRAPHS.map((key) => `${API_CACHE_NAMESPACE}:${key}`);
 const BYSTANDERS = [`${API_CACHE_NAMESPACE}:bge:session:other`, 'bge:user:permissions:no-namespace'];
+/** A data migration this spec registers and applies; its ledger row is removed after each test. */
+const ENTRY = '20260901000000_e2e_flush_probe';
 
-describe('the cache flush after a reconcile that wrote rows', () => {
+describe('the cache flush after a reconcile that wrote rows or a data migration that applied', () => {
   let db: TestDatabase;
   let container: StartedRedisContainer;
   let redis: Redis;
@@ -72,6 +82,7 @@ describe('the cache flush after a reconcile that wrote rows', () => {
 
   afterEach(async () => {
     await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+    await db.client.dataMigration.deleteMany({ where: { name: ENTRY } });
   });
 
   afterAll(async () => {
@@ -80,21 +91,21 @@ describe('the cache flush after a reconcile that wrote rows', () => {
     await db.close();
   });
 
-  async function boot() {
+  /** One boot with the api's wiring: one flush, handed to the seeds phase and the data migrations alike. */
+  async function boot(entries: readonly DataMigrationEntry[] = []) {
     const lock = new PgAdvisoryLock({
       connectionString: requireDatabaseUrl(),
       logger: silent,
       applicationName: 'bge-bootstrap:flush-e2e',
     });
+    const flush = new RedisKeyFlush(redis, PATTERNS);
     try {
       return await runBootstrapSequence({
         expected: MIGRATION_NAMES,
         ledger: new PrismaSchemaLedger(db.client),
         lock,
-        seeder: new RunSeedsSeeder(db.client, {
-          logger: silentSeedLogger,
-          flush: new RedisKeyFlush(redis, PATTERNS),
-        }),
+        seeder: new RunSeedsSeeder(db.client, { logger: silentSeedLogger, flush }),
+        dataMigrations: new RegistryDataMigrations(db.client, { logger: silentSeedLogger, flush, entries }),
         migrator: neverMigrates,
         logger: silent,
       });
@@ -127,12 +138,24 @@ describe('the cache flush after a reconcile that wrote rows', () => {
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });
 
-  it('leaves the caches alone when the reconcile wrote nothing', async () => {
+  it('removes the graphs when a data migration applied, though the reconcile wrote nothing', async () => {
+    await prime();
+
+    const summary = await boot([{ name: ENTRY, revision: 1, run: async () => undefined }]);
+
+    expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
+    expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: [], cachesFlushed: true });
+    expect(await present(CACHED)).toEqual([0, 0, 0]);
+    expect(await present(BYSTANDERS)).toEqual([1, 1]);
+  });
+
+  it('leaves the caches alone when the reconcile wrote nothing and no data migration applied', async () => {
     await prime();
 
     const summary = await boot();
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
+    expect(summary.dataMigrations).toEqual({ applied: [], unknown: [], cachesFlushed: false });
     expect(await present(CACHED)).toEqual([1, 1, 1]);
   });
 });

@@ -5,8 +5,9 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
 
 /**
  * `npm run db:plan` against a real database (#236): the plan-only CLI over
- * the exported planner. It prints what the next reconcile would write and
- * exits 0 when the catalog is converged, 1 when it would write, 2 when it
+ * the exported catalog planner and the data-migration ledger. It prints what
+ * the next api boot would write and exits 0 when both halves are converged,
+ * 1 when either would write or the ledger table is missing, 2 when the boot
  * would refuse, 3 when it could not read the database; the schema half is
  * `prisma migrate status`, which the output points at. Spawned as the npm
  * script itself, so the entry in package.json is what is tested, with the
@@ -18,6 +19,8 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
 /** apps/api-e2e/src/database → workspace root; where package.json and the CLI live. */
 const WORKSPACE_ROOT = path.join(__dirname, '..', '..', '..', '..');
 const silent = { log: () => undefined, warn: () => undefined };
+/** A ledger row this build's registry does not know; written by one test, removed after it. */
+const UNKNOWN_ROW = '20260905000000_e2e_newer_build';
 
 function plan(databaseUrl: string) {
   const result = spawnSync('npm', ['run', '--silent', 'db:plan'], {
@@ -38,6 +41,7 @@ describe('db:plan against Postgres', () => {
 
   afterEach(async () => {
     await reconcileCatalog(db.client, CATALOG_MANIFEST, { logger: silent });
+    await db.client.dataMigration.deleteMany({ where: { name: UNKNOWN_ROW } });
   });
 
   afterAll(async () => {
@@ -54,6 +58,7 @@ describe('db:plan against Postgres', () => {
       'Catalog reconcile: permissions +0 ~0 revived 0 retired 0; roles +0 ~0; grants +0 -0',
     );
     expect(result.stdout).toMatch(/nothing to write/i);
+    expect(result.stdout).toContain('Data migrations: none pending.');
     expect(result.stdout).toContain('prisma migrate status');
     expect(await db.client.rolePermission.count()).toBe(before);
   });
@@ -72,6 +77,19 @@ describe('db:plan against Postgres', () => {
         where: { role: { name: SystemRole.User }, permission: { slug: 'read:game' } },
       }),
     ).toBe(0);
+  });
+
+  it('names a ledger row this build does not know, leaves it alone, and still exits 0', async () => {
+    await db.client.dataMigration.create({
+      data: { name: UNKNOWN_ROW, revision: 1, durationMs: 0 },
+    });
+
+    const result = plan(requireDatabaseUrl());
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/registry does not know/);
+    expect(result.stdout).toContain(`  ${UNKNOWN_ROW}`);
+    expect(await db.client.dataMigration.count({ where: { name: UNKNOWN_ROW } })).toBe(1);
   });
 
   it('exits 3 with the error on stderr when the database cannot be read, so an outage never reads as drift', () => {

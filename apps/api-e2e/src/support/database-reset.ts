@@ -13,6 +13,10 @@ export interface TableRef {
  *
  * Keep this list in lockstep with the seed set — a table seeded once per
  * run but truncated per test would fail every spec after the first.
+ *
+ * `data_migrations` (#236) is absent on purpose while the shipped registry is
+ * empty: `assertPreservedTablesIntact` fails on an empty preserved table. Add
+ * it the day the registry ships its first entry.
  */
 export const PRESERVED_TABLE_NAMES: readonly string[] = [
   '_prisma_migrations',
