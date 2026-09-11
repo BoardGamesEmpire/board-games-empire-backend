@@ -204,6 +204,63 @@ describe('applyDataMigrations and the invalidation port', () => {
 
     expect(logger.lines.some((line) => /^warn: .*no invalidation port/.test(line))).toBe(true);
   });
+
+  it('flushes for the entries that committed when a later one fails, then rethrows that failure', async () => {
+    const { client, transactions } = fakeClient([]);
+    const boom = new Error('second failed');
+    let calls = 0;
+    const entries = [
+      entry(FIRST, 1, async () => undefined),
+      entry(SECOND, 1, async () => {
+        throw boom;
+      }),
+    ];
+
+    await expect(
+      applyDataMigrations(client, entries, recordingLogger(), { invalidate: async () => void (calls += 1) }),
+    ).rejects.toBe(boom);
+
+    expect(calls).toBe(1);
+    expect(transactions[0]?.created.map((row) => row.name)).toEqual([FIRST]);
+  });
+
+  it('leaves the port alone when the first entry fails, nothing having committed', async () => {
+    const { client } = fakeClient([]);
+    let calls = 0;
+    const entries = [
+      entry(FIRST, 1, async () => {
+        throw new Error('first failed');
+      }),
+    ];
+
+    await expect(
+      applyDataMigrations(client, entries, recordingLogger(), { invalidate: async () => void (calls += 1) }),
+    ).rejects.toThrow('first failed');
+
+    expect(calls).toBe(0);
+  });
+
+  it("keeps the entry's failure when the flush after it fails too, and warns", async () => {
+    const { client } = fakeClient([]);
+    const boom = new Error('second failed');
+    const logger = recordingLogger();
+    const entries = [
+      entry(FIRST, 1, async () => undefined),
+      entry(SECOND, 1, async () => {
+        throw boom;
+      }),
+    ];
+
+    await expect(
+      applyDataMigrations(client, entries, logger, {
+        invalidate: async () => {
+          throw new Error('redis is down');
+        },
+      }),
+    ).rejects.toBe(boom);
+
+    expect(logger.lines.some((line) => /^warn: .*invalidation port failed.*redis is down/.test(line))).toBe(true);
+  });
 });
 
 describe('applyDataMigrations, when the commit fails', () => {

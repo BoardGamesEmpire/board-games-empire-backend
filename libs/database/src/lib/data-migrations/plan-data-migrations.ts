@@ -26,6 +26,9 @@ export interface DataMigrationsPlan {
 /** A Prisma migration directory's shape: a 14-digit timestamp, then a snake-case name. */
 const ENTRY_NAME = /^\d{14}_[a-z][a-z0-9_]*$/;
 
+/** The ledger's `revision` column is a Postgres `integer`; a revision above this passes every check until its first insert. */
+const MAX_REVISION = 2_147_483_647;
+
 /** Names are ASCII by {@link ENTRY_NAME}, so code-point order is the order. */
 const byName = (a: DataMigrationEntry, b: DataMigrationEntry): number =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
@@ -34,8 +37,9 @@ const byName = (a: DataMigrationEntry, b: DataMigrationEntry): number =>
  * Compares the registry this build ships with the rows in `data_migrations`.
  * Pure, so every row of the decision is a unit test; the read and the writes
  * are `applyDataMigrations`. The registry is checked on the way in: a
- * duplicate name would let one row satisfy two entries, and a name outside
- * the timestamp shape would sort somewhere its author did not intend.
+ * duplicate name would let one row satisfy two entries, a name outside the
+ * timestamp shape would sort somewhere its author did not intend, and a
+ * revision the ledger column cannot hold would fail at its first insert.
  */
 export function planDataMigrations(
   entries: readonly DataMigrationEntry[],
@@ -89,9 +93,9 @@ export function assertDataMigrationRegistry(entries: readonly DataMigrationEntry
       );
     }
 
-    if (!Number.isInteger(entry.revision) || entry.revision < 1) {
+    if (!Number.isInteger(entry.revision) || entry.revision < 1 || entry.revision > MAX_REVISION) {
       throw new Error(
-        `Data migration '${entry.name}' has revision ${String(entry.revision)}; a revision is a positive integer, starting at 1.`,
+        `Data migration '${entry.name}' has revision ${String(entry.revision)}; a revision is an integer from 1 to ${MAX_REVISION}, what the ledger's integer column holds.`,
       );
     }
   }

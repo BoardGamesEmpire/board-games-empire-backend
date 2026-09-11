@@ -27,8 +27,9 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
 /**
  * The cache flush through the real DML phases (#236). A catalog reconcile
  * that wrote rows removes every cached ability graph and API-key scope graph
- * from a real Valkey, and so does a data migration that applied; a boot that
- * wrote neither leaves them, and keys outside the patterns are never touched.
+ * from a real Valkey, and so does a data migration that applied, whether the
+ * boot then went on or refused over a later entry; a boot that wrote neither
+ * leaves them, and keys outside the patterns are never touched.
  * The graphs are written the way the api's CacheModule writes them, through
  * Keyv and the Valkey adapter under the api's namespace, so the physical keys
  * here are the ones production has (the api's own spec pins its namespace
@@ -145,6 +146,26 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
     expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: [], cachesFlushed: true });
+    expect(await present(CACHED)).toEqual([0, 0, 0]);
+    expect(await present(BYSTANDERS)).toEqual([1, 1]);
+  });
+
+  it('removes the graphs when a data migration applied and a later one failed, though the boot refuses', async () => {
+    await prime();
+    const entries: DataMigrationEntry[] = [
+      { name: ENTRY, revision: 1, run: async () => undefined },
+      {
+        name: '20260902000000_e2e_flush_failing',
+        revision: 1,
+        run: async () => {
+          throw new Error('second failed');
+        },
+      },
+    ];
+
+    await expect(boot(entries)).rejects.toThrow('second failed');
+
+    expect(await db.client.dataMigration.count({ where: { name: ENTRY } })).toBe(1);
     expect(await present(CACHED)).toEqual([0, 0, 0]);
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });

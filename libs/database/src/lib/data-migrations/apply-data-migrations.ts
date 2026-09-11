@@ -19,11 +19,12 @@ export interface DataMigrationsResult {
 
 export interface ApplyDataMigrationsOptions {
   /**
-   * Called once after the pending entries have all applied, never when none
-   * did. A data migration may rewrite anything the cached ability graphs are
-   * derived from, so the call is not conditioned on what the entries touched:
-   * the boot sequence passes its cache flush, and the entries are rare enough
-   * that a flush per boot that applied one costs nothing worth saving.
+   * Called once after the last entry that applied, whether the loop then
+   * finished or a later entry failed; never when none did. A data migration
+   * may rewrite anything the cached ability graphs are derived from, so the
+   * call is not conditioned on what the entries touched: the boot sequence
+   * passes its cache flush, and the entries are rare enough that a flush per
+   * boot that applied one costs nothing worth saving.
    */
   readonly invalidate?: () => Promise<void>;
 }
@@ -69,10 +70,10 @@ export class DataMigrationRevisionError extends Error {
  * anything runs; an entry that throws stops the loop with its transaction
  * rolled back, so the ledger never names work that did not land, and the
  * entries before it stay applied, each having committed on its own. The
- * invalidation port runs once, after the last entry: a loop that stops early
- * refuses the boot, so nothing is served against what the earlier entries
- * changed, and the next boot, which finds them applied, flushes for them when
- * it applies the rest.
+ * invalidation port runs once, after the last entry that applied, and so also
+ * when a later entry fails: this process then refuses to boot and serves
+ * nothing, but the api processes already serving hold graphs built before the
+ * committed entries ran, and only the TTL would otherwise end them.
  */
 export async function applyDataMigrations(
   client: DataMigrationsClient,
@@ -112,45 +113,64 @@ export async function applyDataMigrations(
   );
 
   const applied: string[] = [];
-  for (const entry of plan.pending) {
-    // The line saying it applied waits for the commit: a transaction that fails
-    // to commit has applied nothing, and the log must not say otherwise.
-    const durationMs = await client.$transaction(
-      async (tx) => {
-        const started = performance.now();
-        await entry.run(tx, logger);
-        const elapsed = Math.round(performance.now() - started);
-        await tx.dataMigration.create({ data: { name: entry.name, revision: entry.revision, durationMs: elapsed } });
-        return elapsed;
-      },
-      { timeout: DATA_MIGRATION_TIMEOUT_MS },
-    );
-    applied.push(entry.name);
-    logger.log(`Data migration '${entry.name}' applied at revision ${entry.revision} in ${durationMs}ms.`);
-  }
-
-  let invalidated = false;
-  if (options.invalidate) {
-    try {
-      await options.invalidate();
-      invalidated = true;
-    } catch (error) {
-      // The entries are committed and the next boot finds nothing pending, so
-      // failing here would lose the only chance to say the caches were missed;
-      // the TTL bounds the staleness either way, as after the reconcile.
-      logger.warn(
-        `Data migrations applied but the invalidation port failed (${describeError(error)}): whatever it did not ` +
-          'evict expires on its own TTL.',
+  try {
+    for (const entry of plan.pending) {
+      // The line saying it applied waits for the commit: a transaction that fails
+      // to commit has applied nothing, and the log must not say otherwise.
+      const durationMs = await client.$transaction(
+        async (tx) => {
+          const started = performance.now();
+          await entry.run(tx, logger);
+          const elapsed = Math.round(performance.now() - started);
+          await tx.dataMigration.create({ data: { name: entry.name, revision: entry.revision, durationMs: elapsed } });
+          return elapsed;
+        },
+        { timeout: DATA_MIGRATION_TIMEOUT_MS },
       );
+      applied.push(entry.name);
+      logger.log(`Data migration '${entry.name}' applied at revision ${entry.revision} in ${durationMs}ms.`);
     }
-  } else {
-    logger.warn(
-      'Data migrations applied but no invalidation port was supplied: cached ability graphs were not touched and ' +
-        'expire on their own TTL.',
-    );
+  } catch (error) {
+    // The entry that threw rolled back with its row, but the ones before it
+    // committed, and the caches do not know that yet. The boot refuses either
+    // way; the flush is for the processes that keep serving.
+    if (applied.length > 0) {
+      await invalidateAfter(applied, options, logger);
+    }
+    throw error;
   }
 
+  const invalidated = await invalidateAfter(applied, options, logger);
   return { applied, unknown: plan.unknown, invalidated };
+}
+
+/**
+ * Runs the invalidation port for the entries that committed, and says whether
+ * it ran. Never throws: the entries are committed and the next boot finds them
+ * applied, so failing here would lose the only chance to say the caches were
+ * missed, and the TTL bounds the staleness either way, as after the reconcile.
+ */
+async function invalidateAfter(
+  applied: readonly string[],
+  options: ApplyDataMigrationsOptions,
+  logger: Logger,
+): Promise<boolean> {
+  const count = `${applied.length} data migration(s) applied`;
+  if (!options.invalidate) {
+    logger.warn(
+      `${count} but no invalidation port was supplied: cached ability graphs were not touched and expire on their own TTL.`,
+    );
+    return false;
+  }
+  try {
+    await options.invalidate();
+    return true;
+  } catch (error) {
+    logger.warn(
+      `${count} but the invalidation port failed (${describeError(error)}): whatever it did not evict expires on its own TTL.`,
+    );
+    return false;
+  }
 }
 
 function describeError(error: unknown): string {

@@ -61,8 +61,10 @@ describe('planDataMigrations', () => {
     expect(() => planDataMigrations([entry('20260901000000_First-Backfill')], [])).toThrow(/First-Backfill/);
   });
 
-  it('refuses a revision that is not a positive integer', () => {
+  it('refuses a revision that is not a positive integer, or one above what the ledger column holds', () => {
     expect(() => planDataMigrations([entry(FIRST, 0)], [])).toThrow(/revision/);
     expect(() => planDataMigrations([entry(FIRST, 1.5)], [])).toThrow(/revision/);
+    expect(() => planDataMigrations([entry(FIRST, 2_147_483_648)], [])).toThrow(/2147483647/);
+    expect(planDataMigrations([entry(FIRST, 2_147_483_647)], []).pending.map((e) => e.name)).toEqual([FIRST]);
   });
 });
