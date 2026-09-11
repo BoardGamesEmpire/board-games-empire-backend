@@ -215,6 +215,10 @@ describe('PermissionsService', () => {
   });
 
   describe('cache invalidation', () => {
+    it('apiKeyScopeCacheKey is the single source of truth for the API-key scope format', () => {
+      expect(PermissionsService.apiKeyScopeCacheKey('key-1')).toBe('bge:apikey:scopes:key-1');
+    });
+
     it('userGraphCacheKey is the single source of truth for the key format', () => {
       expect(PermissionsService.userGraphCacheKey('user-1')).toBe('bge:user:permissions:user-1');
     });

@@ -6,6 +6,7 @@ import type {
   Clock,
   LockAcquireOptions,
   Migrator,
+  ReconcileSummary,
   SchemaLedger,
   SeedsPhase,
 } from './ports';
@@ -71,10 +72,25 @@ class FakeMigrator implements Migrator {
   }
 }
 
+const NO_WRITES: ReconcileSummary = {
+  permissionsCreated: 0,
+  permissionsUpdated: 0,
+  permissionsRevived: 0,
+  permissionsRetired: 0,
+  rolesCreated: 0,
+  rolesUpdated: 0,
+  grantsCreated: 0,
+  grantsRevoked: 0,
+  mutations: 0,
+  cachesFlushed: false,
+};
+
 class FakeSeeder implements SeedsPhase {
   runs = 0;
-  async run(): Promise<void> {
+  outcome: ReconcileSummary = NO_WRITES;
+  async run(): Promise<ReconcileSummary> {
     this.runs += 1;
+    return this.outcome;
   }
 }
 
@@ -126,6 +142,31 @@ describe('the boot sequence', () => {
     expect(summary.migrationsApplied).toEqual([]);
     expect(seeder.runs).toBe(1);
     expect(lock.events).toEqual(['acquire', 'release']);
+  });
+
+  it('in sync: the summary carries what the seeds phase reported, the reconcile counts and whether caches were flushed', async () => {
+    const ledger = new FakeLedger(CHAIN.map(finished));
+    const reconcile: ReconcileSummary = {
+      ...NO_WRITES,
+      permissionsUpdated: 1,
+      grantsCreated: 2,
+      mutations: 3,
+      cachesFlushed: true,
+    };
+    seeder.outcome = reconcile;
+
+    const summary = await runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock,
+      seeder,
+      logger,
+      clock,
+      migrator: new FakeMigrator(ledger),
+    });
+
+    expect(summary.seedsRun).toBe(true);
+    expect(summary.reconcile).toEqual(reconcile);
   });
 
   it('behind with a migrator: applies the pending migrations, then seeds', async () => {
@@ -360,6 +401,7 @@ describe('the boot sequence', () => {
     // This build's catalog reconcile would retire what the newer build added.
     expect(seeder.runs).toBe(0);
     expect(summary.seedsRun).toBe(false);
+    expect(summary.reconcile).toBeUndefined();
     expect(logger.lines.some((line) => line.startsWith('warn: ') && line.includes('20260910_from_the_future'))).toBe(
       true,
     );
@@ -377,6 +419,7 @@ describe('the boot sequence', () => {
     expect(summary.unknownMigrations).toEqual(['20260910_from_the_future']);
     expect(seeder.runs).toBe(0);
     expect(summary.seedsRun).toBe(false);
+    expect(summary.reconcile).toBeUndefined();
   });
 
   it('ends every span, the root included, when the lock itself cannot be acquired', async () => {

@@ -50,6 +50,15 @@ export class PermissionsService {
     return `bge:user:permissions:${userId}`;
   }
 
+  /**
+   * Cache key for an API key's resolved scope graph; the same single source of
+   * truth as {@link userGraphCacheKey}. The boot sequence's flush (#236) scans
+   * both formats, with the cache store's namespace in front.
+   */
+  static apiKeyScopeCacheKey(apiKeyId: string): string {
+    return `bge:apikey:scopes:${apiKeyId}`;
+  }
+
   async getUserRoleGraph(userId: string): Promise<UserWithRoles | null> {
     const userGraph = await this.getOrLoad(
       PermissionsService.userGraphCacheKey(userId),
@@ -138,7 +147,7 @@ export class PermissionsService {
    */
   async getApiKeyScopeGraph(apiKeyId: string): Promise<ApikeyWithScopes | null> {
     const apiKey = await this.getOrLoad(
-      `bge:apikey:scopes:${apiKeyId}`,
+      PermissionsService.apiKeyScopeCacheKey(apiKeyId),
       `API key scope graph for key ${apiKeyId}`,
       () => this.loadApiKeyGraph(apiKeyId),
     );

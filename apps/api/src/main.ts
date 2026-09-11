@@ -20,6 +20,8 @@ import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
+import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
+import redisConfig, { redisConfigValidationSchema } from './app/configuration/redis.config';
 
 async function bootstrap() {
   const LOGGER_CONTEXT = 'Bootstrap';
@@ -38,6 +40,12 @@ async function bootstrap() {
     applicationName: 'api',
     logger: nestLoggerFromPino(bootstrapLogger),
     migrator: createPrismaCliMigrator,
+    // The same Redis the CacheModule below opens, so a catalog reconcile that
+    // wrote rows flushes the cached ability graphs before the first request.
+    cache: {
+      redis: { config: redisConfig, validationSchema: redisConfigValidationSchema },
+      flushPatterns: bootstrapCacheFlushPatterns(),
+    },
   });
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {

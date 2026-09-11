@@ -1,5 +1,6 @@
 export * from './catalog-guards';
 export * from './catalog-integrity';
+export * from './catalog-plan-report';
 export * from './catalog-reconcile-plan';
 export * from './catalog-reconciler';
 export * from './permission-entry';

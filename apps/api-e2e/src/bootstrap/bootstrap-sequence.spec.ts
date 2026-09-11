@@ -6,14 +6,15 @@ import {
   PgAdvisoryLock,
   PrismaSchemaLedger,
   runBootstrapSequence,
+  RunSeedsSeeder,
   SchemaNotReadyError,
   systemClock,
   type BootstrapLogger,
   type Migrator,
+  type ReconcileSummary,
   type SeedsPhase,
 } from '@bge/bootstrap';
 import { CATALOG_MANIFEST, MIGRATION_NAMES, readAppliedMigrations, type PrismaClient } from '@bge/database';
-import { runSeeds } from '@bge/database/seeds';
 import type { Logger } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
@@ -21,7 +22,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { Client } from 'pg';
 import { schemaFromDatabaseUrl } from '../support/e2e-env';
 import { expectAdvisoryWaiter, withBarrier } from '../support/lock-barrier';
-import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
  * The boot sequence against a real database (#236).
@@ -52,18 +53,37 @@ function recordingLogger(): BootstrapLogger & { readonly lines: string[] } {
   return { lines, log: push('log'), warn: push('warn') };
 }
 
-/** Records when each seeds pass ran; `inner` is the real `runSeeds` where the test wants it. */
+const NO_WRITES: ReconcileSummary = {
+  permissionsCreated: 0,
+  permissionsUpdated: 0,
+  permissionsRevived: 0,
+  permissionsRetired: 0,
+  rolesCreated: 0,
+  rolesUpdated: 0,
+  grantsCreated: 0,
+  grantsRevoked: 0,
+  mutations: 0,
+  cachesFlushed: false,
+};
+
+/** Records when each seeds pass ran; `inner` is the real seeds phase where the test wants it. */
 class CountingSeeder implements SeedsPhase {
   readonly spans: [number, number][] = [];
-  constructor(private readonly inner: () => Promise<void> = () => sleep(50)) {}
-  async run(): Promise<void> {
+  constructor(
+    private readonly inner: () => Promise<ReconcileSummary> = async () => {
+      await sleep(50);
+      return NO_WRITES;
+    },
+  ) {}
+  async run(): Promise<ReconcileSummary> {
     const started = Date.now();
-    await this.inner();
+    const outcome = await this.inner();
     this.spans.push([started, Date.now()]);
+    return outcome;
   }
 }
 
-/** `runSeeds` wants a Nest `Logger`; it calls `log`/`debug`/`error` only, so a silent stand-in is honest here. */
+/** The seeds want a Nest `Logger`; they call `log`/`debug`/`error` only, so a silent stand-in is honest here. */
 const silentSeedLogger = {
   log: () => undefined,
   debug: () => undefined,
@@ -71,7 +91,7 @@ const silentSeedLogger = {
   error: () => undefined,
 } as unknown as Logger;
 
-const realSeeds = (client: PrismaClient) => () => runSeeds(client, silentSeedLogger);
+const realSeeds = (client: PrismaClient) => () => new RunSeedsSeeder(client, { logger: silentSeedLogger }).run();
 
 class CountingMigrator implements Migrator {
   calls = 0;
@@ -80,12 +100,6 @@ class CountingMigrator implements Migrator {
     this.calls += 1;
     await this.inner?.apply(pending);
   }
-}
-
-function requireDatabaseUrl(): string {
-  const url = process.env['DATABASE_URL'];
-  if (!url) throw new Error('DATABASE_URL is not set — did the e2e globalSetup run?');
-  return url;
 }
 
 function sandboxUrl(): string {

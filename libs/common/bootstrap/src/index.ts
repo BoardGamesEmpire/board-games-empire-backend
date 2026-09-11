@@ -6,6 +6,7 @@ export * from './lib/nest-logger';
 export * from './lib/ports';
 export * from './lib/prisma-cli-migrator';
 export * from './lib/prisma-ledger';
+export * from './lib/redis-key-flush';
 export * from './lib/run-bootstrap';
 export * from './lib/runner';
 export * from './lib/seeder';

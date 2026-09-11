@@ -6,7 +6,7 @@ import type {
   RolePermissionSnapshotRow,
   RoleSnapshotRow,
 } from './catalog-reconcile-plan';
-import { countMutations, planReconcile } from './catalog-reconcile-plan';
+import { countMutations, planReconcile, reconcileCounts } from './catalog-reconcile-plan';
 import type { PermissionSeedDefinition, RoleSeedDefinition } from './seed-definitions';
 
 const definition = (overrides: Partial<PermissionSeedDefinition> & Pick<PermissionSeedDefinition, 'slug'>) =>
@@ -405,5 +405,37 @@ describe('planReconcile — normalisation and the mutation count', () => {
     // created; User→read:game edge created. read:quota and the Librarian edge are retained.
     expect(countMutations(plan)).toBe(4);
     expect(plan.permissions.retained).toEqual([{ slug: 'read:quota', managedBy: PermissionOwner.Admin }]);
+  });
+
+  it('reports the writes by table as counts, with the mutation total, for the boot summary', () => {
+    const plan = planReconcile(
+      manifest({
+        permissions: [definition({ slug: 'read:game' }), definition({ slug: 'read:job', riskLevel: RiskLevel.High })],
+        roles: [roleDefinition()],
+        rolePermissions: { [SystemRole.User]: ['read:game'] },
+      }),
+      snapshot({
+        permissions: [
+          row({ slug: 'read:job', retiredAt: new Date('2026-09-01T00:00:00Z') }),
+          row({ slug: 'read:quota' }),
+        ],
+        roles: [],
+        rolePermissions: [],
+      }),
+    );
+
+    // read:game created; read:job revived AND drifted (one write, counted in
+    // both columns as the summary line prints them); read:quota retired.
+    expect(reconcileCounts(plan)).toEqual({
+      permissionsCreated: 1,
+      permissionsUpdated: 1,
+      permissionsRevived: 1,
+      permissionsRetired: 1,
+      rolesCreated: 1,
+      rolesUpdated: 0,
+      grantsCreated: 1,
+      grantsRevoked: 0,
+      mutations: 5,
+    });
   });
 });

@@ -1,4 +1,4 @@
-import type { AppliedMigrationRow } from '@bge/database';
+import type { AppliedMigrationRow, ReconcileCounts } from '@bge/database';
 import { performance } from 'node:perf_hooks';
 
 /**
@@ -61,11 +61,51 @@ export interface BootstrapLock {
 }
 
 /**
- * The seeds phase: `runSeeds`, which today includes the catalog reconcile.
- * Not `Seeder`, which `@bge/database` already uses for one seed function.
+ * What the seeds phase reports back and the boot summary carries (#236): the
+ * catalog reconcile's writes by table, every count zero on a converged
+ * database, and whether the cache flush ran after a reconcile that wrote rows.
+ */
+export type ReconcileSummary = ReconcileCounts & { readonly cachesFlushed: boolean };
+
+/**
+ * The seeds phase: `runSeeds`, the reference seeds and then the catalog
+ * reconcile. Not `Seeder`, which `@bge/database` already uses for one seed
+ * function.
  */
 export interface SeedsPhase {
-  run(): Promise<void>;
+  run(): Promise<ReconcileSummary>;
+}
+
+/**
+ * Removes every cached ability graph and API-key scope graph after a reconcile
+ * that wrote rows (#236). Only the api build has one, passed by its entrypoint
+ * like the migrator; a boot without it leaves the caches to their TTL and the
+ * reconcile says so. `flush` resolves to how many keys went and rejects with a
+ * {@link CacheFlushError} when it cannot finish; `close` hands the connection
+ * back once the sequence is over, used or not.
+ */
+export interface CacheFlush {
+  flush(): Promise<number>;
+  close(): Promise<void>;
+}
+
+/**
+ * A flush that could not finish: the pattern it stopped on and how many keys
+ * had already gone, so the log can say which half of the cache is still there
+ * rather than that nothing was touched.
+ */
+export class CacheFlushError extends Error {
+  constructor(
+    readonly pattern: string,
+    readonly removed: number,
+    readonly reason: unknown,
+  ) {
+    super(
+      `Cache flush failed on '${pattern}' after removing ${removed} key(s): ` +
+        (reason instanceof Error ? reason.message : String(reason)),
+    );
+    this.name = 'CacheFlushError';
+  }
 }
 
 /**
