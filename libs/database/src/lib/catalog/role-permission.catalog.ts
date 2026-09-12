@@ -59,6 +59,9 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'read:event_game:household',
   'read:event_occurrence:household',
   'read:event_policy:household',
+  // The Event row itself. Without it an owner updates a household event and
+  // manages its attendees but cannot read the event unless attending it.
+  'read:event:participant:household',
   'read:game_collection',
   'read:household',
   'read:households',

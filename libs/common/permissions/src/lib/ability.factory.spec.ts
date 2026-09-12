@@ -870,6 +870,23 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.update, asEntity('Event', { id: 'ev-3', householdId: null }))).toBe(false);
     });
 
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "lets a %s read the household's own events without attending them (#436)",
+      (roleName) => {
+        // The whole composed role. Neither held any Event read before, so an
+        // owner could update a household event and manage its attendees but
+        // never read the row itself.
+        const ability = factory.createForUser(
+          householdMemberOf('hh-1', roleName, [...ROLE_PERMISSION_CATALOG[roleName]]),
+        );
+
+        expect(accessibleBy(ability, Action.read).ofType('Event')).toEqual({ OR: [{ householdId: 'hh-1' }] });
+        expect(ability.can(Action.read, asEntity('Event', { id: 'ev-1', householdId: 'hh-1' }))).toBe(true);
+        expect(ability.can(Action.read, asEntity('Event', { id: 'ev-2', householdId: 'hh-2' }))).toBe(false);
+        expect(ability.can(Action.read, asEntity('Event', { id: 'ev-3', householdId: null }))).toBe(false);
+      },
+    );
+
     it('answers a create for an occurrence of the attended event, and refuses one for another event', () => {
       // What the occurrence create path asks, with the subject it builds from
       // the path parameter and the parent event row.
