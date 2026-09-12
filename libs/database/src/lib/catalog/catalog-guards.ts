@@ -26,9 +26,11 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * catalog is held to the standard the plugin path enforces at runtime.
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`:
- * both defect classes have live instances that are being burned down issue by
- * issue, and a throw at import would turn each of them into a boot failure.
- * The known instances are pinned, exactly, in `known-catalog-defects.spec.ts`.
+ * the fail-closed class still has live instances (#244) being burned down
+ * issue by issue, and a throw at import would turn each of them into a boot
+ * failure. The known instances are pinned, exactly, in
+ * `known-catalog-defects.spec.ts`; the fail-open ledger there is empty since
+ * #432 and stays so a new instance is named rather than shipped.
  *
  * Every function takes the catalogs AND the maps it checks against as
  * arguments, nothing defaulted — same convention as the integrity assertions —

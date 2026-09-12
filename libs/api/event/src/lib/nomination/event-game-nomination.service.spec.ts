@@ -1,9 +1,11 @@
 import type {
+  Event,
   EventAttendee,
   EventAttendeeGameList,
   EventGame,
   EventGameNomination,
   EventGameVote,
+  EventOccurrence,
   EventPolicy,
 } from '@bge/database';
 import {
@@ -24,7 +26,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { NominateGameDto } from './dto/nominate-game.dto';
 import { EventGameNominationService } from './event-game-nomination.service';
@@ -61,6 +63,7 @@ describe('EventGameNominationService', () => {
     db = ctx.db;
     service = ctx.module.get(EventGameNominationService);
     db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);
+    db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -357,6 +360,150 @@ describe('EventGameNominationService', () => {
     await service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto);
 
     expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+  });
+
+  // The route's policy check judges a create by type alone, so each create
+  // path checks the row it is about to write: the event named in the path,
+  // and that event's household for the household-bound grants.
+  it('nominate checks the create against the nomination it is about to write', async () => {
+    db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: 'RequiresVote',
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue({
+      id: 'gl-1',
+      attendee: { eventId: 'event-1' },
+      collection: { platformGameId: 'pg-1' },
+    } as never);
+    db.eventGameNomination.create.mockResolvedValue({ id: 'nom-1' } as EventGameNomination);
+
+    await service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto);
+
+    expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventGameNomination, {
+      eventId: 'event-1',
+      event: { householdId: 'hh-1' },
+    });
+  });
+
+  // The effective policy is read through the occurrence and a Direct-mode
+  // nomination is elevated under it, so the occurrence must be this event's.
+  it("nominate resolves an occurrence-level nomination's occurrence within the event", async () => {
+    db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: 'RequiresVote',
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue({
+      id: 'gl-1',
+      attendee: { eventId: 'event-1' },
+      collection: { platformGameId: 'pg-1' },
+    } as never);
+    db.eventGameNomination.create.mockResolvedValue({ id: 'nom-1' } as EventGameNomination);
+
+    await service.nominate('event-1', {
+      platformGameId: 'pg-1',
+      suppliedFromId: 'gl-1',
+      occurrenceId: 'occ-1',
+    } as NominateGameDto);
+
+    expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'occ-1', eventId: 'event-1' } }),
+    );
+    expect(db.eventGameNomination.create).toHaveBeenCalled();
+  });
+
+  it('nominate answers not found for an occurrence outside the event, reading no policy and writing nothing', async () => {
+    db.eventOccurrence.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1', occurrenceId: 'occ-9' } as never),
+    ).rejects.toThrow(NotFoundException);
+    expect(db.eventOccurrencePolicy.findUnique).not.toHaveBeenCalled();
+    expect(db.eventGameNomination.create).not.toHaveBeenCalled();
+  });
+
+  it('nominate refuses before writing when the instance check denies', async () => {
+    abilityService.assertCurrentActorCan.mockImplementation(() => {
+      throw new ForbiddenException();
+    });
+
+    await expect(
+      service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto),
+    ).rejects.toThrow(ForbiddenException);
+    expect(db.eventGameNomination.create).not.toHaveBeenCalled();
+  });
+
+  it('directAddGame binds an event-level add to the event in the path and its household', async () => {
+    db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', eventId: 'event-1' } as EventGame);
+
+    await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
+
+    expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventGame, {
+      eventId: 'event-1',
+      occurrenceId: null,
+      event: { householdId: 'hh-1' },
+      occurrence: null,
+    });
+  });
+
+  // An occurrence-level EventGame carries no eventId of its own: its event is
+  // the occurrence's, so the occurrence is resolved within the event first and
+  // the subject is built from what was found, not from what was claimed.
+  it('directAddGame binds an occurrence-level add through the occurrence, resolved within the event', async () => {
+    db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+    db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', occurrenceId: 'occ-1' } as EventGame);
+
+    await service.directAddGame('event-1', {
+      platformGameId: 'pg-1',
+      suppliedById: 'gl-1',
+      occurrenceId: 'occ-1',
+    } as never);
+
+    expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'occ-1', eventId: 'event-1' } }),
+    );
+    expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventGame, {
+      eventId: null,
+      occurrenceId: 'occ-1',
+      event: null,
+      occurrence: { id: 'occ-1', eventId: 'event-1', event: { householdId: 'hh-1' } },
+    });
+  });
+
+  it('directAddGame answers not found for an occurrence outside the event, and writes nothing', async () => {
+    db.eventOccurrence.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.directAddGame('event-1', {
+        platformGameId: 'pg-1',
+        suppliedById: 'gl-1',
+        occurrenceId: 'occ-9',
+      } as never),
+    ).rejects.toThrow(NotFoundException);
+    expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+  });
+
+  it('directAddGame refuses before writing when the instance check denies', async () => {
+    abilityService.assertCurrentActorCan.mockImplementation(() => {
+      throw new ForbiddenException();
+    });
+
+    await expect(
+      service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
+    ).rejects.toThrow(ForbiddenException);
+    expect(db.eventGame.create).not.toHaveBeenCalled();
   });
 
   it('nominate emits a NominationCreatedEvent with the created row snapshot', async () => {

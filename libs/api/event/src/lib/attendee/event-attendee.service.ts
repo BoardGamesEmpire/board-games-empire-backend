@@ -21,7 +21,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { assertEventExists } from '../event-access.helpers';
+import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -296,8 +296,17 @@ export class EventAttendeeService {
 
   async addGameToList(eventId: string, attendeeId: string, dto: AddGameToListDto): Promise<EventAttendeeGameList> {
     const initiatedAt = new Date();
-    await assertEventExists(this.db, eventId);
+    const event = await requireEvent(this.db, eventId);
     const attendee = await this.assertAttendeeExists(eventId, attendeeId);
+
+    // The route's policy check judges a create by type alone, and `manage`
+    // implies `create`: a participant passes it for their own list, a manager
+    // for any list in the event. Bind it to the entry about to be written,
+    // carrying the attendee's user and event so either grant can match.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventAttendeeGameList, {
+      attendeeId,
+      attendee: { id: attendeeId, userId: attendee.userId, eventId, event: { householdId: event.householdId } },
+    });
 
     if (attendee.userId) {
       const collection = await this.db.gameCollection.findUnique({

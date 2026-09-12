@@ -370,4 +370,86 @@ describe('AbilityService', () => {
       expect(service.getTriggeringUserAbility()).toBeNull();
     });
   });
+
+  describe('assertCurrentActorCan', () => {
+    // The type-level check a route's `@CheckPolicies` runs answers true the
+    // moment ANY rule for the (action, subject) pair exists, conditions
+    // unread. A create has no row for a query filter to bind those conditions
+    // to, so the service has to ask about the instance it is about to write.
+    const boundToEvent = () =>
+      ability([{ action: Action.create, subject: 'EventOccurrence', conditions: { eventId: 'ev-1' } }]);
+
+    it('the type-level check passes on a conditioned grant whatever the instance — the gap this closes', () => {
+      expect(boundToEvent().can(Action.create, ResourceType.EventOccurrence)).toBe(true);
+    });
+
+    it('allows an instance the conditions match', () => {
+      abilityContext.peek.mockReturnValue([boundToEvent()]);
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { eventId: 'ev-1' }),
+      ).not.toThrow();
+    });
+
+    it('throws ForbiddenException on an instance the conditions do not match', () => {
+      abilityContext.peek.mockReturnValue([boundToEvent()]);
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { eventId: 'ev-2' }),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('evaluates a relation traversal against the related row nested on the instance', () => {
+      abilityContext.peek.mockReturnValue([
+        ability([
+          {
+            action: Action.create,
+            subject: 'EventOccurrence',
+            conditions: { event: { is: { householdId: 'hh-1' } } },
+          },
+        ]),
+      ]);
+      const inHousehold = { eventId: 'ev-9', event: { householdId: 'hh-1' } };
+      const noHousehold = { eventId: 'ev-9', event: { householdId: null } };
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, inHousehold),
+      ).not.toThrow();
+      expect(() => service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, noHousehold)).toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('requires EVERY primed ability to allow the instance — the key clamps its owner', () => {
+      const owner = ability([{ action: Action.create, subject: 'EventOccurrence' }]);
+      abilityContext.peek.mockReturnValue([owner, boundToEvent()]);
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { eventId: 'ev-2' }),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('throws ForbiddenException when the primed array is empty, never a vacuous pass', () => {
+      abilityContext.peek.mockReturnValue([]);
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { eventId: 'ev-1' }),
+      ).toThrow(ForbiddenException);
+    });
+
+    it('treats a condition the matcher cannot evaluate as a denial, not a 500', () => {
+      // `{ relation: { field } }` is a valid Prisma filter, but the in-memory
+      // matcher accepts only the operator form (`is`) and throws on it. The
+      // catalog writes traversals in the operator form; this is the backstop.
+      abilityContext.peek.mockReturnValue([
+        ability([
+          { action: Action.create, subject: 'EventOccurrence', conditions: { event: { householdId: 'hh-1' } } },
+        ]),
+      ]);
+
+      expect(() =>
+        service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { event: { householdId: 'hh-1' } }),
+      ).toThrow(ForbiddenException);
+    });
+  });
 });

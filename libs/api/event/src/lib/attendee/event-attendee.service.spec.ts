@@ -1,4 +1,4 @@
-import type { EventAttendee, EventAttendeeGameList, GameCollection } from '@bge/database';
+import type { Event, EventAttendee, EventAttendeeGameList, GameCollection } from '@bge/database';
 import { Action, EventParticipationStatus, ResourceType } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
@@ -9,7 +9,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { NotFoundException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EventAttendeeService } from './event-attendee.service';
 import {
@@ -199,7 +199,7 @@ describe('EventAttendeeService', () => {
     });
 
     it('addGameToList emits a GameAddedToListEvent (create) for the new row', async () => {
-      db.event.count.mockResolvedValue(1);
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
       db.eventAttendeeGameList.create.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
@@ -214,6 +214,42 @@ describe('EventAttendeeService', () => {
       expect(emitted.eventId).toBe('event-1');
       expect(emitted.before).toBeNull();
       expect(emitted.after).toEqual({ id: 'gl-1', attendeeId: 'att-1', collectionId: 'col-1' });
+    });
+
+    // The route's policy check judges a create by type alone — and `manage`
+    // implies `create`, so a manager passes it for any attendee's list while a
+    // participant passes it for their own. The service checks the entry it is
+    // about to write, carrying the attendee's user and event so both grants
+    // can bind.
+    it('addGameToList checks the create against the entry it is about to write', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.gameCollection.findUnique.mockResolvedValue({ userId: 'user-1', deletedAt: null } as GameCollection);
+      db.eventAttendeeGameList.create.mockResolvedValue(makeEventAttendeeGameList('att-1', 'col-1', { id: 'gl-1' }));
+
+      await service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
+        Action.create,
+        ResourceType.EventAttendeeGameList,
+        {
+          attendeeId: 'att-1',
+          attendee: { id: 'att-1', userId: 'user-1', eventId: 'event-1', event: { householdId: 'hh-1' } },
+        },
+      );
+    });
+
+    it('addGameToList refuses before writing when the instance check denies', async () => {
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.addGameToList('event-1', 'att-1', { collectionId: 'col-1' })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.eventAttendeeGameList.create).not.toHaveBeenCalled();
     });
 
     it('removeGameFromList → delete', async () => {

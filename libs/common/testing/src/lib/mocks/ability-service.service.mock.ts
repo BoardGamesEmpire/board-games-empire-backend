@@ -11,6 +11,7 @@ declare class AbilityService {
   getActingUserId(): string;
   getTriggeringUserAbility(): unknown | null;
   primeCurrentActor(): Promise<void>;
+  assertCurrentActorCan(action: string, resourceType: string, instance: Record<string, unknown>): void;
 }
 
 /** Stable sentinel returned by the mocked condition resolvers, so specs can
@@ -30,6 +31,7 @@ export type MockAbilityService = Mocked<
     | 'getActingUserId'
     | 'getTriggeringUserAbility'
     | 'primeCurrentActor'
+    | 'assertCurrentActorCan'
   >
 >;
 
@@ -37,8 +39,9 @@ export type MockAbilityService = Mocked<
  * Creates a typed AbilityService mock with sensible, non-throwing defaults:
  * condition resolvers return `[MOCK_RESOURCE_CONDITION]` (a non-empty filter,
  * never the dangerous `AND: []`), `getActingUserId` returns
- * `MOCK_ACTING_USER_ID`. Override per spec via the returned jest.fns or the
- * `overrides` argument.
+ * `MOCK_ACTING_USER_ID`, and the instance check `assertCurrentActorCan`
+ * allows (returns without throwing). Override per spec via the returned
+ * jest.fns or the `overrides` argument.
  *
  * @example
  *   abilityService = createMockAbilityService();
@@ -57,6 +60,7 @@ export function createMockAbilityService(overrides: Partial<MockAbilityService> 
     getActingUserId: jest.fn<AbilityService['getActingUserId']>().mockReturnValue(MOCK_ACTING_USER_ID),
     getTriggeringUserAbility: jest.fn<AbilityService['getTriggeringUserAbility']>().mockReturnValue(null),
     primeCurrentActor: jest.fn<AbilityService['primeCurrentActor']>().mockResolvedValue(undefined),
+    assertCurrentActorCan: jest.fn<AbilityService['assertCurrentActorCan']>(),
     ...overrides,
   };
 }

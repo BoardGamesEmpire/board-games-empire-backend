@@ -6,8 +6,11 @@ import {
   RENDER_CONTEXT_VARIABLES,
   ResourceType,
   RiskLevel,
+  ROLE_PERMISSION_CATALOG,
+  SystemRole,
 } from '@bge/database';
 import { subject } from '@casl/ability';
+import { accessibleBy } from '@casl/prisma';
 import { Test, TestingModule } from '@nestjs/testing';
 import { AbilityFactory } from './ability.factory';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
@@ -809,6 +812,82 @@ describe('AbilityFactory', () => {
 
         expect(conditions).toMatchObject({ householdId: 'hh-1' });
       });
+    });
+  });
+
+  describe('scoped event grants (#432, #436)', () => {
+    // Real catalog entries again. An event role renders through the event
+    // pass and binds on `{{ eventId }}`; a household role renders through the
+    // household pass and must bind on `{{ householdId }}`. Before #432 the
+    // event-bound entries below carried no conditions, so every holder read
+    // the whole install; before #436 the household roles held the event-bound
+    // entries and could never match a row.
+    const householdMemberOf = (householdId: string, roleName: string, slugs: PermissionSlug[]) =>
+      makeUser({
+        id: 'user-1',
+        householdMember: [{ householdId, role: makeRole(roleName, slugs.map(catalogPermission)) }],
+      });
+    const eventGuestAt = (eventId: string, slugs: PermissionSlug[]) =>
+      makeUser({
+        id: 'user-1',
+        eventsAttended: [{ eventId, role: makeRole('EventGuest', slugs.map(catalogPermission)) }],
+      });
+
+    it("bounds a household member's occurrence reads to the household's events — a clause, not {} (#432)", () => {
+      // The whole shipped HouseholdMember role, composed: the ceiling is what
+      // every grant the role carries unions to, not what one entry says.
+      const ability = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdMember', [...ROLE_PERMISSION_CATALOG[SystemRole.HouseholdMember]]),
+      );
+
+      expect(accessibleBy(ability, Action.read).ofType('EventOccurrence')).toEqual({
+        OR: [{ event: { is: { householdId: 'hh-1' } } }],
+      });
+      expect(
+        ability.can(Action.read, asEntity('EventOccurrence', { eventId: 'ev-1', event: { householdId: 'hh-1' } })),
+      ).toBe(true);
+      expect(
+        ability.can(Action.read, asEntity('EventOccurrence', { eventId: 'ev-2', event: { householdId: 'hh-2' } })),
+      ).toBe(false);
+      expect(
+        ability.can(Action.read, asEntity('EventOccurrence', { eventId: 'ev-3', event: { householdId: null } })),
+      ).toBe(false);
+    });
+
+    it("bounds an event guest's occurrence reads to the event attended", () => {
+      const ability = factory.createForUser(eventGuestAt('ev-1', ['read:event_occurrence']));
+
+      expect(accessibleBy(ability, Action.read).ofType('EventOccurrence')).toEqual({ OR: [{ eventId: 'ev-1' }] });
+      expect(ability.can(Action.read, asEntity('EventOccurrence', { eventId: 'ev-1' }))).toBe(true);
+      expect(ability.can(Action.read, asEntity('EventOccurrence', { eventId: 'ev-2' }))).toBe(false);
+    });
+
+    it("lets a household owner update the household's own events and no other (#436)", () => {
+      const ability = factory.createForUser(householdMemberOf('hh-1', 'HouseholdOwner', ['update:event:household']));
+
+      expect(ability.can(Action.update, asEntity('Event', { id: 'ev-1', householdId: 'hh-1' }))).toBe(true);
+      expect(ability.can(Action.update, asEntity('Event', { id: 'ev-2', householdId: 'hh-2' }))).toBe(false);
+      expect(ability.can(Action.update, asEntity('Event', { id: 'ev-3', householdId: null }))).toBe(false);
+    });
+
+    it('answers a create for an occurrence of the attended event, and refuses one for another event', () => {
+      // What the occurrence create path asks, with the subject it builds from
+      // the path parameter and the parent event row.
+      const ability = factory.createForUser(eventGuestAt('ev-1', ['create:event_occurrence']));
+
+      expect(ability.can(Action.create, ResourceType.EventOccurrence)).toBe(true);
+      expect(
+        ability.can(
+          Action.create,
+          subject(ResourceType.EventOccurrence, { eventId: 'ev-1', event: { householdId: null } }),
+        ),
+      ).toBe(true);
+      expect(
+        ability.can(
+          Action.create,
+          subject(ResourceType.EventOccurrence, { eventId: 'ev-2', event: { householdId: null } }),
+        ),
+      ).toBe(false);
     });
   });
 

@@ -173,6 +173,39 @@ describe('EventOccurrenceService', () => {
         }),
       );
     });
+
+    // The route's policy check judges a create by type alone, so the service
+    // checks the row it is about to write: the event named in the path, and
+    // that event's household for the household-bound grants.
+    it('checks the create against the occurrence it is about to write', async () => {
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        schedulingMode: EventSchedulingMode.MultiDay,
+        householdId: 'hh-1',
+      } as never);
+      db.eventOccurrence.create.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.addOccurrence('event-1', { label: 'Day 1' });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventOccurrence, {
+        eventId: 'event-1',
+        event: { householdId: 'hh-1' },
+      });
+    });
+
+    it('refuses before writing when the instance check denies', async () => {
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        schedulingMode: EventSchedulingMode.MultiDay,
+        householdId: null,
+      } as never);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.addOccurrence('event-1', { label: 'Day 1' })).rejects.toThrow(ForbiddenException);
+      expect(db.eventOccurrence.create).not.toHaveBeenCalled();
+    });
   });
 
   describe('updateOccurrence', () => {
