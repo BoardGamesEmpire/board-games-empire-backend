@@ -20,6 +20,22 @@ const acceptedFriendOfActingUser = {
   ],
 } satisfies Prisma.UserWhereInput;
 
+// An EventGame hangs off the event itself or off one of its occurrences
+// (exactly one FK is set), so a grant bound to an event has to name both
+// paths, and the household variant both paths' households. Typed as the
+// `EventGame` where-clause they are spliced into and module-private, for the
+// reasons `acceptedFriendOfActingUser` gives.
+const eventGameInEvent = {
+  OR: [{ eventId: '{{ eventId }}' }, { occurrence: { is: { eventId: '{{ eventId }}' } } }],
+} satisfies Prisma.EventGameWhereInput;
+
+const eventGameInHousehold = {
+  OR: [
+    { event: { is: { householdId: '{{ householdId }}' } } },
+    { occurrence: { is: { event: { is: { householdId: '{{ householdId }}' } } } } },
+  ],
+} satisfies Prisma.EventGameWhereInput;
+
 /**
  * The complete seeded permission catalog — the manifest of every permission
  * this code version expects to exist. Data, not behavior: the reconciler (#235) writes
@@ -247,37 +263,96 @@ export const PERMISSION_CATALOG = [
   }),
 
   // ─── EventOccurrence ────────────────────────────────
+  //
+  // Event sub-resource grants bind to the coordinate the pass rendering them
+  // supplies. An event role renders with `{{ eventId }}`, so an event-bound
+  // grant names the row's event: the scalar `eventId` where the subject
+  // carries one, a relation traversal where it does not. Left unconditioned,
+  // these grants reached every row in the install for anyone holding any
+  // event or household role (#432).
+  //
+  // A household role renders with `{{ householdId }}` and never `{{ eventId }}`,
+  // so it holds a `:household` variant of each operation instead, bound
+  // through the event's household; an event with no household is out of every
+  // household role's reach (#436). The event-bound original stays with the
+  // event roles.
+  //
+  // These grants write relation traversals in Prisma's operator form (`is`,
+  // `some`), not the `{ relation: { field } }` shorthand. Prisma accepts both in a
+  // query, but the in-memory matcher behind `ability.can(action, subject(...))`
+  // accepts only the operator form and throws on the shorthand — and the
+  // create paths run exactly that check. A create has no row for a query
+  // filter to bind, and `@CheckPolicies` judges a create by type alone, so
+  // the service checks a subject built from the request and its parent row
+  // before writing.
   permission({
     action: Action.read,
     subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'read:event_occurrence',
     riskLevel: RiskLevel.Medium,
     reason: 'View event occurrences',
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'read:event_occurrence:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the occurrences of your household's events",
+  }),
+  permission({
     action: Action.create,
     subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'create:event_occurrence',
     riskLevel: RiskLevel.Medium,
     reason: 'Add occurrences to an event',
   }),
   permission({
+    action: Action.create,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'create:event_occurrence:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Add occurrences to your household's events",
+  }),
+  permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence',
     riskLevel: RiskLevel.Medium,
     reason: 'Update occurrence details (label, date, location)',
   }),
   permission({
+    action: Action.update,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_occurrence:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Update occurrence details on your household's events",
+  }),
+  permission({
     action: Action.delete,
     subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'delete:event_occurrence',
     riskLevel: RiskLevel.Medium,
     reason: 'Remove an occurrence from an event',
   }),
   permission({
+    action: Action.delete,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'delete:event_occurrence:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Remove an occurrence from your household's events",
+  }),
+  permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:confirm',
     riskLevel: RiskLevel.Medium,
     reason: 'Confirm a proposed occurrence (Proposed → Confirmed)',
@@ -285,6 +360,15 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_occurrence:confirm:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Confirm a proposed occurrence on your household's events",
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:decline',
     riskLevel: RiskLevel.Medium,
     reason: 'Decline a proposed occurrence (Proposed → Declined)',
@@ -292,18 +376,44 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_occurrence:decline:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Decline a proposed occurrence on your household's events",
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventOccurrence,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_occurrence:cancel',
     riskLevel: RiskLevel.Medium,
     reason: 'Cancel a confirmed occurrence (Confirmed → Cancelled)',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_occurrence:cancel:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Cancel a confirmed occurrence on your household's events",
   }),
 
   // ─── EventAvailabilityVote ──────────────────────────
   permission({
     action: Action.read,
     subject: ResourceType.EventAvailabilityVote,
+    conditions: { occurrence: { is: { eventId: '{{ eventId }}' } } },
     slug: 'read:event_availability_vote',
     riskLevel: RiskLevel.Medium,
     reason: 'View availability votes and summary',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventAvailabilityVote,
+    conditions: { occurrence: { is: { event: { is: { householdId: '{{ householdId }}' } } } } },
+    slug: 'read:event_availability_vote:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View availability votes on your household's events",
   }),
   permission({
     action: Action.create,
@@ -322,6 +432,14 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_attendee',
     riskLevel: RiskLevel.Medium,
     reason: 'View event attendees',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventAttendee,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'read:event_attendee:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the attendees of your household's events",
   }),
   permission({
     action: Action.update,
@@ -346,13 +464,23 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.EventGameNomination,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'read:event_game_nomination',
     riskLevel: RiskLevel.Medium,
     reason: 'View game nominations',
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.EventGameNomination,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'read:event_game_nomination:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View game nominations on your household's events",
+  }),
+  permission({
     action: Action.create,
     subject: ResourceType.EventGameNomination,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'create:event_game_nomination',
     riskLevel: RiskLevel.Low,
     reason: 'Nominate a game for the event',
@@ -368,6 +496,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventGameNomination,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_game_nomination:resolve',
     riskLevel: RiskLevel.Medium,
     reason: 'Resolve a nomination (tally votes)',
@@ -375,6 +504,15 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventGameNomination,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_game_nomination:resolve:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Resolve a nomination on your household's events",
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventGameNomination,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_game_nomination:approve',
     riskLevel: RiskLevel.Medium,
     reason: 'Approve a nomination (HostApproval mode)',
@@ -382,6 +520,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventGameNomination,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_game_nomination:reject',
     riskLevel: RiskLevel.Medium,
     reason: 'Reject a nomination (HostApproval mode)',
@@ -391,9 +530,18 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.EventGameVote,
+    conditions: { nomination: { is: { eventId: '{{ eventId }}' } } },
     slug: 'read:event_game_vote',
     riskLevel: RiskLevel.Medium,
     reason: 'View game nomination votes',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventGameVote,
+    conditions: { nomination: { is: { event: { is: { householdId: '{{ householdId }}' } } } } },
+    slug: 'read:event_game_vote:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View game nomination votes on your household's events",
   }),
   permission({
     action: Action.create,
@@ -405,40 +553,86 @@ export const PERMISSION_CATALOG = [
   }),
 
   // ─── EventGame ──────────────────────────────────────
+  // Both parents are named in every grant; `eventGameInEvent` and
+  // `eventGameInHousehold` at the top of the file say why.
   permission({
     action: Action.read,
     subject: ResourceType.EventGame,
+    conditions: eventGameInEvent,
     slug: 'read:event_game',
     riskLevel: RiskLevel.Low,
     reason: 'View the event game lineup',
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.EventGame,
+    conditions: eventGameInHousehold,
+    slug: 'read:event_game:household',
+    riskLevel: RiskLevel.Low,
+    reason: "View the game lineup of your household's events",
+  }),
+  permission({
     action: Action.create,
     subject: ResourceType.EventGame,
+    conditions: eventGameInEvent,
     slug: 'create:event_game',
     riskLevel: RiskLevel.Medium,
     reason: 'Directly add a game to the event lineup',
   }),
   permission({
+    action: Action.create,
+    subject: ResourceType.EventGame,
+    conditions: eventGameInHousehold,
+    slug: 'create:event_game:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Directly add a game to the lineup of your household's events",
+  }),
+  permission({
     action: Action.delete,
     subject: ResourceType.EventGame,
+    conditions: eventGameInEvent,
     slug: 'delete:event_game',
     riskLevel: RiskLevel.Medium,
     reason: 'Remove a game from the event lineup',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.EventGame,
+    conditions: eventGameInHousehold,
+    slug: 'delete:event_game:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Remove a game from the lineup of your household's events",
   }),
 
   // ─── EventAttendeeGameList ──────────────────────────
   permission({
     action: Action.read,
     subject: ResourceType.EventAttendeeGameList,
+    conditions: { attendee: { is: { eventId: '{{ eventId }}' } } },
     slug: 'read:attendee_game_list',
     riskLevel: RiskLevel.Medium,
     reason: "View an attendee's available game list",
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.EventAttendeeGameList,
+    conditions: { attendee: { is: { event: { is: { householdId: '{{ householdId }}' } } } } },
+    slug: 'read:attendee_game_list:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the available game lists of your household's events",
+  }),
+  // The own-list pair names the event as well as the user: an event role is
+  // rendered once per attendance, so a user-only condition granted through
+  // one event matched the actor's own attendee row in every other event. The
+  // pair is in operator form too: the game-list create path checks
+  // `create:attendee_game_list` against an instance (a participant may add to
+  // their own list, a manager to any list in the event), and the matcher
+  // throws on the shorthand this pair used to carry. The delete mirrors the
+  // create so the pair reads alike.
+  permission({
     action: Action.create,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { userId: '{{ user.id }}' } },
+    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
     slug: 'create:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Add a game to your own available game list',
@@ -446,7 +640,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.delete,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { userId: '{{ user.id }}' } },
+    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
     slug: 'delete:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Remove a game from your own available game list',
@@ -454,25 +648,52 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.manage,
     subject: ResourceType.EventAttendeeGameList,
+    conditions: { attendee: { is: { eventId: '{{ eventId }}' } } },
     slug: 'manage:attendee_game_list',
     riskLevel: RiskLevel.Medium,
     reason: "Manage any attendee's available game list",
+  }),
+  permission({
+    action: Action.manage,
+    subject: ResourceType.EventAttendeeGameList,
+    conditions: { attendee: { is: { event: { is: { householdId: '{{ householdId }}' } } } } },
+    slug: 'manage:attendee_game_list:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Manage any attendee's available game list on your household's events",
   }),
 
   // ─── EventPolicy ────────────────────────────────────
   permission({
     action: Action.read,
     subject: ResourceType.EventPolicy,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'read:event_policy',
     riskLevel: RiskLevel.Low,
     reason: 'View event policy configuration',
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'read:event_policy:household',
+    riskLevel: RiskLevel.Low,
+    reason: "View the policy configuration of your household's events",
+  }),
+  permission({
     action: Action.update,
     subject: ResourceType.EventPolicy,
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_policy',
     riskLevel: RiskLevel.Medium,
     reason: 'Update event policy configuration',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.EventPolicy,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'update:event_policy:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Update the policy configuration of your household's events",
   }),
 
   // Game Collection
@@ -863,6 +1084,14 @@ export const PERMISSION_CATALOG = [
     reason: 'View an event you attend',
   }),
   permission({
+    action: Action.read,
+    subject: ResourceType.Event,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'read:event:participant:household',
+    riskLevel: RiskLevel.Low,
+    reason: "View your household's events",
+  }),
+  permission({
     action: Action.update,
     subject: ResourceType.Event,
     conditions: {
@@ -877,6 +1106,14 @@ export const PERMISSION_CATALOG = [
     slug: 'update:event',
     riskLevel: RiskLevel.Low,
     reason: 'Update an event',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.Event,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'update:event:household',
+    riskLevel: RiskLevel.Low,
+    reason: "Update your household's events",
   }),
   permission({
     action: Action.delete,
@@ -953,6 +1190,14 @@ export const PERMISSION_CATALOG = [
     reason: 'Invite to event',
   }),
   permission({
+    action: Action.create,
+    subject: ResourceType.Invite,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'create:event_invite:household',
+    riskLevel: RiskLevel.Low,
+    reason: "Invite to your household's events",
+  }),
+  permission({
     action: Action.manage,
     subject: ResourceType.EventAttendee,
     conditions: { eventId: '{{ eventId }}' },
@@ -960,14 +1205,37 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'Manage event participants',
   }),
+  permission({
+    action: Action.manage,
+    subject: ResourceType.EventAttendee,
+    conditions: { event: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'manage:event_attendee:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Manage the participants of your household's events",
+  }),
 
   // --- Game Sessions ---
+  // A session reaches an event only through its optional occurrence, so a
+  // session outside any occurrence is out of every event role's reach; the
+  // `:household` variants bind on the session's own `householdId`.
+  // `read:game_play_session` and `create:session_player:join` stay
+  // unconditioned on purpose: plain `User` holds them, so global reach is
+  // intended, not an oversight.
   permission({
     action: Action.create,
     subject: ResourceType.GamePlayResult,
+    conditions: { gamePlaySession: { is: { occurrence: { is: { eventId: '{{ eventId }}' } } } } },
     slug: 'create:play_record',
     riskLevel: RiskLevel.Low,
     reason: 'Create a play record',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.GamePlayResult,
+    conditions: { gamePlaySession: { is: { householdId: '{{ householdId }}' } } },
+    slug: 'create:play_record:household',
+    riskLevel: RiskLevel.Low,
+    reason: "Create a play record for your household's sessions",
   }),
   permission({
     action: Action.read,
@@ -979,23 +1247,50 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.create,
     subject: ResourceType.GamePlaySession,
+    conditions: { occurrence: { is: { eventId: '{{ eventId }}' } } },
     slug: 'create:game_play_session',
     riskLevel: RiskLevel.Low,
     reason: 'Create a game session',
   }),
   permission({
+    action: Action.create,
+    subject: ResourceType.GamePlaySession,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'create:game_play_session:household',
+    riskLevel: RiskLevel.Low,
+    reason: 'Create a game session for your household',
+  }),
+  permission({
     action: Action.update,
     subject: ResourceType.GamePlaySession,
+    conditions: { occurrence: { is: { eventId: '{{ eventId }}' } } },
     slug: 'update:game_play_session',
     riskLevel: RiskLevel.Medium,
     reason: 'Update a game session',
   }),
   permission({
+    action: Action.update,
+    subject: ResourceType.GamePlaySession,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'update:game_play_session:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Update your household's game sessions",
+  }),
+  permission({
     action: Action.delete,
     subject: ResourceType.GamePlaySession,
+    conditions: { occurrence: { is: { eventId: '{{ eventId }}' } } },
     slug: 'delete:game_play_session',
     riskLevel: RiskLevel.Medium,
     reason: 'Delete a game session',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GamePlaySession,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'delete:game_play_session:household',
+    riskLevel: RiskLevel.Medium,
+    reason: "Delete your household's game sessions",
   }),
   permission({
     action: Action.create,
@@ -1007,6 +1302,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.create,
     subject: ResourceType.SessionPlayer,
+    conditions: { gamePlaySession: { is: { occurrence: { is: { eventId: '{{ eventId }}' } } } } },
     slug: 'create:session_player:observer:join',
     riskLevel: RiskLevel.Low,
     reason: 'Join a game session as observer',
@@ -1043,9 +1339,18 @@ export const PERMISSION_CATALOG = [
   }),
 
   // --- Media ---
+  // Media reaches an event only through its typed join rows, so the
+  // participant's upload grant names all three.
   permission({
     action: Action.create,
     subject: ResourceType.Media,
+    conditions: {
+      OR: [
+        { eventImages: { some: { eventId: '{{ eventId }}' } } },
+        { eventVideos: { some: { eventId: '{{ eventId }}' } } },
+        { eventDocuments: { some: { eventId: '{{ eventId }}' } } },
+      ],
+    },
     slug: 'create:media:upload',
     riskLevel: RiskLevel.Low,
     reason: 'Upload media',

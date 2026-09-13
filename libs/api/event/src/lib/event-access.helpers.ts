@@ -1,4 +1,4 @@
-import type { DatabaseService } from '@bge/database';
+import type { DatabaseService, Event } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
@@ -16,6 +16,27 @@ export async function assertEventExists(db: DatabaseService, eventId: string): P
   if (count === 0) {
     throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
   }
+}
+
+/**
+ * The same existence predicate as {@link assertEventExists}, returning the
+ * coordinates a create under the event binds to: the event's id and its
+ * household. The create paths check the row they are about to write against
+ * the ability (`AbilityService.assertCurrentActorCan`), and the household-bound
+ * grants need the parent event's `householdId` to match; `null` on an event
+ * outside any household, which no household role can reach.
+ */
+export async function requireEvent(db: DatabaseService, eventId: string): Promise<Pick<Event, 'id' | 'householdId'>> {
+  const event = await db.event.findUnique({
+    where: { id: eventId, deletedAt: null },
+    select: { id: true, householdId: true },
+  });
+
+  if (!event) {
+    throw new NotFoundException(t('errors.event.not_found', { id: eventId }));
+  }
+
+  return event;
 }
 
 /**

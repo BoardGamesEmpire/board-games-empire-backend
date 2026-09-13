@@ -113,10 +113,18 @@ export class EventOccurrenceService {
     const initiatedAt = new Date();
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
-      select: { id: true, schedulingMode: true },
+      select: { id: true, schedulingMode: true, householdId: true },
     });
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id: eventId })));
+
+    // The route's policy check judges a create by type alone; bind it to the
+    // row about to be written — the event in the path, and that event's
+    // household for the household-bound grants.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, {
+      eventId,
+      event: { householdId: event.householdId },
+    });
 
     if (event.schedulingMode === EventSchedulingMode.Fixed) {
       const existingCount = await this.db.eventOccurrence.count({

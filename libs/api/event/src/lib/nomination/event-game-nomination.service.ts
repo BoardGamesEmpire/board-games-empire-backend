@@ -4,6 +4,7 @@ import {
   EventGame,
   EventGameNomination,
   EventGameVote,
+  EventOccurrence,
   GameAdditionMode,
   InterestedWeight,
   isPrismaDependentRecordNotFoundError,
@@ -22,7 +23,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { CastVoteDto } from '../dto/cast-vote.dto';
-import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
+import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
 import { AttendeeStub, VoteResolver } from '../vote/vote-resolver';
 import { DirectAddGameDto } from './dto/direct-add-game.dto';
@@ -108,6 +109,24 @@ export class EventGameNominationService {
 
   async nominate(eventId: string, dto: NominateGameDto): Promise<EventGameNomination> {
     const initiatedAt = new Date();
+    const event = await requireEvent(this.db, eventId);
+
+    // An occurrence named in the body has to be one of this event's: the
+    // effective policy is read through it, and a Direct-mode nomination is
+    // elevated to an EventGame under it, so an occurrence of another event
+    // would gate this create by that event's policy and write into it.
+    if (dto.occurrenceId) {
+      await this.requireOccurrence(eventId, dto.occurrenceId);
+    }
+
+    // The route's policy check judges a create by type alone; bind it to the
+    // row about to be written — the event in the path, and that event's
+    // household for the household-bound grants.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventGameNomination, {
+      eventId,
+      event: { householdId: event.householdId },
+    });
+
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
@@ -474,6 +493,30 @@ export class EventGameNominationService {
 
   async directAddGame(eventId: string, dto: DirectAddGameDto): Promise<EventGame> {
     const initiatedAt = new Date();
+    const event = await requireEvent(this.db, eventId);
+
+    // An occurrence-level game carries no eventId of its own: its event is the
+    // occurrence's. Resolve the occurrence within the event first, so the
+    // subject checked below describes the row that will be written rather
+    // than the event the request named, and an occurrence of some other event
+    // is not found here.
+    const occurrence = dto.occurrenceId ? await this.requireOccurrence(eventId, dto.occurrenceId) : null;
+
+    // The route's policy check judges a create by type alone; bind it to the
+    // row about to be written, on whichever of its two parents it hangs off.
+    this.abilityService.assertCurrentActorCan(
+      Action.create,
+      ResourceType.EventGame,
+      occurrence
+        ? {
+            eventId: null,
+            occurrenceId: occurrence.id,
+            event: null,
+            occurrence: { id: occurrence.id, eventId, event: { householdId: event.householdId } },
+          }
+        : { eventId, occurrenceId: null, event: { householdId: event.householdId }, occurrence: null },
+    );
+
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
     const policy = await this.getEffectivePolicy(eventId, dto.occurrenceId);
 
@@ -503,6 +546,17 @@ export class EventGameNominationService {
     return eventGame;
   }
 
+  /**
+   * Writes the EventGame a nomination becomes. The actor is not checked for
+   * `create:event_game` here, on purpose: elevation is the outcome of the
+   * nomination workflow, not a create request. The event's policy elevates a
+   * Direct-mode nomination the moment it is made, and a resolved or approved
+   * vote elevates through the `update:event_game_nomination:*` grants, which
+   * EventModerator holds without `create:event_game`. The gates are the
+   * nomination grants the callers check; `directAddGame` is the create
+   * request and carries the EventGame check itself. An occurrence named here
+   * has already been resolved within this event by the caller.
+   */
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
     const initiatedAt = new Date();
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
@@ -527,6 +581,16 @@ export class EventGameNominationService {
     );
 
     return eventGame;
+  }
+
+  private async requireOccurrence(eventId: string, occurrenceId: string): Promise<Pick<EventOccurrence, 'id'>> {
+    const occurrence = await this.db.eventOccurrence.findUnique({
+      where: { id: occurrenceId, eventId },
+      select: { id: true },
+    });
+
+    assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
+    return occurrence;
   }
 
   /** Scalar snapshot of a created EventGame row for {@link GameAddedToEventEvent}. */

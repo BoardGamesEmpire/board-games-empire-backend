@@ -9,6 +9,7 @@ import {
 } from '@bge/actor-context';
 import { Action } from '@bge/database';
 import { t } from '@bge/i18n';
+import { subject } from '@casl/ability';
 import { accessibleBy, type WhereInput } from '@casl/prisma';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
@@ -123,6 +124,54 @@ export class AbilityService {
       );
 
       throw new ForbiddenException(t('common.forbidden.access'));
+    }
+  }
+
+  /**
+   * The instance half of a route's `@CheckPolicies` type check: every primed
+   * ability must allow `action` on THIS `instance` of `resourceType`, or the
+   * request is forbidden. The guard's `ability.can(action, ResourceType.X)`
+   * answers true the moment any rule for the pair exists, conditions unread,
+   * which is all a route can ask before it knows the row. A mutation of an
+   * existing row binds the conditions in its query instead
+   * ({@link getCurrentResourceConditions}); a create has no row for a filter
+   * to bind, so the service builds the subject it is about to write — the
+   * request's coordinates plus what the parent row supplies — and asks here.
+   *
+   * Same AND-across-abilities rule as `PoliciesGuard`: for an API key the
+   * owner AND the key must both allow it, and an empty array is a denial,
+   * never a vacuous pass. A condition the matcher cannot evaluate is logged
+   * and denied rather than surfaced as a 500, mirroring
+   * {@link getResourceConditionsForAbilities}.
+   *
+   * The instance is `subject()`-tagged so its type resolves by the tag rather
+   * than by a plain object's constructor. Relation conditions reach it as
+   * nested objects (`{ event: { householdId } }` on the instance for an
+   * `{ event: { is: { householdId } } }` condition), and the matcher accepts
+   * only that operator form — the `{ relation: { field } }` shorthand Prisma
+   * also takes in a query throws here. Every grant a create path checks this
+   * way writes its traversals with `is` and `some`; a grant still in the
+   * shorthand has to be converted before it can be checked against an
+   * instance.
+   */
+  assertCurrentActorCan(action: Action, resourceType: ModelResourceType, instance: Record<string, unknown>): void {
+    const abilities = this.getCurrentAbilities();
+
+    let allowed: boolean;
+    try {
+      allowed =
+        abilities.length > 0 && abilities.every((ability) => ability.can(action, subject(resourceType, instance)));
+    } catch (error) {
+      this.logger.error(
+        `Failed to evaluate '${action}' on a ${resourceType} instance; treating as denied.`,
+        error instanceof Error ? error.stack : String(error),
+      );
+
+      throw new ForbiddenException(t('common.forbidden.action'));
+    }
+
+    if (!allowed) {
+      throw new ForbiddenException(t('common.forbidden.action'));
     }
   }
 
