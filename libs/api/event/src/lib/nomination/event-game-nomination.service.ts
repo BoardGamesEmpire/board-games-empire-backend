@@ -546,6 +546,17 @@ export class EventGameNominationService {
     return eventGame;
   }
 
+  /**
+   * Writes the EventGame a nomination becomes. The actor is not checked for
+   * `create:event_game` here, on purpose: elevation is the outcome of the
+   * nomination workflow, not a create request. The event's policy elevates a
+   * Direct-mode nomination the moment it is made, and a resolved or approved
+   * vote elevates through the `update:event_game_nomination:*` grants, which
+   * EventModerator holds without `create:event_game`. The gates are the
+   * nomination grants the callers check; `directAddGame` is the create
+   * request and carries the EventGame check itself. An occurrence named here
+   * has already been resolved within this event by the caller.
+   */
   private async elevateToEventGame(nominationId: string, eventId: string, occurrenceId?: string): Promise<EventGame> {
     const initiatedAt = new Date();
     const nomination = await this.db.eventGameNomination.findUniqueOrThrow({
