@@ -86,6 +86,8 @@ const INERT_STAFF_GRANTS: readonly Grant[] = [
   ['create:event_game', SystemRole.Admin],
   ['delete:event_game', SystemRole.Admin],
   ['read:attendee_game_list', SystemRole.Admin],
+  ['create:attendee_game_list', SystemRole.Admin],
+  ['delete:attendee_game_list', SystemRole.Admin],
   ['manage:attendee_game_list', SystemRole.Admin],
   ['read:event_policy', SystemRole.Admin],
   ['update:event_policy', SystemRole.Admin],

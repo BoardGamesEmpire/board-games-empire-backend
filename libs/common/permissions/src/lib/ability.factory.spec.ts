@@ -887,6 +887,38 @@ describe('AbilityFactory', () => {
       },
     );
 
+    it.each([SystemRole.EventParticipant, SystemRole.EventHost])(
+      "limits a %s's own game-list writes to the event that granted the role (#432)",
+      (roleName) => {
+        // The whole composed role, rendered through one attendance. The
+        // own-list pair used to name only the user, so a role held in one
+        // event passed the game-list create check for the actor's own
+        // attendee row in any other event; the manage grant already named
+        // its event.
+        const ability = factory.createForUser(
+          makeUser({
+            id: 'user-1',
+            eventsAttended: [
+              {
+                eventId: 'ev-1',
+                role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+              },
+            ],
+          }),
+        );
+        const ownEntry = (eventId: string) =>
+          asEntity('EventAttendeeGameList', {
+            attendeeId: 'a-1',
+            attendee: { id: 'a-1', userId: 'user-1', eventId, event: { householdId: null } },
+          });
+
+        expect(ability.can(Action.create, ownEntry('ev-1'))).toBe(true);
+        expect(ability.can(Action.delete, ownEntry('ev-1'))).toBe(true);
+        expect(ability.can(Action.create, ownEntry('ev-2'))).toBe(false);
+        expect(ability.can(Action.delete, ownEntry('ev-2'))).toBe(false);
+      },
+    );
+
     it('answers a create for an occurrence of the attended event, and refuses one for another event', () => {
       // What the occurrence create path asks, with the subject it builds from
       // the path parameter and the parent event row.

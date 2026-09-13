@@ -621,15 +621,18 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the available game lists of your household's events",
   }),
-  // The own-list pair is in operator form too: the game-list create path
-  // checks `create:attendee_game_list` against an instance (a participant may
-  // add to their own list, a manager to any list in the event), and the
-  // matcher throws on the shorthand this pair used to carry. The delete
-  // mirrors the create so the pair reads alike.
+  // The own-list pair names the event as well as the user: an event role is
+  // rendered once per attendance, so a user-only condition granted through
+  // one event matched the actor's own attendee row in every other event. The
+  // pair is in operator form too: the game-list create path checks
+  // `create:attendee_game_list` against an instance (a participant may add to
+  // their own list, a manager to any list in the event), and the matcher
+  // throws on the shorthand this pair used to carry. The delete mirrors the
+  // create so the pair reads alike.
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { is: { userId: '{{ user.id }}' } } },
+    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
     slug: 'create:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Add a game to your own available game list',
@@ -637,7 +640,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.delete,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { is: { userId: '{{ user.id }}' } } },
+    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
     slug: 'delete:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Remove a game from your own available game list',
