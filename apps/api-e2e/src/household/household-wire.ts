@@ -1,4 +1,4 @@
-import type { Household, HouseholdMember } from '@bge/database';
+import type { Household, HouseholdMember, Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -29,15 +29,85 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 export type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 
 export type HouseholdWire = Wire<Household>;
-export type HouseholdMemberWire = Wire<HouseholdMember>;
 
-/** The `role` embed on a member in `getHouseholdById`'s include. */
+/**
+ * The roster row as the API RETURNS it, which is narrower than the model.
+ *
+ * `HouseholdMember` declares eight scalars; the routes publish six. Membership
+ * provenance — `origin` and `addedById` (#276) — is an audit surface the reads
+ * stopped returning (#296). Keeping it in this type would let
+ * `expect(member.origin).toBe(...)` typecheck and then fail at runtime with
+ * `expect(undefined)`, which is the vacuous assertion this module exists to
+ * prevent.
+ *
+ * `Pick` rather than `Omit` deliberately: `Pick`'s key parameter is constrained
+ * to `keyof HouseholdMember`, so renaming or dropping a published column is a
+ * compile error HERE. `Omit` accepts keys the model no longer carries and
+ * silently omits nothing, which would let the same drift back in from the other
+ * direction.
+ *
+ * Restated rather than imported from `@bge/household` for the reason in the
+ * file header, and for one more: deriving this from the service's own payload
+ * type would widen automatically if a read regressed to `include:`, so the
+ * suite would stop being an independent check of the wire contract.
+ */
+export type HouseholdMemberWire = Wire<
+  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'showAllGames' | 'createdAt' | 'updatedAt'>
+>;
+
+/** The `role` embed on a member in `getHouseholdById`'s select shape. */
 export interface HouseholdRoleProjection {
   readonly role: { readonly id: string; readonly name: string };
 }
 
+/**
+ * Deliberately partial: the detail read also embeds each member's `user` and
+ * their `excludedFromHouseholds` join, which nothing here asserts on yet.
+ * Omitting them fails in the safe direction — an assertion on one is a compile
+ * error, not a green test against `undefined` — so they are added when a spec
+ * first needs them rather than kept speculatively in step with the service.
+ */
 export interface HouseholdMemberProjection extends HouseholdMemberWire {
   readonly role: HouseholdRoleProjection | null;
+}
+
+/**
+ * How a person is rendered wherever a household read names one.
+ *
+ * Named rather than inlined because the service shares ONE select for this
+ * (`ACTOR_SELECT`), so the roster's `user` and an invite's `inviter` cannot
+ * drift into two spellings of the same thing. The wire side should not be the
+ * place that reintroduces the drift.
+ */
+export interface ActorProjection {
+  readonly id: string;
+  readonly username: string;
+  readonly profile: { readonly displayName: string | null; readonly avatarUrl: string | null } | null;
+}
+
+/**
+ * The pending-invite row as the API RETURNS it, which is far narrower than the
+ * model.
+ *
+ * `Invite` declares eighteen scalars and this read publishes six. Two of the
+ * twelve withheld are the whole of #297: `token` is a live accept credential,
+ * and `inviteeEmail` is an address belonging to someone who may have no
+ * account. Declaring either here would let an assertion on it typecheck and
+ * then pass vacuously against `undefined`.
+ *
+ * `Pick` rather than `Omit`, for the reason on {@link HouseholdMemberWire}:
+ * dropping or renaming a published column is a compile error at this
+ * declaration, while `Omit` would accept a key the model no longer carries and
+ * silently omit nothing.
+ */
+export type PendingInviteWire = Wire<
+  Pick<Invite, 'id' | 'status' | 'type' | 'inviteeName' | 'expiresAt' | 'createdAt'>
+>;
+
+/** A pending invite with the `role` and `inviter` embeds, as `D-297-6` shapes it. */
+export interface PendingInviteProjection extends PendingInviteWire {
+  readonly role: HouseholdRoleProjection['role'] | null;
+  readonly inviter: ActorProjection;
 }
 
 /** The `languageTag` select in `getHouseholdById` / `getHouseholdsForUser`. */
@@ -50,6 +120,7 @@ export interface LanguageTagProjection {
 export interface HouseholdDetail extends HouseholdWire {
   readonly languageTag: LanguageTagProjection | null;
   readonly members: readonly HouseholdMemberProjection[];
+  readonly invites: readonly PendingInviteProjection[];
 }
 
 export interface CreateHouseholdEnvelope {
@@ -125,6 +196,13 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
 
   if (!Array.isArray((household as unknown as HouseholdDetail).members)) {
     return fail("the household carried no 'members' array", request, response);
+  }
+
+  // Checked for the same reason `members` is, and for one more: the invite
+  // suite asserts what this array does NOT carry, and an absent array would
+  // make every one of those absence checks pass without reading a response.
+  if (!Array.isArray((household as unknown as HouseholdDetail).invites)) {
+    return fail("the household carried no 'invites' array", request, response);
   }
 
   return { household: household as unknown as HouseholdDetail };

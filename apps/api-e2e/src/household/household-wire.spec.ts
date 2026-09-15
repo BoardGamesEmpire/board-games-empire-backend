@@ -61,10 +61,14 @@ describe('household wire parsers (pure logic)', () => {
   });
 
   describe('readEnvelope', () => {
-    it('accepts a detail envelope carrying the members embed', () => {
-      const parsed = readEnvelope(response({ household: { id: 'h1', members: [], languageTag: null } }), 'GET');
+    it('accepts a detail envelope carrying the members and invites embeds', () => {
+      const parsed = readEnvelope(
+        response({ household: { id: 'h1', members: [], invites: [], languageTag: null } }),
+        'GET',
+      );
 
       expect(parsed.household.members).toEqual([]);
+      expect(parsed.household.invites).toEqual([]);
       expect(parsed.household.languageTag).toBeNull();
     });
 
@@ -73,6 +77,16 @@ describe('household wire parsers (pure logic)', () => {
       // include changed, and the member-role assertions would quietly read
       // undefined instead of failing here.
       expect(() => readEnvelope(response({ household: { id: 'h1' } }), 'GET')).toThrow(/no 'members' array/);
+    });
+
+    it('rejects a household without the invites embed', () => {
+      // Stricter than it looks, and deliberately so: the #297 spec asserts what
+      // the invite rows do NOT carry, and every one of those checks passes
+      // against an array that was never returned. An absent embed has to be an
+      // error here or the token assertion stops meaning anything.
+      expect(() => readEnvelope(response({ household: { id: 'h1', members: [] } }), 'GET')).toThrow(
+        /no 'invites' array/,
+      );
     });
   });
 

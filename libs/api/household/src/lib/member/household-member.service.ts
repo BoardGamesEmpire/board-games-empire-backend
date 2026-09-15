@@ -40,38 +40,9 @@ import {
   lockExistingHousehold,
   lockHouseholdForRoleTransition,
 } from '../household-access.helpers';
+import { MEMBER_SELECT } from '../read-shapes';
 
-/**
- * Include object for member queries, so consistent user/profile/role data is
- * always fetched (the household analog of the event `ATTENDEE_INCLUDE`).
- *
- * Intentionally lean: `excludedFromHouseholds` and the sampled game-collection
- * shaping remain `HouseholdService.getHouseholdById` presentation concerns and
- * are NOT part of the roster surface (#155).
- */
-export const MEMBER_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      username: true,
-      profile: {
-        select: {
-          avatarUrl: true,
-          displayName: true,
-        },
-      },
-    },
-  },
-  role: {
-    include: {
-      role: {
-        select: { id: true, name: true },
-      },
-    },
-  },
-} as const satisfies Prisma.HouseholdMemberInclude;
-
-export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ include: typeof MEMBER_INCLUDE }>;
+export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ select: typeof MEMBER_SELECT }>;
 
 /**
  * A client for reads that take NO locks and whose result cannot vary with
@@ -229,7 +200,7 @@ export class HouseholdMemberService {
       [
         this.db.householdMember.findMany({
           where: scopedWhere,
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           skip: pagination.skip,
           take: pagination.pageSize,
@@ -270,7 +241,7 @@ export class HouseholdMemberService {
 
     const member = await this.db.householdMember.findUnique({
       where: scopedWhere,
-      include: MEMBER_INCLUDE,
+      select: MEMBER_SELECT,
     });
 
     if (member) {
@@ -376,7 +347,7 @@ export class HouseholdMemberService {
           update: { roleId },
         });
 
-        return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, include: MEMBER_INCLUDE });
+        return tx.householdMember.findUniqueOrThrow({ where: { id: member.id }, select: MEMBER_SELECT });
       });
 
       // The target's grants changed — evict their cached ability graph so the
@@ -542,11 +513,11 @@ export class HouseholdMemberService {
 
         const owner = await tx.householdMember.findUniqueOrThrow({
           where: { id: target.id },
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         });
         const previousOwner = await tx.householdMember.findUniqueOrThrow({
           where: { id: actor.id },
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         });
 
         return {
@@ -579,7 +550,7 @@ export class HouseholdMemberService {
   /**
    * Admits a user to an existing household inside the CALLER'S transaction
    * (#276): inserts the `HouseholdMember` row and its 1:1 `HouseholdRole`, and
-   * returns the row in the `MEMBER_INCLUDE` shape so the caller needs no second
+   * returns the row in the `MEMBER_SELECT` shape so the caller needs no second
    * fetch.
    *
    * This is an internal seam, not an endpoint, and there is deliberately no
@@ -756,7 +727,7 @@ export class HouseholdMemberService {
           addedById,
           role: { create: { roleId } },
         },
-        include: MEMBER_INCLUDE,
+        select: MEMBER_SELECT,
       });
 
       return { member, softOverages: decision.softOverages };
@@ -877,7 +848,7 @@ export class HouseholdMemberService {
   ): Promise<HouseholdMemberWithRelations | null> {
     return tx.householdMember.findUnique({
       where: { householdId_userId: { householdId, userId } },
-      include: MEMBER_INCLUDE,
+      select: MEMBER_SELECT,
     });
   }
 
@@ -1214,7 +1185,7 @@ export class HouseholdMemberService {
     unscopedWhere: Prisma.HouseholdMemberWhereInput,
     denials: ScopedMemberDenials,
   ): Promise<HouseholdMemberWithRelations> {
-    const member = await tx.householdMember.findFirst({ where: scopedWhere, include: MEMBER_INCLUDE });
+    const member = await tx.householdMember.findFirst({ where: scopedWhere, select: MEMBER_SELECT });
 
     if (member) {
       return member;
