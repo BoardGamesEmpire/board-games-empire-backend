@@ -1,10 +1,5 @@
 import { Prisma } from '@bge/database';
-import {
-  INVITE_SCALARS_OMITTED,
-  MEMBER_SCALARS_OMITTED,
-  MEMBER_SELECT,
-  PENDING_INVITE_SELECT,
-} from './read-shapes';
+import { INVITE_SCALARS_OMITTED, MEMBER_SCALARS_OMITTED, MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
 
 /**
  * The scalar keys of a select object: the ones written `field: true`, as
@@ -66,8 +61,8 @@ describe('household read shapes', () => {
 
     it('never publishes the accept token', () => {
       // The whole of #297. `Invite.token` is a live accept credential, and this
-      // shape is reached by every holder of `read:household` — which is every
-      // member of the household.
+      // shape is reached by every holder of `read:household` — every member of
+      // the household, plus any member's friend on a `Friends`-visible one.
       expect(scalarKeysOf(PENDING_INVITE_SELECT)).not.toContain('token');
       expect(INVITE_SCALARS_OMITTED).toHaveProperty('token');
     });

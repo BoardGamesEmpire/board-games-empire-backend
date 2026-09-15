@@ -13,8 +13,10 @@ import { Prisma } from '@bge/database';
  *
  * That is not hypothetical. It published membership provenance when #276 added
  * `origin` and `addedById` (#296), and it published `Invite.token` — a live
- * accept credential — to every holder of `read:household`, which is every
- * member of the household (#297).
+ * accept credential — to every holder of `read:household`. That is every member
+ * of the household, and it does not stop there: `read:households:friends` is
+ * granted to the base user role, so a friend of any member reads the same shape
+ * on a `Friends`-visible household without belonging to it (#297).
  *
  * A `select` shape inverts the default: a new column is invisible until someone
  * names it here. `read-shapes.spec.ts` enforces that by reading each model's
@@ -133,7 +135,7 @@ export const PENDING_INVITE_SELECT = {
  */
 export const INVITE_SCALARS_OMITTED = {
   token:
-    'THE accept credential (`@unique`, "email confirmation token"). This shape is reached by every holder of read:household. Publishing it is an authorization bypass once accept is token-reachable (#163). Never select this.',
+    'THE accept credential (`@unique`, "email confirmation token"). This shape is reached by every holder of read:household — which includes non-members, via read:households:friends. Publishing it is an authorization bypass once accept is token-reachable (#163). Never select this.',
   inviteeEmail:
     'An address belonging to someone who may have no account. Harvestable by every co-member under the old shape. Withheld outright by D-297-2; whether the INVITER alone should see it is #459.',
   inviterId: 'Superseded by the `inviter` relation above, which renders the person rather than an opaque id.',

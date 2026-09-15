@@ -4,6 +4,6 @@ export * from './lib/events/household.events';
 export * from './lib/household.controller';
 export * from './lib/household.module';
 export * from './lib/household.service';
-export * from './lib/read-shapes';
 export * from './lib/member/household-member.controller';
 export * from './lib/member/household-member.service';
+export * from './lib/read-shapes';

@@ -29,13 +29,44 @@ import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescripti
 export type { HttpResponseLike, RequestDescription, Wire } from '../support/wire';
 
 export type HouseholdWire = Wire<Household>;
-export type HouseholdMemberWire = Wire<HouseholdMember>;
 
-/** The `role` embed on a member in `getHouseholdById`'s include. */
+/**
+ * The roster row as the API RETURNS it, which is narrower than the model.
+ *
+ * `HouseholdMember` declares eight scalars; the routes publish six. Membership
+ * provenance — `origin` and `addedById` (#276) — is an audit surface the reads
+ * stopped returning (#296). Keeping it in this type would let
+ * `expect(member.origin).toBe(...)` typecheck and then fail at runtime with
+ * `expect(undefined)`, which is the vacuous assertion this module exists to
+ * prevent.
+ *
+ * `Pick` rather than `Omit` deliberately: `Pick`'s key parameter is constrained
+ * to `keyof HouseholdMember`, so renaming or dropping a published column is a
+ * compile error HERE. `Omit` accepts keys the model no longer carries and
+ * silently omits nothing, which would let the same drift back in from the other
+ * direction.
+ *
+ * Restated rather than imported from `@bge/household` for the reason in the
+ * file header, and for one more: deriving this from the service's own payload
+ * type would widen automatically if a read regressed to `include:`, so the
+ * suite would stop being an independent check of the wire contract.
+ */
+export type HouseholdMemberWire = Wire<
+  Pick<HouseholdMember, 'id' | 'userId' | 'householdId' | 'showAllGames' | 'createdAt' | 'updatedAt'>
+>;
+
+/** The `role` embed on a member in `getHouseholdById`'s select shape. */
 export interface HouseholdRoleProjection {
   readonly role: { readonly id: string; readonly name: string };
 }
 
+/**
+ * Deliberately partial: the detail read also embeds each member's `user` and
+ * their `excludedFromHouseholds` join, which nothing here asserts on yet.
+ * Omitting them fails in the safe direction — an assertion on one is a compile
+ * error, not a green test against `undefined` — so they are added when a spec
+ * first needs them rather than kept speculatively in step with the service.
+ */
 export interface HouseholdMemberProjection extends HouseholdMemberWire {
   readonly role: HouseholdRoleProjection | null;
 }

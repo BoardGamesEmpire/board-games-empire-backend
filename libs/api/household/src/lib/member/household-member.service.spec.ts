@@ -436,13 +436,15 @@ describe('HouseholdMemberService', () => {
 
     it('scopes the target by manage conditions, upserts the 1:1 role, and evicts the target cache', async () => {
       db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
-      db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(
-        makeMember({
-          role: {
-            role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
-          },
-        } as Partial<HouseholdMemberWithRelations>),
-      ));
+      db.householdMember.findUniqueOrThrow.mockResolvedValue(
+        resolves(
+          makeMember({
+            role: {
+              role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
+            },
+          } as Partial<HouseholdMemberWithRelations>),
+        ),
+      );
 
       const result = await service.updateMemberRole('hh-1', 'member-1', DTO);
 
