@@ -79,24 +79,23 @@ const PAGINATION = paginationQuery({ limit: 10 });
  * rather than its own scalars. A fixture that still carried them would let a
  * spec assert against a shape no client ever receives.
  */
-const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations =>
-  ({
-    id: 'member-1',
-    userId: 'user-1',
-    householdId: 'hh-1',
-    showAllGames: true,
-    createdAt: new Date('2026-01-01T00:00:00Z'),
-    updatedAt: new Date('2026-01-01T00:00:00Z'),
-    user: {
-      id: 'user-1',
-      username: 'alice',
-      profile: { avatarUrl: null, displayName: 'Alice' },
-    },
-    role: {
-      role: { id: 'role-1', name: 'HouseholdMember' },
-    },
-    ...overrides,
-  }) as HouseholdMemberWithRelations;
+const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations => ({
+  id: 'member-1',
+  userId: 'user-1',
+  householdId: 'hh-1',
+  showAllGames: true,
+  createdAt: new Date('2026-01-01T00:00:00Z'),
+  updatedAt: new Date('2026-01-01T00:00:00Z'),
+  user: {
+    id: 'user-1',
+    username: 'alice',
+    profile: { avatarUrl: null, displayName: 'Alice' },
+  },
+  role: {
+    role: { id: 'role-1', name: 'HouseholdMember' },
+  },
+  ...overrides,
+});
 
 const makeOwner = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations =>
   makeMember({
@@ -104,15 +103,21 @@ const makeOwner = (overrides: Partial<HouseholdMemberWithRelations> = {}): House
       role: { id: 'role-owner', name: SystemRole.HouseholdOwner },
     },
     ...overrides,
-  } as Partial<HouseholdMemberWithRelations>);
+  });
 
 /**
  * Prisma's generated delegate types say a read resolves to the FULL row, so a
  * `select`-shaped fixture is not assignable to `mockResolvedValue` even though
  * it is exactly what the query returns at runtime. The mismatch belongs at this
  * one boundary rather than at every call site.
+ *
+ * Typed to the payload rather than generic on purpose. A `<T>(value: T)` signature
+ * would accept anything and hand the whole fixture surface to `never`, so a stale
+ * column or a missing one would typecheck; naming the payload means the argument is
+ * checked HERE and only the delegate's own over-wide return type is cast away. The
+ * fixtures below carry no casts for the same reason.
  */
-const resolves = <T>(value: T) => value as never;
+const resolves = (rows: HouseholdMemberWithRelations | HouseholdMemberWithRelations[]) => rows as never;
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('no rows', {
@@ -442,7 +447,7 @@ describe('HouseholdMemberService', () => {
             role: {
               role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
             },
-          } as Partial<HouseholdMemberWithRelations>),
+          }),
         ),
       );
 
@@ -874,7 +879,7 @@ describe('HouseholdMemberService', () => {
             role: {
               role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
             },
-          } as Partial<HouseholdMemberWithRelations>) as never,
+          }) as never,
         );
     });
 
