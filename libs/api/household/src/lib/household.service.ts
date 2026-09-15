@@ -18,6 +18,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import assert from 'node:assert';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
+import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
 
 /**
  * Relations returned with every household in the list read. Extracted so the
@@ -32,33 +33,7 @@ const HOUSEHOLD_LIST_INCLUDE = {
     },
   },
 
-  members: {
-    include: {
-      user: {
-        select: {
-          id: true,
-          username: true,
-          profile: {
-            select: {
-              avatarUrl: true,
-              displayName: true,
-            },
-          },
-        },
-      },
-
-      role: {
-        include: {
-          role: {
-            select: {
-              id: true,
-              name: true,
-            },
-          },
-        },
-      },
-    },
-  },
+  members: { select: MEMBER_SELECT },
 } satisfies Prisma.HouseholdInclude;
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
@@ -85,6 +60,7 @@ export class HouseholdService {
           where: {
             AND: [{ status: InviteStatus.Pending }],
           },
+          select: PENDING_INVITE_SELECT,
         },
 
         languageTag: {
@@ -96,31 +72,13 @@ export class HouseholdService {
         },
 
         members: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                profile: {
-                  select: {
-                    avatarUrl: true,
-                    displayName: true,
-                  },
-                },
-              },
-            },
+          select: {
+            ...MEMBER_SELECT,
 
-            role: {
-              include: {
-                role: {
-                  select: {
-                    id: true,
-                    name: true,
-                  },
-                },
-              },
-            },
-
+            // Composed onto the roster shape rather than added to it: the
+            // sampled game-collection presentation below is this read's
+            // concern, not part of the roster surface every other member read
+            // returns (#155).
             excludedFromHouseholds: {
               select: {
                 gameCollectionId: true,

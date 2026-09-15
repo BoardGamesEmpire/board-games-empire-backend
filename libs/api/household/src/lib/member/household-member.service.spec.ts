@@ -31,9 +31,9 @@ import {
   HOUSEHOLD_MEMBER_UNIQUE_FIELDS,
 } from '../constants/household.constants';
 import type { AssignableHouseholdRole } from '../dto';
+import { MEMBER_SELECT } from '../read-shapes';
 import {
   HouseholdMemberService,
-  MEMBER_INCLUDE,
   type AdmissibleMembershipOrigin,
   type HouseholdMemberWithRelations,
 } from './household-member.service';
@@ -71,16 +71,20 @@ const isHouseholdLockSql = (value: unknown): boolean =>
 const COND = { id: 'sentinel-condition' };
 const PAGINATION = paginationQuery({ limit: 10 });
 
+/**
+ * A member row as the service actually returns it (#297, `D-296-5`).
+ *
+ * Deliberately narrower than the model: `origin` and `addedById` are withheld
+ * by `MEMBER_SELECT`, and the `HouseholdRole` join carries only the nested role
+ * rather than its own scalars. A fixture that still carried them would let a
+ * spec assert against a shape no client ever receives.
+ */
 const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations =>
   ({
     id: 'member-1',
     userId: 'user-1',
     householdId: 'hh-1',
     showAllGames: true,
-    // Null is the honest default for a fixture: these rows were not produced by
-    // a consent path (#276), which is exactly what NULL means on the model.
-    origin: null,
-    addedById: null,
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-01T00:00:00Z'),
     user: {
@@ -89,11 +93,6 @@ const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): Hous
       profile: { avatarUrl: null, displayName: 'Alice' },
     },
     role: {
-      id: 'hr-1',
-      householdMemberId: 'member-1',
-      roleId: 'role-1',
-      createdAt: new Date('2026-01-01T00:00:00Z'),
-      updatedAt: new Date('2026-01-01T00:00:00Z'),
       role: { id: 'role-1', name: 'HouseholdMember' },
     },
     ...overrides,
@@ -102,15 +101,18 @@ const makeMember = (overrides: Partial<HouseholdMemberWithRelations> = {}): Hous
 const makeOwner = (overrides: Partial<HouseholdMemberWithRelations> = {}): HouseholdMemberWithRelations =>
   makeMember({
     role: {
-      id: 'hr-1',
-      householdMemberId: 'member-1',
-      roleId: 'role-owner',
-      createdAt: new Date('2026-01-01T00:00:00Z'),
-      updatedAt: new Date('2026-01-01T00:00:00Z'),
       role: { id: 'role-owner', name: SystemRole.HouseholdOwner },
     },
     ...overrides,
   } as Partial<HouseholdMemberWithRelations>);
+
+/**
+ * Prisma's generated delegate types say a read resolves to the FULL row, so a
+ * `select`-shaped fixture is not assignable to `mockResolvedValue` even though
+ * it is exactly what the query returns at runtime. The mismatch belongs at this
+ * one boundary rather than at every call site.
+ */
+const resolves = <T>(value: T) => value as never;
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('no rows', {
@@ -240,8 +242,8 @@ describe('HouseholdMemberService', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('getMembers', () => {
-    it('scopes the list by read conditions on HouseholdMember and shapes with MEMBER_INCLUDE', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+    it('scopes the list by read conditions on HouseholdMember and shapes with MEMBER_SELECT', async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
 
       const result = await service.getMembers('hh-1', PAGINATION);
 
@@ -252,7 +254,7 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ householdId: 'hh-1', AND: [COND] }),
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
           // `id` breaks ties on a shared createdAt, so page boundaries hold.
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         }),
@@ -261,7 +263,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('asserts the household exists (excluding soft-deleted) before querying', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
 
       await service.getMembers('hh-1', PAGINATION);
 
@@ -269,7 +271,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('derives skip/take from the page, defaulting to the shared page size', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
       stubCounts({ scoped: 30, unscoped: 30 });
 
       await service.getMembers('hh-1', paginationQuery({ page: 5, limit: 5 }));
@@ -286,7 +288,7 @@ describe('HouseholdMemberService', () => {
     // the Prisma default a removal landing between the two statements would read
     // as a permission miss. The mock is insensitive to isolation, hence the pin.
     it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
       stubCounts({ scoped: 1, unscoped: 1 });
 
       await service.getMembers('hh-1', PAGINATION);
@@ -299,7 +301,7 @@ describe('HouseholdMemberService', () => {
     // #230: `total` is scoped exactly like the rows, so a caller who may see two
     // of five members is told two — the roster size stays hidden.
     it('reports a total scoped to what the actor may read', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
       stubCounts({ scoped: 2, unscoped: 5 });
 
       await expect(service.getMembers('hh-1', PAGINATION)).resolves.toMatchObject({ total: 2 });
@@ -356,7 +358,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('counts once for a non-empty page and never probes', async () => {
-      db.householdMember.findMany.mockResolvedValue([makeMember()]);
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
       stubCounts({ scoped: 1, unscoped: 1 });
 
       await service.getMembers('hh-1', PAGINATION);
@@ -370,7 +372,7 @@ describe('HouseholdMemberService', () => {
 
   describe('getMember', () => {
     it('scopes the lookup by id + householdId + read conditions', async () => {
-      db.householdMember.findUnique.mockResolvedValue(makeMember());
+      db.householdMember.findUnique.mockResolvedValue(resolves(makeMember()));
 
       const result = await service.getMember('hh-1', 'member-1');
 
@@ -381,7 +383,7 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         }),
       );
       expect(result.id).toBe('member-1');
@@ -429,23 +431,18 @@ describe('HouseholdMemberService', () => {
       db.role.findUnique.mockResolvedValue({ id: 'role-admin' } as never);
       // The locked re-read (#239): a plain member by default, so each case
       // below overrides only the state it is actually about.
-      db.householdMember.findUnique.mockResolvedValue(makeMember() as never);
+      db.householdMember.findUnique.mockResolvedValue(resolves(makeMember() as never));
     });
 
     it('scopes the target by manage conditions, upserts the 1:1 role, and evicts the target cache', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
-      db.householdMember.findUniqueOrThrow.mockResolvedValue(
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(
         makeMember({
           role: {
-            id: 'hr-1',
-            householdMemberId: 'member-1',
-            roleId: 'role-admin',
-            createdAt: new Date('2026-01-01T00:00:00Z'),
-            updatedAt: new Date('2026-01-02T00:00:00Z'),
             role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
           },
         } as Partial<HouseholdMemberWithRelations>),
-      );
+      ));
 
       const result = await service.updateMemberRole('hh-1', 'member-1', DTO);
 
@@ -456,7 +453,7 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         }),
       );
       // The role is resolved explicitly, then connected by FK: a nested
@@ -473,15 +470,15 @@ describe('HouseholdMemberService', () => {
       // The re-read returns the post-write shape; the target's graph is evicted.
       expect(db.householdMember.findUniqueOrThrow).toHaveBeenCalledWith({
         where: { id: 'member-1' },
-        include: MEMBER_INCLUDE,
+        select: MEMBER_SELECT,
       });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
       expect(result.role?.role.name).toBe(SystemRole.HouseholdAdmin);
     });
 
     it('upserts (create arm) for a member that has no role row yet', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember({ role: null }));
-      db.householdMember.findUniqueOrThrow.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ role: null })));
+      db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(makeMember()));
       db.role.findUnique.mockResolvedValue({ id: 'role-guest' } as never);
 
       await service.updateMemberRole('hh-1', 'member-1', { role: SystemRole.HouseholdGuest });
@@ -495,7 +492,7 @@ describe('HouseholdMemberService', () => {
       // Seed drift: an assignable SystemRole with no `roles` row. Connecting by
       // name would surface this as a P2025 → 403, describing a server
       // misconfiguration as the caller's lack of permission.
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.role.findUnique.mockResolvedValue(null);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(InternalServerErrorException);
@@ -505,7 +502,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('rejects changing your own role (400) without writing or invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember({ userId: 'actor-1' }));
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
 
@@ -518,8 +515,8 @@ describe('HouseholdMemberService', () => {
       // pre-lock scoped read: a concurrent `transferOwnership` promoting this
       // member is the case that matters, and the pre-lock read cannot see it
       // (#239). The scoped read still returns an owner here so the two agree.
-      db.householdMember.findFirst.mockResolvedValue(makeOwner());
-      db.householdMember.findUnique.mockResolvedValue(makeOwner() as never);
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
+      db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
 
@@ -532,8 +529,8 @@ describe('HouseholdMemberService', () => {
       // scoped read saw a plain member, the transfer committed in between, and
       // the locked re-read is what stops this upsert from overwriting the
       // household's only owner back down to a member.
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
-      db.householdMember.findUnique.mockResolvedValue(makeOwner() as never);
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
 
@@ -542,8 +539,8 @@ describe('HouseholdMemberService', () => {
     });
 
     it('takes the household lock before deciding, and before the write', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
-      db.householdMember.findUniqueOrThrow.mockResolvedValue(makeMember() as never);
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(makeMember() as never));
 
       await service.updateMemberRole('hh-1', 'member-1', DTO);
 
@@ -558,7 +555,7 @@ describe('HouseholdMemberService', () => {
       // Without the locked re-read the upsert's `where` matches nothing, so it
       // INSERTs against a deleted member and the FK raises P2003 —
       // unclassified, and therefore a 500 describing nothing.
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.householdMember.findUnique.mockResolvedValue(null);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(NotFoundException);
@@ -593,7 +590,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('maps a write-time scoped miss (P2025) to Forbidden without invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.householdRole.upsert.mockRejectedValue(dependentRecordNotFound());
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(ForbiddenException);
@@ -605,11 +602,11 @@ describe('HouseholdMemberService', () => {
     beforeEach(() => {
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
-      db.householdMember.delete.mockResolvedValue(makeMember() as never);
+      db.householdMember.delete.mockResolvedValue(resolves(makeMember() as never));
     });
 
     it('removes a non-owner member under the manage scope, cleaning dependents in order', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
 
       const result = await service.removeMember('hh-1', 'member-1');
 
@@ -652,7 +649,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('locks the owner rows and allows removing an owner when another owner remains', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeOwner());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }, { household_member_id: 'member-2' }]);
 
       await service.removeMember('hh-1', 'member-1');
@@ -663,7 +660,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('rejects removing the sole owner (400) without deleting or invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeOwner());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
 
       await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(BadRequestException);
@@ -700,7 +697,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('maps a write-time scoped miss (P2025) to Forbidden without invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
       db.householdMember.delete.mockRejectedValue(dependentRecordNotFound());
 
       await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
@@ -720,7 +717,7 @@ describe('HouseholdMemberService', () => {
       it('does not log business-rule rejections at error level', async () => {
         // A client-driven 400 on a normal endpoint must not be indistinguishable
         // from a defect in log-based alerting.
-        db.householdMember.findFirst.mockResolvedValue(makeOwner());
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
         db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
 
         await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(BadRequestException);
@@ -729,7 +726,7 @@ describe('HouseholdMemberService', () => {
       });
 
       it('does not log an expected scoped-write miss (P2025) at error level', async () => {
-        db.householdMember.findFirst.mockResolvedValue(makeMember());
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
         db.householdMember.delete.mockRejectedValue(dependentRecordNotFound());
 
         await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
@@ -739,7 +736,7 @@ describe('HouseholdMemberService', () => {
 
       it('logs an unexpected failure at error level and rethrows it unchanged', async () => {
         const boom = new Error('connection reset');
-        db.householdMember.findFirst.mockResolvedValue(makeMember());
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
         db.householdMember.delete.mockRejectedValue(boom);
 
         await expect(service.removeMember('hh-1', 'member-1')).rejects.toBe(boom);
@@ -753,11 +750,11 @@ describe('HouseholdMemberService', () => {
     beforeEach(() => {
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
-      db.householdMember.delete.mockResolvedValue(makeMember() as never);
+      db.householdMember.delete.mockResolvedValue(resolves(makeMember() as never));
     });
 
     it('scopes by delete conditions AND an explicit userId pin (manage implies delete for admins)', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeMember({ userId: 'actor-1' }));
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
 
       await service.leaveHousehold('hh-1');
 
@@ -779,7 +776,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('rejects the sole owner leaving (400) — transfer ownership first', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeOwner({ userId: 'actor-1' }));
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner({ userId: 'actor-1' })));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
 
       await expect(service.leaveHousehold('hh-1')).rejects.toThrow(BadRequestException);
@@ -789,7 +786,7 @@ describe('HouseholdMemberService', () => {
     });
 
     it('allows an owner to leave when another owner remains', async () => {
-      db.householdMember.findFirst.mockResolvedValue(makeOwner({ userId: 'actor-1' }));
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner({ userId: 'actor-1' })));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }, { household_member_id: 'member-2' }]);
 
       await service.leaveHousehold('hh-1');
@@ -873,11 +870,6 @@ describe('HouseholdMemberService', () => {
             id: 'member-actor',
             userId: 'actor-1',
             role: {
-              id: 'hr-actor',
-              householdMemberId: 'member-actor',
-              roleId: 'role-admin',
-              createdAt: new Date('2026-01-01T00:00:00Z'),
-              updatedAt: new Date('2026-01-02T00:00:00Z'),
               role: { id: 'role-admin', name: SystemRole.HouseholdAdmin },
             },
           } as Partial<HouseholdMemberWithRelations>) as never,
@@ -1233,7 +1225,7 @@ describe('HouseholdMemberService', () => {
       // transferOwnership committed. The lock reports that same member as the
       // household's only owner. Deciding from `member.role` here deletes the
       // last owner and leaves the household unadministrable, with no error.
-      db.householdMember.findFirst.mockResolvedValue(makeMember({ id: 'member-1' }));
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ id: 'member-1' })));
       db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
 
       await expect(service.removeMember('hh-1', 'member-1')).rejects.toMatchObject({
@@ -1293,7 +1285,7 @@ describe('HouseholdMemberService', () => {
      */
     const membershipDuplicate = () => uniqueViolation({ fields: HOUSEHOLD_MEMBER_UNIQUE_COLUMNS });
 
-    it('inserts the member and its role in the caller transaction, shaped by MEMBER_INCLUDE', async () => {
+    it('inserts the member and its role in the caller transaction, shaped by MEMBER_SELECT', async () => {
       const created = makeMember({ id: 'member-new', userId: 'user-2' });
       stubAdmissible(created);
 
@@ -1306,7 +1298,7 @@ describe('HouseholdMemberService', () => {
             userId: 'user-2',
             role: { create: { roleId: 'role-member' } },
           }),
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         }),
       );
       expect(result.member).toBe(created);
@@ -1428,7 +1420,7 @@ describe('HouseholdMemberService', () => {
       expect(db.householdMember.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { householdId_userId: { householdId: 'hh-1', userId: 'user-2' } },
-          include: MEMBER_INCLUDE,
+          select: MEMBER_SELECT,
         }),
       );
       expect(result.member).toBe(existing);
@@ -1823,10 +1815,10 @@ describe('HouseholdMemberService', () => {
     const column = (schema: string, model: string, field: string): string => prismaColumn(schema, model, field);
 
     const captureLockSql = async (): Promise<string> => {
-      db.householdMember.findFirst.mockResolvedValue(makeOwner());
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
       db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
       db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
-      db.householdMember.delete.mockResolvedValue(makeOwner() as never);
+      db.householdMember.delete.mockResolvedValue(resolves(makeOwner() as never));
       stubRawQueries({ owners: ['member-1', 'member-2'] });
 
       await service.removeMember('hh-1', 'member-1');
@@ -1864,10 +1856,10 @@ describe('HouseholdMemberService', () => {
 
     describe('household role-transition lock', () => {
       const captureTransitionLockSql = async (): Promise<string> => {
-        db.householdMember.findFirst.mockResolvedValue(makeOwner());
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
         db.excludedGame.deleteMany.mockResolvedValue({ count: 0 } as never);
         db.householdRole.deleteMany.mockResolvedValue({ count: 1 } as never);
-        db.householdMember.delete.mockResolvedValue(makeOwner() as never);
+        db.householdMember.delete.mockResolvedValue(resolves(makeOwner() as never));
         stubRawQueries({ owners: ['member-1', 'member-2'] });
 
         await service.removeMember('hh-1', 'member-1');
@@ -1910,7 +1902,7 @@ describe('HouseholdMemberService', () => {
       const captureHouseholdLockSql = async (): Promise<string> => {
         db.householdMember.findUnique.mockResolvedValue(null);
         db.role.findUnique.mockResolvedValue({ id: 'role-member' } as never);
-        db.householdMember.create.mockResolvedValue(makeMember() as never);
+        db.householdMember.create.mockResolvedValue(resolves(makeMember() as never));
 
         await service.addMemberWithin(db as unknown as Prisma.TransactionClient, {
           householdId: 'hh-1',

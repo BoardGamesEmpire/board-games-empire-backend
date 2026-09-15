@@ -92,6 +92,15 @@ export class HouseholdController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Read one household',
+    description:
+      'Returns the household with its roster and its PENDING invites. Both are `select`-shaped (#296, #297): ' +
+      'the roster carries no membership provenance (`origin`, `addedById`), and an invite carries no accept ' +
+      '`token` and no `inviteeEmail` — the token is a live credential and this route is readable by every ' +
+      'member of the household. Whether the INVITER alone should see the address is #459. Each member also ' +
+      'carries a random sample of up to five of their game collections.',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))

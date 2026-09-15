@@ -13,6 +13,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { PrismaError } from '@status/codes';
 import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
+import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
 
 const COND = { id: 'sentinel-condition' };
 
@@ -82,6 +83,49 @@ describe('HouseholdService', () => {
     expect(db.household.findUnique).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: 'hh-1', AND: [COND] }) }),
     );
+  });
+
+  // #297 / #296. The shapes themselves are pinned in `read-shapes.spec.ts`;
+  // these pin that the reads actually USE them. Without this, the service could
+  // regress to an inline `include:` — republishing `Invite.token` and the
+  // membership provenance columns — while every shape spec still passed.
+  it('shapes pending invites with PENDING_INVITE_SELECT, never the raw row', async () => {
+    db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
+
+    await service.getHouseholdById('hh-1');
+
+    const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
+
+    expect(include.invites).toEqual({
+      where: { AND: [{ status: InviteStatus.Pending }] },
+      select: PENDING_INVITE_SELECT,
+    });
+  });
+
+  it('shapes the detail roster with MEMBER_SELECT plus the exclusion join this read alone needs', async () => {
+    db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
+
+    await service.getHouseholdById('hh-1');
+
+    const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
+
+    expect(include.members).toEqual({
+      select: {
+        ...MEMBER_SELECT,
+        excludedFromHouseholds: { select: { gameCollectionId: true } },
+      },
+    });
+  });
+
+  it('shapes the list roster with MEMBER_SELECT', async () => {
+    db.household.findMany.mockResolvedValue([]);
+    db.household.count.mockResolvedValue(0);
+
+    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
+
+    const [{ include }] = db.household.findMany.mock.calls[0] as [{ include: Record<string, unknown> }];
+
+    expect(include.members).toEqual({ select: MEMBER_SELECT });
   });
 
   it('throws NotFound when the household does not exist (scoped read empty, probe finds nothing)', async () => {
