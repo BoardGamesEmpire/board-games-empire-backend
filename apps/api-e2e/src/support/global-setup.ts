@@ -17,6 +17,7 @@ import {
   type RedisEndpoint,
 } from './e2e-env';
 import { setE2EGlobalState } from './global-state';
+import { sweepThrottleBuckets } from './redis-reset';
 
 /** apps/api-e2e/src/support → workspace root. */
 const WORKSPACE_ROOT = path.join(__dirname, '..', '..', '..', '..');
@@ -298,6 +299,16 @@ export default async function globalSetup(): Promise<void> {
     // and for this flag that means authorizing FLUSHALL on a Redis the
     // harness did not provision.
     Object.assign(process.env, redisEnvOverrides(redisEndpoint), redisOwnershipOverride(decision.redis.mode));
+
+    // Rate-limit buckets outlive the API child now that they live in Redis
+    // (#341), so on a reused server a run inherits the last one's counters —
+    // and any block still standing. A no-op against the throwaway container,
+    // which is the point: the path that matters is exercised every run rather
+    // than only on the escape hatch.
+    const sweptBuckets = await sweepThrottleBuckets(process.env);
+    if (sweptBuckets > 0) {
+      console.warn(`[e2e] cleared ${sweptBuckets} rate-limit bucket(s) left on this Redis by an earlier run`);
+    }
 
     runPrisma(['migrate', 'deploy'], databaseUrl);
     runPrisma(['db', 'seed'], databaseUrl);

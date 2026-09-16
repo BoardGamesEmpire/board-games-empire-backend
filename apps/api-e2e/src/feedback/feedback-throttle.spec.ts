@@ -45,14 +45,18 @@ const USER_THROTTLE_LIMIT = 30;
  *
  * AND BUCKETS NOW OUTLIVE THE API CHILD. They used to be an in-process `Map`
  * that died with it, so a hard-killed run started clean by accident. Since #341
- * they live in Redis, and ONE mechanism keeps this suite clean: `global-setup`
- * provisions a throwaway container per run. Nothing sweeps Redis between tests —
+ * they live in Redis, which survives the child and — when `BGE_E2E_REDIS_URL`
+ * points at a server the harness did not provision — survives the run. So
+ * `global-setup` sweeps `bge:throttle:*` before the API starts
+ * (`sweepThrottleBuckets`), unguarded, because deleting rate-limit counters
+ * cannot cost anyone anything they would miss. Against the throwaway container
+ * it finds nothing; against a reused server it is what stops yesterday's block
+ * from failing today's run.
+ *
+ * That sweep is per RUN, not per test. Nothing clears Redis between tests —
  * `test-isolation.ts` says so outright, and `resetRedis` has no call site in the
- * suite at all. So a developer pointing `BGE_E2E_REDIS_URL` at their own server
- * (with `BGE_E2E_REDIS_FLUSH_OK=true`) carries throttle state between runs, and
- * an hour-long block with it. If the per-run container is ever traded for a
- * reused server, this file needs a sweep of `bge:throttle:*` before it can be
- * trusted — there is no second layer catching that today.
+ * suite — so specs in this file still accumulate against each other's buckets
+ * within a run. The headroom above is what covers that.
  */
 describe('feedback submission throttling (#251)', () => {
   const baseUrl = requireBaseUrl(process.env);

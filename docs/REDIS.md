@@ -12,13 +12,14 @@ expectation rather than measurement. Written that way on purpose: this table
 used to be headed "Tested deployments" over three ticks, which was true of the
 first row only.
 
-| Server                           | Status               | Notes                                                               |
-| -------------------------------- | -------------------- | ------------------------------------------------------------------- |
-| Redis (OSS / Stack / Enterprise) | ✅ Tested            | Reference implementation; what the e2e suite runs against           |
-| Valkey                           | ⚠ Expected, untested | What the cache client (`iovalkey`) targets; AWS ElastiCache default |
-| Dragonfly                        | ⚠ Expected, untested | Multi-threaded; see the two Dragonfly notes below                   |
-| KeyDB                            | ⚠ Expected, untested | Multi-threaded Redis fork                                           |
-| Garnet                           | ⚠ Expected, untested | Microsoft's durable cache/store                                     |
+| Server                   | Status               | Notes                                                               |
+| ------------------------ | -------------------- | ------------------------------------------------------------------- |
+| Redis OSS                | ✅ Tested            | Reference implementation; the container the e2e suite runs against  |
+| Redis Stack / Enterprise | ⚠ Expected, untested | Redis OSS plus modules and tooling; nothing in CI starts either     |
+| Valkey                   | ⚠ Expected, untested | What the cache client (`iovalkey`) targets; AWS ElastiCache default |
+| Dragonfly                | ⚠ Expected, untested | Multi-threaded; see the queue-naming and Streams notes below        |
+| KeyDB                    | ⚠ Expected, untested | Multi-threaded Redis fork                                           |
+| Garnet                   | ⚠ Expected, untested | Microsoft's durable cache/store                                     |
 
 Verifying these — and restoring a ✅ where one is earned — is tracked in #462.
 If you run BGE against any of them, that issue is where the evidence goes.
@@ -215,18 +216,29 @@ implementation) is required for game search and import to function.
 
 ## Server-specific notes
 
-### Dragonfly — BullMQ queue naming
+### BullMQ queue naming — the curly braces
 
-BullMQ queue names in BGE are wrapped in curly braces (e.g. `{game-import}`).
-This is **believed to be a Dragonfly-specific optimisation**: Dragonfly uses the
-bracketed portion of a key to derive a hash slot for thread affinity, allowing
-each queue's commands to run on a dedicated CPU core. Taken from Dragonfly's own
-documentation and never measured here (#462) — the braces are harmless either
-way, so nothing depends on the claim being right.
+BullMQ queue names in BGE are wrapped in curly braces (`{bge.games.import}`,
+`{bge.gateway.fetch}`). Braces are **Redis Cluster hash tags**, a Redis feature
+that Valkey Cluster implements identically: when a key contains `{...}`, only the
+substring inside the braces is hashed to pick a slot, which is how multi-key
+operations are kept on one node.
 
-The braces have **no effect on Redis or Valkey** — they are treated as
-ordinary characters in key names. There is no performance penalty for using
-braces on non-Dragonfly servers, so the convention is applied unconditionally.
+On a **standalone** server — which is every deployment this document describes —
+braces are ordinary characters in a key name and change nothing.
+
+Dragonfly reuses the same bracketed portion for **thread affinity**, so each
+queue's commands land on one core. That is an additional Dragonfly-specific
+effect rather than the reason the braces are there, and it is taken from
+Dragonfly's own documentation, never measured here (#462).
+
+> **If you run clustered Redis or Valkey, read this.** BGE neither configures nor
+> tests clustered mode. The two queue names above carry **different** hash tags,
+> so their keys hash to different slots — and the game-import flow spans both
+> queues through a single `FlowProducer.add`, which is a multi-key operation.
+> Under a cluster that combination raises `CROSSSLOT`. Running BGE clustered
+> needs the flow's queues brought under one tag first; the braces as they stand
+> do not make BGE cluster-compatible.
 
 ### Dragonfly — Streams edge cases
 

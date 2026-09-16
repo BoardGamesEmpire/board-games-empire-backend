@@ -35,9 +35,10 @@ const noScript = () => new Error('NOSCRIPT No matching script. Please use EVAL.'
 
 describe('RedisThrottlerStorage', () => {
   let error: jest.SpyInstance;
+  let log: jest.SpyInstance;
 
   beforeEach(() => {
-    jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+    log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
   });
 
@@ -82,6 +83,31 @@ describe('RedisThrottlerStorage', () => {
       await new RedisThrottlerStorage(redis).increment('k', 60_000, 20, 60_000, 'default');
 
       expect(redis.call.mock.calls.map(([command]) => command)).toEqual(['evalsha']);
+    });
+
+    it('does not run the script for a request the deadline already released', async () => {
+      // The slow NOSCRIPT: a server that takes longer than the deadline and then
+      // answers that it has never seen the script — a failover to a node with a
+      // cold script cache. The request has already been allowed through by then,
+      // so an EVAL here would run the script a SECOND time for it and charge the
+      // caller's counter twice, with nothing waiting to read the answer.
+      jest.useFakeTimers();
+      try {
+        const redis = redisWith((command) =>
+          command === 'evalsha'
+            ? new Promise((_resolve, reject) => setTimeout(() => reject(noScript()), 400))
+            : [1, 60_000, 0, 0],
+        );
+
+        const pending = new RedisThrottlerStorage(redis).increment('k', 60_000, 20, 60_000, 'default');
+
+        await jest.advanceTimersByTimeAsync(500);
+
+        await expect(pending).resolves.toMatchObject({ totalHits: 0, isBlocked: false });
+        expect(redis.call.mock.calls.map(([command]) => command)).toEqual(['evalsha']);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 
@@ -186,6 +212,46 @@ describe('RedisThrottlerStorage', () => {
       }
 
       expect(error.mock.calls[0][0]).toMatchObject({ suppressedSinceLastLog: 0 });
+    });
+
+    it('reports the suppressed count on the next line the gate lets through', async () => {
+      // The assertion above only ever sees the first line, which is 0 by
+      // definition. Without this one the whole counter could be deleted and the
+      // suite would stay green — the number that says how bad the outage was is
+      // the one nothing was checking.
+      jest.useFakeTimers();
+      try {
+        const storage = new RedisThrottlerStorage(redisReturning(new Error('down')));
+
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await storage.increment('k', 60_000, 20, 60_000, 'default');
+        }
+        expect(error).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(11_000);
+        await storage.increment('k', 60_000, 20, 60_000, 'default');
+
+        expect(error).toHaveBeenCalledTimes(2);
+        expect(error.mock.calls[1][0]).toMatchObject({ suppressedSinceLastLog: 4 });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('does not call a reply it cannot read a recovery', async () => {
+      // Recovery used to be declared before the reply was validated, so a run of
+      // malformed replies logged a recovery AND an error on every request: the
+      // recovery cleared the gate, and the failure that followed walked straight
+      // through it. Two lines per request is worse than the storm the gate was
+      // added to stop.
+      const storage = new RedisThrottlerStorage(redisReturning(['not', 'a', 'record']));
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await storage.increment('k', 60_000, 20, 60_000, 'default');
+      }
+
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(log).not.toHaveBeenCalled();
     });
 
     it('reports the next outage immediately once the counter answers again', async () => {

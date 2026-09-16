@@ -107,6 +107,16 @@ const COMMAND_DEADLINE_MS = 250;
 const FAILURE_LOG_INTERVAL_MS = 10_000;
 
 /**
+ * Shared between a request's deadline and the work that deadline bounds, so the
+ * work can tell that nothing is waiting for it any more. See `withDeadline` for
+ * what the deadline can and cannot stop, and `run` for the one decision that
+ * turns on this flag.
+ */
+interface Deadline {
+  expired: boolean;
+}
+
+/**
  * Shared rate-limit counters, backed by the cache Redis (#341).
  *
  * Replaces `@nestjs/throttler`'s default in-process `Map`, under which limits
@@ -154,13 +164,24 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
     throttlerName: string,
   ): Promise<ThrottlerStorageRecord> {
     const hitKey = `${KEY_PREFIX}:${throttlerName}:${key}`;
+    const deadline: Deadline = { expired: false };
 
     try {
-      const reply = await this.withDeadline(this.run(hitKey, `${hitKey}:blocked`, ttl, limit, blockDuration));
+      const reply = await this.withDeadline(
+        this.run(hitKey, `${hitKey}:blocked`, ttl, limit, blockDuration, deadline),
+        deadline,
+      );
+
+      // Validated BEFORE recovery is declared. A reply this cannot read is a
+      // failure, not a recovery, and `noteRecovery` running first would clear
+      // the log gate on every request and then log the failure again straight
+      // after — two lines per request for as long as the drift lasts, which is
+      // the storm the gate exists to prevent.
+      const record = this.toRecord(reply);
 
       this.noteRecovery();
 
-      return this.toRecord(reply, ttl);
+      return record;
     } catch (cause) {
       this.reportFailure(cause, throttlerName);
 
@@ -184,6 +205,7 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
     ttl: number,
     limit: number,
     blockDuration: number,
+    deadline: Deadline,
   ): Promise<unknown> {
     const args = [2, hitKey, blockKey, ttl, limit, blockDuration] as const;
 
@@ -194,35 +216,63 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
         throw cause;
       }
 
+      // A `NOSCRIPT` that arrives after the deadline answers a request that was
+      // already allowed through. Sending the `EVAL` anyway would run the script
+      // a SECOND time for that one request — charging the caller's counter
+      // twice — and nothing is left waiting to read the result. The slow path
+      // is exactly where this happens: a server that takes longer than the
+      // deadline to answer and then answers `NOSCRIPT`, which is a failover to
+      // a node with a cold script cache.
+      if (deadline.expired) {
+        throw cause;
+      }
+
       return this.redis.call('eval', INCREMENT_SCRIPT, ...args);
     }
   }
 
-  /** Rejects if the counter has not answered within {@link COMMAND_DEADLINE_MS}. */
-  private withDeadline<T>(work: Promise<T>): Promise<T> {
+  /**
+   * Rejects if the counter has not answered within {@link COMMAND_DEADLINE_MS},
+   * and marks `deadline` so the work behind it can stop making new decisions.
+   *
+   * WHAT THIS DOES NOT DO: cancel the command. Once `EVALSHA` is on the wire the
+   * server will run it whenever it gets to it, and no client-side timeout can
+   * take that back — so a request allowed through during a stall is still
+   * counted, late, when the server recovers. That is the honest accounting (the
+   * request did happen) but it is not free: while a connected server is not
+   * answering, every request adds another command to the shared cache client's
+   * queue, and that queue is not bounded here. A limiter that stops dispatching
+   * while the backend is known-hung — a circuit breaker, or an isolated client
+   * whose depth can be capped without touching cache reads — is the real answer
+   * and is deliberately not attempted here.
+   */
+  private withDeadline<T>(work: Promise<T>, deadline: Deadline): Promise<T> {
     let timer: NodeJS.Timeout;
 
-    const deadline = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(
-        () => reject(new Error(`Rate-limit storage did not answer within ${COMMAND_DEADLINE_MS}ms`)),
-        COMMAND_DEADLINE_MS,
-      );
+    const expiry = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        deadline.expired = true;
+        reject(new Error(`Rate-limit storage did not answer within ${COMMAND_DEADLINE_MS}ms`));
+      }, COMMAND_DEADLINE_MS);
     });
 
-    return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+    return Promise.race([work, expiry]).finally(() => clearTimeout(timer)) as Promise<T>;
   }
 
   /**
    * The script returns four integers. Anything else means the script and this
    * file have drifted apart, which is a deploy problem rather than a request
-   * problem — so the request is allowed on the same reasoning as an unreachable
-   * server, and the reply is logged under the same gate.
+   * problem — so it throws into the same catch an unreachable server lands in,
+   * and the request is allowed on the same reasoning.
+   *
+   * Throwing rather than failing open in place is what keeps the log gate
+   * honest: one path reports failures, so a run of malformed replies is one
+   * line per interval like any other outage, and it carries the throttler name
+   * rather than a placeholder.
    */
-  private toRecord(reply: unknown, ttl: number): ThrottlerStorageRecord {
+  private toRecord(reply: unknown): ThrottlerStorageRecord {
     if (!Array.isArray(reply) || reply.length !== 4 || reply.some((field) => typeof field !== 'number')) {
-      this.reportFailure(new Error(`Rate-limit script returned an unreadable record: ${JSON.stringify(reply)}`), '-');
-
-      return this.allow(ttl);
+      throw new Error(`Rate-limit script returned an unreadable record: ${JSON.stringify(reply)}`);
     }
 
     const [totalHits, timeToExpire, isBlocked, timeToBlockExpire] = reply as number[];
