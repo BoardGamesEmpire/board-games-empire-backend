@@ -21,6 +21,29 @@ import { Throttle, type ThrottlerGetTrackerFunction, type ThrottlerOptions } fro
  * is the only reliable source at this point.
  */
 
+/**
+ * The window a tier enforces, and the block it applies on breach — one input,
+ * because they are one decision (#342).
+ *
+ * Spelled as a helper rather than two fields at four call sites because the
+ * guard resolves the block as
+ * `routeOrClassBlockDuration || namedThrottler.blockDuration || ttl`: a caller
+ * that sets `ttl` and forgets `blockDuration` silently inherits a DIFFERENT
+ * tier's block, and nothing fails. Taking one argument removes the opportunity.
+ *
+ * Why they are equal rather than the block being shorter: under
+ * `RedisThrottlerStorage` a blocked caller is not counted and the hit key keeps
+ * its own expiry, so a shorter block cannot let anyone back in early — it can
+ * only make `Retry-After` name a moment the counter will still refuse. See the
+ * `blockDuration` note in `apps/api/src/app/lib/throttlers.ts`.
+ *
+ * MILLISECONDS, as `@nestjs/throttler` reads it (#293).
+ */
+export const throttleWindow = (ttlMs: number): { ttl: number; blockDuration: number } => ({
+  ttl: ttlMs,
+  blockDuration: ttlMs,
+});
+
 /** Name of the per-authenticated-user throttler; paired with the IP-based `default`. */
 export const USER_THROTTLER_NAME = 'user';
 
@@ -75,11 +98,12 @@ export const skipUserThrottle = (context: ExecutionContext): boolean => {
  * is skipped by `skipIf` — it exists only because `ThrottlerOptions.limit` is
  * required. `ttlMs` is likewise a placeholder overridden per route.
  *
- * MILLISECONDS, as `@nestjs/throttler` reads it (#293).
+ * MILLISECONDS, as `@nestjs/throttler` reads it (#293) — via
+ * {@link throttleWindow}, which pairs it with the block duration.
  */
 export const createUserThrottler = (ttlMs: number): ThrottlerOptions => ({
   name: USER_THROTTLER_NAME,
-  ttl: ttlMs,
+  ...throttleWindow(ttlMs),
   limit: Number.MAX_SAFE_INTEGER,
   getTracker: getUserTracker,
   skipIf: skipUserThrottle,
@@ -99,12 +123,25 @@ export const createUserThrottler = (ttlMs: number): ThrottlerOptions => ({
  * Note that the `default` override REPLACES the app-wide IP window for this
  * route, so pinning `THROTTLE_LIMIT` in an environment does not raise the
  * ceiling here — see `apps/api-e2e/src/support/e2e-env.ts`.
+ *
+ * BOTH TIERS GO THROUGH {@link throttleWindow}, and the reason is a trap (#342).
+ * The guard resolves the block as
+ * `routeOrClassBlockDuration || namedThrottler.blockDuration || ttl`, where
+ * `ttl` is the ALREADY-OVERRIDDEN route window. While the named throttlers left
+ * `blockDuration` unset, a route that overrode only `ttl` fell through to its
+ * own window and was right by accident. Now that the tiers set it, that fallback
+ * stops at the GLOBAL value — so a route overriding `ttl` to an hour and
+ * omitting the block would carry a one-minute block under an hour-long window,
+ * making `Retry-After` promise a return the counter will refuse.
+ *
+ * Any future route reaching for `@Throttle` directly wants this helper rather
+ * than two literals, for the same reason.
  */
 export const FeedbackSubmissionThrottle = (opts: { userLimit: number; ipLimit: number; ttlMs: number }) =>
   applyDecorators(
     SetMetadata(PER_USER_THROTTLE_KEY, true),
     Throttle({
-      [DEFAULT_THROTTLER_NAME]: { limit: opts.ipLimit, ttl: opts.ttlMs },
-      [USER_THROTTLER_NAME]: { limit: opts.userLimit, ttl: opts.ttlMs },
+      [DEFAULT_THROTTLER_NAME]: { limit: opts.ipLimit, ...throttleWindow(opts.ttlMs) },
+      [USER_THROTTLER_NAME]: { limit: opts.userLimit, ...throttleWindow(opts.ttlMs) },
     }),
   );

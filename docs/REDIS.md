@@ -5,15 +5,23 @@
 
 ## Compatible servers
 
-BGE works with any Redis-protocol-compatible server. Tested deployments:
+BGE speaks the Redis protocol and should work with any server that implements
+it. **Only Redis is actually exercised.** The e2e suite provisions a stock Redis
+container and nothing in CI starts anything else, so every other row below is
+expectation rather than measurement. Written that way on purpose: this table
+used to be headed "Tested deployments" over three ticks, which was true of the
+first row only.
 
-| Server                           | Status                   | Notes                                        |
-| -------------------------------- | ------------------------ | -------------------------------------------- |
-| Redis (OSS / Stack / Enterprise) | ✅ Supported             | Reference implementation                     |
-| Valkey                           | ✅ Supported             | Drop-in replacement; AWS ElastiCache default |
-| Dragonfly                        | ✅ Supported             | Multi-threaded; see queue naming note below  |
-| KeyDB                            | ⚠ Likely works, untested | Multi-threaded Redis fork                    |
-| Garnet                           | ⚠ Likely works, untested | Microsoft's durable cache/store              |
+| Server                           | Status               | Notes                                                               |
+| -------------------------------- | -------------------- | ------------------------------------------------------------------- |
+| Redis (OSS / Stack / Enterprise) | ✅ Tested            | Reference implementation; what the e2e suite runs against           |
+| Valkey                           | ⚠ Expected, untested | What the cache client (`iovalkey`) targets; AWS ElastiCache default |
+| Dragonfly                        | ⚠ Expected, untested | Multi-threaded; see the two Dragonfly notes below                   |
+| KeyDB                            | ⚠ Expected, untested | Multi-threaded Redis fork                                           |
+| Garnet                           | ⚠ Expected, untested | Microsoft's durable cache/store                                     |
+
+Verifying these — and restoring a ✅ where one is earned — is tracked in #462.
+If you run BGE against any of them, that issue is where the evidence goes.
 
 Mixing implementations is fine — see [Split-server deployments](#split-server-deployments).
 
@@ -23,11 +31,19 @@ BGE uses **three logical databases**, each with its own purpose and isolation
 guarantees. They can live on the same Redis server (default), on three
 different servers, or any combination.
 
-| Database | Default `db:` | Purpose                                                       | Client library               |
-| -------- | ------------- | ------------------------------------------------------------- | ---------------------------- |
-| Cache    | `0`           | App-level cache, gateway config events pub/sub, health checks | `ioredis` (via `@bge/redis`) |
-| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events | `node-redis`                 |
-| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)               | `ioredis`                    |
+| Database | Default `db:` | Purpose                                                                          | Client library                |
+| -------- | ------------- | -------------------------------------------------------------------------------- | ----------------------------- |
+| Cache    | `0`           | App-level cache, gateway config events pub/sub, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
+| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                    | `node-redis`                  |
+| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                  | `iovalkey`                    |
+
+Rate-limit counters share the cache connection rather than opening a fourth
+(#341). They are small, short-lived and namespaced under `bge:throttle:`, and a
+dedicated connection would cost a socket per process to isolate keys a prefix
+already separates. One consequence worth knowing: **`FLUSHDB` on the cache
+database clears rate-limit buckets too.** Harmless in development, and a way to
+unstick a wrongly-blocked caller in production — but it is not a targeted
+operation, and it resets every other caller's budget with it.
 
 ### Why three databases?
 
@@ -40,7 +56,7 @@ losing in-flight queue jobs.
 **Sockets are isolated** because the Socket.IO streams adapter uses blocking
 `XREAD BLOCK` calls — same reasoning as queue blocking commands. Additionally,
 the streams adapter requires `node-redis` specifically (the other connections
-use `ioredis`), so it cannot share a client even when it could share a database.
+use `iovalkey`), so it cannot share a client even when it could share a database.
 
 ## Configuration — single server (default)
 
@@ -115,7 +131,7 @@ queue and sockets. Or any other mix that fits your infrastructure.
 
 ## Deployment topologies
 
-The two ioredis connections managed by `@bge/redis` (`CACHE_REDIS_CLIENT`
+The two `iovalkey` connections managed by `@bge/redis` (`CACHE_REDIS_CLIENT`
 and `QUEUE_REDIS_CLIENT`) are **independently optional** at the
 `RedisModule.forRootAsync` level. This is not a feature-toggle mechanism —
 both connections are required for full system functionality — but a
@@ -202,9 +218,11 @@ implementation) is required for game search and import to function.
 ### Dragonfly — BullMQ queue naming
 
 BullMQ queue names in BGE are wrapped in curly braces (e.g. `{game-import}`).
-This is **a Dragonfly-specific optimisation**: Dragonfly uses the bracketed
-portion of a key to derive a hash slot for thread affinity, allowing each
-queue's commands to run on a dedicated CPU core.
+This is **believed to be a Dragonfly-specific optimisation**: Dragonfly uses the
+bracketed portion of a key to derive a hash slot for thread affinity, allowing
+each queue's commands to run on a dedicated CPU core. Taken from Dragonfly's own
+documentation and never measured here (#462) — the braces are harmless either
+way, so nothing depends on the claim being right.
 
 The braces have **no effect on Redis or Valkey** — they are treated as
 ordinary characters in key names. There is no performance penalty for using
@@ -212,36 +230,43 @@ braces on non-Dragonfly servers, so the convention is applied unconditionally.
 
 ### Dragonfly — Streams edge cases
 
-Dragonfly's streams implementation handles the BGE workload (Socket.IO
-cross-instance event distribution) without issue at typical scales. If you
-operate at very high WebSocket throughput (thousands of concurrent
-connections, sustained high event rates), monitor the Dragonfly migration
-guide for stream-related caveats.
+Dragonfly's streams implementation is **expected** to handle the BGE workload
+(Socket.IO cross-instance event distribution), but that has not been verified
+here — no BGE test has run against Dragonfly at any scale (#462). If you operate
+at high WebSocket throughput (thousands of concurrent connections, sustained
+high event rates), read the Dragonfly migration guide for stream-related caveats
+rather than relying on this paragraph.
 
-### Valkey — no caveats
+### Valkey — no caveats expected
 
-Valkey is the closest drop-in replacement for Redis. Every BGE component
-works against Valkey identically to Redis. AWS ElastiCache Serverless
-defaults to Valkey as of 2025.
+Valkey is the closest drop-in replacement for Redis, and the cache client
+(`iovalkey`) is written for it, so every BGE component is expected to work
+against Valkey identically. "No caveats" is a prediction rather than a result —
+like the rest of the table, it is untested here (#462). AWS ElastiCache
+Serverless defaults to Valkey as of 2025.
 
 ## Library choices
 
 BGE deliberately uses two different Node.js Redis client libraries:
 
-- **`ioredis`** for cache, queue, and health-check connections. Required by
-  BullMQ; selected for the other two to consolidate around a single client.
+- **`iovalkey`** for cache, queue, health-check and rate-limit connections. A
+  Valkey-focused fork of `ioredis` with the same options and command surface —
+  which is what BullMQ requires; the others consolidate on it.
 - **`node-redis`** for the Socket.IO streams adapter. Required by
   `@socket.io/redis-streams-adapter`; not used anywhere else.
 
-The cache uses `@keyv/valkey` (backed by `iovalkey`, an ioredis-compatible
-client) so it shares the ioredis ecosystem despite the package name.
+`iovalkey` is the package actually installed. `ioredis` appears in the tree only
+as a transitive dependency of BullMQ and `@nestjs/microservices`, so a library
+typed against `ioredis` needs a cast to accept a `@bge/redis` client — the
+reason `RedisThrottlerStorage` implements `ThrottlerStorage` itself rather than
+using `@nest-lab/throttler-storage-redis` (#341).
 
 This is not a portability constraint — it is a pragmatic constraint imposed
 by the upstream libraries.
 
 ## Internal architecture (developer reference)
 
-The shared ioredis connections are owned by `@bge/redis`'s `RedisModule` and
+The shared `iovalkey` connections are owned by `@bge/redis`'s `RedisModule` and
 exposed via injection tokens. Both tokens are **independently optional** —
 configured per-process via `RedisModule.forRootAsync`:
 
@@ -262,7 +287,7 @@ process. This is internal to BullMQ and cannot be shared.
 
 The Socket.IO streams adapter connection is managed in
 `apps/api/src/app/adapters/redis-io.adapter.ts` outside the shared module —
-it requires `node-redis` rather than ioredis and has different lifecycle
+it requires `node-redis` rather than `iovalkey` and has different lifecycle
 requirements than the queue and cache connections.
 
 ### Future considerations
@@ -294,11 +319,11 @@ cycles feel slow.
 
 Per-process connection counts depend on which connections are configured:
 
-| Process     | ioredis (cache)              | ioredis (queue) | node-redis (sockets) | BullMQ workers                 |
-| ----------- | ---------------------------- | --------------- | -------------------- | ------------------------------ |
-| Main API    | 1                            | 1               | 1                    | 0                              |
-| Coordinator | 1                            | 1 producer      | 0                    | 0                              |
-| Worker      | 0 (or 1 if cache configured) | 1 producer      | 0                    | 1 blocking per worker instance |
+| Process     | iovalkey (cache)             | iovalkey (queue) | node-redis (sockets) | BullMQ workers                 |
+| ----------- | ---------------------------- | ---------------- | -------------------- | ------------------------------ |
+| Main API    | 1                            | 1                | 1                    | 0                              |
+| Coordinator | 1                            | 1 producer       | 0                    | 0                              |
+| Worker      | 0 (or 1 if cache configured) | 1 producer       | 0                    | 1 blocking per worker instance |
 
 Default Redis `maxclients` is 10000 — well above typical needs even with
 many worker replicas. Check `CLIENT LIST` to see who's connected; the BGE

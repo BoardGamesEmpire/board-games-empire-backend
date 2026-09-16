@@ -39,12 +39,18 @@ const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
  * load-balancer health check or an uptime monitor hitting the same path from
  * the same egress address adds to it.
  *
- * `blockDuration` defaults to the window, so the first refusal blocks the route
- * outright for a full minute rather than letting the odd request through —
- * which is what turns a rate limit into consecutive probe failures fast enough
- * to cross `failureThreshold`. The in-memory storage dies with the process, so
- * the restart clears the block; the probe cadence has not changed, so it trips
- * again a window later. The failure is a restart loop, not a stuck block.
+ * `blockDuration` equals the window — explicitly since #342, by default before
+ * it — so the first refusal blocks the route outright for a full minute rather
+ * than letting the odd request through, which is what turns a rate limit into
+ * consecutive probe failures fast enough to cross `failureThreshold`.
+ *
+ * That used to be self-limiting: the in-memory storage died with the process,
+ * so a restart cleared the block and the failure was a restart loop rather than
+ * a stuck one. It is NOT self-limiting any more. Counters moved to Redis in
+ * #341 and now outlive the process, so a blocked probe stays blocked across the
+ * restart it causes — a crash loop with nothing to break it. Which is to say
+ * `@SkipThrottle()` below went from a strong preference to the thing standing
+ * between a probe and an unrecoverable deployment; do not remove it.
  *
  * This was unreachable while the window was 60ms and became reachable when #293
  * corrected it — the throttler was never actually enforcing anything before.

@@ -62,6 +62,7 @@ import { BGE_VERSION } from './generated/bge-version';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
+import { RedisThrottlerStorage } from './lib/redis-throttler.storage';
 import { createThrottlers } from './lib/throttlers';
 
 @Module({
@@ -93,17 +94,27 @@ import { createThrottlers } from './lib/throttlers';
     // during a transient Redis disconnect.
     ScheduleModule.forRoot(),
 
-    // Rate limiting; see `createThrottlers` for the tiers and their units.
+    // Rate limiting; see `createThrottlers` for the tiers and their units, and
+    // `RedisThrottlerStorage` for why the counters are shared rather than
+    // per-process (#341).
+    //
+    // `CACHE_REDIS_CLIENT` comes from `RedisModule`, registered BELOW this line.
+    // Order in this array does not decide resolution order — the module is
+    // global and Nest resolves the provider graph by dependency — but the
+    // reading order is misleading enough to be worth saying so.
     ThrottlerModule.forRootAsync({
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({ throttlers: createThrottlers(config) }),
+      inject: [ConfigService, CACHE_REDIS_CLIENT],
+      useFactory: (config: ConfigService, cache: Redis) => ({
+        throttlers: createThrottlers(config),
+        storage: new RedisThrottlerStorage(cache),
+      }),
     }),
 
     DatabaseModule,
     DbPoolMetricsRecorderModule,
     SecureHttpModule,
 
-    // Shared Redis clients (ioredis). Owns the lifecycle of the cache and
+    // Shared Redis clients (iovalkey). Owns the lifecycle of the cache and
     // queue connections used across the application.
     RedisModule.forRootAsync({
       cache: {

@@ -72,16 +72,31 @@ export const FEEDBACK_MAX_REDACTED_FIELDS = 64;
 export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
 
 /**
- * Tiered submission rate limits (issue #45), enforced per rolling hour. The
- * per-user tier tracks the authenticated user; the per-IP tier tracks the
- * source address. Both apply to every submission — whichever trips first wins.
+ * Tiered submission rate limits (issue #45), enforced per hour. The per-user
+ * tier tracks the authenticated user; the per-IP tier tracks the source
+ * address. Both apply to every submission — whichever trips first wins.
  *
- * "Rolling" is accurate for the storage in use: `ThrottlerStorageService`
- * schedules a decrement per hit at `now + ttl`, so the count is the hits in the
- * trailing window rather than a counter that resets on a fixed boundary. One
- * caveat, tracked in #341 rather than here: its block-reset path clears pending
- * decrements for every key under the throttler name, not just the key being
- * reset, so once any caller's block expires the others stop decaying.
+ * NOT A ROLLING HOUR — a FIXED one, since #341. This said "rolling", and it was
+ * true of the in-memory storage it described: `ThrottlerStorageService`
+ * schedules a decrement per hit at `now + ttl`, so the count really was the
+ * hits in the trailing window. The Redis storage that replaced it counts the
+ * standard way — `INCR`, and `PEXPIRE` only on the first hit of a window — so
+ * the window now starts at a caller's first request and clears whole. The
+ * practical difference is the boundary: 30 submissions at 59:59 and 30 more at
+ * 1:00:01 both pass, where a rolling hour would have refused the second batch.
+ * Accepted as the ordinary cost of shared storage rather than chosen on its
+ * merits; it wants a decision if the boundary burst ever matters.
+ *
+ * The in-memory caveat this note used to carry — that the block-reset path
+ * cleared pending decrements for every key under a throttler NAME rather than
+ * the one being reset — is gone with the storage. The Redis path is per key.
+ *
+ * WHAT HAPPENS AT THE CEILING. The 31st submission in the window is refused for
+ * the REST OF THE WINDOW, not until the caller's oldest request ages out: the
+ * block duration equals the window and is set deliberately (#342). Shortening
+ * it would not let anyone back in early — the hit counter outlives the block —
+ * it would only make `Retry-After` name a time the counter will still refuse.
+ * See the `blockDuration` note in `apps/api/src/app/lib/throttlers.ts`.
  *
  * The window is MILLISECONDS, as `@nestjs/throttler` reads it and as the name
  * says. It was previously `FEEDBACK_THROTTLE_TTL_SECONDS = 60 * 60`, forwarded

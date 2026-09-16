@@ -114,6 +114,8 @@ describe('FeedbackSubmissionThrottle', () => {
   const throttlerTtl = (name: string, handler: object): unknown => Reflect.getMetadata(`THROTTLER:TTL${name}`, handler);
   const throttlerLimit = (name: string, handler: object): unknown =>
     Reflect.getMetadata(`THROTTLER:LIMIT${name}`, handler);
+  const throttlerBlockDuration = (name: string, handler: object): unknown =>
+    Reflect.getMetadata(`THROTTLER:BLOCK_DURATION${name}`, handler);
 
   class Target {
     @FeedbackSubmissionThrottle({
@@ -145,5 +147,19 @@ describe('FeedbackSubmissionThrottle', () => {
   it('keeps the two tiers independent in their limits', () => {
     expect(throttlerLimit(USER_THROTTLER_NAME, Target.prototype.handle)).toBe(FEEDBACK_USER_THROTTLE_LIMIT);
     expect(throttlerLimit(DEFAULT_THROTTLER_NAME, Target.prototype.handle)).toBe(FEEDBACK_IP_THROTTLE_LIMIT);
+  });
+
+  it('carries blockDuration on both tiers, matched to the window it overrode', () => {
+    // Not decoration (#342). The guard resolves
+    // `routeOrClass || namedThrottler.blockDuration || ttl`, and the named
+    // throttlers now set `blockDuration` to the GLOBAL window. A route that
+    // overrides `ttl` to an hour and leaves `blockDuration` off would therefore
+    // block for the global minute under an hour-long window — which does not
+    // widen the limit under our storage, but does make `Retry-After` promise a
+    // return the hit key will refuse.
+    //
+    // Asserted equal to the route's own ttl, so the pair cannot drift apart.
+    expect(throttlerBlockDuration(USER_THROTTLER_NAME, Target.prototype.handle)).toBe(FEEDBACK_THROTTLE_TTL_MS);
+    expect(throttlerBlockDuration(DEFAULT_THROTTLER_NAME, Target.prototype.handle)).toBe(FEEDBACK_THROTTLE_TTL_MS);
   });
 });

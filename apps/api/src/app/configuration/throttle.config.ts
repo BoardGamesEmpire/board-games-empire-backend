@@ -29,7 +29,7 @@ import Joi from 'joi';
  * before these factories ever run.
  */
 export default registerAs('throttle', () =>
-  env.provideMany<{ ttlMs: number; limit: number }>([
+  env.provideMany<{ ttlMs: number; limit: number; trustedProxyHops: number }>([
     {
       keyTo: 'ttlMs',
       defaultValue: seconds(60),
@@ -41,6 +41,17 @@ export default registerAs('throttle', () =>
       defaultValue: 20,
       mutators: [(value: string) => parseInt(value, 10)],
       key: 'THROTTLE_LIMIT',
+    },
+    {
+      keyTo: 'trustedProxyHops',
+      // Zero means "nothing is in front of this app", which is the only thing
+      // the repo can know: no Dockerfile, compose file or chart here describes
+      // a topology (#340). A deployment behind proxies declares its own depth,
+      // and one that says nothing is limited on the peer address — safe by
+      // default rather than bypassable by default.
+      defaultValue: 0,
+      mutators: [(value: string) => parseInt(value, 10)],
+      key: 'THROTTLE_TRUSTED_PROXY_HOPS',
     },
   ]),
 );
@@ -61,5 +72,15 @@ export const throttleConfigValidationSchema = {
     .min(1)
     .description(
       'Requests allowed per route, per IP, within one THROTTLE_TTL_MS window. Must be at least 1: the guard reads 0 as "reject everything".',
+    ),
+  // Every hop configured here is one `X-Forwarded-For` entry the app agrees to
+  // believe, so an over-count reads client-written text as infrastructure and
+  // reopens #340. `.min(0)` rather than `.positive()`: zero is the default and
+  // means "trust none of it".
+  THROTTLE_TRUSTED_PROXY_HOPS: Joi.number()
+    .integer()
+    .min(0)
+    .description(
+      'How many trusted proxies sit in front of this app. 0 (default) keys rate limits on the peer address and ignores X-Forwarded-For. Set it to the real hop count — a larger number trusts entries the client can write.',
     ),
 };

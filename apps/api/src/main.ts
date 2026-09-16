@@ -63,6 +63,18 @@ async function bootstrap() {
 
   app.enable('trust proxy').set('etag', 'strong').set('x-powered-by', false);
 
+  // `trust proxy` shapes `req.protocol` and `req.secure`, which better-auth and
+  // the cookie flags read. It deliberately does NOT shape rate limiting any
+  // more: the IP tier carries its own tracker, because Express resolves `req.ip`
+  // from the leftmost `X-Forwarded-For` entry, which the client writes (#340).
+  //
+  // The two can disagree — `trust proxy` on while THROTTLE_TRUSTED_PROXY_HOPS is
+  // 0 — and that disagreement is quiet in the direction that hurts. It is not
+  // warned about here: at boot the only thing knowable is the setting, and a
+  // warning on the documented default fires on every local run. `createIpTracker`
+  // warns once on the first request that actually carries a forwarded header,
+  // which is the first moment there is evidence rather than a guess.
+
   app
     // I18nValidationPipe is ValidationPipe with an i18n-aware exceptionFactory:
     // decorator messages tagged via `i18nValidationMessage` (see @bge/i18n) are

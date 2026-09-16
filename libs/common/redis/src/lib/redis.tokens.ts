@@ -3,6 +3,7 @@
  *
  * Used by:
  *   - `CacheModule` (via @keyv/valkey adapter)
+ *   - `RedisThrottlerStorage` (rate-limit counters, `bge:throttle:*`)
  *   - `GatewayConfigEventsModule` (pub/sub on the same logical database)
  *   - `HealthModule` (Redis health indicator)
  *
