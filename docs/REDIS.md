@@ -239,6 +239,16 @@ Dragonfly's own documentation, never measured here (#462).
 > Under a cluster that combination raises `CROSSSLOT`. Running BGE clustered
 > needs the flow's queues brought under one tag first; the braces as they stand
 > do not make BGE cluster-compatible.
+>
+> The queues are not the only place. The rate limiter
+> (`apps/api/src/app/lib/redis-throttler.storage.ts`) passes its Lua **two**
+> keys — a hit counter and a block marker, `<counter>:blocked` — and neither
+> carries a hash tag, so under a cluster they land in different slots and every
+> call raises `CROSSSLOT`. The storage fails open on an error it cannot read,
+> which means clustered mode would not break the API loudly; it would quietly
+> stop rate-limiting it. Bracketing the variable part of both keys fixes it, and
+> is deliberately not done while clustered mode is untested — it changes the key
+> format for a topology nothing here runs.
 
 ### Dragonfly — Streams edge cases
 

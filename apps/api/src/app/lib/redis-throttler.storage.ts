@@ -4,7 +4,28 @@ import type { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-st
 import type { Redis } from 'iovalkey';
 import { createHash } from 'node:crypto';
 
-/** Namespace for every throttler key, so buckets are identifiable in a shared database. */
+/**
+ * Namespace for every throttler key, so buckets are identifiable in a shared
+ * database.
+ *
+ * IDENTIFIABLE, NOT ISOLATED, and the difference is reachable. The prefix is
+ * fixed, so two BGE deployments pointed at one logical database share buckets
+ * outright: same route handler, same tracker value, same key. The supported
+ * escape hatch gets there — `BGE_E2E_REDIS_URL` aimed at a Redis a dev API is
+ * already using puts both on database 0, and every request in a suite run comes
+ * from `127.0.0.1`, so the test traffic and the dev API draw down one budget.
+ *
+ * Deliberately not fixed by namespacing this prefix, because throttle buckets
+ * are the newest of four things that collide in that configuration and the
+ * least costly of them: the same database carries better-auth's sessions
+ * (`api:cache:auth_*`), the cached ability graphs
+ * (`api:cache:bge:user:permissions:*`), and the bootstrap advisory lock
+ * (`bge:bootstrap`). A throttle-only namespace would leave sessions and
+ * permission graphs shared while making the arrangement look isolated, which is
+ * worse than a collision everyone can see. What that configuration actually
+ * wants is a per-run prefix across the whole harness — the isolation #341's
+ * own description assumed was already in place, and which does not exist.
+ */
 const KEY_PREFIX = 'bge:throttle';
 
 /**
@@ -198,6 +219,29 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
    * script — first call after boot, or after a `SCRIPT FLUSH` — answers
    * `NOSCRIPT`, and the `EVAL` fallback both satisfies that request and caches
    * the script for the next one.
+   *
+   * WHAT A RECONNECT DOES TO THIS. The script is not idempotent — it `INCR`s —
+   * and the client underneath is the shared cache connection, which runs
+   * iovalkey's default `autoResendUnfulfilledCommands: true`. Nothing in
+   * `toIoRedisOptions` overrides it. So a command already on the wire when the
+   * connection drops is resent verbatim on reconnect, and if the server had in
+   * fact run it before the socket died, that caller is charged twice for one
+   * request.
+   *
+   * The error leans the wrong way. Everything else here fails OPEN — an
+   * unreachable counter allows the request — while this fails CLOSED, refusing
+   * a caller below the configured limit on hits they never made. It is narrow
+   * (it needs a disconnect inside the gap between execution and reply) but it
+   * is not theoretical: every failover is an opportunity, and a failover is
+   * also when the deadline below has already fail-opened the same requests.
+   *
+   * Left alone rather than fixed in place, because both fixes are wider than
+   * this method. Turning resending off belongs to the client, and this one is
+   * shared with the app cache, the gateway's config pub/sub and the health
+   * indicator, none of which asked for that. Making the script idempotent needs
+   * a per-request token and somewhere to remember it, which is a second
+   * keyspace with its own expiry. The isolated limiter connection that
+   * `withDeadline` already argues for would take this with it.
    */
   private async run(
     hitKey: string,
