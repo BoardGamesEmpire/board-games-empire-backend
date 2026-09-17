@@ -85,8 +85,8 @@ export const FEEDBACK_BREADCRUMBS_MAX_BYTES = 64 * 1024;
  * practical difference is the boundary, and it is the WINDOW's boundary rather
  * than the clock's — the hour starts when the caller's first request lands. One
  * submission at 0:00 opens it, 29 more at 0:59:59 fill it, and 30 more at
- * 1:00:01 pass on a window the expiry has just cleared: 60 submissions either
- * side of a second, where a rolling hour would have refused the last batch.
+ * 1:00:01 pass on a window the expiry has just cleared — 59 submissions inside
+ * two seconds, where a rolling hour would have refused the last batch.
  * Accepted as the ordinary cost of shared storage rather than chosen on its
  * merits; it wants a decision if the boundary burst ever matters.
  *

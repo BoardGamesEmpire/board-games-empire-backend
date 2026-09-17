@@ -48,10 +48,15 @@ const USER_THROTTLE_LIMIT = 30;
  * they live in Redis, which survives the child and — when `BGE_E2E_REDIS_URL`
  * points at a server the harness did not provision — survives the run. So
  * `global-setup` sweeps `bge:throttle:*` before the API starts
- * (`sweepThrottleBuckets`), unguarded, because deleting rate-limit counters
- * cannot cost anyone anything they would miss. Against the throwaway container
- * it finds nothing; against a reused server it is what stops yesterday's block
- * from failing today's run.
+ * (`sweepThrottleBuckets`). Against the throwaway container it finds nothing;
+ * against a reused server it is what stops yesterday's block from failing
+ * today's run.
+ *
+ * The sweep gates on the same flag `resetRedis` does, because a shared Redis
+ * may belong to a running API and those buckets are its live rate limits. An
+ * external server nobody has marked disposable therefore keeps its state, and
+ * this file is where the resulting `429` would surface — the console warning at
+ * setup names `BGE_E2E_REDIS_FLUSH_OK` for that case.
  *
  * That sweep is per RUN, not per test. Nothing clears Redis between tests —
  * `test-isolation.ts` says so outright, and `resetRedis` has no call site in the

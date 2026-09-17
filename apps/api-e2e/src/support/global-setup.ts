@@ -302,9 +302,10 @@ export default async function globalSetup(): Promise<void> {
 
     // Rate-limit buckets outlive the API child now that they live in Redis
     // (#341), so on a reused server a run inherits the last one's counters —
-    // and any block still standing. A no-op against the throwaway container,
-    // which is the point: the path that matters is exercised every run rather
-    // than only on the escape hatch.
+    // and any block still standing. Runs after the ownership flag is published
+    // above, because the sweep gates on it: against the throwaway container it
+    // is authorised and finds nothing, and against an external Redis nobody has
+    // called disposable it declines and says why.
     const sweptBuckets = await sweepThrottleBuckets(process.env);
     if (sweptBuckets > 0) {
       console.warn(`[e2e] cleared ${sweptBuckets} rate-limit bucket(s) left on this Redis by an earlier run`);

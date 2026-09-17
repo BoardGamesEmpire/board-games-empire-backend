@@ -237,14 +237,24 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
    *
    * WHAT THIS DOES NOT DO: cancel the command. Once `EVALSHA` is on the wire the
    * server will run it whenever it gets to it, and no client-side timeout can
-   * take that back — so a request allowed through during a stall is still
-   * counted, late, when the server recovers. That is the honest accounting (the
-   * request did happen) but it is not free: while a connected server is not
-   * answering, every request adds another command to the shared cache client's
-   * queue, and that queue is not bounded here. A limiter that stops dispatching
-   * while the backend is known-hung — a circuit breaker, or an isolated client
-   * whose depth can be capped without touching cache reads — is the real answer
-   * and is deliberately not attempted here.
+   * take that back. Two consequences, and the second is the one that bites.
+   *
+   * Every request during a stall adds another command to the SHARED cache
+   * client's queue, and nothing bounds that queue — so a long outage at any real
+   * request rate grows it until the process feels it, and the app cache and
+   * health indicator are queued behind it.
+   *
+   * And the counting is not merely late. The whole stall's worth of commands
+   * lands at recovery, which is when the first of them sets `PEXPIRE` — so the
+   * window starts at recovery and is immediately full of traffic that was
+   * already allowed through. A caller told its budget was untouched for the
+   * length of the outage is blocked for a fresh window the moment the outage
+   * ends, which inverts the fail-open policy at the worst possible moment.
+   *
+   * The fix is to stop dispatching once the backend is known-hung — a circuit
+   * breaker, or an isolated client whose depth can be capped without touching
+   * cache reads — and it is deliberately not attempted here, because it changes
+   * behaviour under outage and wants reviewing on its own.
    */
   private withDeadline<T>(work: Promise<T>, deadline: Deadline): Promise<T> {
     let timer: NodeJS.Timeout;

@@ -34,15 +34,39 @@ const THROTTLE_KEY_PATTERN = 'bge:throttle:*';
  * still there, and an hour-long block with them, so a run fails with `429`s
  * that have nothing to do with the behaviour under test.
  *
- * Unguarded, unlike {@link resetRedis}, and deliberately so — this cannot
- * destroy anything a developer would miss. It is also run unconditionally
- * rather than only on the external path, so the sweep that matters on a reused
- * server is the same one CI exercises every run.
+ * GUARDED on the same policy as {@link resetRedis}, which this deliberately did
+ * not do at first. The reasoning then was that rate-limit counters cost nobody
+ * anything to lose — true of a developer's data, and false of the thing they
+ * actually are. If `BGE_E2E_REDIS_URL` names a Redis shared with a running dev
+ * or staging API, this deletes that API's live budgets and standing blocks:
+ * an abuse control silently disarmed by starting a test suite. The asymmetry
+ * decides it — skipping the sweep costs a confusing local `429`, running it
+ * unasked costs someone else's rate limiting.
+ *
+ * So an un-acknowledged external Redis keeps its buckets and says so. That
+ * leaves the stale-state problem standing for exactly that configuration, which
+ * is the trade: `BGE_E2E_REDIS_FLUSH_OK=true` is how a developer says the server
+ * is theirs to sweep.
  *
  * `SCAN` rather than `KEYS`: the sweep runs against whatever server the
  * developer named, and `KEYS` on a large one blocks it.
+ *
+ * Returns the number of buckets removed; zero also covers "not authorised",
+ * which is reported on the console rather than raised — a refusal here is a
+ * safe outcome, not a broken run.
  */
 export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  if (!mayFlushRedis(env)) {
+    console.warn(
+      `[e2e] leaving rate-limit buckets on the Redis at ${E2E_REDIS_URL_VAR} alone — it may be shared with a ` +
+        `running API, and sweeping would clear that API's live budgets and blocks. Set ` +
+        `${E2E_REDIS_FLUSH_OK_VAR}=true if it is disposable. Until then a run inherits any throttle state left ` +
+        `by the last one, which surfaces as 429s unrelated to the behaviour under test.`,
+    );
+
+    return 0;
+  }
+
   const client = connect(env);
   let cursor = '0';
   let removed = 0;
@@ -67,6 +91,19 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
  * A short-lived TEST-OWNED connection built from the same `REDIS_*` environment
  * the harness pointed the API at — the cache database, which is where both the
  * app cache and the rate-limit buckets live.
+ *
+ * TLS is read from the environment rather than assumed off. `BGE_E2E_REDIS_URL`
+ * accepts `rediss://`, and `redisEnvOverrides` publishes that as
+ * `REDIS_TLS_ENABLED=true`; a client that ignored it would offer plaintext to a
+ * TLS port. Certificates are not read here because the overrides do not publish
+ * any — the harness carries host, port, credentials and the TLS flag, and
+ * nothing else.
+ *
+ * It gives up rather than reconnecting, which matters because the sweep runs
+ * inside `globalSetup` before anything is listening to fail. A mismatched TLS
+ * setting or a wrong port would otherwise leave iovalkey retrying forever and
+ * hang the whole run until the job timeout, with nothing in the log to say why.
+ * Five seconds and one attempt turns that into a readable error.
  */
 function connect(env: NodeJS.ProcessEnv): Redis {
   const host = env['REDIS_HOST'];
@@ -82,6 +119,10 @@ function connect(env: NodeJS.ProcessEnv): Redis {
     username: env['REDIS_USERNAME'] || undefined,
     password: env['REDIS_PASSWORD'] || undefined,
     db: Number(env['REDIS_DATABASE']) || 0,
+    connectTimeout: 5_000,
+    maxRetriesPerRequest: 1,
+    retryStrategy: () => null,
+    ...(env['REDIS_TLS_ENABLED'] === 'true' ? { tls: {} } : {}),
   });
 }
 
