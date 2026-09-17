@@ -104,6 +104,14 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
  * setting or a wrong port would otherwise leave iovalkey retrying forever and
  * hang the whole run until the job timeout, with nothing in the log to say why.
  * Five seconds and one attempt turns that into a readable error.
+ *
+ * `commandTimeout` covers the half `connectTimeout` does not. Once the socket
+ * is up, a server that accepts the connection and then stops answering leaves
+ * the `SCAN` below — and the `quit` after it — waiting on a reply with nothing
+ * to time it out. `maxRetriesPerRequest` is not that bound either: it counts
+ * RECONNECT attempts, and a connected-but-silent server never causes one. The
+ * failure looks identical to a wrong port from outside, and lands in the same
+ * place before any test has started, so it gets the same five seconds.
  */
 function connect(env: NodeJS.ProcessEnv): Redis {
   const host = env['REDIS_HOST'];
@@ -120,6 +128,7 @@ function connect(env: NodeJS.ProcessEnv): Redis {
     password: env['REDIS_PASSWORD'] || undefined,
     db: Number(env['REDIS_DATABASE']) || 0,
     connectTimeout: 5_000,
+    commandTimeout: 5_000,
     maxRetriesPerRequest: 1,
     retryStrategy: () => null,
     ...(env['REDIS_TLS_ENABLED'] === 'true' ? { tls: {} } : {}),

@@ -243,12 +243,20 @@ Dragonfly's own documentation, never measured here (#462).
 > The queues are not the only place. The rate limiter
 > (`apps/api/src/app/lib/redis-throttler.storage.ts`) passes its Lua **two**
 > keys — a hit counter and a block marker, `<counter>:blocked` — and neither
-> carries a hash tag, so under a cluster they land in different slots and every
-> call raises `CROSSSLOT`. The storage fails open on an error it cannot read,
-> which means clustered mode would not break the API loudly; it would quietly
-> stop rate-limiting it. Bracketing the variable part of both keys fixes it, and
-> is deliberately not done while clustered mode is untested — it changes the key
-> format for a topology nothing here runs.
+> carries a hash tag, so nothing colocates them. A slot is `CRC16` of the whole
+> key name, and the two names differ, so all but roughly one bucket in 16384
+> straddles two slots and raises `CROSSSLOT`. Not "sometimes": the two slots for
+> a given route-and-tracker pair are fixed, so a bucket raises it on every
+> request or on none, and which one it is does not change while the key format
+> does not.
+>
+> The storage fails open on an error it cannot read, so clustered mode would not
+> break the API — it would serve 200s with nothing limiting them. The only
+> signal is one gated `Rate-limit storage unavailable` line per interval, which
+> is also what an unreachable Redis produces, so the logs do not distinguish a
+> cluster nobody supports from a server that is down. Bracketing the variable
+> part of both keys fixes it, and is deliberately not done while clustered mode
+> is untested — it changes the key format for a topology nothing here runs.
 
 ### Dragonfly — Streams edge cases
 
