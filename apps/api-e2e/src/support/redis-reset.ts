@@ -1,4 +1,4 @@
-import Redis from 'iovalkey';
+import Redis, { type RedisOptions } from 'iovalkey';
 import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from './e2e-env';
 
 /**
@@ -88,16 +88,55 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
 }
 
 /**
+ * How {@link connect} offers TLS, as a pure function of the environment.
+ *
+ * Split out and exported because this expression is the part of the file that
+ * has been wrong twice — first ignoring `REDIS_TLS_ENABLED` outright, then
+ * reading the flag and dropping the certificates — and a pure function of the
+ * environment is the only part of a client constructor a unit test can reach.
+ * {@link mayFlushRedis} is exported on the same reasoning.
+ *
+ * TLS is read rather than assumed off: `BGE_E2E_REDIS_URL` accepts `rediss://`,
+ * and `redisEnvOverrides` publishes that as `REDIS_TLS_ENABLED=true`, so a
+ * client ignoring it would offer plaintext to a TLS port.
+ *
+ * The certificate material is read too, mirroring `toIoRedisOptions` in
+ * `libs/common/redis` — spelled out rather than imported for the reason
+ * `THROTTLE_KEY_PATTERN` above is. This skipped it at first on the grounds that
+ * `redisEnvOverrides` publishes no certificates, which is true and is a
+ * different claim: the overrides are `Object.assign`ed onto `process.env`, so a
+ * developer's own `REDIS_TLS_CA`, `REDIS_TLS_CERT`, `REDIS_TLS_KEY` and
+ * `REDIS_REJECT_UNAUTHORIZED` stay standing — and `process.env` is exactly where
+ * the API child reads them. Ignoring them here meant a private CA, an mTLS
+ * server, or a deliberately unverified one connected for the API and refused
+ * this sweep, killing globalSetup before a test ran.
+ */
+export function redisTlsOptions(env: NodeJS.ProcessEnv = process.env): Pick<RedisOptions, 'tls'> {
+  if (env['REDIS_TLS_ENABLED'] !== 'true') {
+    return {};
+  }
+
+  return {
+    tls: {
+      ca: env['REDIS_TLS_CA'] || undefined,
+      key: env['REDIS_TLS_KEY'] || undefined,
+      cert: env['REDIS_TLS_CERT'] || undefined,
+      // `isTrue` over a default of `true`, as `makeRedisConfig` reads it: unset
+      // or empty verifies, and only an explicit true-ish value is a value.
+      // Matching the app matters more than the stricter reading — a sweep that
+      // verified where the app does not is the failure being fixed here,
+      // pointed the other way.
+      rejectUnauthorized: env['REDIS_REJECT_UNAUTHORIZED']
+        ? env['REDIS_REJECT_UNAUTHORIZED'].toLowerCase() === 'true'
+        : true,
+    },
+  };
+}
+
+/**
  * A short-lived TEST-OWNED connection built from the same `REDIS_*` environment
  * the harness pointed the API at — the cache database, which is where both the
  * app cache and the rate-limit buckets live.
- *
- * TLS is read from the environment rather than assumed off. `BGE_E2E_REDIS_URL`
- * accepts `rediss://`, and `redisEnvOverrides` publishes that as
- * `REDIS_TLS_ENABLED=true`; a client that ignored it would offer plaintext to a
- * TLS port. Certificates are not read here because the overrides do not publish
- * any — the harness carries host, port, credentials and the TLS flag, and
- * nothing else.
  *
  * It gives up rather than reconnecting, which matters because the sweep runs
  * inside `globalSetup` before anything is listening to fail. A mismatched TLS
@@ -131,7 +170,7 @@ function connect(env: NodeJS.ProcessEnv): Redis {
     commandTimeout: 5_000,
     maxRetriesPerRequest: 1,
     retryStrategy: () => null,
-    ...(env['REDIS_TLS_ENABLED'] === 'true' ? { tls: {} } : {}),
+    ...redisTlsOptions(env),
   });
 }
 
