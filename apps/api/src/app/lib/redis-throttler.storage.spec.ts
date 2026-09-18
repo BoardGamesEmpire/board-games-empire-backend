@@ -1,5 +1,20 @@
+// Stubs the meter so the fail-open counter can be asserted without standing up
+// a metric provider, following `pool-metrics-recorder.service.spec.ts`. The
+// storage touches nothing else in `@opentelemetry/api`.
+jest.mock('@opentelemetry/api', () => {
+  const add = jest.fn();
+  const createCounter = jest.fn(() => ({ add }));
+
+  return { metrics: { getMeter: jest.fn(() => ({ createCounter })) } };
+});
+
 import { Logger } from '@nestjs/common';
+import { metrics } from '@opentelemetry/api';
 import { RedisThrottlerStorage } from './redis-throttler.storage';
+
+/** The `add` stub shared by every counter the mocked meter hands out. */
+const failOpenAdds = (): jest.Mock =>
+  (metrics.getMeter('bge-throttle').createCounter('throttle.storage.fail_open') as unknown as { add: jest.Mock }).add;
 
 /**
  * The storage is the whole rate limiter as far as correctness goes: the guard
@@ -40,6 +55,7 @@ describe('RedisThrottlerStorage', () => {
   beforeEach(() => {
     log = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    failOpenAdds().mockClear();
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -270,6 +286,55 @@ describe('RedisThrottlerStorage', () => {
       await storage.increment('k', 60_000, 20, 60_000, 'default');
 
       expect(error).toHaveBeenCalledTimes(2);
+    });
+  });
+  describe('counting the fail-opens', () => {
+    it('counts a request it let through uncounted', async () => {
+      const storage = new RedisThrottlerStorage(redisReturning(new Error('down')));
+
+      await storage.increment('k', 60_000, 20, 60_000, 'default');
+
+      expect(failOpenAdds()).toHaveBeenCalledWith(1, { throttler: 'default' });
+    });
+
+    it('counts every failure, including the ones the log gate suppresses', async () => {
+      // The reason the metric exists at all (#341). The gate deliberately
+      // emits one line per interval, so the logs cannot answer "how big was
+      // it"; a count that shared the gate would be wrong in the same way.
+      const storage = new RedisThrottlerStorage(redisReturning(new Error('down')));
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await storage.increment('k', 60_000, 20, 60_000, 'default');
+      }
+
+      expect(error).toHaveBeenCalledTimes(1);
+      expect(failOpenAdds()).toHaveBeenCalledTimes(10);
+    });
+
+    it('says which tier stopped being enforced', async () => {
+      // The IP tier going open is a different exposure from the user tier
+      // going open, and an unlabelled count cannot tell them apart.
+      const storage = new RedisThrottlerStorage(redisReturning(new Error('down')));
+
+      await storage.increment('k', 60_000, 20, 60_000, 'user');
+
+      expect(failOpenAdds()).toHaveBeenCalledWith(1, { throttler: 'user' });
+    });
+
+    it('counts a reply it could not read, which is also a request let through', async () => {
+      const storage = new RedisThrottlerStorage(redisReturning(['not', 'a', 'record']));
+
+      await storage.increment('k', 60_000, 20, 60_000, 'default');
+
+      expect(failOpenAdds()).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent while the counter is answering', async () => {
+      const storage = new RedisThrottlerStorage(redisReturning([1, 60_000, 0, 0]));
+
+      await storage.increment('k', 60_000, 20, 60_000, 'default');
+
+      expect(failOpenAdds()).not.toHaveBeenCalled();
     });
   });
 });

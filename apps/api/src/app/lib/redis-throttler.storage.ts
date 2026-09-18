@@ -1,8 +1,23 @@
 import { Logger } from '@nestjs/common';
 import type { ThrottlerStorage } from '@nestjs/throttler';
 import type { ThrottlerStorageRecord } from '@nestjs/throttler/dist/throttler-storage-record.interface';
+import { metrics } from '@opentelemetry/api';
 import type { Redis } from 'iovalkey';
 import { createHash } from 'node:crypto';
+
+/**
+ * Instrumentation scope for the fail-open counter below, named the way
+ * `bge-database-pool` in `@bge/otel` is.
+ *
+ * Read through `@opentelemetry/api`'s global rather than injected, because this
+ * class is constructed with `new` inside `ThrottlerModule`'s factory and has no
+ * DI to inject through — see the class docstring. `bootstrapObservability` runs
+ * at the top of `main.ts`, before `AppModule` is imported, so the provider is
+ * registered by the time the factory builds this. When metrics export is off —
+ * the default — `createCounter` returns a no-op and `add` costs nothing.
+ */
+const METER_NAME = 'bge-throttle';
+const REQUEST_UNIT = '{request}';
 
 /**
  * Namespace for every throttler key, so buckets are identifiable in a shared
@@ -160,7 +175,8 @@ interface Deadline {
  * later would be silently dead.
  *
  * FAILS OPEN. If Redis cannot answer — or cannot answer promptly —
- * the request is allowed and the failure is logged. Rate limiting is an abuse
+ * the request is allowed, and the failure is logged and counted
+ * (`throttle.storage.fail_open`). Rate limiting is an abuse
  * control, not a correctness control: failing closed would turn a Redis blip
  * into a 429 on every route of every replica at once. The tradeoff is stated
  * rather than inherited, which is what #341 asked for.
@@ -170,6 +186,20 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
 
   /** `EVALSHA` digest of {@link INCREMENT_SCRIPT}; see `run`. */
   private readonly scriptSha = createHash('sha1').update(INCREMENT_SCRIPT).digest('hex');
+
+  /**
+   * Requests allowed through uncounted because the storage could not answer.
+   *
+   * The log beside it is deliberately rate-gated, which makes it useless for
+   * asking how big an outage was — the whole point of the gate is that most
+   * failures produce no line. This counts every one of them, which is what
+   * choosing to fail open obliges (#341): a control that silently stops
+   * controlling needs a signal that does not also go quiet.
+   */
+  private readonly failOpens = metrics.getMeter(METER_NAME).createCounter('throttle.storage.fail_open', {
+    description: 'Requests allowed through without being counted because the rate-limit storage was unavailable.',
+    unit: REQUEST_UNIT,
+  });
 
   /** Fail-open bookkeeping, so an outage is one log line and not one per request. */
   private failuresSinceLastLog = 0;
@@ -349,6 +379,11 @@ export class RedisThrottlerStorage implements ThrottlerStorage {
    * that produced them.
    */
   private reportFailure(cause: unknown, throttlerName: string): void {
+    // Before the gate below, not after it. The gate exists to suppress LOG
+    // lines; suppressing the count with them would make the metric agree with
+    // the logs about an outage's size and be wrong with them too.
+    this.failOpens.add(1, { throttler: throttlerName });
+
     this.failuresSinceLastLog++;
 
     const now = Date.now();
