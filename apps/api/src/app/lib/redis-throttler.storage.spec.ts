@@ -148,7 +148,7 @@ describe('RedisThrottlerStorage', () => {
 
   describe('failing open', () => {
     it('allows the request when Redis rejects, and says so', async () => {
-      // D-341-3. Rate limiting is an abuse control, not a correctness control:
+      // Rate limiting is an abuse control, not a correctness control:
       // failing closed turns a Redis blip into a total outage of every route.
       const storage = new RedisThrottlerStorage(redisReturning(new Error('ECONNREFUSED')));
 

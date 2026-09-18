@@ -159,7 +159,7 @@ interface Deadline {
  * never runs, so an `OnModuleDestroy` or a second constructor dependency added
  * later would be silently dead.
  *
- * FAILS OPEN (D-341-3). If Redis cannot answer — or cannot answer promptly —
+ * FAILS OPEN. If Redis cannot answer — or cannot answer promptly —
  * the request is allowed and the failure is logged. Rate limiting is an abuse
  * control, not a correctness control: failing closed would turn a Redis blip
  * into a 429 on every route of every replica at once. The tradeoff is stated
