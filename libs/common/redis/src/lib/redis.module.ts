@@ -11,12 +11,13 @@ import { RedisLifecycleManager } from './redis-lifecycle.service';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from './redis.tokens';
 
 /**
- * Global module providing shared ioredis clients for the BGE backend.
+ * Global module providing shared iovalkey clients for the BGE backend.
  *
  * Provides up to two injection tokens, each registered independently:
  *
  *   - `CACHE_REDIS_CLIENT` — for the cache (via @keyv/valkey), gateway
- *     config events pub/sub, and the Redis health indicator. Configured
+ *     config events pub/sub, rate-limit counters (#341), and the Redis
+ *     health indicator. Configured
  *     with `maxRetriesPerRequest: 3` for fail-fast cache semantics.
  *   - `QUEUE_REDIS_CLIENT` — for BullMQ `Queue` / `FlowProducer` instances.
  *     Configured with `maxRetriesPerRequest: null` per BullMQ requirements.
@@ -27,7 +28,7 @@ import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from './redis.tokens';
  * only the cache connection, and so on.
  *
  * Deliberately does NOT manage the Socket.IO streams adapter connection —
- * that adapter requires `node-redis` rather than ioredis and remains owned
+ * that adapter requires `node-redis` rather than iovalkey and remains owned
  * by `RedisIoAdapter`. See docs/REDIS.md for the full connection topology.
  */
 @Module({})

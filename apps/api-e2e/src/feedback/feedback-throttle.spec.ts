@@ -28,18 +28,40 @@ const USER_THROTTLE_LIMIT = 30;
  * what it asserts. The per-user tier (30) is keyed on the user id, so a
  * throwaway actor confines the damage to a key nothing else uses.
  *
- * It also keeps #341 out of the way: its block-reset defect clears pending
- * decrements for every key under a throttler NAME, and the two tiers are
- * separately named (`user` and `default`), so a trip here cannot slow the decay
- * of keys the rest of the suite depends on.
+ * That reasoning used to lean on a second argument — that #341's block-reset
+ * defect cleared pending decrements for every key under a throttler NAME, so
+ * tripping the separately-named `user` tier confined the damage. #341 has since
+ * landed and that defect is gone with the storage it belonged to: counters are
+ * Redis-backed and per key. The budget argument above is unaffected and is on
+ * its own sufficient, which is why the choice did not change.
  *
  * THE COST, STATED PLAINLY. This file spends ~31 of the run's ~100 IP-tier
  * submissions, because the user limit is a compile-time constant that cannot be
- * lowered for tests (#343). Buckets are in-process in a child that outlives the
- * truncate sweep, and `blockDuration` defaults to the ttl — so exceeding the IP
- * tier would block the route for a wall-clock HOUR against a suite that runs in
- * under a minute. There is headroom today; there is not much. Adding feedback
- * specs without #343 is how that headroom disappears.
+ * lowered for tests (#343). `blockDuration` equals the ttl — explicitly now,
+ * rather than by default (#342) — so exceeding the IP tier would block the route
+ * for a wall-clock HOUR against a suite that runs in under a minute. There is
+ * headroom today; there is not much. Adding feedback specs without #343 is how
+ * that headroom disappears.
+ *
+ * AND BUCKETS NOW OUTLIVE THE API CHILD. They used to be an in-process `Map`
+ * that died with it, so a hard-killed run started clean by accident. Since #341
+ * they live in Redis, which survives the child and — when `BGE_E2E_REDIS_URL`
+ * points at a server the harness did not provision — survives the run. So
+ * `global-setup` sweeps `bge:throttle:*` before the API starts
+ * (`sweepThrottleBuckets`). Against the throwaway container it finds nothing;
+ * against a reused server it is what stops yesterday's block from failing
+ * today's run.
+ *
+ * The sweep gates on the same flag `resetRedis` does, because a shared Redis
+ * may belong to a running API and those buckets are its live rate limits. An
+ * external server nobody has marked disposable therefore keeps its state, and
+ * this file is where the resulting `429` would surface — the console warning at
+ * setup names `BGE_E2E_REDIS_FLUSH_OK` for that case.
+ *
+ * That sweep is per RUN, not per test. Nothing clears Redis between tests —
+ * `test-isolation.ts` says so outright, and `resetRedis` has no call site in the
+ * suite — so specs in this file still accumulate against each other's buckets
+ * within a run. The headroom above is what covers that.
  */
 describe('feedback submission throttling (#251)', () => {
   const baseUrl = requireBaseUrl(process.env);

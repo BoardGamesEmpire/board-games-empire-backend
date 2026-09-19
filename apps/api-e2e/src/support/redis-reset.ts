@@ -1,4 +1,4 @@
-import Redis from 'iovalkey';
+import Redis, { type RedisOptions } from 'iovalkey';
 import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from './e2e-env';
 
 /**
@@ -14,6 +14,164 @@ import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from '.
  */
 export function mayFlushRedis(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[E2E_OWNS_REDIS_VAR] === 'true' || env[E2E_REDIS_FLUSH_OK_VAR] === 'true';
+}
+
+/**
+ * The rate-limit namespace, mirroring `KEY_PREFIX` in
+ * `apps/api/src/app/lib/redis-throttler.storage.ts`. Spelled out rather than
+ * imported because `api-e2e` has no path to `apps/api` — the same seam that
+ * keeps the limiter's Lua untested (#464).
+ */
+const THROTTLE_KEY_PATTERN = 'bge:throttle:*';
+
+/**
+ * Deletes every rate-limit bucket, and nothing else.
+ *
+ * Throttle counters used to be an in-process `Map` that died with the API
+ * child, so a run started clean by accident. Since #341 they live in Redis and
+ * outlive the process, which matters the moment the suite is pointed at a
+ * server it did not provision (`BGE_E2E_REDIS_URL`): yesterday's buckets are
+ * still there, and an hour-long block with them, so a run fails with `429`s
+ * that have nothing to do with the behaviour under test.
+ *
+ * GUARDED on the same policy as {@link resetRedis}, which this deliberately did
+ * not do at first. The reasoning then was that rate-limit counters cost nobody
+ * anything to lose — true of a developer's data, and false of the thing they
+ * actually are. If `BGE_E2E_REDIS_URL` names a Redis shared with a running dev
+ * or staging API, this deletes that API's live budgets and standing blocks:
+ * an abuse control silently disarmed by starting a test suite. The asymmetry
+ * decides it — skipping the sweep costs a confusing local `429`, running it
+ * unasked costs someone else's rate limiting.
+ *
+ * So an un-acknowledged external Redis keeps its buckets and says so. That
+ * leaves the stale-state problem standing for exactly that configuration, which
+ * is the trade: `BGE_E2E_REDIS_FLUSH_OK=true` is how a developer says the server
+ * is theirs to sweep.
+ *
+ * `SCAN` rather than `KEYS`: the sweep runs against whatever server the
+ * developer named, and `KEYS` on a large one blocks it.
+ *
+ * Returns the number of buckets removed; zero also covers "not authorised",
+ * which is reported on the console rather than raised — a refusal here is a
+ * safe outcome, not a broken run.
+ */
+export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  if (!mayFlushRedis(env)) {
+    console.warn(
+      `[e2e] leaving rate-limit buckets on the Redis at ${E2E_REDIS_URL_VAR} alone — it may be shared with a ` +
+        `running API, and sweeping would clear that API's live budgets and blocks. Set ` +
+        `${E2E_REDIS_FLUSH_OK_VAR}=true if it is disposable. Until then a run inherits any throttle state left ` +
+        `by the last one, which surfaces as 429s unrelated to the behaviour under test.`,
+    );
+
+    return 0;
+  }
+
+  const client = connect(env);
+  let cursor = '0';
+  let removed = 0;
+
+  try {
+    do {
+      const [next, keys] = await client.scan(cursor, 'MATCH', THROTTLE_KEY_PATTERN, 'COUNT', 500);
+      cursor = next;
+
+      if (keys.length > 0) {
+        removed += await client.del(...keys);
+      }
+    } while (cursor !== '0');
+  } finally {
+    await client.quit();
+  }
+
+  return removed;
+}
+
+/**
+ * How {@link connect} offers TLS, as a pure function of the environment.
+ *
+ * Split out and exported because this expression is the part of the file that
+ * has been wrong twice — first ignoring `REDIS_TLS_ENABLED` outright, then
+ * reading the flag and dropping the certificates — and a pure function of the
+ * environment is the only part of a client constructor a unit test can reach.
+ * {@link mayFlushRedis} is exported on the same reasoning.
+ *
+ * TLS is read rather than assumed off: `BGE_E2E_REDIS_URL` accepts `rediss://`,
+ * and `redisEnvOverrides` publishes that as `REDIS_TLS_ENABLED=true`, so a
+ * client ignoring it would offer plaintext to a TLS port.
+ *
+ * The certificate material is read too, mirroring `toIoRedisOptions` in
+ * `libs/common/redis` — spelled out rather than imported for the reason
+ * `THROTTLE_KEY_PATTERN` above is. This skipped it at first on the grounds that
+ * `redisEnvOverrides` publishes no certificates, which is true and is a
+ * different claim: the overrides are `Object.assign`ed onto `process.env`, so a
+ * developer's own `REDIS_TLS_CA`, `REDIS_TLS_CERT`, `REDIS_TLS_KEY` and
+ * `REDIS_REJECT_UNAUTHORIZED` stay standing — and `process.env` is exactly where
+ * the API child reads them. Ignoring them here meant a private CA, an mTLS
+ * server, or a deliberately unverified one connected for the API and refused
+ * this sweep, killing globalSetup before a test ran.
+ */
+export function redisTlsOptions(env: NodeJS.ProcessEnv = process.env): Pick<RedisOptions, 'tls'> {
+  if (env['REDIS_TLS_ENABLED'] !== 'true') {
+    return {};
+  }
+
+  return {
+    tls: {
+      ca: env['REDIS_TLS_CA'] || undefined,
+      key: env['REDIS_TLS_KEY'] || undefined,
+      cert: env['REDIS_TLS_CERT'] || undefined,
+      // `isTrue` over a default of `true`, as `makeRedisConfig` reads it: unset
+      // or empty verifies, and only an explicit true-ish value is a value.
+      // Matching the app matters more than the stricter reading — a sweep that
+      // verified where the app does not is the failure being fixed here,
+      // pointed the other way.
+      rejectUnauthorized: env['REDIS_REJECT_UNAUTHORIZED']
+        ? env['REDIS_REJECT_UNAUTHORIZED'].toLowerCase() === 'true'
+        : true,
+    },
+  };
+}
+
+/**
+ * A short-lived TEST-OWNED connection built from the same `REDIS_*` environment
+ * the harness pointed the API at — the cache database, which is where both the
+ * app cache and the rate-limit buckets live.
+ *
+ * It gives up rather than reconnecting, which matters because the sweep runs
+ * inside `globalSetup` before anything is listening to fail. A mismatched TLS
+ * setting or a wrong port would otherwise leave iovalkey retrying forever and
+ * hang the whole run until the job timeout, with nothing in the log to say why.
+ * Five seconds and one attempt turns that into a readable error.
+ *
+ * `commandTimeout` covers the half `connectTimeout` does not. Once the socket
+ * is up, a server that accepts the connection and then stops answering leaves
+ * the `SCAN` below — and the `quit` after it — waiting on a reply with nothing
+ * to time it out. `maxRetriesPerRequest` is not that bound either: it counts
+ * RECONNECT attempts, and a connected-but-silent server never causes one. The
+ * failure looks identical to a wrong port from outside, and lands in the same
+ * place before any test has started, so it gets the same five seconds.
+ */
+function connect(env: NodeJS.ProcessEnv): Redis {
+  const host = env['REDIS_HOST'];
+  const port = Number(env['REDIS_PORT']);
+
+  if (!host || !Number.isFinite(port)) {
+    throw new Error('REDIS_HOST/PORT are not set — did the e2e globalSetup run?');
+  }
+
+  return new Redis({
+    host,
+    port,
+    username: env['REDIS_USERNAME'] || undefined,
+    password: env['REDIS_PASSWORD'] || undefined,
+    db: Number(env['REDIS_DATABASE']) || 0,
+    connectTimeout: 5_000,
+    commandTimeout: 5_000,
+    maxRetriesPerRequest: 1,
+    retryStrategy: () => null,
+    ...redisTlsOptions(env),
+  });
 }
 
 /**
@@ -37,19 +195,7 @@ export async function resetRedis(env: NodeJS.ProcessEnv = process.env): Promise<
     );
   }
 
-  const host = env['REDIS_HOST'];
-  const port = Number(env['REDIS_PORT']);
-
-  if (!host || !Number.isFinite(port)) {
-    throw new Error('REDIS_HOST/PORT are not set — did the e2e globalSetup run?');
-  }
-
-  const client = new Redis({
-    host,
-    port,
-    username: env['REDIS_USERNAME'] || undefined,
-    password: env['REDIS_PASSWORD'] || undefined,
-  });
+  const client = connect(env);
 
   try {
     await client.flushall();

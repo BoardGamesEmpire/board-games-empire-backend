@@ -39,12 +39,22 @@ const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
  * load-balancer health check or an uptime monitor hitting the same path from
  * the same egress address adds to it.
  *
- * `blockDuration` defaults to the window, so the first refusal blocks the route
- * outright for a full minute rather than letting the odd request through —
- * which is what turns a rate limit into consecutive probe failures fast enough
- * to cross `failureThreshold`. The in-memory storage dies with the process, so
- * the restart clears the block; the probe cadence has not changed, so it trips
- * again a window later. The failure is a restart loop, not a stuck block.
+ * `blockDuration` equals the window — explicitly since #342, by default before
+ * it — so a refusal blocks the route outright for the REST OF THE WINDOW rather
+ * than letting the odd request through. Not a full minute from the refusal: the
+ * Lua storage caps a block at the hit key's remaining TTL, so refusing at 0:45
+ * of a one-minute window refuses until 1:00, not until 1:45. Either way it is
+ * consecutive probe failures, which is what crosses `failureThreshold`.
+ *
+ * That used to be self-limiting in a second way: the in-memory storage died
+ * with the process, so a restart cleared the block outright. It does not any
+ * more. Counters moved to Redis in #341 and outlive the process, so a blocked
+ * probe stays blocked across the restart it causes, and the restart buys
+ * nothing — the block ends when the window does, not when the pod comes back.
+ * Bounded, then, at under one window rather than unrecoverable; but a window of
+ * failing probes is several `periodSeconds` apart and is enough to be killed
+ * again on the way out of it. `@SkipThrottle()` below is what keeps a probe
+ * clear of that loop entirely; do not remove it.
  *
  * This was unreachable while the window was 60ms and became reachable when #293
  * corrected it — the throttler was never actually enforcing anything before.

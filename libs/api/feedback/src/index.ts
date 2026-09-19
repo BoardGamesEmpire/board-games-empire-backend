@@ -9,4 +9,9 @@ export type {
   UserFeedbackBannedEvent,
   UserFeedbackUnbannedEvent,
 } from './lib/interfaces/feedback.interface';
-export { DEFAULT_THROTTLER_NAME, USER_THROTTLER_NAME, createUserThrottler } from './lib/throttling/feedback-throttler';
+export {
+  DEFAULT_THROTTLER_NAME,
+  USER_THROTTLER_NAME,
+  createUserThrottler,
+  throttleWindow,
+} from './lib/throttling/feedback-throttler';

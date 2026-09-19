@@ -1,14 +1,20 @@
 /**
  * BullMQ queue names.
  *
- * Wrapped in `{braces}` for Dragonfly thread-affinity hashing. Dragonfly uses
- * the bracketed portion of a key to derive a hash slot for thread placement,
- * allowing all of a queue's internal Redis keys (`bull:{name}:wait`,
- * `bull:{name}:active`, etc.) to land on the same CPU core. The braces have
- * no effect on Redis or Valkey — they are treated as ordinary key characters
- * — so the convention is applied unconditionally.
+ * Wrapped in `{braces}`, which are Redis Cluster hash tags: only the bracketed
+ * substring is hashed, so all of a queue's internal keys (`bull:{name}:wait`,
+ * `bull:{name}:active`, ...) resolve to one slot. Dragonfly reuses the same
+ * substring for thread placement, landing those keys on one CPU core.
  *
- * @see docs/REDIS.md — "Dragonfly — BullMQ queue naming" for the rationale.
+ * On a standalone server — which is every deployment BGE documents — braces are
+ * ordinary key characters, so the convention is applied unconditionally.
+ *
+ * The two names below carry DIFFERENT tags, and the game-import flow spans both
+ * through one `FlowProducer.add`. On a cluster that is a multi-key operation
+ * across two slots and raises `CROSSSLOT`; bringing the flow's queues under a
+ * single tag is a prerequisite for running BGE clustered.
+ *
+ * @see docs/REDIS.md — "BullMQ queue naming — the curly braces".
  */
 export enum QueueNames {
   GamesImport = '{bge.games.import}',
