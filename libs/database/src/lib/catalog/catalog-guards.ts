@@ -13,24 +13,27 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  *   reaches every row — or, for a static filter like `{ visibility: 'Public' }`,
  *   every matching row install-wide. Granted through a household- or
  *   event-scoped role, that is an install-wide grant wearing a scoped role's
- *   name (#432).
+ *   name (#432). Granted through a GLOBAL role it may be exactly what was
+ *   meant — reference data has no coordinate to bind to — so that half is
+ *   guarded as a declaration rather than as a defect (#244).
  * - **Fail-closed.** A condition templated on `{{ householdId }}` or
  *   `{{ eventId }}` is rendered by a pass that never supplies it. Mustache
  *   renders the missing variable as `''`, the clause matches no row, and the
  *   grant is inert while every audit of `role_permissions` says it exists
  *   (#244, #436).
  *
- * A third guard sits under both: a template must parse, use only the token
- * types the factory renders, and name only variables SOME context supplies.
- * Its rules mirror `AbilityFactory.assertTemplateWithinContext`, so the
- * catalog is held to the standard the plugin path enforces at runtime.
+ * A further guard sits under all of them: a template must parse, use only the
+ * token types the factory renders, and name only variables SOME context
+ * supplies. Its rules mirror `AbilityFactory.assertTemplateWithinContext`, so
+ * the catalog is held to the standard the plugin path enforces at runtime.
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`:
  * the fail-closed class still has live instances (#244) being burned down
  * issue by issue, and a throw at import would turn each of them into a boot
  * failure. The known instances are pinned, exactly, in
- * `known-catalog-defects.spec.ts`; the fail-open ledger there is empty since
- * #432 and stays so a new instance is named rather than shipped.
+ * `known-catalog-defects.spec.ts`; the scoped fail-open ledger there is empty
+ * since #432 and stays so a new instance is named rather than shipped, and the
+ * global one is an allowlist that is not expected to empty at all.
  *
  * Every function takes the catalogs AND the maps it checks against as
  * arguments, nothing defaulted — same convention as the integrity assertions —
@@ -67,6 +70,22 @@ export interface UnconditionedScopedGrant {
   slug: string;
   role: string;
   scope: RoleScope;
+}
+
+/**
+ * A global role, other than the everyone role, holding a permission whose
+ * conditions bind to nothing. `action` and `subject` ride along because this
+ * guard's findings are mostly legitimate and a reader has to tell them apart
+ * at a glance: an unconditioned `read` on `AuditLog` is reference-data
+ * administration, an unconditioned `manage` on `all` is `Owner` under another
+ * name. The slug alone does not say which — `manage:content:moderate` reads
+ * like a narrow moderation grant.
+ */
+export interface UnconditionedGlobalGrant {
+  slug: string;
+  role: string;
+  action: PermissionSeedDefinition['action'];
+  subject: PermissionSeedDefinition['subject'];
 }
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
@@ -172,6 +191,72 @@ export function findUnconditionedScopedGrants(
     for (const { role, scope } of roles) {
       if (scope !== 'global') {
         findings.push({ slug, role, scope });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * The fail-open guard's complement, and the other half of the same join: the
+ * same unconditioned permission, held by a GLOBAL role other than the everyone
+ * role. {@link findUnconditionedScopedGrants} skips `scope === 'global'` by
+ * design, because a global role has no scope coordinate for a condition to
+ * bind to and an unconditioned grant there may be exactly what was meant.
+ *
+ * Between them the two cover every unconditioned edge EXCEPT one case, and it
+ * is the exemption below rather than an oversight: a slug the everyone role
+ * holds is skipped outright, by both. So an unconditioned permission granted
+ * to `User` is reported nowhere and gets no ledger line — including, were one
+ * ever written, an unconditioned `subject: 'all'`. That is a different and
+ * larger question than this guard's (a wildcard on the everyone role is not a
+ * staff-authority problem, it is everyone having everything), and widening the
+ * exemption to catch it would flag every ordinary global read in the catalog.
+ * Named here so the gap is known rather than assumed covered.
+ *
+ * "May be" is the whole difficulty, and it is why this guard's ledger is an
+ * ALLOWLIST rather than a defect list. Most of what it finds is correct:
+ * platforms, gateways, quotas and the audit log are install-wide reference
+ * data with no scope coordinate to bind to, so an unconditioned grant is the
+ * only shape they can take. What the guard buys is that each one is DECLARED —
+ * a new unconditioned staff grant has to be added to the ledger by someone who
+ * looked at it, rather than arriving with a slug nobody read (#244).
+ *
+ * `manage:content:moderate` is the case that motivated it: an unconditioned
+ * `manage` on `all`, held by `Admin` and `Moderator`, functionally `Owner`
+ * under two other names, invisible to both existing guards for years. Nothing
+ * about it was detectable from the permission or from the role alone — only
+ * from the edge, which is where every guard in this file looks.
+ *
+ * The everyone-role exemption is per-slug and matches the fail-open guard's,
+ * for the same reason: a slug plain `User` holds is already reachable by
+ * everyone, so a staff role also holding it grants nothing further and is not
+ * a finding. A template with problems is skipped, as above.
+ */
+export function findUnconditionedGlobalGrants(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roleScope: Readonly<Record<string, RoleScope>>,
+  everyoneRole: string,
+): UnconditionedGlobalGrant[] {
+  const holders = holdersBySlug(rolePermissions, roleScope);
+  const findings: UnconditionedGlobalGrant[] = [];
+
+  for (const { slug, conditions, action, subject } of catalog) {
+    const { variables, problems } = parseTemplate(conditions);
+    if (variables.length > 0 || problems.length > 0) {
+      continue;
+    }
+
+    const roles = holders.get(slug) ?? [];
+    if (roles.some(({ role }) => role === everyoneRole)) {
+      continue;
+    }
+
+    for (const { role, scope } of roles) {
+      if (scope === 'global') {
+        findings.push({ slug, role, action, subject });
       }
     }
   }

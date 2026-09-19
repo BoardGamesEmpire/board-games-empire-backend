@@ -1,6 +1,7 @@
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
   findTemplateDefects,
+  findUnconditionedGlobalGrants,
   findUnconditionedScopedGrants,
   findUnrenderableTemplateGrants,
   parseTemplate,
@@ -21,6 +22,7 @@ const definition = (overrides: Partial<PermissionSeedDefinition> & Pick<Permissi
 // the fixtures can classify only the roles they use.
 const SCOPE: Readonly<Record<string, RoleScope>> = {
   [SystemRole.User]: 'global',
+  [SystemRole.Admin]: 'global',
   [SystemRole.Moderator]: 'global',
   [SystemRole.HouseholdMember]: 'household',
   [SystemRole.EventGuest]: 'event',
@@ -140,6 +142,78 @@ describe('catalog guards', () => {
 
       expect(findUnconditionedScopedGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([
         { slug: 'read:widget', role: SystemRole.EventGuest, scope: 'event' },
+      ]);
+    });
+  });
+
+  describe('findUnconditionedGlobalGrants', () => {
+    const catalog = [
+      definition({ slug: 'manage:everything', action: Action.manage, subject: 'all' }),
+      definition({ slug: 'read:audit', subject: ResourceType.AuditLog }),
+      definition({ slug: 'read:gadget' }),
+      definition({ slug: 'read:public', conditions: { visibility: 'Public' } }),
+      definition({ slug: 'read:member', conditions: { householdId: '{{ householdId }}' } }),
+      definition({ slug: 'read:own', conditions: { createdById: '{{ user.id }}' } }),
+      definition({ slug: 'read:broken', conditions: { id: '{{ unclosed' } }),
+    ];
+
+    it('flags each global role holding an unconditioned permission the everyone role does not', () => {
+      const roles = {
+        [SystemRole.User]: [],
+        [SystemRole.Admin]: ['manage:everything', 'read:audit'],
+        [SystemRole.Moderator]: ['manage:everything'],
+      };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([
+        { slug: 'manage:everything', role: SystemRole.Admin, action: Action.manage, subject: 'all' },
+        { slug: 'manage:everything', role: SystemRole.Moderator, action: Action.manage, subject: 'all' },
+        { slug: 'read:audit', role: SystemRole.Admin, action: Action.read, subject: ResourceType.AuditLog },
+      ]);
+    });
+
+    it('treats a static row filter as unconditioned — it narrows the rows, not who reaches them', () => {
+      const roles = { [SystemRole.User]: [], [SystemRole.Admin]: ['read:public'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([
+        { slug: 'read:public', role: SystemRole.Admin, action: Action.read, subject: ResourceType.Game },
+      ]);
+    });
+
+    it('passes an unconditioned permission the everyone role also holds — global reach is intended', () => {
+      const roles = { [SystemRole.User]: ['read:gadget'], [SystemRole.Admin]: ['read:gadget'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([]);
+    });
+
+    it('passes an unconditioned permission only scoped roles hold — that is the fail-open guard', () => {
+      const roles = { [SystemRole.User]: [], [SystemRole.HouseholdMember]: ['read:gadget'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([]);
+    });
+
+    it('passes a templated permission on a global role, bound or not — the template is not this guard', () => {
+      const roles = { [SystemRole.User]: [], [SystemRole.Admin]: ['read:own', 'read:member'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([]);
+    });
+
+    it('leaves a template that does not parse to the template guard', () => {
+      const roles = { [SystemRole.User]: [], [SystemRole.Admin]: ['read:broken'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([]);
+    });
+
+    it('names a role the scope map does not classify, even one holding only grants it would skip', () => {
+      const roles = { Wizard: ['read:member'] };
+
+      expect(() => findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toThrow(/Wizard/);
+    });
+
+    it('counts a role once however many times it lists the slug', () => {
+      const roles = { [SystemRole.User]: [], [SystemRole.Admin]: ['read:audit', 'read:audit'] };
+
+      expect(findUnconditionedGlobalGrants(catalog, roles, SCOPE, SystemRole.User)).toEqual([
+        { slug: 'read:audit', role: SystemRole.Admin, action: Action.read, subject: ResourceType.AuditLog },
       ]);
     });
   });
