@@ -123,6 +123,33 @@ describe('the shipped catalogs', () => {
       );
     });
 
+    it.each([SystemRole.Admin, SystemRole.Moderator])('give %s nothing an ordinary User already holds', (roleName) => {
+      const user = new Set(ROLE_PERMISSION_CATALOG[SystemRole.User]);
+      const shared = ROLE_PERMISSION_CATALOG[roleName].filter((slug) => user.has(slug));
+
+      // Staff AUGMENT `User` rather than mirroring it. Every actor is
+      // provisioned with `User` and elevation adds a role, so a repeated slug
+      // grants nothing and only obscures what staff authority actually is.
+      // Listed rather than counted, so a failure names the slug to remove —
+      // and the fix is removing it from the staff role, not from `User`.
+      expect(shared).toEqual([]);
+    });
+
+    it('leaves the createdById-scoped game grants to User, where every creator gets them', () => {
+      // An imported game is always public and server-owned; a user-created one
+      // may be private and is its creator's to edit or delete. `Admin` curates
+      // the install through the unconditioned pair, which subsumes these.
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
+        expect.arrayContaining(['update:game:own', 'delete:game:own']),
+      );
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.Admin]).toEqual(expect.arrayContaining(['update:game', 'delete:game']));
+
+      for (const roleName of [SystemRole.Admin, SystemRole.Moderator]) {
+        expect(ROLE_PERMISSION_CATALOG[roleName]).not.toContain('update:game:own');
+        expect(ROLE_PERMISSION_CATALOG[roleName]).not.toContain('delete:game:own');
+      }
+    });
+
     it('give the staff roles no wildcard beyond the read-only one — `manage` on `all` is Owner alone', () => {
       const wildcards = PERMISSION_CATALOG.filter(({ subject }) => subject === 'all').map(({ slug }) => slug);
       const heldBy = (role: SystemRole) => ROLE_PERMISSION_CATALOG[role].filter((slug) => wildcards.includes(slug));

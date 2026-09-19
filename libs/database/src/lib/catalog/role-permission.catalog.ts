@@ -18,6 +18,36 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * real and is the point: a new slug reaches `Admin` only when someone adds it
  * here, where before it arrived for free and unexamined.
  *
+ * Staff roles AUGMENT `User`; they do not mirror it. Every actor is
+ * provisioned with `User` and elevation adds a role rather than replacing one
+ * (#410), so a slug `User` already holds adds nothing to `Admin` or
+ * `Moderator`: abilities union across an actor's roles and a second identical
+ * `can` is a no-op. The enumeration originally repeated all 43 of `User`'s
+ * slugs, because the derivation it replaced was "every slug except
+ * `manage:all`" and writing that out preserved its contents rather than
+ * choosing them. They are gone. What is left on a staff role is only what an
+ * ordinary user does NOT have, which is also what makes the list readable as a
+ * statement of staff authority.
+ *
+ * The subtraction is safe only because `User` is held independently — see
+ * `user-provisioning.service.ts`. An actor granted `Admin` WITHOUT `User` is
+ * now LESS capable than an ordinary user, which is the trap #410 describes for
+ * `Owner`, and the reason neither role is ever assigned alone.
+ *
+ * Two of the removals look like lost authority and are not.
+ * `update:game:own`/`delete:game:own` moved to `User`, where they belong: an
+ * imported game is always public and server-owned, while a game a user creates
+ * may be private and is theirs to edit or delete. `Admin` keeps the
+ * unconditioned `update:game`/`delete:game` that curating an install needs, and
+ * those subsume the `createdById`-scoped pair anyway. The four attendee-scoped
+ * event grants (`create:event_availability_vote`, `create:event_game_vote`,
+ * `update:event_game_nomination:withdraw`, `update:event_attendee:status:self`)
+ * are gone from `Admin` because they are bound to the actor's OWN attendee row:
+ * the event roles carry them for anyone who attends, and
+ * `resolveActingAttendeeId` refuses a non-attendee before CASL is consulted. An
+ * Admin attending as `EventSpectator` or `EventModerator` loses a vote it
+ * should not have had — neither of those roles votes.
+ *
  * Because those lists are derived, every Owner-/Host-only slug has to be
  * named in the exclusion, or it is granted to the derived role silently, with
  * no compile-time signal. `update:household_role:transfer-ownership` is the
@@ -153,58 +183,33 @@ const EVENT_HOST_ONLY: readonly PermissionSlug[] = ['delete:event'];
 export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly PermissionSlug[]>> = {
   [SystemRole.Owner]: ['manage:all'],
   [SystemRole.Admin]: [
-    // Global Admin/Owner
+    // Cross-subject read. The only wildcard a staff role holds, and read-only.
     'read:public_content',
 
-    // Server staff administration
+    // Server staff administration: the four writes that deliberately ignore
+    // the household scope coordinate, so staff can act on a household they are
+    // no member of.
     'manage:household_member:administer',
     'delete:household:administer',
     'update:household_role:transfer-ownership:administer',
     'delete:game_play_session:moderate',
 
-    // App Level / User
-    'read:user:profile',
-    'update:user:profile:own',
-
-    // Friendships
-    'create:friendship',
-    'read:friendships:own',
-    'update:friendship:own',
-    'delete:friendship:own',
-    'read:event:friends',
-    'read:households:friends',
-
-    // Games
-    'read:game',
-    'read:job',
-    'create:game',
+    // The games catalogue. Unconditioned, which is what curating an install
+    // requires: an imported game belongs to the server, and a user-created one
+    // may be private without being beyond moderation. The `createdById`-scoped
+    // pair lives on `User` and would add nothing here anyway.
     'update:game',
     'delete:game',
-    'update:game:own',
-    'delete:game:own',
 
     // PlatformGame
-    'read:platform_game',
     'create:platform_game',
     'update:platform_game',
     'delete:platform_game',
 
     // Platform
-    'read:platform',
     'create:platform',
     'update:platform',
     'delete:platform',
-    'create:event_availability_vote',
-    'update:event_attendee:status:self',
-    'update:event_game_nomination:withdraw',
-    'create:event_game_vote',
-    'read:game_collection',
-    'read:game_collection:household',
-    'read:game_collection:friends',
-    'read:game_collection:public',
-    'create:game_collection',
-    'update:game_collection',
-    'delete:game_collection',
 
     // Game Gateway
     'read:game_gateway',
@@ -213,58 +218,35 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'delete:game_gateway',
 
     // Households
-    'create:household',
-    'read:households',
-    'read:household_member:friends',
     'create:household_role',
 
     // Events
-    'create:event',
     'read:event',
     'delete:event',
     'delete:event:moderate',
 
-    // Game Sessions
-    'read:game_play_session',
-    'create:session_player:join',
-
-    // Rule Variants
-    'create:rule_variant',
-    'update:rule_variant',
-    'delete:rule_variant',
-
-    // Media
-    'create:media_object',
-    'read:media_object:own',
-    'read:media_object:public',
-    'update:media_object:own',
-    'delete:media_object:own',
-    'create:media_contribution',
-    'update:media_contribution:reclaim',
+    // Media moderation
     'read:media_contribution',
     'update:media_contribution:moderate',
 
-    // Customization
-    'create:user_game_customization',
-    'update:user_game_customization',
-    'delete:user_game_customization',
-    'create:feedback_report',
-    'read:feedback_report:own',
+    // Feedback triage
     'read:feedback_report',
     'delete:feedback_report',
     'manage:feedback_report',
     'read:feedback_sink_dispatch',
+
+    // Operations surfaces: server-owned rows with no scope to bind to.
     'read:safe_http_policy',
     'manage:safe_http_policy',
     'manage:plugin',
     'read:plugin',
-    'manage:webhook_subscription:own',
-    'read:webhook_subscription:own',
     'read:audit_log',
     'manage:quota',
     'read:quota',
   ],
   [SystemRole.Moderator]: [
+    // Cross-subject read: a moderator triages content in households they are
+    // no member of, and this is the grant that lets them see it.
     'read:public_content',
 
     // audit
@@ -279,21 +261,13 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:feedback_sink_dispatch',
 
     // game
-    'read:game_collection',
-    'read:game',
     'update:game',
     'delete:game_play_session:moderate',
-    'read:game_play_session',
-
-    // household
-    'read:households',
 
     'read:safe_http_policy',
-    'read:user:profile',
 
-    // Media
+    // media
     'read:media_contribution',
-    'read:media_object:public',
     'update:media_contribution:moderate',
   ],
   [SystemRole.User]: [
@@ -315,8 +289,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
 
     // game
     'create:game',
+    'delete:game:own',
     'read:game',
     'read:job',
+    'update:game:own',
 
     // game collection
     'create:game_collection',

@@ -985,14 +985,32 @@ describe('AbilityFactory', () => {
       // not edit one. A floor, not a mirror.
       expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({ OR: [] });
 
-      // And the other direction of the same decision: what an Admin holds as a
-      // PERSON stays, still bound to them. `create:event_game_vote` is
-      // templated on `{{ user.id }}`, so it renders here and votes as this
-      // actor — never unfiltered, which is what it would be if the floor had
-      // mirrored the old inert list instead of replacing it.
-      expect(accessibleBy(ability, Action.create).ofType('EventGameVote')).toEqual({
-        OR: [{ attendee: { userId: 'user-1' } }],
-      });
+      // Nor does it carry an ORDINARY ability. Voting is bound to the actor's
+      // own attendee row, so it belongs to whatever event role they attend
+      // under; `Admin` held it for a while, and all that bought was letting an
+      // Admin attending as a spectator vote. `{ OR: [] }` is deny-all.
+      expect(accessibleBy(ability, Action.create).ofType('EventGameVote')).toEqual({ OR: [] });
+    });
+
+    it('elevates an Admin by union with User, not by repeating it', () => {
+      const composed = factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [SystemRole.User, SystemRole.Admin].map((roleName) =>
+            makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+          ),
+        }),
+      );
+
+      // Each role contributes what the other does not. `create:household` is
+      // `User`'s, and the Admin list no longer repeats it; the household floor
+      // is the Admin role's, and `User` has never had it. Composed, the actor
+      // holds both — which is why removing the repetition changed no outcome,
+      // and why `Admin` on its own is now a DOWNGRADE rather than an elevation.
+      expect(composed.can(Action.create, asEntity('Household', {}))).toBe(true);
+      expect(accessibleBy(composed, Action.delete).ofType('Household')).toEqual({});
+
+      expect(staff(SystemRole.Admin).can(Action.create, asEntity('Household', {}))).toBe(false);
     });
 
     it('gives a Moderator content removal without household administration', () => {

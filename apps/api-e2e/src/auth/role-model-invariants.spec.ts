@@ -43,6 +43,27 @@ describe('role model invariants', () => {
     expect(inverted.map((row) => `${row.role.name}:${row.permission.slug}`)).toEqual([]);
   });
 
+  it('seeds the staff roles as an augmentation of User, not a copy of it', async () => {
+    const slugs = async (name: string) => {
+      const role = await db.client.role.findUniqueOrThrow({
+        where: { name },
+        select: { permissions: { select: { permission: { select: { slug: true } } } } },
+      });
+
+      return role.permissions.map((row) => row.permission.slug);
+    };
+
+    const user = new Set(await slugs('User'));
+
+    // The catalog spec holds the same property on the source list; this holds
+    // the SEEDED rows to it, which is what authorization actually reads. Both
+    // matter: a reconciler that stopped hard-deleting the edges the manifest
+    // drops would leave a stale grant live here while the catalog looked clean.
+    for (const staff of ['Admin', 'Moderator']) {
+      expect({ [staff]: (await slugs(staff)).filter((slug) => user.has(slug)) }).toEqual({ [staff]: [] });
+    }
+  });
+
   it('holds the base User grants that make Owner downlevelling meaningful', async () => {
     const user = await db.client.role.findUniqueOrThrow({
       where: { name: 'User' },
