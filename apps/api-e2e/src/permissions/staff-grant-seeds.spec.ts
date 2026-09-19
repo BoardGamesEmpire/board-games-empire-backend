@@ -41,11 +41,19 @@ describe('staff grant seeds', () => {
     return role.permissions.map((row) => row.permission.slug);
   };
 
-  it('has retired the staff wildcard entirely', async () => {
-    // Not merely unassigned — gone. It was an unconditioned `manage` on 'all',
-    // which made Admin and Moderator each functionally Owner, and the prune
-    // policy (#235) deletes a System-owned row the manifest stops listing.
-    await expect(permission('manage:content:moderate')).resolves.toBeNull();
+  it('leaves no live staff wildcard, and no grant of it', async () => {
+    // It was an unconditioned `manage` on 'all', which made Admin and Moderator
+    // each functionally Owner. "Retired" is literal (#235): the reconciler
+    // tombstones a System row the manifest stops listing by setting `retiredAt`,
+    // and separately hard-deletes the grant edges. This harness seeds a fresh
+    // container, so here the row is simply absent — but an already-seeded
+    // database keeps the tombstone, and asserting absence would fail there on an
+    // upgrade that is not a regression. What holds in both is that nothing LIVE
+    // remains, which is the property authorization reads: every role → permission
+    // hop in `permissions.service.ts` filters `retiredAt: null`.
+    await expect(
+      db.client.permission.count({ where: { slug: 'manage:content:moderate', retiredAt: null } }),
+    ).resolves.toBe(0);
 
     for (const roleName of [SystemRole.Admin, SystemRole.Moderator]) {
       await expect(roleSlugs(roleName)).resolves.not.toContain('manage:content:moderate');
@@ -53,8 +61,10 @@ describe('staff grant seeds', () => {
   });
 
   it('leaves `manage` on the wildcard subject to Owner alone', async () => {
+    // Live rows only, for the same reason: a tombstoned wildcard still carries
+    // `subject: 'all'` and would show up here on an upgraded database.
     const wildcards = await db.client.permission.findMany({
-      where: { subject: 'all' },
+      where: { subject: 'all', retiredAt: null },
       select: { slug: true, action: true },
     });
 
@@ -135,11 +145,12 @@ describe('staff grant seeds', () => {
   });
 
   it('keeps Admin a proper subset of the catalogue, not a derivation of it', async () => {
-    const total = await db.client.permission.count();
+    const total = await db.client.permission.count({ where: { retiredAt: null } });
     const admin = await roleSlugs(SystemRole.Admin);
 
     // The retired derivation was `every slug except manage:all`. Anything at
-    // or above that count means it came back.
+    // or above that count means it came back — counted against live rows, since
+    // tombstones would inflate the total and quietly loosen the bound.
     expect(admin.length).toBeLessThan(total - 1);
   });
 });
