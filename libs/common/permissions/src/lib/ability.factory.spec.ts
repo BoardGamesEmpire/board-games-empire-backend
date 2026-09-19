@@ -974,16 +974,22 @@ describe('AbilityFactory', () => {
       // the only shape that can reach a household the actor has no row in.
       expect(accessibleBy(ability, Action.manage).ofType('HouseholdMember')).toEqual({});
       expect(accessibleBy(ability, Action.delete).ofType('Household')).toEqual({});
-      expect(accessibleBy(ability, Action.update).ofType('HouseholdRole')).toEqual({});
     });
 
     it('withholds from an Admin what the floor does not name', () => {
       const ability = staff(SystemRole.Admin);
 
       // `update:household` was one of the 77 inert grants and is deliberately
-      // not in the floor: staff may read, transfer and soft-delete a household,
-      // not edit one. A floor, not a mirror.
+      // not in the floor: staff may read a household's roster and soft-delete
+      // the household, not edit it. A floor, not a mirror.
       expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({ OR: [] });
+
+      // Ownership transfer is NOT staff authority, and this is the assertion
+      // that keeps it out. A slug for it was seeded and then removed:
+      // `transferOwnership` refuses any actor who is not an owning member, so
+      // the grant passed the route gate and bought nothing but a widened gate.
+      // Driven end-to-end in `apps/api-e2e/src/permissions/staff-grant-seeds.spec.ts`.
+      expect(accessibleBy(ability, Action.update).ofType('HouseholdRole')).toEqual({ OR: [] });
 
       // Nor does it carry an ORDINARY ability. Voting is bound to the actor's
       // own attendee row, so it belongs to whatever event role they attend
@@ -1011,6 +1017,35 @@ describe('AbilityFactory', () => {
       expect(accessibleBy(composed, Action.delete).ofType('Household')).toEqual({});
 
       expect(staff(SystemRole.Admin).can(Action.create, asEntity('Household', {}))).toBe(false);
+    });
+
+    it('lets an ordinary User edit and delete the games it created, and no others', () => {
+      // The one EXPANSION in #244's trim, and the only part of it a user can
+      // observe. `update:game:own`/`delete:game:own` were `Admin`-only, where
+      // `Admin`'s own unconditioned `update:game`/`delete:game` subsumed them —
+      // so nobody could edit a game they had created. They are `User`'s now,
+      // which is what the domain already assumed: an imported game is public
+      // and server-owned, a user-created one may be private and is its
+      // creator's to change.
+      //
+      // Asserted as the Prisma clause rather than a boolean because that is
+      // what `game.service.ts` actually feeds its `where` — and because
+      // `delete:game:own` reaches a HARD delete, so the narrowing to
+      // `createdById` is the whole of what stops one user destroying another's
+      // row.
+      const user = factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [makeRole(SystemRole.User, [...ROLE_PERMISSION_CATALOG[SystemRole.User]].map(catalogPermission))],
+        }),
+      );
+
+      for (const action of [Action.update, Action.delete]) {
+        expect(accessibleBy(user, action).ofType('Game')).toEqual({ OR: [{ createdById: 'user-1' }] });
+      }
+
+      expect(user.can(Action.delete, asEntity('Game', { createdById: 'user-1' }))).toBe(true);
+      expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
     it('gives a Moderator content removal without household administration', () => {
@@ -1069,20 +1104,25 @@ describe('AbilityFactory', () => {
         expect(conditions).not.toHaveProperty('members');
       });
 
-      it('is the ONLY update/manage grant on HouseholdRole, which is what makes the gate owner-only', () => {
+      it('is the ONLY update/manage grant on HouseholdRole in the whole catalog, which is what makes the gate owner-only', () => {
         // `can(update, HouseholdRole)` is the controller gate. It can only stay
-        // owner-only while no other rule grants update (or manage, which implies
-        // it) on this subject — the seed enforces that by excluding the slug from
-        // the derived HouseholdAdmin list.
-        const ability = factory.createForUser(holder('HouseholdOwner', [transferOwnership()]));
+        // owner-only while no other slug ANYWHERE grants update (or manage,
+        // which implies it) on this subject.
+        //
+        // Read from PERMISSION_CATALOG, not from a fixture. The fixture version
+        // of this test built an ability from one hand-made HouseholdOwner grant,
+        // so it counted the rule it had just supplied and could not observe a
+        // second grant arriving from another role — which is how
+        // `update:household_role:transfer-ownership:administer` reached the
+        // global Admin role with this test green and the comment on
+        // `household-member.controller.ts` quietly false.
+        const grants = PERMISSION_CATALOG.filter(
+          (permission) =>
+            permission.subject === ResourceType.HouseholdRole &&
+            [Action.update, Action.manage].includes(permission.action as 'update' | 'manage'),
+        ).map((permission) => permission.slug);
 
-        const householdRoleRules = ability.rules.filter(
-          (rule) =>
-            rule.subject === ResourceType.HouseholdRole &&
-            [Action.update, Action.manage].includes(rule.action as 'update' | 'manage'),
-        );
-
-        expect(householdRoleRules).toHaveLength(1);
+        expect(grants).toEqual(['update:household_role:transfer-ownership']);
       });
 
       it('does not confer the gate on an admin who holds no such grant', () => {

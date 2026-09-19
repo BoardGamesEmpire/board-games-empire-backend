@@ -115,12 +115,28 @@ describe('the shipped catalogs', () => {
       expect(admin.length).toBeLessThan(PERMISSION_CATALOG.length - 1);
 
       expect(admin).toEqual(
-        expect.arrayContaining([
-          'manage:household_member:administer',
-          'delete:household:administer',
-          'update:household_role:transfer-ownership:administer',
-        ]),
+        expect.arrayContaining(['manage:household_member:administer', 'delete:household:administer']),
       );
+    });
+
+    it.each([SystemRole.Admin, SystemRole.Moderator])('give %s no slug bound to a scope it has none of', (roleName) => {
+      const conditioned = ROLE_PERMISSION_CATALOG[roleName]
+        .map((slug) => PERMISSION_CATALOG.find((permission) => permission.slug === slug))
+        .filter((permission) => Object.keys(permission?.conditions ?? {}).length > 0)
+        .map((permission) => permission?.slug);
+
+      // A global role arrives through the `roles` pass, which supplies `user`
+      // and `role` and nothing else. So a condition on a staff role is one of
+      // exactly two things, and neither belongs: templated on `householdId` or
+      // `eventId`, it renders to `''` and matches no row; templated on
+      // `user.id`, it grants what the actor's own household or event role
+      // already grants, because that role's condition renders identically.
+      // Both were shipped and both are gone (#244) — `create:household_role`
+      // duplicated `HouseholdOwner`/`HouseholdAdmin`, `delete:event`
+      // duplicated `EventHost`, which an event's creator always is.
+      //
+      // Listed rather than counted, so a failure names the slug.
+      expect(conditioned).toEqual([]);
     });
 
     it.each([SystemRole.Admin, SystemRole.Moderator])('give %s nothing an ordinary User already holds', (roleName) => {

@@ -82,10 +82,22 @@ export const PERMISSION_CATALOG = [
   // reasoning #175 relies on for the restore grant.
   //
   // A floor, not a mirror of what staff nominally held before: administer any
-  // roster, transfer ownership of any household, soft-delete one, and remove a
-  // game session. Staff have no business casting votes or building game lists
-  // on an attendee's behalf, so the event sub-resource grants that used to
-  // reach Admin inertly are simply gone rather than reissued in this shape.
+  // roster, soft-delete any household, and remove a game session. Staff have
+  // no business casting votes or building game lists on an attendee's behalf,
+  // so the event sub-resource grants that used to reach Admin inertly are
+  // simply gone rather than reissued in this shape.
+  //
+  // Transferring ownership of a household is NOT here, and the omission is
+  // deliberate. `transferOwnership` refuses any actor who is not an owning
+  // member of the household in question — a membership count outside the
+  // transaction, then an owner-set check inside it — and the operation it
+  // performs is a swap that demotes the ACTOR, which has no meaning for a
+  // non-member. `updateMemberRole` cannot stand in either: `HouseholdOwner` is
+  // excluded from `ASSIGNABLE_HOUSEHOLD_ROLES` precisely so every owner
+  // transition goes through that one flow (#158). So no route grants it, a
+  // slug saying otherwise would be the decorative kind this issue deletes, and
+  // giving staff a real remedy for an abandoned household is a service change
+  // rather than a catalog one.
   //
   // Every one of these is a WRITE, and that is not an accident of the list.
   // `read:public_content` is a `read` on 'all', so both staff roles already
@@ -104,26 +116,26 @@ export const PERMISSION_CATALOG = [
   // by global roles passes the fail-open guard, which flags scoped holders;
   // granting one to a household or event role without a template fails the
   // guard at once, and that is the intended tripwire.
-  // `manage`, not `read`, and not by preference: `transferOwnership` scopes
-  // its writes with `getCurrentResourceConditions(HouseholdMember, manage)`
-  // (`household-member.service.ts`), because ownership moves between two member
-  // rows. A `read` grant answers that query with `{ OR: [] }` — deny-all — so a
-  // read-only roster grant would pass the route guard and then fail the write
-  // with a 404, and the transfer half of the staff floor would not exist. CASL
-  // `manage` matches every action, so this covers reading the roster too;
-  // seeding a separate `read:household_member:administer` beside it would be
-  // the kind of decorative grant this issue exists to remove.
+
+  // `manage`, not `read`, and not by preference: the roster writes staff need
+  // are scoped with `getCurrentResourceConditions(HouseholdMember, manage)`
+  // (`household-member.service.ts`). A `read` grant answers that query with
+  // `{ OR: [] }` — deny-all — so a read-only roster grant would pass the route
+  // guard and then fail the write with a 404. CASL `manage` matches every
+  // action, so this covers reading the roster too; seeding a separate
+  // `read:household_member:administer` beside it would be the kind of
+  // decorative grant this issue exists to remove.
   //
-  // It is wider than "read any roster, transfer ownership" strictly needs —
+  // It is wider than "read any roster, change a member's role" strictly needs —
   // there is no scope coordinate to condition on, so the catalog cannot express
-  // "manage, but only for a transfer". Narrowing it means changing what the
+  // "manage, but only for a role change". Narrowing it means changing what the
   // service scopes by, which is a service change, not a catalog one.
   permission({
     action: Action.manage,
     subject: ResourceType.HouseholdMember,
     slug: 'manage:household_member:administer',
     riskLevel: RiskLevel.Critical,
-    reason: 'Administer any household roster as server staff, including ownership transfer',
+    reason: 'Administer any household roster as server staff',
   }),
   permission({
     action: Action.delete,
@@ -132,13 +144,14 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Critical,
     reason: 'Soft-delete any household as server staff',
   }),
-  permission({
-    action: Action.update,
-    subject: ResourceType.HouseholdRole,
-    slug: 'update:household_role:transfer-ownership:administer',
-    riskLevel: RiskLevel.Critical,
-    reason: 'Transfer ownership of any household as server staff',
-  }),
+  // The one floor entry with no route behind it YET, and the distinction from
+  // the transfer-ownership slug above matters: nothing in the tree references
+  // `ResourceType.GamePlaySession`, so this grant is unreachable rather than
+  // refused. Its eight siblings (`delete:game_play_session`,
+  // `:household`, and the create/read/update family) are unreachable for the
+  // same reason and predate #244 — the sessions feature is unbuilt, not
+  // broken. Seeded now so the moderation half exists when it lands; if that
+  // feature is cut, this line goes with the rest of the family.
   permission({
     action: Action.delete,
     subject: ResourceType.GamePlaySession,

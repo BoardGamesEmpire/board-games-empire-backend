@@ -34,19 +34,35 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * now LESS capable than an ordinary user, which is the trap #410 describes for
  * `Owner`, and the reason neither role is ever assigned alone.
  *
- * Two of the removals look like lost authority and are not.
- * `update:game:own`/`delete:game:own` moved to `User`, where they belong: an
- * imported game is always public and server-owned, while a game a user creates
- * may be private and is theirs to edit or delete. `Admin` keeps the
- * unconditioned `update:game`/`delete:game` that curating an install needs, and
- * those subsume the `createdById`-scoped pair anyway. The four attendee-scoped
- * event grants (`create:event_availability_vote`, `create:event_game_vote`,
- * `update:event_game_nomination:withdraw`, `update:event_attendee:status:self`)
- * are gone from `Admin` because they are bound to the actor's OWN attendee row:
- * the event roles carry them for anyone who attends, and
+ * `update:game:own`/`delete:game:own` are the one change here that is NOT a
+ * subtraction, and calling it a move would understate it. `Admin` was their
+ * only holder, and `Admin`'s own unconditioned `update:game`/`delete:game`
+ * subsumed them, so they granted nothing anywhere: no user could edit a game
+ * they had created. Putting them on `User` is a deliberate EXPANSION — every
+ * authenticated actor gains them — and it is the rule the domain already runs
+ * on: an imported game is always public and server-owned, while a game a user
+ * creates may be private and is theirs to edit or delete. `delete:game:own`
+ * reaches a HARD delete (`game.service.ts`), guarded only by a count of live
+ * collection rows; that is the creator's own row to destroy, but it is a real
+ * capability and not bookkeeping. `Admin` keeps the unconditioned pair that
+ * curating an install needs.
+ *
+ * Every other change is a removal, and none of them costs authority. The four
+ * attendee-scoped event grants (`create:event_availability_vote`,
+ * `create:event_game_vote`, `update:event_game_nomination:withdraw`,
+ * `update:event_attendee:status:self`) are bound to the actor's OWN attendee
+ * row: the event roles carry them for anyone who attends, and
  * `resolveActingAttendeeId` refuses a non-attendee before CASL is consulted. An
  * Admin attending as `EventSpectator` or `EventModerator` loses a vote it
- * should not have had — neither of those roles votes.
+ * should not have had — neither of those roles votes. `create:household_role`
+ * and `delete:event` went the same way for a sharper reason: both are scoped
+ * `{{ user.id }}` and both are already held by the role their own condition
+ * demands — `HouseholdOwner`/`HouseholdAdmin` for the first, `EventHost` (which
+ * an event's creator is seeded as) for the second — so each rendered a clause
+ * identical to one the actor already had. `Admin` now carries no conditioned
+ * slug at all, which is the shape a global role should have: a global role has
+ * no scope coordinate, so anything it holds that binds to one is either inert
+ * or a duplicate.
  *
  * Because those lists are derived, every Owner-/Host-only slug has to be
  * named in the exclusion, or it is granted to the derived role silently, with
@@ -186,12 +202,13 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // Cross-subject read. The only wildcard a staff role holds, and read-only.
     'read:public_content',
 
-    // Server staff administration: the four writes that deliberately ignore
-    // the household scope coordinate, so staff can act on a household they are
-    // no member of.
+    // Server staff administration: the writes that deliberately ignore the
+    // household scope coordinate, so staff can act on a household they are no
+    // member of. Transferring ownership is NOT among them — no route performs
+    // it for a non-member, and the catalog says so rather than implying
+    // otherwise (see the block comment on these slugs).
     'manage:household_member:administer',
     'delete:household:administer',
-    'update:household_role:transfer-ownership:administer',
     'delete:game_play_session:moderate',
 
     // The games catalogue. Unconditioned, which is what curating an install
@@ -217,12 +234,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:game_gateway',
     'delete:game_gateway',
 
-    // Households
-    'create:household_role',
-
-    // Events
+    // Events. Only the moderation variant: `delete:event` is scoped
+    // `createdById: '{{ user.id }}'` and an event's creator is seeded
+    // `EventHost` on it (`event.service.ts`), which carries that slug already.
     'read:event',
-    'delete:event',
     'delete:event:moderate',
 
     // Media moderation

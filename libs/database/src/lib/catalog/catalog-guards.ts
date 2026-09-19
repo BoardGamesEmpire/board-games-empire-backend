@@ -173,28 +173,14 @@ export function findUnconditionedScopedGrants(
   roleScope: Readonly<Record<string, RoleScope>>,
   everyoneRole: string,
 ): UnconditionedScopedGrant[] {
-  const holders = holdersBySlug(rolePermissions, roleScope);
-  const findings: UnconditionedScopedGrant[] = [];
-
-  for (const { slug, conditions } of catalog) {
-    const { variables, problems } = parseTemplate(conditions);
-    if (variables.length > 0 || problems.length > 0) {
-      continue;
-    }
-
-    const roles = holders.get(slug) ?? [];
-    if (roles.some(({ role }) => role === everyoneRole)) {
-      continue;
-    }
-
-    for (const { role, scope } of roles) {
-      if (scope !== 'global') {
-        findings.push({ slug, role, scope });
-      }
-    }
-  }
-
-  return findings;
+  return scanUnconditionedGrants(
+    catalog,
+    rolePermissions,
+    roleScope,
+    everyoneRole,
+    (scope) => scope !== 'global',
+    ({ slug }, role, scope) => ({ slug, role, scope }),
+  );
 }
 
 /**
@@ -240,23 +226,55 @@ export function findUnconditionedGlobalGrants(
   roleScope: Readonly<Record<string, RoleScope>>,
   everyoneRole: string,
 ): UnconditionedGlobalGrant[] {
-  const holders = holdersBySlug(rolePermissions, roleScope);
-  const findings: UnconditionedGlobalGrant[] = [];
+  return scanUnconditionedGrants(
+    catalog,
+    rolePermissions,
+    roleScope,
+    everyoneRole,
+    (scope) => scope === 'global',
+    ({ slug, action, subject }, role) => ({ slug, role, action, subject }),
+  );
+}
 
-  for (const { slug, conditions, action, subject } of catalog) {
-    const { variables, problems } = parseTemplate(conditions);
+/**
+ * The scan both unconditioned-grant guards run, which is all of it but the
+ * scope predicate and the finding's shape: skip any permission whose template
+ * binds something or fails to parse, skip any slug the everyone role holds,
+ * then report one finding per remaining holder the predicate selects.
+ *
+ * Shared rather than written twice because the skips are a policy, not
+ * boilerplate. The everyone-role exemption in particular is a deliberate,
+ * documented gap in BOTH guards (see {@link findUnconditionedGlobalGrants});
+ * two copies of it is two places for a future change — handling `inverted`
+ * rules, say, which neither does yet — to be made in one and forgotten in the
+ * other, leaving the fail-open and allowlist halves disagreeing about what an
+ * unconditioned grant is.
+ */
+function scanUnconditionedGrants<T>(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roleScope: Readonly<Record<string, RoleScope>>,
+  everyoneRole: string,
+  selects: (scope: RoleScope) => boolean,
+  toFinding: (entry: PermissionSeedDefinition, role: string, scope: RoleScope) => T,
+): T[] {
+  const holders = holdersBySlug(rolePermissions, roleScope);
+  const findings: T[] = [];
+
+  for (const entry of catalog) {
+    const { variables, problems } = parseTemplate(entry.conditions);
     if (variables.length > 0 || problems.length > 0) {
       continue;
     }
 
-    const roles = holders.get(slug) ?? [];
+    const roles = holders.get(entry.slug) ?? [];
     if (roles.some(({ role }) => role === everyoneRole)) {
       continue;
     }
 
     for (const { role, scope } of roles) {
-      if (scope === 'global') {
-        findings.push({ slug, role, action, subject });
+      if (selects(scope)) {
+        findings.push(toFinding(entry, role, scope));
       }
     }
   }
