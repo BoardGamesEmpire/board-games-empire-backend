@@ -940,6 +940,79 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe('staff grants (#244)', () => {
+    // The composed staff roles, rendered through the GLOBAL `roles` pass — the
+    // one that supplies neither `householdId` nor `eventId`. Before #244 that
+    // was the whole problem twice over: 77 of Admin's grants were templated on
+    // a coordinate this pass never supplies, so they rendered to clauses
+    // matching nothing, and `manage:content:moderate` — an unconditioned
+    // `manage` on 'all' — made that irrelevant by granting everything anyway.
+    // These assertions are on the composed role, because the ceiling is what
+    // every grant the role carries unions to, not what one entry says.
+    const staff = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission))],
+        }),
+      );
+
+    it.each([SystemRole.Admin, SystemRole.Moderator])(
+      'gives %s no wildcard write — `manage` on `all` is Owner alone',
+      (roleName) => {
+        const ability = staff(roleName);
+
+        expect(ability.can(Action.manage, asEntity('Household', { id: 'hh-1' }))).toBe(false);
+        expect(ability.can(Action.update, asEntity('UserProfile', { userId: 'someone-else' }))).toBe(false);
+      },
+    );
+
+    it('lets an Admin administer a household it is no member of', () => {
+      const ability = staff(SystemRole.Admin);
+
+      // `{}` is the unfiltered clause: no household predicate at all, which is
+      // the only shape that can reach a household the actor has no row in.
+      expect(accessibleBy(ability, Action.manage).ofType('HouseholdMember')).toEqual({});
+      expect(accessibleBy(ability, Action.delete).ofType('Household')).toEqual({});
+      expect(accessibleBy(ability, Action.update).ofType('HouseholdRole')).toEqual({});
+    });
+
+    it('withholds from an Admin what the floor does not name', () => {
+      const ability = staff(SystemRole.Admin);
+
+      // `update:household` was one of the 77 inert grants and is deliberately
+      // not in the floor: staff may read, transfer and soft-delete a household,
+      // not edit one. A floor, not a mirror.
+      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({ OR: [] });
+
+      // And the other direction of the same decision: what an Admin holds as a
+      // PERSON stays, still bound to them. `create:event_game_vote` is
+      // templated on `{{ user.id }}`, so it renders here and votes as this
+      // actor — never unfiltered, which is what it would be if the floor had
+      // mirrored the old inert list instead of replacing it.
+      expect(accessibleBy(ability, Action.create).ofType('EventGameVote')).toEqual({
+        OR: [{ attendee: { userId: 'user-1' } }],
+      });
+    });
+
+    it('gives a Moderator content removal without household administration', () => {
+      const ability = staff(SystemRole.Moderator);
+
+      expect(accessibleBy(ability, Action.delete).ofType('GamePlaySession')).toEqual({});
+      expect(accessibleBy(ability, Action.delete).ofType('Household')).toEqual({ OR: [] });
+      expect(accessibleBy(ability, Action.manage).ofType('HouseholdMember')).toEqual({ OR: [] });
+    });
+
+    it.each([SystemRole.Admin, SystemRole.Moderator])('reads every subject as %s, through one grant', (roleName) => {
+      // `read:public_content` is a `read` on 'all', so staff reads are already
+      // unfiltered and a `read:*:administer` slug would grant nothing. This is
+      // pinned because the floor's shape depends on it: if this ever stops
+      // being `{}`, the read variants have to be seeded.
+      expect(accessibleBy(staff(roleName), Action.read).ofType('Household')).toEqual({});
+      expect(accessibleBy(staff(roleName), Action.read).ofType('HouseholdMember')).toEqual({});
+    });
+  });
+
   /**
    * The Owner-only gate for transfer-ownership (#158) and the tightened
    * `update:household` condition (#160). Both are relation-traversing, so they

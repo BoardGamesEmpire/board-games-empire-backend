@@ -27,13 +27,12 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * supplies. Its rules mirror `AbilityFactory.assertTemplateWithinContext`, so
  * the catalog is held to the standard the plugin path enforces at runtime.
  *
- * These are specs, not module-scope assertions like `catalog-integrity.ts`:
- * the fail-closed class still has live instances (#244) being burned down
- * issue by issue, and a throw at import would turn each of them into a boot
- * failure. The known instances are pinned, exactly, in
- * `known-catalog-defects.spec.ts`; the scoped fail-open ledger there is empty
- * since #432 and stays so a new instance is named rather than shipped, and the
- * global one is an allowlist that is not expected to empty at all.
+ * These are specs, not module-scope assertions like `catalog-integrity.ts`.
+ * They were written while both defect classes had live instances, when a throw
+ * at import would have turned each into a boot failure; both ledgers in
+ * `known-catalog-defects.spec.ts` are empty now (#432, #436, #244), and they
+ * stay as specs so the next instance is named at CI rather than at boot. The
+ * third ledger is an allowlist and is not expected to empty at all.
  *
  * Every function takes the catalogs AND the maps it checks against as
  * arguments, nothing defaulted — same convention as the integrity assertions —
@@ -78,8 +77,8 @@ export interface UnconditionedScopedGrant {
  * guard's findings are mostly legitimate and a reader has to tell them apart
  * at a glance: an unconditioned `read` on `AuditLog` is reference-data
  * administration, an unconditioned `manage` on `all` is `Owner` under another
- * name. The slug alone does not say which — `manage:content:moderate` reads
- * like a narrow moderation grant.
+ * name. The slug alone does not say which — `manage:content:moderate`, the
+ * retired grant that was the second of those, read like the first.
  */
 export interface UnconditionedGlobalGrant {
   slug: string;
@@ -223,11 +222,12 @@ export function findUnconditionedScopedGrants(
  * a new unconditioned staff grant has to be added to the ledger by someone who
  * looked at it, rather than arriving with a slug nobody read (#244).
  *
- * `manage:content:moderate` is the case that motivated it: an unconditioned
+ * `manage:content:moderate` was the case that motivated it: an unconditioned
  * `manage` on `all`, held by `Admin` and `Moderator`, functionally `Owner`
- * under two other names, invisible to both existing guards for years. Nothing
- * about it was detectable from the permission or from the role alone — only
- * from the edge, which is where every guard in this file looks.
+ * under two other names, invisible to both existing guards. Nothing about it
+ * was detectable from the permission or from the role alone — only from the
+ * edge, which is where every guard in this file looks. It is gone (#244); the
+ * guard remains, so its successor is named rather than shipped.
  *
  * The everyone-role exemption is per-slug and matches the fail-open guard's,
  * for the same reason: a slug plain `User` holds is already reachable by

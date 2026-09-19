@@ -64,18 +64,87 @@ export const PERMISSION_CATALOG = [
     reason: 'Unrestricted access for Owner',
   }),
   permission({
-    action: Action.manage,
-    subject: 'all',
-    slug: 'manage:content:moderate',
-    riskLevel: RiskLevel.Critical,
-    reason: 'Moderate app content',
-  }),
-  permission({
     action: Action.read,
     subject: 'all',
     slug: 'read:public_content',
     riskLevel: RiskLevel.Low,
     reason: 'View public content',
+  }),
+
+  // --- Server staff administration ---
+  //
+  // Deliberately UNCONDITIONED, and the only permissions in the catalog that
+  // are so on purpose for a reason other than the subject being install-wide.
+  // A global role arrives through the `roles` pass, which supplies neither
+  // `householdId` nor `eventId`, so a household-scoped condition would render
+  // to a clause matching nothing and the grant would be inert — which is what
+  // every staff grant here replaces (#244). Empty conditions is the same
+  // reasoning #175 relies on for the restore grant.
+  //
+  // A floor, not a mirror of what staff nominally held before: administer any
+  // roster, transfer ownership of any household, soft-delete one, and remove a
+  // game session. Staff have no business casting votes or building game lists
+  // on an attendee's behalf, so the event sub-resource grants that used to
+  // reach Admin inertly are simply gone rather than reissued in this shape.
+  //
+  // Every one of these is a WRITE, and that is not an accident of the list.
+  // `read:public_content` is a `read` on 'all', so both staff roles already
+  // read every subject in the catalog; a `read:household:administer` beside it
+  // would change nothing, and a grant that changes nothing is the decorative
+  // kind this issue exists to remove. Whether staff reads should be that wide
+  // is #364, #365 and #419's question — #419 settles that its routes grant
+  // nothing new — and if that wildcard is ever narrowed, the read variants
+  // belong here then and not before.
+  //
+  // Restoring a soft-deleted household is #175's slug and is not seeded here.
+  // When it lands it needs an explicit line in Admin's list: the blanket
+  // derivation that would once have handed it over for free is gone.
+  //
+  // Keep these staff-only or templated. An unconditioned permission held only
+  // by global roles passes the fail-open guard, which flags scoped holders;
+  // granting one to a household or event role without a template fails the
+  // guard at once, and that is the intended tripwire.
+  // `manage`, not `read`, and not by preference: `transferOwnership` scopes
+  // its writes with `getCurrentResourceConditions(HouseholdMember, manage)`
+  // (`household-member.service.ts`), because ownership moves between two member
+  // rows. A `read` grant answers that query with `{ OR: [] }` — deny-all — so a
+  // read-only roster grant would pass the route guard and then fail the write
+  // with a 404, and the transfer half of the staff floor would not exist. CASL
+  // `manage` matches every action, so this covers reading the roster too;
+  // seeding a separate `read:household_member:administer` beside it would be
+  // the kind of decorative grant this issue exists to remove.
+  //
+  // It is wider than "read any roster, transfer ownership" strictly needs —
+  // there is no scope coordinate to condition on, so the catalog cannot express
+  // "manage, but only for a transfer". Narrowing it means changing what the
+  // service scopes by, which is a service change, not a catalog one.
+  permission({
+    action: Action.manage,
+    subject: ResourceType.HouseholdMember,
+    slug: 'manage:household_member:administer',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Administer any household roster as server staff, including ownership transfer',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.Household,
+    slug: 'delete:household:administer',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Soft-delete any household as server staff',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.HouseholdRole,
+    slug: 'update:household_role:transfer-ownership:administer',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Transfer ownership of any household as server staff',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.GamePlaySession,
+    slug: 'delete:game_play_session:moderate',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Delete any game session as moderator',
   }),
 
   // --- App Level / User ---
@@ -709,7 +778,10 @@ export const PERMISSION_CATALOG = [
   // collections through their own queries (household game view, attendee
   // game lists), not through this grant, and cross-user API reads flow
   // through the :household/:friends/:public scopes on the base User role.
-  // Moderators keep full read via `manage:content:moderate` (subject 'all').
+  // Moderators keep full read via `read:public_content` (subject 'all'). That
+  // used to read `manage:content:moderate`, which was a `manage` on 'all' and
+  // so conferred full WRITE here too; #244 retired it, and the surviving
+  // wildcard is read-only — which is all this narrowing ever relied on.
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,

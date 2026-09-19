@@ -98,16 +98,38 @@ describe('the shipped catalogs', () => {
     expect(misplaced).toEqual([]);
   });
 
-  describe('derived role lists', () => {
+  describe('role lists', () => {
     it('grant Owner exactly the wildcard', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.Owner]).toEqual(['manage:all']);
     });
 
-    it('grant Admin every slug except the wildcard', () => {
+    it('enumerate Admin rather than deriving it from the catalog', () => {
       const admin = ROLE_PERMISSION_CATALOG[SystemRole.Admin];
 
       expect(admin).not.toContain('manage:all');
-      expect(admin).toHaveLength(PERMISSION_CATALOG.length - 1);
+
+      // The point of enumerating (#244): a new catalog slug reaches Admin only
+      // when someone adds it here. The derivation it replaced handed over every
+      // slug but one, 77 of them templated on a household or event that Admin's
+      // render pass never supplies, so they were inert and nothing said so.
+      expect(admin.length).toBeLessThan(PERMISSION_CATALOG.length - 1);
+
+      expect(admin).toEqual(
+        expect.arrayContaining([
+          'manage:household_member:administer',
+          'delete:household:administer',
+          'update:household_role:transfer-ownership:administer',
+        ]),
+      );
+    });
+
+    it('give the staff roles no wildcard beyond the read-only one — `manage` on `all` is Owner alone', () => {
+      const wildcards = PERMISSION_CATALOG.filter(({ subject }) => subject === 'all').map(({ slug }) => slug);
+      const heldBy = (role: SystemRole) => ROLE_PERMISSION_CATALOG[role].filter((slug) => wildcards.includes(slug));
+
+      expect(wildcards).toEqual(['manage:all', 'read:public_content']);
+      expect(heldBy(SystemRole.Admin)).toEqual(['read:public_content']);
+      expect(heldBy(SystemRole.Moderator)).toEqual(['read:public_content']);
     });
 
     it('derive HouseholdAdmin from HouseholdOwner minus deletion and the ownership-transfer gate', () => {

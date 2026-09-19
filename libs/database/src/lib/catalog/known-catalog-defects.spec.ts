@@ -65,99 +65,13 @@ type DeclaredGrant = readonly [
 
 /**
  * Global staff roles holding grants templated on `{{ householdId }}` or
- * `{{ eventId }}`: the `roles` pass supplies neither, so server staff cannot
- * act on any household or event they are not personally a member of. The
- * policy fix — explicit unconditional staff variants — is #244.
+ * `{{ eventId }}`: the `roles` pass supplies neither, so the grant rendered to
+ * a clause matching nothing while every audit of `role_permissions` said staff
+ * held it. Emptied by #244, which stopped deriving `Admin` from the whole
+ * catalogue and gave staff an explicit unconditioned floor instead. A new line
+ * here is a new defect, not a backlog.
  */
-const INERT_STAFF_GRANTS: readonly Grant[] = [
-  ['read:household', SystemRole.Admin],
-  ['read:household', SystemRole.Moderator],
-  ['update:household', SystemRole.Admin],
-  ['delete:household', SystemRole.Admin],
-  ['manage:household_member', SystemRole.Admin],
-  ['read:household_member', SystemRole.Admin],
-  ['delete:household_member:leave', SystemRole.Admin],
-  ['update:household_role:transfer-ownership', SystemRole.Admin],
-  ['create:household_invite', SystemRole.Admin],
-  ['create:household_member:join', SystemRole.Admin],
-  ['manage:plugin:household', SystemRole.Admin],
-  ['read:plugin:household', SystemRole.Admin],
-  ['read:quota:household', SystemRole.Admin],
-  ['manage:quota:household_member', SystemRole.Admin],
-  ['read:event_attendee', SystemRole.Admin],
-  ['update:event_attendee:status', SystemRole.Admin],
-  ['read:event:participant', SystemRole.Admin],
-  ['update:event', SystemRole.Admin],
-  ['update:event', SystemRole.Moderator],
-  ['update:event:status:cancel-event', SystemRole.Admin],
-  ['update:event:status:archive-event', SystemRole.Admin],
-  ['create:event_invite', SystemRole.Admin],
-  ['manage:event_attendee', SystemRole.Admin],
-
-  // The event sub-resource grants #432 bound to `{{ eventId }}` reach Admin
-  // through the same blanket derivation — and `delete:game_play_session`
-  // reaches Moderator by name — where the `roles` pass renders nothing.
-  ['read:event_occurrence', SystemRole.Admin],
-  ['create:event_occurrence', SystemRole.Admin],
-  ['update:event_occurrence', SystemRole.Admin],
-  ['delete:event_occurrence', SystemRole.Admin],
-  ['update:event_occurrence:confirm', SystemRole.Admin],
-  ['update:event_occurrence:decline', SystemRole.Admin],
-  ['update:event_occurrence:cancel', SystemRole.Admin],
-  ['read:event_availability_vote', SystemRole.Admin],
-  ['read:event_game_nomination', SystemRole.Admin],
-  ['create:event_game_nomination', SystemRole.Admin],
-  ['update:event_game_nomination:resolve', SystemRole.Admin],
-  ['update:event_game_nomination:approve', SystemRole.Admin],
-  ['update:event_game_nomination:reject', SystemRole.Admin],
-  ['read:event_game_vote', SystemRole.Admin],
-  ['read:event_game', SystemRole.Admin],
-  ['create:event_game', SystemRole.Admin],
-  ['delete:event_game', SystemRole.Admin],
-  ['read:attendee_game_list', SystemRole.Admin],
-  ['create:attendee_game_list', SystemRole.Admin],
-  ['delete:attendee_game_list', SystemRole.Admin],
-  ['manage:attendee_game_list', SystemRole.Admin],
-  ['read:event_policy', SystemRole.Admin],
-  ['update:event_policy', SystemRole.Admin],
-  ['create:play_record', SystemRole.Admin],
-  ['create:game_play_session', SystemRole.Admin],
-  ['update:game_play_session', SystemRole.Admin],
-  ['delete:game_play_session', SystemRole.Admin],
-  ['delete:game_play_session', SystemRole.Moderator],
-  ['create:session_player:observer:join', SystemRole.Admin],
-  ['create:media:upload', SystemRole.Admin],
-
-  // The `:household` variants (#436, #432) reach Admin the same way, and
-  // `{{ householdId }}` renders no better there.
-  ['read:event_attendee:household', SystemRole.Admin],
-  ['read:event:participant:household', SystemRole.Admin],
-  ['update:event:household', SystemRole.Admin],
-  ['create:event_invite:household', SystemRole.Admin],
-  ['manage:event_attendee:household', SystemRole.Admin],
-  ['read:event_occurrence:household', SystemRole.Admin],
-  ['create:event_occurrence:household', SystemRole.Admin],
-  ['update:event_occurrence:household', SystemRole.Admin],
-  ['delete:event_occurrence:household', SystemRole.Admin],
-  ['update:event_occurrence:confirm:household', SystemRole.Admin],
-  ['update:event_occurrence:decline:household', SystemRole.Admin],
-  ['update:event_occurrence:cancel:household', SystemRole.Admin],
-  ['read:event_availability_vote:household', SystemRole.Admin],
-  ['read:event_game_nomination:household', SystemRole.Admin],
-  ['update:event_game_nomination:resolve:household', SystemRole.Admin],
-  ['read:event_game_vote:household', SystemRole.Admin],
-  ['read:event_game:household', SystemRole.Admin],
-  ['create:event_game:household', SystemRole.Admin],
-  ['delete:event_game:household', SystemRole.Admin],
-  ['read:attendee_game_list:household', SystemRole.Admin],
-  ['manage:attendee_game_list:household', SystemRole.Admin],
-  ['read:event_policy:household', SystemRole.Admin],
-  ['update:event_policy:household', SystemRole.Admin],
-  ['create:play_record:household', SystemRole.Admin],
-  ['create:game_play_session:household', SystemRole.Admin],
-  ['update:game_play_session:household', SystemRole.Admin],
-  ['delete:game_play_session:household', SystemRole.Admin],
-];
+const INERT_STAFF_GRANTS: readonly Grant[] = [];
 
 /**
  * Household roles holding grants templated on `{{ eventId }}`: the
@@ -180,24 +94,42 @@ const INERT_HOUSEHOLD_EVENT_GRANTS: readonly Grant[] = [];
  * `unlisted`, so a new one cannot arrive without someone writing the line; and
  * a listed grant the guard no longer finds fails as `fixed`, so retiring one
  * means deleting its line. `manage:content:moderate` is why the guard exists —
- * an unconditioned `manage` on `all`, held by `Admin` and `Moderator`, which
- * makes both functionally `Owner` and which neither other guard can see. It is
- * listed here rather than exempted; retiring it is #244's policy half.
+ * an unconditioned `manage` on `all` that made `Admin` and `Moderator`
+ * functionally `Owner`, which neither other guard could see. It was listed here
+ * rather than exempted, and #244 then retired it; its line is gone because the
+ * ratchet demanded it, which is the mechanism working.
  */
 const DECLARED_GLOBAL_STAFF_GRANTS: readonly DeclaredGrant[] = [
   // The wildcards, `subject: 'all'`. `manage:all` is the designed one and the
-  // reason `Owner` exists. The other two are not designed, they accumulated:
-  // `manage:content:moderate` is an unconditioned `manage` on `all`, so
-  // `Admin` and `Moderator` are each functionally `Owner`, and no audit of
-  // either role's permission list says so because the slug reads like a narrow
-  // moderation grant. #244 retires it and keeps `read:public_content`,
-  // which is read-only and the substance of a triage role; the read-widening
-  // it causes is #364/#365/#419's subject, not this guard's.
+  // reason `Owner` exists. `read:public_content` is the only other one left,
+  // and it is read-only: it gives the staff roles the cross-subject read a
+  // triage role needs, and the read-widening that causes is #364/#365/#419's
+  // subject rather than this guard's. A third, `manage:content:moderate`, was
+  // a `manage` on `all` that made both staff roles functionally `Owner`; #244
+  // retired it, and no `manage`-shaped wildcard may reach a staff role again
+  // without a line here saying so.
   ['manage:all', SystemRole.Owner, Action.manage, 'all'],
-  ['manage:content:moderate', SystemRole.Admin, Action.manage, 'all'],
-  ['manage:content:moderate', SystemRole.Moderator, Action.manage, 'all'],
   ['read:public_content', SystemRole.Admin, Action.read, 'all'],
   ['read:public_content', SystemRole.Moderator, Action.read, 'all'],
+
+  // The staff floor (#244). Unconditioned on purpose and the only entries here
+  // that are not install-wide subjects: a household HAS a scope coordinate, and
+  // these grants deliberately ignore it so staff can act on a household they
+  // are not a member of. That is the whole authority the retired wildcard used
+  // to confer by accident, now four slugs wide instead of every slug wide, and
+  // named where a reviewer can see it. All four are writes — staff reads come
+  // from `read:public_content` above, so a read variant here would grant
+  // nothing.
+  ['manage:household_member:administer', SystemRole.Admin, Action.manage, ResourceType.HouseholdMember],
+  ['delete:household:administer', SystemRole.Admin, Action.delete, ResourceType.Household],
+  [
+    'update:household_role:transfer-ownership:administer',
+    SystemRole.Admin,
+    Action.update,
+    ResourceType.HouseholdRole,
+  ],
+  ['delete:game_play_session:moderate', SystemRole.Admin, Action.delete, ResourceType.GamePlaySession],
+  ['delete:game_play_session:moderate', SystemRole.Moderator, Action.delete, ResourceType.GamePlaySession],
 
   // Install-wide reference data: platforms, the games catalogue and the
   // gateways games are imported through. There is no household or event these

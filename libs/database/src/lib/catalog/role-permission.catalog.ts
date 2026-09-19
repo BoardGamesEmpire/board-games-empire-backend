@@ -3,13 +3,20 @@ import { assertRolePermissionCatalog } from './catalog-integrity';
 import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
 
 /**
- * Role → slug assignments. Three lists are DERIVED rather than enumerated,
- * exactly as the seed always computed them:
+ * Role → slug assignments. Two lists are DERIVED rather than enumerated:
  *
- * - `Admin` = every slug except `manage:all` (retiring this blanket
- *   derivation for an enumerated list is #244, not this catalog's concern);
  * - `HouseholdAdmin` = the owner list minus `HOUSEHOLD_OWNER_ONLY`;
  * - `EventCoHost` = the host list minus `EVENT_HOST_ONLY`.
+ *
+ * `Admin` used to be a third — every slug except `manage:all` — and is now
+ * written out. The derivation read as "an Admin can do everything except the
+ * Owner-only wildcard"; what it actually produced was 77 grants templated on a
+ * household or event that the `roles` pass never supplies, so they rendered to
+ * clauses matching nothing, plus `manage:content:moderate`, an unconditioned
+ * `manage` on `all` that made the inert 77 irrelevant by granting everything
+ * anyway. Staff authority is now a list somebody chose (#244). The cost is
+ * real and is the point: a new slug reaches `Admin` only when someone adds it
+ * here, where before it arrived for free and unexamined.
  *
  * Because those lists are derived, every Owner-/Host-only slug has to be
  * named in the exclusion, or it is granted to the derived role silently, with
@@ -145,9 +152,119 @@ const EVENT_HOST_ONLY: readonly PermissionSlug[] = ['delete:event'];
 
 export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly PermissionSlug[]>> = {
   [SystemRole.Owner]: ['manage:all'],
-  [SystemRole.Admin]: PERMISSION_CATALOG.map((permission) => permission.slug).filter((slug) => slug !== 'manage:all'),
+  [SystemRole.Admin]: [
+    // Global Admin/Owner
+    'read:public_content',
+
+    // Server staff administration
+    'manage:household_member:administer',
+    'delete:household:administer',
+    'update:household_role:transfer-ownership:administer',
+    'delete:game_play_session:moderate',
+
+    // App Level / User
+    'read:user:profile',
+    'update:user:profile:own',
+
+    // Friendships
+    'create:friendship',
+    'read:friendships:own',
+    'update:friendship:own',
+    'delete:friendship:own',
+    'read:event:friends',
+    'read:households:friends',
+
+    // Games
+    'read:game',
+    'read:job',
+    'create:game',
+    'update:game',
+    'delete:game',
+    'update:game:own',
+    'delete:game:own',
+
+    // PlatformGame
+    'read:platform_game',
+    'create:platform_game',
+    'update:platform_game',
+    'delete:platform_game',
+
+    // Platform
+    'read:platform',
+    'create:platform',
+    'update:platform',
+    'delete:platform',
+    'create:event_availability_vote',
+    'update:event_attendee:status:self',
+    'update:event_game_nomination:withdraw',
+    'create:event_game_vote',
+    'read:game_collection',
+    'read:game_collection:household',
+    'read:game_collection:friends',
+    'read:game_collection:public',
+    'create:game_collection',
+    'update:game_collection',
+    'delete:game_collection',
+
+    // Game Gateway
+    'read:game_gateway',
+    'create:game_gateway',
+    'update:game_gateway',
+    'delete:game_gateway',
+
+    // Households
+    'create:household',
+    'read:households',
+    'read:household_member:friends',
+    'create:household_role',
+
+    // Events
+    'create:event',
+    'read:event',
+    'delete:event',
+    'delete:event:moderate',
+
+    // Game Sessions
+    'read:game_play_session',
+    'create:session_player:join',
+
+    // Rule Variants
+    'create:rule_variant',
+    'update:rule_variant',
+    'delete:rule_variant',
+
+    // Media
+    'create:media_object',
+    'read:media_object:own',
+    'read:media_object:public',
+    'update:media_object:own',
+    'delete:media_object:own',
+    'create:media_contribution',
+    'update:media_contribution:reclaim',
+    'read:media_contribution',
+    'update:media_contribution:moderate',
+
+    // Customization
+    'create:user_game_customization',
+    'update:user_game_customization',
+    'delete:user_game_customization',
+    'create:feedback_report',
+    'read:feedback_report:own',
+    'read:feedback_report',
+    'delete:feedback_report',
+    'manage:feedback_report',
+    'read:feedback_sink_dispatch',
+    'read:safe_http_policy',
+    'manage:safe_http_policy',
+    'manage:plugin',
+    'read:plugin',
+    'manage:webhook_subscription:own',
+    'read:webhook_subscription:own',
+    'read:audit_log',
+    'manage:quota',
+    'read:quota',
+  ],
   [SystemRole.Moderator]: [
-    'manage:content:moderate',
     'read:public_content',
 
     // audit
@@ -156,7 +273,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // event
     'read:event',
     'delete:event:moderate',
-    'update:event',
 
     // feedback
     'read:feedback_report',
@@ -166,11 +282,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game_collection',
     'read:game',
     'update:game',
-    'delete:game_play_session',
+    'delete:game_play_session:moderate',
     'read:game_play_session',
 
     // household
-    'read:household',
     'read:households',
 
     'read:safe_http_policy',
