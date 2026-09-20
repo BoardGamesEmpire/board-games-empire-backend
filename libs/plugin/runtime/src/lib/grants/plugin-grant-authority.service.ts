@@ -16,7 +16,7 @@ import { Injectable } from '@nestjs/common';
  * design, the registry being server-owned with no scope to bind to.
  * `PluginInstallerService.install` is the exception, reached by no route at
  * all; whichever entry point it eventually gets carries the ability gate at its
- * edge (#59), and this predicate stays behind it.
+ * edge (#84, which owns that caller), and this predicate stays behind it.
  *
  * Deliberately direct role-membership queries rather than CASL resolution: the
  * question is structural ("is this user a household admin of X"), not
