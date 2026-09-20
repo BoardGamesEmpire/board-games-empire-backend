@@ -27,13 +27,12 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * supplies. Its rules mirror `AbilityFactory.assertTemplateWithinContext`, so
  * the catalog is held to the standard the plugin path enforces at runtime.
  *
- * These are specs, not module-scope assertions like `catalog-integrity.ts`:
- * the fail-closed class still has live instances (#244) being burned down
- * issue by issue, and a throw at import would turn each of them into a boot
- * failure. The known instances are pinned, exactly, in
- * `known-catalog-defects.spec.ts`; the scoped fail-open ledger there is empty
- * since #432 and stays so a new instance is named rather than shipped, and the
- * global one is an allowlist that is not expected to empty at all.
+ * These are specs, not module-scope assertions like `catalog-integrity.ts`.
+ * They were written while both defect classes had live instances, when a throw
+ * at import would have turned each into a boot failure; both ledgers in
+ * `known-catalog-defects.spec.ts` are empty now (#432, #436, #244), and they
+ * stay as specs so the next instance is named at CI rather than at boot. The
+ * third ledger is an allowlist and is not expected to empty at all.
  *
  * Every function takes the catalogs AND the maps it checks against as
  * arguments, nothing defaulted — same convention as the integrity assertions —
@@ -78,8 +77,8 @@ export interface UnconditionedScopedGrant {
  * guard's findings are mostly legitimate and a reader has to tell them apart
  * at a glance: an unconditioned `read` on `AuditLog` is reference-data
  * administration, an unconditioned `manage` on `all` is `Owner` under another
- * name. The slug alone does not say which — `manage:content:moderate` reads
- * like a narrow moderation grant.
+ * name. The slug alone does not say which — `manage:content:moderate`, the
+ * retired grant that was the second of those, read like the first.
  */
 export interface UnconditionedGlobalGrant {
   slug: string;
@@ -174,28 +173,14 @@ export function findUnconditionedScopedGrants(
   roleScope: Readonly<Record<string, RoleScope>>,
   everyoneRole: string,
 ): UnconditionedScopedGrant[] {
-  const holders = holdersBySlug(rolePermissions, roleScope);
-  const findings: UnconditionedScopedGrant[] = [];
-
-  for (const { slug, conditions } of catalog) {
-    const { variables, problems } = parseTemplate(conditions);
-    if (variables.length > 0 || problems.length > 0) {
-      continue;
-    }
-
-    const roles = holders.get(slug) ?? [];
-    if (roles.some(({ role }) => role === everyoneRole)) {
-      continue;
-    }
-
-    for (const { role, scope } of roles) {
-      if (scope !== 'global') {
-        findings.push({ slug, role, scope });
-      }
-    }
-  }
-
-  return findings;
+  return scanUnconditionedGrants(
+    catalog,
+    rolePermissions,
+    roleScope,
+    everyoneRole,
+    (scope) => scope !== 'global',
+    ({ slug }, role, scope) => ({ slug, role, scope }),
+  );
 }
 
 /**
@@ -223,11 +208,12 @@ export function findUnconditionedScopedGrants(
  * a new unconditioned staff grant has to be added to the ledger by someone who
  * looked at it, rather than arriving with a slug nobody read (#244).
  *
- * `manage:content:moderate` is the case that motivated it: an unconditioned
+ * `manage:content:moderate` was the case that motivated it: an unconditioned
  * `manage` on `all`, held by `Admin` and `Moderator`, functionally `Owner`
- * under two other names, invisible to both existing guards for years. Nothing
- * about it was detectable from the permission or from the role alone — only
- * from the edge, which is where every guard in this file looks.
+ * under two other names, invisible to both existing guards. Nothing about it
+ * was detectable from the permission or from the role alone — only from the
+ * edge, which is where every guard in this file looks. It is gone (#244); the
+ * guard remains, so its successor is named rather than shipped.
  *
  * The everyone-role exemption is per-slug and matches the fail-open guard's,
  * for the same reason: a slug plain `User` holds is already reachable by
@@ -240,23 +226,55 @@ export function findUnconditionedGlobalGrants(
   roleScope: Readonly<Record<string, RoleScope>>,
   everyoneRole: string,
 ): UnconditionedGlobalGrant[] {
-  const holders = holdersBySlug(rolePermissions, roleScope);
-  const findings: UnconditionedGlobalGrant[] = [];
+  return scanUnconditionedGrants(
+    catalog,
+    rolePermissions,
+    roleScope,
+    everyoneRole,
+    (scope) => scope === 'global',
+    ({ slug, action, subject }, role) => ({ slug, role, action, subject }),
+  );
+}
 
-  for (const { slug, conditions, action, subject } of catalog) {
-    const { variables, problems } = parseTemplate(conditions);
+/**
+ * The scan both unconditioned-grant guards run, which is all of it but the
+ * scope predicate and the finding's shape: skip any permission whose template
+ * binds something or fails to parse, skip any slug the everyone role holds,
+ * then report one finding per remaining holder the predicate selects.
+ *
+ * Shared rather than written twice because the skips are a policy, not
+ * boilerplate. The everyone-role exemption in particular is a deliberate,
+ * documented gap in BOTH guards (see {@link findUnconditionedGlobalGrants});
+ * two copies of it is two places for a future change — handling `inverted`
+ * rules, say, which neither does yet — to be made in one and forgotten in the
+ * other, leaving the fail-open and allowlist halves disagreeing about what an
+ * unconditioned grant is.
+ */
+function scanUnconditionedGrants<T>(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roleScope: Readonly<Record<string, RoleScope>>,
+  everyoneRole: string,
+  selects: (scope: RoleScope) => boolean,
+  toFinding: (entry: PermissionSeedDefinition, role: string, scope: RoleScope) => T,
+): T[] {
+  const holders = holdersBySlug(rolePermissions, roleScope);
+  const findings: T[] = [];
+
+  for (const entry of catalog) {
+    const { variables, problems } = parseTemplate(entry.conditions);
     if (variables.length > 0 || problems.length > 0) {
       continue;
     }
 
-    const roles = holders.get(slug) ?? [];
+    const roles = holders.get(entry.slug) ?? [];
     if (roles.some(({ role }) => role === everyoneRole)) {
       continue;
     }
 
     for (const { role, scope } of roles) {
-      if (scope === 'global') {
-        findings.push({ slug, role, action, subject });
+      if (selects(scope)) {
+        findings.push(toFinding(entry, role, scope));
       }
     }
   }

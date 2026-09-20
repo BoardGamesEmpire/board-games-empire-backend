@@ -64,7 +64,7 @@ describe('plugin permission seeds', () => {
     });
   });
 
-  it('reaches Admin with the server pair (allPermsExceptManageAll) and Owner via manage:all', async () => {
+  it('reaches Admin with the server pair, now by enumeration, and Owner via manage:all', async () => {
     const admin = await roleSlugs(SystemRole.Admin);
     expect(admin).toEqual(expect.arrayContaining(['manage:plugin', 'read:plugin']));
 

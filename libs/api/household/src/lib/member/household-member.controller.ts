@@ -78,6 +78,15 @@ export class HouseholdMemberController {
   // `can(update, ResourceType.Household)` would admit Admins, because
   // `update:household` is theirs too and CASL unions the rules for an
   // (action, subject) pair.
+  //
+  // "Sole" is a claim about the WHOLE catalog, so it is pinned there rather
+  // than trusted here: `ability.factory.spec.ts` asserts it over
+  // `PERMISSION_CATALOG`. It has been false once — a staff slug on the global
+  // Admin role added a second `update` on this subject (#244) and every spec
+  // covering the gate built its own one-grant fixture, so none of them noticed.
+  // The service is what refused those actors, and the service is where the real
+  // boundary lives (see `transferOwnership`): this gate narrows, it does not
+  // authorize.
   @ApiOperation({ summary: 'Transfer household ownership to another member (current owner only)' })
   @ApiParam({ name: 'householdId', type: String })
   @ApiParam({ name: 'memberId', type: String, description: 'HouseholdMember.id of the member to promote' })
