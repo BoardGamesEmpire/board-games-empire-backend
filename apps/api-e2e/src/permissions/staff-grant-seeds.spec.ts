@@ -1,5 +1,5 @@
 import { Action, parseTemplate, ResourceType, RiskLevel, SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -117,9 +117,12 @@ describe('staff grant seeds', () => {
       // condition to one of these would leave the assertion green while every
       // staff write silently became inert, which is the precise failure this
       // test names in its title.
-      expect({ action: row.action, subject: row.subject, conditions: row.conditions, riskLevel: row.riskLevel }).toEqual(
-        { action, subject, conditions: {}, riskLevel: RiskLevel.Critical },
-      );
+      expect({
+        action: row.action,
+        subject: row.subject,
+        conditions: row.conditions,
+        riskLevel: row.riskLevel,
+      }).toEqual({ action, subject, conditions: {}, riskLevel: RiskLevel.Critical });
     }
   });
 

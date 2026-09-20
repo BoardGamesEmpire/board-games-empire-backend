@@ -56,12 +56,7 @@ type Grant = readonly [slug: PermissionSlug, role: SystemRole];
  * `manage` on `all` with every ledger still green — the precise escalation
  * `manage:content:moderate` already is.
  */
-type DeclaredGrant = readonly [
-  slug: PermissionSlug,
-  role: SystemRole,
-  action: Action,
-  subject: ResourceType | 'all',
-];
+type DeclaredGrant = readonly [slug: PermissionSlug, role: SystemRole, action: Action, subject: ResourceType | 'all'];
 
 /**
  * Global staff roles holding grants templated on `{{ householdId }}` or
