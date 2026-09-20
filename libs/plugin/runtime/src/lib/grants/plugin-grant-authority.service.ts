@@ -8,11 +8,24 @@ import { Injectable } from '@nestjs/common';
  * HOLDS the authority being delegated — these queries are that
  * verification, evaluated once, at decision time.
  *
- * Deliberately direct role-membership queries rather than CASL resolution:
- * the question is structural ("is this user a household admin of X"), not
- * conditional, and keeping `@bge/plugin` off `@bge/permissions` preserves
- * the dependency direction this design relies on (the permissions lib reads
- * `PluginGrant` via the database directly).
+ * These are a SECOND layer, not the only one. Every HTTP path into a grant
+ * decision is already gated in the ability layer: the household routes carry a
+ * CASL INSTANCE check on the route's `:householdId`
+ * (`HouseholdPluginsController.assertHouseholdScope`, one per route), and the
+ * server routes carry `@CheckPolicies(manage/read:plugin)` — unconditioned by
+ * design, the registry being server-owned with no scope to bind to.
+ * `PluginInstallerService.install` is the exception, reached by no route at
+ * all; whichever entry point it eventually gets carries the ability gate at its
+ * edge (#84, which owns that caller), and this predicate stays behind it.
+ *
+ * Deliberately direct role-membership queries rather than CASL resolution: the
+ * question is structural ("is this user a household admin of X"), not
+ * conditional, and resolving an ability here would rebuild the actor's full
+ * ability behind a guard that already built one. Keeping `@bge/plugin` off
+ * `@bge/permissions` is a layering preference, NOT a cycle — `@bge/permissions`
+ * imports only the leaf `@boardgamesempire/plugin-manifest` and never this
+ * library, so the dependency would resolve; it reads `PluginGrant` through the
+ * database directly, and the preference is to keep it that way (#409).
  *
  * User-scope decisions need no predicate HERE (#225 uniform enablement):
  * the authority question reduces to conditions `PluginGrantService.decide()`
