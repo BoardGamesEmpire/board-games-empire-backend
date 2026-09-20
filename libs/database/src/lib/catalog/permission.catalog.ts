@@ -1606,10 +1606,15 @@ export const PERMISSION_CATALOG = [
   }),
 
   // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
-  // Server-scope pair: no explicit role assignment in ROLE_PERMISSION_CATALOG
-  // — Owner holds it via `manage:all`, Admin via that catalog's derived
-  // every-slug-except-`manage:all` list — Owner/Admin only,
-  // per the locked role assignment on #59. Plugin principals can NEVER hold the `manage:` pair regardless of
+  // Server-scope pair: Owner/Admin only, per the locked role assignment on
+  // #59. Owner holds it via `manage:all`; Admin names both slugs outright in
+  // ROLE_PERMISSION_CATALOG's operations-surfaces block, since #244 replaced
+  // that role's derived every-slug-except-`manage:all` list with an
+  // enumeration. Both are UNCONDITIONED on purpose — the registry is
+  // server-owned, with no scope to bind them to — which is why
+  // `known-catalog-defects.spec.ts` carries `manage:plugin` as an ACCEPTED
+  // grant rather than a defect to fix.
+  // Plugin principals can NEVER hold the `manage:` pair regardless of
   // rows: the runtime's hard exclusion matches `manage:plugin*` by pattern
   // on purpose (both slugs are pinned against it by the runtime's
   // consent-gate specs), so these seeds change what admins may do, not what
