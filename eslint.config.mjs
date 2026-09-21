@@ -10,20 +10,6 @@ export const restrictedImportPaths = {
   // worker bases may use them. Application code and plugins must use the
   // read-only `AuditContextService` — this enforces "plugins have read-only
   // access to CLS actor; cannot forge" (issue #57).
-  // The composed-scope registry's WRITER. It has to be exported from
-  // `@bge/shared` for `ScopeComposer` (a different lib) to reach it, but a
-  // service that calls it directly satisfies the `paginated()` guard without
-  // composing anything — which turns the assertion into decoration. Same
-  // shape, and the same reasoning, as the internal CLS populator below:
-  // exported because the module graph requires it, restricted because nothing
-  // outside its one sanctioned caller should touch it.
-  composedScopeWriter: {
-    name: '@bge/shared',
-    importNames: ['recordComposedScope'],
-    message:
-      'Internal writer for the composed-scope registry. ScopeComposer only — a service calling this satisfies the paginated() guard without composing a scope, which is the erosion the guard exists to prevent (#365/#416). Inject ScopeComposer and call compose() instead.',
-  },
-
   auditContextInternal: {
     name: '@bge/actor-context',
     importNames: [
@@ -36,6 +22,20 @@ export const restrictedImportPaths = {
     ],
     message:
       'Internal CLS populator/keys. Entry-point interceptors and worker bases only — application and plugin code must use the read-only AuditContextService (issue #57).',
+  },
+
+  // The composed-scope registry's WRITER. It has to be exported from
+  // `@bge/shared` for `ScopeComposer` (a different lib) to reach it, but a
+  // service that calls it directly satisfies the `paginated()` guard without
+  // composing anything — which turns the assertion into decoration. Same
+  // shape, and the same reasoning, as the internal CLS populator above:
+  // exported because the module graph requires it, restricted because nothing
+  // outside its one sanctioned caller should touch it.
+  composedScopeWriter: {
+    name: '@bge/shared',
+    importNames: ['recordComposedScope'],
+    message:
+      'Internal writer for the composed-scope registry. ScopeComposer only — a service calling this satisfies the paginated() guard without composing a scope, which is the erosion the guard exists to prevent (#365/#416). Inject ScopeComposer and call compose() instead.',
   },
 };
 

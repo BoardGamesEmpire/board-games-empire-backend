@@ -53,7 +53,7 @@ export class UserPluginsController {
   @ApiOperation({
     summary: 'List the plugins you can enable, with your own enablement state',
     description:
-      'Every installed plugin, narrowed by no scope at all: user-scope consent is legal at any plugin scope ' +
+      'Every installed plugin, with no narrowing on the user axis: user-scope consent is legal at any plugin scope ' +
       '(#225), so unlike the household axis there is no plugin you cannot be anchored on. `unit.anchored` is ' +
       'false until your first Granted decision creates the anchor — which is why an empty enablement history ' +
       'shows a populated list of not-yet-enabled plugins rather than nothing. Carries no version, provenance or ' +

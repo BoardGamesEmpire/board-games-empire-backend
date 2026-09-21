@@ -40,6 +40,12 @@ export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
     'Job',
     'MediaContribution',
     'MediaObject',
+    // THREE routes read this one, across two libs: the server list, the
+    // per-household inventory and the per-user inventory. All three query
+    // `db.plugin` — the household/user axis is a filtered `select`, not a
+    // different table — so all three must be converted in the change that
+    // deletes this entry. Convert one and the other two serialize a list whose
+    // scope was never composed, which is a 500 on a route nobody touched.
     'Plugin',
     'User',
   ]),

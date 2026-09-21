@@ -81,7 +81,16 @@ describe('ScopeComposer', () => {
     it('still applies the ceiling, so an unscoped read is not an unfiltered one', () => {
       abilityService.getCurrentResourceConditions.mockReturnValue([{ visibility: 'Public' }]);
 
-      const where = composer.compose(ResourceType.Game, Action.read, Unscoped('the games catalogue is install-wide'));
+      // Deliberately NOT `Game`. A games list looks unscoped and is not: the
+      // uniformity there is a missing condition, not a design (472), and this
+      // is the file 418 copies its conversions from. An egress-policy list is
+      // the honest shape — installation configuration with no per-caller row
+      // set behind it.
+      const where = composer.compose(
+        ResourceType.SafeHttpPolicy,
+        Action.read,
+        Unscoped('egress policy is installation configuration, identical for every caller'),
+      );
 
       expect(where).toEqual({ AND: [{ visibility: 'Public' }] });
     });
