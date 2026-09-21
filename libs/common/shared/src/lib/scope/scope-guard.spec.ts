@@ -78,6 +78,16 @@ describe('assertListScopeComposed', () => {
     });
   });
 
+  it('refuses a hand-built opt-out carrying no reason', () => {
+    // `UnscopedList` is structural, so this literal typechecks without ever
+    // reaching `Unscoped()` and its reason check. If the guard took it at its
+    // word, "unscoped" would be assertable while stating nothing — and the
+    // stated reason is the entire value of the opt-out.
+    inRequest(() => {
+      expect(() => assertListScopeComposed('languages', { kind: 'unscoped', reason: '  ' })).toThrow(TypeError);
+    });
+  });
+
   it('passes a resource still pinned as unswept', () => {
     inRequest(() => {
       expect(() => assertListScopeComposed('households', 'Household')).not.toThrow();

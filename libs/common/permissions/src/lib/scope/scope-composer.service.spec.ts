@@ -98,6 +98,17 @@ describe('ScopeComposer', () => {
     it('refuses an opt-out with no reason', () => {
       expect(() => Unscoped('   ')).toThrow(TypeError);
     });
+
+    it('refuses a hand-built opt-out too, rather than splicing it into the where-clause', () => {
+      abilityService.getCurrentResourceConditions.mockReturnValue([{}]);
+
+      // The sentinel is structural: this bypasses the factory's reason check.
+      // Failing here rather than returning false is what keeps the mistake
+      // legible — the alternative reaches Prisma as an unknown `kind` argument.
+      expect(() =>
+        composer.compose(ResourceType.SafeHttpPolicy, Action.read, { kind: 'unscoped', reason: '' }),
+      ).toThrow(TypeError);
+    });
   });
 
   describe('recording for the paginated() guard', () => {

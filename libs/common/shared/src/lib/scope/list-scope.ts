@@ -23,25 +23,51 @@ export interface UnscopedList {
   readonly reason: string;
 }
 
+const MISSING_REASON =
+  'Unscoped() requires a non-empty reason: an unexplained opt-out is indistinguishable from a forgotten scope clause.';
+
+/**
+ * The reason contract, enforced wherever an opt-out is built OR believed.
+ *
+ * `UnscopedList` is a structural type, so `{ kind: 'unscoped', reason: '' }`
+ * satisfies it without ever reaching `Unscoped()`. Checking only in the factory
+ * would leave the mandatory reason resting on everyone choosing the front door
+ * — which is the kind of guarantee this whole seam exists to replace.
+ */
+function assertReason(reason: unknown): void {
+  if (typeof reason !== 'string' || !reason.trim()) {
+    throw new TypeError(MISSING_REASON);
+  }
+}
+
 /**
  * Declares a read intentionally unscoped. See {@link UnscopedList} for when
  * this is the honest answer and when it is cover for a defect.
  */
 export function Unscoped(reason: string): UnscopedList {
-  const trimmed = reason.trim();
+  assertReason(reason);
 
-  if (!trimmed) {
-    throw new TypeError(
-      'Unscoped() requires a non-empty reason: an unexplained opt-out is indistinguishable from a forgotten scope clause.',
-    );
-  }
-
-  return Object.freeze({ kind: 'unscoped', reason: trimmed });
+  return Object.freeze({ kind: 'unscoped', reason: reason.trim() });
 }
 
-/** Narrowing helper — an unscoped declaration, as opposed to a resource key. */
+/**
+ * Narrowing helper — an unscoped declaration, as opposed to a resource key.
+ *
+ * Throws on a sentinel that claims the kind and carries no reason, rather than
+ * returning false. Returning false would send the literal down the scope path
+ * instead: the guard would ask the registry about an object, and the composer
+ * would splice `{ kind, reason }` into a where-clause and surface the mistake
+ * as an unrelated Prisma error. A stated opt-out that states nothing is a
+ * programmer error, and it should read as one.
+ */
 export function isUnscoped(scope: ListScope): scope is UnscopedList {
-  return typeof scope === 'object' && scope !== null && (scope as UnscopedList).kind === 'unscoped';
+  if (typeof scope !== 'object' || scope === null || (scope as UnscopedList).kind !== 'unscoped') {
+    return false;
+  }
+
+  assertReason((scope as UnscopedList).reason);
+
+  return true;
 }
 
 /**
