@@ -8,3 +8,4 @@ export * from './lib/interfaces';
 export * from './lib/middleware/ability-context.middleware';
 export * from './lib/permissions.module';
 export * from './lib/permissions.service';
+export * from './lib/scope';
