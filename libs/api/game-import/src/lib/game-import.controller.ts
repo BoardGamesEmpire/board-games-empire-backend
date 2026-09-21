@@ -84,7 +84,7 @@ export class GameImportController {
   @Get()
   listImports(@Session() session: UserSession, @Query() pagination: DefaultPaginationQueryDto) {
     return from(this.importStatus.listBatchesForUser(session.user.id, pagination)).pipe(
-      map((page) => paginated('batches', page, pagination)),
+      map((page) => paginated('batches', page, pagination, ResourceType.Job)),
     );
   }
 

@@ -37,7 +37,12 @@ export class MediaContributionController {
   list(@Query() query: ListContributionsQueryDto) {
     return from(this.contributions.list(query)).pipe(
       map(({ rows, total }) =>
-        paginated('contributions', { rows: rows.map(toMediaContributionResponse), total }, query),
+        paginated(
+          'contributions',
+          { rows: rows.map(toMediaContributionResponse), total },
+          query,
+          ResourceType.MediaContribution,
+        ),
       ),
     );
   }

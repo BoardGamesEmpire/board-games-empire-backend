@@ -1,5 +1,5 @@
 import { AuditContextService, isUserActor, type UserPluginUnit } from '@bge/actor-context';
-import { PluginGrantScope } from '@bge/database';
+import { PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import {
   PluginConsentPresentationService,
@@ -71,7 +71,7 @@ export class UserPluginsController {
       this.inventory.listForUser(this.selfUserId(), query, {
         locale: this.auditContext.getLocale() ?? undefined,
       }),
-    ).pipe(map((page) => paginated('plugins', page, query)));
+    ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
   @ApiOperation({

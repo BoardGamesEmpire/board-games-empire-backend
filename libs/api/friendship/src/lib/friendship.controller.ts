@@ -58,7 +58,9 @@ export class FriendshipController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Friendship))
   @Get()
   list(@Query() query: ListFriendshipsQueryDto) {
-    return from(this.friendshipService.listForUser(query)).pipe(map((page) => paginated('friendships', page, query)));
+    return from(this.friendshipService.listForUser(query)).pipe(
+      map((page) => paginated('friendships', page, query, ResourceType.Friendship)),
+    );
   }
 
   @ApiOperation({
@@ -76,7 +78,7 @@ export class FriendshipController {
   @Get('requests')
   listRequests(@Query() query: DefaultPaginationQueryDto) {
     return from(this.friendshipService.listIncomingRequests(query)).pipe(
-      map((page) => paginated('requests', page, query)),
+      map((page) => paginated('requests', page, query, ResourceType.Friendship)),
     );
   }
 

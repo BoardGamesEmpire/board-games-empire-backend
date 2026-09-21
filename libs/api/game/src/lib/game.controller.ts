@@ -35,7 +35,7 @@ export class GameController {
   @Get()
   getGames(@Query() paginationQuery: DefaultPaginationQueryDto) {
     return from(this.gameService.getGames(paginationQuery)).pipe(
-      map((page) => paginated('games', page, paginationQuery)),
+      map((page) => paginated('games', page, paginationQuery, ResourceType.Game)),
     );
   }
 

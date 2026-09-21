@@ -1,0 +1,58 @@
+/**
+ * A list read declaring that it genuinely has no intrinsic scope, and why.
+ *
+ * The reason is REQUIRED and is the whole point of the sentinel. An opt-out
+ * that carries no justification is indistinguishable from a forgotten scope
+ * clause, which is the failure this guard exists to make impossible — so
+ * "unscoped" has to be a stated fact a reviewer can weigh, not an absence.
+ *
+ * Two distinct cases reach for it, and both are legitimate:
+ *
+ * - The envelope has no permissioned resource behind it at all. `GET /languages`
+ *   serves a static i18n catalogue; there is no `ResourceType` to compose for.
+ * - The resource exists and the read is deliberately install-wide.
+ *
+ * What it is NOT for: a read whose uniformity is a defect rather than a design.
+ * `GET /games` looks unscoped and is not — `read:game` carries no conditions, so
+ * every signed-in caller reads every private game (see 472). Declaring such a
+ * read unscoped would entrench the leak behind a stated fact, which is worse
+ * than leaving it undeclared.
+ */
+export interface UnscopedList {
+  readonly kind: 'unscoped';
+  readonly reason: string;
+}
+
+/**
+ * Declares a read intentionally unscoped. See {@link UnscopedList} for when
+ * this is the honest answer and when it is cover for a defect.
+ */
+export function Unscoped(reason: string): UnscopedList {
+  const trimmed = reason.trim();
+
+  if (!trimmed) {
+    throw new TypeError(
+      'Unscoped() requires a non-empty reason: an unexplained opt-out is indistinguishable from a forgotten scope clause.',
+    );
+  }
+
+  return Object.freeze({ kind: 'unscoped', reason: trimmed });
+}
+
+/** Narrowing helper — an unscoped declaration, as opposed to a resource key. */
+export function isUnscoped(scope: ListScope): scope is UnscopedList {
+  return typeof scope === 'object' && scope !== null && (scope as UnscopedList).kind === 'unscoped';
+}
+
+/**
+ * What a paginated list declares about its scope: either the resource type the
+ * composer was asked to scope for this request, or an explicit opt-out.
+ *
+ * Typed as `string` rather than `ResourceType` on purpose. This lib is a leaf —
+ * nothing under `@bge/shared` imports another `@bge/*` package — and pulling
+ * `@bge/database` in to narrow one parameter would put the heaviest package in
+ * the repo behind the most widely imported one. Call sites pass a real
+ * `ResourceType` member, so the value is typed where it is written; only this
+ * boundary sees it as a string.
+ */
+export type ListScope = string | UnscopedList;

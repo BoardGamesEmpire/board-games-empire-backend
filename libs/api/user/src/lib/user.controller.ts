@@ -41,7 +41,7 @@ export class UserController {
     // sent `q`, and a per-endpoint third field is how a shared envelope stops
     // being shared.
     return from(this.userService.searchUsers(session.user.id, query)).pipe(
-      map((page) => paginated('users', page, query)),
+      map((page) => paginated('users', page, query, ResourceType.User)),
     );
   }
 }

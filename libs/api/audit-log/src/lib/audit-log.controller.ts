@@ -39,6 +39,8 @@ export class AuditLogController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.AuditLog))
   @Get()
   list(@Query() query: ListAuditLogsQueryDto) {
-    return from(this.auditLogService.list(query)).pipe(map((page) => paginated('auditLogs', page, query)));
+    return from(this.auditLogService.list(query)).pipe(
+      map((page) => paginated('auditLogs', page, query, ResourceType.AuditLog)),
+    );
   }
 }

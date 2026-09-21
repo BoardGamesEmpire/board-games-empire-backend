@@ -1,5 +1,7 @@
 import { applyDecorators, type Type as NestType } from '@nestjs/common';
 import { ApiExtraModels, ApiProperty, ApiResponse, getSchemaPath } from '@nestjs/swagger';
+import { assertListScopeComposed } from '../scope/assert-list-scope-composed.js';
+import type { ListScope } from '../scope/list-scope.js';
 
 /** Metadata attached to every paginated list response. */
 export class PaginationMetaDto {
@@ -51,12 +53,29 @@ export type PaginatedResponse<K extends string, T> = { [P in K]: T[] } & { pagin
  * `hasMore` is kept even though `page`/`totalPages` make it derivable: it is
  * free once `total` is known, and it is the field a client's paging loop
  * terminates on without doing arithmetic.
+ *
+ * `scope` is required and is the erosion guard for #365's invariant: either the
+ * `ResourceType` whose intrinsic scope the read composed, or `Unscoped('<why>')`
+ * for a list that genuinely has none. A required parameter on the composer only
+ * binds callers who use the composer — a newly written list can still call
+ * `getCurrentResourceConditions` directly and inherit the caller's ceiling as
+ * its answer. This is the half that catches that, at the point the envelope is
+ * built rather than at the point the query is written.
+ *
+ * It is checked per resource, not per request, so a handler serving lists of
+ * two DIFFERENT resources cannot pass by scoping only one of them. Two
+ * envelopes of the SAME resource still vouch for each other — the registry
+ * records a resource type, not a call — which is the known limit of keying it
+ * this way rather than handing back a per-call receipt.
  */
 export function paginated<K extends string, T>(
   resourceKey: K,
   { rows, total }: PaginatedRows<T>,
   { page, pageSize }: ResolvedPaging,
+  scope: ListScope,
 ): PaginatedResponse<K, T> {
+  assertListScopeComposed(resourceKey, scope);
+
   const pagination: PaginationMetaDto = {
     page,
     limit: pageSize,

@@ -104,7 +104,7 @@ export class HouseholdPluginsController {
       this.inventory.listForHousehold(householdId, query, {
         locale: this.auditContext.getLocale() ?? undefined,
       }),
-    ).pipe(map((page) => paginated('plugins', page, query)));
+    ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
   @ApiOperation({

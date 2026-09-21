@@ -1,4 +1,5 @@
 import { DECORATORS } from '@nestjs/swagger';
+import { Unscoped } from '../scope/list-scope.js';
 import {
   ApiPaginatedEnvelope,
   paginated,
@@ -9,63 +10,75 @@ import {
 
 const rowsOf = (count: number) => Array.from({ length: count }, (_, index) => ({ id: index + 1 }));
 
+/**
+ * These cases exercise the envelope arithmetic, not the scope guard — which
+ * has its own suite in `../scope/scope-guard.spec.ts`. Declaring the opt-out
+ * keeps that separation explicit rather than leaning on the guard being inert
+ * outside a request scope.
+ */
+const ENVELOPE_ONLY = Unscoped('envelope arithmetic under test; no read behind it');
+
 describe('paginated — the shared list envelope', () => {
   it('nests the rows under the resource key', () => {
-    const envelope = paginated('households', { rows: rowsOf(2), total: 2 }, { page: 1, pageSize: 25 });
+    const envelope = paginated('households', { rows: rowsOf(2), total: 2 }, { page: 1, pageSize: 25 }, ENVELOPE_ONLY);
 
     expect(envelope.households).toHaveLength(2);
   });
 
   it('echoes the resolved page size as pagination.limit', () => {
-    const envelope = paginated('households', { rows: rowsOf(10), total: 10 }, { page: 1, pageSize: 10 });
+    const envelope = paginated('households', { rows: rowsOf(10), total: 10 }, { page: 1, pageSize: 10 }, ENVELOPE_ONLY);
 
     expect(envelope.pagination).toMatchObject({ page: 1, limit: 10, total: 10 });
   });
 
   // D-230-2: `total` is unconditional precisely so a UI can render "page 3 of 12".
   it('derives totalPages from total and page size, rounding up a partial last page', () => {
-    expect(paginated('games', { rows: rowsOf(25), total: 51 }, { page: 1, pageSize: 25 }).pagination.totalPages).toBe(
-      3,
-    );
+    expect(
+      paginated('games', { rows: rowsOf(25), total: 51 }, { page: 1, pageSize: 25 }, ENVELOPE_ONLY).pagination
+        .totalPages,
+    ).toBe(3);
   });
 
   it('reports totalPages 0 for an empty result rather than 1', () => {
-    const { pagination } = paginated('games', { rows: [], total: 0 }, { page: 1, pageSize: 25 });
+    const { pagination } = paginated('games', { rows: [], total: 0 }, { page: 1, pageSize: 25 }, ENVELOPE_ONLY);
 
     expect(pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
   });
 
   describe('hasMore boundary behaviour', () => {
     it('is true when rows remain after this page', () => {
-      expect(paginated('games', { rows: rowsOf(25), total: 26 }, { page: 1, pageSize: 25 }).pagination.hasMore).toBe(
-        true,
-      );
+      expect(
+        paginated('games', { rows: rowsOf(25), total: 26 }, { page: 1, pageSize: 25 }, ENVELOPE_ONLY).pagination
+          .hasMore,
+      ).toBe(true);
     });
 
     // The case the old bare-array shape forced clients to guess at: a full page
     // that happens to be the last one. A short-page heuristic gets this wrong.
     it('is false on a full page that is exactly the end of the result set', () => {
-      expect(paginated('games', { rows: rowsOf(25), total: 25 }, { page: 1, pageSize: 25 }).pagination.hasMore).toBe(
-        false,
-      );
+      expect(
+        paginated('games', { rows: rowsOf(25), total: 25 }, { page: 1, pageSize: 25 }, ENVELOPE_ONLY).pagination
+          .hasMore,
+      ).toBe(false);
     });
 
     it('is false on the final partial page', () => {
-      expect(paginated('games', { rows: rowsOf(5), total: 30 }, { page: 2, pageSize: 25 }).pagination.hasMore).toBe(
-        false,
-      );
+      expect(
+        paginated('games', { rows: rowsOf(5), total: 30 }, { page: 2, pageSize: 25 }, ENVELOPE_ONLY).pagination.hasMore,
+      ).toBe(false);
     });
 
     it('is false past the end of the result set, with the requested page echoed back', () => {
-      const { pagination } = paginated('games', { rows: [], total: 30 }, { page: 9, pageSize: 25 });
+      const { pagination } = paginated('games', { rows: [], total: 30 }, { page: 9, pageSize: 25 }, ENVELOPE_ONLY);
 
       expect(pagination).toMatchObject({ page: 9, hasMore: false, total: 30, totalPages: 2 });
     });
 
     it('is true on a middle page', () => {
-      expect(paginated('games', { rows: rowsOf(25), total: 200 }, { page: 4, pageSize: 25 }).pagination.hasMore).toBe(
-        true,
-      );
+      expect(
+        paginated('games', { rows: rowsOf(25), total: 200 }, { page: 4, pageSize: 25 }, ENVELOPE_ONLY).pagination
+          .hasMore,
+      ).toBe(true);
     });
   });
 });

@@ -34,7 +34,9 @@ export class EventController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Event))
   @Get()
   getEvents(@Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.eventService.getEvents(pagination)).pipe(map((page) => paginated('events', page, pagination)));
+    return from(this.eventService.getEvents(pagination)).pipe(
+      map((page) => paginated('events', page, pagination, ResourceType.Event)),
+    );
   }
 
   @ApiOperation({ summary: 'Get event by ID' })

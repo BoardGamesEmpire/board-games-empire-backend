@@ -102,7 +102,9 @@ export class MediaObjectController {
     // `total` and the rows describe the same set — the mapper is a projection,
     // never a filter.
     return from(this.media.list(pagination)).pipe(
-      map(({ rows, total }) => paginated('media', { rows: rows.map(toMediaObjectResponse), total }, pagination)),
+      map(({ rows, total }) =>
+        paginated('media', { rows: rows.map(toMediaObjectResponse), total }, pagination, ResourceType.MediaObject),
+      ),
     );
   }
 

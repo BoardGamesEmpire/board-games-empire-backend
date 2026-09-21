@@ -1,5 +1,5 @@
 import { PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, paginated } from '@bge/shared';
+import { ApiPaginatedEnvelope, paginated, Unscoped } from '@bge/shared';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -28,7 +28,14 @@ export class LanguageController {
   @Get()
   getLanguages(@Query() languageDto: LanguageQueryDto) {
     return from(this.languageService.getLanguages(languageDto)).pipe(
-      map((page) => paginated('languages', page, languageDto)),
+      map((page) =>
+        paginated(
+          'languages',
+          page,
+          languageDto,
+          Unscoped('the language catalogue is static installation data with no permissioned resource behind it'),
+        ),
+      ),
     );
   }
 
