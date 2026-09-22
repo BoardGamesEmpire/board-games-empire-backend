@@ -36,7 +36,7 @@ export class HouseholdMemberController {
   @Get()
   getMembers(@Param('householdId') householdId: string, @Query() pagination: DefaultPaginationQueryDto) {
     return from(this.memberService.getMembers(householdId, pagination)).pipe(
-      map((page) => paginated('members', page, pagination)),
+      map((page) => paginated('members', page, pagination, ResourceType.HouseholdMember)),
     );
   }
 

@@ -47,7 +47,9 @@ export class GameCollectionController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get()
   getOwnCollection(@Query() query: ListGameCollectionsQueryDto) {
-    return from(this.gameCollectionService.listOwn(query)).pipe(map((page) => paginated('collections', page, query)));
+    return from(this.gameCollectionService.listOwn(query)).pipe(
+      map((page) => paginated('collections', page, query, ResourceType.GameCollection)),
+    );
   }
 
   @ApiOperation({
@@ -62,7 +64,7 @@ export class GameCollectionController {
   @Get('user/:userId')
   getUserCollection(@Param('userId') userId: string, @Query() query: ListUserGameCollectionsQueryDto) {
     return from(this.gameCollectionService.listForUser(userId, query)).pipe(
-      map((page) => paginated('collections', page, query)),
+      map((page) => paginated('collections', page, query, ResourceType.GameCollection)),
     );
   }
 

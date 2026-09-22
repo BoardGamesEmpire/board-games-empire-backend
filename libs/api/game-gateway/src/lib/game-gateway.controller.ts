@@ -37,7 +37,7 @@ export class GameGatewayController {
   @Get()
   getAll(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.gameGatewayService.getAll(pagination)).pipe(
-      map((page) => paginated('gateways', page, pagination)),
+      map((page) => paginated('gateways', page, pagination, ResourceType.GameGateway)),
     );
   }
 

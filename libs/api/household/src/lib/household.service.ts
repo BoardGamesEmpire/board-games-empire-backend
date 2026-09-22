@@ -12,7 +12,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveScopeSubjectId } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
@@ -454,7 +454,7 @@ export class HouseholdService {
    * documented on the route. The key permission model is unbuilt (#270).
    */
   async getHouseholdsForMember(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
-    const userId = this.resolveMemberUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
 
     return this.paginateHouseholds(
       {
@@ -464,39 +464,6 @@ export class HouseholdService {
       },
       pagination,
     );
-  }
-
-  /**
-   * The caller's own user id, or a 403 for an actor kind that has none.
-   *
-   * Resolved before the query runs, and the rejection is the intended answer:
-   * "my households" has no meaning for an actor with no user behind it. It must
-   * never soften into an empty page — an empty page tells a client its
-   * memberships were removed.
-   *
-   * PROVISIONAL (D-364-4). A plugin may legitimately act on a user's behalf, so
-   * this may well be the wrong answer for plugin actors; today it reflects the
-   * absence of polymorphic actor attribution (deferred to #59) rather than a
-   * decision about memberships. #395 revisits it, along with anonymous actors,
-   * who could reach household-adjacent access through a game play session or
-   * event linked to a household.
-   *
-   * The message is re-thrown rather than passed through: `getActingUserId`
-   * phrases its rejection as being about user-attributed WRITES — accurate for
-   * its usual callers, wrong on a GET — and does not localise it. A MISSING
-   * actor is a different failure (a plain `Error`, meaning nothing primed the
-   * context) and is left to propagate as the 500 it is.
-   */
-  private resolveMemberUserId(): string {
-    try {
-      return this.abilityService.getActingUserId();
-    } catch (error) {
-      if (error instanceof ForbiddenException) {
-        throw new ForbiddenException(t('common.forbidden.access'));
-      }
-
-      throw error;
-    }
   }
 
   /**

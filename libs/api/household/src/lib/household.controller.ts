@@ -36,7 +36,7 @@ export class HouseholdController {
   @Get()
   getHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.householdService.getHouseholdsForUser(pagination)).pipe(
-      map((page) => paginated('households', page, pagination)),
+      map((page) => paginated('households', page, pagination, ResourceType.Household)),
     );
   }
 
@@ -69,7 +69,7 @@ export class HouseholdController {
   @Get('mine')
   getHouseholdsForMember(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.householdService.getHouseholdsForMember(pagination)).pipe(
-      map((page) => paginated('households', page, pagination)),
+      map((page) => paginated('households', page, pagination, ResourceType.Household)),
     );
   }
 

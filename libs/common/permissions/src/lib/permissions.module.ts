@@ -5,6 +5,7 @@ import { AbilityFactory } from './ability.factory';
 import { AbilityService } from './ability.service';
 import { AbilityContextMiddleware } from './middleware/ability-context.middleware';
 import { PermissionsService } from './permissions.service';
+import { ScopeComposer } from './scope/scope-composer.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
 
 /**
@@ -19,6 +20,11 @@ import { AbilityContextInternalService } from './services/ability-context-intern
  * so no module outside this lib injects it; transports prime by calling the public
  * `AbilityService`. `AbilityContextMiddleware` is exported so the application can
  * apply it (after `HttpActorMiddleware`) in its `configure()`.
+ *
+ * `ScopeComposer` is exported alongside `AbilityService`, and depends on it —
+ * never the reverse. That direction is what keeps scope off the authorization
+ * service: a scope parameter on `AbilityService` would re-merge the two
+ * concepts 365 separates, and the module graph now makes the merge visible.
  */
 @Global()
 @Module({
@@ -29,7 +35,8 @@ import { AbilityContextInternalService } from './services/ability-context-intern
     AbilityService,
     AbilityContextInternalService,
     AbilityContextMiddleware,
+    ScopeComposer,
   ],
-  exports: [AbilityFactory, PermissionsService, AbilityService, AbilityContextMiddleware],
+  exports: [AbilityFactory, PermissionsService, AbilityService, AbilityContextMiddleware, ScopeComposer],
 })
 export class PermissionsModule {}

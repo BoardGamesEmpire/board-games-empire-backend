@@ -37,7 +37,7 @@ export class EventOccurrenceController {
   @Get()
   getOccurrences(@Param('eventId') eventId: string, @Query() pagination: DefaultPaginationQueryDto) {
     return from(this.occurrenceService.getOccurrences(eventId, pagination)).pipe(
-      map((page) => paginated('occurrences', page, pagination)),
+      map((page) => paginated('occurrences', page, pagination, ResourceType.EventOccurrence)),
     );
   }
 

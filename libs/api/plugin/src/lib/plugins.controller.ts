@@ -88,7 +88,7 @@ export class PluginsController {
         includeUninstalled: query.includeUninstalled,
         locale: this.auditContext.getLocale() ?? undefined,
       }),
-    ).pipe(map((page) => paginated('plugins', page, query)));
+    ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
   // ─── Grant decisions + consent presentation (#322): Server scope ──────────

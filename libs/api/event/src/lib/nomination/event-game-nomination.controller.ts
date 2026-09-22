@@ -37,7 +37,7 @@ export class EventGameNominationController {
   @Get()
   getNominations(@Param('eventId') eventId: string, @Query() pagination: DefaultPaginationQueryDto) {
     return from(this.nominationService.getNominations(eventId, pagination)).pipe(
-      map((page) => paginated('nominations', page, pagination)),
+      map((page) => paginated('nominations', page, pagination, ResourceType.EventGameNomination)),
     );
   }
 

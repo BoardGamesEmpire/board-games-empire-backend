@@ -13,6 +13,14 @@ const allowedRestrictedImportPaths = Object.entries(restrictedImportPaths).map((
     : entry,
 );
 
+// ScopeComposer IS the sanctioned writer for the composed-scope registry, so
+// this ONE file may import `recordComposedScope`. Narrowed rather than dropped,
+// for the same reason as the entry above: every other restriction re-applies,
+// and the rest of this lib still cannot reach the writer.
+const composerAllowedImportPaths = Object.entries(restrictedImportPaths).map(([key, entry]) =>
+  key === 'composedScopeWriter' ? { ...entry, importNames: [] } : entry,
+);
+
 export default [
   ...baseConfig,
   {
@@ -32,6 +40,12 @@ export default [
     ignores: ['**/*.spec.ts'],
     rules: {
       'no-restricted-syntax': ['error', ...i18nHardcodedStringSelectors],
+    },
+  },
+  {
+    files: ['**/src/lib/scope/scope-composer.service.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: composerAllowedImportPaths }],
     },
   },
 ];
