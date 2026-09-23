@@ -54,8 +54,20 @@ describe('assertListScopeComposed', () => {
   // stop firing and these assertions would pass for the wrong reason.
   const UNPINNED = 'Quota';
 
+  // Taken FROM the pin rather than named, which is the same guard the line
+  // above applies in the other direction. Naming one (this was 'Household'
+  // until 417 swept it) makes the test fail on the unrelated change that
+  // converts that resource, and the reader cannot tell a real regression from
+  // an example that simply moved on.
+  const [PINNED] = [...PENDING_SCOPE_SWEEP];
+
   beforeAll(() => {
     expect(PENDING_SCOPE_SWEEP.has(UNPINNED)).toBe(false);
+
+    // The sweep is finished when this fails. That is the point at which
+    // `pending-scope-sweep.ts`, its spec, the branch in
+    // `assertListScopeComposed` and this test are all deleted together.
+    expect(PENDING_SCOPE_SWEEP.size).toBeGreaterThan(0);
   });
 
   it('throws when a declared scope was never composed', () => {
@@ -90,7 +102,7 @@ describe('assertListScopeComposed', () => {
 
   it('passes a resource still pinned as unswept', () => {
     inRequest(() => {
-      expect(() => assertListScopeComposed('households', 'Household')).not.toThrow();
+      expect(() => assertListScopeComposed('a pinned envelope', PINNED)).not.toThrow();
     });
   });
 

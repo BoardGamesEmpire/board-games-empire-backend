@@ -54,6 +54,22 @@ export interface Actors {
   admin(options?: SignupOptions): Promise<SessionActor>;
 
   /**
+   * A server-scope moderator: a plain user additionally granted the
+   * `SystemRole.Moderator` catalog role, arranged exactly as {@link admin}
+   * arranges its own — additive, before the actor's first authenticated
+   * request.
+   *
+   * Moderator and Admin are the two roles holding the unconditioned
+   * `read:public_content` grant, which is what used to widen every collection
+   * read to the whole server. A reference implementation that removes that
+   * widening has to be able to name a Moderator to prove it, so this exists
+   * for the assertions rather than for any production promotion path — that
+   * path is #422, and nothing here waits on it, because the factory writes the
+   * `UserRole` row directly.
+   */
+  moderator(options?: SignupOptions): Promise<SessionActor>;
+
+  /**
    * A household with a role-scoped roster, arranged directly in the
    * database (see {@link createHouseholdWithMembers} for why not via the
    * endpoints, and for the ordering rule the caller must respect).
@@ -224,22 +240,38 @@ export function createActors(deps: ActorDeps): Actors {
     return signUpProvisionedActor(options, [SystemRole.User]);
   }
 
-  async function admin(options: SignupOptions = {}): Promise<SessionActor> {
+  /**
+   * A plain user with one server-scope catalog role added on top. Elevation is
+   * additive (#410): the provisioned `User` row stays and abilities union
+   * across `UserRole` rows, so an elevated actor holds an ordinary user's
+   * grants as well as the role's. Swapping the role instead would arrange a
+   * subject that does not exist in production and would quietly weaken every
+   * denial asserted against it.
+   */
+  async function elevated(role: SystemRole, options: SignupOptions): Promise<SessionActor> {
     const actor = await user(options);
 
-    const adminRole = await prisma.role.findUniqueOrThrow({
-      where: { name: SystemRole.Admin },
+    const catalogRole = await prisma.role.findUniqueOrThrow({
+      where: { name: role },
       select: { id: true },
     });
 
-    await prisma.userRole.create({ data: { userId: actor.user.id, roleId: adminRole.id } });
+    await prisma.userRole.create({ data: { userId: actor.user.id, roleId: catalogRole.id } });
 
     return actor;
+  }
+
+  async function admin(options: SignupOptions = {}): Promise<SessionActor> {
+    return elevated(SystemRole.Admin, options);
+  }
+
+  async function moderator(options: SignupOptions = {}): Promise<SessionActor> {
+    return elevated(SystemRole.Moderator, options);
   }
 
   async function householdWithMembers(options: HouseholdWithMembersOptions): Promise<HouseholdFixture> {
     return createHouseholdWithMembers(prisma, options);
   }
 
-  return { owner, user, admin, householdWithMembers };
+  return { owner, user, admin, moderator, householdWithMembers };
 }

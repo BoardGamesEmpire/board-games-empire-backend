@@ -1,7 +1,7 @@
 import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -22,6 +22,7 @@ describe('HouseholdService', () => {
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = {
@@ -36,6 +37,10 @@ describe('HouseholdService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         HouseholdService,
+        // The REAL composer, over the mocked ability service. Substituting a
+        // double here would make every where-clause assertion below a test of
+        // the double rather than of the merge the reads actually depend on.
+        ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
       ],
@@ -43,21 +48,10 @@ describe('HouseholdService', () => {
 
     db = ctx.db;
     service = ctx.module.get(HouseholdService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
-
-  it('getHouseholdsForUser → read', async () => {
-    db.household.findMany.mockResolvedValue([]);
-    db.household.count.mockResolvedValue(0);
-
-    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
-
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
-    expect(db.household.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) }),
-    );
-  });
 
   // #230: `total` is only trustworthy against the rows because both come from
   // one snapshot, and nothing in the read itself enforces that — the mock
@@ -544,20 +538,6 @@ describe('HouseholdService', () => {
       expect(db.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
     });
 
-    // D-364-4, PROVISIONAL: `getActingUserId` throws for `plugin`/`system`/
-    // `external`, and "my households" genuinely has no answer for those actors
-    // today. The rejection is asserted so the holding position is visible in
-    // the suite rather than implied by a helper's internals — #395 revisits
-    // whether a plugin acting for a user should be admitted here.
-    it('rejects an actor kind that has no memberships of its own', async () => {
-      abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
-      });
-
-      await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
-      expect(db.household.findMany).not.toHaveBeenCalled();
-    });
-
     // `getActingUserId` phrases its rejection as being about user-attributed
     // WRITES and does not localise it. Accurate for its usual callers, wrong on
     // a GET — a caller told they "cannot perform writes" by a list endpoint
@@ -601,6 +581,78 @@ describe('HouseholdService', () => {
       });
 
       await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  /**
+   * #417, and the reason it converted two routes rather than the one it named.
+   *
+   * The `paginated()` guard reads a CLS registry keyed per resource type per
+   * REQUEST, not per call: a read that reaches the database on its ceiling
+   * alone records nothing, and now that `Household` has left
+   * `PENDING_SCOPE_SWEEP` the envelope it builds throws
+   * `ListScopeNotComposedError` — a 500, in production, on a route nobody
+   * touched. Converting one household list and leaving the other is therefore
+   * not a partial improvement; it is an outage in the half left behind.
+   *
+   * Both reads are held to the same facts here for that reason. What is
+   * specific to the membership-scoped route stays in its own #364 block.
+   */
+  describe.each([
+    [
+      'getHouseholdsForUser',
+      (subject: HouseholdService) => subject.getHouseholdsForUser(paginationQuery({ limit: 10 })),
+    ],
+    [
+      'getHouseholdsForMember',
+      (subject: HouseholdService) => subject.getHouseholdsForMember(paginationQuery({ limit: 10 })),
+    ],
+  ] as const)('%s, as a converted household list', (_name, read) => {
+    beforeEach(() => {
+      db.household.findMany.mockResolvedValue([]);
+      db.household.count.mockResolvedValue(0);
+    });
+
+    it('asks the composer for its where clause, declaring its own scope', async () => {
+      await read(service);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, {
+        deletedAt: null,
+        members: { some: { userId: 'user-1' } },
+      });
+    });
+
+    // Asking is not enough — the query has to use the answer. The ceiling is
+    // still ANDed in, but it clips the declared scope rather than supplying
+    // it. Before #417 it WAS the scope of `getHouseholdsForUser`, so one route
+    // returned a plain user their memberships, a friend those friends'
+    // `Friends`-visible households as well, and staff every household on the
+    // server, with `pagination.total` scoped the same way so a client could
+    // not tell which contract it had been given.
+    it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
+      await read(service);
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
+      expect(db.household.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ deletedAt: null, members: { some: { userId: 'user-1' } }, AND: [COND] }),
+        }),
+      );
+    });
+
+    // PROVISIONAL (#417). A first-person scope has no meaning for an actor
+    // with no user behind it, and the rejection must stay a rejection: an empty
+    // page tells a client its memberships were removed, which is a different
+    // and much more damaging claim than "you cannot ask this". For
+    // `getHouseholdsForUser` this is a real behaviour change — those actors
+    // previously received whatever their ceiling admitted. #395 revisits it.
+    it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
+      });
+
+      await expect(read(service)).rejects.toThrow(ForbiddenException);
+      expect(db.household.findMany).not.toHaveBeenCalled();
     });
   });
 

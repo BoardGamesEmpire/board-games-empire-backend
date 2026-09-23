@@ -12,7 +12,7 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
-import { AbilityService, PermissionsService, resolveScopeSubjectId } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import assert from 'node:assert';
@@ -46,6 +46,7 @@ export class HouseholdService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   async getHouseholdById(id: string) {
@@ -404,64 +405,99 @@ export class HouseholdService {
   }
 
   /**
-   * Paginated households the actor may READ — which widens with the caller.
-   * A plain user receives their memberships AND friends' `Friends`-visible
-   * households (`read:households` OR `read:households:friends`, both on the
-   * base `User` role); Owner/Admin/Moderator receive every household via their
-   * unconditioned `subject: 'all'` grants. That is the role- and
-   * friendship-dependent meaning #365 exists to settle.
+   * Paginated households the caller is a member of. FIRST-PERSON: the scope is
+   * the caller's own `HouseholdMember` rows, so this route answers the same
+   * question for everybody (#417), applying the rule #365 settled: the path
+   * names the scope.
    *
-   * Callers that need a set whose absence means something — "this household is
-   * no longer mine" — want {@link getHouseholdsForMember} instead.
+   * It used to answer three. The scope WAS the permission ceiling, so a plain
+   * user received their memberships, a user with friends also received those
+   * friends' `Friends`-visible households, and Owner/Admin/Moderator received
+   * every household on the server — one route, and the caller decided which
+   * question it had asked. `pagination.total` was scoped the same way, so a
+   * client could not tell the cases apart either. That is the ambiguity #365
+   * was filed about, removed here at its original instance.
+   *
+   * Friend visibility is narrowed, not withdrawn. `read:households:friends`
+   * still reaches a friend's `Friends`-visible household through
+   * {@link getHouseholdById}, which ANDs the ceiling exactly as before; what it
+   * loses is its effect on this LIST. Reading another subject's households as a
+   * list belongs on a path-parameterized route (#485), unbuilt until a consumer
+   * needs it; the all-subject staff surface is #419 and gets its own
+   * controllers.
+   *
+   * As of this change it is identical to {@link getHouseholdsForMember}, which
+   * is what makes #420 a route deletion rather than a behaviour change. The two
+   * entry points are kept separate until then so that removal stays trivial.
    */
   async getHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
-    return this.paginateHouseholds(
-      {
-        deletedAt: null,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
-      },
-      pagination,
-    );
+    return this.paginateOwnHouseholds(pagination);
   }
 
   /**
-   * Paginated households the caller holds a `HouseholdMember` row for,
-   * whatever their server role (#364). Unlike {@link getHouseholdsForUser}
-   * this means one thing for every caller, which is what lets a client treat
-   * "cached locally but absent here" as "you were removed or it was deleted"
-   * rather than as a scope it has to guess at.
-   *
-   * Three constraints carry that guarantee, and each is asserted rather than
-   * left to the shape of this query:
-   *
-   * - The membership clause is the scope (D-364-2). The ability conditions
-   *   alone would readmit friends' `Friends`-visible households, which the
-   *   caller is not a member of.
-   * - It is ANDed with those conditions, never a substitute for them
-   *   (D-364-3). For an `apiKey` actor the conditions carry the key ∩ owner
-   *   floor, so dropping them would widen a narrow key to the owner's full
-   *   membership list.
-   * - `deletedAt: null` stays (D-364-5). `deleteHousehold` retains member rows
-   *   by design, so the membership clause still matches a soft-deleted
-   *   household.
+   * Paginated households the caller holds a `HouseholdMember` row for, whatever
+   * their server role (#364). This route has always meant one thing for every
+   * caller, which is what lets a client treat "cached locally but absent here"
+   * as "you were removed or it was deleted" rather than as a scope it has to
+   * guess at.
    *
    * `HouseholdMember` has no `deletedAt` — removal is a hard delete — so with
-   * those in place absence is unambiguous FOR A USER SESSION. It is not
-   * unconditional: because the ability conditions are ANDed in, an API key
+   * the scope below in place absence is unambiguous FOR A USER SESSION. It is
+   * not unconditional: because the ability conditions are ANDed in, an API key
    * scoped narrower than its owner makes absence also mean "outside this key's
    * scope", so a key-authenticated read must not drive a cache purge. That is
    * the intended trade — a widened key would be the worse bug — and it is
    * documented on the route. The key permission model is unbuilt (#270).
+   *
+   * {@link getHouseholdsForUser} now answers identically (#417), so this
+   * route is redundant and #420 removes it. It converted in the same change as
+   * its sibling rather than after it: see {@link paginateOwnHouseholds}.
    */
   async getHouseholdsForMember(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
+    return this.paginateOwnHouseholds(pagination);
+  }
+
+  /**
+   * The scope both household lists declare, composed with the caller's ceiling
+   * in the one place allowed to write both halves (#416):
+   *
+   * ```
+   * rows = my memberships AND what my ability admits
+   * ```
+   *
+   * Shared rather than written twice because the two routes now ask the same
+   * question, and a copy would let them drift apart silently in the window
+   * before #420 deletes one of them.
+   *
+   * Three constraints carry the guarantee (#364), and each is asserted rather
+   * than left to the shape of this query:
+   *
+   * - The membership clause is the scope. The ability conditions
+   *   alone would readmit friends' `Friends`-visible households, which the
+   *   caller is not a member of — and for staff, every household on the
+   *   server.
+   * - It is ANDed with those conditions, never a substitute for them. For an
+   *   `apiKey` actor the conditions carry the key ∩ owner
+   *   floor, so dropping them would widen a narrow key to the owner's full
+   *   membership list. Routing both halves through the composer is what makes
+   *   dropping them unrepresentable rather than merely discouraged.
+   * - `deletedAt: null` stays. `deleteHousehold` retains member rows
+   *   by design, so the membership clause still matches a soft-deleted
+   *   household.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors
+   * (#417): "my households" has no meaning for an actor with no user, and
+   * the refusal must never soften into an empty page, which would tell a client
+   * its memberships were removed. PROVISIONAL — #395.
+   */
+  private async paginateOwnHouseholds(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
     const userId = resolveScopeSubjectId(this.abilityService);
 
     return this.paginateHouseholds(
-      {
+      this.scopeComposer.compose(ResourceType.Household, Action.read, {
         deletedAt: null,
         members: { some: { userId } },
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
-      },
+      }),
       pagination,
     );
   }
@@ -515,8 +551,10 @@ export class HouseholdService {
    *
    * That retention is load-bearing in the other direction too: because the
    * member rows survive, a membership clause alone still matches this household,
-   * which is why `getHouseholdsForMember` cannot drop its `deletedAt` filter
-   * (D-364-5). Anything added to that list must filter it as well.
+   * which is why `paginateOwnHouseholds` — the scope BOTH first-person lists
+   * share — cannot drop its `deletedAt` filter (#364). A read that adopts that
+   * scope inherits the filter; one that builds its own membership clause must
+   * add it.
    */
   async deleteHousehold(id: string) {
     try {

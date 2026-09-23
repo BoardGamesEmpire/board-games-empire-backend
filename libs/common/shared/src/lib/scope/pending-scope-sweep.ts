@@ -10,11 +10,15 @@
  * back until the whole sweep is done and lose the reference implementation
  * that proves the shape.
  *
- * So the pin is the sweep's own progress bar, and it only ever shrinks: 418
- * deletes an entry as it converts that resource, and `pending-scope-sweep.spec`
- * asserts the set is exactly this. An entry ADDED here is a new unscoped read,
- * which is the thing being eliminated — the spec makes that a deliberate,
- * reviewable act rather than a silent one.
+ * So the pin is the sweep's own progress bar, and it only ever shrinks: 417
+ * deleted the first entry (`Household`) and 418 deletes the rest as it converts
+ * them, with `pending-scope-sweep.spec` asserting the set is exactly this. An
+ * entry ADDED here is a new unscoped read, which is the thing being eliminated
+ * — the spec makes that a deliberate, reviewable act rather than a silent one.
+ *
+ * DELETING an entry converts EVERY route that lists that resource, in one
+ * change — 417 converted both household reads for this reason, not just the
+ * one it named. See the note on `Plugin` below for what goes wrong otherwise.
  *
  * Empty means the sweep is complete and this file should be deleted along with
  * the branch in `assertListScopeComposed` that reads it.
@@ -24,9 +28,6 @@
  */
 export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
   new Set([
-    // Swept by 417 — the households reference implementation.
-    'Household',
-
     // Swept by 418, in the groups the intrinsic-scope table names.
     'AuditLog',
     'Event',

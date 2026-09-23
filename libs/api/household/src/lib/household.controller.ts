@@ -21,17 +21,28 @@ export class HouseholdController {
   constructor(private readonly householdService: HouseholdService) {}
 
   @ApiOperation({
-    summary: 'List households the caller may read (widens with role and friendships)',
+    summary: 'List households the caller is a member of',
     description:
-      'Scope depends on the caller: a plain user receives their own memberships AND friends\u2019 ' +
-      '`Friends`-visible households; Owner/Admin/Moderator receive every household. For a set that means the ' +
-      'same thing for every caller, use `GET /households/mine` (#364). The ambiguity itself is #365. ' +
-      'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
-      '`total`, `totalPages` and `hasMore`. See #230.',
+      'Membership-scoped: households the caller holds a `HouseholdMember` row for, and nothing else — the ' +
+      'same kind of result for every caller. **Breaking change (#417).** This route previously widened with ' +
+      'the caller: a plain user also received friends\u2019 `Friends`-visible households, and ' +
+      'Owner/Admin/Moderator received every household on the server, so it answered a different question ' +
+      'depending on who asked — and `pagination.total` was scoped the same way, so a client could not tell ' +
+      'the cases apart (#365). A friend\u2019s `Friends`-visible household is still readable at ' +
+      '`GET /households/:id`; listing another user\u2019s households is #485, and the all-subject staff surface ' +
+      'is #419. An **API key** is additionally floored by its own permissions (effective access is ' +
+      'key ∩ owner). Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
+      '`total`, `totalPages` and `hasMore`. See #230. `GET /households/mine` now answers identically and is ' +
+      'removed by #420.',
   })
   @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no memberships of its own (plugin, system, external) ' +
+      '— new with #417, and provisional: see #395',
+  })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get()
   getHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
@@ -48,14 +59,14 @@ export class HouseholdController {
     summary: 'List households the caller is a member of, whatever their role',
     description:
       'Membership-scoped: households the caller holds a `HouseholdMember` row for, and nothing else. ' +
-      'Unlike `GET /households` — which widens with the caller\u2019s role and friendships — this returns the ' +
-      'same kind of result for every caller, so a **user session** may treat a household it has cached but ' +
-      'does not find here as one it was removed from or one that was deleted. An **API key** is additionally ' +
-      'floored by its own permissions (effective access is key ∩ owner), so absence under a key also admits ' +
-      '\u201coutside this key\u2019s scope\u201d — do not purge a cache from a key-authenticated read. The key ' +
-      'permission model is unbuilt (#270). Paginated identically to `GET /households`: `?page=` (1-based) and ' +
-      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the ' +
-      'caller\u2019s visible memberships. See #364, and #365 for the general question.',
+      '**Redundant as of #417**, which gave `GET /households` this same scope; #420 removes this route. It ' +
+      'returns the same kind of result for every caller, so a **user session** may treat a household it has ' +
+      'cached but does not find here as one it was removed from or one that was deleted. An **API key** is ' +
+      'additionally floored by its own permissions (effective access is key ∩ owner), so absence under a key ' +
+      'also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a key-authenticated ' +
+      'read. The key permission model is unbuilt (#270). Paginated identically to `GET /households`: `?page=` ' +
+      '(1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; ' +
+      '`total` counts the caller\u2019s visible memberships. See #364, and #365/#417 for the general question.',
   })
   @ApiPaginatedEnvelope('households')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
