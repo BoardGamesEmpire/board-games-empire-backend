@@ -166,6 +166,18 @@ describe('the shipped catalogs', () => {
       }
     });
 
+    it.each([
+      SystemRole.HouseholdOwner,
+      SystemRole.HouseholdAdmin,
+      SystemRole.HouseholdMember,
+      SystemRole.HouseholdGuest,
+    ])('leave read:households to User rather than repeating it on %s', (roleName) => {
+      // `User`'s condition already admits every household the actor belongs
+      // to; a household role's copy only repeats that clause per membership.
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:households');
+      expect(ROLE_PERMISSION_CATALOG[roleName]).not.toContain('read:households');
+    });
+
     it('give the staff roles no wildcard beyond the read-only one — `manage` on `all` is Owner alone', () => {
       const wildcards = PERMISSION_CATALOG.filter(({ subject }) => subject === 'all').map(({ slug }) => slug);
       const heldBy = (role: SystemRole) => ROLE_PERMISSION_CATALOG[role].filter((slug) => wildcards.includes(slug));

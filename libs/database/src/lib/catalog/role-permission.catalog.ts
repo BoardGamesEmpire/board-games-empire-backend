@@ -75,6 +75,12 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * belongs to the event roles alone, because the household pass never supplies
  * `{{ eventId }}` (#436, #432).
  *
+ * `read:households` is `User`'s alone. Its condition names the actor, not a
+ * household, so a household role holding it rendered `User`'s clause again for
+ * every membership: nothing granted, but one more `OR` term per membership in
+ * every household read's ceiling, half of the per-membership planning cost
+ * measured on #417.
+ *
  * Insertion order is the seed's assignment order.
  */
 
@@ -117,7 +123,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'read:event:participant:household',
   'read:game_collection',
   'read:household',
-  'read:households',
   'read:household_member',
   'update:event_game_nomination:resolve:household',
   'update:event_occurrence:cancel:household',
@@ -376,7 +381,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game_collection',
     'read:game_play_session',
     'read:household',
-    'read:households',
   ],
   [SystemRole.HouseholdGuest]: [
     'create:session_player:join',
@@ -385,7 +389,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:game_play_session',
     'read:household',
     'read:household_member',
-    'read:households',
   ],
   [SystemRole.EventHost]: EVENT_HOST,
   [SystemRole.EventCoHost]: EVENT_HOST.filter((slug) => !EVENT_HOST_ONLY.includes(slug)),
