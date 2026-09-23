@@ -75,11 +75,13 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * belongs to the event roles alone, because the household pass never supplies
  * `{{ eventId }}` (#436, #432).
  *
- * `read:households` is `User`'s alone. Its condition names the actor, not a
- * household, so a household role holding it rendered `User`'s clause again for
- * every membership: nothing granted, but one more `OR` term per membership in
- * every household read's ceiling, half of the per-membership planning cost
- * measured on #417.
+ * A household role holds nothing `User` holds. Every user ability is built in
+ * one pass that includes `User`, so a household role's copy of one of its
+ * slugs grants nothing. Where the condition names the actor rather than a
+ * household (`read:households`, `read:game_collection`), the copy renders
+ * `User`'s clause again for every membership: one more `OR` term per
+ * membership in that resource's ceiling. On households that was half of the
+ * per-membership planning cost measured on #417.
  *
  * Insertion order is the seed's assignment order.
  */
@@ -88,12 +90,10 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event_game:household',
   'create:event_invite:household',
   'create:event_occurrence:household',
-  'create:event',
   'create:game_play_session:household',
   'create:household_invite',
   'create:household_role',
   'create:play_record:household',
-  'create:rule_variant',
   'delete:event_game:household',
   'delete:event_occurrence:household',
   'manage:quota:household_member',
@@ -103,7 +103,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'read:quota:household',
   'delete:game_play_session:household',
   'delete:household',
-  'delete:rule_variant',
   'manage:attendee_game_list:household',
   'manage:event_attendee:household',
   'manage:household_member',
@@ -121,7 +120,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   // The Event row itself. Without it an owner updates a household event and
   // manages its attendees but cannot read the event unless attending it.
   'read:event:participant:household',
-  'read:game_collection',
   'read:household',
   'read:household_member',
   'update:event_game_nomination:resolve:household',
@@ -134,7 +132,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:game_play_session:household',
   'update:household',
   'update:household_role:transfer-ownership',
-  'update:rule_variant',
 ];
 
 const HOUSEHOLD_OWNER_ONLY: readonly PermissionSlug[] = [
@@ -365,8 +362,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.HouseholdMember]: [
     'create:game_play_session:household',
     'create:play_record:household',
-    'create:rule_variant',
-    'create:session_player:join',
     'read:attendee_game_list:household',
     'read:event_attendee:household',
     'read:event_availability_vote:household',
@@ -378,15 +373,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence:household',
     'read:event_policy:household',
     'read:event:participant:household',
-    'read:game_collection',
-    'read:game_play_session',
     'read:household',
   ],
   [SystemRole.HouseholdGuest]: [
-    'create:session_player:join',
     'delete:household_member:leave',
     'read:event:participant:household',
-    'read:game_play_session',
     'read:household',
     'read:household_member',
   ],

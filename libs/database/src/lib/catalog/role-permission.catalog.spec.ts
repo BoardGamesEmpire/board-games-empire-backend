@@ -166,16 +166,17 @@ describe('the shipped catalogs', () => {
       }
     });
 
-    it.each([
-      SystemRole.HouseholdOwner,
-      SystemRole.HouseholdAdmin,
-      SystemRole.HouseholdMember,
-      SystemRole.HouseholdGuest,
-    ])('leave read:households to User rather than repeating it on %s', (roleName) => {
-      // `User`'s condition already admits every household the actor belongs
-      // to; a household role's copy only repeats that clause per membership.
-      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:households');
-      expect(ROLE_PERMISSION_CATALOG[roleName]).not.toContain('read:households');
+    it.each(
+      Object.entries(ROLE_SCOPE)
+        .filter(([, scope]) => scope === 'household')
+        .map(([roleName]) => roleName as SystemRole),
+    )('give %s nothing User already holds', (roleName) => {
+      // Every user ability includes `User`, so a household role's copy of one
+      // of its slugs grants nothing. Where the condition names the actor, the
+      // copy repeats `User`'s clause once per membership in that ceiling.
+      const userSlugs = ROLE_PERMISSION_CATALOG[SystemRole.User];
+
+      expect(ROLE_PERMISSION_CATALOG[roleName].filter((slug) => userSlugs.includes(slug))).toEqual([]);
     });
 
     it('give the staff roles no wildcard beyond the read-only one — `manage` on `all` is Owner alone', () => {
