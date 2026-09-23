@@ -53,21 +53,6 @@ describe('HouseholdService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  // #230: `total` is only trustworthy against the rows because both come from
-  // one snapshot, and nothing in the read itself enforces that — the mock
-  // resolves the operation array at any isolation level, so a regression to the
-  // Prisma default would be invisible without pinning it here.
-  it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
-    db.household.findMany.mockResolvedValue([]);
-    db.household.count.mockResolvedValue(0);
-
-    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
-
-    const { operations, options } = batchTransactionCall(db);
-    expect(operations).toHaveLength(2);
-    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-  });
-
   it('getHouseholdById → read', async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
@@ -442,148 +427,6 @@ describe('HouseholdService', () => {
     expect(permissions.invalidateUsers).not.toHaveBeenCalled();
   });
 
-  it('reads exclude soft-deleted households (deletedAt: null filter)', async () => {
-    db.household.findMany.mockResolvedValue([]);
-    db.household.count.mockResolvedValue(0);
-
-    await service.getHouseholdsForUser(paginationQuery({ limit: 10 }));
-
-    expect(db.household.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
-    );
-  });
-
-  describe('getHouseholdsForMember (#364)', () => {
-    beforeEach(() => {
-      db.household.findMany.mockResolvedValue([]);
-      db.household.count.mockResolvedValue(0);
-    });
-
-    // D-364-2. The point of the route: `read:households:friends` puts a
-    // friend's `Friends`-visible household in the ability conditions, so scope
-    // that leaned on those conditions alone would return households the caller
-    // holds no membership in — and the client's "absent means removed"
-    // reconcile would be guessing again.
-    it('scopes to the actor\u2019s own HouseholdMember rows', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      expect(db.household.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ members: { some: { userId: 'user-1' } } }),
-        }),
-      );
-    });
-
-    // D-364-3. The membership clause NARROWS; it never replaces the ability
-    // conditions. For an `apiKey` actor `getCurrentResourceConditions` returns
-    // one clause per ability and effective access is the floor of key ∩ owner,
-    // so dropping them here would let a narrowly-scoped key read the owner's
-    // whole membership list.
-    it('intersects the membership clause with the read conditions rather than replacing them', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
-      expect(db.household.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) }),
-      );
-    });
-
-    // D-364-5. `deleteHousehold` soft-deletes the household and deliberately
-    // retains its member rows, so the membership clause alone still matches a
-    // dead household. Without this filter "absent means removed" breaks in the
-    // one direction the client cannot detect.
-    it('excludes soft-deleted households, whose member rows survive the delete', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      expect(db.household.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ deletedAt: null }) }),
-      );
-    });
-
-    // Same reasoning as the sibling read: `total` is only trustworthy against
-    // the rows it is sent with, and the mock resolves the operation array at
-    // any isolation level, so a regression to the Prisma default (READ
-    // COMMITTED) would otherwise be invisible.
-    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
-      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-    });
-
-    // The count must see the membership clause too, or `total` describes a
-    // different population than the rows and the client pages through a number
-    // that was never true for it.
-    it('counts over the same where clause as the rows', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      const [findManyArgs] = db.household.findMany.mock.calls[0] as [{ where: unknown }];
-      expect(db.household.count).toHaveBeenCalledWith({ where: findManyArgs.where });
-    });
-
-    // A page boundary needs a total order; `createdAt` alone lets rows created
-    // in one transaction share a key and drift between requests.
-    it('orders totally, so pages cannot drift between requests', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ limit: 10 }));
-
-      expect(db.household.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
-      );
-    });
-
-    it('applies the requested page window', async () => {
-      await service.getHouseholdsForMember(paginationQuery({ page: 3, limit: 10 }));
-
-      expect(db.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
-    });
-
-    // `getActingUserId` phrases its rejection as being about user-attributed
-    // WRITES and does not localise it. Accurate for its usual callers, wrong on
-    // a GET — a caller told they "cannot perform writes" by a list endpoint
-    // looks for a bug that is not there.
-    //
-    // Asserted negatively on purpose: `t()` is inert outside an initialised
-    // i18n context, so this spec cannot compare against the resolved string.
-    // What it CAN pin is that the write-flavoured message does not reach the
-    // caller, which is the regression worth catching.
-    it('does not answer a read with a message about writes', async () => {
-      abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
-      });
-
-      const rejection: unknown = await service
-        .getHouseholdsForMember(paginationQuery({ limit: 10 }))
-        .catch((error: unknown) => error);
-
-      expect(rejection).toBeInstanceOf(ForbiddenException);
-      expect((rejection as Error).message).not.toContain('user-attributed writes');
-    });
-
-    // A MISSING actor is not a denied one: `getActingUserId` throws a plain
-    // Error when nothing primed the context, which is a programmer error and
-    // must stay a 500 rather than being laundered into a 403.
-    it('lets an unprimed context through as the programmer error it is', async () => {
-      const unprimed = new Error('getActingUserId called with no actor in context');
-      abilityService.getActingUserId.mockImplementation(() => {
-        throw unprimed;
-      });
-
-      await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.toThrow(unprimed);
-      await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.not.toThrow(
-        ForbiddenException,
-      );
-    });
-
-    it('surfaces the empty-conditions Forbidden backstop', async () => {
-      abilityService.getCurrentResourceConditions.mockImplementation(() => {
-        throw new ForbiddenException();
-      });
-
-      await expect(service.getHouseholdsForMember(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
-    });
-  });
-
   /**
    * #417, and the reason it converted two routes rather than the one it named.
    *
@@ -595,17 +438,19 @@ describe('HouseholdService', () => {
    * touched. Converting one household list and leaving the other is therefore
    * not a partial improvement; it is an outage in the half left behind.
    *
-   * Both reads are held to the same facts here for that reason. What is
-   * specific to the membership-scoped route stays in its own #364 block.
+   * Both reads are held to the same facts here for that reason, and nothing
+   * about them differs any more, so every list fact lives in this table: #420
+   * deletes one row of it rather than a block of coverage `GET /households`
+   * also depends on.
    */
   describe.each([
     [
       'getHouseholdsForUser',
-      (subject: HouseholdService) => subject.getHouseholdsForUser(paginationQuery({ limit: 10 })),
+      (subject: HouseholdService, query = paginationQuery({ limit: 10 })) => subject.getHouseholdsForUser(query),
     ],
     [
       'getHouseholdsForMember',
-      (subject: HouseholdService) => subject.getHouseholdsForMember(paginationQuery({ limit: 10 })),
+      (subject: HouseholdService, query = paginationQuery({ limit: 10 })) => subject.getHouseholdsForMember(query),
     ],
   ] as const)('%s, as a converted household list', (_name, read) => {
     beforeEach(() => {
@@ -629,6 +474,12 @@ describe('HouseholdService', () => {
     // `Friends`-visible households as well, and staff every household on the
     // server, with `pagination.total` scoped the same way so a client could
     // not tell which contract it had been given.
+    //
+    // The other two halves stay as well. `deletedAt: null`, because a soft
+    // delete keeps the household's member rows, so the membership clause alone
+    // still matches a dead household. The ceiling, because for an `apiKey`
+    // actor it carries the key ∩ owner floor, and dropping it would widen a
+    // narrow key to the owner's whole membership list.
     it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
       await read(service);
 
@@ -638,6 +489,45 @@ describe('HouseholdService', () => {
           where: expect.objectContaining({ deletedAt: null, members: { some: { userId: 'user-1' } }, AND: [COND] }),
         }),
       );
+    });
+
+    // #230: `total` is only trustworthy against the rows because both come
+    // from one snapshot, and nothing in the read itself enforces that — the
+    // mock resolves the operation array at any isolation level, so a
+    // regression to the Prisma default would be invisible without pinning it
+    // here.
+    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+      await read(service);
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // The count must see the membership clause too, or `total` describes a
+    // different population than the rows and the client pages through a number
+    // that was never true for it.
+    it('counts over the same where clause as the rows', async () => {
+      await read(service);
+
+      const [findManyArgs] = db.household.findMany.mock.calls[0] as [{ where: unknown }];
+      expect(db.household.count).toHaveBeenCalledWith({ where: findManyArgs.where });
+    });
+
+    // A page boundary needs a total order; `createdAt` alone lets rows created
+    // in one transaction share a key and drift between requests.
+    it('orders totally, so pages cannot drift between requests', async () => {
+      await read(service);
+
+      expect(db.household.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }),
+      );
+    });
+
+    it('applies the requested page window', async () => {
+      await read(service, paginationQuery({ page: 3, limit: 10 }));
+
+      expect(db.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 10 }));
     });
 
     // PROVISIONAL (#417). A first-person scope has no meaning for an actor
@@ -654,14 +544,47 @@ describe('HouseholdService', () => {
       await expect(read(service)).rejects.toThrow(ForbiddenException);
       expect(db.household.findMany).not.toHaveBeenCalled();
     });
-  });
 
-  it('surfaces the empty-conditions Forbidden backstop on reads', async () => {
-    abilityService.getCurrentResourceConditions.mockImplementation(() => {
-      throw new ForbiddenException();
+    // `getActingUserId` phrases its rejection as being about user-attributed
+    // WRITES and does not localise it. Accurate for its usual callers, wrong on
+    // a GET — a caller told they "cannot perform writes" by a list endpoint
+    // looks for a bug that is not there.
+    //
+    // Asserted negatively on purpose: `t()` is inert outside an initialised
+    // i18n context, so this spec cannot compare against the resolved string.
+    // What it CAN pin is that the write-flavoured message does not reach the
+    // caller, which is the regression worth catching.
+    it('does not answer a read with a message about writes', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
+      });
+
+      const rejection: unknown = await read(service).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as Error).message).not.toContain('user-attributed writes');
     });
 
-    await expect(service.getHouseholdsForUser(paginationQuery({ limit: 10 }))).rejects.toThrow(ForbiddenException);
+    // A MISSING actor is not a denied one: `getActingUserId` throws a plain
+    // Error when nothing primed the context, which is a programmer error and
+    // must stay a 500 rather than being laundered into a 403.
+    it('lets an unprimed context through as the programmer error it is', async () => {
+      const unprimed = new Error('getActingUserId called with no actor in context');
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw unprimed;
+      });
+
+      await expect(read(service)).rejects.toThrow(unprimed);
+      await expect(read(service)).rejects.not.toThrow(ForbiddenException);
+    });
+
+    it('surfaces the empty-conditions Forbidden backstop', async () => {
+      abilityService.getCurrentResourceConditions.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(read(service)).rejects.toThrow(ForbiddenException);
+    });
   });
 });
 

@@ -1,4 +1,6 @@
+import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
@@ -66,9 +68,9 @@ describe('HouseholdController (no-Session delegation)', () => {
     });
   });
 
-  // The two reads must not be crossed: `/households/mine` answering from the
-  // role-widened query would hand an admin every household under a route whose
-  // whole contract is that absence means "you were removed".
+  // The two reads answer identically since #417, but each route keeps its own
+  // service method until #420 deletes `/mine`, so that removal touches one
+  // handler and one method and nothing `GET /households` reaches.
   it('keeps the two reads on separate service methods', async () => {
     await firstValueFrom(controller.getHouseholdsForMember(PAGINATION));
     expect(service.getHouseholdsForUser).not.toHaveBeenCalled();
@@ -76,6 +78,20 @@ describe('HouseholdController (no-Session delegation)', () => {
     await firstValueFrom(controller.getHouseholdsForUser(PAGINATION));
     expect(service.getHouseholdsForMember).toHaveBeenCalledTimes(1);
   });
+
+  // The service composes the `Household` scope; the envelope is where the
+  // guard checks for it, under the resource type the handler passes. Built
+  // inside a request with nothing composed, a `Household` envelope must fail.
+  // A handler passing a type still in `PENDING_SCOPE_SWEEP` would pass here
+  // instead, which switches the guard off for that route without a sound.
+  it.each(['getHouseholdsForUser', 'getHouseholdsForMember'] as const)(
+    '%s builds its envelope under the Household scope guard',
+    async (handler) => {
+      await expect(
+        ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller[handler](PAGINATION))),
+      ).rejects.toThrow(ListScopeNotComposedError);
+    },
+  );
 
   /**
    * Nest matches routes in declaration order, so `@Get(':id')` declared above

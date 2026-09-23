@@ -451,7 +451,9 @@ export class HouseholdService {
    *
    * {@link getHouseholdsForUser} now answers identically (#417), so this
    * route is redundant and #420 removes it. It converted in the same change as
-   * its sibling rather than after it: see {@link paginateOwnHouseholds}.
+   * its sibling, not after it, because the envelope guard is keyed per resource
+   * type per request: with `Household` out of `PENDING_SCOPE_SWEEP`, a sibling
+   * still reading on its ceiling alone answers 500.
    */
   async getHouseholdsForMember(pagination: PaginationQueryDto): Promise<PaginatedRows<HouseholdWithRelations>> {
     return this.paginateOwnHouseholds(pagination);

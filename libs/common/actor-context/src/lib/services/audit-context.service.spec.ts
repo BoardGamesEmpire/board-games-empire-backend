@@ -1,6 +1,7 @@
+import { ForbiddenException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
-import type { Actor } from '../types';
+import { SERVER_PLUGIN_UNIT, type Actor } from '../types';
 import { ACTOR_CLS_KEY, AuditContextService, CORRELATION_ID_CLS_KEY, SOURCE_CLS_KEY } from './audit-context.service';
 
 describe('AuditContextService', () => {
@@ -73,6 +74,52 @@ describe('AuditContextService', () => {
     it('throws when no actor is populated', async () => {
       await cls.run(() => {
         expect(() => service.getActorOrThrow()).toThrow(/populated CLS scope/);
+      });
+    });
+  });
+
+  // `resolveScopeSubjectId` turns this refusal into the 403 a first-person
+  // list read gives an actor with no user behind it (#417). No HTTP request
+  // arrives as one of those kinds, so this is the only place the real switch
+  // is pinned: were it to answer with an id instead, those reads would return
+  // an empty page, telling a client its memberships had been removed.
+  describe('getActingUserId', () => {
+    it.each<[string, Actor]>([
+      ['user', { kind: 'user', userId: 'user-1' }],
+      ['anonymous', { kind: 'anonymous', userId: 'user-1' }],
+      ['apiKey', { kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-1' }],
+    ])('returns the backing user of a %s actor', async (_kind, actor) => {
+      await cls.run(() => {
+        cls.set(ACTOR_CLS_KEY, actor);
+        expect(service.getActingUserId()).toBe('user-1');
+      });
+    });
+
+    // The plugin carries a user trigger on purpose: acting on a user's behalf
+    // does not make the user its subject until polymorphic attribution exists.
+    it.each<[string, Actor]>([
+      [
+        'plugin',
+        {
+          kind: 'plugin',
+          pluginId: 'plugin-foo',
+          unit: SERVER_PLUGIN_UNIT,
+          trigger: { kind: 'user', userId: 'user-1' },
+        },
+      ],
+      ['system', { kind: 'system', reason: 'migration' }],
+      ['external', { kind: 'external', system: 'gateway', identifier: 'gateway-bgg' }],
+    ])('refuses a %s actor with a 403 rather than answering with an id', async (_kind, actor) => {
+      await cls.run(() => {
+        cls.set(ACTOR_CLS_KEY, actor);
+        expect(() => service.getActingUserId()).toThrow(ForbiddenException);
+      });
+    });
+
+    it('fails with a plain error, not a 403, when no actor is populated', async () => {
+      await cls.run(() => {
+        expect(() => service.getActingUserId()).toThrow('getActingUserId called with no actor in context');
+        expect(() => service.getActingUserId()).not.toThrow(ForbiddenException);
       });
     });
   });
