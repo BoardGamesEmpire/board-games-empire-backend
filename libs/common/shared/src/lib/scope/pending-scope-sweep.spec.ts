@@ -19,7 +19,6 @@ describe('PENDING_SCOPE_SWEEP', () => {
     'Game',
     'GameCollection',
     'GameGateway',
-    'Household',
     'HouseholdMember',
     'Job',
     'MediaContribution',

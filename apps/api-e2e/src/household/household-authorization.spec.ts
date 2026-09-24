@@ -48,6 +48,19 @@ describe('household authorization', () => {
   const listOwnHouseholds = (actor: SessionActor) => request(baseUrl).get(`${HOUSEHOLDS_PATH}/mine`).set(actor.headers);
 
   /**
+   * Both first-person lists for one actor, labelled for the envelope reader.
+   * Paired rather than asserted one at a time because the guard behind the
+   * invariant is per resource type per REQUEST: a household list left on its
+   * permission ceiling does not merely return too much, it answers 500 — so a
+   * regression can land on either route alone.
+   */
+  const bothLists = (actor: SessionActor, who: string) =>
+    [
+      [`GET /api/households as ${who}`, listHouseholds(actor)],
+      [`GET /api/households/mine as ${who}`, listOwnHouseholds(actor)],
+    ] as const;
+
+  /**
    * An accepted friendship, arranged directly (no fixture covers this yet).
    * `pairKey` is the canonical undirected key the model requires the service to
    * maintain — two sorted ids joined — so a row written here is indistinguishable
@@ -109,11 +122,13 @@ describe('household authorization', () => {
       await readHousehold(actor, `missing-${randomUUID()}`).expect(404);
     });
 
-    // Titled for what it actually pins. This read is NOT membership-scoped: a
-    // plain user also receives friends' `Friends`-visible households, and these
-    // two actors are strangers, so the union simply never arises here. The
-    // membership-scoped read and the friends case are covered below (#364).
-    it('scopes the list to what the actor may read, and a non-member sees absence', async () => {
+    // Survives #417 with its assertions intact, and is worth keeping for that
+    // reason: these two actors are strangers, so the read returned the owner
+    // their own household both before the route was scoped and after. What
+    // moved is everything the union used to add on top — friends'
+    // `Friends`-visible households, and every household on the server for
+    // staff — which is asserted below.
+    it('lists only the actor\u2019s own households, and a non-member sees absence', async () => {
       const owner = await actors.user();
       const outsider = await actors.user();
 
@@ -125,9 +140,9 @@ describe('household authorization', () => {
       // rather than every household on the server.
       expect(ownList.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
 
-      // The same rule that yields 403 on the detail route yields absence here:
-      // a scoped `findMany` has no existence probe to disambiguate against, so
-      // an unauthorized household is simply not in the page.
+      // Absence, where the detail route would answer 403: a list has no
+      // existence probe to disambiguate against, so a household outside the
+      // caller's memberships is simply not in the page.
       const outsiderList = listEnvelope(await listHouseholds(outsider).expect(200), 'GET /api/households as outsider');
       expect(outsiderList.households).toEqual([]);
       expect(outsiderList.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
@@ -135,41 +150,82 @@ describe('household authorization', () => {
   });
 
   /**
-   * #364. `GET /households` answers a different question depending on who asks;
-   * `GET /households/mine` answers the same one for everybody. These four tests
-   * are the difference — each one passes trivially against the role-widened
-   * read, EXCEPT against the thing it is actually pinning.
+   * #364, rewritten by #417 rather than retired. Until #417 these routes were a
+   * CONTRAST: `GET /households` widened with the caller's role and friendships,
+   * `GET /households/mine` did not, and two of the tests below asserted that
+   * widening as correct. Both routes are first-person now — the caller's own
+   * memberships, the same question for everybody — so what was the control has
+   * become the invariant.
+   *
+   * Every list assertion runs against BOTH routes — see {@link bothLists} for
+   * why one of them alone would not be enough. The exception is the last test,
+   * which is about `/mine` as a route (its place ahead of `:id`) and leaves
+   * with it in #420.
    */
-  describe('the membership-scoped list', () => {
-    it('gives an elevated caller only their own memberships, where the wide list gives them everything', async () => {
-      // Rosters before anyone's first authenticated request (the ordering rule).
-      const admin = await actors.admin();
-      const stranger = await actors.user();
+  describe('the first-person household lists', () => {
+    it('gives every caller only their own memberships, however elevated', async () => {
+      // Every actor before any of them issues an authenticated request, then
+      // the rosters (the ordering rule). Concurrent factory calls share one
+      // in-flight Owner mint, so nobody else can land in the Owner seat.
+      const [serverOwner, admin, moderator, plainUser, stranger] = await Promise.all([
+        actors.owner(),
+        actors.admin(),
+        actors.moderator(),
+        actors.user(),
+        actors.user(),
+      ]);
 
-      const belongsToAdmin = await actors.householdWithMembers({ owner: admin, name: 'The admin lives here' });
-      const belongsToNobodyRelevant = await actors.householdWithMembers({
-        owner: stranger,
-        name: 'Nothing to do with the admin',
-      });
+      const [ofAdmin, ofModerator, ofPlainUser, strangers] = await Promise.all([
+        actors.householdWithMembers({ owner: admin, name: 'The admin lives here' }),
+        actors.householdWithMembers({ owner: moderator, name: 'The moderator lives here' }),
+        actors.householdWithMembers({ owner: plainUser, name: 'An ordinary household' }),
+        // A fourth household none of them belongs to, so "only their own" is a
+        // real exclusion rather than an artefact of there being nothing else.
+        actors.householdWithMembers({ owner: stranger, name: 'Nothing to do with any of them' }),
+      ]);
 
-      const scoped = listEnvelope(await listOwnHouseholds(admin).expect(200), 'GET /api/households/mine as admin');
-      expect(scoped.households.map((household) => household.id)).toEqual([belongsToAdmin.household.id]);
-      expect(scoped.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
+      // The control. Every list assertion below would pass unchanged for an
+      // actor whose elevation never took effect, so it is proven here rather
+      // than assumed: the detail route still reads on the ceiling alone, and a
+      // stranger's household is exactly where a staff ceiling shows. Admin and
+      // Moderator reach it through `read:public_content` — an unconditioned
+      // `read` on `subject: 'all'`, which before #417 also handed each of them
+      // all four households as a LIST — and the Owner through `manage:all`.
+      await readHousehold(admin, strangers.household.id).expect(200);
+      await readHousehold(moderator, strangers.household.id).expect(200);
+      await readHousehold(serverOwner, strangers.household.id).expect(200);
+      await readHousehold(plainUser, strangers.household.id).expect(403);
 
-      // The control. Without this the test above would also pass if `/mine` had
-      // simply been wired to the widened read on a server with one household.
-      const wide = listEnvelope(await listHouseholds(admin).expect(200), 'GET /api/households as admin');
-      expect(wide.households.map((household) => household.id)).toEqual(
-        expect.arrayContaining([belongsToAdmin.household.id, belongsToNobodyRelevant.household.id]),
-      );
-      expect(wide.pagination.total).toBeGreaterThan(scoped.pagination.total);
+      const ownHouseholds = [
+        ['an admin', admin, ofAdmin],
+        ['a moderator', moderator, ofModerator],
+        ['a plain user', plainUser, ofPlainUser],
+      ] as const;
+
+      for (const [who, actor, own] of ownHouseholds) {
+        for (const [label, list] of bothLists(actor, who)) {
+          const page = listEnvelope(await list.expect(200), label);
+          expect(page.households.map((household) => household.id)).toEqual([own.household.id]);
+          expect(page.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
+        }
+      }
+
+      // The sharpest statement of the change, and why the Owner sentinel is
+      // dragged into this test: it holds `manage:all`, belongs to no household,
+      // and therefore now receives nothing at all. Four households exist.
+      for (const [label, list] of bothLists(serverOwner, 'the server Owner')) {
+        const page = listEnvelope(await list.expect(200), label);
+        expect(page.households).toEqual([]);
+        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+      }
     });
 
-    it("omits a friend's Friends-visible household, which the wide list includes", async () => {
-      // The case `pagination.total` cannot detect at all: this household is in
-      // an ordinary user's list with no membership behind it, so a client
-      // treating absence as removal would be wrong about a household it never
-      // belonged to. D-364-2 is what excludes it.
+    it("omits a friend's Friends-visible household from both lists, while the detail route still admits it", async () => {
+      // The case `pagination.total` cannot detect at all: before #417 this
+      // household appeared in an ordinary user's list with no membership behind
+      // it, so a client treating absence as removal would have been wrong about
+      // a household it never belonged to. #364 excluded it from `/mine`; #417
+      // excludes it from both.
       const friend = await actors.user();
       const viewer = await actors.user();
 
@@ -180,19 +236,28 @@ describe('household authorization', () => {
       });
       await befriend(viewer, friend);
 
-      const wide = listEnvelope(await listHouseholds(viewer).expect(200), 'GET /api/households as a friend');
-      expect(wide.households.map((household) => household.id)).toEqual([shared.household.id]);
+      for (const [label, list] of bothLists(viewer, 'a friend')) {
+        const page = listEnvelope(await list.expect(200), label);
+        expect(page.households).toEqual([]);
+        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+      }
 
-      const scoped = listEnvelope(await listOwnHouseholds(viewer).expect(200), 'GET /api/households/mine as a friend');
-      expect(scoped.households).toEqual([]);
-      expect(scoped.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+      // #417: friend visibility is NARROWED, not withdrawn, and this is the
+      // assertion that makes deferring #485 safe rather than merely convenient.
+      // `read:households:friends` still reaches the household through the
+      // detail route — it has only lost its effect on a first-person LIST. A
+      // 403 here would mean the grant had become dead weight and the
+      // path-parameterized route were owed immediately, not eventually.
+      await readHousehold(viewer, shared.household.id).expect(200);
     });
 
-    it('omits a soft-deleted household even though the caller\u2019s member row survives it', async () => {
-      // D-364-5. `deleteHousehold` retains member rows by design, so the
+    it('omits a soft-deleted household from both lists even though the caller\u2019s member row survives it', async () => {
+      // #364. `deleteHousehold` retains member rows by design, so the
       // membership clause on its own still matches a dead household — the
       // member row is asserted precisely so this cannot be mistaken for a
-      // fixture that tore itself down.
+      // fixture that tore itself down. Both routes, because the filter lives in
+      // the scope they share, and `GET /households` is the one that outlives
+      // #420.
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'About to be deleted' });
 
@@ -204,12 +269,11 @@ describe('household authorization', () => {
       });
       expect(survivingMembership).not.toBeNull();
 
-      const scoped = listEnvelope(
-        await listOwnHouseholds(owner).expect(200),
-        'GET /api/households/mine after a soft delete',
-      );
-      expect(scoped.households).toEqual([]);
-      expect(scoped.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+      for (const [label, list] of bothLists(owner, 'its owner, after a soft delete')) {
+        const page = listEnvelope(await list.expect(200), label);
+        expect(page.households).toEqual([]);
+        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
+      }
     });
 
     it('is reachable at all, rather than captured by the :id detail route', async () => {

@@ -166,6 +166,20 @@ describe('the shipped catalogs', () => {
       }
     });
 
+    it.each(
+      Object.entries(ROLE_SCOPE)
+        .filter(([, scope]) => scope !== 'global')
+        .map(([roleName]) => roleName as SystemRole),
+    )('give %s nothing User already holds', (roleName) => {
+      // Every user ability includes `User`, so a scoped role's copy of one of
+      // its slugs grants nothing. Where the condition names the actor, the copy
+      // repeats `User`'s clause once per membership or attendance in that
+      // ceiling.
+      const userSlugs = ROLE_PERMISSION_CATALOG[SystemRole.User];
+
+      expect(ROLE_PERMISSION_CATALOG[roleName].filter((slug) => userSlugs.includes(slug))).toEqual([]);
+    });
+
     it('give the staff roles no wildcard beyond the read-only one — `manage` on `all` is Owner alone', () => {
       const wildcards = PERMISSION_CATALOG.filter(({ subject }) => subject === 'all').map(({ slug }) => slug);
       const heldBy = (role: SystemRole) => ROLE_PERMISSION_CATALOG[role].filter((slug) => wildcards.includes(slug));

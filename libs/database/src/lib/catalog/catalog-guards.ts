@@ -158,11 +158,14 @@ export function parseTemplate(conditions: unknown): ParsedTemplate {
  * holding role is SCOPED, and the everyone role does not hold it. All three
  * clauses are load-bearing: without the first, every scoped grant is flagged;
  * without the second, `read:audit_log` is flagged though only global roles
- * hold it; without the third, `read:game_play_session` is flagged though plain
- * `User` holds it, which is the declaration that global reach is intended.
- * Intent is derived from that grant rather than from a marker on the
- * permission, because the everyone role is by construction available to
- * everyone (#234).
+ * hold it; without the third, a scoped role repeating an unconditioned slug
+ * plain `User` holds is flagged, though `User` holding it is the declaration
+ * that global reach is intended. Intent is derived from that grant rather than
+ * from a marker on the permission, because the everyone role is by
+ * construction available to everyone (#234). No shipped scoped role repeats a
+ * `User` slug — the copy grants nothing, and the role catalog's spec forbids it
+ * (#417) — so the third clause keeps a duplicate from reading as a fail-open
+ * grant rather than excusing a live one.
  *
  * A template with problems is skipped here: whether it binds anything cannot
  * be judged until `findTemplateDefects` is clean.

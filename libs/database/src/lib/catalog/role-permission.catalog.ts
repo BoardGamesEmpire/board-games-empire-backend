@@ -75,6 +75,14 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * belongs to the event roles alone, because the household pass never supplies
  * `{{ eventId }}` (#436, #432).
  *
+ * A household or event role holds nothing `User` holds. Every user ability is
+ * built in one pass that includes `User`, so a scoped role's copy of one of
+ * its slugs grants nothing. Where the condition names the actor rather than
+ * the scope (`read:households`, `read:game_collection`), the copy renders
+ * `User`'s clause again for every membership or attendance: one more `OR`
+ * term per scope in that resource's ceiling. On households that was half of
+ * the per-membership planning cost measured on #417.
+ *
  * Insertion order is the seed's assignment order.
  */
 
@@ -82,12 +90,10 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event_game:household',
   'create:event_invite:household',
   'create:event_occurrence:household',
-  'create:event',
   'create:game_play_session:household',
   'create:household_invite',
   'create:household_role',
   'create:play_record:household',
-  'create:rule_variant',
   'delete:event_game:household',
   'delete:event_occurrence:household',
   'manage:quota:household_member',
@@ -97,7 +103,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'read:quota:household',
   'delete:game_play_session:household',
   'delete:household',
-  'delete:rule_variant',
   'manage:attendee_game_list:household',
   'manage:event_attendee:household',
   'manage:household_member',
@@ -115,9 +120,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   // The Event row itself. Without it an owner updates a household event and
   // manages its attendees but cannot read the event unless attending it.
   'read:event:participant:household',
-  'read:game_collection',
   'read:household',
-  'read:households',
   'read:household_member',
   'update:event_game_nomination:resolve:household',
   'update:event_occurrence:cancel:household',
@@ -129,7 +132,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:game_play_session:household',
   'update:household',
   'update:household_role:transfer-ownership',
-  'update:rule_variant',
 ];
 
 const HOUSEHOLD_OWNER_ONLY: readonly PermissionSlug[] = [
@@ -146,7 +148,6 @@ const EVENT_HOST: readonly PermissionSlug[] = [
   'manage:event_attendee',
   'read:event_attendee',
   'read:event:participant',
-  'read:game_play_session',
   'update:event_attendee:status',
   'update:event:status:archive-event',
   'update:event:status:cancel-event',
@@ -360,8 +361,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.HouseholdMember]: [
     'create:game_play_session:household',
     'create:play_record:household',
-    'create:rule_variant',
-    'create:session_player:join',
     'read:attendee_game_list:household',
     'read:event_attendee:household',
     'read:event_availability_vote:household',
@@ -373,19 +372,13 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence:household',
     'read:event_policy:household',
     'read:event:participant:household',
-    'read:game_collection',
-    'read:game_play_session',
     'read:household',
-    'read:households',
   ],
   [SystemRole.HouseholdGuest]: [
-    'create:session_player:join',
     'delete:household_member:leave',
     'read:event:participant:household',
-    'read:game_play_session',
     'read:household',
     'read:household_member',
-    'read:households',
   ],
   [SystemRole.EventHost]: EVENT_HOST,
   [SystemRole.EventCoHost]: EVENT_HOST.filter((slug) => !EVENT_HOST_ONLY.includes(slug)),
@@ -439,8 +432,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:game_play_session',
     'create:media:upload',
     'create:play_record',
-    'create:rule_variant',
-    'create:session_player:join',
     'delete:attendee_game_list',
     'read:attendee_game_list',
     'read:event_attendee',
@@ -451,8 +442,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
-    'read:game_collection',
-    'read:game_play_session',
     'update:event_attendee:status:self',
     'update:event_game_nomination:withdraw',
     'update:game_play_session',
@@ -460,7 +449,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.EventGuest]: [
     'create:attendee_game_list',
     'create:event_availability_vote',
-    'create:session_player:join',
     'delete:attendee_game_list',
     'read:attendee_game_list',
     'read:event_attendee',
@@ -471,7 +459,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
-    'read:game_play_session',
     'update:event_attendee:status:self',
   ],
   [SystemRole.EventSpectator]: [
@@ -485,7 +472,6 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
-    'read:game_play_session',
   ],
 };
 

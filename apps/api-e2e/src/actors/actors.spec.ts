@@ -133,6 +133,12 @@ describe('actor fixtures (#256)', () => {
 
       await expect(globalRoleNames(admin.user.id)).resolves.toEqual([SystemRole.Admin, SystemRole.User].sort());
     });
+
+    it('grants a server-scope moderator the Moderator catalog role additively', async () => {
+      const moderator = await actors.moderator();
+
+      await expect(globalRoleNames(moderator.user.id)).resolves.toEqual([SystemRole.Moderator, SystemRole.User].sort());
+    });
   });
 
   describe('householdWithMembers', () => {
