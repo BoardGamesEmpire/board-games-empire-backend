@@ -158,11 +158,24 @@ describe('AbilityService', () => {
         expect(abilityContext.prime).toHaveBeenCalledWith([]);
       });
 
-      it('primes [] for a deferred actor kind (anonymous) without resolving', async () => {
+      it('resolves and primes an anonymous actor through its own row, exactly as a user (#484)', async () => {
+        const anonymousAbility = ability([]);
         auditContext.getActor.mockReturnValue({ kind: 'anonymous', userId: 'anon-1' });
+        permissionsService.getUserRoleGraph.mockResolvedValue({ id: 'anon-1' } as UserWithRoles);
+        abilityFactory.createForUser.mockReturnValue(anonymousAbility);
 
         await service.primeCurrentActor();
 
+        expect(permissionsService.getUserRoleGraph).toHaveBeenCalledWith('anon-1');
+        expect(abilityContext.prime).toHaveBeenCalledWith([anonymousAbility]);
+      });
+
+      it('primes [] for an actor kind with no ability surface (external) without resolving', async () => {
+        auditContext.getActor.mockReturnValue({ kind: 'external', system: 'igdb-gateway', identifier: 'svc-1' });
+
+        await service.primeCurrentActor();
+
+        expect(permissionsService.getUserRoleGraph).not.toHaveBeenCalled();
         expect(abilityContext.prime).toHaveBeenCalledWith([]);
       });
 
@@ -254,10 +267,22 @@ describe('AbilityService', () => {
       expect(result).toEqual([systemAbility]);
     });
 
-    it('anonymous → throws (deferred, never returns [])', async () => {
-      const actor: Actor = { kind: 'anonymous', userId: 'anon-1' };
+    it('anonymous → [userAbility] built from the anonymous user’s own row graph (#484)', async () => {
+      // Through the row, not a lookup by role name: a guest's event rights live
+      // on its attendee row, and only the row's graph carries them. What keeps
+      // this safe is what provisioning writes there — `AnonymousUser`, never
+      // `User` — not anything this branch leaves out.
+      const graph = { id: 'anon-1' } as UserWithRoles;
+      const anonymousAbility = ability([]);
+      permissionsService.getUserRoleGraph.mockResolvedValue(graph);
+      abilityFactory.createForUser.mockReturnValue(anonymousAbility);
 
-      await expect(service.resolveAbilitiesForActor(actor)).rejects.toThrow(/not implemented/i);
+      const actor: Actor = { kind: 'anonymous', userId: 'anon-1' };
+      const result = await service.resolveAbilitiesForActor(actor);
+
+      expect(permissionsService.getUserRoleGraph).toHaveBeenCalledWith('anon-1');
+      expect(abilityFactory.createForUser).toHaveBeenCalledWith(graph);
+      expect(result).toEqual([anonymousAbility]);
     });
 
     it('external → throws (audit-only, no query surface)', async () => {

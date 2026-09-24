@@ -61,9 +61,9 @@ describe('PoliciesGuard', () => {
   });
 
   it('denies (403) when no abilities are primed — must not vacuously pass [].every(...)', () => {
-    // Covers unauthenticated and not-yet-supported actor kinds alike: both prime
-    // an empty array, which the guard must treat as a denial rather than letting
-    // `[].every(...) === true` grant access.
+    // Covers a request with no actor and a kind with no ability surface alike:
+    // both prime an empty array, which the guard must treat as a denial rather
+    // than letting `[].every(...) === true` grant access.
     withPolicies([canReadHousehold]);
     abilityService.getCurrentAbilities.mockReturnValue([]);
 

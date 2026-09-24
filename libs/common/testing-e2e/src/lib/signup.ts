@@ -10,6 +10,13 @@ import { randomUUID } from 'node:crypto';
 export const SIGN_UP_EMAIL_PATH = '/api/auth/sign-up/email';
 
 /**
+ * The mounted anonymous-plugin sign-in route (`anonymous()` in `authFactory`).
+ * It creates a `User` row flagged `isAnonymous` and opens a session for it;
+ * inlined for the same reason as {@link SIGN_UP_EMAIL_PATH}.
+ */
+export const SIGN_IN_ANONYMOUS_PATH = '/api/auth/sign-in/anonymous';
+
+/**
  * The bearer() plugin returns the session token in this response header on
  * sign-up/sign-in. Preferred over the response body's `token` field because
  * the header is the plugin's documented transport for what a subsequent
@@ -94,9 +101,10 @@ function readBodyToken(body: unknown): string | undefined {
  * Resolves the session token from a signup/sign-in response: the
  * `set-auth-token` header when present (the bearer plugin's transport),
  * falling back to the body's `token` field. Failing to find either is a
- * configuration regression worth naming, not a bare undefined.
+ * configuration regression worth naming, not a bare undefined. `route` is the
+ * path that answered, so the failure names the flow that broke.
  */
-export function extractSessionToken(headers: Headers, body: unknown): string {
+export function extractSessionToken(headers: Headers, body: unknown, route: string): string {
   const headerToken = headers.get(SET_AUTH_TOKEN_HEADER);
   if (headerToken !== null && headerToken.length > 0) {
     return headerToken;
@@ -108,13 +116,13 @@ export function extractSessionToken(headers: Headers, body: unknown): string {
   }
 
   throw new Error(
-    `Signup succeeded but no session token was found: neither a '${SET_AUTH_TOKEN_HEADER}' response header ` +
+    `POST ${route} succeeded but no session token was found: neither a '${SET_AUTH_TOKEN_HEADER}' response header ` +
       `nor a 'token' field in the response body. Is the bearer() plugin still enabled in authFactory?`,
   );
 }
 
-/** Resolves the created user's id from the signup response body, loudly. */
-export function extractUserId(body: unknown): string {
+/** Resolves the created user's id from a signup/sign-in response body, loudly; `route` is the path that answered. */
+export function extractUserId(body: unknown, route: string): string {
   if (isRecord(body)) {
     const user = (body as UserBearingBody).user;
     // isRecord (not a bare undefined check) so a `{ user: null }` body gets
@@ -125,8 +133,8 @@ export function extractUserId(body: unknown): string {
   }
 
   throw new Error(
-    `Signup succeeded but the response body carried no 'user.id' — the BetterAuth response shape has changed; ` +
-      `update @bge/testing-e2e's signup parsing to match.`,
+    `POST ${route} succeeded but the response body carried no 'user.id' — the BetterAuth response shape has ` +
+      `changed; update the response parsing in @bge/testing-e2e's signup.ts to match.`,
   );
 }
 
@@ -211,10 +219,47 @@ export async function performSignup(
   const parsed: unknown = await response.json();
 
   return {
-    userId: extractUserId(parsed),
-    token: extractSessionToken(response.headers, parsed),
+    userId: extractUserId(parsed, SIGN_UP_EMAIL_PATH),
+    token: extractSessionToken(response.headers, parsed, SIGN_UP_EMAIL_PATH),
     username: prepared.username,
     email: prepared.email,
     password: prepared.password,
+  };
+}
+
+export interface AnonymousSignInResult {
+  readonly userId: string;
+  readonly token: string;
+}
+
+/**
+ * Signs an anonymous user in through the REAL wire path, for the reason
+ * {@link performSignup} gives: the `user.create.after` hook has to run in the
+ * server, where the provisioning listener is. The same explicit `Origin`, for
+ * the same reason. The caller still waits for provisioning.
+ */
+export async function performAnonymousSignIn(
+  baseUrl: string,
+  fetchFn: typeof fetch = fetch,
+): Promise<AnonymousSignInResult> {
+  const origin = trimTrailingSlash(baseUrl);
+
+  const response = await fetchFn(`${origin}${SIGN_IN_ANONYMOUS_PATH}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: origin },
+    body: JSON.stringify({}),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `POST ${SIGN_IN_ANONYMOUS_PATH} failed with status ${response.status}: ${await safeText(response)}`,
+    );
+  }
+
+  const parsed: unknown = await response.json();
+
+  return {
+    userId: extractUserId(parsed, SIGN_IN_ANONYMOUS_PATH),
+    token: extractSessionToken(response.headers, parsed, SIGN_IN_ANONYMOUS_PATH),
   };
 }

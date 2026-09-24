@@ -7,7 +7,7 @@ import {
   paginationQuery,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GameCollectionService } from './game-collection.service';
 
 const dependentRecordNotFound = () =>
@@ -42,15 +42,12 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
 describe('GameCollectionService', () => {
   let service: GameCollectionService;
   let db: MockDatabaseService;
-  let abilityService: jest.Mocked<
-    Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'getCurrentAbilities'>
-  >;
+  let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
 
   beforeEach(async () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue(ME),
-      getCurrentAbilities: jest.fn().mockReturnValue([{}]),
     };
 
     const ctx = await createTestingModuleWithDb({
@@ -179,31 +176,15 @@ describe('GameCollectionService', () => {
       expect(page.total).toBe(4);
     });
 
-    it('falls back to Public-only for an anonymous viewer', async () => {
-      abilityService.getCurrentAbilities.mockReturnValue([]);
-      db.gameCollection.findMany.mockResolvedValue([]);
-
-      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
-
-      expect(db.gameCollection.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ userId: 'user-2', deletedAt: null, visibility: Visibility.Public }),
-        }),
-      );
-      expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
-    });
-
-    it('counts only Public entries for an anonymous viewer', async () => {
-      abilityService.getCurrentAbilities.mockReturnValue([]);
-      db.gameCollection.findMany.mockResolvedValue([]);
-      db.gameCollection.count.mockResolvedValue(2);
-
-      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
-
-      expect(db.gameCollection.count).toHaveBeenCalledWith({
-        where: expect.objectContaining({ visibility: Visibility.Public }),
+    it('refuses a caller the ability layer refuses, rather than falling back to Public entries', async () => {
+      // No Public-only fallback any more (#484): anonymous callers read through
+      // their own role, and a refusal has to reach the client.
+      abilityService.getCurrentResourceConditions.mockImplementation(() => {
+        throw new ForbiddenException();
       });
-      expect(db.gameCollection.count.mock.calls[0][0]?.where).not.toHaveProperty('AND');
+
+      await expect(service.listForUser('user-2', paginationQuery({ limit: 20 }))).rejects.toThrow(ForbiddenException);
+      expect(db.gameCollection.findMany).not.toHaveBeenCalled();
     });
   });
 

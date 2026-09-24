@@ -30,7 +30,7 @@ export class PoliciesGuard implements CanActivate {
       return true;
     }
 
-    // Empty abilities (anonymous or not-yet-supported actor kinds) cannot
+    // Empty abilities (no actor, or a kind with no ability surface) cannot
     // satisfy any policy: deny rather than vacuously pass `[].every(...)`.
     const abilities = this.abilityService.getCurrentAbilities();
     if (abilities.length === 0) {

@@ -27,6 +27,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * supplies. Its rules mirror `AbilityFactory.assertTemplateWithinContext`, so
  * the catalog is held to the standard the plugin path enforces at runtime.
  *
+ * One guard judges a role rather than a pairing: every grant on `AnonymousUser`,
+ * which anyone who opens an anonymous session holds, must narrow the rows it
+ * reaches (#484). See {@link findUnboundedGrants}.
+ *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw
  * at import would have turned each into a boot failure; both ledgers in
@@ -85,6 +89,12 @@ export interface UnconditionedGlobalGrant {
   role: string;
   action: PermissionSeedDefinition['action'];
   subject: PermissionSeedDefinition['subject'];
+}
+
+/** A grant on a role that may hold only grants narrowing the rows they reach, that narrows nothing. */
+export interface UnboundedGrant {
+  slug: string;
+  role: string;
 }
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
@@ -337,6 +347,47 @@ export function findTemplateDefects(
       if (!known.includes(variable)) {
         findings.push({ slug, kind: 'unknown-variable', variable });
       }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * The floor guard (#484): every grant the floor role holds must carry a
+ * condition. It exists for `AnonymousUser`, the role anyone who opens an
+ * anonymous session holds, where an unconditioned grant would hand the whole
+ * table to the internet — the inverse of what the role is for.
+ *
+ * Neither unconditioned-grant guard can say this. Both skip any slug the
+ * everyone role holds, which is exactly where a floor role's slugs come from,
+ * and both count a static filter such as `{ visibility: 'Public' }` as
+ * unconditioned, which is exactly the shape a floor grant should take. The
+ * question here is only whether a grant narrows the rows at all, so a static
+ * filter passes, a template passes, and no other holder of the slug excuses
+ * anything.
+ *
+ * Non-empty is a tripwire, not a proof: `{ deletedAt: null }` is non-empty and
+ * still admits every live row. That is why the floor role's list is also
+ * pinned exactly in `role-permission.catalog.spec.ts`. Review catches an
+ * addition there; this catches the addition review is likeliest to wave
+ * through, a slug that looks harmless because `User` holds it.
+ */
+export function findUnboundedGrants(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  floorRole: string,
+): UnboundedGrant[] {
+  const bySlug = new Map(catalog.map((entry) => [entry.slug, entry] as const));
+  const findings: UnboundedGrant[] = [];
+
+  for (const slug of new Set(rolePermissions[floorRole] ?? [])) {
+    const entry = bySlug.get(slug);
+
+    // A slug the catalog does not define is refused at import by
+    // `assertRolePermissionCatalog`; there is nothing here to judge.
+    if (entry !== undefined && !hasBoundingConditions(entry.conditions)) {
+      findings.push({ slug, role: floorRole });
     }
   }
 

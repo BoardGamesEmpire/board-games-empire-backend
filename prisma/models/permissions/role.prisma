@@ -50,6 +50,7 @@ enum SystemRole {
   Admin
   Moderator
   User
+  AnonymousUser
 
   HouseholdOwner
   HouseholdAdmin

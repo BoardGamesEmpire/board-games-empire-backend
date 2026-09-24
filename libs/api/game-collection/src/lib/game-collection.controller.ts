@@ -5,7 +5,6 @@ import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { AllowAnonymous } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import {
@@ -55,12 +54,14 @@ export class GameCollectionController {
   @ApiOperation({
     summary: "List another user's visible collection",
     description:
-      'Entries filtered by visibility: household-shared, friend-shared, and public for authenticated ' +
-      'viewers; public only for anonymous viewers.',
+      'Entries filtered by visibility: household-shared, friend-shared, and public for signed-in viewers; ' +
+      'public only for an anonymous (guest) session. A session is required.',
   })
   @ApiParam({ name: 'userId', type: String })
   @ApiResponse({ status: Http.Ok, type: PaginatedGameCollectionResponse })
-  @AllowAnonymous()
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
   @Get('user/:userId')
   getUserCollection(@Param('userId') userId: string, @Query() query: ListUserGameCollectionsQueryDto) {
     return from(this.gameCollectionService.listForUser(userId, query)).pipe(
