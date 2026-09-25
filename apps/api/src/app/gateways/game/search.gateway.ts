@@ -111,9 +111,11 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     await client.join(this.searchRoom(client, dto.correlationId));
 
     // TODO: return observables and merge -- error killing one source shouldn't kill the whole search
-    await Promise.all([this.runLocalSearch(client, dto), this.runGatewaySearch(client, dto, search)]).finally(() => {
+    try {
+      await Promise.all([this.runLocalSearch(client, dto, search), this.runGatewaySearch(client, dto, search)]);
+    } finally {
       this.completeSearch(client, dto.correlationId, search);
-    });
+    }
   }
 
   /**
@@ -150,12 +152,21 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.log(`Search cancelled: correlationId=${dto.correlationId}`);
   }
 
-  private async runLocalSearch(client: Socket, options: SearchStartDto) {
+  private async runLocalSearch(client: Socket, options: SearchStartDto, search: Subscription) {
     if (options.includeLocal === false) {
       return Promise.resolve();
     }
 
     const source = 'local';
+
+    // A cancel stops the coordinator stream but cannot stop a query already in
+    // flight, and by the time it answers the id may belong to a new search in
+    // the same room. So a cancelled search sends nothing more.
+    const emit = <T>(event: string, payload: T): void => {
+      if (!search.closed) {
+        this.emit<T>(client, options.correlationId, event, payload);
+      }
+    };
 
     try {
       // No ability context is primed for a WebSocket message the way HTTP
@@ -177,20 +188,20 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
         options.offset,
       );
 
-      this.emit<WsSearchResultPayload>(client, options.correlationId, SearchEvents.SearchResult, {
+      emit<WsSearchResultPayload>(SearchEvents.SearchResult, {
         correlationId: options.correlationId,
         source,
         games: results,
       });
     } catch (err) {
       this.logger.error(`Local search failed for correlationId=${options.correlationId}`, err);
-      this.emit<WsSearchErrorPayload>(client, options.correlationId, SearchEvents.SearchError, {
+      emit<WsSearchErrorPayload>(SearchEvents.SearchError, {
         correlationId: options.correlationId,
         message: 'Local search failed',
         source,
       });
     } finally {
-      this.emit<WsSourceDonePayload>(client, options.correlationId, SearchEvents.SearchSourceDone, {
+      emit<WsSourceDonePayload>(SearchEvents.SearchSourceDone, {
         correlationId: options.correlationId,
         source,
       });

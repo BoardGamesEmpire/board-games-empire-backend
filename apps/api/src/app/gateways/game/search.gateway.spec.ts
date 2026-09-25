@@ -667,6 +667,26 @@ describe('GameSearchGateway', () => {
       expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
     });
 
+    it('sends nothing more for a cancelled search, even once its id belongs to a new one', async () => {
+      // The cancel cannot stop a local query already in flight, and the new
+      // search joins the same room.
+      const client = makeSocket(gateway);
+      const stale = deferred<unknown[]>();
+      db.game.findMany.mockReturnValueOnce(stale.promise as never).mockResolvedValueOnce([]);
+      const localOnly = { includeLocal: true, includeExternal: false };
+
+      const cancelled = gateway.handleSearchStart(client, makeStartDto(localOnly));
+      await flushMicrotasks();
+      gateway.handleSearchCancel(client, makeCancelDto());
+      await gateway.handleSearchStart(client, makeStartDto({ ...localOnly, query: 'Catan' }));
+      mockEmit.mockClear();
+
+      stale.resolve([makeGameWithSource()]);
+      await cancelled;
+
+      expect(mockEmit).not.toHaveBeenCalled();
+    });
+
     it('does not affect other concurrent searches on the same socket', () => {
       const client = makeSocket(gateway);
       seedActiveSearch(gateway, client, 'corr-1');
