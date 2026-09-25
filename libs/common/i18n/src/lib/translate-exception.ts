@@ -1,10 +1,9 @@
 import { AuditContextService } from '@bge/actor-context';
+import { isI18nMessage, type I18nTranslations } from '@bge/i18n-core';
 import { HttpException } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
 import { STATUS_CODES } from 'node:http';
-import type { I18nTranslations } from './generated/i18n.generated';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { isI18nMessage } from './translatable';
 
 /**
  * Resolves the request locale from CLS for edge translation, degrading to

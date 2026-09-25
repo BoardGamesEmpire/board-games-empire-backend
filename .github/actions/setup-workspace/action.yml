@@ -124,4 +124,4 @@ runs:
     # wiring. Cheap either way: an Nx cache hit when the catalogs are unchanged.
     - name: Generate i18n types
       shell: bash
-      run: npx nx run @board-games-empire/i18n:generate
+      run: npx nx run @board-games-empire/i18n-core:generate

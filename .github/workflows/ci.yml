@@ -118,7 +118,7 @@ jobs:
           : "${NX_BASE:?NX_BASE is unset — nx-set-shas did not run or changed its contract}"
           : "${NX_HEAD:?NX_HEAD is unset — nx-set-shas did not run or changed its contract}"
           files="$(git diff --no-renames --name-only "$NX_BASE" "$NX_HEAD")"
-          matches="$(printf '%s\n' "$files" | grep -c '^libs/common/i18n/src/lib/i18n/' || true)"
+          matches="$(printf '%s\n' "$files" | grep -c '^libs/common/i18n-core/src/lib/i18n/' || true)"
           changed=false
           if [ "$matches" -gt 0 ]; then
             changed=true

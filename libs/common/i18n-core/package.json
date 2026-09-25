@@ -1,0 +1,49 @@
+{
+  "name": "@bge/i18n-core",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./package.json": "./package.json"
+  },
+  "nx": {
+    "tags": [
+      "common",
+      "i18n"
+    ],
+    "name": "@board-games-empire/i18n-core",
+    "targets": {
+      "generate": {
+        "executor": "nx:run-commands",
+        "cache": true,
+        "inputs": [
+          "{projectRoot}/src/lib/i18n/**/*.json",
+          {
+            "externalDependencies": [
+              "nestjs-i18n"
+            ]
+          }
+        ],
+        "outputs": [
+          "{projectRoot}/src/lib/generated/i18n.generated.ts"
+        ],
+        "options": {
+          "command": "nestjs-i18n -p libs/common/i18n-core/src/lib/i18n -o libs/common/i18n-core/src/lib/generated/i18n.generated.ts"
+        }
+      },
+      "typecheck": {
+        "dependsOn": [
+          "generate",
+          "^generate"
+        ]
+      }
+    }
+  },
+  "dependencies": {}
+}

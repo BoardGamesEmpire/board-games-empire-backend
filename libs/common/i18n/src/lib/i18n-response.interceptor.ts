@@ -1,11 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
+import { isI18nMessage, type I18nTranslations } from '@bge/i18n-core';
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import type { I18nTranslations } from './generated/i18n.generated';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { isI18nMessage } from './translatable';
 
 /**
  * Success-path counterpart to {@link I18nExceptionFilter}. Controllers embed a

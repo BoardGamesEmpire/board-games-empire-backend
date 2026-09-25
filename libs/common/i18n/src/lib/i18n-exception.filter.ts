@@ -1,8 +1,8 @@
 import { AuditContextService } from '@bge/actor-context';
+import type { I18nTranslations } from '@bge/i18n-core';
 import { ArgumentsHost, Catch, HttpException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { I18nService } from 'nestjs-i18n';
-import type { I18nTranslations } from './generated/i18n.generated';
 import { translateException } from './translate-exception';
 
 /**

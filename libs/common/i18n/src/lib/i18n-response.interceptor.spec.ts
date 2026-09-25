@@ -1,12 +1,11 @@
 import { AuditContextService } from '@bge/actor-context';
+import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
 import { Controller, Get, type INestApplication } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';
-import * as path from 'node:path';
 import { I18nResponseInterceptor } from './i18n-response.interceptor';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { t } from './translatable';
 
 /**
  * End-to-end coverage for the success-path interceptor against the REAL shipped
@@ -15,8 +14,7 @@ import { t } from './translatable';
  * translated string before serialization, that it is found when nested, and
  * that marker-free bodies are untouched.
  *
- * `__dirname` is `src/lib` under jest (unbundled source), so `./i18n` is the
- * same catalog the app ships as a webpack asset.
+ * `I18N_CATALOG_DIR` is the same catalog the app loads.
  */
 @Controller('games')
 class TestController {
@@ -54,7 +52,7 @@ describe('I18nResponseInterceptor (real catalog)', () => {
       imports: [
         I18nModule.forRoot({
           fallbackLanguage: FALLBACK_LOCALE,
-          loaderOptions: { path: path.join(__dirname, 'i18n'), watch: false },
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
         }),
       ],
       controllers: [TestController],

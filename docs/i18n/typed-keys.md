@@ -6,11 +6,19 @@ fails `tsc`.
 
 ## Where things live
 
-| Thing                      | Path                                                   |
-| -------------------------- | ------------------------------------------------------ |
-| Catalogs (source of truth) | `libs/common/i18n/src/lib/i18n/<locale>/*.json`        |
-| Generated types            | `libs/common/i18n/src/lib/generated/i18n.generated.ts` |
-| Public re-export           | `I18nTranslations`, `I18nPath` from `@bge/i18n`        |
+| Thing                      | Path                                                        |
+| -------------------------- | ----------------------------------------------------------- |
+| Catalogs (source of truth) | `libs/common/i18n-core/src/lib/i18n/<locale>/*.json`        |
+| Generated types            | `libs/common/i18n-core/src/lib/generated/i18n.generated.ts` |
+| Public re-export           | `I18nTranslations`, `I18nPath` from `@bge/i18n`             |
+
+`@bge/i18n-core` holds the catalogs, the types generated from them, and the `t()` marker, and loads
+nothing at runtime beyond `node:path`. `@bge/i18n` re-exports the marker and the key types beside
+`i18nValidationMessage` (a nestjs-i18n facade, which is why it stays out of the core lib) and the
+edge machinery that does the translating. **Import from `@bge/i18n`.** Apart from `@bge/i18n`
+itself, only a lib that `@bge/i18n` depends on imports `@bge/i18n-core` directly — today that is
+`@bge/actor-context`, which the edge filters read the locale from, so importing `@bge/i18n` there
+would form a circular project reference that `tsc --build` rejects (#189).
 
 The generated file is **not committed** — it is gitignored (`**/generated/*`) and produced on
 demand, the same as the Prisma client and the protobuf output (#260). It carries its own
@@ -35,20 +43,20 @@ npm run i18n:generate
 ```
 
 Under the hood that runs the `nestjs-i18n` CLI via the Nx target
-`@board-games-empire/i18n:generate`:
+`@board-games-empire/i18n-core:generate`:
 
 ```bash
-nestjs-i18n -p libs/common/i18n/src/lib/i18n -o libs/common/i18n/src/lib/generated/i18n.generated.ts
+nestjs-i18n -p libs/common/i18n-core/src/lib/i18n -o libs/common/i18n-core/src/lib/generated/i18n.generated.ts
 ```
 
-Two exceptions to "`typecheck` pulls it in", neither of which bites today:
+One exception to "`typecheck` pulls it in", which does not bite today: `@bge/database` and
+`@boardgamesempire/proto-gateway` declare their own `typecheck.dependsOn`, which **replaces** the
+`nx.json` default rather than merging with it, so they do not get `^generate`. Neither imports
+`@bge/i18n` or `@bge/i18n-core`. The first file in either project to do so will fail to typecheck on
+a cold clone until that project's `dependsOn` is updated.
 
-- `@bge/database` and `@boardgamesempire/proto-gateway` declare their own `typecheck.dependsOn`,
-  which **replaces** the `nx.json` default rather than merging with it, so they do not get
-  `^generate`. Neither imports `@bge/i18n`. The first file in either project to do so will fail to
-  typecheck on a cold clone until that project's `dependsOn` is updated.
-- `test` does not pull it in at all, in any project. Jest transpiles through `@swc/jest`, which
-  erases these type-only imports, so no test needs the file.
+`test` pulls it in through the same `^generate` default, but no test needs it: Jest transpiles
+through `@swc/jest`, which erases these type-only imports.
 
 ## Known hazard: a cached typecheck can outlive a catalog change
 
@@ -66,7 +74,7 @@ Nothing else catches it either. The app builds do not type-check — `tsPlugins`
 ts-loader's `transformers` option, so it runs `transpileOnly`, and a deliberate type error in
 `apps/api/src/main.ts` builds clean. Jest erases the type-only imports through `@swc/jest`.
 
-**CI covers this**: `ci.yml` detects when a PR touches `libs/common/i18n/src/lib/i18n/` and runs
+**CI covers this**: `ci.yml` detects when a PR touches `libs/common/i18n-core/src/lib/i18n/` and runs
 `typecheck` with `--skip-nx-cache` for that run. That is strictly stronger than the byte-comparison
 drift gate it replaced, since it compiles the workspace against the regenerated type.
 

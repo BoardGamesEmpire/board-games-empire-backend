@@ -1,5 +1,5 @@
+import { t } from '@bge/i18n-core';
 import { HttpException, NotFoundException } from '@nestjs/common';
-import { t } from './translatable';
 import { translateException } from './translate-exception';
 
 describe('translateException', () => {

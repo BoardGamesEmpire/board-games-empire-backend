@@ -1,13 +1,12 @@
 import { AuditContextService } from '@bge/actor-context';
+import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
 import { Body, Controller, Get, type INestApplication, NotFoundException, Param, Post } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { IsString } from 'class-validator';
 import { I18nModule, I18nValidationExceptionFilter, I18nValidationPipe } from 'nestjs-i18n';
-import * as path from 'node:path';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { t } from './translatable';
 import { i18nValidationMessage } from './validation-message';
 
 /**
@@ -28,9 +27,9 @@ import { i18nValidationMessage } from './validation-message';
  *     regresses, the validation assertion below fails (the catch-all would
  *     render `{ message: 'Bad Request' }`, dropping the field errors).
  *
- * `__dirname` is `src/lib` under jest (unbundled), so `./i18n` is the shipped
- * catalog. No resolver is configured; `I18nModule` applies `I18nMiddleware` for
- * all routes, which creates the request `I18nContext` at `fallbackLanguage`.
+ * `I18N_CATALOG_DIR` is the shipped catalog. No resolver is configured;
+ * `I18nModule` applies `I18nMiddleware` for all routes, which creates the
+ * request `I18nContext` at `fallbackLanguage`.
  */
 class ValidateDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
@@ -58,7 +57,7 @@ describe('I18nValidationExceptionFilter + I18nExceptionFilter (real catalog)', (
       imports: [
         I18nModule.forRoot({
           fallbackLanguage: FALLBACK_LOCALE,
-          loaderOptions: { path: path.join(__dirname, 'i18n'), watch: false },
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
         }),
       ],
       controllers: [TestController],

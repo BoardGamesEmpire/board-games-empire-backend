@@ -17,5 +17,5 @@
 # - prisma client         → libs/database/.gitignore; prettier-clean today, but that
 #                           is a property of the current codegen, not a guarantee
 /libs/proto/gateway/src/gen
-/libs/common/i18n/src/lib/generated
+/libs/common/i18n-core/src/lib/generated
 /libs/database/src/lib/generated
