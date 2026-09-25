@@ -1,9 +1,9 @@
-import { SystemRole, type PrismaClient, type User } from '@bge/database';
+import { HUMAN_USER_WHERE, SystemRole, type PrismaClient, type User } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { createHouseholdWithMembers, type HouseholdFixture, type HouseholdWithMembersOptions } from './household.js';
 import { pollUntil } from './poll.js';
-import { performSignup, type SignupOptions, type SignupResult } from './signup.js';
-import type { ActorDeps, SessionActor } from './types.js';
+import { performAnonymousSignIn, performSignup, type SignupOptions, type SignupResult } from './signup.js';
+import type { ActorDeps, AuthenticatedActor, SessionActor } from './types.js';
 
 /**
  * The factory surface a spec works with. Every actor is a REAL user created
@@ -68,6 +68,21 @@ export interface Actors {
    * `UserRole` row directly.
    */
   moderator(options?: SignupOptions): Promise<SessionActor>;
+
+  /**
+   * An anonymous user — a temporary, account-less guest — signed in through
+   * better-auth's anonymous plugin over the real wire path. Provisioning gives
+   * it `AnonymousUser` INSTEAD of `User` (#484), and this fails loudly on any
+   * other role SET: `User` beside it would hand every anonymous session a
+   * signed-in user's authority, and only an exact-set check sees that.
+   * Implicitly ensures the Owner sentinel first, like every other factory. No
+   * password: an anonymous user has none.
+   *
+   * One per test. The plugin names every anonymous user 'Anonymous' and
+   * `users.username` is unique, so a second anonymous sign-in answers 500
+   * while the first row exists (#489); the between-test sweep clears it.
+   */
+  anonymous(): Promise<AuthenticatedActor>;
 
   /**
    * A household with a role-scoped roster, arranged directly in the
@@ -171,7 +186,9 @@ export function createActors(deps: ActorDeps): Actors {
   }
 
   async function mintSentinel(): Promise<SessionActor> {
-    const humans = await prisma.user.count({ where: { isServiceAccount: false } });
+    // Provisioning's own predicate, so the seat this refuses is exactly the seat
+    // provisioning considers taken (#484).
+    const humans = await prisma.user.count({ where: HUMAN_USER_WHERE });
     if (humans > 0) {
       throw new Error(
         `Cannot mint the Owner sentinel: ${humans} human user(s) already exist, so the Owner seat is ` +
@@ -269,9 +286,32 @@ export function createActors(deps: ActorDeps): Actors {
     return elevated(SystemRole.Moderator, options);
   }
 
+  async function anonymous(): Promise<AuthenticatedActor> {
+    await owner();
+
+    const signIn = await performAnonymousSignIn(baseUrl, fetchFn);
+    const granted = (await waitForProvisionedRoleNames(prisma, signIn.userId, 'Anonymous')).join(', ');
+
+    if (granted !== SystemRole.AnonymousUser) {
+      throw new Error(
+        `Anonymous user ${signIn.userId} was provisioned with role(s) [${granted}], expected ` +
+          `[${SystemRole.AnonymousUser}]. Provisioning grants an anonymous user AnonymousUser INSTEAD of ` +
+          `User — 'User' here would hand every anonymous session a signed-in user's authority (#484).`,
+      );
+    }
+
+    const headers = { Authorization: `Bearer ${signIn.token}` } as const;
+
+    return {
+      user: await loadUser(prisma, signIn.userId),
+      credentials: { token: signIn.token, headers },
+      headers,
+    };
+  }
+
   async function householdWithMembers(options: HouseholdWithMembersOptions): Promise<HouseholdFixture> {
     return createHouseholdWithMembers(prisma, options);
   }
 
-  return { owner, user, admin, moderator, householdWithMembers };
+  return { owner, user, admin, moderator, anonymous, householdWithMembers };
 }

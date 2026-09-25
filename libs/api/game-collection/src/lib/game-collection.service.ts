@@ -1,11 +1,4 @@
-import {
-  Action,
-  DatabaseService,
-  isPrismaDependentRecordNotFoundError,
-  Prisma,
-  ResourceType,
-  Visibility,
-} from '@bge/database';
+import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
@@ -69,25 +62,18 @@ export class GameCollectionService {
   }
 
   /**
-   * Another user's collection, filtered to what the acting user may see. For an
-   * authenticated viewer the CASL read conditions grant own/household/friends/
-   * public scopes; an anonymous viewer (primed with no abilities) sees Public
-   * entries only. Tombstones are never exposed through this view.
+   * Another user's collection, filtered to what the acting user may see: the
+   * CASL read conditions grant own/household/friends/public scopes. An
+   * anonymous viewer — a guest holding `AnonymousUser` instead of `User` —
+   * reaches Public entries only, through those same conditions rather than a
+   * branch of its own (#484). Tombstones are never exposed through this view.
    */
   async listForUser(targetUserId: string, query: ListUserGameCollectionsQueryDto) {
-    // Anonymous actors have no ability surface yet (`resolveAbilitiesForActor`
-    // throws for 'anonymous'; the middleware primes `[]` — see issue #68), so
-    // the Public filter is applied explicitly here. When an anonymous ability
-    // set lands, this branch collapses into the CASL path below.
-    const isAnonymous = this.abilityService.getCurrentAbilities().length === 0;
-
     const where = {
       userId: targetUserId,
       deletedAt: null,
       ...(query.medium ? { medium: query.medium } : {}),
-      ...(isAnonymous
-        ? { visibility: Visibility.Public }
-        : { AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read) }),
+      AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
     } satisfies Prisma.GameCollectionWhereInput;
 
     return this.paginate(where, query);

@@ -1,5 +1,5 @@
-import { FriendshipStatus, SystemRole, Visibility } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { SystemRole, Visibility } from '@bge/database';
+import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -59,24 +59,6 @@ describe('household authorization', () => {
       [`GET /api/households as ${who}`, listHouseholds(actor)],
       [`GET /api/households/mine as ${who}`, listOwnHouseholds(actor)],
     ] as const;
-
-  /**
-   * An accepted friendship, arranged directly (no fixture covers this yet).
-   * `pairKey` is the canonical undirected key the model requires the service to
-   * maintain — two sorted ids joined — so a row written here is indistinguishable
-   * from one the friendship service would have written.
-   */
-  const befriend = async (a: SessionActor, b: SessionActor) => {
-    await db.client.friendship.create({
-      data: {
-        requesterId: a.user.id,
-        addresseeId: b.user.id,
-        pairKey: [a.user.id, b.user.id].sort().join(':'),
-        status: FriendshipStatus.Accepted,
-        respondedAt: new Date(),
-      },
-    });
-  };
 
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
@@ -234,7 +216,7 @@ describe('household authorization', () => {
         where: { id: shared.household.id },
         data: { visibility: Visibility.Friends },
       });
-      await befriend(viewer, friend);
+      await befriend(db.client, viewer, friend);
 
       for (const [label, list] of bothLists(viewer, 'a friend')) {
         const page = listEnvelope(await list.expect(200), label);

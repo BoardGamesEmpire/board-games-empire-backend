@@ -12,6 +12,7 @@ export const ROLE_CATALOG = [
   { name: SystemRole.Admin, description: 'Full access to all system functions' },
   { name: SystemRole.Moderator, description: 'Can moderate content but cannot change system settings' },
   { name: SystemRole.User, description: 'Standard user account' },
+  { name: SystemRole.AnonymousUser, description: 'Temporary account-less user, such as a guest invited to an event' },
 
   // Household
   { name: SystemRole.HouseholdOwner, description: 'Owner of a household with full control' },
@@ -44,6 +45,7 @@ export const ROLE_SCOPE: Readonly<Record<SystemRole, RoleScope>> = {
   [SystemRole.Admin]: 'global',
   [SystemRole.Moderator]: 'global',
   [SystemRole.User]: 'global',
+  [SystemRole.AnonymousUser]: 'global',
 
   [SystemRole.HouseholdOwner]: 'household',
   [SystemRole.HouseholdAdmin]: 'household',

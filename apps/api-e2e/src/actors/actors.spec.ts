@@ -139,6 +139,17 @@ describe('actor fixtures (#256)', () => {
 
       await expect(globalRoleNames(moderator.user.id)).resolves.toEqual([SystemRole.Moderator, SystemRole.User].sort());
     });
+
+    it('signs an anonymous user in through the plugin route, holding AnonymousUser alone', async () => {
+      const guest = await actors.anonymous();
+
+      // INSTEAD of `User`, never beside it, and never the Owner seat (#484).
+      await expect(globalRoleNames(guest.user.id)).resolves.toEqual([SystemRole.AnonymousUser]);
+      expect(guest.user.isAnonymous).toBe(true);
+
+      await request(baseUrl).get('/api/users/me').set(guest.headers).expect(200);
+      await request(baseUrl).get('/api/users/me').expect(401);
+    });
   });
 
   describe('householdWithMembers', () => {

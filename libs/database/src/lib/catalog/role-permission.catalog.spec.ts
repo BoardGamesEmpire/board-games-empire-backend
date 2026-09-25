@@ -103,6 +103,15 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.Owner]).toEqual(['manage:all']);
     });
 
+    it('grant AnonymousUser the Public collection read and nothing else', () => {
+      // Anyone who opens an anonymous session holds this role, so the list grows
+      // one consumer at a time, each driven through its route (#484). Pinned
+      // exactly, so an addition is an edit someone makes here on purpose rather
+      // than a line that arrives unread. A guest's event rights are not here:
+      // they come from the event role on the guest's attendee row.
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).toEqual(['read:game_collection:public']);
+    });
+
     it('enumerate Admin rather than deriving it from the catalog', () => {
       const admin = ROLE_PERMISSION_CATALOG[SystemRole.Admin];
 
@@ -143,7 +152,7 @@ describe('the shipped catalogs', () => {
       const user = new Set(ROLE_PERMISSION_CATALOG[SystemRole.User]);
       const shared = ROLE_PERMISSION_CATALOG[roleName].filter((slug) => user.has(slug));
 
-      // Staff AUGMENT `User` rather than mirroring it. Every actor is
+      // Staff AUGMENT `User` rather than mirroring it. Every signed-in actor is
       // provisioned with `User` and elevation adds a role, so a repeated slug
       // grants nothing and only obscures what staff authority actually is.
       // Listed rather than counted, so a failure names the slug to remove —
@@ -171,10 +180,11 @@ describe('the shipped catalogs', () => {
         .filter(([, scope]) => scope !== 'global')
         .map(([roleName]) => roleName as SystemRole),
     )('give %s nothing User already holds', (roleName) => {
-      // Every user ability includes `User`, so a scoped role's copy of one of
-      // its slugs grants nothing. Where the condition names the actor, the copy
-      // repeats `User`'s clause once per membership or attendance in that
-      // ceiling.
+      // Every signed-in user's ability includes `User`, so a scoped role's copy
+      // of one of its slugs grants nothing. Where the condition names the actor,
+      // the copy repeats `User`'s clause once per membership or attendance in
+      // that ceiling. An anonymous guest's ability does not include `User`;
+      // what a guest's event role needs is #488's to decide.
       const userSlugs = ROLE_PERMISSION_CATALOG[SystemRole.User];
 
       expect(ROLE_PERMISSION_CATALOG[roleName].filter((slug) => userSlugs.includes(slug))).toEqual([]);

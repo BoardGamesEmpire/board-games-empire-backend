@@ -18,7 +18,7 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * real and is the point: a new slug reaches `Admin` only when someone adds it
  * here, where before it arrived for free and unexamined.
  *
- * Staff roles AUGMENT `User`; they do not mirror it. Every actor is
+ * Staff roles AUGMENT `User`; they do not mirror it. Every signed-in actor is
  * provisioned with `User` and elevation adds a role rather than replacing one
  * (#410), so a slug `User` already holds adds nothing to `Admin` or
  * `Moderator`: abilities union across an actor's roles and a second identical
@@ -75,13 +75,25 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * belongs to the event roles alone, because the household pass never supplies
  * `{{ eventId }}` (#436, #432).
  *
- * A household or event role holds nothing `User` holds. Every user ability is
- * built in one pass that includes `User`, so a scoped role's copy of one of
- * its slugs grants nothing. Where the condition names the actor rather than
- * the scope (`read:households`, `read:game_collection`), the copy renders
- * `User`'s clause again for every membership or attendance: one more `OR`
- * term per scope in that resource's ceiling. On households that was half of
- * the per-membership planning cost measured on #417.
+ * A household or event role holds nothing `User` holds. Every signed-in
+ * user's ability is built in one pass that includes `User`, so a scoped role's
+ * copy of one of its slugs grants nothing. Where the condition names the actor
+ * rather than the scope (`read:households`, `read:game_collection`), the copy
+ * renders `User`'s clause again for every membership or attendance: one more
+ * `OR` term per scope in that resource's ceiling. On households that was half
+ * of the per-membership planning cost measured on #417. An anonymous guest's
+ * ability is the exception — it carries `AnonymousUser`, not `User` — so an
+ * event role given to a guest does not bring back what that role left to
+ * `User`, such as `read:game_play_session` and `create:session_player:join`.
+ * Which of those a guest's event role needs is #488's to decide.
+ *
+ * `AnonymousUser` is the one global role that repeats a `User` slug, and does
+ * so on purpose. It is not an elevation: an anonymous user — a temporary,
+ * account-less guest — is provisioned it INSTEAD of `User`, never beside it,
+ * so its list is everything such a user can do rather than an addition to
+ * anything (#484). Anyone can open an anonymous session, which is why that list
+ * is pinned and why every entry on it must carry a condition, whatever `User`
+ * holds.
  *
  * Insertion order is the seed's assignment order.
  */
@@ -356,6 +368,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'manage:webhook_subscription:own',
     'read:webhook_subscription:own',
   ],
+  [SystemRole.AnonymousUser]: ['read:game_collection:public'],
   [SystemRole.HouseholdOwner]: HOUSEHOLD_OWNER,
   [SystemRole.HouseholdAdmin]: HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
   [SystemRole.HouseholdMember]: [

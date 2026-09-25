@@ -1,4 +1,4 @@
-import { DatabaseService, SystemRole, Theme } from '@bge/database';
+import { DatabaseService, HUMAN_USER_WHERE, SystemRole, Theme } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { Injectable, Logger } from '@nestjs/common';
 
@@ -20,10 +20,17 @@ export class UserProvisioningService {
       ? `${user.firstName}${user.lastName ? ` ${user.lastName}` : ''}`.trim()
       : user.username;
 
-    // Service accounts are real User rows, so they must be excluded or they'd
-    // shift the first human out of this branch.
-    const usersCount = await this.db.user.count({ where: { isServiceAccount: false } });
-    const isFirstHuman = usersCount === 1;
+    // An anonymous user is a temporary, account-less guest (#484), and it must
+    // never take the first-human seat. Guests are meant to arrive by
+    // invitation, which needs an account holder first, but nothing enforces
+    // that: `POST /api/auth/sign-in/anonymous` is open (#489), so on an empty
+    // install the first anonymous sign-in would otherwise be made Owner and
+    // handed better-auth's admin role.
+    const isAnonymous = user.isAnonymous === true;
+
+    // Service accounts and anonymous users are real User rows, so they must be
+    // excluded or they'd shift the first human out of this branch.
+    const isFirstHuman = !isAnonymous && (await this.db.user.count({ where: HUMAN_USER_WHERE })) === 1;
 
     // Two separate questions, deliberately not one comparison (#410). "Is this
     // the first human" drives the side effects below — service-account birth,
@@ -40,7 +47,14 @@ export class UserProvisioningService {
     // role permission is inverted, so the extra rules have nothing to collide
     // with under CASL's last-rule-wins (asserted by the seed invariant in
     // apps/api-e2e/src/auth/role-model-invariants.spec.ts).
-    const roleNames = isFirstHuman ? [SystemRole.User, SystemRole.Owner] : [SystemRole.User];
+    // An anonymous user holds `AnonymousUser` INSTEAD of `User`, never beside
+    // it: the row's roles are resolved like anyone else's, so `User` here would
+    // hand an anonymous session everything a signed-in user can do (#484).
+    const roleNames = isAnonymous
+      ? [SystemRole.AnonymousUser]
+      : isFirstHuman
+        ? [SystemRole.User, SystemRole.Owner]
+        : [SystemRole.User];
 
     // Resolved BEFORE the transaction opens. An unseeded catalog is a constant
     // of the deployment, not a property of this signup, so discovering it

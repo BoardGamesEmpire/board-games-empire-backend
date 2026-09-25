@@ -38,10 +38,11 @@ export interface SessionCredentials {
 }
 
 /**
- * A persisted, authenticated actor: a real `User` row created through the
- * real signup path, with a credential the running server accepts.
+ * A persisted, authenticated actor: a real `User` row with a credential the
+ * running server accepts. What every factory hands back, and all a request
+ * helper needs.
  */
-export interface SessionActor {
+export interface AuthenticatedActor {
   /** The persisted row, loaded after provisioning completed. */
   readonly user: User;
 
@@ -49,7 +50,14 @@ export interface SessionActor {
 
   /** Convenience alias for `credentials.headers`. */
   readonly headers: SessionCredentials['headers'];
+}
 
+/**
+ * An authenticated actor created through the real signup path. An anonymous
+ * user is an {@link AuthenticatedActor} with no password, because it has none
+ * (#484).
+ */
+export interface SessionActor extends AuthenticatedActor {
   /** The plaintext password used at signup, for re-sign-in scenarios. */
   readonly password: string;
 }

@@ -1,6 +1,7 @@
 import {
   type Actor,
   AuditContextService,
+  isAnonymousActor,
   isApiKeyActor,
   isPluginActor,
   isSystemActor,
@@ -24,6 +25,11 @@ import { AbilityContextInternalService } from './services/ability-context-intern
  *
  * Resolution model (issue #68):
  * - `user`     → `[userAbility]`
+ * - `anonymous`→ `[userAbility]`, built from the anonymous user's own row
+ *                exactly as for `user`. An anonymous user is a real `User` row
+ *                — a temporary guest — and provisioning gives it
+ *                `AnonymousUser` INSTEAD of `User` (#484); a guest's event
+ *                rights arrive through the same row, on its attendee roles.
  * - `apiKey`   → `[ownerUserAbility, apiKeyAbility]` (intersected via AND at
  *                query time — effective access is the *floor* of the two, so an
  *                over-scoped key or a user-level restriction both clamp access
@@ -35,8 +41,8 @@ import { AbilityContextInternalService } from './services/ability-context-intern
  *                not currently served resolves to a no-rule ability (denies
  *                everything); a grant that cannot be rendered safely is a
  *                typed rejection surfaced as 403.
- * - `anonymous`/`external` → resolution throws (see
- *   {@link resolveAbilitiesForActor}); these are deferred / have no query surface.
+ * - `external` → resolution throws (see {@link resolveAbilitiesForActor}); it
+ *   is audit-only and has no query surface.
  *
  * Plugins are installed principals, not delegations of user authority — the
  * "no intersection with the triggering user" rule is enforced by what populates
@@ -181,11 +187,11 @@ export class AbilityService {
    * BullMQ worker host, …) calls this once the actor is in CLS.
    *
    * Primes only the *current* actor (read from CLS); there is no arbitrary-actor
-   * parameter, so this cannot forge an ability set. Unauthenticated and
-   * not-yet-supported kinds (`anonymous`/`external`) prime `[]`, which the
-   * query layer and PoliciesGuard treat as denial — never an unfiltered
-   * query. Resolution failures (revoked key, DB error) propagate to the caller
-   * (→ request/job failure) rather than degrading silently.
+   * parameter, so this cannot forge an ability set. A request with no actor
+   * (no session) and a kind with no ability surface (`external`) prime `[]`,
+   * which the query layer and PoliciesGuard treat as denial — never an
+   * unfiltered query. Resolution failures (revoked key, DB error) propagate to
+   * the caller (→ request/job failure) rather than degrading silently.
    */
   async primeCurrentActor(): Promise<void> {
     const actor = this.auditContext.getActor();
@@ -208,6 +214,7 @@ export class AbilityService {
   async resolveAbilitiesForActor(actor: Actor): Promise<AppAbility[]> {
     switch (actor.kind) {
       case 'user':
+      case 'anonymous':
         return [await this.buildUserAbility(actor.userId)];
 
       case 'apiKey':
@@ -215,12 +222,6 @@ export class AbilityService {
 
       case 'system':
         return [this.abilityFactory.createForSystem(actor.reason)];
-
-      case 'anonymous':
-        throw new Error(
-          'Anonymous actor abilities are not implemented yet. The anonymous ' +
-            'permission set is deferred to a later slice (issue #68 follow-up).',
-        );
 
       case 'external':
         throw new Error(
@@ -325,10 +326,17 @@ export class AbilityService {
  * Single source of truth for that decision: the priming middleware uses it to
  * gate resolution (priming `[]` for the rest), so the "resolvable kinds" set is
  * expressed once instead of being duplicated there. Keep in lock-step with the
- * `switch` above when a deferred kind (`anonymous`) gains a surface.
+ * `switch` above: a kind the `switch` resolves but this omits primes `[]` and
+ * is denied everything, silently.
  */
 export function isResolvableActor(actor: Actor): boolean {
-  return isUserActor(actor) || isApiKeyActor(actor) || isSystemActor(actor) || isPluginActor(actor);
+  return (
+    isUserActor(actor) ||
+    isAnonymousActor(actor) ||
+    isApiKeyActor(actor) ||
+    isSystemActor(actor) ||
+    isPluginActor(actor)
+  );
 }
 
 /**

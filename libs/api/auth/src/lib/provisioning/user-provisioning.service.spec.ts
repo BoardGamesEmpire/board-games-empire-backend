@@ -46,7 +46,12 @@ describe('UserProvisioningService', () => {
     await service.provisionNewUser('u1');
 
     expect(db.user.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: 'u1' } });
-    expect(db.user.count).toHaveBeenCalledWith({ where: { isServiceAccount: false } });
+    // Anonymous rows are not humans for the election (#484). `isAnonymous` is
+    // nullable and a NULL is a human, so a bare `isAnonymous: false` would
+    // silently stop counting those rows.
+    expect(db.user.count).toHaveBeenCalledWith({
+      where: { isServiceAccount: false, OR: [{ isAnonymous: false }, { isAnonymous: null }] },
+    });
     expect(db.userRole.createMany).toHaveBeenCalledWith({
       data: [
         { userId: 'u1', roleId: 'role-user' },
@@ -73,6 +78,25 @@ describe('UserProvisioningService', () => {
     await service.provisionNewUser('u2');
 
     expect(db.userRole.createMany).toHaveBeenCalledWith({ data: [{ userId: 'u2', roleId: 'role-user' }] });
+    expect(db.user.update).not.toHaveBeenCalled();
+    expect(serviceAccount.ensure).not.toHaveBeenCalled();
+  });
+
+  it('gives an anonymous user AnonymousUser INSTEAD of User, and never treats it as the first human', async () => {
+    db.user.findUniqueOrThrow.mockResolvedValue(
+      makeUser({ id: 'anon-1', username: 'Anonymous', email: 'temp@anon-1.com', isAnonymous: true }),
+    );
+    // The worst case for the election: were anonymous rows counted, this one
+    // would be the only human on the install and would take the Owner seat.
+    db.user.count.mockResolvedValue(1);
+    db.role.findMany.mockResolvedValue([{ id: 'role-anonymous', name: SystemRole.AnonymousUser }] as never);
+    db.$transaction.mockImplementation((cb) => cb(db));
+
+    await service.provisionNewUser('anon-1');
+
+    // The exact set: `User` beside `AnonymousUser` would hand an anonymous
+    // session everything a signed-in user can do (#484).
+    expect(db.userRole.createMany).toHaveBeenCalledWith({ data: [{ userId: 'anon-1', roleId: 'role-anonymous' }] });
     expect(db.user.update).not.toHaveBeenCalled();
     expect(serviceAccount.ensure).not.toHaveBeenCalled();
   });

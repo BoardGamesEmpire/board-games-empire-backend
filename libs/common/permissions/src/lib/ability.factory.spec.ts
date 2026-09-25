@@ -1066,6 +1066,42 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe('the AnonymousUser floor (#484)', () => {
+    // The composed role an anonymous user holds INSTEAD of `User`, rendered
+    // through the same global `roles` pass. Anyone can open an anonymous
+    // session, so what this ability reaches is what the whole internet reaches.
+    const anonymous = () =>
+      factory.createForUser(
+        makeUser({
+          id: 'anon-1',
+          roles: [
+            makeRole(
+              SystemRole.AnonymousUser,
+              [...ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]].map(catalogPermission),
+            ),
+          ],
+        }),
+      );
+
+    it('reads the Public collection entries that are not tombstoned, and no other collection row', () => {
+      expect(accessibleBy(anonymous(), Action.read).ofType('GameCollection')).toEqual({
+        OR: [{ deletedAt: null, visibility: 'Public' }],
+      });
+    });
+
+    it('writes nothing, and reads no other subject', () => {
+      const ability = anonymous();
+
+      for (const action of [Action.create, Action.update, Action.delete]) {
+        expect(ability.can(action, 'GameCollection')).toBe(false);
+      }
+
+      for (const subjectType of ['Game', 'Household', 'Event', 'User', 'UserProfile'] as const) {
+        expect(ability.can(Action.read, subjectType)).toBe(false);
+      }
+    });
+  });
+
   /**
    * The Owner-only gate for transfer-ownership (#158) and the tightened
    * `update:household` condition (#160). Both are relation-traversing, so they

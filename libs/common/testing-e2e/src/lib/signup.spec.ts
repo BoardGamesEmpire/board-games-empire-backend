@@ -4,6 +4,7 @@ import {
   performSignup,
   prepareSignup,
   SET_AUTH_TOKEN_HEADER,
+  SIGN_IN_ANONYMOUS_PATH,
   SIGN_UP_EMAIL_PATH,
   signupFailureMessage,
 } from './signup.js';
@@ -47,32 +48,46 @@ describe('extractSessionToken', () => {
   it('prefers the set-auth-token header over the body token', () => {
     const headers = new Headers({ [SET_AUTH_TOKEN_HEADER]: 'header-token' });
 
-    expect(extractSessionToken(headers, { token: 'body-token' })).toBe('header-token');
+    expect(extractSessionToken(headers, { token: 'body-token' }, SIGN_UP_EMAIL_PATH)).toBe('header-token');
   });
 
   it('falls back to the body token when the header is absent', () => {
-    expect(extractSessionToken(new Headers(), { token: 'body-token' })).toBe('body-token');
+    expect(extractSessionToken(new Headers(), { token: 'body-token' }, SIGN_UP_EMAIL_PATH)).toBe('body-token');
   });
 
   it('fails loudly, naming the bearer plugin, when no token is present anywhere', () => {
-    expect(() => extractSessionToken(new Headers(), { token: null })).toThrow(/bearer\(\) plugin/);
-    expect(() => extractSessionToken(new Headers(), 'not-an-object')).toThrow(SET_AUTH_TOKEN_HEADER);
+    expect(() => extractSessionToken(new Headers(), { token: null }, SIGN_UP_EMAIL_PATH)).toThrow(/bearer\(\) plugin/);
+    expect(() => extractSessionToken(new Headers(), 'not-an-object', SIGN_UP_EMAIL_PATH)).toThrow(
+      SET_AUTH_TOKEN_HEADER,
+    );
+  });
+
+  it('names the route that answered, so a failed anonymous sign-in does not read as a failed signup', () => {
+    expect(() => extractSessionToken(new Headers(), {}, SIGN_IN_ANONYMOUS_PATH)).toThrow(
+      `POST ${SIGN_IN_ANONYMOUS_PATH} succeeded but no session token was found`,
+    );
   });
 });
 
 describe('extractUserId', () => {
   it('reads user.id from the response body', () => {
-    expect(extractUserId({ user: { id: 'usr_1' } })).toBe('usr_1');
+    expect(extractUserId({ user: { id: 'usr_1' } }, SIGN_UP_EMAIL_PATH)).toBe('usr_1');
   });
 
   it('fails loudly on a shape without user.id', () => {
-    expect(() => extractUserId({ user: {} })).toThrow(/user\.id/);
-    expect(() => extractUserId(undefined)).toThrow(/user\.id/);
+    expect(() => extractUserId({ user: {} }, SIGN_UP_EMAIL_PATH)).toThrow(/user\.id/);
+    expect(() => extractUserId(undefined, SIGN_UP_EMAIL_PATH)).toThrow(/user\.id/);
   });
 
   it('fails loudly on a null user rather than throwing a TypeError', () => {
-    expect(() => extractUserId({ user: null })).toThrow(/user\.id/);
-    expect(() => extractUserId({ user: 'usr_1' })).toThrow(/user\.id/);
+    expect(() => extractUserId({ user: null }, SIGN_UP_EMAIL_PATH)).toThrow(/user\.id/);
+    expect(() => extractUserId({ user: 'usr_1' }, SIGN_UP_EMAIL_PATH)).toThrow(/user\.id/);
+  });
+
+  it('names the route that answered, so a failed anonymous sign-in does not read as a failed signup', () => {
+    expect(() => extractUserId({}, SIGN_IN_ANONYMOUS_PATH)).toThrow(
+      `POST ${SIGN_IN_ANONYMOUS_PATH} succeeded but the response body carried no 'user.id'`,
+    );
   });
 });
 

@@ -1,6 +1,7 @@
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
   findTemplateDefects,
+  findUnboundedGrants,
   findUnconditionedGlobalGrants,
   findUnconditionedScopedGrants,
   findUnrenderableTemplateGrants,
@@ -346,6 +347,52 @@ describe('catalog guards', () => {
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'role.name' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.email' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.householdId' },
+      ]);
+    });
+  });
+
+  describe('findUnboundedGrants', () => {
+    const catalog = [
+      definition({ slug: 'read:gadget' }),
+      definition({ slug: 'read:blank', conditions: {} }),
+      definition({ slug: 'read:public', conditions: { deletedAt: null, visibility: 'Public' } }),
+      definition({ slug: 'read:own', conditions: { createdById: '{{ user.id }}' } }),
+    ];
+
+    it('flags every grant on a named role whose conditions are absent or empty', () => {
+      const roles = { [SystemRole.AnonymousUser]: ['read:gadget', 'read:blank', 'read:public'] };
+
+      expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([
+        { slug: 'read:gadget', role: SystemRole.AnonymousUser },
+        { slug: 'read:blank', role: SystemRole.AnonymousUser },
+      ]);
+    });
+
+    it('flags it even when the everyone role holds the slug — the exemption the other guards make does not apply', () => {
+      const roles = { [SystemRole.User]: ['read:gadget'], [SystemRole.AnonymousUser]: ['read:gadget'] };
+
+      expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([
+        { slug: 'read:gadget', role: SystemRole.AnonymousUser },
+      ]);
+    });
+
+    it('passes a static row filter and a template — both narrow the rows the grant reaches', () => {
+      const roles = { [SystemRole.AnonymousUser]: ['read:public', 'read:own'] };
+
+      expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([]);
+    });
+
+    it('judges only the role it is given', () => {
+      const roles = { [SystemRole.User]: ['read:gadget'], [SystemRole.Admin]: ['read:blank'] };
+
+      expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([]);
+    });
+
+    it('counts a role once however many times it lists the slug', () => {
+      const roles = { [SystemRole.AnonymousUser]: ['read:gadget', 'read:gadget'] };
+
+      expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([
+        { slug: 'read:gadget', role: SystemRole.AnonymousUser },
       ]);
     });
   });
