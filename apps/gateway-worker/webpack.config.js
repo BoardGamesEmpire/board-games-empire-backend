@@ -22,13 +22,13 @@ module.exports = {
           input: '../../libs/proto/gateway/proto-export',
           output: 'proto',
         },
-        // i18n catalogs from @bge/i18n. The bundled I18nModule resolves its
-        // loader path as `join(__dirname, 'i18n')` (dist dir at runtime), so
+        // i18n catalogs from @bge/i18n-core. The bundled I18nModule loads them from
+        // `I18N_CATALOG_DIR`, `join(__dirname, 'i18n')` (dist dir at runtime), so
         // the en/*.json catalogs must be copied to dist/i18n. Mirrors the
         // .proto copy above; the module itself is wired into this app in #146.
         {
           glob: '**/*.json',
-          input: '../../libs/common/i18n/src/lib/i18n',
+          input: '../../libs/common/i18n-core/src/lib/i18n',
           output: 'i18n',
         },
       ],

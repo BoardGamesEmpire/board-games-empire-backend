@@ -221,6 +221,9 @@
     },
     {
       "path": "./libs/common/bootstrap"
+    },
+    {
+      "path": "./libs/common/i18n-core"
     }
   ]
 }

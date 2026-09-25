@@ -41,7 +41,7 @@ A response DTO still types the field as `message: string` (e.g.
 ## Adding a new success message
 
 1. Add the key under `success.<lib>.<action>` in
-   `libs/common/i18n/src/lib/i18n/en/success.json`.
+   `libs/common/i18n-core/src/lib/i18n/en/success.json`.
 2. Run `npm run i18n:generate` so your editor sees the new key. The types are
    generated, not committed — every `typecheck` and every app `build` produces them on demand.
 3. Return `t('success.<lib>.<action>', { ...args })` from the controller.

@@ -76,7 +76,7 @@ one app.
 
 ## Adding a new validation message
 
-1. Add the key to `libs/common/i18n/src/lib/i18n/en/validation.json`. Name it
+1. Add the key to `libs/common/i18n-core/src/lib/i18n/en/validation.json`. Name it
    after the `class-validator` constraint (`isString`, `minLength`, …) so the
    catalog reads as a map of constraint → message.
 2. Run `npm run i18n:generate` so your editor sees the new key. The types are

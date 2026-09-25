@@ -1,5 +1,5 @@
+import type { I18nPath, I18nTranslations } from '@bge/i18n-core';
 import { i18nValidationMessage as baseI18nValidationMessage } from 'nestjs-i18n';
-import type { I18nPath, I18nTranslations } from './generated/i18n.generated';
 
 /**
  * The `validation.*` subset of {@link I18nPath}. Restricting validation markers

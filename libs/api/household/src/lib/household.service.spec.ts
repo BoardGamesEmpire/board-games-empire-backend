@@ -1,6 +1,7 @@
 import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
+import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -538,7 +539,7 @@ describe('HouseholdService', () => {
     // previously received whatever their ceiling admitted. #395 revisits it.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
       });
 
       await expect(read(service)).rejects.toThrow(ForbiddenException);
@@ -546,23 +547,22 @@ describe('HouseholdService', () => {
     });
 
     // `getActingUserId` phrases its rejection as being about user-attributed
-    // WRITES and does not localise it. Accurate for its usual callers, wrong on
-    // a GET — a caller told they "cannot perform writes" by a list endpoint
-    // looks for a bug that is not there.
+    // WRITES. Accurate for its usual callers, wrong on a GET — a caller told
+    // they "cannot perform writes" by a list endpoint looks for a bug that is
+    // not there.
     //
-    // Asserted negatively on purpose: `t()` is inert outside an initialised
-    // i18n context, so this spec cannot compare against the resolved string.
-    // What it CAN pin is that the write-flavoured message does not reach the
-    // caller, which is the regression worth catching.
+    // Both refusals are `t()` markers, translated only at the edge, so this
+    // pins the key the caller receives: the read's own, not the write-flavoured
+    // one passed through.
     it('does not answer a read with a message about writes', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
-        throw new ForbiddenException("Actor kind 'plugin' cannot perform user-attributed writes.");
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
       });
 
       const rejection: unknown = await read(service).catch((error: unknown) => error);
 
       expect(rejection).toBeInstanceOf(ForbiddenException);
-      expect((rejection as Error).message).not.toContain('user-attributed writes');
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
     });
 
     // A MISSING actor is not a denied one: `getActingUserId` throws a plain

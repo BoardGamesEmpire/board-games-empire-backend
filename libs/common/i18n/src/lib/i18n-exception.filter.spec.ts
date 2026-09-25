@@ -1,7 +1,7 @@
+import { t } from '@bge/i18n-core';
 import { ArgumentsHost, HttpException, NotFoundException } from '@nestjs/common';
 import { BaseExceptionFilter } from '@nestjs/core';
 import { I18nExceptionFilter } from './i18n-exception.filter';
-import { t } from './translatable';
 
 describe('I18nExceptionFilter', () => {
   let filter: I18nExceptionFilter;

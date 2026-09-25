@@ -24,7 +24,7 @@ import type { AbilityService } from '../ability.service';
  *
  * The message is re-thrown rather than passed through: `getActingUserId`
  * phrases its rejection as being about user-attributed WRITES — accurate for
- * its usual callers, wrong on a GET — and does not localise it. A MISSING
+ * its usual callers, wrong on a GET. A MISSING
  * actor is a different failure (a plain `Error`: nothing primed the context)
  * and is left to propagate as the 500 it is.
  */
