@@ -24,6 +24,9 @@
     },
     {
       "path": "../../libs/database"
+    },
+    {
+      "path": "../../libs/common/services"
     }
   ]
 }

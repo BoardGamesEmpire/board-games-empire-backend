@@ -1,5 +1,6 @@
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
+import { Action, ResourceType } from '@bge/database';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -10,6 +11,7 @@ import type {
   WsSourceUnavailablePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
+import { AbilityService } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
@@ -51,6 +53,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     private readonly coordinator: GatewayCoordinatorClientService,
     override readonly authService: AuthService,
     private readonly gameSearch: GameSearchService,
+    private readonly abilityService: AbilityService,
   ) {
     super(authService);
   }
@@ -83,33 +86,51 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     );
 
     if (!dto.includeLocal && !dto.includeExternal) {
-      return this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+      return this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
         correlationId: dto.correlationId,
         source: 'local',
         message: 'At least one of includeLocal or includeExternal must be true',
       });
     }
 
-    if (this.getClientData(client).activeSearches.has(dto.correlationId)) {
-      return this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+    const { activeSearches } = this.getClientData(client);
+    if (activeSearches.has(dto.correlationId)) {
+      return this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
         correlationId: dto.correlationId,
         source: 'local',
         message: `Search with correlationId ${dto.correlationId} is already active`,
       });
     }
 
-    await client.join(dto.correlationId);
+    // Registered before the first await and for the whole search, local half
+    // included, so the check above refuses a second search with this id
+    // however the first was asked for. The gateway half adds its stream to it.
+    const search = new Subscription();
+    activeSearches.set(dto.correlationId, search);
+
+    await client.join(this.searchRoom(client, dto.correlationId));
 
     // TODO: return observables and merge -- error killing one source shouldn't kill the whole search
-    await Promise.all([this.runLocalSearch(dto), this.runGatewaySearch(client, dto)]).finally(() => {
-      this.completeSearch(client, dto.correlationId);
+    await Promise.all([this.runLocalSearch(client, dto), this.runGatewaySearch(client, dto, search)]).finally(() => {
+      this.completeSearch(client, dto.correlationId, search);
     });
   }
 
-  private completeSearch(client: Socket, correlationId: string): void {
-    const search = this.getClientData(client);
-    search.activeSearches.delete(correlationId);
-    client.leave(correlationId);
+  /**
+   * Ends a search once both halves have finished. `search:done` is its last
+   * frame, sent only here so it never overtakes the local results. A search
+   * no longer registered was cancelled — the cancel already left its room —
+   * and the id may since belong to a new search, so neither is touched.
+   */
+  private completeSearch(client: Socket, correlationId: string, search: Subscription): void {
+    const { activeSearches } = this.getClientData(client);
+    if (activeSearches.get(correlationId) !== search) {
+      return;
+    }
+
+    this.emit<WsSearchDonePayload>(client, correlationId, SearchEvents.SearchDone, { correlationId });
+    activeSearches.delete(correlationId);
+    client.leave(this.searchRoom(client, correlationId));
     this.logger.debug(`Search completed: correlationId=${correlationId}`);
   }
 
@@ -125,11 +146,11 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
     sub?.unsubscribe();
     search.activeSearches.delete(dto.correlationId);
-    client.leave(dto.correlationId);
+    client.leave(this.searchRoom(client, dto.correlationId));
     this.logger.log(`Search cancelled: correlationId=${dto.correlationId}`);
   }
 
-  private async runLocalSearch(options: SearchStartDto) {
+  private async runLocalSearch(client: Socket, options: SearchStartDto) {
     if (options.includeLocal === false) {
       return Promise.resolve();
     }
@@ -137,36 +158,55 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     const source = 'local';
 
     try {
-      const results = await this.gameSearch.queryLocalGames(options.query, options.limit, options.offset);
+      // No ability context is primed for a WebSocket message the way HTTP
+      // primes one per request (#498), so the actor the socket authenticated
+      // as is resolved here. Per search rather than per connection: its grants
+      // can change while the socket stays open. A failure lands in the catch
+      // below as a SearchError, never as an unfiltered query.
+      const abilities = await this.abilityService.resolveAbilitiesForActor(this.getClientData(client).actor);
+      const readConditions = this.abilityService.getResourceConditionsForAbilities(
+        abilities,
+        ResourceType.Game,
+        Action.read,
+      );
 
-      this.emit<WsSearchResultPayload>(options.correlationId, SearchEvents.SearchResult, {
+      const results = await this.gameSearch.queryLocalGames(
+        options.query,
+        readConditions,
+        options.limit,
+        options.offset,
+      );
+
+      this.emit<WsSearchResultPayload>(client, options.correlationId, SearchEvents.SearchResult, {
         correlationId: options.correlationId,
         source,
         games: results,
       });
     } catch (err) {
       this.logger.error(`Local search failed for correlationId=${options.correlationId}`, err);
-      this.emit<WsSearchErrorPayload>(options.correlationId, SearchEvents.SearchError, {
+      this.emit<WsSearchErrorPayload>(client, options.correlationId, SearchEvents.SearchError, {
         correlationId: options.correlationId,
         message: 'Local search failed',
         source,
       });
     } finally {
-      this.emit<WsSourceDonePayload>(options.correlationId, SearchEvents.SearchSourceDone, {
+      this.emit<WsSourceDonePayload>(client, options.correlationId, SearchEvents.SearchSourceDone, {
         correlationId: options.correlationId,
         source,
       });
     }
   }
 
-  private runGatewaySearch(client: Socket, dto: SearchStartDto): Promise<void> {
+  private runGatewaySearch(client: Socket, dto: SearchStartDto, search: Subscription): Promise<void> {
     if (dto.includeExternal === false) {
       return Promise.resolve();
     }
 
-    const search = this.getClientData(client);
-
     return new Promise<void>((resolve) => {
+      // A cancel stops the stream before it can complete or error, so the
+      // cancel itself ends the wait.
+      search.add(() => resolve());
+
       const stream$ = this.coordinator.searchGames({
         correlationId: dto.correlationId,
         query: dto.query,
@@ -190,7 +230,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
                 break;
               }
 
-              this.emit<WsSearchResultPayload>(dto.correlationId, SearchEvents.SearchResult, {
+              this.emit<WsSearchResultPayload>(client, dto.correlationId, SearchEvents.SearchResult, {
                 correlationId: dto.correlationId,
                 source,
                 games: [this.gameSearch.mapProtoGame(result)],
@@ -199,7 +239,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
             }
 
             case ResultStatus.RESULT_STATUS_SOURCE_DONE: {
-              this.emit<WsSourceDonePayload>(dto.correlationId, SearchEvents.SearchSourceDone, {
+              this.emit<WsSourceDonePayload>(client, dto.correlationId, SearchEvents.SearchSourceDone, {
                 correlationId: dto.correlationId,
                 source,
               });
@@ -207,7 +247,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
             }
 
             case ResultStatus.RESULT_STATUS_RATE_LIMITED: {
-              this.emit<WsRateLimitedPayload>(dto.correlationId, SearchEvents.SearchRateLimited, {
+              this.emit<WsRateLimitedPayload>(client, dto.correlationId, SearchEvents.SearchRateLimited, {
                 correlationId: dto.correlationId,
                 source,
                 retryAfter: result.retryAfter ?? 60,
@@ -217,7 +257,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
             }
 
             case ResultStatus.RESULT_STATUS_UNAVAILABLE: {
-              this.emit<WsSourceUnavailablePayload>(dto.correlationId, SearchEvents.SearchUnavailable, {
+              this.emit<WsSourceUnavailablePayload>(client, dto.correlationId, SearchEvents.SearchUnavailable, {
                 correlationId: dto.correlationId,
                 source,
               });
@@ -225,7 +265,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
             }
 
             case ResultStatus.RESULT_STATUS_ERROR: {
-              this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+              this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
                 correlationId: dto.correlationId,
                 source,
                 message: result.message ?? 'Search error',
@@ -235,17 +275,12 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
           }
         },
 
-        complete: () => {
-          this.emit<WsSearchDonePayload>(dto.correlationId, SearchEvents.SearchDone, {
-            correlationId: dto.correlationId,
-          });
-          resolve();
-        },
+        complete: () => resolve(),
 
         error: (err) => {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.error(`Gateway search stream error: correlationId=${dto.correlationId}: ${message}`);
-          this.emit<WsSearchErrorPayload>(dto.correlationId, SearchEvents.SearchError, {
+          this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
             correlationId: dto.correlationId,
             source: 'coordinator',
             message,
@@ -254,7 +289,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
         },
       });
 
-      search.activeSearches.set(dto.correlationId, sub);
+      search.add(sub);
     });
   }
 
@@ -272,12 +307,22 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
     for (const [correlationId, sub] of data.activeSearches) {
       sub.unsubscribe();
-      client.leave(correlationId);
+      client.leave(this.searchRoom(client, correlationId));
     }
     data.activeSearches.clear();
   }
 
-  private emit<T>(correlationId: string, event: string, payload: T): void {
-    this.server.to(correlationId).emit(event, payload);
+  /**
+   * The room a search's frames go to: the socket's own, per correlation id.
+   * The id is the client's choice, and local results depend on who is asking
+   * (#472), so a room keyed by the id alone would deliver one user's private
+   * games to any other socket that sent the same id.
+   */
+  private searchRoom(client: Socket, correlationId: string): string {
+    return `${client.id}:${correlationId}`;
+  }
+
+  private emit<T>(client: Socket, correlationId: string, event: string, payload: T): void {
+    this.server.to(this.searchRoom(client, correlationId)).emit(event, payload);
   }
 }

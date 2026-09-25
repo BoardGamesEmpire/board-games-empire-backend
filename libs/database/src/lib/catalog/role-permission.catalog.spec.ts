@@ -175,6 +175,20 @@ describe('the shipped catalogs', () => {
       }
     });
 
+    it('let User read its own games and everyone’s Public ones, and nothing else', () => {
+      const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+
+      // `User` is held by every signed-in actor, so an unconditioned read here
+      // is every private game handed to everyone (#472). Pinned exactly rather
+      // than by shape, so a clause that goes missing fails here instead of
+      // widening the read unnoticed.
+      expect(conditionsOf('read:game')).toStrictEqual({ deletedAt: null, createdById: '{{ user.id }}' });
+      expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, visibility: 'Public' });
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
+        expect.arrayContaining(['read:game', 'read:game:public']),
+      );
+    });
+
     it.each(
       Object.entries(ROLE_SCOPE)
         .filter(([, scope]) => scope !== 'global')

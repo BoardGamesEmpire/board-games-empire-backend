@@ -11,12 +11,17 @@ declare class AbilityService {
   getActingUserId(): string;
   getTriggeringUserAbility(): unknown | null;
   primeCurrentActor(): Promise<void>;
+  resolveAbilitiesForActor(actor: unknown): Promise<unknown[]>;
   assertCurrentActorCan(action: string, resourceType: string, instance: Record<string, unknown>): void;
 }
 
 /** Stable sentinel returned by the mocked condition resolvers, so specs can
  *  assert it flows into a Prisma `where.AND` without hand-rolling a value. */
 export const MOCK_RESOURCE_CONDITION = { __mockAbilityCondition: true } as const;
+
+/** Stable sentinel ability returned by the mocked `resolveAbilitiesForActor`.
+ *  Never `[]`: the real method throws rather than return an empty set. */
+export const MOCK_ABILITY = { __mockAbility: true } as const;
 
 /** Default acting user id returned by the mocked `getActingUserId`. */
 export const MOCK_ACTING_USER_ID = 'mock-acting-user-id';
@@ -31,6 +36,7 @@ export type MockAbilityService = Mocked<
     | 'getActingUserId'
     | 'getTriggeringUserAbility'
     | 'primeCurrentActor'
+    | 'resolveAbilitiesForActor'
     | 'assertCurrentActorCan'
   >
 >;
@@ -38,8 +44,9 @@ export type MockAbilityService = Mocked<
 /**
  * Creates a typed AbilityService mock with sensible, non-throwing defaults:
  * condition resolvers return `[MOCK_RESOURCE_CONDITION]` (a non-empty filter,
- * never the dangerous `AND: []`), `getActingUserId` returns
- * `MOCK_ACTING_USER_ID`, and the instance check `assertCurrentActorCan`
+ * never the dangerous `AND: []`), `resolveAbilitiesForActor` resolves
+ * `[MOCK_ABILITY]`, `getActingUserId` returns `MOCK_ACTING_USER_ID`, and the
+ * instance check `assertCurrentActorCan`
  * allows (returns without throwing). Override per spec via the returned
  * jest.fns or the `overrides` argument.
  *
@@ -60,6 +67,7 @@ export function createMockAbilityService(overrides: Partial<MockAbilityService> 
     getActingUserId: jest.fn<AbilityService['getActingUserId']>().mockReturnValue(MOCK_ACTING_USER_ID),
     getTriggeringUserAbility: jest.fn<AbilityService['getTriggeringUserAbility']>().mockReturnValue(null),
     primeCurrentActor: jest.fn<AbilityService['primeCurrentActor']>().mockResolvedValue(undefined),
+    resolveAbilitiesForActor: jest.fn<AbilityService['resolveAbilitiesForActor']>().mockResolvedValue([MOCK_ABILITY]),
     assertCurrentActorCan: jest.fn<AbilityService['assertCurrentActorCan']>(),
     ...overrides,
   };

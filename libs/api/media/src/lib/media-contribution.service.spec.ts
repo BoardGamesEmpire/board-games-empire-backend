@@ -24,7 +24,11 @@ describe('MediaContributionService', () => {
   let ability: MockAbilityService;
   const emit = jest.fn();
   const serviceAccount = { resolve: jest.fn().mockResolvedValue({ id: 'svc' }), ensure: jest.fn() };
-  const mediaLink = { attachWithin: jest.fn(), canLink: jest.fn().mockReturnValue(true) };
+  const mediaLink = {
+    attachWithin: jest.fn(),
+    canLink: jest.fn().mockReturnValue(true),
+    assertSubjectReadable: jest.fn().mockResolvedValue(undefined),
+  };
 
   const ownedMedia = { id: 'm1', ownerId: MOCK_ACTING_USER_ID };
   const dto = { subjectType: ResourceType.Game, subjectId: 'g1', category: 'rulebook' };
@@ -44,6 +48,8 @@ describe('MediaContributionService', () => {
     service = ctx.module.get(MediaContributionService);
     unwrapTransaction(db);
   });
+
+  afterEach(() => jest.clearAllMocks());
 
   describe('contribute', () => {
     beforeEach(() => {
@@ -112,6 +118,36 @@ describe('MediaContributionService', () => {
       mediaLink.canLink.mockReturnValueOnce(false);
       await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(BadRequestException);
     });
+
+    it('checks, inside the transaction, that the contributor can read the subject', async () => {
+      db.systemSetting.findFirst.mockResolvedValue({ requireContributionApproval: true } as never);
+      db.mediaContribution.create.mockResolvedValue({ id: 'c1' } as never);
+
+      await service.contribute('m1', dto);
+
+      expect(mediaLink.assertSubjectReadable).toHaveBeenCalledWith(dto.subjectType, dto.subjectId, db);
+    });
+
+    // Read is the bar for attaching media, and an auto-approved contribution
+    // attaches with no reviewer in between (#472: a private game is its
+    // creator's). A held one is refused too: a reviewer should never be asked
+    // to attach to a subject its contributor cannot see.
+    it.each([
+      ['auto-approved', false],
+      ['held for review', true],
+    ])(
+      'refuses a subject the contributor cannot read, before anything is written (%s)',
+      async (_, requireContributionApproval) => {
+        db.systemSetting.findFirst.mockResolvedValue({ requireContributionApproval } as never);
+        mediaLink.assertSubjectReadable.mockRejectedValueOnce(new ForbiddenException());
+
+        await expect(service.contribute('m1', dto)).rejects.toBeInstanceOf(ForbiddenException);
+
+        expect(db.mediaContribution.create).not.toHaveBeenCalled();
+        expect(db.mediaObject.update).not.toHaveBeenCalled();
+        expect(mediaLink.attachWithin).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('approve', () => {
@@ -287,6 +323,20 @@ describe('MediaContributionService', () => {
         }),
       );
       expect(mediaLink.attachWithin).toHaveBeenCalled();
+    });
+
+    it('refuses a DirectUpload to a subject the contributor cannot read', async () => {
+      db.mediaObject.findUnique.mockResolvedValue({ mimeType: 'image/png' } as never);
+      db.mediaContribution.findFirst.mockResolvedValue(null);
+      db.systemSetting.findFirst.mockResolvedValue({ requireContributionApproval: false } as never);
+      mediaLink.assertSubjectReadable.mockRejectedValueOnce(new ForbiddenException());
+
+      await expect(
+        service.createContributionWithin(db as never, 'm1', dto, ContributionOrigin.DirectUpload, MOCK_ACTING_USER_ID),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(db.mediaContribution.create).not.toHaveBeenCalled();
+      expect(mediaLink.attachWithin).not.toHaveBeenCalled();
     });
   });
 

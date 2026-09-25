@@ -6,6 +6,7 @@ import {
   Prisma,
   Visibility,
 } from '@bge/database';
+import { ServiceAccountService } from '@bge/services';
 import { DlcData, type GameData, ContentType as ProtoContentType } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
@@ -23,6 +24,7 @@ export class GameUpsertService {
     private readonly taxonomy: TaxonomyUpsertService,
     private readonly persons: PersonUpsertService,
     private readonly platform: PlatformUpsertService,
+    private readonly serviceAccount: ServiceAccountService,
   ) {}
 
   async upsert(gameData: GameData, gatewayId: string): Promise<ImportJobResult> {
@@ -77,10 +79,19 @@ export class GameUpsertService {
       return this.applyExistingGameUpdate(existingSource.game, gameData);
     }
 
+    // An imported game is the server's, not the requester's, and that ownership
+    // is what keeps it Public (`updateGame` refuses to privatize one). Created
+    // if missing, not merely resolved: otherwise the account exists only once
+    // the first Owner's provisioning has run, and nothing orders an import after
+    // that. Outside the try, so a failure here is never read as the GameSource
+    // race.
+    const owner = await this.serviceAccount.resolveOrEnsure();
+
     try {
       const game = await this.db.game.create({
         data: {
           ...this.buildCreateInput(gameData),
+          createdBy: { connect: { id: owner.id } },
           gameSources: {
             create: {
               gatewayId,

@@ -4,6 +4,7 @@ import {
   isPrismaDependentRecordNotFoundError,
   Prisma,
   ResourceType,
+  Visibility,
   type Game,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -223,17 +224,37 @@ export class GameService {
     }
 
     const userId = this.abilityService.getActingUserId();
+    const updateConditions = this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.update);
 
     try {
-      const existing = await this.db.game.count({ where: { id } });
-      if (existing === 0) {
-        throw new NotFoundException(t('errors.game.not_found', { id }));
+      // Read through the update conditions, so a caller who may not change the
+      // game hears 403 whatever fields they sent, before the rule below can
+      // answer 400. The write binds the same conditions again.
+      const existing = await this.db.game.findFirst({
+        where: { id, AND: updateConditions },
+        select: { createdBy: { select: { isServiceAccount: true } } },
+      });
+      if (existing === null) {
+        const exists = await this.db.game.count({ where: { id } });
+        if (exists === 0) {
+          throw new NotFoundException(t('errors.game.not_found', { id }));
+        }
+
+        throw new ForbiddenException(t('common.forbidden.update'));
+      }
+
+      // Only an import gives the service account a game, and imported games are
+      // public. Re-import never rewrites visibility, so one made private here
+      // would stay private for good.
+      const privatizes = updateGameDto.visibility !== undefined && updateGameDto.visibility !== Visibility.Public;
+      if (privatizes && existing.createdBy?.isServiceAccount === true) {
+        throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));
       }
 
       const game = await this.db.game.update({
         where: {
           id,
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.update),
+          AND: updateConditions,
         },
         data: {
           ...updateGameDto,

@@ -38,4 +38,18 @@ export class ServiceAccountService {
       },
     });
   }
+
+  /**
+   * The canonical service account, created if it does not exist yet. For a
+   * caller that cannot assume system birth has run. A read when the account
+   * exists, so a caller on a busy path pays no write: {@link ensure} upserts,
+   * and re-asserts the row's invariants, on every call.
+   */
+  async resolveOrEnsure(): Promise<User> {
+    const account = await this.db.user.findUnique({
+      where: { isServiceAccount: true, username: SERVICE_ACCOUNT_USERNAME },
+    });
+
+    return account ?? this.ensure();
+  }
 }

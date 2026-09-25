@@ -2,6 +2,7 @@ import { AuditContextModule } from '@bge/actor-context';
 import { DatabaseModule } from '@bge/database';
 import { LanguageLinkModule } from '@bge/language';
 import { NotificationsServiceModule } from '@bge/notifications-service';
+import { ServicesModule } from '@bge/services';
 import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import { FlowProducerNames, QueueNames } from './constants/queue.constants';
@@ -23,6 +24,8 @@ import { TaxonomyUpsertService } from './services/taxonomy.service';
     DatabaseModule,
     LanguageLinkModule,
     NotificationsServiceModule,
+    // ServiceAccountService: imported games are owned by the service account.
+    ServicesModule,
     // GamesImport: consumed here (GameImportProcessor) and produced (spawner).
     // GatewayFetch: producer only — the spawner enqueues expansion fetch jobs,
     // but this app registers NO fetch @Processor, so the worker never calls a

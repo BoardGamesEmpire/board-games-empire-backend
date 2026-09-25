@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { DatabaseService } from '@bge/database';
+import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
+import { AbilityService } from '@bge/permissions';
 import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -17,12 +18,18 @@ export class GameSearchService {
   constructor(
     private readonly db: DatabaseService,
     private readonly coordinator: GatewayCoordinatorClientService,
+    private readonly ability: AbilityService,
   ) {}
 
   search(dto: SearchQueryDto): Observable<SearchResponseDto> {
     const correlationId = crypto.randomUUID();
 
-    const local$ = dto.includeLocal !== false ? this.searchLocal(dto) : of([]);
+    // Built here, outside the local half's catchError: a failure to build them
+    // is an authorization failure and must not come back as "no games found".
+    const local$ =
+      dto.includeLocal !== false
+        ? this.searchLocal(dto, this.ability.getCurrentResourceConditions(ResourceType.Game, Action.read))
+        : of([]);
     const external$ = dto.includeExternal !== false ? this.searchExternal(correlationId, dto) : of(null);
 
     return forkJoin({ local: local$, external: external$ }).pipe(
@@ -30,8 +37,8 @@ export class GameSearchService {
     );
   }
 
-  private searchLocal(dto: SearchQueryDto): Observable<WsGameSearchResult[]> {
-    return from(this.queryLocalGames(dto.query, dto.limit, dto.offset)).pipe(
+  private searchLocal(dto: SearchQueryDto, readConditions: Prisma.GameWhereInput[]): Observable<WsGameSearchResult[]> {
+    return from(this.queryLocalGames(dto.query, readConditions, dto.limit, dto.offset)).pipe(
       catchError((err) => {
         this.logger.error('Local search failed', err);
         return of([]);
@@ -45,14 +52,25 @@ export class GameSearchService {
    * GameSearchGateway so the query/select and row→DTO mapping live in one place.
    * Rejects on DB error; callers decide how to surface it (REST swallows to `[]`,
    * WS emits a SearchError frame).
+   *
+   * `readConditions` is the caller's Game read clause, and it is required
+   * rather than defaulted because the two callers get it differently: REST from
+   * the request's primed ability context, WS by resolving the socket's actor.
+   * Without it a title search reads every private game (#472).
    */
-  async queryLocalGames(query: string, limit = 20, offset = 0): Promise<WsGameSearchResult[]> {
+  async queryLocalGames(
+    query: string,
+    readConditions: Prisma.GameWhereInput[],
+    limit = 20,
+    offset = 0,
+  ): Promise<WsGameSearchResult[]> {
     this.logger.debug(`Performing local search for query="${query}" with limit=${limit} and offset=${offset}`);
 
     const games = await this.db.game.findMany({
       where: {
         deletedAt: null,
         title: { contains: query, mode: 'insensitive' },
+        AND: readConditions,
       },
 
       take: limit,

@@ -4,7 +4,8 @@
   },
   "game": {
     "not_found": "Game with ID {id} not found",
-    "cannot_delete_in_collection": "Cannot delete game that is part of a collection"
+    "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
+    "server_owned_stays_public": "Game with ID {id} was imported and must stay public"
   },
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",

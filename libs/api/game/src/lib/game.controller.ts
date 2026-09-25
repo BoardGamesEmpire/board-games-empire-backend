@@ -60,6 +60,7 @@ export class GameController {
     );
   }
 
+  @ApiResponse({ status: Http.BadRequest, description: 'Empty patch, or an imported game made anything but public' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Game))

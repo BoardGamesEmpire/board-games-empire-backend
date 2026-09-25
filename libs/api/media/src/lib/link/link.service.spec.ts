@@ -1,7 +1,7 @@
 import { Action, Prisma, ResourceType } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
-import { createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
+import { createMockAbilityService, createTestingModuleWithDb, MOCK_RESOURCE_CONDITION } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { MediaLinkService } from './link.service';
 
@@ -20,6 +20,30 @@ describe('MediaLinkService', () => {
 
     db.$transaction.mockImplementation((cb) => cb(db));
     db.media.upsert.mockResolvedValue({ id: 'media-1' } as never);
+  });
+
+  describe('assertSubjectReadable', () => {
+    it('reads the subject through the client it is given, under the caller’s read conditions', async () => {
+      // A contribution checks its subject inside its own transaction.
+      const tx = { game: { findUnique: jest.fn().mockResolvedValue({ id: 'g1' }) } };
+
+      await service.assertSubjectReadable(ResourceType.Game, 'g1', tx as unknown as Prisma.TransactionClient);
+
+      expect(tx.game.findUnique).toHaveBeenCalledWith({
+        where: { id: 'g1', AND: [MOCK_RESOURCE_CONDITION] },
+        select: { id: true },
+      });
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
+      expect(db.game.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('forbids a subject the caller cannot read, whether or not it exists', async () => {
+      const tx = { game: { findUnique: jest.fn().mockResolvedValue(null) } };
+
+      await expect(
+        service.assertSubjectReadable(ResourceType.Game, 'g1', tx as unknown as Prisma.TransactionClient),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
   });
 
   describe('attach', () => {

@@ -224,8 +224,8 @@ describe('the shipped catalog', () => {
     // No ledger, like the template guard's: a floor grant with no condition is
     // never declared, only removed. The unconditioned-grant guards excuse any
     // slug `User` holds, and on the floor role that excuse is the danger —
-    // `read:game` would pass them and serve the whole Game table, private games
-    // included, to anyone with an anonymous session (#484).
+    // `read:user:profile` would pass them and serve every profile, whatever its
+    // visibility, to anyone with an anonymous session (#484).
     expect(findUnboundedGrants(PERMISSION_CATALOG, ROLE_PERMISSION_CATALOG, SystemRole.AnonymousUser)).toEqual([]);
   });
 

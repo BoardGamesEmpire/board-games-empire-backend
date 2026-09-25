@@ -1,4 +1,5 @@
-import { GameSource, Prisma } from '@bge/database';
+import { GameSource, Prisma, Visibility } from '@bge/database';
+import { ServiceAccountService } from '@bge/services';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData } from '@boardgamesempire/proto-gateway';
 import { ContentType, PlatformType as ProtoPlatformType } from '@boardgamesempire/proto-gateway';
@@ -18,8 +19,10 @@ describe('GameUpsertService', () => {
   let platformService: jest.Mocked<PlatformUpsertService>;
   let taxonomyService: jest.Mocked<TaxonomyUpsertService>;
   let personService: jest.Mocked<PersonUpsertService>;
+  let serviceAccount: { resolveOrEnsure: jest.Mock };
 
   const GATEWAY_ID = 'gw-bgg';
+  const SERVICE_ACCOUNT_ID = 'service-account';
 
   beforeEach(async () => {
     platformService = {
@@ -42,12 +45,15 @@ describe('GameUpsertService', () => {
       upsertPublisher: jest.fn(),
     } as unknown as jest.Mocked<PersonUpsertService>;
 
+    serviceAccount = { resolveOrEnsure: jest.fn().mockResolvedValue({ id: SERVICE_ACCOUNT_ID }) };
+
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         GameUpsertService,
         { provide: PlatformUpsertService, useValue: platformService },
         { provide: TaxonomyUpsertService, useValue: taxonomyService },
         { provide: PersonUpsertService, useValue: personService },
+        { provide: ServiceAccountService, useValue: serviceAccount },
       ],
     });
 
@@ -230,6 +236,38 @@ describe('GameUpsertService', () => {
       expect(result.sourceCreated).toBe(true);
       expect(result.gameId).toBe('game-new');
       expect(db.game.create).toHaveBeenCalled();
+    });
+
+    it('gives a new game to the service account, Public', async () => {
+      // An imported game belongs to the server, not to whoever asked for the
+      // import, and that ownership is what keeps it Public: `updateGame` refuses
+      // to make a server-owned game private.
+      stubNewGameCreation('game-new');
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+
+      await service.upsert(bggGameData(), GATEWAY_ID);
+
+      expect(serviceAccount.resolveOrEnsure).toHaveBeenCalledTimes(1);
+      expect(db.game.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            visibility: Visibility.Public,
+            createdBy: { connect: { id: SERVICE_ACCOUNT_ID } },
+          }),
+        }),
+      );
+    });
+
+    it('leaves ownership and visibility alone on re-import', async () => {
+      stubExistingGame('game-existing');
+      stubPlatformGameMap(['platform-tabletop', 'pg-1']);
+
+      await service.upsert(bggGameData(), GATEWAY_ID);
+
+      expect(serviceAccount.resolveOrEnsure).not.toHaveBeenCalled();
+      const [{ data }] = db.game.update.mock.calls[0];
+      expect(data).not.toHaveProperty('createdBy');
+      expect(data).not.toHaveProperty('visibility');
     });
 
     it('updates an existing Game record on re-import', async () => {
