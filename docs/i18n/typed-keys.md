@@ -49,11 +49,13 @@ Under the hood that runs the `nestjs-i18n` CLI via the Nx target
 nestjs-i18n -p libs/common/i18n-core/src/lib/i18n -o libs/common/i18n-core/src/lib/generated/i18n.generated.ts
 ```
 
-One exception to "`typecheck` pulls it in", which does not bite today: `@bge/database` and
-`@boardgamesempire/proto-gateway` declare their own `typecheck.dependsOn`, which **replaces** the
-`nx.json` default rather than merging with it, so they do not get `^generate`. Neither imports
-`@bge/i18n` or `@bge/i18n-core`. The first file in either project to do so will fail to typecheck on
-a cold clone until that project's `dependsOn` is updated.
+A project that declares its own `typecheck.dependsOn` **replaces** the `nx.json` default rather than
+merging with it, and loses `^generate` unless it lists it. What counts is the project-reference
+closure, not direct imports: `tsc --build` compiles every referenced project. `@bge/database`
+reaches `@bge/i18n-core` through `@bge/otel` → `@bge/actor-context`, so it declares the union
+`["generate", "^generate"]`. `@boardgamesempire/proto-gateway` references nothing and keeps
+`["generate"]`; the first reference it gains that leads to `@bge/i18n-core` fails its typecheck on a
+cold clone until its `dependsOn` gets the union too (#312).
 
 `test` pulls it in through the same `^generate` default, but no test needs it: Jest transpiles
 through `@swc/jest`, which erases these type-only imports.

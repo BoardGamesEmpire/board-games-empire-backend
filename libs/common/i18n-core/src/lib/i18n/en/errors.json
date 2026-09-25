@@ -239,5 +239,8 @@
   },
   "database": {
     "deadlock": "Another change was being applied at the same time. Please retry the request."
+  },
+  "actor_context": {
+    "not_user_attributable": "Actor kind '{kind}' cannot perform user-attributed writes."
   }
 }

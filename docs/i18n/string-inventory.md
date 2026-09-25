@@ -207,13 +207,18 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [x] `libs/api/gateway-registry` — **DONE**. 1 exception (`GatewayCredentialsFactory` →
       `errors.gateway_registry.auth_type_not_implemented`, keeps `{authType}`). No spec asserted the message
       (zero spec edits).
-- [ ] `libs/common/actor-context` — 1 exception (`audit-context.service.ts:54`). **BLOCKED on a cycle:**
-      `@bge/i18n` already imports `AuditContextService` / `LOCALE_CLS_KEY` from `@bge/actor-context`, so
-      having `@bge/actor-context` import `t` from `@bge/i18n` forms a circular project reference that
-      `tsc --build` rejects. Needs the pure `t`/`translatable` primitive (no NestJS/actor-context deps)
-      extracted into a lower lib both can depend on before this one can migrate. The plain `Error` at
-      `audit-context.service.ts:44` stays English regardless (§5).
-- [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — 19 auth-plumbing exceptions (17 internal gRPC)
+- [x] `libs/common/actor-context` — **DONE** (#189). 1 exception (`audit-context.service.ts:66`,
+      `getActingUserId` refusing a `system`/`external`/`plugin` actor) → `errors.actor_context.not_user_attributable`,
+      keeps `{kind}` (a non-translatable identifier). `@bge/i18n` imports `AuditContextService` /
+      `LOCALE_CLS_KEY` from this lib, so importing `t` from `@bge/i18n` here would form a circular project
+      reference; it imports from `@bge/i18n-core` instead, the lower lib #189 extracted the primitives
+      and catalogs into. The plain `Error`s at `:56` and `:78` stay English (§5). Spec gained a test
+      asserting the marker via `getResponse()`. Guardrail enabled.
+- [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — auth-plumbing exceptions. Real surface is
+      **21** (inventory said 19): 4 HTTP — "Invalid API key" and "Impersonated sessions are not
+      supported", each in both `http-actor.middleware.ts` and `http-actor.interceptor.ts` (the latter
+      pair added by #408) — and 17 on the internal gRPC interceptors. Not behind the #189 cycle: this
+      lib already imports `@bge/i18n`.
 
 ---
 

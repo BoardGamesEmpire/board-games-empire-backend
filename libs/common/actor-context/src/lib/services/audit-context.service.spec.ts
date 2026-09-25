@@ -1,3 +1,4 @@
+import { t } from '@bge/i18n-core';
 import { ForbiddenException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ClsModule, ClsService } from 'nestjs-cls';
@@ -97,6 +98,8 @@ describe('AuditContextService', () => {
 
     // The plugin carries a user trigger on purpose: acting on a user's behalf
     // does not make the user its subject until polymorphic attribution exists.
+    // A plugin acting inside a request carries the refusal to an HTTP response,
+    // so it names a catalog key, with the refused kind, for the edge to translate.
     it.each<[string, Actor]>([
       [
         'plugin',
@@ -109,10 +112,20 @@ describe('AuditContextService', () => {
       ],
       ['system', { kind: 'system', reason: 'migration' }],
       ['external', { kind: 'external', system: 'gateway', identifier: 'gateway-bgg' }],
-    ])('refuses a %s actor with a 403 rather than answering with an id', async (_kind, actor) => {
+    ])('refuses a %s actor with a 403 rather than answering with an id', async (kind, actor) => {
       await cls.run(() => {
         cls.set(ACTOR_CLS_KEY, actor);
-        expect(() => service.getActingUserId()).toThrow(ForbiddenException);
+        let error: unknown;
+        try {
+          service.getActingUserId();
+        } catch (caught) {
+          error = caught;
+        }
+
+        expect(error).toBeInstanceOf(ForbiddenException);
+        expect((error as ForbiddenException).getResponse()).toEqual(
+          t('errors.actor_context.not_user_attributable', { kind }),
+        );
       });
     });
 

@@ -28,7 +28,8 @@
       "dependsOn": ["generate"]
     },
     "typecheck": {
-      "dependsOn": ["generate"]
+      "// dependsOn": "^generate: this project compiles @bge/i18n-core through otel → actor-context, and its key types are generated and untracked, so a cold typecheck fails without them. The union, because a project-level dependsOn replaces the nx.json default rather than merging (#312).",
+      "dependsOn": ["generate", "^generate"]
     },
     "test": {
       "dependsOn": ["generate"]
