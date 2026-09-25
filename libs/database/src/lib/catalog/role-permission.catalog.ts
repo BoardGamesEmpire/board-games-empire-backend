@@ -84,7 +84,7 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * of the per-membership planning cost measured on #417. An anonymous guest's
  * ability is the exception — it carries `AnonymousUser`, not `User` — so an
  * event role given to a guest does not bring back what that role left to
- * `User`, `read:game_play_session` and `create:session_player:join` among it.
+ * `User`, such as `read:game_play_session` and `create:session_player:join`.
  * Which of those a guest's event role needs is #488's to decide.
  *
  * `AnonymousUser` is the one global role that repeats a `User` slug, and does
