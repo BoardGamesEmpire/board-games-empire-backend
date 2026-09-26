@@ -1,6 +1,17 @@
 import { AuditContextService } from '@bge/actor-context';
 import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
-import { Controller, Get, type INestApplication, NotFoundException, Param } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  type INestApplication,
+  type MiddlewareConsumer,
+  Module,
+  type NestMiddleware,
+  type NestModule,
+  NotFoundException,
+  Param,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';
@@ -27,6 +38,30 @@ class TestController {
   }
 }
 
+// Mirrors HttpActorMiddleware, which refuses by handing a marker to `next()`
+// before any route handler runs. Scoped to its own controller so the other
+// route stays reachable; the error takes the same path either way.
+class RefusingMiddleware implements NestMiddleware {
+  use(_req: unknown, _res: unknown, next: (error?: unknown) => void): void {
+    next(new UnauthorizedException(t('errors.api_key.invalid')));
+  }
+}
+
+@Controller('refused')
+class RefusedController {
+  @Get()
+  refused(): never {
+    throw new Error('unreachable: the middleware refuses first');
+  }
+}
+
+@Module({ controllers: [RefusedController] })
+class RefusingModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RefusingMiddleware).forRoutes(RefusedController);
+  }
+}
+
 describe('I18nExceptionFilter (real catalog)', () => {
   let app: INestApplication;
   const getLocale = jest.fn().mockReturnValue(FALLBACK_LOCALE);
@@ -38,6 +73,7 @@ describe('I18nExceptionFilter (real catalog)', () => {
           fallbackLanguage: FALLBACK_LOCALE,
           loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
         }),
+        RefusingModule,
       ],
       controllers: [TestController],
       providers: [
@@ -62,6 +98,17 @@ describe('I18nExceptionFilter (real catalog)', () => {
       statusCode: 404,
       message: 'Language with id 42 not found',
       error: 'Not Found',
+    });
+  });
+
+  it('renders a marker that middleware passes to next()', async () => {
+    const res = await fetch(`${await app.getUrl()}/refused`);
+
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual({
+      statusCode: 401,
+      message: 'Invalid API key',
+      error: 'Unauthorized',
     });
   });
 });

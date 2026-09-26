@@ -1,5 +1,6 @@
 import { AuditContextInternalService, type Actor } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
+import { t } from '@bge/i18n';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
 import type { CallHandler, ExecutionContext } from '@nestjs/common';
@@ -88,7 +89,7 @@ export class HttpActorInterceptor extends ActorInterceptor {
     const resolved = await this.authService.verifyApiKey(key);
 
     if (!resolved) {
-      throw new UnauthorizedException('Invalid API key');
+      throw new UnauthorizedException(t('errors.api_key.invalid'));
     }
 
     return {
@@ -120,7 +121,7 @@ export class HttpActorInterceptor extends ActorInterceptor {
     const impersonatorId = sessionImpersonatorId(session);
     if (impersonatorId) {
       this.logger.warn(`Refusing impersonated session (#408): target=${user?.id} impersonatedBy=${impersonatorId}`);
-      throw new ForbiddenException('Impersonated sessions are not supported');
+      throw new ForbiddenException(t('errors.auth.impersonated_session'));
     }
 
     if (user.isAnonymous) {

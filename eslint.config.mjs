@@ -87,9 +87,12 @@ export const unscopedListReadSelectors = [
 // rule scoped to its source, so the guardrail grows as #144 lands lib-by-lib and
 // never red-CIs a lib that hasn't been migrated yet. Genuinely non-user-facing
 // cases use an explicit `// eslint-disable-next-line no-restricted-syntax --
-// <reason>` escape hatch. `raw=/^['"]/` restricts to STRING literals (a numeric
-// status code as an exception arg is not flagged); namespaced callees
-// (`ns.FooException`) are a known gap — call sites here import exceptions directly.
+// <reason>` escape hatch. A file whose every exception is non-user-facing (the
+// transport lib's gRPC interceptors) may instead be listed in that lib's
+// `ignores`, with the reason beside it. `raw=/^['"]/` restricts to STRING
+// literals (a numeric status code as an exception arg is not flagged);
+// namespaced callees (`ns.FooException`) are a known gap — call sites here
+// import exceptions directly.
 export const i18nHardcodedStringSelectors = [
   {
     selector: 'NewExpression[callee.name=/Exception$/] > Literal[raw=/^[\'"]/]',

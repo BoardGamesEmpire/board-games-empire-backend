@@ -6,6 +6,7 @@ import {
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
+import { I18nMessage, t } from '@bge/i18n';
 import { ExecutionContext, ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { Request } from 'express';
@@ -208,7 +209,12 @@ describe('HttpActorInterceptor', () => {
         stubSession({ id: 'target-1', isAnonymous: false }, 'sess-imp', 'admin-1'),
       );
 
-      await expect(run(buildRequest({ authorization: 'Bearer imp' }))).rejects.toBeInstanceOf(ForbiddenException);
+      const error: unknown = await run(buildRequest({ authorization: 'Bearer imp' })).catch(
+        (thrown: unknown) => thrown,
+      );
+
+      expect(error).toBeInstanceOf(ForbiddenException);
+      expect((error as ForbiddenException).getResponse()).toEqual(t('errors.auth.impersonated_session'));
     });
 
     it('does not leak the acting admin to the caller', async () => {
@@ -220,7 +226,11 @@ describe('HttpActorInterceptor', () => {
         (thrown: unknown) => thrown,
       );
 
-      expect((error as ForbiddenException).message).not.toContain('admin-1');
+      // The caller sees only the rendered catalog copy. A marker with no args
+      // has nothing from the session to interpolate into it.
+      const body = (error as ForbiddenException).getResponse() as I18nMessage;
+      expect(body).toBeInstanceOf(I18nMessage);
+      expect(body.args).toBeUndefined();
     });
 
     it('logs the acting admin and the target so the attempt is traceable', async () => {
@@ -291,7 +301,10 @@ describe('HttpActorInterceptor', () => {
     it('throws UnauthorizedException when AuthService returns null', async () => {
       authMock.verifyApiKey.mockResolvedValue(null);
 
-      await expect(run(buildRequest({ [API_KEY_HEADER]: 'nope' }))).rejects.toBeInstanceOf(UnauthorizedException);
+      const error: unknown = await run(buildRequest({ [API_KEY_HEADER]: 'nope' })).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(UnauthorizedException);
+      expect((error as UnauthorizedException).getResponse()).toEqual(t('errors.api_key.invalid'));
     });
   });
 

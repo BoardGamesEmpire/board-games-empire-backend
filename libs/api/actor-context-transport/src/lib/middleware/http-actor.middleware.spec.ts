@@ -6,6 +6,7 @@ import {
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
+import { I18nMessage, t } from '@bge/i18n';
 import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
@@ -169,6 +170,7 @@ describe('HttpActorMiddleware', () => {
       const captured = await run(buildRequest({ authorization: 'Bearer imp' }));
 
       expect(captured.nextArg).toBeInstanceOf(ForbiddenException);
+      expect((captured.nextArg as ForbiddenException).getResponse()).toEqual(t('errors.auth.impersonated_session'));
       // Never populated: an actor of `{ kind: 'user', userId: 'target-1' }`
       // is precisely the audit-attribution hole this guard closes.
       expect(captured.actor).toBeUndefined();
@@ -179,7 +181,11 @@ describe('HttpActorMiddleware', () => {
 
       const captured = await run(buildRequest({ authorization: 'Bearer imp' }));
 
-      expect((captured.nextArg as ForbiddenException).message).not.toContain('admin-1');
+      // The caller sees only the rendered catalog copy. A marker with no args
+      // has nothing from the session to interpolate into it.
+      const body = (captured.nextArg as ForbiddenException).getResponse() as I18nMessage;
+      expect(body).toBeInstanceOf(I18nMessage);
+      expect(body.args).toBeUndefined();
     });
 
     it('logs the acting admin and the target so the attempt is traceable', async () => {
@@ -242,6 +248,7 @@ describe('HttpActorMiddleware', () => {
       const captured = await run(buildRequest({ [API_KEY_HEADER]: 'nope' }));
 
       expect(captured.nextArg).toBeInstanceOf(UnauthorizedException);
+      expect((captured.nextArg as UnauthorizedException).getResponse()).toEqual(t('errors.api_key.invalid'));
       // CLS was not populated because populate is reached after resolveActor.
       expect(captured.actor).toBeUndefined();
     });
