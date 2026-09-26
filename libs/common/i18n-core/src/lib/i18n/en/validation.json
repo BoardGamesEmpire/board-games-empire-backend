@@ -9,6 +9,8 @@
   "isArray": "{property} must be an array",
   "isObject": "{property} must be an object",
   "arrayMaxSize": "{property} must contain no more than {constraints.0} elements",
+  "arrayNotEmpty": "{property} should not be empty",
+  "arrayUnique": "All {property}'s elements must be unique",
   "isISO8601": "{property} must be a valid ISO 8601 date string",
   "maxJsonBytes": "{property} exceeds the maximum serialized size of {constraints.0} UTF-8 bytes",
   "isDate": "{property} must be a Date instance",
@@ -23,5 +25,9 @@
   "isNumberString": "{property} must be a number string",
   "nonNegativeIntegerString": "{property} must be a non-negative integer string",
   "isHostnameOrWildcard": "Each entry must be a valid hostname or wildcard (e.g. \"example.com\" or \"*.example.com\")",
-  "isCidr": "Each entry must be a valid CIDR (e.g. \"10.0.0.0/8\" or \"fc00::/7\"). Single IPs require explicit prefix (e.g. \"10.0.0.5/32\")"
+  "isCidr": "Each entry must be a valid CIDR (e.g. \"10.0.0.0/8\" or \"fc00::/7\"). Single IPs require explicit prefix (e.g. \"10.0.0.5/32\")",
+  "each": {
+    "isString": "each value in {property} must be a string",
+    "isIn": "each value in {property} must be one of the following values: {constraints.0}"
+  }
 }

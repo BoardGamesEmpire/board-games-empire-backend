@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { CappedPaginationQueryDto } from '@bge/shared';
 import { ApiProperty } from '@nestjs/swagger';
 import { IsString, MinLength } from 'class-validator';
@@ -17,7 +18,7 @@ export const USER_SEARCH_MAX_RESULTS = 20;
 // over-large `limit` is rejected rather than quietly reduced.
 export class UserSearchQueryDto extends CappedPaginationQueryDto(USER_SEARCH_MAX_RESULTS, 10) {
   @ApiProperty({ description: 'Search term matched against username and first name', minLength: 2 })
-  @IsString()
-  @MinLength(2)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MinLength(2, { message: i18nValidationMessage('validation.minLength') })
   q!: string;
 }

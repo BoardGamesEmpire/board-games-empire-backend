@@ -1,4 +1,5 @@
 import type { ActorKind, EventSource } from '@bge/actor-context';
+import { i18nValidationMessage } from '@bge/i18n';
 import { CappedPaginationQueryDto } from '@bge/shared';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -31,31 +32,31 @@ export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(
 ) {
   @ApiPropertyOptional({ description: 'Filter by domain model name (ResourceType value, e.g. "Event")' })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   subject?: string;
 
   @ApiPropertyOptional({ description: 'Filter by mutated row id (usually combined with subject)' })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   subjectId?: string;
 
   @ApiPropertyOptional({ enum: ACTOR_KINDS, description: 'Filter by actor variant' })
   @IsOptional()
-  @IsIn(ACTOR_KINDS)
+  @IsIn(ACTOR_KINDS, { message: i18nValidationMessage('validation.isIn') })
   actorKind?: ActorKind;
 
   @ApiPropertyOptional({ description: 'Filter by owning user id (plugin chains resolve to their trigger)' })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   actorUserId?: string;
 
   @ApiPropertyOptional({ description: 'Filter by raw event name (e.g. "event.created")' })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   event?: string;
 
   @ApiPropertyOptional({
@@ -63,18 +64,18 @@ export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(
     description: "Filter by mutation action ('create' | 'update' | 'delete')",
   })
   @IsOptional()
-  @IsIn(['create', 'update', 'delete'])
+  @IsIn(['create', 'update', 'delete'], { message: i18nValidationMessage('validation.isIn') })
   action?: 'create' | 'update' | 'delete';
 
   @ApiPropertyOptional({ enum: EVENT_SOURCES, description: 'Filter by origin transport' })
   @IsOptional()
-  @IsIn(EVENT_SOURCES)
+  @IsIn(EVENT_SOURCES, { message: i18nValidationMessage('validation.isIn') })
   source?: EventSource;
 
   @ApiPropertyOptional({ description: 'Filter by correlation id — reconstructs one request/job chain' })
   @IsOptional()
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   correlationId?: string;
 
   @ApiPropertyOptional({
@@ -83,7 +84,7 @@ export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(
     description: 'Only rows that occurred at or after this time',
   })
   @IsOptional()
-  @IsDate()
+  @IsDate({ message: i18nValidationMessage('validation.isDate') })
   @Type(() => Date)
   occurredFrom?: Date;
 
@@ -93,7 +94,7 @@ export class ListAuditLogsQueryDto extends CappedPaginationQueryDto(
     description: 'Only rows that occurred strictly before this time',
   })
   @IsOptional()
-  @IsDate()
+  @IsDate({ message: i18nValidationMessage('validation.isDate') })
   @Type(() => Date)
   occurredTo?: Date;
 }

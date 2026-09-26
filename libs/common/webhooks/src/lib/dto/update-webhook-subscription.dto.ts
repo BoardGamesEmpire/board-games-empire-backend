@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayNotEmpty, ArrayUnique, IsIn, IsOptional, IsString, IsUrl, MinLength } from 'class-validator';
 import { WEBHOOK_EVENT_TYPES, type WebhookEventType } from '../constants/webhook-event-types';
@@ -19,19 +20,22 @@ export class UpdateWebhookSubscriptionDto {
   })
   @IsOptional()
   // See CreateWebhookSubscriptionDto.url — `http` is intentionally allowed for internal targets.
-  @IsUrl({ require_protocol: true, protocols: ['https', 'http'] })
+  @IsUrl(
+    { require_protocol: true, protocols: ['https', 'http'] },
+    { message: i18nValidationMessage('validation.isUrl') },
+  )
   url?: string;
 
   @ApiPropertyOptional({ isArray: true, enum: WEBHOOK_EVENT_TYPES })
   @IsOptional()
-  @ArrayNotEmpty()
-  @ArrayUnique()
-  @IsIn(WEBHOOK_EVENT_TYPES, { each: true })
+  @ArrayNotEmpty({ message: i18nValidationMessage('validation.arrayNotEmpty') })
+  @ArrayUnique({ message: i18nValidationMessage('validation.arrayUnique') })
+  @IsIn(WEBHOOK_EVENT_TYPES, { each: true, message: i18nValidationMessage('validation.each.isIn') })
   eventTypes?: WebhookEventType[];
 
   @ApiPropertyOptional({ description: 'Rotate the signing secret (minimum 16 characters).' })
   @IsOptional()
-  @IsString()
-  @MinLength(16)
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  @MinLength(16, { message: i18nValidationMessage('validation.minLength') })
   secret?: string;
 }

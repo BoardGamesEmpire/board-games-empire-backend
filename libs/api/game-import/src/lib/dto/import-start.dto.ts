@@ -28,7 +28,7 @@ export class ImportStartDto {
    */
   @ApiProperty({ type: [String], description: 'External IDs of expansions to co-import. Empty = base game only.' })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsString({ each: true, message: i18nValidationMessage('validation.isString') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @IsOptional()
   expansionExternalIds?: string[] = [];
 }

@@ -3,7 +3,7 @@ import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
 import { Body, Controller, Get, type INestApplication, NotFoundException, Param, Post } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
-import { IsString } from 'class-validator';
+import { ArrayNotEmpty, ArrayUnique, IsEnum, IsIn, IsOptional, IsString } from 'class-validator';
 import { I18nModule, I18nValidationExceptionFilter, I18nValidationPipe } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 import { FALLBACK_LOCALE } from './locale.constants';
@@ -36,11 +36,52 @@ class ValidateDto {
   name!: string;
 }
 
+class ValidateArrayDto {
+  @ArrayNotEmpty({ message: i18nValidationMessage('validation.arrayNotEmpty') })
+  @ArrayUnique({ message: i18nValidationMessage('validation.arrayUnique') })
+  tags!: string[];
+}
+
+enum Color {
+  Red = 'red',
+  Green = 'green',
+}
+
+const ACTIONS = ['create', 'update', 'delete'];
+
+class ValidateListDto {
+  @IsOptional()
+  @IsIn(ACTIONS, { message: i18nValidationMessage('validation.isIn') })
+  action?: string;
+
+  @IsOptional()
+  @IsEnum(Color, { message: i18nValidationMessage('validation.isEnum') })
+  color?: Color;
+
+  @IsOptional()
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
+  names?: string[];
+
+  @IsOptional()
+  @IsIn(ACTIONS, { each: true, message: i18nValidationMessage('validation.each.isIn') })
+  actions?: string[];
+}
+
 @Controller()
 class TestController {
   @Post('validate')
   validate(@Body() dto: ValidateDto): ValidateDto {
     return dto; // only the failure path is exercised; echo keeps the param used
+  }
+
+  @Post('validate-array')
+  validateArray(@Body() dto: ValidateArrayDto): ValidateArrayDto {
+    return dto;
+  }
+
+  @Post('validate-list')
+  validateList(@Body() dto: ValidateListDto): ValidateListDto {
+    return dto;
   }
 
   @Get('translated/:id')
@@ -92,6 +133,45 @@ describe('I18nValidationExceptionFilter + I18nExceptionFilter (real catalog)', (
       message: ['name must be a string'],
       error: 'Bad Request',
     });
+  });
+
+  // The catalog copies class-validator's own defaults, so these must render
+  // exactly what an untagged decorator said before.
+  it.each([
+    ['an empty array', [], 'tags should not be empty'],
+    ['a duplicate entry', ['a', 'a'], "All tags's elements must be unique"],
+  ])('renders the array constraints in class-validator wording (%s)', async (_case, tags, expected) => {
+    const res = await fetch(`${await app.getUrl()}/validate-array`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tags }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ statusCode: 400, message: [expected], error: 'Bad Request' });
+  });
+
+  // Expected copy is what class-validator's own defaults print for the same
+  // decorators: a list constraint joined with ", ", and the "each value in "
+  // prefix an `each: true` default carries.
+  it.each([
+    ['an IsIn list', { action: 'upsert' }, 'action must be one of the following values: create, update, delete'],
+    ['an IsEnum list', { color: 'blue' }, 'color must be one of the following values: red, green'],
+    ['an each: true IsString', { names: [1] }, 'each value in names must be a string'],
+    [
+      'an each: true IsIn',
+      { actions: ['bogus'] },
+      'each value in actions must be one of the following values: create, update, delete',
+    ],
+  ])('renders %s in class-validator wording', async (_case, body, expected) => {
+    const res = await fetch(`${await app.getUrl()}/validate-list`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ statusCode: 400, message: [expected], error: 'Bad Request' });
   });
 
   it('still routes a t() HttpException to the catch-all filter (ordering intact)', async () => {

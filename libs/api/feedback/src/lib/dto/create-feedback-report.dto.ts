@@ -155,7 +155,7 @@ export class CreateFeedbackReportDto {
   })
   @IsOptional()
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsString({ each: true, message: i18nValidationMessage('validation.isString') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @ArrayMaxSize(FEEDBACK_MAX_REDACTED_FIELDS, { message: i18nValidationMessage('validation.arrayMaxSize') })
   userRedactedFields?: string[];
 }

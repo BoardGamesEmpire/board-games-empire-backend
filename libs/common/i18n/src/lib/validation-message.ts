@@ -1,4 +1,5 @@
 import type { I18nPath, I18nTranslations } from '@bge/i18n-core';
+import type { ValidationArguments } from 'class-validator';
 import { i18nValidationMessage as baseI18nValidationMessage } from 'nestjs-i18n';
 
 /**
@@ -31,7 +32,19 @@ export type I18nValidationPath = Extract<I18nPath, `validation.${string}`>;
  * The marker only becomes a translated string once the request hits
  * `I18nValidationPipe` + `I18nValidationExceptionFilter` (registered in the
  * app); calling `class-validator`'s `validate()` directly yields the raw marker.
+ *
+ * An array constraint (`@IsIn`'s values, `@IsEnum`'s entries) is joined with
+ * ", " before encoding, as class-validator does for its own defaults. The
+ * catalog formatter would otherwise print it with bare commas.
  */
 export function i18nValidationMessage(key: I18nValidationPath, args?: Record<string, unknown>) {
-  return baseI18nValidationMessage<I18nTranslations>(key, args);
+  const encode = baseI18nValidationMessage<I18nTranslations>(key, args);
+
+  return (validationArguments: ValidationArguments): string =>
+    encode({
+      ...validationArguments,
+      constraints: validationArguments.constraints?.map((constraint: unknown) =>
+        Array.isArray(constraint) ? constraint.join(', ') : constraint,
+      ),
+    });
 }
