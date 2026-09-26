@@ -1,6 +1,7 @@
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { createActors, type Actors, type SessionCredentials } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { Socket } from 'socket.io-client';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, nextEvent, openSocket } from '../support/socket';
@@ -23,6 +24,7 @@ describe('WebSocket error delivery', () => {
   const baseUrl = requireBaseUrl(process.env);
   const NAMESPACE = 'games/search';
   const SEARCH_START = 'search:start';
+  const STILL_OPEN_AFTER_MS = 500;
 
   let db: TestDatabase;
   let actors: Actors;
@@ -69,6 +71,21 @@ describe('WebSocket error delivery', () => {
     includeExternal: false,
   });
 
+  /**
+   * Proves a socket outlived its refusal. A refused socket is held open for
+   * 100 ms before it is disconnected, so `socket.connected` right after the
+   * error frame would pass either way. A frame answered well after that
+   * window cannot.
+   */
+  const expectStillOpen = async (socket: Socket): Promise<void> => {
+    await delay(STILL_OPEN_AFTER_MS);
+    const answered = nextEvent<WsErrorPayload>(socket, WsErrorEvents.Exception);
+
+    socket.emit(SEARCH_START, searchOfNothing());
+
+    expect(await answered).toMatchObject({ statusCode: 400 });
+  };
+
   describe('a refused frame', () => {
     it('reports a validation failure on `exception`, and the socket stays open', async () => {
       const socket = await connectedAs((await actors.user()).credentials);
@@ -83,7 +100,7 @@ describe('WebSocket error delivery', () => {
         pattern: SEARCH_START,
         correlationId: 'not-a-uuid',
       });
-      expect(socket.connected).toBe(true);
+      await expectStillOpen(socket);
     });
 
     it("reports the gateway's own refusal on `exception`, though no search room was joined", async () => {
@@ -100,7 +117,7 @@ describe('WebSocket error delivery', () => {
         pattern: SEARCH_START,
         correlationId: frame.correlationId,
       });
-      expect(socket.connected).toBe(true);
+      await expectStillOpen(socket);
     });
   });
 
