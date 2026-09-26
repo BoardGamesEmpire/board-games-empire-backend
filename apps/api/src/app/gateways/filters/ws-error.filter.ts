@@ -29,9 +29,17 @@ export class WsErrorFilter implements WsExceptionFilter {
     const client = ws.getClient<Socket>();
     const frame = { pattern: ws.getPattern(), data: ws.getData() };
 
-    // Validation failures, and the refusals handlers throw.
+    // Validation failures, and the refusals handlers throw. A 401 says the
+    // session is gone however it was raised, so it ends the connection the way
+    // AuthGuard's own does below.
     if (exception instanceof HttpException) {
-      client.emit(WsErrorEvents.Exception, wsErrorPayload(exception.getStatus(), messageOf(exception), frame));
+      const payload = wsErrorPayload(exception.getStatus(), messageOf(exception), frame);
+      if (payload.statusCode === Http.Unauthorized) {
+        await refuseSocket(client, payload);
+        return;
+      }
+
+      client.emit(WsErrorEvents.Exception, payload);
       return;
     }
 

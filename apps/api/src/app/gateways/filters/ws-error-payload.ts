@@ -6,7 +6,7 @@ import type { Socket } from 'socket.io';
 /**
  * How long a refused socket stays open before it is disconnected, so the
  * `auth:error` frame is flushed first. Disconnecting sooner meant clients
- * never saw the refusal (#427).
+ * never saw the refusal; #427 records why the delay has to stay.
  */
 const AUTH_ERROR_FLUSH_MS = 100;
 

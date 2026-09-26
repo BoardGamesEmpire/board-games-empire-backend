@@ -6,6 +6,7 @@ import {
   ConflictException,
   HttpException,
   Logger,
+  UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
 import { WsException } from '@nestjs/websockets';
@@ -16,7 +17,7 @@ describe('WsErrorFilter', () => {
 
   it('sends a validation failure to the socket on `exception`, shaped like the HTTP error body', async () => {
     const payload = { correlationId: 'not-a-uuid', query: 'Gloomhaven' };
-    const { client, host } = frame('search:start', payload);
+    const { client, host } = hostFor('search:start', payload);
 
     await filter.catch(await validationFailure(payload), host);
 
@@ -31,7 +32,7 @@ describe('WsErrorFilter', () => {
   });
 
   it('keeps the status of any HTTP exception, including one whose body is a plain string', async () => {
-    const { client, host } = frame('search:start', { correlationId: 'corr-1' });
+    const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
     await filter.catch(new HttpException('ThrottlerException: Too Many Requests', 429), host);
 
@@ -49,7 +50,7 @@ describe('WsErrorFilter', () => {
     ['carries a non-string one', { correlationId: 42 }],
     ['is not an object', 'search for Gloomhaven'],
   ])('echoes no correlationId when the frame %s', async (_, payload) => {
-    const { client, host } = frame('search:start', payload);
+    const { client, host } = hostFor('search:start', payload);
 
     await filter.catch(new ConflictException('refused'), host);
 
@@ -57,9 +58,25 @@ describe('WsErrorFilter', () => {
     expect(sent).not.toHaveProperty('correlationId');
   });
 
+  it('ends the connection for an HTTP 401 as for a missing session: `auth:error`, then a disconnect', async () => {
+    const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+    await filter.catch(new UnauthorizedException('Session revoked'), host);
+
+    expect(client.emit).toHaveBeenCalledTimes(1);
+    expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.AuthError, {
+      statusCode: 401,
+      error: 'Unauthorized',
+      message: 'Session revoked',
+      pattern: 'search:start',
+      correlationId: 'corr-1',
+    });
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+  });
+
   describe('the WsExceptions AuthGuard throws', () => {
     it('answers a frame whose session is gone on `auth:error`, then disconnects', async () => {
-      const { client, host } = frame('search:start', { correlationId: 'corr-1' });
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
       await filter.catch(new WsException('UNAUTHORIZED'), host);
 
@@ -76,7 +93,7 @@ describe('WsErrorFilter', () => {
     });
 
     it('refuses a frame the client may not send on `exception`, and keeps the socket open', async () => {
-      const { client, host } = frame('search:start', { correlationId: 'corr-1' });
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
       await filter.catch(new WsException('FORBIDDEN'), host);
 
@@ -99,7 +116,7 @@ describe('WsErrorFilter', () => {
       ['a WsException with a message AuthGuard never throws', new WsException('meaningful only to its thrower')],
     ])('answers %s with a generic 500, and logs it', async (_, exception) => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-      const { client, host } = frame('search:start', { correlationId: 'corr-1', query: 'Gloomhaven' });
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1', query: 'Gloomhaven' });
 
       await filter.catch(exception, host);
 
@@ -118,10 +135,10 @@ describe('WsErrorFilter', () => {
 });
 
 /**
- * A frame as the filter sees it: the socket it came from, the pattern it was
- * sent on, and its raw payload.
+ * The exception host for one frame: the socket it came from, the pattern it
+ * was sent on, and its raw payload.
  */
-function frame(pattern: string, data: unknown) {
+function hostFor(pattern: string, data: unknown) {
   const client = { emit: jest.fn(), disconnect: jest.fn() };
   const host = {
     switchToWs: () => ({ getClient: () => client, getPattern: () => pattern, getData: () => data }),
