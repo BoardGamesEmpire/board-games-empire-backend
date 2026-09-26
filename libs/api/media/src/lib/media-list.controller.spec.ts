@@ -1,6 +1,8 @@
 import { MediaContributionStatus, Visibility, type MediaContribution, type MediaObject } from '@bge/database';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { ListContributionsQueryDto } from './dto';
 import { MediaContributionController } from './media-contribution.controller';
@@ -94,6 +96,20 @@ describe('media list envelopes (#372)', () => {
         pagination: { page: 1, limit: 5, total: 6, totalPages: 2, hasMore: true },
       });
       expect(contributions.list).toHaveBeenCalledWith(query);
+    });
+
+    // The service composes the `MediaContribution` scope; the envelope is where
+    // the guard checks for it. Built inside a request with nothing composed,
+    // this envelope must fail — an `Unscoped` envelope, or a type still in
+    // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+    it('builds its envelope under the MediaContribution scope guard', async () => {
+      const contributions = { list: jest.fn().mockResolvedValue({ rows: [contributionRow], total: 1 }) };
+      const controller = new MediaContributionController(contributions as never);
+      const query = plainToInstance(ListContributionsQueryDto, { limit: 5 }, { enableImplicitConversion: true });
+
+      await expect(
+        ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.list(query))),
+      ).rejects.toThrow(ListScopeNotComposedError);
     });
   });
 });

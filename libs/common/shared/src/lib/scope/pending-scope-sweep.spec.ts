@@ -11,17 +11,14 @@ import { PENDING_SCOPE_SWEEP } from './pending-scope-sweep.js';
  */
 describe('PENDING_SCOPE_SWEEP', () => {
   const EXPECTED = [
-    'AuditLog',
     'Event',
     'EventGameNomination',
     'EventOccurrence',
     'Friendship',
     'Game',
     'GameCollection',
-    'GameGateway',
     'HouseholdMember',
     'Job',
-    'MediaContribution',
     'MediaObject',
     'Plugin',
     'User',

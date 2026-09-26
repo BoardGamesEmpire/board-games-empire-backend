@@ -45,6 +45,14 @@ export class ScopeComposer {
    * costs a sentence and makes the claim reviewable; the alternative is an
    * omission indistinguishable from a forgotten clause.
    *
+   * An `Unscoped` read over a real resource still comes through here, for two
+   * reasons: the caller's ceiling is ANDed in all the same, and the read is
+   * recorded, which is what `paginated()`'s guard checks. An envelope declaring
+   * `Unscoped` itself skips that check, so it is for envelopes with no
+   * `ResourceType` behind them at all. Only the ceiling comes back, so the
+   * read's other filters — soft-delete, query parameters — sit beside it:
+   * `{ AND: [composed, filters] }`.
+   *
    * `action` is required and never defaulted, mirroring
    * `AbilityService.getCurrentResourceConditions`: defaulting to `read` reads
    * as a convenience right up until a mutation path inherits it.

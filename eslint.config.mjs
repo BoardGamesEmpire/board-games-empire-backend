@@ -70,6 +70,17 @@ export const restrictedImportPaths = {
 // service directly (#365 binds collection reads only), so a converted lib uses
 // an explicit `// eslint-disable-next-line no-restricted-syntax -- <reason>`
 // for those rather than staying opted out wholesale.
+//
+// OPT IN BY EXTENDING THE LIB'S EXISTING ENTRY, never with a second block.
+// Most libs already carry `no-restricted-syntax` for the i18n selectors, and in
+// flat config a later block setting the same rule REPLACES its options rather
+// than merging them — so a second block silently deletes the i18n guardrail,
+// and lint still passes. The opt-in is one entry:
+//
+//   'no-restricted-syntax': ['error', ...i18nHardcodedStringSelectors, ...unscopedListReadSelectors]
+//
+// A lib with no `no-restricted-syntax` entry yet can take a block of its own.
+// `eslint --print-config <file>` shows which selectors actually apply.
 export const unscopedListReadSelectors = [
   {
     selector: "CallExpression[callee.property.name='getCurrentResourceConditions']",
