@@ -504,7 +504,7 @@ describe('HouseholdService', () => {
 
     // A page boundary needs a total order; `createdAt` alone lets rows created
     // in one transaction share a key and drift between requests.
-    it('orders totally, so pages cannot drift between requests', async () => {
+    it('orders totally, so tied rows cannot swap across a page boundary', async () => {
       await read(service);
 
       expect(db.household.findMany).toHaveBeenCalledWith(
@@ -521,9 +521,9 @@ describe('HouseholdService', () => {
     // PROVISIONAL (#417). A first-person scope has no meaning for an actor
     // with no user behind it, and the rejection must stay a rejection: an empty
     // page tells a client its memberships were removed, which is a different
-    // and much more damaging claim than "you cannot ask this". For
-    // `getHouseholdsForUser` this is a real behaviour change — those actors
-    // previously received whatever their ceiling admitted. #395 revisits it.
+    // and much more damaging claim than "you cannot ask this". #417 made this
+    // a real behaviour change — those actors previously received whatever
+    // their ceiling admitted. #395 revisits it.
     it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
       abilityService.getActingUserId.mockImplementation(() => {
         throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));

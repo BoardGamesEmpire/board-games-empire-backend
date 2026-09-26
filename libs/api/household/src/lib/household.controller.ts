@@ -31,10 +31,14 @@ export class HouseholdController {
       'the cases apart (#365). A friend\u2019s `Friends`-visible household is still readable at ' +
       '`GET /households/:id`; listing another user\u2019s households is #485, and the all-subject staff surface ' +
       'is #419. Because it answers the same question for every caller, a **user session** may treat a ' +
-      'household it has cached but does not find here as one it was removed from or one that was deleted. An ' +
-      '**API key** is additionally floored by its own permissions (effective access is key ∩ owner), so ' +
-      'absence under a key also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a ' +
-      'key-authenticated read. The key permission model is unbuilt (#270). Paginated: `?page=` (1-based) and ' +
+      'household it has cached but does not find in the COMPLETE list as one it was removed from or one that ' +
+      'was deleted. Absence from one page says nothing about the others, and only a first page with ' +
+      '`hasMore: false` is a complete, consistent read: a walk across pages is not one snapshot, so a ' +
+      'household removed between two page requests shifts the rest up and can carry a live one past the ' +
+      'boundary unseen. Treat what a walk missed as something to re-check, not as proof. An **API key** ' +
+      'is additionally floored by its own permissions (effective access is key ∩ owner), so absence under a ' +
+      'key also admits \u201coutside this key\u2019s scope\u201d — do not purge a cache from a ' +
+      'key-authenticated read. Restricted keys are unbuilt (#266). Paginated: `?page=` (1-based) and ' +
       '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts ' +
       'the caller\u2019s visible memberships. See #230.',
   })

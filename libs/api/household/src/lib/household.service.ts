@@ -447,15 +447,13 @@ export class HouseholdService {
    *   by design, so the membership clause still matches a soft-deleted
    *   household.
    *
-   * `HouseholdMember` has no `deletedAt` — removal is a hard delete — so with
-   * this scope in place absence is unambiguous FOR A USER SESSION: a client may
-   * treat a household it has cached but does not find here as one it was
-   * removed from or one that was deleted. It is not unconditional: because the
-   * ability conditions are ANDed in, an API key scoped narrower than its owner
-   * makes absence also mean "outside this key's scope", so a key-authenticated
-   * read must not drive a cache purge. That is the intended trade — a widened
-   * key would be the worse bug — and it is documented on the route. The key
-   * permission model is unbuilt (#270).
+   * `HouseholdMember` has no `deletedAt` — removal is a hard delete — so for a
+   * user session this scope leaves a row's absence meaning exactly "removed or
+   * deleted". For an API key it does not: the ANDed conditions carry the
+   * key ∩ owner floor, so absence also means "outside this key's scope". That
+   * is the intended trade — a widened key would be the worse bug. What a
+   * client may conclude from absence, including how pagination limits it, is
+   * the route's contract and is stated once, in its OpenAPI description.
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors
    * (#417): "my households" has no meaning for an actor with no user, and
