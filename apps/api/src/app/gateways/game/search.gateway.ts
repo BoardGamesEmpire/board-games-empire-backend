@@ -13,15 +13,7 @@ import type {
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { AbilityService } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
-import {
-  BadRequestException,
-  ConflictException,
-  Logger,
-  UseFilters,
-  UseGuards,
-  UsePipes,
-  ValidationPipe,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -31,14 +23,10 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { wrapDefaults } from '@status/defaults';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
-import { WsErrorFilter } from '../filters';
 
-@UseGuards(AuthGuard)
-@UseFilters(WsErrorFilter)
 @WebSocketGateway({
   namespace: 'games/search',
   cors: { origin: '*', credentials: true },

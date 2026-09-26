@@ -1,18 +1,41 @@
 import { AuthService } from '@bge/auth';
 import type { BaseClientData } from '@bge/shared';
 import { buildWsClientData } from '@bge/utils';
-import { Logger } from '@nestjs/common';
+import { Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection } from '@nestjs/websockets';
 import { Http } from '@status/codes';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { AuthGuard, type UserSession } from '@thallesp/nestjs-better-auth';
 import { Socket } from 'socket.io';
-import { refuseSocket, wsErrorPayload } from '../filters';
+import { refuseSocket, WsErrorFilter, wsErrorPayload } from '../filters';
 
+/**
+ * Authenticates a gateway's connection here, and each of its frames through
+ * `AuthGuard`, answering every refusal in the #426 envelope.
+ *
+ * The guard and filter are bound here, not on each gateway: no app-wide
+ * enhancer runs on a gateway message, so a gateway that left them out would
+ * go on serving a revoked session and answer in Nest's default shape, and
+ * nothing would fail. Nest reads a class's enhancers from its parents too.
+ */
+@UseGuards(AuthGuard)
+@UseFilters(WsErrorFilter)
 export abstract class AuthenticatedGateway implements OnGatewayConnection {
   protected abstract readonly logger: Logger;
   constructor(protected readonly authService: AuthService) {}
 
   async handleConnection(client: Socket): Promise<UserSession | void> {
+    // Nest does not await this hook, so a session lookup that fails (the
+    // database or Redis briefly down) would otherwise be an unhandled
+    // rejection, and the socket would stay open with no actor and no answer.
+    try {
+      return await this.authenticate(client);
+    } catch (error) {
+      this.logger.error(`WS connection failed: socketId=${client.id}`, error);
+      return refuseSocket(client, wsErrorPayload(Http.InternalServerError, 'Internal server error'));
+    }
+  }
+
+  private async authenticate(client: Socket): Promise<UserSession | void> {
     const token = client.handshake?.auth?.token;
     this.logger.log(`WS connection attempt: socketId=${client.id} token=${token ? 'present' : 'absent'}`);
 

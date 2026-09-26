@@ -22,20 +22,38 @@ export function openSocket(baseUrl: string, namespace: string, credentials?: Ses
   });
 }
 
-/** Resolves with the payload of the next `event` the socket receives. */
+/**
+ * Resolves with the payload of the next `event` the socket receives. Rejects
+ * as soon as the socket fails to connect or disconnects first, naming why,
+ * rather than at the timeout, and a spec's teardown disconnect settles any
+ * wait a failed test left behind.
+ */
 export function nextEvent<T = unknown>(socket: Socket, event: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const onEvent = (payload: T): void => {
+    const settle = (outcome: () => void): void => {
       clearTimeout(timer);
-      resolve(payload);
+      socket.off(event, onEvent);
+      socket.off('connect_error', onConnectError);
+      socket.off('disconnect', onDisconnect);
+      outcome();
     };
 
-    const timer = setTimeout(() => {
-      socket.off(event, onEvent);
-      reject(new Error(`No '${event}' frame within ${EVENT_TIMEOUT_MS}ms`));
-    }, EVENT_TIMEOUT_MS);
+    const onEvent = (payload: T): void => settle(() => resolve(payload));
+    const onConnectError = (error: Error): void =>
+      settle(() => reject(new Error(`Connection failed while waiting for '${event}': ${error.message}`)));
+    const onDisconnect = (reason: string): void =>
+      settle(() => reject(new Error(`Disconnected (${reason}) while waiting for '${event}'`)));
 
-    socket.once(event, onEvent);
+    const timer = setTimeout(
+      () => settle(() => reject(new Error(`No '${event}' frame within ${EVENT_TIMEOUT_MS}ms`))),
+      EVENT_TIMEOUT_MS,
+    );
+
+    socket.on(event, onEvent);
+    socket.on('connect_error', onConnectError);
+    if (event !== 'disconnect') {
+      socket.on('disconnect', onDisconnect);
+    }
   });
 }
 

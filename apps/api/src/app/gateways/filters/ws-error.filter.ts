@@ -16,9 +16,10 @@ import { refuseSocket, wsErrorPayload } from './ws-error-payload';
  * filters has to be declared first, on every gateway, or it silently answers
  * every frame with a 500. A single filter has no order to get wrong.
  *
- * It has to be bound on each gateway. No app-wide filter runs on a gateway
- * message (Nest builds the WS exception context without the application's
- * global enhancers).
+ * No app-wide filter runs on a gateway message (Nest builds the WS exception
+ * context without the application's global enhancers), so it is bound on
+ * `AuthenticatedGateway`, and a gateway that does not extend it binds it
+ * itself.
  */
 @Catch()
 export class WsErrorFilter implements WsExceptionFilter {

@@ -4,9 +4,10 @@
  */
 export enum WsErrorEvents {
   /**
-   * The connection is closing because of who the client is: a refused
-   * connection, or a frame whose session is gone. The socket disconnects
-   * right after.
+   * The connection is closing, and the socket disconnects right after. Almost
+   * always because of who the client is: a refused connection, or a frame
+   * whose session is gone. A 500 says the server could not check the session
+   * at all, so connecting again may succeed.
    */
   AuthError = 'auth:error',
 
