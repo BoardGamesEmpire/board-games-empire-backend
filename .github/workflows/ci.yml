@@ -127,7 +127,38 @@ jobs:
           echo "i18n catalogs changed: $changed ($matches catalog file(s))"
 
       - run: npx nx run-many -t typecheck ${{ steps.catalogs.outputs.changed == 'true' && '--skip-nx-cache' || '' }}
-      - run: npx nx affected -t test --parallel --maxParallel=3 --passWithNoTests
+      # `run-many`, not `affected`, so every commit uploads a WHOLE-workspace
+      # report: an affected-only upload would show Codecov a handful of
+      # projects and read as a collapse in project coverage. The cost stays
+      # close to `affected` because the test target caches its coverage
+      # directory as an output — an unaffected project is a cache hit that
+      # restores its lcov without running a suite.
+      #
+      # `--coverage` is part of the task hash, so it must be passed on every
+      # run or the cache splits into with- and without-coverage halves.
+      - run: npx nx run-many -t test --coverage --parallel --maxParallel=3 --passWithNoTests
+
+      # Explicit list rather than the uploader's own search: that search walks
+      # the whole tree, and this pins the upload to exactly what the jest
+      # preset writes. Paths inside each lcov are repo-relative — see
+      # `coverageReporters` in jest.preset.js for why that matters.
+      - name: Collect coverage reports
+        id: coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          files="$(find apps libs -path '*/node_modules' -prune -o -path '*/test-output/jest/coverage/lcov.info' -print | sort | paste -sd, -)"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "coverage reports: $(printf '%s' "$files" | tr ',' '\n' | grep -c . || true)"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ steps.coverage.outputs.files }}
+          disable_search: true
+          flags: unittests
+          fail_ci_if_error: true
       - run: npx nx affected -t lint build --parallel --maxParallel=3
 
       # Nx Cloud self-healing stays scoped to this job (D-259-1): letting it
