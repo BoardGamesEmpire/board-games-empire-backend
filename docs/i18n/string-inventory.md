@@ -86,8 +86,9 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
       must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
       normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
-      `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
-      (en-only, no test asserts it — accepted).
+      `{constraints.1}`. The enum list rendered with bare commas at first, unlike class-validator's
+      default. `i18nValidationMessage` now joins it with ", ", and the `@bge/i18n` real-catalog spec
+      pins the wording (#144).
 - [x] `libs/api/media` — **DONE**. Real surface was **41 exceptions + 1 success** (inventory said
       35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
       (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
