@@ -110,8 +110,9 @@ runs:
 
     # Untracked as of #260, like the two above. The task graph can mostly produce
     # this on its own: `typecheck` reaches `^generate` for every project except
-    # `@bge/database` and `proto-gateway` (both override `typecheck.dependsOn` and so
-    # drop the default; neither imports i18n), and the six apps' `build` targets
+    # `proto-gateway` (it overrides `typecheck.dependsOn` and so drops the default;
+    # it references nothing that reaches i18n — `@bge/database` does, through
+    # actor-context, and declares the union), and the six apps' `build` targets
     # reach it too.
     #
     # This step is NOT merely belt-and-braces, though. Nx cannot hash an untracked
@@ -124,4 +125,4 @@ runs:
     # wiring. Cheap either way: an Nx cache hit when the catalogs are unchanged.
     - name: Generate i18n types
       shell: bash
-      run: npx nx run @board-games-empire/i18n:generate
+      run: npx nx run @board-games-empire/i18n-core:generate

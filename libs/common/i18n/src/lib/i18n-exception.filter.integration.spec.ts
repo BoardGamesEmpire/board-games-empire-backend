@@ -1,10 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
+import { t } from '@bge/i18n-core';
 import { Controller, Get, type INestApplication, NotFoundException, Param } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nService } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
-import { t } from './translatable';
 
 /**
  * Boots a real (minimal) Nest HTTP app so the filter is exercised end-to-end:

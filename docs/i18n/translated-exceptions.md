@@ -120,7 +120,7 @@ explicitly at the throw site.
 ## Adding a new message
 
 1. Add the key to the right catalog file under
-   `libs/common/i18n/src/lib/i18n/en/` (e.g. `errors.json`), with
+   `libs/common/i18n-core/src/lib/i18n/en/` (e.g. `errors.json`), with
    `{placeholder}`s for any interpolated values.
 2. Run `npm run i18n:generate` so your editor sees the new key. The types are
    generated, not committed — every `typecheck` and every app `build`

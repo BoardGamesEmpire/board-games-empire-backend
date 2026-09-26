@@ -1,3 +1,4 @@
+import { t } from '@bge/i18n-core';
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { ClsService } from 'nestjs-cls';
 import type { Actor, EventSource } from '../types';
@@ -62,7 +63,7 @@ export class AuditContextService {
         return actor.userId;
       default:
         // system | external | plugin — no backing user yet (polymorphic attribution deferred to #59)
-        throw new ForbiddenException(`Actor kind '${actor.kind}' cannot perform user-attributed writes.`);
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: actor.kind }));
     }
   }
 

@@ -1,7 +1,7 @@
 import { DatabaseModule } from '@bge/database';
+import { I18N_CATALOG_DIR } from '@bge/i18n-core';
 import { Module } from '@nestjs/common';
 import { I18nModule } from 'nestjs-i18n';
-import * as path from 'node:path';
 import { ClsLocaleResolver } from './cls-locale.resolver';
 import { LocaleResolutionService } from './locale-resolution.service';
 import { FALLBACK_LOCALE } from './locale.constants';
@@ -21,11 +21,9 @@ import { SupportedLocalesService } from './supported-locales.service';
  *   entry seam stored in CLS. Requires `ClsModule.forRoot({ global: true })`
  *   in the application graph.
  *
- * Catalogs live beside this module at `./i18n/<locale>/*.json`. Resolving from
- * `__dirname` works in jest (swc, unbundled — `__dirname` is this source dir)
- * and in a build where `./i18n` has been copied into the app's `dist` as a
- * webpack asset (`__dirname` is the app's `dist` dir). Each in-scope app
- * (api, worker, gateway-worker) wires that copy in its `webpack.config.js`
+ * Catalogs live in `@bge/i18n-core`, beside the key types generated from them;
+ * `I18N_CATALOG_DIR` resolves to them under jest and to the copy each in-scope
+ * app (api, worker, gateway-worker) makes into its `dist` as a webpack asset
  * (#139).
  */
 @Module({
@@ -34,7 +32,7 @@ import { SupportedLocalesService } from './supported-locales.service';
     I18nModule.forRoot({
       fallbackLanguage: FALLBACK_LOCALE,
       loaderOptions: {
-        path: path.join(__dirname, 'i18n'),
+        path: I18N_CATALOG_DIR,
         watch: false,
       },
       resolvers: [ClsLocaleResolver],

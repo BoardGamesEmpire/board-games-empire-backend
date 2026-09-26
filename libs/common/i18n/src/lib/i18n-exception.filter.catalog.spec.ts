@@ -1,12 +1,11 @@
 import { AuditContextService } from '@bge/actor-context';
+import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
 import { Controller, Get, type INestApplication, NotFoundException, Param } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { I18nModule } from 'nestjs-i18n';
-import * as path from 'node:path';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { t } from './translatable';
 
 /**
  * Complements the (stubbed-`I18nService`) integration spec by exercising the
@@ -15,8 +14,8 @@ import { t } from './translatable';
  * that would catch a catalog placeholder-syntax mismatch, a renamed/missing
  * catalog file, or a wrong loader path — the stubs elsewhere cannot.
  *
- * `__dirname` here is `src/lib` (jest runs the unbundled source), so
- * `./i18n` is the same catalog directory the app ships as a webpack asset.
+ * `I18N_CATALOG_DIR` is the same catalog directory the app loads, so a wrong
+ * loader path fails here too.
  * No resolver is configured — the filter always translates with an explicit
  * `lang`, so `I18nContext` is unnecessary.
  */
@@ -37,7 +36,7 @@ describe('I18nExceptionFilter (real catalog)', () => {
       imports: [
         I18nModule.forRoot({
           fallbackLanguage: FALLBACK_LOCALE,
-          loaderOptions: { path: path.join(__dirname, 'i18n'), watch: false },
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
         }),
       ],
       controllers: [TestController],
