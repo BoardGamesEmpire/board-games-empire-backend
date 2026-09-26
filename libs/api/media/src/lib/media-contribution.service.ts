@@ -66,6 +66,7 @@ export class MediaContributionService {
    * transaction. Shared by `contribute` (ExistingMedia) and the DirectUpload
    * upload-and-contribute path. The caller is responsible for authorizing the object
    * (contribute checks ownership; the DirectUpload path just created it as the actor).
+   * The subject is checked here, for both: the contributor must be able to read it.
    * With approval disabled, the ownership flip + attach happen here in the same tx.
    */
   async createContributionWithin(
@@ -95,6 +96,11 @@ export class MediaContributionService {
         t('errors.contribution.cannot_contribute_subject', { subjectType: dto.subjectType }),
       );
     }
+
+    // Before the approval split, so a held contribution is refused as well as
+    // an auto-approved one: the subject id is the contributor's to choose, and
+    // a private game is its creator's (#472).
+    await this.mediaLink.assertSubjectReadable(dto.subjectType, dto.subjectId, tx);
 
     const data = {
       mediaObjectId,

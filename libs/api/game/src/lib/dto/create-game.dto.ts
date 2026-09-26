@@ -1,7 +1,35 @@
 import { TimeMeasure, Visibility } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsPositive, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsPositive, IsString, ValidateIf } from 'class-validator';
+
+const GAME_VISIBILITIES = [Visibility.Public, Visibility.Private] as const;
+export type GameVisibility = (typeof GAME_VISIBILITIES)[number];
+
+/**
+ * A game's visibility: Public or Private only. The other tiers name audiences
+ * no game read rule serves yet, so a game saved with one would be its
+ * creator's alone while claiming otherwise; they arrive with #495's reach
+ * rules.
+ *
+ * `ValidateIf` rather than `IsOptional`, which skips null as well as
+ * undefined: left out, the column default applies, but an explicit null is
+ * refused here instead of reaching a non-nullable column as a 500. Shared with
+ * `UpdateGameDto`, which declares the field itself because `PartialType` would
+ * add `IsOptional` back.
+ */
+export function GameVisibilityProperty(): PropertyDecorator {
+  return applyDecorators(
+    ApiPropertyOptional({
+      enum: GAME_VISIBILITIES,
+      description: 'Public games are visible to everyone; private games only to their creator',
+    }),
+    ValidateIf((_, value) => value !== undefined),
+    IsString({ message: i18nValidationMessage('validation.isString') }),
+    IsIn(GAME_VISIBILITIES, { message: i18nValidationMessage('validation.isIn') }),
+  );
+}
 
 export class CreateGameDto {
   @ApiProperty({ description: 'Title of the game' })
@@ -86,12 +114,6 @@ export class CreateGameDto {
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   complexity?: number;
 
-  @ApiPropertyOptional({
-    enum: Visibility,
-    description: 'Indicates whether the game is visible to other users',
-  })
-  @IsOptional()
-  @IsString({ message: i18nValidationMessage('validation.isString') })
-  @IsIn(Object.values(Visibility), { message: i18nValidationMessage('validation.isIn') })
-  visible?: Visibility;
+  @GameVisibilityProperty()
+  visibility?: GameVisibility;
 }

@@ -38,4 +38,24 @@ describe('ServiceAccountService', () => {
       },
     });
   });
+
+  describe('resolveOrEnsure', () => {
+    it('reads the existing account and writes nothing', async () => {
+      db.user.findUnique.mockResolvedValue({ id: 'svc' } as never);
+
+      await expect(service.resolveOrEnsure()).resolves.toEqual({ id: 'svc' });
+      expect(db.user.findUnique).toHaveBeenCalledWith({
+        where: { isServiceAccount: true, username: '__system__' },
+      });
+      expect(db.user.upsert).not.toHaveBeenCalled();
+    });
+
+    it('creates the account when it does not exist yet', async () => {
+      db.user.findUnique.mockResolvedValue(null);
+      db.user.upsert.mockResolvedValue({ id: 'svc' } as never);
+
+      await expect(service.resolveOrEnsure()).resolves.toEqual({ id: 'svc' });
+      expect(db.user.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { username: '__system__' } }));
+    });
+  });
 });

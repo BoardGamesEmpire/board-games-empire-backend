@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { Action, Prisma, ResourceType } from '@bge/database';
+import { Action, Prisma, ResourceType, Visibility } from '@bge/database';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -11,13 +11,17 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import type { CreateGameDto } from './dto';
+import type { CreateGameDto, UpdateGameDto } from './dto';
 import { GameService } from './game.service';
 
 const COND = { id: 'sentinel-condition' };
 
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('Record to fetch not found', { code: 'P2025', clientVersion: 'test' });
+
+// The owner projection `updateGame` reads before it writes.
+const userOwned = { createdBy: { isServiceAccount: false } } as never;
+const serviceOwned = { createdBy: { isServiceAccount: true } } as never;
 
 describe('GameService', () => {
   let service: GameService;
@@ -122,8 +126,18 @@ describe('GameService', () => {
     expect(permissions.invalidateUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
   });
 
+  it('createGame keeps the visibility it was sent, owned by the caller', async () => {
+    db.game.create.mockResolvedValue({ id: 'game-1' } as Game);
+
+    await service.createGame({ title: 'X', visibility: Visibility.Private });
+
+    expect(db.game.create).toHaveBeenCalledWith({
+      data: { title: 'X', visibility: Visibility.Private, createdBy: { connect: { id: MOCK_ACTING_USER_ID } } },
+    });
+  });
+
   it('updateGame → update, and evicts the updater’s permission graph', async () => {
-    db.game.count.mockResolvedValue(1);
+    db.game.findFirst.mockResolvedValue(userOwned);
     db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
 
     await service.updateGame('game-1', { title: 'New' } as CreateGameDto);
@@ -137,6 +151,90 @@ describe('GameService', () => {
 
   it('updateGame rejects an empty patch', async () => {
     await expect(service.updateGame('game-1', {} as CreateGameDto)).rejects.toThrow(BadRequestException);
+  });
+
+  it('updateGame reads the row through the update conditions before it writes', async () => {
+    db.game.findFirst.mockResolvedValue(userOwned);
+    db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+    await service.updateGame('game-1', { title: 'New' });
+
+    expect(db.game.findFirst).toHaveBeenCalledWith({
+      where: { id: 'game-1', AND: [COND] },
+      select: { createdBy: { select: { isServiceAccount: true } } },
+    });
+  });
+
+  it('updateGame throws NotFound when the row is absent', async () => {
+    db.game.findFirst.mockResolvedValue(null);
+    db.game.count.mockResolvedValue(0);
+
+    await expect(service.updateGame('game-1', { title: 'New' })).rejects.toThrow(NotFoundException);
+    expect(db.game.update).not.toHaveBeenCalled();
+  });
+
+  it('updateGame throws Forbidden when the row exists but the caller may not change it', async () => {
+    db.game.findFirst.mockResolvedValue(null);
+    db.game.count.mockResolvedValue(1);
+
+    await expect(service.updateGame('game-1', { title: 'New' })).rejects.toThrow(ForbiddenException);
+    expect(db.game.update).not.toHaveBeenCalled();
+  });
+
+  it('updateGame throws Forbidden when the row leaves the conditions before the write', async () => {
+    db.game.findFirst.mockResolvedValue(userOwned);
+    db.game.update.mockRejectedValue(dependentRecordNotFound());
+
+    await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(ForbiddenException);
+  });
+
+  describe('a game the service account owns', () => {
+    // Only an import produces one, and re-import never rewrites visibility, so
+    // a server-owned game made private would stay private for good.
+    it('refuses to be made private, before any write', async () => {
+      db.game.findFirst.mockResolvedValue(serviceOwned);
+
+      await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(db.game.update).not.toHaveBeenCalled();
+    });
+
+    it('answers 403, not 400, to a caller who may not change it at all', async () => {
+      // The status follows the caller's rights, not the fields they sent.
+      db.game.findFirst.mockResolvedValue(null);
+      db.game.count.mockResolvedValue(1);
+
+      await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it.each<[string, UpdateGameDto]>([
+      ['kept Public', { visibility: Visibility.Public }],
+      ['edited without naming a visibility', { title: 'New' }],
+    ])('can still be %s', async (_label, patch) => {
+      db.game.findFirst.mockResolvedValue(serviceOwned);
+      db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+      await service.updateGame('game-1', patch);
+
+      expect(db.game.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining(patch) }));
+    });
+  });
+
+  it.each([
+    ['its creator’s game', userOwned],
+    ['a game whose creator was deleted', { createdBy: null } as never],
+  ])('updateGame lets %s be made private', async (_label, existing) => {
+    db.game.findFirst.mockResolvedValue(existing);
+    db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+    await service.updateGame('game-1', { visibility: Visibility.Private });
+
+    expect(db.game.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ visibility: Visibility.Private }) }),
+    );
   });
 
   it('deleteGame → delete (and blocks when in a collection)', async () => {

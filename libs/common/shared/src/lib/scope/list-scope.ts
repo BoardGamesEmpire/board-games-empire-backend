@@ -12,11 +12,10 @@
  *   serves a static i18n catalogue; there is no `ResourceType` to compose for.
  * - The resource exists and the read is deliberately install-wide.
  *
- * What it is NOT for: a read whose uniformity is a defect rather than a design.
- * `GET /games` looks unscoped and is not — `read:game` carries no conditions, so
- * every signed-in caller reads every private game (see 472). Declaring such a
- * read unscoped would entrench the leak behind a stated fact, which is worse
- * than leaving it undeclared.
+ * What it is NOT for: a read that only looks install-wide. `GET /games` returns
+ * every Public game plus the caller's own private ones (#472), so its rows vary
+ * by caller. Declaring such a read unscoped would state a fact that is false,
+ * which is worse than leaving it undeclared.
  */
 export interface UnscopedList {
   readonly kind: 'unscoped';

@@ -136,20 +136,26 @@ export class MediaLinkService {
   }
 
   /**
-   * Endpoint-path guard: the caller must be able to *read* the target subject.
-   * Read is the bar for attaching media — games are public, events are
-   * attendee-private, so "can see it" cleanly means "can contribute media to
-   * it" (a spectator at a competitive event can post photos). Not applied in
-   * attachWithin: contribution approval carries its own authority.
+   * The caller must be able to *read* the target subject. Read is the bar for
+   * attaching media — a game is readable when it is public or the caller's
+   * own, an event by its attendees, so "can see it" cleanly means "can
+   * contribute media to it" (a spectator at a competitive event can post
+   * photos). The endpoint paths apply it, and so does every contribution when
+   * it is made, whether or not it will wait for review. Not applied in
+   * attachWithin: a reviewer's approval carries its own authority.
    */
-  private async assertSubjectReadable(subjectType: ResourceType, subjectId: string): Promise<void> {
+  async assertSubjectReadable(
+    subjectType: ResourceType,
+    subjectId: string,
+    client: Prisma.TransactionClient = this.db,
+  ): Promise<void> {
     const AND = this.ability.getCurrentResourceConditions(subjectType as ModelResourceType, Action.read);
 
     let found: { id: string } | null;
     if (subjectType === ResourceType.Game) {
-      found = await this.db.game.findUnique({ where: { id: subjectId, AND }, select: { id: true } });
+      found = await client.game.findUnique({ where: { id: subjectId, AND }, select: { id: true } });
     } else if (subjectType === ResourceType.Event) {
-      found = await this.db.event.findUnique({ where: { id: subjectId, AND }, select: { id: true } });
+      found = await client.event.findUnique({ where: { id: subjectId, AND }, select: { id: true } });
     } else {
       throw new BadRequestException(t('errors.media_link.cannot_link_subject', { subjectType }));
     }

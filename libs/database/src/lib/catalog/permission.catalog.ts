@@ -231,12 +231,29 @@ export const PERMISSION_CATALOG = [
   }),
 
   // --- Games ---
+  //
+  // Split like the GameCollection family: the bare slug is the creator's own
+  // rows, and `:public` is everyone else's view. A game carries a visibility
+  // its creator chooses, and `User` is held by every signed-in actor, so an
+  // unconditioned read here would hand every private game to everyone (#472).
+  // `:public` is static — no render variable — so a plugin can hold it; the
+  // bare slug's `user.id` is outside a plugin's render context. Staff read
+  // everything through `read:public_content`.
   permission({
     action: Action.read,
     subject: ResourceType.Game,
+    conditions: { deletedAt: null, createdById: '{{ user.id }}' },
     slug: 'read:game',
     riskLevel: RiskLevel.Low,
-    reason: 'View games',
+    reason: 'View the games you created',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: { deletedAt: null, visibility: 'Public' },
+    slug: 'read:game:public',
+    riskLevel: RiskLevel.Low,
+    reason: 'View public games',
   }),
   permission({
     action: Action.read,

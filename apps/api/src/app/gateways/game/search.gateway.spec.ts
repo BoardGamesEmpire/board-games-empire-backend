@@ -1,5 +1,6 @@
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
+import { Action, ResourceType } from '@bge/database';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -8,7 +9,15 @@ import type {
   WsSourceDonePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import { createTestingModuleWithDb, makeGame, makeGameWithSource, MockDatabaseService } from '@bge/testing';
+import { AbilityService } from '@bge/permissions';
+import {
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  makeGame,
+  makeGameWithSource,
+  type MockAbilityService,
+  MockDatabaseService,
+} from '@bge/testing';
 import {
   ContentType,
   GameSearchData,
@@ -19,14 +28,21 @@ import {
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
-import { of, throwError } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
 import { GameSearchGateway } from './search.gateway';
+
+// The actor the socket authenticated as at connection time (`client.data`).
+const SOCKET_ID = 'socket-test-1';
+const SOCKET_USER_ID = 'socket-user';
+const SOCKET_ABILITY = { sentinel: 'socket-ability' };
+const SOCKET_READ = { id: 'sentinel-socket-read-condition' };
 
 describe('GameSearchGateway', () => {
   let gateway: GameSearchGateway;
   let db: MockDatabaseService;
   let coordinator: jest.Mocked<GatewayCoordinatorClientService>;
+  let abilityService: MockAbilityService;
   let mockEmit: jest.Mock;
   let mockTo: jest.Mock<{ emit: jest.Mock }, [string]>;
 
@@ -39,6 +55,10 @@ describe('GameSearchGateway', () => {
       connectGateway: jest.fn(),
       disconnectGateway: jest.fn(),
     } as unknown as jest.Mocked<GatewayCoordinatorClientService>;
+
+    abilityService = createMockAbilityService();
+    abilityService.resolveAbilitiesForActor.mockResolvedValue([SOCKET_ABILITY]);
+    abilityService.getResourceConditionsForAbilities.mockReturnValue([SOCKET_READ]);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       overrideGuards: [AuthGuard],
@@ -56,6 +76,7 @@ describe('GameSearchGateway', () => {
           provide: AuthService,
           useValue: { verifyToken: jest.fn() },
         },
+        { provide: AbilityService, useValue: abilityService },
       ],
     });
 
@@ -129,7 +150,7 @@ describe('GameSearchGateway', () => {
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
         await gateway.handleSearchStart(client, makeStartDto());
-        assertEmitted<WsSearchErrorPayload>('corr-1', SearchEvents.SearchError, {
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
           correlationId: 'corr-1',
           source: 'local',
           message: `Search with correlationId corr-1 is already active`,
@@ -142,7 +163,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        expect(client.join).toHaveBeenCalledWith('corr-1');
+        expect(client.join).toHaveBeenCalledWith(room('corr-1'));
       });
     });
 
@@ -231,6 +252,40 @@ describe('GameSearchGateway', () => {
         expect(gameCount).toBe(2);
       });
 
+      it('reads only what the socket’s own actor may read', async () => {
+        // No ability context is primed for a WebSocket message (#498), so the
+        // gateway resolves the actor the connection authenticated as, per search.
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(abilityService.resolveAbilitiesForActor).toHaveBeenCalledWith({ kind: 'user', userId: SOCKET_USER_ID });
+        expect(abilityService.getResourceConditionsForAbilities).toHaveBeenCalledWith(
+          [SOCKET_ABILITY],
+          ResourceType.Game,
+          Action.read,
+        );
+        expect(db.game.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ AND: [SOCKET_READ] }) }),
+        );
+      });
+
+      it('queries nothing and emits a local error when the actor’s abilities cannot be resolved', async () => {
+        const client = makeSocket(gateway);
+        abilityService.resolveAbilitiesForActor.mockRejectedValue(new Error('role graph unavailable'));
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(db.game.findMany).not.toHaveBeenCalled();
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
+          correlationId: 'corr-1',
+          source: 'local',
+          message: 'Local search failed',
+        });
+        assertEmitted<WsSourceDonePayload>(room('corr-1'), SearchEvents.SearchSourceDone, { source: 'local' });
+      });
+
       it('emits search:source_done with source="local" after local results', async () => {
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone('corr-1', 'local')));
@@ -238,7 +293,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
-        assertEmitted<WsSourceDonePayload>('corr-1', SearchEvents.SearchSourceDone, {
+        assertEmitted<WsSourceDonePayload>(room('corr-1'), SearchEvents.SearchSourceDone, {
           correlationId: 'corr-1',
           source: 'local',
         });
@@ -290,7 +345,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        const payload = assertEmitted<WsSearchResultPayload>('corr-1', SearchEvents.SearchResult);
+        const payload = assertEmitted<WsSearchResultPayload>(room('corr-1'), SearchEvents.SearchResult);
         expect(payload.source).toBe('bgg-gw-1');
         expect(payload.games[0].externalId).toBe('174430');
         expect(payload.games[0].title).toBe('Gloomhaven');
@@ -304,7 +359,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        const payload = assertEmitted<WsSearchResultPayload>('corr-1', SearchEvents.SearchResult);
+        const payload = assertEmitted<WsSearchResultPayload>(room('corr-1'), SearchEvents.SearchResult);
         expect(payload.games[0].inSystem).toBe(true);
         expect(payload.games[0].gameId).toBe('db-game-uuid');
       });
@@ -315,7 +370,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted<WsSourceDonePayload>('corr-1', SearchEvents.SearchSourceDone, {
+        assertEmitted<WsSourceDonePayload>(room('corr-1'), SearchEvents.SearchSourceDone, {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
         });
@@ -338,7 +393,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted<WsRateLimitedPayload>('corr-1', SearchEvents.SearchRateLimited, {
+        assertEmitted<WsRateLimitedPayload>(room('corr-1'), SearchEvents.SearchRateLimited, {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
           retryAfter: 30,
@@ -360,7 +415,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        const payload = assertEmitted<WsRateLimitedPayload>('corr-1', SearchEvents.SearchRateLimited);
+        const payload = assertEmitted<WsRateLimitedPayload>(room('corr-1'), SearchEvents.SearchRateLimited);
         expect(payload.retryAfter).toBe(60);
       });
 
@@ -379,7 +434,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted('corr-1', SearchEvents.SearchUnavailable, {
+        assertEmitted(room('corr-1'), SearchEvents.SearchUnavailable, {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
         });
@@ -401,7 +456,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted<WsSearchErrorPayload>('corr-1', SearchEvents.SearchError, {
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
           correlationId: 'corr-1',
           source: 'bgg-gw-1',
           message: 'Upstream BGG failure',
@@ -416,7 +471,31 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted('corr-1', SearchEvents.SearchDone, { correlationId: 'corr-1' });
+        assertEmitted(room('corr-1'), SearchEvents.SearchDone, { correlationId: 'corr-1' });
+      });
+
+      it('sends search:done after the local results, however fast the coordinator stream completes', async () => {
+        // `of(...)` completes the gateway half synchronously, while the local
+        // half still has the actor's abilities and the query to wait on.
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+        db.game.findMany.mockResolvedValue([makeGameWithSource()]);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true }));
+
+        const events = mockEmit.mock.calls.map(([event]) => event);
+        expect(events.filter((event) => event === SearchEvents.SearchDone)).toHaveLength(1);
+        expect(events.at(-1)).toBe(SearchEvents.SearchDone);
+        expect(events).toContain(SearchEvents.SearchResult);
+      });
+
+      it('ends a local-only search with search:done', async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        assertEmitted(room('corr-1'), SearchEvents.SearchDone, { correlationId: 'corr-1' });
       });
 
       it('removes the subscription from activeSearches after stream completion', async () => {
@@ -434,7 +513,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        expect(client.leave).toHaveBeenCalledWith('corr-1');
+        expect(client.leave).toHaveBeenCalledWith(room('corr-1'));
       });
 
       it('always emits to the correlationId room, not directly to the socket', async () => {
@@ -443,9 +522,9 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        // Every emission should go via server.to(correlationId)
-        for (const [room] of mockTo.mock.calls) {
-          expect(room).toBe('corr-1');
+        // Every emission should go via server.to(<socket>:<correlationId>)
+        for (const [target] of mockTo.mock.calls) {
+          expect(target).toBe(room('corr-1'));
         }
       });
     });
@@ -457,7 +536,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        assertEmitted<WsSearchErrorPayload>('corr-1', SearchEvents.SearchError, {
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
           correlationId: 'corr-1',
           source: 'coordinator',
         });
@@ -487,7 +566,7 @@ describe('GameSearchGateway', () => {
 
         await gateway.handleSearchStart(client, makeStartDto());
 
-        expect(client.leave).toHaveBeenCalledWith('corr-1');
+        expect(client.leave).toHaveBeenCalledWith(room('corr-1'));
       });
     });
 
@@ -502,8 +581,41 @@ describe('GameSearchGateway', () => {
         await gateway.handleSearchStart(client, makeStartDto({ correlationId: 'corr-2' }));
 
         expect(coordinator.searchGames).toHaveBeenCalledTimes(2);
-        expect(client.join).toHaveBeenCalledWith('corr-1');
-        expect(client.join).toHaveBeenCalledWith('corr-2');
+        expect(client.join).toHaveBeenCalledWith(room('corr-1'));
+        expect(client.join).toHaveBeenCalledWith(room('corr-2'));
+      });
+
+      it('refuses a second search with the same correlationId while a local-only one is still running', async () => {
+        const client = makeSocket(gateway);
+        const local = deferred<never[]>();
+        db.game.findMany.mockReturnValueOnce(local.promise as never);
+
+        const first = gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
+          message: `Search with correlationId corr-1 is already active`,
+        });
+
+        local.resolve([]);
+        await first;
+        expect(db.game.findMany).toHaveBeenCalledTimes(1);
+      });
+
+      it('keeps two sockets that send the same correlationId in rooms of their own', async () => {
+        // The id is the client's choice, and local results depend on who asked
+        // (#472): a room shared by id would hand one user's private games to
+        // every other socket that sent it.
+        const mine = makeSocket(gateway);
+        const theirs = makeSocket(gateway, 'socket-test-2');
+        db.game.findMany.mockResolvedValue([makeGameWithSource()]);
+
+        await gateway.handleSearchStart(mine, makeStartDto({ includeLocal: true, includeExternal: false }));
+        await gateway.handleSearchStart(theirs, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(mine.join).toHaveBeenCalledWith(room('corr-1'));
+        expect(theirs.join).toHaveBeenCalledWith('socket-test-2:corr-1');
+        expect(mockTo).not.toHaveBeenCalledWith('corr-1');
       });
     });
   });
@@ -539,7 +651,40 @@ describe('GameSearchGateway', () => {
 
       gateway.handleSearchCancel(client, makeCancelDto());
 
-      expect(client.leave).toHaveBeenCalledWith('corr-1');
+      expect(client.leave).toHaveBeenCalledWith(room('corr-1'));
+    });
+
+    it('ends a running search without search:done, so its start handler settles', async () => {
+      const client = makeSocket(gateway);
+      coordinator.searchGames.mockReturnValue(NEVER);
+
+      const started = gateway.handleSearchStart(client, makeStartDto());
+      await flushMicrotasks();
+      gateway.handleSearchCancel(client, makeCancelDto());
+
+      await expect(started).resolves.toBeUndefined();
+      expect(countEmissionsFor(SearchEvents.SearchDone)).toBe(0);
+      expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
+    });
+
+    it('sends nothing more for a cancelled search, even once its id belongs to a new one', async () => {
+      // The cancel cannot stop a local query already in flight, and the new
+      // search joins the same room.
+      const client = makeSocket(gateway);
+      const stale = deferred<unknown[]>();
+      db.game.findMany.mockReturnValueOnce(stale.promise as never).mockResolvedValueOnce([]);
+      const localOnly = { includeLocal: true, includeExternal: false };
+
+      const cancelled = gateway.handleSearchStart(client, makeStartDto(localOnly));
+      await flushMicrotasks();
+      gateway.handleSearchCancel(client, makeCancelDto());
+      await gateway.handleSearchStart(client, makeStartDto({ ...localOnly, query: 'Catan' }));
+      mockEmit.mockClear();
+
+      stale.resolve([makeGameWithSource()]);
+      await cancelled;
+
+      expect(mockEmit).not.toHaveBeenCalled();
     });
 
     it('does not affect other concurrent searches on the same socket', () => {
@@ -564,6 +709,23 @@ function makeStartDto(overrides: Partial<SearchStartDto> = {}): SearchStartDto {
     includeExternal: true,
     ...overrides,
   });
+}
+
+/** The room {@link makeSocket}'s frames for `correlationId` are emitted to. */
+function room(correlationId: string): string {
+  return `${SOCKET_ID}:${correlationId}`;
+}
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => (resolve = settle));
+
+  return { promise, resolve };
+}
+
+/** Lets the handler run up to the point it waits on the coordinator stream. */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((settle) => setImmediate(settle));
 }
 
 function makeCancelDto(correlationId = 'corr-1'): SearchCancelDto {
@@ -601,16 +763,20 @@ function makeSourceDone(correlationId = 'corr-1', gatewayId = 'bgg-gw-1'): Searc
  * `as unknown as Socket` is intentional — we only need the subset of the
  * socket surface that GameSearchGateway actually touches.
  */
-function makeSocket(gateway: GameSearchGateway): Socket {
+function makeSocket(gateway: GameSearchGateway, id = SOCKET_ID): Socket {
   const socket = {
-    id: 'socket-test-1',
-    rooms: new Set<string>(['socket-test-1']),
+    id,
+    rooms: new Set<string>([id]),
     join: jest.fn().mockResolvedValue(undefined),
     leave: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockReturnThis(),
   } as unknown as Socket;
 
-  socket.data = (gateway as any).userQueryMap.get(socket);
+  socket.data = Object.assign((gateway as any).userQueryMap.get(socket), {
+    userId: SOCKET_USER_ID,
+    actor: { kind: 'user', userId: SOCKET_USER_ID },
+    correlationId: 'connection-correlation-id',
+  });
   return socket;
 }
 

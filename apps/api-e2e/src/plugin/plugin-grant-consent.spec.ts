@@ -30,7 +30,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * checks reference SEEDED permissions only: `read:safe_http_policy`
  * (Medium, condition-free) at server scope, `read:household_member` (Low,
  * household-conditioned), `update:user:profile:own` (Low, user-conditioned),
- * and `read:game` (Low, condition-free) as the D60-7 trap.
+ * and `read:platform_game` (Low, condition-free) as the D60-7 trap.
  */
 describe('plugin grant decisions + consent presentation (#322)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -291,19 +291,23 @@ describe('plugin grant decisions + consent presentation (#322)', () => {
       const plugin = await arrangePlugin([
         MANAGE_DIGEST_CHECK,
         {
-          slug: 'read:game',
+          // A check with no conditions at all, which `read:game` no longer is (#472).
+          slug: 'read:platform_game',
           required: false,
-          reason: { en: 'Lists games inside the digest.' },
+          reason: { en: 'Lists platform editions inside the digest.' },
           consentScope: 'household',
         },
       ]);
 
-      const response = await decideHousehold(owner, fixture.household.id, plugin.slug, granted('read:game')).expect(
-        403,
-      );
+      const response = await decideHousehold(
+        owner,
+        fixture.household.id,
+        plugin.slug,
+        granted('read:platform_game'),
+      ).expect(403);
 
       expect(response.body.code).toBe('PluginGrantExclusionError');
-      expect(response.body.permissionSlug).toBe('read:game');
+      expect(response.body.permissionSlug).toBe('read:platform_game');
     });
   });
 

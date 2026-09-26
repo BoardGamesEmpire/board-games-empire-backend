@@ -1048,6 +1048,25 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
+    it('lets an ordinary User read the games it created and every Public one, and no others', () => {
+      // The clause the game list, the by-id read and search all put in their
+      // `where` (#472). Before, `read:game` carried no condition, so this was
+      // `{}`: every signed-in user read every private game.
+      const user = factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [makeRole(SystemRole.User, [...ROLE_PERMISSION_CATALOG[SystemRole.User]].map(catalogPermission))],
+        }),
+      );
+
+      expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
+        OR: [
+          { deletedAt: null, visibility: 'Public' },
+          { deletedAt: null, createdById: 'user-1' },
+        ],
+      });
+    });
+
     it('gives a Moderator content removal without household administration', () => {
       const ability = staff(SystemRole.Moderator);
 
@@ -1357,12 +1376,7 @@ describe('AbilityFactory', () => {
 
     describe('fail-loud out-of-context rejection', () => {
       it('rejects the user-centric seed templates — {{ user.id }} is not plugin-grantable', () => {
-        const seeded = makePermission({
-          action: Action.read,
-          subject: 'Game',
-          slug: 'read:game',
-          conditions: { userId: '{{ user.id }}' },
-        });
+        const seeded = catalogPermission('read:game');
         const build = () => factory.createForPlugin(makeSnapshot({ corePermissions: [seeded] }));
 
         expect(build).toThrow(PluginAbilityRenderRejectionError);
@@ -1374,6 +1388,16 @@ describe('AbilityFactory', () => {
             unit: { scopeType: 'Household', householdId: 'hh-x' },
           }),
         );
+      });
+
+      it('renders the public game read, which names no actor — the game read a plugin can hold', () => {
+        const ability = factory.createForPlugin(
+          makeSnapshot({ corePermissions: [catalogPermission('read:game:public')] }),
+        );
+
+        expect(accessibleBy(ability, Action.read).ofType('Game')).toEqual({
+          OR: [{ deletedAt: null, visibility: 'Public' }],
+        });
       });
 
       it('rejects {{ unit.householdId }} while operating as a Server unit — the coordinate is absent, not empty', () => {
