@@ -25,9 +25,10 @@ export class MediaContributionController {
   constructor(private readonly contributions: MediaContributionService) {}
 
   @ApiOperation({
-    summary: 'List media contributions the caller may read',
+    summary: 'List media contributions for moderation',
     description:
-      'Newest first, optionally narrowed to one `status`. Paginated: `?page=` (1-based) and `?limit=`, ' +
+      'The staff moderation view of contributions: newest first, optionally narrowed to one `status`. ' +
+      'Paginated: `?page=` (1-based) and `?limit=`, ' +
       'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the rows ' +
       'matching the status filter, which is what makes it a usable moderation-queue length. See #230.',
   })

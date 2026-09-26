@@ -29,17 +29,14 @@
 export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
   new Set([
     // Swept by 418, in the groups the intrinsic-scope table names.
-    'AuditLog',
     'Event',
     'EventGameNomination',
     'EventOccurrence',
     'Friendship',
     'Game',
     'GameCollection',
-    'GameGateway',
     'HouseholdMember',
     'Job',
-    'MediaContribution',
     'MediaObject',
     // THREE routes read this one, across two libs: the server list, the
     // per-household inventory and the per-user inventory. All three query

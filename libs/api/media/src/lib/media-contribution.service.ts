@@ -9,7 +9,7 @@ import {
   type MediaContribution,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, ModelResourceType } from '@bge/permissions';
+import { AbilityService, ModelResourceType, ScopeComposer, Unscoped } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import type { PaginatedRows } from '@bge/shared';
 import {
@@ -33,6 +33,7 @@ export class MediaContributionService {
     private readonly serviceAccount: ServiceAccountService,
     private readonly eventEmitter: EventEmitter2,
     private readonly mediaLink: MediaLinkService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -216,19 +217,32 @@ export class MediaContributionService {
   }
 
   /**
-   * One page of readable contributions plus the total matching count for the
-   * response envelope (#372). The status filter reaches both halves: a
-   * Pending-only page whose `total` counted approved rows too would advertise
-   * a moderation queue several times its real length.
+   * One page of the moderation queue, newest first, plus the total matching
+   * count for the response envelope (#372). The status filter reaches both
+   * halves: a Pending-only page whose `total` counted approved rows too would
+   * advertise a moderation queue several times its real length.
    *
    * Rows and count share a REPEATABLE READ snapshot — this list is the view of
    * exactly the approvals and rejections that would otherwise land between the
    * two statements.
+   *
+   * Composed as `Unscoped` (#516; `ScopeComposer.compose` says why a read
+   * with no scope composes at all): the queue has no per-caller row set to
+   * name. The status filter is caller input, not a scope, so it sits beside
+   * the composed clause.
    */
   async list(query: ListContributionsQueryDto): Promise<PaginatedRows<MediaContribution>> {
     const where: Prisma.MediaContributionWhereInput = {
-      AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.read),
-      ...(query.status ? { status: query.status } : {}),
+      AND: [
+        this.scopeComposer.compose(
+          ResourceType.MediaContribution,
+          Action.read,
+          Unscoped(
+            'staff-only moderation queue: every catalog role that reads contributions reads every row (KNOWN_READ_CEILINGS)',
+          ),
+        ),
+        ...(query.status ? [{ status: query.status }] : []),
+      ],
     };
 
     const [rows, total] = await this.db.$transaction(

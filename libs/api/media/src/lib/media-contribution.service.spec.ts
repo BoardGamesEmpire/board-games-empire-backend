@@ -1,11 +1,13 @@
-import { ContributionOrigin, MediaContributionStatus, Prisma, ResourceType, Visibility } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { Action, ContributionOrigin, MediaContributionStatus, Prisma, ResourceType, Visibility } from '@bge/database';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import {
   batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_ACTING_USER_ID,
+  MOCK_RESOURCE_CONDITION,
+  shippedReadReaches,
   unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
@@ -22,6 +24,7 @@ describe('MediaContributionService', () => {
   let service: MediaContributionService;
   let db: MockDatabaseService;
   let ability: MockAbilityService;
+  let compose: jest.SpyInstance;
   const emit = jest.fn();
   const serviceAccount = { resolve: jest.fn().mockResolvedValue({ id: 'svc' }), ensure: jest.fn() };
   const mediaLink = {
@@ -38,6 +41,9 @@ describe('MediaContributionService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         MediaContributionService,
+        // The REAL composer over the mocked ability service, so the list's
+        // where-clause assertions test the merge rather than a double.
+        ScopeComposer,
         { provide: AbilityService, useValue: ability },
         { provide: ServiceAccountService, useValue: serviceAccount },
         { provide: EventEmitter2, useValue: { emit } },
@@ -46,6 +52,7 @@ describe('MediaContributionService', () => {
     });
     db = ctx.db;
     service = ctx.module.get(MediaContributionService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     unwrapTransaction(db);
   });
 
@@ -349,6 +356,23 @@ describe('MediaContributionService', () => {
       db.mediaContribution.count.mockResolvedValue(0);
     });
 
+    it('composes MediaContribution as unscoped', async () => {
+      await service.list(query());
+
+      expect(compose).toHaveBeenCalledWith(
+        ResourceType.MediaContribution,
+        Action.read,
+        expect.objectContaining({ kind: 'unscoped', reason: expect.any(String) }),
+      );
+    });
+
+    // The Unscoped reason is a claim about the catalog, and this is where it is
+    // checked: a conditioned read granted later fails here, beside the
+    // declaration it would falsify, and not only in the catalog's own pin.
+    it('stays unscoped only while every catalog role that reads contributions reads every row', () => {
+      expect(new Set(shippedReadReaches(ResourceType.MediaContribution))).toEqual(new Set(['every row']));
+    });
+
     it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
       await service.list(query());
 
@@ -364,16 +388,16 @@ describe('MediaContributionService', () => {
 
       const page = await service.list(query({ status: MediaContributionStatus.Pending }));
 
-      expect(db.mediaContribution.count).toHaveBeenCalledWith({
-        where: expect.objectContaining({ status: MediaContributionStatus.Pending }),
-      });
+      const where = { AND: [{ AND: [MOCK_RESOURCE_CONDITION] }, { status: MediaContributionStatus.Pending }] };
+      expect(db.mediaContribution.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.mediaContribution.count).toHaveBeenCalledWith({ where });
       expect(page).toEqual({ rows: [], total: 6 });
     });
 
     it('omits the status clause entirely when no status is asked for', async () => {
       await service.list(query());
 
-      expect(db.mediaContribution.count.mock.calls[0][0]?.where).not.toHaveProperty('status');
+      expect(db.mediaContribution.count).toHaveBeenCalledWith({ where: { AND: [{ AND: [MOCK_RESOURCE_CONDITION] }] } });
     });
   });
 });

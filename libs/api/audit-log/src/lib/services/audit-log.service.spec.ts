@@ -1,9 +1,5 @@
 import type { Actor } from '@bge/actor-context';
-import { Prisma } from '@bge/database';
-import { batchTransactionCall, createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
-import { plainToInstance } from 'class-transformer';
-import { AUDIT_LOG_DEFAULT_PAGE_SIZE } from '../constants/audit-log.constants';
-import { ListAuditLogsQueryDto } from '../dto';
+import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import type { RecordAuditEntry } from '../interfaces/record-audit-entry.interface';
 import { AuditLogService } from './audit-log.service';
 
@@ -20,14 +16,6 @@ const baseEntry: RecordAuditEntry = {
   initiatedAt: new Date('2026-01-15T10:00:00.000Z'),
   occurredAt: new Date('2026-01-15T10:00:01.000Z'),
 };
-
-/**
- * A bound `ListAuditLogsQueryDto`. Built through the DTO rather than cast from a
- * literal because `skip`/`pageSize` are derived accessors (#230) — a cast object
- * would let a test assert paging the DTO never computed.
- */
-const auditQuery = (init: Partial<ListAuditLogsQueryDto> = {}) =>
-  plainToInstance(ListAuditLogsQueryDto, init, { enableImplicitConversion: true });
 
 describe('AuditLogService', () => {
   let db: MockDatabaseService;
@@ -88,100 +76,6 @@ describe('AuditLogService', () => {
 
       const data = db.auditLog.create.mock.calls[0][0].data;
       expect(data.payload).toEqual({ before: null, after: { id: 'e1', startsAt: '2026-02-01T00:00:00.000Z' } });
-    });
-  });
-
-  describe('list', () => {
-    beforeEach(() => {
-      db.auditLog.findMany.mockResolvedValue([]);
-      db.auditLog.count.mockResolvedValue(0);
-    });
-
-    it('excludes soft-deleted rows, sorts newest first, and applies default paging', async () => {
-      await service.list(auditQuery());
-
-      expect(db.auditLog.findMany).toHaveBeenCalledWith({
-        where: { deletedAt: null },
-        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-        skip: 0,
-        take: AUDIT_LOG_DEFAULT_PAGE_SIZE,
-      });
-    });
-
-    it('applies scalar filters when present', async () => {
-      await service.list(
-        auditQuery({
-          page: 3,
-          limit: 5,
-          subject: 'Event',
-          subjectId: 'e1',
-          actorKind: 'user',
-          actorUserId: 'u1',
-          event: 'event.created',
-          action: 'create',
-          source: 'http',
-          correlationId: 'corr-1',
-        }),
-      );
-
-      expect(db.auditLog.findMany).toHaveBeenCalledWith({
-        where: {
-          deletedAt: null,
-          subject: 'Event',
-          subjectId: 'e1',
-          actorKind: 'user',
-          actorUserId: 'u1',
-          event: 'event.created',
-          action: 'create',
-          source: 'http',
-          correlationId: 'corr-1',
-        },
-        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-        skip: 10,
-        take: 5,
-      });
-    });
-
-    it('builds a half-open occurredAt range (gte from, lt to)', async () => {
-      const occurredFrom = new Date('2026-01-01T00:00:00.000Z');
-      const occurredTo = new Date('2026-02-01T00:00:00.000Z');
-
-      await service.list(auditQuery({ occurredFrom, occurredTo }));
-
-      const args = db.auditLog.findMany.mock.calls[0][0];
-      expect(args?.where?.occurredAt).toEqual({ gte: occurredFrom, lt: occurredTo });
-    });
-
-    it('supports a one-sided range', async () => {
-      const occurredFrom = new Date('2026-01-01T00:00:00.000Z');
-
-      await service.list(auditQuery({ occurredFrom }));
-
-      const args = db.auditLog.findMany.mock.calls[0][0];
-      expect(args?.where?.occurredAt).toEqual({ gte: occurredFrom });
-    });
-
-    // #372: rows and count share one snapshot, or the retention sweep running
-    // between them makes `hasMore` promise a page that no longer exists.
-    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
-      await service.list(auditQuery());
-
-      const { operations, options } = batchTransactionCall(db);
-      expect(operations).toHaveLength(2);
-      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-    });
-
-    // The filters are the expensive part of this read; a count that skipped them
-    // would report the size of the whole table as the size of a filtered view.
-    it('counts through the same filtered where as the rows', async () => {
-      db.auditLog.count.mockResolvedValue(4);
-
-      const page = await service.list(auditQuery({ subject: 'Event', subjectId: 'e1' }));
-
-      expect(db.auditLog.count).toHaveBeenCalledWith({
-        where: { deletedAt: null, subject: 'Event', subjectId: 'e1' },
-      });
-      expect(page).toEqual({ rows: [], total: 4 });
     });
   });
 });

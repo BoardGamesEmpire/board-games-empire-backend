@@ -2,9 +2,16 @@ import type { GameGateway } from '@bge/database';
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer, Unscoped } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  HttpException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 
 @Injectable()
@@ -15,6 +22,7 @@ export class GameGatewayService {
     private readonly db: DatabaseService,
     private readonly configEvents: GatewayConfigEventsService,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -22,11 +30,22 @@ export class GameGatewayService {
    * envelope (#372). Both come from one REPEATABLE READ snapshot, so a gateway
    * registered or soft-deleted mid-request cannot make `total` disagree with
    * the rows sent.
+   *
+   * Composed as `Unscoped` (#516; `ScopeComposer.compose` says why a read
+   * with no scope composes at all): gateways are installation configuration,
+   * with no per-caller row set to name. Hiding tombstones is the same for
+   * every caller, so `deletedAt: null` is a filter beside the composed clause.
    */
   async getAll(pagination: PaginationQueryDto): Promise<PaginatedRows<GameGateway>> {
     const where: Prisma.GameGatewayWhereInput = {
       AND: [
-        ...this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.read),
+        this.scopeComposer.compose(
+          ResourceType.GameGateway,
+          Action.read,
+          Unscoped(
+            'staff-only installation configuration: every catalog role that reads gateways reads every row (KNOWN_READ_CEILINGS)',
+          ),
+        ),
         { deletedAt: null },
       ],
     };
@@ -56,18 +75,18 @@ export class GameGatewayService {
         where: {
           id,
           AND: [
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
             ...this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.read),
             { deletedAt: null },
           ],
         },
       });
     } catch (error) {
-      this.logger.error(`Error fetching game gateway with ID ${id}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new NotFoundException(t('errors.game_gateway.not_found_or_denied', { id }));
-      }
-
-      throw error;
+      this.rethrowFailure(
+        error,
+        () => new NotFoundException(t('errors.game_gateway.not_found_or_denied', { id })),
+        `Error fetching game gateway with ID ${id}`,
+      );
     }
   }
 
@@ -91,8 +110,11 @@ export class GameGatewayService {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
 
+    // Live rows only, in the count and again in the write. Every read hides a
+    // tombstone, so an update that still reached one would publish 'updated'
+    // and reconnect a gateway the API says does not exist.
     try {
-      const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId } });
+      const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId, deletedAt: null } });
       if (existingGateway === 0) {
         throw new NotFoundException(t('errors.game_gateway.not_found', { id: gatewayId }));
       }
@@ -109,6 +131,8 @@ export class GameGatewayService {
       const gateway = await this.db.gameGateway.update({
         where: {
           id: gatewayId,
+          deletedAt: null,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.update),
         },
         data: { ...update },
@@ -117,12 +141,11 @@ export class GameGatewayService {
       await this.publishConfigEvent(gateway, 'updated');
       return gateway;
     } catch (error) {
-      this.logger.error(`Error updating game gateway with ID ${gatewayId}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException(t('common.forbidden.update'));
-      }
-
-      throw error;
+      this.rethrowFailure(
+        error,
+        () => new ForbiddenException(t('common.forbidden.update')),
+        `Error updating game gateway with ID ${gatewayId}`,
+      );
     }
   }
 
@@ -131,7 +154,7 @@ export class GameGatewayService {
    */
   async delete(gatewayId: string): Promise<GameGateway> {
     try {
-      const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId } });
+      const existingGateway = await this.db.gameGateway.count({ where: { id: gatewayId, deletedAt: null } });
       if (existingGateway === 0) {
         throw new NotFoundException(t('errors.game_gateway.not_found', { id: gatewayId }));
       }
@@ -139,6 +162,8 @@ export class GameGatewayService {
       const gateway = await this.db.gameGateway.update({
         where: {
           id: gatewayId,
+          deletedAt: null,
+          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
           AND: [...this.abilityService.getCurrentResourceConditions(ResourceType.GameGateway, Action.delete)],
         },
         data: { deletedAt: new Date() },
@@ -147,13 +172,37 @@ export class GameGatewayService {
       await this.publishConfigEvent(gateway, 'deleted');
       return gateway;
     } catch (error) {
-      this.logger.error(`Error deleting game gateway with ID ${gatewayId}`, error);
-      if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException(t('common.forbidden.delete'));
-      }
+      this.rethrowFailure(
+        error,
+        () => new ForbiddenException(t('common.forbidden.delete')),
+        `Error deleting game gateway with ID ${gatewayId}`,
+      );
+    }
+  }
 
+  /**
+   * One failure classifier for the by-id reads and writes, and the log level
+   * is the point:
+   *
+   * - An `HttpException` is the answer the endpoint is specified to give — the
+   *   404 for an unknown or soft-deleted id. Rethrown untouched and not logged
+   *   at error, where a client's 4xx would read as a defect to alerting.
+   * - A `P2025` is the scoped statement matching no row, which the caller's
+   *   ceiling or a concurrent delete can cause. Mapped, at `debug`.
+   * - Anything else is unexpected and keeps the full error log.
+   */
+  private rethrowFailure(error: unknown, whenNotMatched: () => HttpException, context: string): never {
+    if (error instanceof HttpException) {
       throw error;
     }
+
+    if (isPrismaDependentRecordNotFoundError(error)) {
+      this.logger.debug(`${context}: matched no row`);
+      throw whenNotMatched();
+    }
+
+    this.logger.error(context, error);
+    throw error;
   }
 
   private async publishConfigEvent(gateway: GameGateway, changeType: GatewayConfigEvent['changeType']): Promise<void> {

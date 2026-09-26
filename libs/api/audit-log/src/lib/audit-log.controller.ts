@@ -7,7 +7,7 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuditLogEntryDto, ListAuditLogsQueryDto } from './dto';
-import { AuditLogService } from './services/audit-log.service';
+import { AuditLogQueryService } from './services/audit-log-query.service';
 
 const PaginatedAuditLogsResponse = PaginatedResponseDto(AuditLogEntryDto, 'auditLogs');
 
@@ -23,7 +23,7 @@ const PaginatedAuditLogsResponse = PaginatedResponseDto(AuditLogEntryDto, 'audit
 @UseGuards(PoliciesGuard)
 @Controller('audit-logs')
 export class AuditLogController {
-  constructor(private readonly auditLogService: AuditLogService) {}
+  constructor(private readonly auditLogs: AuditLogQueryService) {}
 
   @ApiOperation({
     summary: 'List audit trail entries',
@@ -39,7 +39,7 @@ export class AuditLogController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.AuditLog))
   @Get()
   list(@Query() query: ListAuditLogsQueryDto) {
-    return from(this.auditLogService.list(query)).pipe(
+    return from(this.auditLogs.list(query)).pipe(
       map((page) => paginated('auditLogs', page, query, ResourceType.AuditLog)),
     );
   }

@@ -1,9 +1,11 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { AuthType, GameGateway } from '@bge/database';
 import { PoliciesGuard } from '@bge/permissions';
-import { createTestingModuleWithDb } from '@bge/testing';
+import { ListScopeNotComposedError } from '@bge/shared';
+import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
-import { of } from 'rxjs';
+import { ClsServiceManager } from 'nestjs-cls';
+import { firstValueFrom, of } from 'rxjs';
 import { GameGatewayController } from './game-gateway.controller';
 import { GameGatewayService } from './game-gateway.service';
 
@@ -17,7 +19,7 @@ describe('GameGatewayController', () => {
         {
           provide: GameGatewayService,
           useValue: {
-            getAll: jest.fn().mockResolvedValue([]),
+            getAll: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
             getById: jest.fn().mockResolvedValue(null),
             create: jest.fn().mockResolvedValue(makeGateway()),
             update: jest.fn().mockResolvedValue(makeGateway()),
@@ -40,6 +42,20 @@ describe('GameGatewayController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  // The service composes the `GameGateway` scope; the envelope is where the
+  // guard checks for it, under the resource type the handler passes. Built
+  // inside a request with nothing composed, a `GameGateway` envelope must fail.
+  // An envelope declaring `Unscoped` instead would pass here, and so would one
+  // passing a type still in `PENDING_SCOPE_SWEEP` — either switches the guard
+  // off for this route without a sound.
+  it('getAll builds its envelope under the GameGateway scope guard', async () => {
+    await expect(
+      ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getAll(paginationQuery({ limit: 20 }))),
+      ),
+    ).rejects.toThrow(ListScopeNotComposedError);
   });
 });
 
