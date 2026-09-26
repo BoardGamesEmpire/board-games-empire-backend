@@ -1,6 +1,6 @@
 /**
- * Shape stored on `Socket.data` by the AuthenticatedGateway base class and
- * consumed by `WsActorInterceptor` to populate CLS per WS message.
+ * Shape stored on `Socket.data` by the AuthenticatedGateway base class at the
+ * handshake, and read by `WsActorScope` to open each frame's CLS scope.
  *
  * `actor` is narrowed to `UserActor` because Phase 1 only permits registered,
  * non-anonymous user sessions over WebSocket. Anonymous sessions are rejected

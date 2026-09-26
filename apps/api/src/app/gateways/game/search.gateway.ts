@@ -11,7 +11,7 @@ import type {
   WsSourceUnavailablePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, CheckPolicies } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ConflictException, Logger, UsePipes, ValidationPipe } from '@nestjs/common';
 import {
@@ -26,6 +26,7 @@ import { wrapDefaults } from '@status/defaults';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
+import { WsFrameScope } from '../base/ws-frame-scope';
 
 @WebSocketGateway({
   namespace: 'games/search',
@@ -50,8 +51,9 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     override readonly authService: AuthService,
     private readonly gameSearch: GameSearchService,
     private readonly abilityService: AbilityService,
+    frameScope: WsFrameScope,
   ) {
-    super(authService);
+    super(authService, frameScope);
   }
 
   handleDisconnect(client: Socket): void {
@@ -73,6 +75,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       },
     }),
   )
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @SubscribeMessage(SearchEvents.SearchStart)
   async handleSearchStart(@ConnectedSocket() client: Socket, @MessageBody() dto: SearchStartDto): Promise<void> {
     this.logger.log(
@@ -160,18 +163,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     };
 
     try {
-      // No ability context is primed for a WebSocket message the way HTTP
-      // primes one per request (#498), so the actor the socket authenticated
-      // as is resolved here. Per search rather than per connection: its grants
-      // can change while the socket stays open. A failure lands in the catch
-      // below as a SearchError, never as an unfiltered query.
-      const abilities = await this.abilityService.resolveAbilitiesForActor(this.getClientData(client).actor);
-      const readConditions = this.abilityService.getResourceConditionsForAbilities(
-        abilities,
-        ResourceType.Game,
-        Action.read,
-      );
-
+      const readConditions = this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read);
       const results = await this.gameSearch.queryLocalGames(
         options.query,
         readConditions,
@@ -324,7 +316,15 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     return `${client.id}:${correlationId}`;
   }
 
+  /**
+   * Sends a search frame to its room from this node only. The socket is
+   * always connected here, and the cluster adapter delivers a broadcast only
+   * after publishing it to Redis, by which time `completeSearch` has left the
+   * room, so a search that finishes quickly would arrive empty.
+   * Connection-state recovery replays none of these frames, and a search could
+   * not resume from them anyway: a disconnect cancels every search.
+   */
   private emit<T>(client: Socket, correlationId: string, event: string, payload: T): void {
-    this.server.to(this.searchRoom(client, correlationId)).emit(event, payload);
+    this.server.to(this.searchRoom(client, correlationId)).local.emit(event, payload);
   }
 }

@@ -26,7 +26,8 @@ export function openSocket(baseUrl: string, namespace: string, credentials?: Ses
  * Resolves with the payload of the next `event` the socket receives. Rejects
  * as soon as the socket fails to connect or disconnects first, naming why,
  * rather than at the timeout, and a spec's teardown disconnect settles any
- * wait a failed test left behind.
+ * wait a failed test left behind. Waiting for `connect_error` itself resolves
+ * with the refusal: the error's message, and the envelope as its `data`.
  */
 export function nextEvent<T = unknown>(socket: Socket, event: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -50,7 +51,9 @@ export function nextEvent<T = unknown>(socket: Socket, event: string): Promise<T
     );
 
     socket.on(event, onEvent);
-    socket.on('connect_error', onConnectError);
+    if (event !== 'connect_error') {
+      socket.on('connect_error', onConnectError);
+    }
     if (event !== 'disconnect') {
       socket.on('disconnect', onDisconnect);
     }

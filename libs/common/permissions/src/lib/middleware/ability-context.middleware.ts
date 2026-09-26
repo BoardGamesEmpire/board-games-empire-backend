@@ -10,7 +10,8 @@ import { AbilityService } from '../ability.service';
  *
  * All priming logic lives in `AbilityService.primeCurrentActor()`; this is just
  * the HTTP seam that invokes it. The same call is made by the BullMQ worker host
- * (`AbilityAwareWorkerHost`) and, in future, the WS/gRPC populators.
+ * (`AbilityAwareWorkerHost`), by the API's WebSocket gateways for each frame,
+ * and, in future, the gRPC populator.
  */
 @Injectable()
 export class AbilityContextMiddleware implements NestMiddleware {
