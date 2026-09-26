@@ -86,8 +86,9 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       in this lib, incl. multi-line asserts where the exception sits on a later line). **Remaining libs
       must re-grep for `new [A-Z]\w*Exception\(` (not only `throw new`)** to avoid under counting. Copy
       normalized: event-not-found unified to game's `"… with ID {id} …"` form. isEnum message uses
-      `{constraints.1}`; enum-list stringification may differ slightly from class-validator's default
-      (en-only, no test asserts it — accepted).
+      `{constraints.1}`. The enum list rendered with bare commas at first, unlike class-validator's
+      default. `i18nValidationMessage` now joins it with ", ", and the `@bge/i18n` real-catalog spec
+      pins the wording (#144).
 - [x] `libs/api/media` — **DONE**. Real surface was **41 exceptions + 1 success** (inventory said
       35/1; no `assert()` throws in this lib). The two **controller-scoped** filters
       (`StorageExceptionFilter`, `MulterExceptionFilter`) render responses themselves, so they now
@@ -214,15 +215,45 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       reference; it imports from `@bge/i18n-core` instead, the lower lib #189 extracted the primitives
       and catalogs into. The plain `Error`s at `:56` and `:78` stay English (§5). Spec gained a test
       asserting the marker via `getResponse()`. Guardrail enabled.
-- [ ] `libs/api/actor-context-transport` — **LOW PRIORITY** — auth-plumbing exceptions. Real surface is
-      **21** (inventory said 19): 4 HTTP — "Invalid API key" and "Impersonated sessions are not
-      supported", each in both `http-actor.middleware.ts` and `http-actor.interceptor.ts` (the latter
-      pair added by #408) — and 17 on the internal gRPC interceptors. Not behind the #189 cycle: this
-      lib already imports `@bge/i18n`.
+- [x] `libs/api/actor-context-transport` — **DONE**. Real surface was **21** (inventory said 19): 4 HTTP
+      and 17 gRPC. The 4 HTTP throws are "Invalid API key" and "Impersonated sessions are not supported",
+      each in both `http-actor.middleware.ts` and its unwired twin `http-actor.interceptor.ts` (the second
+      pair was added by #408). They became `errors.api_key.invalid` (beside the existing
+      `not_found_or_revoked`) and `errors.auth.impersonated_session`, which the WS refusal in #180 can
+      reuse. The middleware throws before `LocaleResolutionMiddleware` runs, so both render in the
+      fallback locale (see [translated-exceptions.md](./translated-exceptions.md)). The 17 gRPC frames
+      stay English (§5), and the guardrail exempts those two files by name. Specs assert the markers via
+      `getResponse()`. The gRPC spec's English assertions are unchanged.
+- [x] `libs/api/audit-log` — **DONE**. A DTO-only lib: it had no exception strings, so the exception
+      sweep never listed it, but `ListAuditLogsQueryDto` carried 15 bare decorators. As in each DTO-only
+      row below, a spec asserts that every failing constraint names its `validation.*` key (the
+      `validationCatalogKeys` helper in `@bge/testing`), and the guardrail is enabled.
+- [x] `libs/common/webhooks` — **DONE** (DTO-only). `CreateWebhookSubscriptionDto` (9) and
+      `UpdateWebhookSubscriptionDto` (6), the DTOs the `webhook-subscription` item above deferred. This
+      sweep's new keys, `validation.arrayNotEmpty`, `validation.arrayUnique` and
+      `validation.each.{isString,isIn}`, copy class-validator's default wording, and the `@bge/i18n`
+      real-catalog spec pins that they render identically. The `each` keys keep the "each value in "
+      prefix that a custom message drops. The five `each: true` sites annotated in earlier rows now use
+      them too.
+- [x] `libs/api/game-search` — **DONE** (DTO-only). The HTTP `SearchQueryDto` (6). Its WS DTOs are in the
+      #503 row below.
+- [x] `libs/api/notifications` — **DONE** (DTO-only). `MarkReadDto` (4).
+- [x] `libs/api/user` — **DONE** (DTO-only). `UserSearchQueryDto` (2).
+- [ ] `libs/common/shared` pagination/search DTOs and the WS `SearchStartDto` / `SearchCancelDto` — **#503**.
+      17 bare decorators plus `SkipWithinCeiling.defaultMessage()` in `@bge/shared`, and 8 on the WS DTOs.
+      The WS-reachable ones wait on #180: until it puts `I18nValidationPipe` on the gateway, a marker would
+      reach WS clients raw. `@bge/shared` does not depend on `@bge/i18n` yet, and #503 decides how it
+      gets the marker.
 
 ---
 
 ## 4. Recommended shared keys (dedup)
+
+**Superseded (#144):** this was the plan before the migration, and the names below did not land as
+written. The shared keys are `common.forbidden.{view,update,delete,remove,access,action}` and
+`common.at_least_one_field`. Not-found messages became per-entity `errors.<entity>.not_found` keys, and
+"Invalid API key" became `errors.api_key.invalid`, since it has one live site. The §3 rows record the
+keys each lib uses.
 
 These strings repeat across many libs — make them shared `common.*` keys, not per-site:
 
@@ -253,6 +284,12 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 - **actor-context** (`libs/common/actor-context`): `TypeError` + plain `Error` invariants — dev-facing.
 - **permissions**: `AbilityContextNotPrimedError` + plain `Error` — dev-facing.
 - **quota registry** (`libs/common/quota/.../registry`): 3 plain `Error` throws — internal.
+- **actor-context-transport gRPC interceptors** (#144): 17 `HttpException` frames — 16 in
+  `GrpcInternalActorInterceptor` (registered only on `gateway-coordinator`) and 1 in the unwired
+  `GrpcActorInterceptor`. These are real exception classes, not custom errors, but no caller ever reads
+  them: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error" and
+  only logs the exception. A `t()` marker body would make that log line the generic class phrase (#501),
+  so they stay English. The lib's eslint config exempts those two files from the guardrail by name.
 
 ---
 
@@ -265,7 +302,7 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
     `error.message`. **Not just an i18n gap — a potential info leak.** Replace with a translated,
     sanitized string.
   - `grpc-internal-actor.interceptor.ts:143` — embeds `(error as Error).message` in a
-    BadRequestException; keep the interpolation arg, translate the frame.
+    BadRequestException. **Resolved (#144):** it stays English with the other gRPC frames (§5).
 - **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor
   (`Quota for "{resource}" exceeded at {scope} scope`) — one key, all throw sites inherit it.
 - **`SAFE_MESSAGE` map** (`game-import/src/lib/utils/sanitize-import-error.ts`) — 4 client-safe
@@ -277,7 +314,12 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 - **Worker-context throws** (`game-import` processors): thrown off the HTTP path; some are later
   sanitized before reaching clients. Localize with an explicit `lang` when Phase 4 wires worker locale.
 - **`actor-context-transport` gRPC frames (17):** on internal service-to-service channels — technically
-  `HttpException` but rarely surfaced to end users. Lowest priority.
+  `HttpException` but never surfaced to callers. **Resolved (#144):** they stay English (§5).
+- **WebSocket copy** — #180, not this inventory's sweep. The gateways send English straight through
+  `client.emit`, bypassing any filter: `auth:error` in `authenticated.gateway.ts`, the three refusals in
+  `build-client-data.ts`, and `SearchError` in `search.gateway.ts`. `WsValidationFilter` forwards
+  validation messages unchanged, which is why the WS DTOs wait on #180 (§3, #503). #180's amendment
+  lists every site.
 
 ---
 
@@ -289,11 +331,14 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 | libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()`         | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes`                                                   |
 | libs/api/safe-http/.../dto/validators.ts:33                     | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")`                                    |
 | libs/api/safe-http/.../dto/validators.ts:71                     | `IsCidrConstraint.defaultMessage()`               | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
+| libs/common/shared/.../dto/pagination-query.dto.ts:77           | `SkipWithinCeiling.defaultMessage()` (#230)       | `page is too deep: (page - 1) × limit must not exceed {DEFAULT_MAX_OFFSET}` — pending #503                                   |
 
 Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
 (#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
-these requires adding `i18nValidationMessage<I18nTranslations>('validation.KEY')` to each decorator —
-tracked as Phase 3 work (#144).
+these requires adding `i18nValidationMessage<I18nTranslations>('validation.KEY')` to each decorator. #144
+annotated every in-scope DTO except the `@bge/shared` pagination/search DTOs and the WS search
+DTOs, which #503 tracks (§3). The #145 guardrail cannot catch a bare decorator: it only matches string
+literals, and a bare `@IsString()` has none.
 
 ---
 

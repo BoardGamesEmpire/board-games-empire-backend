@@ -1,6 +1,7 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
+import { t } from '@bge/i18n';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
 import { ForbiddenException, Injectable, Logger, UnauthorizedException, type NestMiddleware } from '@nestjs/common';
@@ -96,7 +97,7 @@ export class HttpActorMiddleware implements NestMiddleware {
     const resolved = await this.authService.verifyApiKey(key);
 
     if (!resolved) {
-      throw new UnauthorizedException('Invalid API key');
+      throw new UnauthorizedException(t('errors.api_key.invalid'));
     }
 
     return {
@@ -123,12 +124,12 @@ export class HttpActorMiddleware implements NestMiddleware {
     if (impersonatorId) {
       // The ids and the issue reference go to the log, not to the caller: the
       // response must disclose neither which admin is behind the session nor
-      // an internal tracker number. A raw literal rather than a `t()` key is
-      // deliberate — this middleware runs BEFORE LocaleResolutionMiddleware
-      // (see AppModule.configure), so no request locale exists yet; the
-      // sibling `UnauthorizedException` above is a literal for the same reason.
+      // an internal tracker number, so the marker carries no args. This
+      // middleware runs BEFORE LocaleResolutionMiddleware (see
+      // AppModule.configure), so no request locale exists yet: this refusal and
+      // the API-key one above render in the fallback locale.
       this.logger.warn(`Refusing impersonated session (#408): target=${user?.id} impersonatedBy=${impersonatorId}`);
-      throw new ForbiddenException('Impersonated sessions are not supported');
+      throw new ForbiddenException(t('errors.auth.impersonated_session'));
     }
 
     this.logger.debug(`Resolved session for user ${user.id} (anonymous: ${user.isAnonymous})`);

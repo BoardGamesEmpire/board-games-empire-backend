@@ -87,9 +87,17 @@ export const unscopedListReadSelectors = [
 // rule scoped to its source, so the guardrail grows as #144 lands lib-by-lib and
 // never red-CIs a lib that hasn't been migrated yet. Genuinely non-user-facing
 // cases use an explicit `// eslint-disable-next-line no-restricted-syntax --
-// <reason>` escape hatch. `raw=/^['"]/` restricts to STRING literals (a numeric
-// status code as an exception arg is not flagged); namespaced callees
-// (`ns.FooException`) are a known gap — call sites here import exceptions directly.
+// <reason>` escape hatch. A file whose every exception is non-user-facing (the
+// transport lib's gRPC interceptors) may instead be listed in that lib's
+// `ignores`, with the reason beside it. `raw=/^['"]/` restricts to STRING
+// literals (a numeric status code as an exception arg is not flagged);
+// namespaced callees (`ns.FooException`) are a known gap — call sites here
+// import exceptions directly.
+//
+// The last entry is not about a literal. An `each: true` validator's default
+// reads "each value in tags must be a string", and a custom message drops that
+// prefix, so such a decorator must name a `validation.each.*` key. Nothing else
+// catches a base key there: the copy still reads plausibly.
 export const i18nHardcodedStringSelectors = [
   {
     selector: 'NewExpression[callee.name=/Exception$/] > Literal[raw=/^[\'"]/]',
@@ -110,6 +118,12 @@ export const i18nHardcodedStringSelectors = [
     selector: "Property[key.name='message'] > TemplateLiteral",
     message:
       "Hardcoded user-facing `message:` template string. Move the copy to a catalog key and interpolate via t('…', { … }). (#144/#145)",
+  },
+  {
+    selector:
+      "ObjectExpression:has(> Property[key.name='each'][value.value=true]) > Property[key.name='message'] > CallExpression[callee.name='i18nValidationMessage'] > Literal:not([value=/^validation\\.each\\./])",
+    message:
+      'An `each: true` validator needs a `validation.each.*` key: a custom message drops the "each value in " prefix of the class-validator default. Add the key beside its base one in validation.json. (#144)',
   },
 ];
 

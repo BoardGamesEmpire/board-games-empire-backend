@@ -1,3 +1,4 @@
+import { validationCatalogKeys } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { SearchQueryDto } from './search-query.dto';
@@ -161,6 +162,31 @@ describe('SearchQueryDto', () => {
     it('transforms string numbers from query params', async () => {
       const dto = toDto({ query: 'test', offset: '10' });
       expect(dto.offset).toBe(10);
+    });
+  });
+
+  // Each failure must name a validation catalog key, so the edge can render it
+  // in the request locale. Assigned without the transformers: the
+  // boolean transform coerces everything to a boolean, so only a raw value can
+  // reach @IsBoolean.
+  describe('failure messages', () => {
+    it('names a catalog key for every field failure', async () => {
+      const dto = Object.assign(new SearchQueryDto(), {
+        query: 42,
+        gatewayIds: 42,
+        includeLocal: 'yes',
+        includeExternal: 'yes',
+        locale: 42,
+      });
+
+      expect(validationCatalogKeys(await validate(dto))).toEqual({
+        'query.isString': 'validation.isString',
+        'gatewayIds.isArray': 'validation.isArray',
+        'gatewayIds.isString': 'validation.each.isString',
+        'includeLocal.isBoolean': 'validation.isBoolean',
+        'includeExternal.isBoolean': 'validation.isBoolean',
+        'locale.isString': 'validation.isString',
+      });
     });
   });
 

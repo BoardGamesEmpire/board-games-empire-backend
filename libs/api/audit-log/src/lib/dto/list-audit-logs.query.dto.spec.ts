@@ -1,3 +1,4 @@
+import { validationCatalogKeys } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { ListAuditLogsQueryDto } from './list-audit-logs.query.dto';
@@ -29,6 +30,42 @@ describe('ListAuditLogsQueryDto', () => {
 
     it('leaves the filter optional — absent is valid', async () => {
       expect(await errorsFor(field, {})).toHaveLength(0);
+    });
+  });
+
+  // Each failure must name a validation catalog key, so the edge can render it
+  // in the request locale. Without implicit conversion, so a number
+  // stays a number and trips @IsString.
+  describe('failure messages', () => {
+    const keysFor = async (plain: Record<string, unknown>) =>
+      validationCatalogKeys(await validate(plainToInstance(ListAuditLogsQueryDto, plain)));
+
+    it('names a catalog key for every type and enum failure', async () => {
+      const keys = await keysFor({
+        ...Object.fromEntries(STRING_FILTERS.map((field) => [field, 42])),
+        actorKind: 'robot',
+        action: 'upsert',
+        source: 'fax',
+        occurredFrom: 'not-a-date',
+        occurredTo: 'not-a-date',
+      });
+
+      expect(keys).toEqual({
+        ...Object.fromEntries(STRING_FILTERS.map((field) => [`${field}.isString`, 'validation.isString'])),
+        'actorKind.isIn': 'validation.isIn',
+        'action.isIn': 'validation.isIn',
+        'source.isIn': 'validation.isIn',
+        'occurredFrom.isDate': 'validation.isDate',
+        'occurredTo.isDate': 'validation.isDate',
+      });
+    });
+
+    it('names a catalog key for every empty filter', async () => {
+      const keys = await keysFor(Object.fromEntries(STRING_FILTERS.map((field) => [field, ''])));
+
+      expect(keys).toEqual(
+        Object.fromEntries(STRING_FILTERS.map((field) => [`${field}.isNotEmpty`, 'validation.isNotEmpty'])),
+      );
     });
   });
 });

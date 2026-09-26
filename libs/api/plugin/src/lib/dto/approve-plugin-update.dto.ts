@@ -15,7 +15,7 @@ export class ApprovePluginUpdateDto {
     type: [String],
   })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsString({ each: true, message: i18nValidationMessage('validation.isString') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @IsOptional()
   confirmCriticalSlugs?: string[];
 }

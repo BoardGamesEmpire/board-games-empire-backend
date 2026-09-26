@@ -45,6 +45,23 @@ locale is resolved, it degrades to `FALLBACK_LOCALE` (`en`).
 Exceptions **without** a `t()` payload pass straight through to Nest's default
 handling — nothing about existing error responses changes.
 
+### Refusals thrown before the locale exists
+
+The entry seam runs as ordered middleware (`AppModule.configure`):
+`HttpActorMiddleware` resolves the actor, then `LocaleResolutionMiddleware`
+resolves the locale. It has to come second, because the actor's stored language
+preference heads its precedence chain. So `HttpActorMiddleware`'s own two
+refusals throw while CLS holds no locale yet, and they always render in
+`FALLBACK_LOCALE`:
+
+- an invalid API key (`errors.api_key.invalid`)
+- an impersonated session (`errors.auth.impersonated_session`)
+
+With only `en` shipping, the difference is invisible. The order cannot flip, so
+once a second locale ships, the way to localize these two is for the edge to
+read the request's `Accept-Language` header when CLS holds no locale. Everything
+thrown later — guards, pipes, handlers — sees the resolved locale.
+
 ### Controller-scoped filters
 
 The global `I18nExceptionFilter` only runs when no more-specific filter handles
@@ -130,7 +147,9 @@ explicitly at the throw site.
 ## Scope
 
 - **HTTP only.** WebSocket gateways keep their own filters; WS localization is
-  tracked in #180.
+  tracked in #180. The gRPC actor interceptors' refusals stay English on
+  purpose: Nest answers them with a generic "Internal server error", so the log
+  is the only reader (see [string-inventory.md](./string-inventory.md) §5).
 - This issue (#143) establishes the pattern + filter and converts one exemplar
   site (`language.service.ts`). Converting the remaining ~165 throw sites — and
   collapsing repeated messages into shared `common.*` keys — is Phase 3 (#144);

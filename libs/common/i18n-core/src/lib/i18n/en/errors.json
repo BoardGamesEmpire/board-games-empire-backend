@@ -118,7 +118,11 @@
     "not_found": "User with ID {id} not found"
   },
   "api_key": {
-    "not_found_or_revoked": "API key not found or has been revoked."
+    "not_found_or_revoked": "API key not found or has been revoked.",
+    "invalid": "Invalid API key"
+  },
+  "auth": {
+    "impersonated_session": "Impersonated sessions are not supported"
   },
   "household": {
     "not_found": "Household with ID {id} not found",

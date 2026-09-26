@@ -64,7 +64,7 @@ export class CreateEventPolicyDto {
 
   @ApiPropertyOptional({ type: [String] })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
-  @IsString({ each: true, message: i18nValidationMessage('validation.isString') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @ValidateIf((o: CreateEventPolicyDto) => o.restrictToGameCategories === true)
   allowedCategoryIds?: string[];
 
