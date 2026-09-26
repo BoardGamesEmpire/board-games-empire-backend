@@ -319,8 +319,11 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   two places. `WsErrorFilter` renders validation failures and the search gateway's two refusals, which
   it throws. `wsErrorPayload` builds the `auth:error` connection refusals in `authenticated.gateway.ts`,
   including the three from `build-client-data.ts`. The filter forwards validation messages unchanged,
-  which is why the WS DTOs wait on #180 (§3, #503). The one direct emit left is the `SearchError`
-  "Local search failed" in `search.gateway.ts`. #180's amendments list every site.
+  which is why the WS DTOs wait on #180 (§3, #503). `search.gateway.ts` still emits three strings of
+  its own, directly: the `SearchError` "Local search failed", and the fallbacks "Rate limited — please
+  try again shortly" (`SearchRateLimited`) and "Search error" (`SearchError`), sent when a source's
+  result carries no message. The coordinator stream's error handler forwards the raw gRPC message
+  instead (#519), so it has no copy of its own.
 
 ---
 
