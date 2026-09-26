@@ -30,7 +30,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * checks reference SEEDED permissions only: `read:safe_http_policy`
  * (Medium, condition-free) at server scope, `read:household_member` (Low,
  * household-conditioned), `update:user:profile:own` (Low, user-conditioned),
- * and `read:game` (Low, condition-free) as the D60-7 trap.
+ * and `read:platform_game` (Low, condition-free) as the D60-7 trap.
  */
 describe('plugin grant decisions + consent presentation (#322)', () => {
   const baseUrl = requireBaseUrl(process.env);
