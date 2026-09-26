@@ -23,7 +23,11 @@ export class RedisIoAdapter extends IoAdapter {
       connectionStateRecovery: {
         // Make configurable?
         maxDisconnectionDuration: 2 * 60 * 1000,
-        skipMiddlewares: true,
+        // Gateways authenticate in namespace middleware, which also installs
+        // each frame's actor scope (#427). A recovered connection that skipped
+        // it would be accepted without its session being checked, and every
+        // frame it sent would then be refused for running outside a scope.
+        skipMiddlewares: false,
       },
     };
 

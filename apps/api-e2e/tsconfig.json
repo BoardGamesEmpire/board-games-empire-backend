@@ -8,7 +8,13 @@
   "include": ["jest.config.ts", "src/**/*.ts"],
   "references": [
     {
+      "path": "../../libs/common/shared"
+    },
+    {
       "path": "../../libs/plugin/manifest"
+    },
+    {
+      "path": "../../libs/common/services"
     },
     {
       "path": "../../libs/queue/feedback"
@@ -24,9 +30,6 @@
     },
     {
       "path": "../../libs/database"
-    },
-    {
-      "path": "../../libs/common/services"
     }
   ]
 }

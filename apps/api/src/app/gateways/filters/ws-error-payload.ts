@@ -4,9 +4,10 @@ import { setTimeout } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
 
 /**
- * How long a refused socket stays open before it is disconnected, so the
- * `auth:error` frame is flushed first. Disconnecting sooner meant clients
- * never saw the refusal; #427 records why the delay has to stay.
+ * How long a socket whose session is gone stays open before it is
+ * disconnected, so the `auth:error` frame is flushed first. Disconnecting
+ * sooner meant clients never saw the refusal. A refused connection needs no
+ * wait: it is refused before socket.io accepts it, on `connect_error`.
  */
 const AUTH_ERROR_FLUSH_MS = 100;
 
@@ -32,7 +33,22 @@ export function wsErrorPayload(statusCode: number, message: string | string[], f
   };
 }
 
-/** Tells the client why on `auth:error`, then closes the socket. */
+/**
+ * What a handshake middleware refuses a connection with. socket.io sends its
+ * message, and the envelope as its `data`, to the client's `connect_error`,
+ * and the client does not try to connect again on its own.
+ */
+export class WsConnectionRefusal extends Error {
+  readonly data: WsErrorPayload;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = WsConnectionRefusal.name;
+    this.data = wsErrorPayload(statusCode, message);
+  }
+}
+
+/** Tells a connected client why on `auth:error`, then closes the socket. */
 export async function refuseSocket(client: Socket, payload: WsErrorPayload): Promise<void> {
   client.emit(WsErrorEvents.AuthError, payload);
   await setTimeout(AUTH_ERROR_FLUSH_MS);

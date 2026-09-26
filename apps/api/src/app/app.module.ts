@@ -3,7 +3,6 @@ import {
   ActorContextTransportModule,
   HttpActorMiddleware,
   LocaleResolutionMiddleware,
-  WsActorInterceptor,
 } from '@bge/actor-context-transport';
 import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
@@ -57,6 +56,7 @@ import { I18nValidationExceptionFilter } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { API_CACHE_NAMESPACE, configuration, configurationValidationSchema } from './configuration';
+import { WsFrameScope } from './gateways/base/ws-frame-scope';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 import { BGE_VERSION } from './generated/bge-version';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
@@ -287,7 +287,6 @@ import { createThrottlers } from './lib/throttlers';
     // deadlock raised by any service on any route is converted exactly once.
     { provide: APP_INTERCEPTOR, useClass: TransactionDeadlockInterceptor },
 
-    { provide: APP_INTERCEPTOR, useExisting: WsActorInterceptor },
     {
       provide: APP_INTERCEPTOR,
       useClass: UserAwareCacheInterceptor,
@@ -304,6 +303,7 @@ import { createThrottlers } from './lib/throttlers';
     },
 
     // WS Gateways
+    WsFrameScope,
     GameSearchGateway,
   ],
 })

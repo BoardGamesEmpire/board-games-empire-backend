@@ -1,13 +1,16 @@
 /**
- * The two events every gateway reports errors on, split by what the client
- * should do next (#426).
+ * The two events every gateway reports errors on once it has accepted a
+ * connection, split by what the client should do next (#426).
+ *
+ * A refused connection is never accepted, so it hears on neither: socket.io
+ * answers it on the client's `connect_error`, with the same envelope as the
+ * error's `data` (#427). A 500 there says the server could not check the
+ * session at all, so connecting again may succeed.
  */
 export enum WsErrorEvents {
   /**
-   * The connection is closing, and the socket disconnects right after. Almost
-   * always because of who the client is: a refused connection, or a frame
-   * whose session is gone. A 500 says the server could not check the session
-   * at all, so connecting again may succeed.
+   * The connection is closing, and the socket disconnects right after: a
+   * frame arrived whose session is gone.
    */
   AuthError = 'auth:error',
 
@@ -21,8 +24,9 @@ export enum WsErrorEvents {
 }
 
 /**
- * The payload of both {@link WsErrorEvents}: Nest's HTTP error body, so one
- * client parser reads either transport, plus the frame the error answers.
+ * The payload of both {@link WsErrorEvents}, and the `data` of a refused
+ * connection's `connect_error`: Nest's HTTP error body, so one client parser
+ * reads either transport, plus the frame the error answers.
  */
 export interface WsErrorPayload {
   readonly statusCode: number;

@@ -9,7 +9,7 @@ import type {
   WsSourceDonePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
-import { AbilityService } from '@bge/permissions';
+import { AbilityContextNotPrimedError, AbilityService, PoliciesGuard } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
@@ -31,13 +31,15 @@ import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { NEVER, of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
+import { WsFrameScope, WsFrameScopeGuard } from '../base/ws-frame-scope';
 import { GameSearchGateway } from './search.gateway';
 
 // The actor the socket authenticated as at connection time (`client.data`).
 const SOCKET_ID = 'socket-test-1';
 const SOCKET_USER_ID = 'socket-user';
-const SOCKET_ABILITY = { sentinel: 'socket-ability' };
-const SOCKET_READ = { id: 'sentinel-socket-read-condition' };
+
+// What the frame's primed abilities let it read.
+const FRAME_READ = { id: 'sentinel-frame-read-condition' };
 
 describe('GameSearchGateway', () => {
   let gateway: GameSearchGateway;
@@ -45,7 +47,8 @@ describe('GameSearchGateway', () => {
   let coordinator: jest.Mocked<GatewayCoordinatorClientService>;
   let abilityService: MockAbilityService;
   let mockEmit: jest.Mock;
-  let mockTo: jest.Mock<{ emit: jest.Mock }, [string]>;
+  let mockClusterEmit: jest.Mock;
+  let mockTo: jest.Mock<{ emit: jest.Mock; local: { emit: jest.Mock } }, [string]>;
 
   beforeEach(async () => {
     coordinator = {
@@ -58,11 +61,10 @@ describe('GameSearchGateway', () => {
     } as unknown as jest.Mocked<GatewayCoordinatorClientService>;
 
     abilityService = createMockAbilityService();
-    abilityService.resolveAbilitiesForActor.mockResolvedValue([SOCKET_ABILITY]);
-    abilityService.getResourceConditionsForAbilities.mockReturnValue([SOCKET_READ]);
+    abilityService.getCurrentResourceConditions.mockReturnValue([FRAME_READ]);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      overrideGuards: [AuthGuard],
+      overrideGuards: [AuthGuard, WsFrameScopeGuard, PoliciesGuard],
       providers: [
         GameSearchGateway,
         // Real GameSearchService: the gateway delegates its local query + proto
@@ -78,6 +80,7 @@ describe('GameSearchGateway', () => {
           useValue: { verifyToken: jest.fn() },
         },
         { provide: AbilityService, useValue: abilityService },
+        { provide: WsFrameScope, useValue: {} },
       ],
     });
 
@@ -85,10 +88,12 @@ describe('GameSearchGateway', () => {
     gateway = module.get(GameSearchGateway);
 
     // Wire a mock server so gateway emissions can be asserted.
-    // server.to(room) is a fluent interface; mockTo captures the room arg,
-    // mockEmit captures the (event, payload) args.
+    // server.to(room).local is a fluent interface; mockTo captures the room
+    // arg, mockEmit captures the (event, payload) args of a local emit, and
+    // mockClusterEmit those of an emit sent through the cluster adapter.
     mockEmit = jest.fn();
-    mockTo = jest.fn().mockReturnValue({ emit: mockEmit });
+    mockClusterEmit = jest.fn();
+    mockTo = jest.fn().mockReturnValue({ emit: mockClusterEmit, local: { emit: mockEmit } });
     (gateway as unknown as { server: Server }).server = { to: mockTo } as unknown as Server;
   });
 
@@ -271,28 +276,25 @@ describe('GameSearchGateway', () => {
         expect(gameCount).toBe(2);
       });
 
-      it('reads only what the socket’s own actor may read', async () => {
-        // No ability context is primed for a WebSocket message (#498), so the
-        // gateway resolves the actor the connection authenticated as, per search.
+      it('reads only what the frame’s actor may read', async () => {
+        // Every frame runs with its actor's abilities primed, as a request
+        // does over HTTP (#498).
         const client = makeSocket(gateway);
         db.game.findMany.mockResolvedValue([]);
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
-        expect(abilityService.resolveAbilitiesForActor).toHaveBeenCalledWith({ kind: 'user', userId: SOCKET_USER_ID });
-        expect(abilityService.getResourceConditionsForAbilities).toHaveBeenCalledWith(
-          [SOCKET_ABILITY],
-          ResourceType.Game,
-          Action.read,
-        );
+        expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
         expect(db.game.findMany).toHaveBeenCalledWith(
-          expect.objectContaining({ where: expect.objectContaining({ AND: [SOCKET_READ] }) }),
+          expect.objectContaining({ where: expect.objectContaining({ AND: [FRAME_READ] }) }),
         );
       });
 
-      it('queries nothing and emits a local error when the actor’s abilities cannot be resolved', async () => {
+      it('queries nothing and emits a local error when the frame’s abilities cannot be read', async () => {
         const client = makeSocket(gateway);
-        abilityService.resolveAbilitiesForActor.mockRejectedValue(new Error('role graph unavailable'));
+        abilityService.getCurrentResourceConditions.mockImplementation(() => {
+          throw new AbilityContextNotPrimedError();
+        });
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
@@ -495,7 +497,7 @@ describe('GameSearchGateway', () => {
 
       it('sends search:done after the local results, however fast the coordinator stream completes', async () => {
         // `of(...)` completes the gateway half synchronously, while the local
-        // half still has the actor's abilities and the query to wait on.
+        // half still has its query to wait on.
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
         db.game.findMany.mockResolvedValue([makeGameWithSource()]);
@@ -545,6 +547,23 @@ describe('GameSearchGateway', () => {
         for (const [target] of mockTo.mock.calls) {
           expect(target).toBe(room('corr-1'));
         }
+      });
+
+      it('delivers every frame from this node, never through the cluster adapter', async () => {
+        // The cluster adapter delivers a broadcast only after publishing it to
+        // Redis, by which time the search has left its room: a local-only
+        // search's frames would all be dropped.
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([makeGameWithSource()]);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(mockEmit.mock.calls.map(([event]) => event)).toEqual([
+          SearchEvents.SearchResult,
+          SearchEvents.SearchSourceDone,
+          SearchEvents.SearchDone,
+        ]);
+        expect(mockClusterEmit).not.toHaveBeenCalled();
       });
     });
 
