@@ -12,18 +12,12 @@ describe('HouseholdController (no-Session delegation)', () => {
   let service: jest.Mocked<
     Pick<
       HouseholdService,
-      | 'getHouseholdsForUser'
-      | 'getHouseholdsForMember'
-      | 'getHouseholdById'
-      | 'create'
-      | 'updateHousehold'
-      | 'deleteHousehold'
+      'getHouseholdsForUser' | 'getHouseholdById' | 'create' | 'updateHousehold' | 'deleteHousehold'
     >
   >;
   beforeEach(() => {
     service = {
       getHouseholdsForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
-      getHouseholdsForMember: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
       getHouseholdById: jest.fn().mockResolvedValue({ id: 'hh-1' }),
       create: jest.fn().mockResolvedValue({ id: 'hh-1', createdById: 'user-1' }),
       updateHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
@@ -52,59 +46,15 @@ describe('HouseholdController (no-Session delegation)', () => {
     });
   });
 
-  it('getHouseholdsForMember forwards only pagination', async () => {
-    await firstValueFrom(controller.getHouseholdsForMember(PAGINATION));
-    expect(service.getHouseholdsForMember).toHaveBeenCalledWith(PAGINATION);
-  });
-
-  it('wraps the membership-scoped rows in the same envelope as the wide list', async () => {
-    service.getHouseholdsForMember.mockResolvedValue({ rows: [{ id: 'hh-1' }], total: 1 } as never);
-
-    const response = await firstValueFrom(controller.getHouseholdsForMember(paginationQuery({ page: 1, limit: 10 })));
-
-    expect(response).toEqual({
-      households: [{ id: 'hh-1' }],
-      pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
-    });
-  });
-
-  // The two reads answer identically since #417, but each route keeps its own
-  // service method until #420 deletes `/mine`, so that removal touches one
-  // handler and one method and nothing `GET /households` reaches.
-  it('keeps the two reads on separate service methods', async () => {
-    await firstValueFrom(controller.getHouseholdsForMember(PAGINATION));
-    expect(service.getHouseholdsForUser).not.toHaveBeenCalled();
-
-    await firstValueFrom(controller.getHouseholdsForUser(PAGINATION));
-    expect(service.getHouseholdsForMember).toHaveBeenCalledTimes(1);
-  });
-
   // The service composes the `Household` scope; the envelope is where the
   // guard checks for it, under the resource type the handler passes. Built
   // inside a request with nothing composed, a `Household` envelope must fail.
   // A handler passing a type still in `PENDING_SCOPE_SWEEP` would pass here
   // instead, which switches the guard off for that route without a sound.
-  it.each(['getHouseholdsForUser', 'getHouseholdsForMember'] as const)(
-    '%s builds its envelope under the Household scope guard',
-    async (handler) => {
-      await expect(
-        ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller[handler](PAGINATION))),
-      ).rejects.toThrow(ListScopeNotComposedError);
-    },
-  );
-
-  /**
-   * Nest matches routes in declaration order, so `@Get(':id')` declared above
-   * `@Get('mine')` would capture `/households/mine` and answer 404 from the
-   * detail route — the trap flagged in #364's roadmap. Class method order is
-   * insertion order for string keys, so this asserts the actual mechanism
-   * rather than a comment about it.
-   */
-  it('declares the membership route above the :id route, which is what keeps it reachable', () => {
-    const declarationOrder = Object.getOwnPropertyNames(HouseholdController.prototype);
-
-    expect(declarationOrder.indexOf('getHouseholdsForMember')).toBeGreaterThan(-1);
-    expect(declarationOrder.indexOf('getHouseholdsForMember')).toBeLessThan(declarationOrder.indexOf('getById'));
+  it('getHouseholdsForUser builds its envelope under the Household scope guard', async () => {
+    await expect(
+      ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.getHouseholdsForUser(PAGINATION))),
+    ).rejects.toThrow(ListScopeNotComposedError);
   });
 
   it('create forwards only the dto (no Session); cache invalidation is the service’s concern', async () => {

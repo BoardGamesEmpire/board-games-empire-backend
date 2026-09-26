@@ -429,31 +429,18 @@ describe('HouseholdService', () => {
   });
 
   /**
-   * #417, and the reason it converted two routes rather than the one it named.
-   *
-   * The `paginated()` guard reads a CLS registry keyed per resource type per
-   * REQUEST, not per call: a read that reaches the database on its ceiling
+   * #417. The `paginated()` guard reads a CLS registry keyed per resource type
+   * per REQUEST, not per call: a read that reaches the database on its ceiling
    * alone records nothing, and now that `Household` has left
-   * `PENDING_SCOPE_SWEEP` the envelope it builds throws
-   * `ListScopeNotComposedError` — a 500, in production, on a route nobody
-   * touched. Converting one household list and leaving the other is therefore
-   * not a partial improvement; it is an outage in the half left behind.
-   *
-   * Both reads are held to the same facts here for that reason, and nothing
-   * about them differs any more, so every list fact lives in this table: #420
-   * deletes one row of it rather than a block of coverage `GET /households`
-   * also depends on.
+   * `PENDING_SCOPE_SWEEP` the envelope built over it throws
+   * `ListScopeNotComposedError`. A regression that stops this read composing
+   * its scope therefore answers 500 rather than merely returning too much,
+   * which is why the first test pins the composer call itself.
    */
-  describe.each([
-    [
-      'getHouseholdsForUser',
-      (subject: HouseholdService, query = paginationQuery({ limit: 10 })) => subject.getHouseholdsForUser(query),
-    ],
-    [
-      'getHouseholdsForMember',
-      (subject: HouseholdService, query = paginationQuery({ limit: 10 })) => subject.getHouseholdsForMember(query),
-    ],
-  ] as const)('%s, as a converted household list', (_name, read) => {
+  describe('getHouseholdsForUser, as a converted household list', () => {
+    const read = (subject: HouseholdService, query = paginationQuery({ limit: 10 })) =>
+      subject.getHouseholdsForUser(query);
+
     beforeEach(() => {
       db.household.findMany.mockResolvedValue([]);
       db.household.count.mockResolvedValue(0);

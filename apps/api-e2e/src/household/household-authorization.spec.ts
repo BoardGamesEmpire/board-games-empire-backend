@@ -45,21 +45,6 @@ describe('household authorization', () => {
 
   const listHouseholds = (actor: SessionActor) => request(baseUrl).get(HOUSEHOLDS_PATH).set(actor.headers);
 
-  const listOwnHouseholds = (actor: SessionActor) => request(baseUrl).get(`${HOUSEHOLDS_PATH}/mine`).set(actor.headers);
-
-  /**
-   * Both first-person lists for one actor, labelled for the envelope reader.
-   * Paired rather than asserted one at a time because the guard behind the
-   * invariant is per resource type per REQUEST: a household list left on its
-   * permission ceiling does not merely return too much, it answers 500 — so a
-   * regression can land on either route alone.
-   */
-  const bothLists = (actor: SessionActor, who: string) =>
-    [
-      [`GET /api/households as ${who}`, listHouseholds(actor)],
-      [`GET /api/households/mine as ${who}`, listOwnHouseholds(actor)],
-    ] as const;
-
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
@@ -132,19 +117,14 @@ describe('household authorization', () => {
   });
 
   /**
-   * #364, rewritten by #417 rather than retired. Until #417 these routes were a
-   * CONTRAST: `GET /households` widened with the caller's role and friendships,
-   * `GET /households/mine` did not, and two of the tests below asserted that
-   * widening as correct. Both routes are first-person now — the caller's own
-   * memberships, the same question for everybody — so what was the control has
-   * become the invariant.
-   *
-   * Every list assertion runs against BOTH routes — see {@link bothLists} for
-   * why one of them alone would not be enough. The exception is the last test,
-   * which is about `/mine` as a route (its place ahead of `:id`) and leaves
-   * with it in #420.
+   * #364, rewritten by #417 rather than retired. Until #417 this route widened
+   * with the caller's role and friendships, and two of the tests below
+   * asserted that widening as correct; #364's membership-only route was the
+   * contrast. The route is first-person now — the caller's own memberships,
+   * the same question for everybody — so what was the control has become the
+   * invariant, and #420 removed the membership-only route as a duplicate.
    */
-  describe('the first-person household lists', () => {
+  describe('the first-person household list', () => {
     it('gives every caller only their own memberships, however elevated', async () => {
       // Every actor before any of them issues an authenticated request, then
       // the rosters (the ordering rule). Concurrent factory calls share one
@@ -185,29 +165,28 @@ describe('household authorization', () => {
       ] as const;
 
       for (const [who, actor, own] of ownHouseholds) {
-        for (const [label, list] of bothLists(actor, who)) {
-          const page = listEnvelope(await list.expect(200), label);
-          expect(page.households.map((household) => household.id)).toEqual([own.household.id]);
-          expect(page.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
-        }
+        const page = listEnvelope(await listHouseholds(actor).expect(200), `GET /api/households as ${who}`);
+        expect(page.households.map((household) => household.id)).toEqual([own.household.id]);
+        expect(page.pagination).toMatchObject({ page: 1, total: 1, totalPages: 1, hasMore: false });
       }
 
       // The sharpest statement of the change, and why the Owner sentinel is
       // dragged into this test: it holds `manage:all`, belongs to no household,
       // and therefore now receives nothing at all. Four households exist.
-      for (const [label, list] of bothLists(serverOwner, 'the server Owner')) {
-        const page = listEnvelope(await list.expect(200), label);
-        expect(page.households).toEqual([]);
-        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
-      }
+      const ownerPage = listEnvelope(
+        await listHouseholds(serverOwner).expect(200),
+        'GET /api/households as the server Owner',
+      );
+      expect(ownerPage.households).toEqual([]);
+      expect(ownerPage.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
     });
 
-    it("omits a friend's Friends-visible household from both lists, while the detail route still admits it", async () => {
+    it("omits a friend's Friends-visible household from the list, while the detail route still admits it", async () => {
       // The case `pagination.total` cannot detect at all: before #417 this
       // household appeared in an ordinary user's list with no membership behind
       // it, so a client treating absence as removal would have been wrong about
-      // a household it never belonged to. #364 excluded it from `/mine`; #417
-      // excludes it from both.
+      // a household it never belonged to. #364 excluded it from the
+      // membership-only route it added; #417 excludes it here.
       const friend = await actors.user();
       const viewer = await actors.user();
 
@@ -218,11 +197,9 @@ describe('household authorization', () => {
       });
       await befriend(db.client, viewer, friend);
 
-      for (const [label, list] of bothLists(viewer, 'a friend')) {
-        const page = listEnvelope(await list.expect(200), label);
-        expect(page.households).toEqual([]);
-        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
-      }
+      const page = listEnvelope(await listHouseholds(viewer).expect(200), 'GET /api/households as a friend');
+      expect(page.households).toEqual([]);
+      expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
 
       // #417: friend visibility is NARROWED, not withdrawn, and this is the
       // assertion that makes deferring #485 safe rather than merely convenient.
@@ -233,13 +210,11 @@ describe('household authorization', () => {
       await readHousehold(viewer, shared.household.id).expect(200);
     });
 
-    it('omits a soft-deleted household from both lists even though the caller\u2019s member row survives it', async () => {
+    it('omits a soft-deleted household from the list even though the caller\u2019s member row survives it', async () => {
       // #364. `deleteHousehold` retains member rows by design, so the
       // membership clause on its own still matches a dead household — the
       // member row is asserted precisely so this cannot be mistaken for a
-      // fixture that tore itself down. Both routes, because the filter lives in
-      // the scope they share, and `GET /households` is the one that outlives
-      // #420.
+      // fixture that tore itself down.
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'About to be deleted' });
 
@@ -251,24 +226,12 @@ describe('household authorization', () => {
       });
       expect(survivingMembership).not.toBeNull();
 
-      for (const [label, list] of bothLists(owner, 'its owner, after a soft delete')) {
-        const page = listEnvelope(await list.expect(200), label);
-        expect(page.households).toEqual([]);
-        expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
-      }
-    });
-
-    it('is reachable at all, rather than captured by the :id detail route', async () => {
-      // Nest matches in declaration order. With `@Get(':id')` declared first,
-      // every request here becomes a household lookup for the literal id
-      // "mine" — a 404, or worse a 200 carrying the detail shape.
-      const actor = await actors.user();
-
-      const response = await listOwnHouseholds(actor).expect(200);
-
-      expect(response.body).toHaveProperty('households');
-      expect(response.body).toHaveProperty('pagination');
-      expect(response.body).not.toHaveProperty('household');
+      const page = listEnvelope(
+        await listHouseholds(owner).expect(200),
+        'GET /api/households as its owner, after a soft delete',
+      );
+      expect(page.households).toEqual([]);
+      expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
     });
   });
 
