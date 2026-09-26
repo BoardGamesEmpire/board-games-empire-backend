@@ -11,12 +11,16 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Logger, NotFoundException } from '@nestjs/common';
 import type { CreateGameGatewayDto, UpdateGameGatewayDto } from './dto';
 import { GameGatewayService } from './game-gateway.service';
 
 const COND = { id: 'sentinel-condition' };
 const COMPOSED_LIST_WHERE = { AND: [{ AND: [COND] }, { deletedAt: null }] };
+
+/** Prisma's answer when a statement's `where` matches no row. */
+const noRowMatched = () =>
+  new Prisma.PrismaClientKnownRequestError('not found', { code: 'P2025', clientVersion: 'test' });
 
 describe('GameGatewayService', () => {
   let service: GameGatewayService;
@@ -164,6 +168,36 @@ describe('GameGatewayService', () => {
     expect(configEvents.publish).not.toHaveBeenCalled();
   });
 
+  // The count saw a live row, but the write, which carries the caller's
+  // ceiling, matched none: the ceiling excludes that gateway, or a delete
+  // landed between the two statements. Either way it is a refusal naming the
+  // action, and nothing is published.
+  it('update refuses a live gateway its scoped write does not reach', async () => {
+    db.gameGateway.count.mockResolvedValue(1);
+    db.gameGateway.update.mockRejectedValue(noRowMatched());
+
+    const refusal = service.update('gw-1', { name: 'New' } as UpdateGameGatewayDto);
+
+    await expect(refusal).rejects.toThrow(ForbiddenException);
+    await expect(refusal).rejects.toMatchObject({
+      response: expect.objectContaining({ key: 'common.forbidden.update' }),
+    });
+    expect(configEvents.publish).not.toHaveBeenCalled();
+  });
+
+  it('delete refuses a live gateway its scoped write does not reach', async () => {
+    db.gameGateway.count.mockResolvedValue(1);
+    db.gameGateway.update.mockRejectedValue(noRowMatched());
+
+    const refusal = service.delete('gw-1');
+
+    await expect(refusal).rejects.toThrow(ForbiddenException);
+    await expect(refusal).rejects.toMatchObject({
+      response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+    });
+    expect(configEvents.publish).not.toHaveBeenCalled();
+  });
+
   // A 404 is the client's answer, not a server fault. Logged at error level it
   // is indistinguishable from a real defect to log-based alerting.
   describe('error logging', () => {
@@ -176,9 +210,7 @@ describe('GameGatewayService', () => {
     afterEach(() => errorLog.mockRestore());
 
     it('getById answers an unknown id with a 404 and no error log', async () => {
-      db.gameGateway.findUniqueOrThrow.mockRejectedValue(
-        new Prisma.PrismaClientKnownRequestError('not found', { code: 'P2025', clientVersion: 'test' }),
-      );
+      db.gameGateway.findUniqueOrThrow.mockRejectedValue(noRowMatched());
 
       await expect(service.getById('gw-1')).rejects.toThrow(NotFoundException);
       expect(errorLog).not.toHaveBeenCalled();
