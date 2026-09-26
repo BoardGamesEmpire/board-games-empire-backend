@@ -13,7 +13,15 @@ import type {
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { AbilityService } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
-import { Logger, UseFilters, UseGuards, UsePipes, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Logger,
+  UseFilters,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -27,10 +35,10 @@ import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
-import { WsAuthFilter, WsValidationFilter } from '../filters';
+import { WsErrorFilter } from '../filters';
 
 @UseGuards(AuthGuard)
-@UseFilters(WsValidationFilter, WsAuthFilter)
+@UseFilters(WsErrorFilter)
 @WebSocketGateway({
   namespace: 'games/search',
   cors: { origin: '*', credentials: true },
@@ -85,21 +93,16 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       }" gateways=[${dto.gatewayIds?.join(',')}]`,
     );
 
+    // Both refusals are thrown for WsErrorFilter to answer on the socket
+    // itself: a first-time id has no room joined yet, and a repeated id's room
+    // belongs to the search already running (#426).
     if (!dto.includeLocal && !dto.includeExternal) {
-      return this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
-        correlationId: dto.correlationId,
-        source: 'local',
-        message: 'At least one of includeLocal or includeExternal must be true',
-      });
+      throw new BadRequestException('At least one of includeLocal or includeExternal must be true');
     }
 
     const { activeSearches } = this.getClientData(client);
     if (activeSearches.has(dto.correlationId)) {
-      return this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
-        correlationId: dto.correlationId,
-        source: 'local',
-        message: `Search with correlationId ${dto.correlationId} is already active`,
-      });
+      throw new ConflictException(`Search with correlationId ${dto.correlationId} is already active`);
     }
 
     // Registered before the first await and for the whole search, local half

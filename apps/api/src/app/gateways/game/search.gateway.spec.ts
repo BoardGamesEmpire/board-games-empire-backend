@@ -25,6 +25,7 @@ import {
   SearchGameResult,
   SearchGamesRequest,
 } from '@boardgamesempire/proto-gateway';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
@@ -143,18 +144,36 @@ describe('GameSearchGateway', () => {
   });
 
   describe('handleSearchStart()', () => {
+    // Refusals are thrown rather than emitted: the gateway's filter answers the
+    // socket directly, and the search room is not joined until a search starts.
     describe('guard conditions', () => {
-      it('emits an error when correlationId is already active', async () => {
+      it('refuses a search that asks for no source, before joining a room', async () => {
         const client = makeSocket(gateway);
-        seedActiveSearch(gateway, client, 'corr-1');
-        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
 
-        await gateway.handleSearchStart(client, makeStartDto());
-        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
-          correlationId: 'corr-1',
-          source: 'local',
-          message: `Search with correlationId corr-1 is already active`,
-        });
+        const refusal = gateway.handleSearchStart(
+          client,
+          makeStartDto({ includeLocal: false, includeExternal: false }),
+        );
+
+        await expect(refusal).rejects.toBeInstanceOf(BadRequestException);
+        await expect(refusal).rejects.toThrow('At least one of includeLocal or includeExternal must be true');
+        expect(client.join).not.toHaveBeenCalled();
+        expect(mockEmit).not.toHaveBeenCalled();
+        expect(coordinator.searchGames).not.toHaveBeenCalled();
+      });
+
+      it('refuses a correlationId that is already active, and leaves that search running', async () => {
+        const client = makeSocket(gateway);
+        const running = seedActiveSearch(gateway, client, 'corr-1');
+
+        const refusal = gateway.handleSearchStart(client, makeStartDto());
+
+        await expect(refusal).rejects.toBeInstanceOf(ConflictException);
+        await expect(refusal).rejects.toThrow('Search with correlationId corr-1 is already active');
+        expect(running.unsubscribe).not.toHaveBeenCalled();
+        expect(clientData(gateway, client).activeSearches.get('corr-1')).toBe(running);
+        expect(mockEmit).not.toHaveBeenCalled();
+        expect(coordinator.searchGames).not.toHaveBeenCalled();
       });
 
       it('joins the correlationId room before beginning the search', async () => {
@@ -591,11 +610,9 @@ describe('GameSearchGateway', () => {
         db.game.findMany.mockReturnValueOnce(local.promise as never);
 
         const first = gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
-        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+        const second = gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
-        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
-          message: `Search with correlationId corr-1 is already active`,
-        });
+        await expect(second).rejects.toBeInstanceOf(ConflictException);
 
         local.resolve([]);
         await first;

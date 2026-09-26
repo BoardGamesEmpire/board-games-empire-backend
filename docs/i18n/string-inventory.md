@@ -315,11 +315,12 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   sanitized before reaching clients. Localize with an explicit `lang` when Phase 4 wires worker locale.
 - **`actor-context-transport` gRPC frames (17):** on internal service-to-service channels — technically
   `HttpException` but never surfaced to callers. **Resolved (#144):** they stay English (§5).
-- **WebSocket copy** — #180, not this inventory's sweep. The gateways send English straight through
-  `client.emit`, bypassing any filter: `auth:error` in `authenticated.gateway.ts`, the three refusals in
-  `build-client-data.ts`, and `SearchError` in `search.gateway.ts`. `WsValidationFilter` forwards
-  validation messages unchanged, which is why the WS DTOs wait on #180 (§3, #503). #180's amendment
-  lists every site.
+- **WebSocket copy** — #180, not this inventory's sweep. Since #426 the WS error copy passes through
+  two places. `WsErrorFilter` renders validation failures and the search gateway's two refusals, which
+  it throws. `wsErrorPayload` builds the `auth:error` connection refusals in `authenticated.gateway.ts`,
+  including the three from `build-client-data.ts`. The filter forwards validation messages unchanged,
+  which is why the WS DTOs wait on #180 (§3, #503). The one direct emit left is the `SearchError`
+  "Local search failed" in `search.gateway.ts`. #180's amendments list every site.
 
 ---
 

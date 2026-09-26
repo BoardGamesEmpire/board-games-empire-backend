@@ -1,2 +1,2 @@
-export * from './ws-auth.filter';
-export * from './ws-validation.filter';
+export * from './ws-error-payload';
+export * from './ws-error.filter';

@@ -3,9 +3,10 @@ import type { BaseClientData } from '@bge/shared';
 import { buildWsClientData } from '@bge/utils';
 import { Logger } from '@nestjs/common';
 import { OnGatewayConnection } from '@nestjs/websockets';
+import { Http } from '@status/codes';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { setTimeout } from 'node:timers/promises';
 import { Socket } from 'socket.io';
+import { refuseSocket, wsErrorPayload } from '../filters';
 
 export abstract class AuthenticatedGateway implements OnGatewayConnection {
   protected abstract readonly logger: Logger;
@@ -17,19 +18,13 @@ export abstract class AuthenticatedGateway implements OnGatewayConnection {
 
     if (!token) {
       this.logger.warn(`Unauthorized WS connection attempt: socketId=${client.id}`);
-      client.emit('auth:error', { status: 'UNAUTHORIZED', message: 'No token provided' });
-      await setTimeout(100);
-      client.disconnect(true);
-      return;
+      return refuseSocket(client, wsErrorPayload(Http.Unauthorized, 'No token provided'));
     }
 
     const session = await this.authService.getSessionFromToken(token);
     if (!this.authService.isValidSession(session)) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
-      client.emit('auth:error', { status: 'UNAUTHORIZED', message: 'Session expired or invalid' });
-      await setTimeout(100);
-      client.disconnect(true);
-      return;
+      return refuseSocket(client, wsErrorPayload(Http.Unauthorized, 'Session expired or invalid'));
     }
 
     // The refusal reason comes back discriminated so the log and the
@@ -39,10 +34,7 @@ export abstract class AuthenticatedGateway implements OnGatewayConnection {
     if (!outcome.ok) {
       const detail = outcome.detail ? ` ${outcome.detail}` : '';
       this.logger.warn(`WS connection refused (${outcome.reason}): socketId=${client.id}${detail}`);
-      client.emit('auth:error', { status: 'FORBIDDEN', message: outcome.message });
-      await setTimeout(100);
-      client.disconnect(true);
-      return;
+      return refuseSocket(client, wsErrorPayload(Http.Forbidden, outcome.message));
     }
 
     client.data = outcome.data satisfies BaseClientData;
