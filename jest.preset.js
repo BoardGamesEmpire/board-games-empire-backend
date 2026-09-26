@@ -74,4 +74,15 @@ module.exports = {
    * and are responsible for loading it themselves.
    */
   setupFiles: ['reflect-metadata'],
+
+  /**
+   * `lcovonly` feeds Codecov; `html` keeps the Nx preset's local report.
+   *
+   * `projectRoot` is load-bearing: istanbul writes lcov `SF:` paths relative
+   * to the process cwd, which Nx sets to the project root — so every project
+   * reports `src/index.ts`, `src/lib/...`, and Codecov cannot tell which
+   * project a file belongs to. Anchoring at the workspace root (this file's
+   * directory) makes the paths repo-relative and unambiguous.
+   */
+  coverageReporters: ['html', ['lcovonly', { projectRoot: __dirname }]],
 };
