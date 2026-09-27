@@ -26,7 +26,9 @@ map((game) => ({ game, message: t('success.game.created') })),
 The interceptor is the **outermost** global interceptor, so its transform runs
 after the response cache. The cache therefore stores locale-independent markers
 and this interceptor renders them per request — a cache hit is never pinned to
-the locale that first populated it.
+the locale that first populated it. The cache key carries the resolved locale as
+well (`user:{id}:{locale}:{url}`, #358), for a body that is rendered in the
+request locale before it reaches the cache rather than through a marker.
 
 Marker-free bodies pass through by reference (no reallocation); the walk is
 bounded in depth and descends only plain objects/arrays (never `Date`s or class

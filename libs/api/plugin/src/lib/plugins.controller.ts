@@ -77,9 +77,8 @@ export class PluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  // Localized body, and the response cache keys without the resolved locale
-  // (#358) — the same reason every other localized plugin read is uncached.
-  // It is also read immediately after the lifecycle writes that change it.
+  // Read immediately after the lifecycle writes that change it, which must be
+  // visible on the re-read.
   @NoCache()
   @Get()
   list(@Query() query: ListPluginsQueryDto) {
@@ -150,9 +149,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
   // Mutation-adjacent by definition: it exists to be read right before a
-  // decide POST, and the decide's write must be visible on the re-read. The
-  // response cache also keys without the resolved locale (#358), which
-  // would cross-serve this fully localized body between locales.
+  // decide POST, and the decide's write must be visible on the re-read.
   @NoCache()
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
@@ -356,8 +353,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
   // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached) — and the response cache keys without the resolved
-  // locale (#358), which would cross-serve localized bodies.
+  // surface uncached).
   @NoCache()
   @Get(':slug/features')
   featureStates(@Param('slug') slug: string) {

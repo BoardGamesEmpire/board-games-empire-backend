@@ -275,9 +275,8 @@ type UnitStateRow = { enabled: boolean; suspendedForConsent: boolean; suspendedA
  * other list read. Ordering is by `slug`, which is `@unique` and therefore
  * already a total order: no tiebreaker needed for page boundaries to hold.
  *
- * **No caching.** These bodies are localized (#358's cache key omits the
- * resolved locale) and they are read immediately after the lifecycle writes
- * that change them.
+ * **No caching.** These bodies are read immediately after the lifecycle
+ * writes that change them.
  */
 @Injectable()
 export class PluginInventoryService {

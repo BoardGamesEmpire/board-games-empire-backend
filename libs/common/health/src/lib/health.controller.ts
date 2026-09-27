@@ -1,3 +1,4 @@
+import { NoCache } from '@bge/shared';
 import { Controller, Get, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiOkResponse, ApiServiceUnavailableResponse, ApiTags } from '@nestjs/swagger';
@@ -60,6 +61,10 @@ const DISABLED_RESPONSE: DisabledResponse = { status: 'disabled' };
  * corrected it — the throttler was never actually enforcing anything before.
  */
 @SkipThrottle()
+// Never response-cached: every probe is the same anonymous caller, and the
+// cache stores successes but never errors, so one cached 200 would keep
+// answering through the outage that followed it (#528).
+@NoCache()
 @SurrogateDelegate()
 @ApiTags('health')
 @AllowAnonymous()

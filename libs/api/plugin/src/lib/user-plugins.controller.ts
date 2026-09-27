@@ -63,7 +63,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Ok, type: PaginatedUserPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'API keys cannot read a user consent surface' })
-  // Localized body; the response cache keys without the resolved locale (#358).
+  // The grant, enable and disable writes on this controller change these rows,
+  // and must be visible on the re-read.
   @NoCache()
   @Get()
   list(@Query() query: DefaultPaginationQueryDto) {
@@ -123,9 +124,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  // Mutation-adjacent (read right before a decide POST, which must be
-  // visible on the re-read) — and the response cache keys without the
-  // resolved locale (#358), which would cross-serve localized bodies.
+  // Mutation-adjacent: read right before a decide POST, which must be
+  // visible on the re-read.
   @NoCache()
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
@@ -186,8 +186,7 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached) — and the response cache keys without the resolved
-  // locale (#358), which would cross-serve localized bodies.
+  // surface uncached).
   @NoCache()
   @Get(':slug/features')
   featureStates(@Param('slug') slug: string) {
