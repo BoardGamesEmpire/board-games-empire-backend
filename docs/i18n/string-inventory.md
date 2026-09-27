@@ -13,7 +13,8 @@ stay English).
 
 - **In:** API exception/error messages, validation messages, and server-generated human-readable
   strings (incl. controller success `message:` bodies and the import client-safe copy map).
-- **Out:** notification bodies (rendered client-side from `type + payload`), domain content
+- **Out:** notification bodies (rendered client-side from `type + payload`; server-written copy that a
+  payload carries as data is in, e.g. ImportFailed's `error`, #188), domain content
   (game descriptions etc. — own `languageId` relations), and all custom/domain **error classes**
   (operator/developer-facing — see §5).
 
@@ -174,9 +175,11 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       thrown inside BullMQ worker processors, caught by `sanitizeImportError`, and land only in `Job.error`
       plus operator logs, so they stay English (both use string concatenation, so the #145 guardrail's
       direct-literal selectors don't trip — no eslint-disable needed). The `SAFE_MESSAGE` map stays English
-      for worker-emitted surfaces (webhook/notification); only the REST read-back is localized —
-      `toJobDto` maps `errorCode → t(IMPORT_FAILURE_MESSAGE_KEYS[code])` behind `I18nResponseInterceptor`.
-      Deferred worker-side localization (notification + webhook) → new issue **#188**. Added
+      for the webhook payload and `Job.result` (§5). The two surfaces a user reads translate from
+      `errorCode` through `importErrorMarker(code)` in `sanitize-import-error.ts`: the REST read-back
+      (`toJobDto`), and since #188 the ImportFailed notification, which stores the marker in its payload and
+      renders on `GET /notifications/unread` (`docs/i18n/translated-responses.md`, "Stored markers"). A
+      catalog spec keeps each `SAFE_MESSAGE` string equal to its key's `en` text. Added
       `errors.game_import.batch_not_found` + `errors.game_import.failure.*`, `success.game_import.enqueued`,
       `validation.isUUID`. Both DTOs annotated.
 - [x] `libs/api/system-settings` — **DONE**. 2 exceptions (surface matched inventory; no `assert()`, no
@@ -290,6 +293,12 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   them: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error" and
   only logs the exception. A `t()` marker body would make that log line the generic class phrase (#501),
   so they stay English. The lib's eslint config exempts those two files from the guardrail by name.
+- **game-import webhook copy** (#188): `game.import.failed.v1` carries `errorCode` plus the
+  `SAFE_MESSAGE` English `error` (`libs/api/game-import/src/lib/utils/emit-job-failed.ts`). Not an error
+  class, but machine-facing like the rest of this section. A webhook subscription has no locale, and the
+  body is POSTed outside the API, so no interceptor renders it. Integrations key on `errorCode`; the
+  English text is for the receiver's logs. The user's own copy of the failure, the ImportFailed
+  notification, is translated (§3).
 
 ---
 
@@ -306,13 +315,17 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 - **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor
   (`Quota for "{resource}" exceeded at {scope} scope`) — one key, all throw sites inherit it.
 - **`SAFE_MESSAGE` map** (`game-import/src/lib/utils/sanitize-import-error.ts`) — 4 client-safe
-  strings already designed as user-facing copy; ideal first candidates
-  (`The requested game could not be found on the gateway.`, etc.).
+  strings already designed as user-facing copy. **Resolved (#144, #188):** they are the
+  `errors.game_import.failure.*` keys, which the status read-back and the ImportFailed notification
+  render. The map itself stays as the webhook's English copy (§5).
 - **Concatenated literals:** several messages are built from 2 string fragments across lines
   (event occurrence, well-known security.txt, safe-http wildcard, quota scope, game-import,
   gateway-registry). Join into a single catalog entry.
-- **Worker-context throws** (`game-import` processors): thrown off the HTTP path; some are later
-  sanitized before reaching clients. Localize with an explicit `lang` when Phase 4 wires worker locale.
+- **Worker-context throws** (`game-import` processors): thrown off the HTTP path, and they land only in
+  `Job.error` and operator logs (§3), so they stay English. What reaches a user is the sanitized
+  `errorCode`, translated where the user reads it (#188). Worker output that is itself addressed to a
+  recipient, such as a push or a channel message, renders in that recipient's locale, resolved in the
+  worker (#146).
 - **`actor-context-transport` gRPC frames (17):** on internal service-to-service channels — technically
   `HttpException` but never surfaced to callers. **Resolved (#144):** they stay English (§5).
 - **WebSocket copy** — **DONE (#180)**, outside this inventory's sweep. It renders in the connection's

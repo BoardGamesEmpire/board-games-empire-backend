@@ -87,5 +87,8 @@ interceptor).
 - **#139** — done: catalog folders ship as nx build assets for `api`, `worker`, and
   `gateway-worker`.
 - **#140** — done: request-time resolution + CLS-stored locale, per above.
-- **#146/#147** — populate the CLS locale on the non-HTTP seams (queue jobs, gRPC metadata,
-  WS) and localize worker output.
+- **#180** — done: a WebSocket connection resolves its locale at the handshake.
+- **#146** — localize worker output addressed to a recipient, in that recipient's locale,
+  resolved in the worker from their `userId`. Built with its first consumer (#66 or #186).
+  Rows a user reads back over HTTP don't need it: they store a `t()` marker (#188).
+- **#147** — carry the locale on gRPC metadata.

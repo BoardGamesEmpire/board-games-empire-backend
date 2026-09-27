@@ -4,6 +4,7 @@ import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ImportJobCompletedEvent, ImportJobFailedEvent } from '../events/import.events';
+import { importErrorMarker } from '../utils/sanitize-import-error';
 
 /**
  * Creates a Notification for the importing user when a new game or expansion
@@ -96,12 +97,14 @@ export class NotificationListener {
           gatewayId: event.gatewayId,
           externalId: event.externalId,
           isExpansion: event.isExpansion,
-          // Sanitized code + static message from the persisted Job.result
-          // snapshot — the raw error can carry internal hostnames/IPs, gRPC
-          // transport detail or Prisma text, so it stays in Job.error /
-          // operator logs and never reaches the user's notification.
+          // Sanitized code from the persisted Job.result snapshot — the raw
+          // error can carry internal hostnames/IPs, gRPC transport detail or
+          // Prisma text, so it stays in Job.error / operator logs and never
+          // reaches the user's notification. The message is stored as a marker
+          // for that code, not the snapshot's English copy: the user reads the
+          // row back over HTTP, where it renders in their locale at read time.
           errorCode: event.after.result.errorCode,
-          error: event.after.result.error,
+          error: importErrorMarker(event.after.result.errorCode),
         },
       });
     } catch (err) {

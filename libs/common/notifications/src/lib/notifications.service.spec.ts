@@ -1,4 +1,5 @@
 import { JobType, NotificationType } from '@bge/database';
+import { t } from '@bge/i18n';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { NotificationsService } from './notifications.service';
 
@@ -55,8 +56,8 @@ describe('NotificationsService', () => {
           gatewayId: 'gw-1',
           externalId: 'x-1',
           isExpansion: false,
-          errorCode: 'GATEWAY_UNAVAILABLE',
-          error: 'The gateway is temporarily unavailable.',
+          errorCode: 'GATEWAY_ERROR',
+          error: t('errors.game_import.failure.gateway_error'),
         },
       },
     ]);

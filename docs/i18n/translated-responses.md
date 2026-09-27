@@ -38,7 +38,29 @@ instances).
 
 A response DTO still types the field as `message: string` (e.g.
 `GameMessageResponseDto`). That is correct: the client receives a translated
-**string** — the marker only exists in-process, before serialization.
+**string** — the marker only exists in-process (or in storage, below), before
+serialization.
+
+## Stored markers (#188)
+
+A marker can also be stored in a row and rendered each time the row is read
+back. The ImportFailed notification does this: the worker writes `payload.error`
+as `t(...)`, and `GET /notifications/unread` renders it in the reader's locale,
+at the time they read it. The brand is a plain property, so the marker survives
+the JSON column the same way it survives the response cache.
+
+- **Type the stored field `I18nMessage`, not `string`.** The HTTP read renders
+  it, but anything that reads the row in-process gets the marker. That includes
+  a future push sender (#186) or channel dispatcher (#66), and each must render
+  it for its own recipient (#146).
+- **A stored key is data.** A renamed or deleted key orphans the rows that name
+  it: they render as the key itself. Rename a stored key the way you would a
+  column.
+- **The walk is depth-bounded** (8 levels). A stored marker has to sit within
+  that depth of the response body's root.
+- **Machine-facing copy stays English.** The same failure's webhook payload
+  carries English text next to its `errorCode`: a subscription has no locale,
+  and the body leaves the API with no interceptor on the way.
 
 ## Adding a new success message
 

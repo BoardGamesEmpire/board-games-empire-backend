@@ -1,26 +1,11 @@
 import { DatabaseService, JobStatus, JobType, Prisma } from '@bge/database';
-import { t, type I18nPath } from '@bge/i18n';
+import { t } from '@bge/i18n';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { ImportBatchStatusResponseDto, ImportJobStatusDto } from '../dto/import-status.dto';
 import type { PersistedJobFailure, PersistedJobResult } from '../interfaces/import-job.interface';
 import { deriveBatchStatus } from '../utils/batch-status';
-import { ImportErrorCode } from '../utils/sanitize-import-error';
-
-/**
- * Maps the stable failure classification to its catalog key. The read-back
- * endpoint translates from the machine-readable `errorCode` (not the English
- * `error` string persisted at failure time in the worker), so the message is
- * localized per HTTP request by `I18nResponseInterceptor`. The worker-emitted
- * surfaces (notification, webhook) still carry the static English copy — see
- * #188 for finishing those.
- */
-const IMPORT_FAILURE_MESSAGE_KEYS = {
-  [ImportErrorCode.NotFound]: 'errors.game_import.failure.not_found',
-  [ImportErrorCode.GatewayError]: 'errors.game_import.failure.gateway_error',
-  [ImportErrorCode.InternalError]: 'errors.game_import.failure.internal_error',
-  [ImportErrorCode.BaseImportFailed]: 'errors.game_import.failure.base_import_failed',
-} as const satisfies Record<ImportErrorCode, I18nPath>;
+import { importErrorMarker } from '../utils/sanitize-import-error';
 
 /**
  * Deliberately omits Job.error: that column holds the raw failure text
@@ -249,9 +234,11 @@ export class GameImportStatusService {
       thumbnail: result?.thumbnail,
       platformGames: result?.platformGames,
       errorCode: result?.errorCode,
-      // Marker cast to the DTO's string field: I18nResponseInterceptor renders it
-      // to a localized string before serialization, so the wire value is a string.
-      error: result?.errorCode ? (t(IMPORT_FAILURE_MESSAGE_KEYS[result.errorCode]) as unknown as string) : undefined,
+      // Translated from the machine-readable `errorCode`, not the English `error`
+      // the worker persisted at failure time, so it renders in the reader's
+      // locale. Marker cast to the DTO's string field: I18nResponseInterceptor
+      // renders it to a string before serialization, so the wire value is a string.
+      error: result?.errorCode ? (importErrorMarker(result.errorCode) as unknown as string) : undefined,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
     };

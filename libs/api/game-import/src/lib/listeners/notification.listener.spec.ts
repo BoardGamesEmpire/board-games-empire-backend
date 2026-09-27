@@ -1,8 +1,9 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { JobStatus, JobType, NotificationType } from '@bge/database';
+import { isI18nMessage } from '@bge/i18n';
 import type { NotificationsService } from '@bge/notifications-service';
 import { ImportJobCompletedEvent, ImportJobFailedEvent, type ImportJobCompletedContext } from '../events/import.events';
-import { ImportErrorCode } from '../utils/sanitize-import-error';
+import { ImportErrorCode, importErrorMessage } from '../utils/sanitize-import-error';
 import { NotificationListener } from './notification.listener';
 
 const USER_ACTOR: Actor = { kind: 'user', userId: 'user-7' };
@@ -27,13 +28,13 @@ const makeCompleted = (ctx: Partial<ImportJobCompletedContext> = {}) =>
     new Date(),
   );
 
-const makeFailed = () =>
+const makeFailed = (errorCode: ImportErrorCode = ImportErrorCode.GatewayError) =>
   new ImportJobFailedEvent(
     { id: 'job-1' }, // prior status unknown at the shared emit point — identity only
     {
       id: 'job-1',
       status: JobStatus.Failed,
-      result: { errorCode: ImportErrorCode.GatewayError, error: 'Fetching game data from the gateway failed.' },
+      result: { errorCode, error: importErrorMessage(errorCode) },
     },
     { batchId: 'batch-1', gatewayId: 'bgg', externalId: 'ext-1', isExpansion: false },
     new Date(),
@@ -118,9 +119,21 @@ describe('NotificationListener', () => {
           externalId: 'ext-1',
           isExpansion: false,
           errorCode: ImportErrorCode.GatewayError,
-          error: 'Fetching game data from the gateway failed.',
+          error: expect.objectContaining({ key: 'errors.game_import.failure.gateway_error' }),
         },
       });
+    });
+
+    it("stores a translation marker keyed on the job's own errorCode, not the English copy", async () => {
+      await listener.handleFailed(makeFailed(ImportErrorCode.NotFound));
+
+      const [{ payload }] = notifications.create.mock.calls[0];
+
+      // The row is rendered each time the user reads it back, in the reader's
+      // locale, so it must carry the key rather than text frozen at failure time.
+      expect(isI18nMessage(payload.error)).toBe(true);
+      expect(payload.error).toMatchObject({ key: 'errors.game_import.failure.not_found' });
+      expect(payload.errorCode).toBe(ImportErrorCode.NotFound);
     });
 
     it('skips when the CLS actor carries no user (system-initiated import)', async () => {

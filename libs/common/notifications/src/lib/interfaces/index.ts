@@ -1,5 +1,6 @@
 import type { JobType, ResourceType } from '@bge/database';
 import { NotificationType } from '@bge/database';
+import type { I18nMessage } from '@bge/i18n';
 
 /**
  * Per-`NotificationType` payload shapes.
@@ -36,10 +37,16 @@ export interface WatchedExpansionImportedPayload {
 /**
  * An import job failed terminally. `jobType` is the generic discriminator
  * clients key off (game import today, profile sync etc. later); the rest is
- * jobType-specific failure detail. `error` is the sanitized, user-safe message
- * and `errorCode` its stable classification (typed `string` to avoid coupling
- * this common lib to game-import's `ImportErrorCode`); the raw failure text
- * stays in `Job.error` / operator logs and never reaches the user.
+ * jobType-specific failure detail. `errorCode` is the stable classification
+ * (typed `string` to avoid coupling this common lib to game-import's
+ * `ImportErrorCode`); the raw failure text stays in `Job.error` / operator logs
+ * and never reaches the user.
+ *
+ * `error` is the sanitized, user-safe message, stored as a `t()` marker rather
+ * than text (#188). `I18nResponseInterceptor` renders it on
+ * `GET /notifications/unread` in the reader's locale, so on the wire it is a
+ * string. Anything that reads the row in-process gets the marker and must render
+ * it for its recipient.
  */
 export interface ImportFailedPayload {
   jobType: JobType;
@@ -49,7 +56,7 @@ export interface ImportFailedPayload {
   externalId: string;
   isExpansion: boolean;
   errorCode: string;
-  error: string;
+  error: I18nMessage;
 }
 
 /** A media contribution was rejected; the contributor may reclaim it until the deadline. */
@@ -185,8 +192,10 @@ export interface CreateNotificationInput<T extends NotificationType = Notificati
 }
 
 /**
- * One unread notification as returned to clients — a discriminated union on
- * `type`, so a consumer that narrows `type` gets the exact `payload` shape.
+ * One unread notification as `getUnread` returns it — a discriminated union on
+ * `type`, so a consumer that narrows `type` gets the exact `payload` shape. A
+ * `t()` marker in a payload (`ImportFailedPayload.error`) is still a marker
+ * here; `I18nResponseInterceptor` renders it to a string on the way to the client.
  */
 export type UnreadNotificationDto = {
   [T in NotificationType]: {
