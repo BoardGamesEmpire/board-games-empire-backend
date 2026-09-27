@@ -29,10 +29,11 @@ export interface JobFailureContext extends ImportJobEventContext {
  * Job.result by the caller (via sanitizeImportError) — computed once and
  * passed in, not recomputed here, so the audit row, the webhook payload,
  * the REST status endpoint, and the in-app notification can never disagree
- * about a job's failure code/message. Every surface here carries the
- * sanitized code + static message; the raw error text lives only in the
- * Job.error DB column and operator logs (written by the caller before
- * emitting). See sanitize-import-error.ts.
+ * about a job's failure code/message. Every surface carries the sanitized
+ * code. The webhook and Job.result carry its static English message; the
+ * notification and the REST status endpoint translate the message from the
+ * code. The raw error text lives only in the Job.error DB column and operator
+ * logs (written by the caller before emitting). See sanitize-import-error.ts.
  */
 export function emitJobFailedEvents(
   events: EventEmitter2,
@@ -60,6 +61,10 @@ export function emitJobFailedEvents(
     ),
   );
 
+  // The webhook stays English, unlike the user's notification (#188). A
+  // subscription has no locale to render into, and the body is POSTed to a URL
+  // outside the API, where no interceptor translates. Integrations key on the
+  // stable `errorCode`; the English `error` is there for a receiver's logs.
   events.emit(
     WebhookEventType.ImportJobFailed,
     webhookEnvelope({

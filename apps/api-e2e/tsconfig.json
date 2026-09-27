@@ -14,6 +14,12 @@
       "path": "../../libs/plugin/manifest"
     },
     {
+      "path": "../../libs/common/notifications"
+    },
+    {
+      "path": "../../libs/common/i18n"
+    },
+    {
       "path": "../../libs/common/services"
     },
     {
