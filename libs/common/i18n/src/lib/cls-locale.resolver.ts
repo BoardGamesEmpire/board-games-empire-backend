@@ -6,7 +6,8 @@ import type { I18nResolver } from 'nestjs-i18n';
 /**
  * The single nestjs-i18n resolver: reads the locale that the entry seam
  * already resolved into the CLS actor-context envelope
- * (`LocaleResolutionMiddleware` on HTTP; #146/#147 for queue/gRPC/WS).
+ * (`LocaleResolutionMiddleware` on HTTP, each frame's scope on WS (#180);
+ * #146/#147 for queue/gRPC).
  *
  * All precedence logic lives in `LocaleResolutionService` — deliberately NOT
  * in nestjs-i18n resolvers, which run in a post-guard interceptor: too late
@@ -17,7 +18,7 @@ import type { I18nResolver } from 'nestjs-i18n';
  * providers are injectable — `AuditContextService` is not. Read-only; the
  * lib-local eslint config carves out exactly this key.
  *
- * Returns undefined when no seam has populated a locale (e.g. WS before
+ * Returns undefined when no seam has populated a locale (e.g. gRPC before
  * #147), deferring to `fallbackLanguage`.
  */
 @Injectable()

@@ -9,29 +9,28 @@ export type WsRefusalReason = 'no-user' | 'anonymous' | 'impersonated';
 
 export interface WsClientDataRefused {
   readonly ok: false;
+  /**
+   * The rule the session broke. The gateway tells the client which, in the
+   * connection's locale, so no copy lives here (#180).
+   */
   readonly reason: WsRefusalReason;
-  /** Client-facing. Names the rule, never the principal behind it. */
-  readonly message: string;
   /** Log-only. Carries ids that must not be sent to the client. */
   readonly detail?: string;
 }
 
 export interface WsClientDataAccepted {
   readonly ok: true;
-  readonly data: BaseClientData;
+  /** Everything but the locale, which the gateway resolves with a lookup. */
+  readonly data: Omit<BaseClientData, 'locale'>;
 }
 
 export type WsClientDataOutcome = WsClientDataAccepted | WsClientDataRefused;
 
-const refuse = (reason: WsRefusalReason, message: string, detail?: string): WsClientDataRefused => ({
-  ok: false,
-  reason,
-  message,
-  detail,
-});
+const refuse = (reason: WsRefusalReason, detail?: string): WsClientDataRefused => ({ ok: false, reason, detail });
 
 /**
- * Builds the `BaseClientData` payload for an authenticated WS connection.
+ * Builds the `BaseClientData` payload for an authenticated WS connection, all
+ * but its locale.
  *
  * Called from the gateway base class's handshake middleware. Returns a
  * discriminated outcome: `ok: true` with the payload, or `ok: false` with the
@@ -53,7 +52,7 @@ export function buildWsClientData(
   const user = session?.user as (UserSession['user'] & { isAnonymous?: boolean }) | undefined;
 
   if (!user) {
-    return refuse('no-user', 'Session could not be resolved');
+    return refuse('no-user');
   }
 
   /**
@@ -71,17 +70,13 @@ export function buildWsClientData(
    */
   const impersonatorId = sessionImpersonatorId(session);
   if (impersonatorId) {
-    return refuse(
-      'impersonated',
-      // Client-facing: names the rule only. The issue reference and the ids
-      // ride along as log-only `detail`.
-      'Impersonated sessions are not supported',
-      `#408 target=${user.id} impersonatedBy=${impersonatorId}`,
-    );
+    // The client is told the rule only. The issue reference and the ids ride
+    // along as log-only `detail`.
+    return refuse('impersonated', `#408 target=${user.id} impersonatedBy=${impersonatorId}`);
   }
 
   if (user.isAnonymous) {
-    return refuse('anonymous', 'Anonymous access not permitted');
+    return refuse('anonymous');
   }
 
   return {

@@ -15,8 +15,8 @@ import { SupportedLocalesService } from './supported-locales.service';
  * - `SupportedLocalesService` — boot-time supported-locale set (DB
  *   `systemSupported` tags ∩ shipped catalogs, drift warned).
  * - `LocaleResolutionService` — user preference → Accept-Language → fallback,
- *   used by the HTTP `LocaleResolutionMiddleware` and by the queue/gRPC seams
- *   in #146/#147.
+ *   used by the HTTP `LocaleResolutionMiddleware`, by the WS handshake (#180),
+ *   and by the queue/gRPC seams in #146/#147.
  * - `ClsLocaleResolver` — the only nestjs-i18n resolver; reads the locale the
  *   entry seam stored in CLS. Requires `ClsModule.forRoot({ global: true })`
  *   in the application graph.

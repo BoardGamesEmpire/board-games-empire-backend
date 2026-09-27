@@ -60,11 +60,7 @@ describe('buildWsClientData', () => {
     it('refuses anonymous sessions (Phase 1: anon not permitted over WS)', () => {
       const outcome = buildWsClientData(buildSession({ userId: 'anon-1', isAnonymous: true }), {});
 
-      expect(outcome).toEqual({
-        ok: false,
-        reason: 'anonymous',
-        message: 'Anonymous access not permitted',
-      });
+      expect(outcome).toEqual({ ok: false, reason: 'anonymous' });
     });
 
     it('refuses a session with no resolvable user', () => {
@@ -90,13 +86,6 @@ describe('buildWsClientData', () => {
       const outcome = buildWsClientData(buildSession({ userId: 'target-1', impersonatedBy: 'admin-1' }), {});
 
       expect(outcome).toMatchObject({ ok: false, reason: 'impersonated' });
-    });
-
-    it('keeps the acting admin out of the client-facing message', () => {
-      const outcome = buildWsClientData(buildSession({ userId: 'target-1', impersonatedBy: 'admin-1' }), {});
-
-      expect(outcome.ok).toBe(false);
-      expect(outcome.ok === false && outcome.message).not.toContain('admin-1');
     });
 
     /**

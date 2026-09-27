@@ -1,3 +1,4 @@
+import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
@@ -9,6 +10,13 @@ import type {
   WsSourceDonePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
+import {
+  FALLBACK_LOCALE,
+  I18N_CATALOG_DIR,
+  type I18nTranslations,
+  isI18nMessage,
+  LocaleResolutionService,
+} from '@bge/i18n';
 import { AbilityContextNotPrimedError, AbilityService, PoliciesGuard } from '@bge/permissions';
 import {
   createMockAbilityService,
@@ -25,13 +33,15 @@ import {
   SearchGameResult,
   SearchGamesRequest,
 } from '@boardgamesempire/proto-gateway';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Logger } from '@nestjs/common';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import { I18nModule, I18nService } from 'nestjs-i18n';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { NEVER, of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
 import { WsFrameScope, WsFrameScopeGuard } from '../base/ws-frame-scope';
+import { WsTranslator } from '../base/ws-translator';
 import { GameSearchGateway } from './search.gateway';
 
 // The actor the socket authenticated as at connection time (`client.data`).
@@ -46,6 +56,7 @@ describe('GameSearchGateway', () => {
   let db: MockDatabaseService;
   let coordinator: jest.Mocked<GatewayCoordinatorClientService>;
   let abilityService: MockAbilityService;
+  let i18n: I18nService<I18nTranslations>;
   let mockEmit: jest.Mock;
   let mockClusterEmit: jest.Mock;
   let mockTo: jest.Mock<{ emit: jest.Mock; local: { emit: jest.Mock } }, [string]>;
@@ -65,6 +76,14 @@ describe('GameSearchGateway', () => {
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       overrideGuards: [AuthGuard, WsFrameScopeGuard, PoliciesGuard],
+      // The shipped catalog, so the copy the gateway sends itself is asserted
+      // as a client reads it.
+      imports: [
+        I18nModule.forRoot({
+          fallbackLanguage: FALLBACK_LOCALE,
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
+        }),
+      ],
       providers: [
         GameSearchGateway,
         // Real GameSearchService: the gateway delegates its local query + proto
@@ -81,11 +100,16 @@ describe('GameSearchGateway', () => {
         },
         { provide: AbilityService, useValue: abilityService },
         { provide: WsFrameScope, useValue: {} },
+        WsTranslator,
+        { provide: LocaleResolutionService, useValue: { resolve: jest.fn() } },
+        // For the gateway's WsErrorFilter, which Nest builds with the gateway.
+        { provide: AuditContextService, useValue: { getLocale: () => null } },
       ],
     });
 
     db = mockDb;
     gateway = module.get(GameSearchGateway);
+    i18n = module.get(I18nService);
 
     // Wire a mock server so gateway emissions can be asserted.
     // server.to(room).local is a fluent interface; mockTo captures the room
@@ -97,7 +121,10 @@ describe('GameSearchGateway', () => {
     (gateway as unknown as { server: Server }).server = { to: mockTo } as unknown as Server;
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
 
   /**
    * Asserts that `server.to(room).emit(event, payload)` was called with the
@@ -161,7 +188,7 @@ describe('GameSearchGateway', () => {
         );
 
         await expect(refusal).rejects.toBeInstanceOf(BadRequestException);
-        await expect(refusal).rejects.toThrow('At least one of includeLocal or includeExternal must be true');
+        await expect(markerOf(refusal)).resolves.toEqual({ key: 'errors.game_search.no_source_selected' });
         expect(client.join).not.toHaveBeenCalled();
         expect(mockEmit).not.toHaveBeenCalled();
         expect(coordinator.searchGames).not.toHaveBeenCalled();
@@ -174,7 +201,10 @@ describe('GameSearchGateway', () => {
         const refusal = gateway.handleSearchStart(client, makeStartDto());
 
         await expect(refusal).rejects.toBeInstanceOf(ConflictException);
-        await expect(refusal).rejects.toThrow('Search with correlationId corr-1 is already active');
+        await expect(markerOf(refusal)).resolves.toEqual({
+          key: 'errors.game_search.already_active',
+          args: { correlationId: 'corr-1' },
+        });
         expect(running.unsubscribe).not.toHaveBeenCalled();
         expect(clientData(gateway, client).activeSearches.get('corr-1')).toBe(running);
         expect(mockEmit).not.toHaveBeenCalled();
@@ -305,6 +335,21 @@ describe('GameSearchGateway', () => {
           message: 'Local search failed',
         });
         assertEmitted<WsSourceDonePayload>(room('corr-1'), SearchEvents.SearchSourceDone, { source: 'local' });
+      });
+
+      it("renders the copy it sends itself in the locale its socket's connection resolved", async () => {
+        const translate = jest.spyOn(i18n, 'translate');
+        const client = makeSocket(gateway, SOCKET_ID, 'fr');
+        abilityService.getCurrentResourceConditions.mockImplementation(() => {
+          throw new AbilityContextNotPrimedError();
+        });
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(translate).toHaveBeenCalledWith(
+          'errors.game_search.local_failed',
+          expect.objectContaining({ lang: 'fr' }),
+        );
       });
 
       it('emits search:source_done with source="local" after local results', async () => {
@@ -440,6 +485,31 @@ describe('GameSearchGateway', () => {
         expect(payload.retryAfter).toBe(60);
       });
 
+      it("says why in its own words, in the socket's locale, when a rate-limited frame carries no message", async () => {
+        const translate = jest.spyOn(i18n, 'translate');
+        const client = makeSocket(gateway, SOCKET_ID, 'fr');
+        coordinator.searchGames.mockReturnValue(
+          of(
+            {
+              correlationId: 'corr-1',
+              gatewayId: 'bgg-gw-1',
+              status: ResultStatus.RESULT_STATUS_RATE_LIMITED,
+            } satisfies SearchGameResult,
+            makeSourceDone(),
+          ),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        assertEmitted<WsRateLimitedPayload>(room('corr-1'), SearchEvents.SearchRateLimited, {
+          message: 'Rate limited — please try again shortly',
+        });
+        expect(translate).toHaveBeenCalledWith(
+          'errors.game_search.rate_limited',
+          expect.objectContaining({ lang: 'fr' }),
+        );
+      });
+
       it('emits search:unavailable for RESULT_STATUS_UNAVAILABLE', async () => {
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(
@@ -482,6 +552,32 @@ describe('GameSearchGateway', () => {
           source: 'bgg-gw-1',
           message: 'Upstream BGG failure',
         });
+      });
+
+      it("says why in its own words, in the socket's locale, when an error frame carries no message", async () => {
+        const translate = jest.spyOn(i18n, 'translate');
+        const client = makeSocket(gateway, SOCKET_ID, 'fr');
+        coordinator.searchGames.mockReturnValue(
+          of(
+            {
+              correlationId: 'corr-1',
+              gatewayId: 'bgg-gw-1',
+              status: ResultStatus.RESULT_STATUS_ERROR,
+            } satisfies SearchGameResult,
+            makeSourceDone(),
+          ),
+        );
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
+          source: 'bgg-gw-1',
+          message: 'Search error',
+        });
+        expect(translate).toHaveBeenCalledWith(
+          'errors.game_search.source_error',
+          expect.objectContaining({ lang: 'fr' }),
+        );
       });
     });
 
@@ -578,6 +674,29 @@ describe('GameSearchGateway', () => {
           correlationId: 'corr-1',
           source: 'coordinator',
         });
+      });
+
+      // The error's text is written for operators: for an unreachable
+      // coordinator, it names the address and the connection's last error (#519).
+      it("tells the client the external search failed, never the stream error's own text, and logs that", async () => {
+        const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        const translate = jest.spyOn(i18n, 'translate');
+        const client = makeSocket(gateway, SOCKET_ID, 'fr');
+        const internal = '14 UNAVAILABLE: No connection established. Last error: connect ECONNREFUSED 10.0.3.7:50051';
+        coordinator.searchGames.mockReturnValue(throwError(() => new Error(internal)));
+
+        await gateway.handleSearchStart(client, makeStartDto());
+
+        assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
+          source: 'coordinator',
+          message: 'External search failed',
+        });
+        expect(JSON.stringify(mockEmit.mock.calls)).not.toContain('ECONNREFUSED');
+        expect(logged).toHaveBeenCalledWith(expect.stringContaining(internal));
+        expect(translate).toHaveBeenCalledWith(
+          'errors.game_search.external_failed',
+          expect.objectContaining({ lang: 'fr' }),
+        );
       });
 
       it('resolves (does not throw) when the gRPC stream errors', async () => {
@@ -799,7 +918,7 @@ function makeSourceDone(correlationId = 'corr-1', gatewayId = 'bgg-gw-1'): Searc
  * `as unknown as Socket` is intentional — we only need the subset of the
  * socket surface that GameSearchGateway actually touches.
  */
-function makeSocket(gateway: GameSearchGateway, id = SOCKET_ID): Socket {
+function makeSocket(gateway: GameSearchGateway, id = SOCKET_ID, locale = 'en'): Socket {
   const socket = {
     id,
     rooms: new Set<string>([id]),
@@ -812,8 +931,22 @@ function makeSocket(gateway: GameSearchGateway, id = SOCKET_ID): Socket {
     userId: SOCKET_USER_ID,
     actor: { kind: 'user', userId: SOCKET_USER_ID },
     correlationId: 'connection-correlation-id',
+    locale,
   });
   return socket;
+}
+
+/** The catalog key and args a refused frame's exception names. */
+async function markerOf(refusal: Promise<unknown>): Promise<unknown> {
+  const error = await refusal.then(
+    () => {
+      throw new Error('expected the frame to be refused');
+    },
+    (thrown: unknown) => thrown,
+  );
+  const body = (error as HttpException).getResponse();
+
+  return isI18nMessage(body) ? { key: body.key, args: body.args } : body;
 }
 
 function clientData(gateway: GameSearchGateway, socket: Socket): WsClientData {

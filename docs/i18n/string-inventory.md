@@ -219,8 +219,8 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       and 17 gRPC. The 4 HTTP throws are "Invalid API key" and "Impersonated sessions are not supported",
       each in both `http-actor.middleware.ts` and its unwired twin `http-actor.interceptor.ts` (the second
       pair was added by #408). They became `errors.api_key.invalid` (beside the existing
-      `not_found_or_revoked`) and `errors.auth.impersonated_session`, which the WS refusal in #180 can
-      reuse. The middleware throws before `LocaleResolutionMiddleware` runs, so both render in the
+      `not_found_or_revoked`) and `errors.auth.impersonated_session`, which the WS refusal reuses
+      (#180). The middleware throws before `LocaleResolutionMiddleware` runs, so both render in the
       fallback locale (see [translated-exceptions.md](./translated-exceptions.md)). The 17 gRPC frames
       stay English (§5), and the guardrail exempts those two files by name. Specs assert the markers via
       `getResponse()`. The gRPC spec's English assertions are unchanged.
@@ -241,9 +241,9 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
 - [x] `libs/api/user` — **DONE** (DTO-only). `UserSearchQueryDto` (2).
 - [ ] `libs/common/shared` pagination/search DTOs and the WS `SearchStartDto` / `SearchCancelDto` — **#503**.
       17 bare decorators plus `SkipWithinCeiling.defaultMessage()` in `@bge/shared`, and 8 on the WS DTOs.
-      The WS-reachable ones wait on #180: until it puts `I18nValidationPipe` on the gateway, a marker would
-      reach WS clients raw. `@bge/shared` does not depend on `@bge/i18n` yet, and #503 decides how it
-      gets the marker.
+      #180 put `I18nValidationPipe` on the gateway and taught `WsErrorFilter` to translate its markers, so
+      the WS-reachable ones no longer wait. `@bge/shared` does not depend on `@bge/i18n` yet, and #503
+      decides how it gets the marker.
 
 ---
 
@@ -315,15 +315,25 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   sanitized before reaching clients. Localize with an explicit `lang` when Phase 4 wires worker locale.
 - **`actor-context-transport` gRPC frames (17):** on internal service-to-service channels — technically
   `HttpException` but never surfaced to callers. **Resolved (#144):** they stay English (§5).
-- **WebSocket copy** — #180, not this inventory's sweep. Since #426 the WS error copy passes through
-  two places. `WsErrorFilter` renders validation failures and the search gateway's two refusals, which
-  it throws. `WsConnectionRefusal` builds the connection refusals in `authenticated.gateway.ts`, sent
-  on socket.io's `connect_error` since #427, including the three from `build-client-data.ts`. The
-  filter forwards validation messages unchanged, which is why the WS DTOs wait on #180 (§3, #503).
-  `search.gateway.ts` still emits three strings of its own, directly: the `SearchError` "Local search
-  failed", and the fallbacks "Rate limited — please try again shortly" (`SearchRateLimited`) and
-  "Search error" (`SearchError`), sent when a source's result carries no message. The coordinator
-  stream's error handler forwards the raw gRPC message instead (#519), so it has no copy of its own.
+- **WebSocket copy** — **DONE (#180)**, outside this inventory's sweep. It renders in the connection's
+  locale, resolved at the handshake, from three places:
+  - `WsErrorFilter` translates whatever a frame throws: validation markers, and the search gateway's
+    two refusals (`errors.game_search.{no_source_selected,already_active}`).
+  - The handshake middleware in `authenticated.gateway.ts` translates the connection refusals, sent on
+    socket.io's `connect_error`, in the handshake's `Accept-Language` alone:
+    `errors.auth.{no_token,session_invalid,session_unresolved,anonymous_not_permitted,impersonated_session}`.
+    `build-client-data.ts` now returns only the refusal's reason, and holds no copy.
+  - `WsTranslator` renders what `search.gateway.ts` emits itself:
+    `errors.game_search.{local_failed,external_failed,rate_limited,source_error}`. The last two are
+    fallbacks for a source result that carries no message; a driver's own `result.message` passes
+    through. `external_failed` replaced the raw gRPC error the coordinator stream used to forward (#519).
+
+  Four strings stay English on purpose, as the same refusals are over HTTP:
+  - `WsErrorFilter`'s "Unauthorized" and "Insufficient permissions" for `AuthGuard`'s two `WsException`s,
+    and its "Internal server error" for anything unexpected;
+  - the handshake's "Internal server error" for a failed session lookup.
+
+  #527 tracks translating them on both transports together.
 
 ---
 

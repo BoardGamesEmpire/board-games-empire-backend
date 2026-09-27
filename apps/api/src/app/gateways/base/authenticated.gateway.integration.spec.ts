@@ -5,6 +5,14 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/database';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import {
+  FALLBACK_LOCALE,
+  I18N_CATALOG_DIR,
+  type I18nTranslations,
+  i18nValidationMessage,
+  type LocaleResolutionInput,
+  LocaleResolutionService,
+} from '@bge/i18n';
+import {
   AbilityService,
   PermissionsModule,
   PermissionsService,
@@ -13,11 +21,13 @@ import {
 } from '@bge/permissions';
 import { BGE_ACTOR_HEADER, WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { Metadata } from '@grpc/grpc-js';
-import { type CanActivate, type INestApplication, Logger, Module } from '@nestjs/common';
+import { type CanActivate, type INestApplication, Logger, Module, UsePipes } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { SubscribeMessage, WebSocketGateway, WsException } from '@nestjs/websockets';
+import { MessageBody, SubscribeMessage, WebSocketGateway, WsException } from '@nestjs/websockets';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import { IsString } from 'class-validator';
 import { ClsModule } from 'nestjs-cls';
+import { I18nModule, I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -27,6 +37,7 @@ import { WsErrorFilter } from '../filters';
 import { GameSearchGateway } from '../game/search.gateway';
 import { AuthenticatedGateway } from './authenticated.gateway';
 import { WsFrameScope } from './ws-frame-scope';
+import { WsTranslator } from './ws-translator';
 
 const USER_A = 'user-a';
 const USER_B = 'user-b';
@@ -141,6 +152,23 @@ class UnscopedGateway extends AuthenticatedGateway {
   }
 }
 
+/** A frame whose validator names a catalog key, as every WS DTO will (#503). */
+class MarkedDto {
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  query!: string;
+}
+
+@WebSocketGateway({ namespace: 'marked' })
+class MarkedGateway extends AuthenticatedGateway {
+  protected readonly logger = new Logger(MarkedGateway.name);
+
+  @UsePipes(new I18nValidationPipe())
+  @SubscribeMessage('mark')
+  mark(@MessageBody() dto: MarkedDto) {
+    return { event: 'marked', data: dto };
+  }
+}
+
 @Module({ providers: [{ provide: DatabaseService, useValue: {} }], exports: [DatabaseService] })
 class StubDatabaseModule {}
 
@@ -219,6 +247,15 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   /** The actor each call to the exception filter ran as. */
   const filterSaw: (Actor | null)[] = [];
 
+  /**
+   * Stands in for the preference lookup, which needs the database. French is
+   * treated as supported, so a French `Accept-Language` resolves to it.
+   */
+  const resolveLocale = jest.fn(async ({ acceptLanguage }: LocaleResolutionInput) =>
+    acceptLanguage?.startsWith('fr') ? 'fr' : FALLBACK_LOCALE,
+  );
+  let i18n: I18nService<I18nTranslations>;
+
   beforeAll(async () => {
     const filterCatch = WsErrorFilter.prototype.catch;
     jest.spyOn(WsErrorFilter.prototype, 'catch').mockImplementation(function (this: WsErrorFilter, ...args) {
@@ -238,13 +275,24 @@ describe('AuthenticatedGateway (over a real socket)', () => {
     auth = new GatedAuthService();
 
     const moduleRef = await Test.createTestingModule({
-      imports: [ClsModule.forRoot({ global: true }), AuditContextModule, PermissionsModule],
+      imports: [
+        ClsModule.forRoot({ global: true }),
+        AuditContextModule,
+        PermissionsModule,
+        I18nModule.forRoot({
+          fallbackLanguage: FALLBACK_LOCALE,
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
+        }),
+      ],
       providers: [
         WsActorScope,
         WsFrameScope,
+        WsTranslator,
         GameSearchGateway,
         UnauthenticatedGateway,
         UnscopedGateway,
+        MarkedGateway,
+        { provide: LocaleResolutionService, useValue: { resolve: resolveLocale } },
         { provide: AuthService, useValue: auth },
         { provide: GameSearchService, useValue: { queryLocalGames } },
         { provide: GatewayCoordinatorClientService, useValue: { searchGames } },
@@ -262,6 +310,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
     await app.listen(0, '127.0.0.1');
     baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
     abilityService = app.get(AbilityService);
+    i18n = app.get(I18nService);
   });
 
   afterEach(() => {
@@ -285,13 +334,14 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   });
 
   /** A socket authenticating as `userId`, not yet connected. */
-  const socketAs = (userId: string, namespace = 'games/search'): ClientSocket => {
+  const socketAs = (userId: string, namespace = 'games/search', acceptLanguage?: string): ClientSocket => {
     const socket = io(`${baseUrl}/${namespace}`, {
       autoConnect: false,
       forceNew: true,
       reconnection: false,
       transports: ['websocket'],
       auth: { token: `token-${userId}` },
+      ...(acceptLanguage && { extraHeaders: { 'accept-language': acceptLanguage } }),
     });
     sockets.push(socket);
 
@@ -437,7 +487,15 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       socket.emit(SearchEvents.SearchStart, searchStart());
 
-      expect(await refused).toMatchObject({ statusCode: 403, pattern: SearchEvents.SearchStart });
+      // PoliciesGuard refuses with a catalog marker, which reached the client
+      // as the bare class name "Forbidden Exception" until the filter
+      // translated it (#180, #501).
+      expect(await refused).toMatchObject({
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'You do not have permission to perform this action.',
+        pattern: SearchEvents.SearchStart,
+      });
       expect(queryLocalGames).not.toHaveBeenCalled();
     });
 
@@ -518,6 +576,59 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       expect(error.message).toBe('Internal server error');
       expect(error.data).toEqual({ statusCode: 500, error: 'Internal Server Error', message: 'Internal server error' });
       expect(socket.active).toBe(false);
+    });
+  });
+
+  // Only `en` ships, so text renders in English whatever the locale. That the
+  // handshake's locale reaches each translation is shown by the locale
+  // `translate` is asked for.
+  describe('the copy a client reads', () => {
+    it("renders a validator's catalog marker as its text, not as the marker", async () => {
+      const socket = await connected(socketAs(USER_A, 'marked'));
+      const refused = refusalOf(socket);
+
+      socket.emit('mark', { query: 42 });
+
+      expect(await refused).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['query must be a string'],
+        pattern: 'mark',
+      });
+    });
+
+    it("translates a frame's copy in the locale its handshake resolved, from its user and Accept-Language", async () => {
+      const translate = jest.spyOn(i18n, 'translate');
+      const socket = await connected(socketAs(USER_A, 'marked', 'fr-CA,fr;q=0.9'));
+      const refused = refusalOf(socket);
+
+      socket.emit('mark', { query: 42 });
+      await refused;
+
+      expect(resolveLocale).toHaveBeenCalledWith({ userId: USER_A, acceptLanguage: 'fr-CA,fr;q=0.9' });
+      expect(translate).toHaveBeenCalledWith('validation.isString', expect.objectContaining({ lang: 'fr' }));
+      translate.mockRestore();
+    });
+
+    it("tells a refused connection why in its handshake's Accept-Language", async () => {
+      const translate = jest.spyOn(i18n, 'translate');
+      const socket = io(`${baseUrl}/games/search`, {
+        forceNew: true,
+        reconnection: false,
+        transports: ['websocket'],
+        extraHeaders: { 'accept-language': 'fr' },
+      });
+      sockets.push(socket);
+
+      const error = await new Promise<Error & { data?: unknown }>((resolve, reject) => {
+        socket.once('connect_error', resolve);
+        socket.once('connect', () => reject(new Error('The connection was accepted')));
+      });
+
+      expect(error.message).toBe('No token provided');
+      expect(error.data).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'No token provided' });
+      expect(translate).toHaveBeenCalledWith('errors.auth.no_token', expect.objectContaining({ lang: 'fr' }));
+      translate.mockRestore();
     });
   });
 

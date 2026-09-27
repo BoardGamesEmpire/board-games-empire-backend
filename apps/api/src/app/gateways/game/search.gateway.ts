@@ -11,9 +11,10 @@ import type {
   WsSourceUnavailablePayload,
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
+import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
-import { BadRequestException, ConflictException, Logger, UsePipes, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ConflictException, Logger, UsePipes } from '@nestjs/common';
 import {
   ConnectedSocket,
   MessageBody,
@@ -23,10 +24,12 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { wrapDefaults } from '@status/defaults';
+import { I18nValidationPipe } from 'nestjs-i18n';
 import { Subscription } from 'rxjs';
 import type { Server, Socket } from 'socket.io';
 import { AuthenticatedGateway } from '../base/authenticated.gateway';
 import { WsFrameScope } from '../base/ws-frame-scope';
+import { WsTranslator } from '../base/ws-translator';
 
 @WebSocketGateway({
   namespace: 'games/search',
@@ -52,8 +55,9 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     private readonly gameSearch: GameSearchService,
     private readonly abilityService: AbilityService,
     frameScope: WsFrameScope,
+    translator: WsTranslator,
   ) {
-    super(authService, frameScope);
+    super(authService, frameScope, translator);
   }
 
   handleDisconnect(client: Socket): void {
@@ -61,8 +65,11 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.log(`WS disconnected: socketId=${client.id}`);
   }
 
+  // I18nValidationPipe, so a decorator's catalog marker reaches WsErrorFilter
+  // to be translated (#180). No nestjs-i18n context exists on a frame, so the
+  // pipe leaves the markers for the filter rather than translating them.
   @UsePipes(
-    new ValidationPipe({
+    new I18nValidationPipe({
       forbidNonWhitelisted: true,
       transform: true,
       whitelist: true,
@@ -88,12 +95,12 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     // itself: a first-time id has no room joined yet, and a repeated id's room
     // belongs to the search already running (#426).
     if (!dto.includeLocal && !dto.includeExternal) {
-      throw new BadRequestException('At least one of includeLocal or includeExternal must be true');
+      throw new BadRequestException(t('errors.game_search.no_source_selected'));
     }
 
     const { activeSearches } = this.getClientData(client);
     if (activeSearches.has(dto.correlationId)) {
-      throw new ConflictException(`Search with correlationId ${dto.correlationId} is already active`);
+      throw new ConflictException(t('errors.game_search.already_active', { correlationId: dto.correlationId }));
     }
 
     // Registered before the first await and for the whole search, local half
@@ -130,7 +137,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.debug(`Search completed: correlationId=${correlationId}`);
   }
 
-  @UsePipes(new ValidationPipe({ whitelist: true }))
+  @UsePipes(new I18nValidationPipe({ whitelist: true }))
   @SubscribeMessage(SearchEvents.SearchCancel)
   handleSearchCancel(@ConnectedSocket() client: Socket, @MessageBody() dto: SearchCancelDto): void {
     const search = this.getClientData(client);
@@ -180,7 +187,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       this.logger.error(`Local search failed for correlationId=${options.correlationId}`, err);
       emit<WsSearchErrorPayload>(SearchEvents.SearchError, {
         correlationId: options.correlationId,
-        message: 'Local search failed',
+        message: this.translator.forClient(client, t('errors.game_search.local_failed')),
         source,
       });
     } finally {
@@ -245,7 +252,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
                 correlationId: dto.correlationId,
                 source,
                 retryAfter: result.retryAfter ?? 60,
-                message: result.message ?? 'Rate limited — please try again shortly',
+                message: result.message ?? this.translator.forClient(client, t('errors.game_search.rate_limited')),
               });
               break;
             }
@@ -262,7 +269,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
               this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
                 correlationId: dto.correlationId,
                 source,
-                message: result.message ?? 'Search error',
+                message: result.message ?? this.translator.forClient(client, t('errors.game_search.source_error')),
               });
               break;
             }
@@ -271,13 +278,17 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
         complete: () => resolve(),
 
+        // The error's own text is written for operators (for an unreachable
+        // coordinator, it names the address), so it is only logged, and the
+        // client is told the external half failed, as the local half does
+        // (#519).
         error: (err) => {
-          const message = err instanceof Error ? err.message : String(err);
-          this.logger.error(`Gateway search stream error: correlationId=${dto.correlationId}: ${message}`);
+          const detail = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Gateway search stream error: correlationId=${dto.correlationId}: ${detail}`);
           this.emit<WsSearchErrorPayload>(client, dto.correlationId, SearchEvents.SearchError, {
             correlationId: dto.correlationId,
             source: 'coordinator',
-            message,
+            message: this.translator.forClient(client, t('errors.game_search.external_failed')),
           });
           resolve();
         },
