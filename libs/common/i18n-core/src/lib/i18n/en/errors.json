@@ -51,8 +51,8 @@
   "nomination": {
     "not_found": "Nomination {nominationId} not found for event {eventId}",
     "host_only": "Only hosts can add games in HostOnly mode.",
-    "supplied_from_not_found": "Game list entry {suppliedFromId} not found for this event.",
-    "supplied_from_mismatch": "The suppliedFromId does not correspond to the nominated platformGameId.",
+    "supplier_not_found": "Game list entry {gameListId} not found for this event.",
+    "supplier_mismatch": "The game list entry named as the supplier is not for this platformGameId.",
     "only_nominator_withdraw": "Only the nominator can withdraw a nomination.",
     "cannot_withdraw_status": "Cannot withdraw a nomination with status \"{status}\".",
     "cannot_vote_status": "Cannot vote on a nomination with status \"{status}\".",

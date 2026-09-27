@@ -440,6 +440,7 @@ describe('EventGameNominationService', () => {
       gameAdditionMode: GameAdditionMode.Direct,
       votingWindowHours: null,
     } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue(supplyEntry('event-1', 'pg-1'));
     db.eventGame.create.mockResolvedValue({ id: 'eg-1', eventId: 'event-1' } as EventGame);
 
     await service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never);
@@ -462,6 +463,7 @@ describe('EventGameNominationService', () => {
       gameAdditionMode: GameAdditionMode.Direct,
       votingWindowHours: null,
     } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue(supplyEntry('event-1', 'pg-1'));
     db.eventGame.create.mockResolvedValue({ id: 'eg-1', occurrenceId: 'occ-1' } as EventGame);
 
     await service.directAddGame('event-1', {
@@ -503,6 +505,35 @@ describe('EventGameNominationService', () => {
     await expect(
       service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
     ).rejects.toThrow(ForbiddenException);
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+  });
+
+  // The supplier is the attendee recorded as bringing the game, so it has to
+  // be a list entry of this event's, and for this game — the two checks a
+  // nomination makes on the same field.
+  it('directAddGame answers not found for a supplier from another event, and writes nothing', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue(supplyEntry('event-9', 'pg-1'));
+
+    await expect(
+      service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-9' } as never),
+    ).rejects.toThrow(NotFoundException);
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+  });
+
+  it('directAddGame refuses a supplier whose list entry is for another game, and writes nothing', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue(supplyEntry('event-1', 'pg-2'));
+
+    await expect(
+      service.directAddGame('event-1', { platformGameId: 'pg-1', suppliedById: 'gl-1' } as never),
+    ).rejects.toThrow(BadRequestException);
     expect(db.eventGame.create).not.toHaveBeenCalled();
   });
 
@@ -555,6 +586,7 @@ describe('EventGameNominationService', () => {
       gameAdditionMode: GameAdditionMode.Direct,
       votingWindowHours: null,
     } as EventPolicy);
+    db.eventAttendeeGameList.findUnique.mockResolvedValue(supplyEntry('event-1', 'pg-1'));
     db.eventGame.create.mockResolvedValue({
       id: 'eg-1',
       eventId: 'event-1',
@@ -588,3 +620,12 @@ describe('EventGameNominationService', () => {
     });
   });
 });
+
+/** A game-list entry as the supplier lookups select it: whose event, and which game. */
+function supplyEntry(eventId: string, platformGameId: string): EventAttendeeGameList {
+  return {
+    id: 'gl-1',
+    attendee: { eventId },
+    collection: { platformGameId },
+  } as unknown as EventAttendeeGameList;
+}
