@@ -10,7 +10,7 @@ import { FALLBACK_LOCALE } from './locale.constants';
  * {@link FALLBACK_LOCALE} when no CLS scope is active (a wiring bug, not a normal
  * request) rather than failing the response — matching the entry-seam contract.
  */
-function resolveEdgeLocale(auditContext: AuditContextService): string {
+export function resolveEdgeLocale(auditContext: AuditContextService): string {
   try {
     return auditContext.getLocale() ?? FALLBACK_LOCALE;
   } catch {
@@ -37,10 +37,12 @@ function resolveEdgeLocale(auditContext: AuditContextService): string {
  * it byte-for-byte as before).
  *
  * Shared by every edge component that renders exceptions itself: the global
- * {@link I18nExceptionFilter}, and the media `StorageExceptionFilter` /
- * `MulterExceptionFilter`, which are controller-scoped and therefore run
- * *instead of* the global filter (Nest picks the most specific matching filter),
- * so they must resolve markers themselves rather than delegate.
+ * {@link I18nExceptionFilter}; the media `StorageExceptionFilter` /
+ * `MulterExceptionFilter` and the plugin `PluginExceptionFilter`, which are
+ * controller-scoped and therefore run *instead of* the global filter (Nest picks
+ * the most specific matching filter), so they must resolve markers themselves
+ * rather than delegate; and the WebSocket gateways' `WsErrorFilter`, since no
+ * global filter runs on a gateway message (#180).
  */
 export function translateException(
   exception: HttpException,

@@ -26,12 +26,17 @@ export enum WsErrorEvents {
 /**
  * The payload of both {@link WsErrorEvents}, and the `data` of a refused
  * connection's `connect_error`: Nest's HTTP error body, so one client parser
- * reads either transport, plus the frame the error answers.
+ * reads either transport, plus the frame the error answers. A structured
+ * exception's carries its body's other fields too
+ * ({@link WsStructuredErrorPayload}).
  */
 export interface WsErrorPayload {
   readonly statusCode: number;
 
-  /** The status text, as the HTTP body's `error` field carries it. */
+  /**
+   * The HTTP body's `error` field: the status text, or a structured
+   * exception's own label.
+   */
   readonly error: string;
 
   /** A list for validation failures, as over HTTP. */
@@ -46,4 +51,14 @@ export interface WsErrorPayload {
    * failure can be about the id itself, so it is echoed as sent.
    */
   readonly correlationId?: string;
+}
+
+/**
+ * A {@link WsErrorPayload} that also carries the other fields of a structured
+ * exception's body, as over HTTP: a quota refusal's `resource`, `scope` and
+ * `limit`, or a deadlock's `code` and `retryable`. Kept apart so the envelope
+ * itself still refuses a misspelt field.
+ */
+export interface WsStructuredErrorPayload extends WsErrorPayload {
+  readonly [field: string]: unknown;
 }

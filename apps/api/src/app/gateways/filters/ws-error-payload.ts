@@ -1,4 +1,5 @@
-import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
+import { WsErrorEvents, type WsErrorPayload, type WsStructuredErrorPayload } from '@bge/shared';
+import type { HttpException } from '@nestjs/common';
 import { STATUS_CODES } from 'node:http';
 import { setTimeout } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
@@ -31,6 +32,37 @@ export function wsErrorPayload(statusCode: number, message: string | string[], f
     ...(frame && { pattern: frame.pattern }),
     ...(correlationId !== undefined && { correlationId }),
   };
+}
+
+/** The fields of an exception body that the envelope itself supplies. */
+const ENVELOPE_FIELDS = new Set(['statusCode', 'error', 'message', 'pattern', 'correlationId']);
+
+/**
+ * The envelope for an HTTP exception, read from its body the way Nest's HTTP
+ * filter sends it. A string body is the message. An object body supplies the
+ * message, its own `error` label and any other fields it carries, so a
+ * structured exception reads the same on both transports. The status and the
+ * frame's `pattern` and `correlationId` always come from the exception and the
+ * frame, whatever the body says.
+ */
+export function wsExceptionPayload(exception: HttpException, frame: WsFrame): WsStructuredErrorPayload {
+  const response = exception.getResponse();
+  const body = (typeof response === 'string' ? { message: response } : response) as Record<string, unknown>;
+  const { message, error } = body;
+  const fields = Object.fromEntries(Object.entries(body).filter(([field]) => !ENVELOPE_FIELDS.has(field)));
+
+  return {
+    ...fields,
+    ...wsErrorPayload(exception.getStatus(), isMessage(message) ? message : exception.message, frame),
+    ...(typeof error === 'string' && { error }),
+  };
+}
+
+function isMessage(message: unknown): message is string | string[] {
+  return (
+    typeof message === 'string' ||
+    (Array.isArray(message) && message.every((line): line is string => typeof line === 'string'))
+  );
 }
 
 /**

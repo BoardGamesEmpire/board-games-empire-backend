@@ -1,19 +1,154 @@
+import type { AuditContextService } from '@bge/actor-context';
 import { SearchStartDto } from '@bge/game-search';
+import { FALLBACK_LOCALE, I18N_CATALOG_DIR, i18nValidationMessage, t, type I18nTranslations } from '@bge/i18n';
 import { WsErrorEvents } from '@bge/shared';
 import {
   ArgumentsHost,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   HttpException,
   Logger,
   UnauthorizedException,
   ValidationPipe,
 } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
 import { WsException } from '@nestjs/websockets';
+import { IsString } from 'class-validator';
+import { I18nModule, I18nService, I18nValidationException, I18nValidationPipe } from 'nestjs-i18n';
 import { WsErrorFilter } from './ws-error.filter';
 
+class MarkedDto {
+  @IsString({ message: i18nValidationMessage('validation.isString') })
+  query!: string;
+}
+
 describe('WsErrorFilter', () => {
-  const filter = new WsErrorFilter();
+  let filter: WsErrorFilter;
+  let i18n: I18nService<I18nTranslations>;
+  let locale: string;
+  const auditContext = { getLocale: () => locale } as unknown as AuditContextService;
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({
+      imports: [
+        I18nModule.forRoot({
+          fallbackLanguage: FALLBACK_LOCALE,
+          loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
+        }),
+      ],
+    }).compile();
+
+    i18n = moduleRef.get(I18nService);
+    filter = new WsErrorFilter(i18n, auditContext);
+  });
+
+  beforeEach(() => {
+    locale = FALLBACK_LOCALE;
+  });
+
+  describe('translation', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it("sends an I18nValidationPipe failure's own messages, translated in the frame's locale, rather than its status text", async () => {
+      locale = 'fr';
+      const translate = jest.spyOn(i18n, 'translate');
+      const payload = { correlationId: 'corr-1', query: 42 };
+      const { client, host } = hostFor('search:start', payload);
+
+      await filter.catch(await failureOf(new I18nValidationPipe(), MarkedDto, payload), host);
+
+      expect(translate).toHaveBeenCalledWith('validation.isString', expect.objectContaining({ lang: 'fr' }));
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['query must be a string'],
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+    });
+
+    it("translates a marker body in the frame's locale", async () => {
+      locale = 'fr';
+      const translate = jest.spyOn(i18n, 'translate');
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(new ForbiddenException(t('common.forbidden.action')), host);
+
+      expect(translate).toHaveBeenCalledWith('common.forbidden.action', expect.objectContaining({ lang: 'fr' }));
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'You do not have permission to perform this action.',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+    });
+
+    it("keeps a structured body's own error label and fields, as the HTTP body does", async () => {
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+      const exceeded = new HttpException(
+        {
+          statusCode: 402,
+          error: 'Quota Exceeded',
+          message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          resource: 'storage_bytes',
+          scope: 'User',
+          limit: 5,
+        },
+        402,
+      );
+
+      await filter.catch(exceeded, host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 402,
+        error: 'Quota Exceeded',
+        message: 'Quota for "storage_bytes" exceeded at User scope',
+        resource: 'storage_bytes',
+        scope: 'User',
+        limit: 5,
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+    });
+
+    it("still answers, with the exception's status, when its copy cannot be translated, and logs why", async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const malformed = new Error('cannot switch from implicit to explicit numbering');
+      jest.spyOn(i18n, 'translate').mockImplementation(() => {
+        throw malformed;
+      });
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(new UnauthorizedException(t('errors.auth.session_invalid')), host);
+
+      // What the frame was answered with before its copy was translated.
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.AuthError, {
+        statusCode: 401,
+        error: 'Unauthorized',
+        message: 'Unauthorized Exception',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+      expect(client.disconnect).toHaveBeenCalledWith(true);
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('search:start'), malformed);
+    });
+
+    it('takes the status and the frame from the exception and the frame, not from body fields of the same name', async () => {
+      const { client, host } = hostFor('search:start', { query: 'Gloomhaven' });
+      const body = { statusCode: 999, message: 'refused', pattern: 'elsewhere', correlationId: 'not-this-frame' };
+
+      await filter.catch(new HttpException(body, 409), host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 409,
+        error: 'Conflict',
+        message: 'refused',
+        pattern: 'search:start',
+      });
+    });
+  });
 
   it('sends a validation failure to the socket on `exception`, shaped like the HTTP error body', async () => {
     const payload = { correlationId: 'not-a-uuid', query: 'Gloomhaven' };
@@ -149,10 +284,19 @@ function hostFor(pattern: string, data: unknown) {
 
 /** The exception a real `ValidationPipe` throws for `payload`. */
 function validationFailure(payload: object): Promise<BadRequestException> {
-  return new ValidationPipe().transform(payload, { type: 'body', metatype: SearchStartDto }).then(
+  return failureOf(new ValidationPipe(), SearchStartDto, payload);
+}
+
+/** The exception `pipe` throws validating `payload` as `metatype`. */
+function failureOf<E extends BadRequestException | I18nValidationException>(
+  pipe: ValidationPipe,
+  metatype: new () => object,
+  payload: object,
+): Promise<E> {
+  return pipe.transform(payload, { type: 'body', metatype }).then(
     () => {
       throw new Error('expected the payload to fail validation');
     },
-    (error: BadRequestException) => error,
+    (error: E) => error,
   );
 }

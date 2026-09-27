@@ -91,6 +91,17 @@ those two providers.** The rule is locked by
 which asserts both a validation error and a `t()` exception render correctly in
 one app.
 
+### On WebSocket frames (#180)
+
+A gateway handler binds `I18nValidationPipe` itself, since no global pipe or
+filter runs on a gateway message. A frame has no nestjs-i18n context, so the
+pipe cannot translate there: its `I18nValidationException` carries the raw
+markers, and its body is only "Bad Request". The gateways' `WsErrorFilter`
+formats `exception.errors` with `translateValidationErrors` (`@bge/i18n`),
+which calls nestjs-i18n's own formatter in the frame's locale and flattens as
+`detailedErrors: false` does. A WS client gets the same `message: string[]` an
+HTTP client gets for the same payload.
+
 ## Adding a new validation message
 
 1. Add the key to `libs/common/i18n-core/src/lib/i18n/en/validation.json`. Name it
@@ -104,7 +115,8 @@ one app.
 
 ## Scope
 
-- **HTTP only.** WebSocket message validation is tracked in #180.
+- **HTTP and WebSocket** (see above). The WS search DTOs themselves are
+  annotated in #503.
 - This issue (#142) installs the machinery + a `validation.*` catalog seed and
   converts one exemplar DTO (`language-query.dto.ts`). Annotating the remaining
   DTO decorators repo-wide is Phase 3 (#144); see

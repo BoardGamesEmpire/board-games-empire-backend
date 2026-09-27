@@ -16,8 +16,9 @@ export interface ActorContextInit {
 
   /**
    * Resolved catalog locale (a `systemSupported` `LanguageTag.tag`). Optional:
-   * seams that carry a pre-resolved locale (queue jobs, gRPC metadata —
-   * #146/#147) set it here; the HTTP seam resolves it after actor population
+   * seams that carry a pre-resolved locale (a WebSocket connection, #180;
+   * queue jobs and gRPC metadata, #146/#147) set it here; the HTTP seam
+   * resolves it after actor population
    * via {@link AuditContextInternalService.setLocale} instead.
    */
   readonly locale?: string;

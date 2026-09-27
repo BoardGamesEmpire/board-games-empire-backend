@@ -6,12 +6,13 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Socket } from 'socket.io';
 import { WsActorScope } from './ws-actor-scope.service';
 
-const socketOf = (userId: string): Socket =>
+const socketOf = (userId: string, locale = 'en'): Socket =>
   ({
     data: {
       userId,
       actor: { kind: 'user', userId },
       correlationId: `connection-of-${userId}`,
+      locale,
     } satisfies BaseClientData,
   }) as unknown as Socket;
 
@@ -41,6 +42,10 @@ describe('WsActorScope', () => {
       correlationId: 'connection-of-user-1',
       source: 'ws',
     });
+  });
+
+  it('runs a frame in the locale its connection resolved at the handshake', () => {
+    expect(scope.run(socketOf('user-1', 'fr'), () => auditContext.getLocale())).toBe('fr');
   });
 
   it("keeps each socket's actor across awaits, however their frames interleave", async () => {

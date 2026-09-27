@@ -4,10 +4,11 @@ import { Injectable } from '@nestjs/common';
 import type { Socket } from 'socket.io';
 
 /**
- * Opens the CLS scope a WebSocket frame runs in, populated with the actor and
- * correlation id its connection authenticated with. The API's gateway base
- * class stores both on `Socket.data` at the handshake, and every frame is run
- * through this from a socket.io packet middleware (`socket.use`).
+ * Opens the CLS scope a WebSocket frame runs in, populated with the actor,
+ * correlation id and locale its connection authenticated with. The API's
+ * gateway base class stores all three on `Socket.data` at the handshake, and
+ * every frame is run through this from a socket.io packet middleware
+ * (`socket.use`).
  *
  * A packet middleware rather than an interceptor, because of what each scope
  * covers. socket.io hands a packet to its listeners after its middleware, in a
@@ -24,8 +25,8 @@ export class WsActorScope {
   constructor(private readonly auditContext: AuditContextInternalService) {}
 
   run<T>(client: Socket, fn: () => T): T {
-    const { actor, correlationId } = client.data as BaseClientData;
+    const { actor, correlationId, locale } = client.data as BaseClientData;
 
-    return this.auditContext.runWith({ actor, correlationId, source: 'ws' }, fn);
+    return this.auditContext.runWith({ actor, correlationId, source: 'ws', locale }, fn);
   }
 }

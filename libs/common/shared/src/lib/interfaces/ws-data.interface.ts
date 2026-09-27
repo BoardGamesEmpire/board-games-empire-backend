@@ -15,4 +15,12 @@ export interface BaseClientData {
 
   readonly correlationId: string;
   readonly userId: string;
+
+  /**
+   * The catalog locale the connection's copy renders in: the user's stored
+   * preference, then the handshake's `Accept-Language`, then the fallback.
+   * Resolved once, at the handshake, so a changed preference applies from the
+   * socket's next connection (#180).
+   */
+  readonly locale: string;
 }

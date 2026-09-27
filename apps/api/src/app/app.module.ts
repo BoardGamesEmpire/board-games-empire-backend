@@ -57,6 +57,7 @@ import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
 import { API_CACHE_NAMESPACE, configuration, configurationValidationSchema } from './configuration';
 import { WsFrameScope } from './gateways/base/ws-frame-scope';
+import { WsTranslator } from './gateways/base/ws-translator';
 import { GameSearchGateway } from './gateways/game/search.gateway';
 import { BGE_VERSION } from './generated/bge-version';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
@@ -304,6 +305,7 @@ import { createThrottlers } from './lib/throttlers';
 
     // WS Gateways
     WsFrameScope,
+    WsTranslator,
     GameSearchGateway,
   ],
 })

@@ -35,8 +35,9 @@ export interface LocaleResolutionInput {
  * TTL window on each instance; no cross-instance invalidation is needed for
  * a display-language setting.
  *
- * HTTP calls this from `LocaleResolutionMiddleware`; queue/gRPC seams reuse
- * it in #146/#147 where only a userId is at hand.
+ * HTTP calls this from `LocaleResolutionMiddleware`, and the WS gateways once
+ * per connection, at the handshake (#180); queue/gRPC seams reuse it in
+ * #146/#147 where only a userId is at hand.
  */
 @Injectable()
 export class LocaleResolutionService {

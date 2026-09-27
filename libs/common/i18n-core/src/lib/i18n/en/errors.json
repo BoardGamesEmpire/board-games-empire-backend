@@ -122,7 +122,11 @@
     "invalid": "Invalid API key"
   },
   "auth": {
-    "impersonated_session": "Impersonated sessions are not supported"
+    "impersonated_session": "Impersonated sessions are not supported",
+    "no_token": "No token provided",
+    "session_invalid": "Session expired or invalid",
+    "session_unresolved": "Session could not be resolved",
+    "anonymous_not_permitted": "Anonymous access not permitted"
   },
   "household": {
     "not_found": "Household with ID {id} not found",
@@ -188,6 +192,14 @@
   },
   "gateway_registry": {
     "auth_type_not_implemented": "Auth type '{authType}' is not yet implemented. Gateway connection requires AuthType.None until this is implemented."
+  },
+  "game_search": {
+    "no_source_selected": "At least one of includeLocal or includeExternal must be true",
+    "already_active": "Search with correlationId {correlationId} is already active",
+    "local_failed": "Local search failed",
+    "external_failed": "External search failed",
+    "rate_limited": "Rate limited — please try again shortly",
+    "source_error": "Search error"
   },
   "plugin": {
     "install_authority": "Installing a plugin requires a server administrator",

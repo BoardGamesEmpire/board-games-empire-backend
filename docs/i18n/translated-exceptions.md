@@ -134,6 +134,28 @@ carries the fully translated message. This is inherent to translating at the
 edge; if a call site needs a descriptive server-side log line, log it
 explicitly at the throw site.
 
+### On WebSocket frames (#180)
+
+No app-wide filter runs on a gateway message, so `I18nExceptionFilter` never
+sees one. The gateways' own `WsErrorFilter` renders a thrown marker instead,
+through the same `translateException`, and sends it in the WS error envelope. A
+structured body keeps its own `error` label and extra fields, as over HTTP.
+
+- **The locale** is resolved once per connection, at the handshake: the user's
+  stored preference, then the handshake's `Accept-Language`, then `en`. It is
+  stored on `client.data.locale`, and each frame's CLS scope carries it. A
+  changed preference therefore applies from the socket's next connection,
+  where over HTTP it applies within the preference cache's 60 s.
+- **A refused connection** is told why in the handshake's `Accept-Language`
+  alone: there is no user yet whose preference could count.
+- **What a gateway sends itself**, such as a `search:error` frame, is not
+  thrown, so no filter sees it. The gateway renders it with `WsTranslator`,
+  from the socket's locale.
+- **The framework's own copy stays English**, on both transports: AuthGuard's
+  "Unauthorized" and "Insufficient permissions", and the 500's "Internal
+  server error". Over HTTP those are better-auth's and Nest's bodies, so the WS
+  filter matches them (#527).
+
 ## Adding a new message
 
 1. Add the key to the right catalog file under
@@ -146,10 +168,9 @@ explicitly at the throw site.
 
 ## Scope
 
-- **HTTP only.** WebSocket gateways keep their own filters; WS localization is
-  tracked in #180. The gRPC actor interceptors' refusals stay English on
-  purpose: Nest answers them with a generic "Internal server error", so the log
-  is the only reader (see [string-inventory.md](./string-inventory.md) §5).
+- **HTTP and WebSocket** (see above). The gRPC actor interceptors' refusals stay
+  English on purpose: Nest answers them with a generic "Internal server error",
+  so the log is the only reader (see [string-inventory.md](./string-inventory.md) §5).
 - This issue (#143) establishes the pattern + filter and converts one exemplar
   site (`language.service.ts`). Converting the remaining ~165 throw sites — and
   collapsing repeated messages into shared `common.*` keys — is Phase 3 (#144);

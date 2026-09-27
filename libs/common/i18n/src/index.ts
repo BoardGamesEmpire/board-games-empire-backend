@@ -6,7 +6,7 @@
 // `@bge/i18n-core` only from a lib this one depends on. `I18nPath` and
 // `I18nTranslations` let consumers type `I18nContext<I18nTranslations>`, `t()`,
 // and `i18nValidationMessage(...)` against real keys — invalid keys fail `tsc`.
-export { I18nMessage, isI18nMessage, t, type I18nPath, type I18nTranslations } from '@bge/i18n-core';
+export { I18N_CATALOG_DIR, I18nMessage, isI18nMessage, t, type I18nPath, type I18nTranslations } from '@bge/i18n-core';
 export { ClsLocaleResolver } from './lib/cls-locale.resolver';
 export { I18nExceptionFilter } from './lib/i18n-exception.filter';
 export { I18nResponseInterceptor } from './lib/i18n-response.interceptor';
@@ -15,4 +15,5 @@ export { LocaleResolutionService, type LocaleResolutionInput } from './lib/local
 export { FALLBACK_LOCALE } from './lib/locale.constants';
 export { SupportedLocalesService } from './lib/supported-locales.service';
 export { translateException } from './lib/translate-exception';
+export { translateValidationErrors } from './lib/translate-validation-errors';
 export { i18nValidationMessage, type I18nValidationPath } from './lib/validation-message';
