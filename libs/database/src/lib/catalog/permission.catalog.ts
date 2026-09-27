@@ -938,6 +938,12 @@ export const PERMISSION_CATALOG = [
   }),
 
   // --- Households ---
+  //
+  // `Low`, though it takes `visibility` as `update:household` does. A new
+  // household's roster is its founder alone, so the reach this write sets
+  // covers only the actor's own data, and anyone who joins later joins into
+  // it. `update:household` changes the reach over members already on the
+  // roster, which is why that write rates `Medium`.
   permission({
     action: Action.create,
     subject: ResourceType.Household,
@@ -977,13 +983,15 @@ export const PERMISSION_CATALOG = [
   // role wider and it silently becomes membership-only. The role clause
   // makes the constraint self-describing (#160).
   //
-  // `Medium`, not `Low`, because this write sets `visibility`, which decides
-  // who outside the household can read it and its roster
-  // (`read:households:friends`, `read:household_member:friends`, both
-  // `Medium`), and it should not rate below the reads it opens. The rating
-  // follows the field, not the slug: if `visibility` moves into a settings
-  // write (#231), that write takes this rating, and the rule that makes
-  // `Public` a live reach for households (#495) is the point to re-rate it.
+  // `Medium`, not `Low`, because this write sets `visibility` over a roster
+  // that already holds other members. It decides who outside the household
+  // can read it and see each of them on it (`read:households:friends`,
+  // `read:household_member:friends`, both `Medium`). The rubric's `Low` is
+  // for writes to the actor's own resources, and this reach covers other
+  // users. The rating follows the field, not the slug: if `visibility` moves
+  // into a settings write (#231), that write takes this rating, and the rule
+  // that makes `Public` a live reach for households (#495) is the point to
+  // re-rate it.
   permission({
     action: Action.update,
     subject: ResourceType.Household,
@@ -1134,12 +1142,19 @@ export const PERMISSION_CATALOG = [
   }),
 
   // Owner/Admin only, with the role clause in the condition for the same
-  // reason as `update:household`. That holds for a check against an invite
-  // instance: `Invite` also carries event invites, so a type-only
-  // `can(create, Invite)` passes for any holder of `create:event_invite`,
-  // down to EventParticipant. Whether plain members may invite is a default
-  // for the household capability matrix (#168); a per-household override
-  // would be a household setting (#231).
+  // reason as `update:household`.
+  //
+  // The conditions bind only a check against an invite instance, so a route
+  // gate cannot stop at the type: `Invite` also carries event invites, and a
+  // type-only `can(create, Invite)` passes for any holder of
+  // `create:event_invite`, down to EventParticipant. The instance must carry
+  // the household's members with their roles, or the role clause denies it,
+  // and this condition must first leave the relation shorthand, which the
+  // in-memory matcher throws on (#458).
+  //
+  // Whether plain members may invite is a default for the household
+  // capability matrix (#168); a per-household override would be a household
+  // setting (#231).
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
