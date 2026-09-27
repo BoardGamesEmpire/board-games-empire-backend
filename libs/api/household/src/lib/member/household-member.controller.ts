@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, NoCache, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -13,6 +13,10 @@ import { HouseholdMemberService } from './household-member.service';
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('household-members')
+// Never response-cached, for the reasons on `HouseholdController`: a roster
+// read must reflect the role change or removal its caller just made, and a
+// cache hit skips the service's row scoping (#528).
+@NoCache()
 @UseGuards(PoliciesGuard)
 @Controller('households/:householdId/members')
 export class HouseholdMemberController {

@@ -1,3 +1,4 @@
+import { NoCache } from '@bge/shared';
 import { Controller } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -15,6 +16,10 @@ import { PrometheusController } from '@willsoto/nestjs-prometheus';
  * and is not addressed here: it is `@AllowAnonymous` today.
  */
 @SkipThrottle()
+// Never response-cached: every scrape is the same anonymous caller, so a cached
+// body would hand each scrape within the TTL the same frozen counters. A hit
+// also skips the handler, which is what sets the exposition Content-Type (#528).
+@NoCache()
 @ApiTags('metrics')
 @Controller('metrics')
 @AllowAnonymous()

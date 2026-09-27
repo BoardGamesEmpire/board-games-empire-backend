@@ -1,4 +1,5 @@
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT } from '@bge/redis';
+import { NO_CACHE_KEY } from '@bge/shared';
 import { StorageService } from '@bge/storage';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
@@ -409,6 +410,14 @@ describe('HealthController', () => {
       // name; the key is internal to @nestjs/throttler and spelled out rather
       // than imported, so a version that changes it fails here loudly.
       expect(Reflect.getMetadata('THROTTLER:SKIPdefault', HealthController)).toBe(true);
+    });
+
+    it('is exempt from the response cache', () => {
+      // The api caches GETs by default, keyed per caller, and every probe is
+      // the same anonymous caller. The interceptor stores successes and never
+      // errors, so a cached 200 from `ready` would keep answering through the
+      // outage that followed it (#528).
+      expect(Reflect.getMetadata(NO_CACHE_KEY, HealthController)).toBe(true);
     });
   });
 });

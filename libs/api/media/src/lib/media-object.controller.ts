@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
 import {
   BadRequestException,
   Body,
@@ -114,6 +114,9 @@ export class MediaObjectController {
     return from(this.media.findById(id)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
   }
 
+  // Never response-cached: a signed URL lives as long as the cache TTL by
+  // default, so a cached body hands out URLs that are already expiring (#528).
+  @NoCache()
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
   @Get(':id/url')
   signedUrl(@Param('id') id: string) {

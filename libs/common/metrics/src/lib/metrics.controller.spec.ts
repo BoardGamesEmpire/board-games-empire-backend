@@ -1,3 +1,4 @@
+import { NO_CACHE_KEY } from '@bge/shared';
 import { Test } from '@nestjs/testing';
 import { MetricsController } from './metrics.controller';
 
@@ -23,5 +24,11 @@ describe('MetricsController', () => {
     // throttler name; the key is internal to @nestjs/throttler and spelled out
     // rather than imported, so a version that changes it fails here loudly.
     expect(Reflect.getMetadata('THROTTLER:SKIPdefault', MetricsController)).toBe(true);
+  });
+
+  it('is exempt from the response cache', () => {
+    // Every scrape is the same anonymous caller, so a cached body would hand
+    // each scrape within the TTL the same frozen counters (#528).
+    expect(Reflect.getMetadata(NO_CACHE_KEY, MetricsController)).toBe(true);
   });
 });
