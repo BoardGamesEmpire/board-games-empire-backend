@@ -7,6 +7,9 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { connect, nextEvent, openSocket } from '../support/socket';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
+/** What socket.io-client hands a `connect_error` listener for a middleware refusal. */
+type ConnectError = Error & { readonly data?: WsErrorPayload };
+
 /**
  * What a WebSocket client is told when the API refuses it (#426), on a real
  * socket against the shipped bundle.
@@ -14,11 +17,10 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * Before #426 these reached no listener a client could know about: validation
  * failures went to `search:start:error`, the gateway's own refusals to a room
  * the socket had not joined yet, and connection refusals in a shape of their
- * own. Each case below is answered on one of the two error events, in one
- * envelope.
- *
- * No case depends on the actor `handleConnection` attaches to the socket, so
- * none races the connect window in #427.
+ * own. Each refused frame below is answered on one of the two error events,
+ * in one envelope. A refused connection is never accepted (#427), so it is
+ * answered on socket.io's `connect_error`, with that envelope as the error's
+ * `data`.
  */
 describe('WebSocket error delivery', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -59,11 +61,7 @@ describe('WebSocket error delivery', () => {
     return socket;
   };
 
-  /**
-   * A well-formed search that asks for no source. The handler refuses it
-   * before it reads the socket's actor, so the refusal is the same however
-   * soon after connecting it is sent.
-   */
+  /** A well-formed search that asks for no source, which the handler refuses. */
   const searchOfNothing = (correlationId: string = randomUUID()) => ({
     correlationId,
     query: 'Gloomhaven',
@@ -122,26 +120,37 @@ describe('WebSocket error delivery', () => {
   });
 
   describe('a refused connection', () => {
-    it('tells an anonymous session why on `auth:error`, then disconnects it', async () => {
-      const socket = socketFor((await actors.anonymous()).credentials);
-      const refused = nextEvent<WsErrorPayload>(socket, WsErrorEvents.AuthError);
-      const closed = nextEvent<string>(socket, 'disconnect');
-
+    /**
+     * The refusal as the client sees it. `active` is false once socket.io has
+     * refused a connection in middleware: the client does not try again on
+     * its own.
+     */
+    const refusalOf = async (socket: Socket) => {
+      const refused = nextEvent<ConnectError>(socket, 'connect_error');
       socket.connect();
+      const { message, data } = await refused;
 
-      expect(await refused).toEqual({ statusCode: 403, error: 'Forbidden', message: 'Anonymous access not permitted' });
-      expect(await closed).toBe('io server disconnect');
+      return { message, data, retrying: socket.active };
+    };
+
+    it('tells an anonymous session why on `connect_error`, without ever accepting it', async () => {
+      const socket = socketFor((await actors.anonymous()).credentials);
+
+      expect(await refusalOf(socket)).toEqual({
+        message: 'Anonymous access not permitted',
+        data: { statusCode: 403, error: 'Forbidden', message: 'Anonymous access not permitted' },
+        retrying: false,
+      });
     });
 
-    it('tells a socket without a token why on `auth:error`, then disconnects it', async () => {
+    it('tells a socket without a token why on `connect_error`, without ever accepting it', async () => {
       const socket = socketFor();
-      const refused = nextEvent<WsErrorPayload>(socket, WsErrorEvents.AuthError);
-      const closed = nextEvent<string>(socket, 'disconnect');
 
-      socket.connect();
-
-      expect(await refused).toEqual({ statusCode: 401, error: 'Unauthorized', message: 'No token provided' });
-      expect(await closed).toBe('io server disconnect');
+      expect(await refusalOf(socket)).toEqual({
+        message: 'No token provided',
+        data: { statusCode: 401, error: 'Unauthorized', message: 'No token provided' },
+        retrying: false,
+      });
     });
   });
 

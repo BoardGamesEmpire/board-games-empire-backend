@@ -33,10 +33,9 @@ const refuse = (reason: WsRefusalReason, message: string, detail?: string): WsCl
 /**
  * Builds the `BaseClientData` payload for an authenticated WS connection.
  *
- * Called from gateway base classes during `handleConnection`. Returns a
+ * Called from the gateway base class's handshake middleware. Returns a
  * discriminated outcome: `ok: true` with the payload, or `ok: false` with the
- * reason the session is not permitted. The caller is responsible for emitting
- * the error and disconnecting the socket.
+ * reason the session is not permitted. The caller refuses the connection.
  *
  * The reason is discriminated rather than a bare `null` because the refusals
  * are no longer interchangeable (#408) — reporting an impersonated session as
