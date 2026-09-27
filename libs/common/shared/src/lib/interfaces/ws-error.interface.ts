@@ -26,8 +26,8 @@ export enum WsErrorEvents {
 /**
  * The payload of both {@link WsErrorEvents}, and the `data` of a refused
  * connection's `connect_error`: Nest's HTTP error body, so one client parser
- * reads either transport, plus the frame the error answers. A structured
- * exception's carries its body's other fields too
+ * reads either transport, plus the frame the error answers. The payload for a
+ * structured exception also carries its body's other fields
  * ({@link WsStructuredErrorPayload}).
  */
 export interface WsErrorPayload {

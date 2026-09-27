@@ -676,8 +676,8 @@ describe('GameSearchGateway', () => {
         });
       });
 
-      // The error's text is written for operators: an unreachable coordinator's
-      // names its address and the connection's last error (#519).
+      // The error's text is written for operators: for an unreachable
+      // coordinator, it names the address and the connection's last error (#519).
       it("tells the client the external search failed, never the stream error's own text, and logs that", async () => {
         const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
         const translate = jest.spyOn(i18n, 'translate');

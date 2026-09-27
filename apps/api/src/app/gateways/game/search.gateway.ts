@@ -278,8 +278,8 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
         complete: () => resolve(),
 
-        // The error's own text is written for operators (an unreachable
-        // coordinator's names its address), so it is only logged, and the
+        // The error's own text is written for operators (for an unreachable
+        // coordinator, it names the address), so it is only logged, and the
         // client is told the external half failed, as the local half does
         // (#519).
         error: (err) => {
