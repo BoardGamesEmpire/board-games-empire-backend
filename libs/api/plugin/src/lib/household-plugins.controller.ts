@@ -91,7 +91,8 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Localized body; the response cache keys without the resolved locale (#358).
+  // The writes on this controller change these rows, and must be visible on
+  // the re-read.
   @NoCache()
   @Get()
   list(@Param('householdId') householdId: string, @Query() query: DefaultPaginationQueryDto) {
@@ -168,9 +169,8 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Mutation-adjacent (read right before a decide POST, which must be
-  // visible on the re-read) — and the response cache keys without the
-  // resolved locale (#358), which would cross-serve localized bodies.
+  // Mutation-adjacent: read right before a decide POST, which must be
+  // visible on the re-read.
   @NoCache()
   @Get(':slug/consent')
   consentPresentation(@Param('householdId') householdId: string, @Param('slug') slug: string) {
@@ -317,8 +317,7 @@ export class HouseholdPluginsController {
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
   // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached) — and the response cache keys without the resolved
-  // locale (#358), which would cross-serve localized bodies.
+  // surface uncached).
   @NoCache()
   @Get(':slug/features')
   featureStates(@Param('householdId') householdId: string, @Param('slug') slug: string) {

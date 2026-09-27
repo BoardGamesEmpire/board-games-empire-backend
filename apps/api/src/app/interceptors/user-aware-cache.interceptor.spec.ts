@@ -1,3 +1,5 @@
+import type { AuditContextService } from '@bge/actor-context';
+import { FALLBACK_LOCALE } from '@bge/i18n';
 import { NO_CACHE_KEY } from '@bge/shared';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -22,16 +24,21 @@ const httpContext = (method: string, url: string, userId?: string): ExecutionCon
 describe('UserAwareCacheInterceptor', () => {
   let interceptor: UserAwareCacheInterceptor;
   let reflector: Reflector;
+  // What `LocaleResolutionMiddleware` resolved for the request under test.
+  let locale: string | null;
 
   const trackBy = (ctx: ExecutionContext) =>
     (interceptor as unknown as { trackBy(context: ExecutionContext): string | undefined }).trackBy(ctx);
 
   beforeEach(() => {
     reflector = new Reflector();
-    // CacheInterceptor(cacheManager, reflector) — the cache manager is not
-    // touched by trackBy, so a stub suffices. The http adapter host is a
-    // property injection; stub the two accessors the stock trackBy uses.
-    interceptor = new UserAwareCacheInterceptor({}, reflector);
+    locale = 'en';
+    const auditContext = { getLocale: () => locale } as Pick<AuditContextService, 'getLocale'>;
+    // (cacheManager, reflector, auditContext) — the cache manager is not
+    // touched by trackBy, so a stub suffices, and the audit context answers
+    // `locale`. The http adapter host is a property injection; stub the two
+    // accessors the stock trackBy uses.
+    interceptor = new UserAwareCacheInterceptor({}, reflector, auditContext as AuditContextService);
     Object.assign(interceptor, {
       httpAdapterHost: {
         httpAdapter: {
@@ -42,8 +49,8 @@ describe('UserAwareCacheInterceptor', () => {
     });
   });
 
-  it('namespaces the cache key by the authenticated user', () => {
-    expect(trackBy(httpContext('GET', '/api/game-collections', 'user-1'))).toBe('user:user-1:/api/game-collections');
+  it('namespaces the cache key by the authenticated user and the request locale', () => {
+    expect(trackBy(httpContext('GET', '/api/game-collections', 'user-1'))).toBe('user:user-1:en:/api/game-collections');
   });
 
   it('gives distinct users distinct keys for the same URL', () => {
@@ -53,7 +60,30 @@ describe('UserAwareCacheInterceptor', () => {
   });
 
   it('uses a shared anon namespace for unauthenticated requests', () => {
-    expect(trackBy(httpContext('GET', '/api/languages'))).toBe('user:anon:/api/languages');
+    expect(trackBy(httpContext('GET', '/api/languages'))).toBe('user:anon:en:/api/languages');
+  });
+
+  // #358: a body rendered in one language must not be served to a request
+  // resolved to another, which a key without the locale would do.
+  it('gives the same user distinct keys for the same URL in different locales', () => {
+    const english = trackBy(httpContext('GET', '/api/foo', 'user-1'));
+    locale = 'fr';
+    const french = trackBy(httpContext('GET', '/api/foo', 'user-1'));
+
+    expect(french).toBe('user:user-1:fr:/api/foo');
+    expect(french).not.toBe(english);
+  });
+
+  it('keeps anonymous requests in different locales apart', () => {
+    locale = 'fr';
+
+    expect(trackBy(httpContext('GET', '/api/languages'))).toBe('user:anon:fr:/api/languages');
+  });
+
+  it('keys an unresolved locale as the fallback locale, which is what the body renders in', () => {
+    locale = null;
+
+    expect(trackBy(httpContext('GET', '/api/foo', 'user-1'))).toBe(`user:user-1:${FALLBACK_LOCALE}:/api/foo`);
   });
 
   it('does not cache non-GET requests (stock behavior preserved)', () => {
