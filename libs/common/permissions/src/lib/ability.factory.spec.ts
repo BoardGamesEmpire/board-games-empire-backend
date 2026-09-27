@@ -938,6 +938,206 @@ describe('AbilityFactory', () => {
         ),
       ).toBe(false);
     });
+
+    it("answers an attendee add for the managed event or the household's events, and refuses any other (#539)", () => {
+      // The subject the attendee add builds: the path's event, that event's
+      // household, and the role being written. A host's grant names its own
+      // event and an owner's names its household, so each reaches only its
+      // own.
+      const host = factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          eventsAttended: [
+            {
+              eventId: 'ev-1',
+              role: makeRole('EventHost', [...ROLE_PERMISSION_CATALOG[SystemRole.EventHost]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+      const owner = factory.createForUser(
+        householdMemberOf('hh-1', 'HouseholdOwner', [...ROLE_PERMISSION_CATALOG[SystemRole.HouseholdOwner]]),
+      );
+      const attendeeOf = (eventId: string, householdId: string | null) =>
+        subject(ResourceType.EventAttendee, {
+          eventId,
+          event: { householdId },
+          role: { role: { name: SystemRole.EventParticipant } },
+        });
+
+      expect(host.can(Action.create, attendeeOf('ev-1', null))).toBe(true);
+      expect(host.can(Action.create, attendeeOf('ev-2', null))).toBe(false);
+      expect(host.can(Action.create, attendeeOf('ev-2', 'hh-1'))).toBe(false);
+
+      expect(owner.can(Action.create, attendeeOf('ev-2', 'hh-1'))).toBe(true);
+      expect(owner.can(Action.create, attendeeOf('ev-3', 'hh-2'))).toBe(false);
+      expect(owner.can(Action.create, attendeeOf('ev-4', null))).toBe(false);
+    });
+
+    describe('which roles an attendee grant gives out and takes away (#539)', () => {
+      // The composed roles again. An organizer or moderator is a delegate:
+      // their grants name the roles that attend an event, so they cannot
+      // appoint anyone who runs it, or remove anyone who does. A host,
+      // co-host, household owner or admin, and the site's Owner, hold grants
+      // with no role in them.
+      const ATTENDING_ROLES = [SystemRole.EventParticipant, SystemRole.EventGuest, SystemRole.EventSpectator];
+      const RUNNING_ROLES = [
+        SystemRole.EventHost,
+        SystemRole.EventCoHost,
+        SystemRole.EventOrganizer,
+        SystemRole.EventModerator,
+      ];
+      const attendingAs = (roleName: SystemRole) =>
+        factory.createForUser(
+          makeUser({
+            id: 'user-1',
+            eventsAttended: [
+              {
+                eventId: 'ev-1',
+                role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+              },
+            ],
+          }),
+        );
+      const attendeeAs = (roleName: SystemRole, eventId = 'ev-1') =>
+        subject(ResourceType.EventAttendee, {
+          eventId,
+          event: { householdId: 'hh-1' },
+          role: { role: { name: roleName } },
+        });
+
+      it.each([SystemRole.EventOrganizer, SystemRole.EventModerator])(
+        'lets an %s add and remove the attendees who attend the event, and no one who runs it',
+        (roleName) => {
+          const ability = attendingAs(roleName);
+
+          for (const role of ATTENDING_ROLES) {
+            expect(ability.can(Action.create, attendeeAs(role))).toBe(true);
+            expect(ability.can(Action.delete, attendeeAs(role))).toBe(true);
+          }
+          for (const role of RUNNING_ROLES) {
+            expect(ability.can(Action.create, attendeeAs(role))).toBe(false);
+            expect(ability.can(Action.delete, attendeeAs(role))).toBe(false);
+          }
+          expect(ability.can(Action.create, attendeeAs(SystemRole.EventParticipant, 'ev-2'))).toBe(false);
+        },
+      );
+
+      it.each([SystemRole.EventOrganizer, SystemRole.EventModerator])(
+        "bounds an %s's removals to those roles in the query, so the delete refuses the rest itself",
+        (roleName) => {
+          expect(accessibleBy(attendingAs(roleName), Action.delete).ofType('EventAttendee')).toEqual({
+            OR: [{ eventId: 'ev-1', role: { is: { role: { is: { name: { in: ATTENDING_ROLES } } } } } }],
+          });
+        },
+      );
+
+      it('refuses an organizer an add whose subject names no role', () => {
+        // Why the add always names the role it writes: a delegate's grant
+        // matches only a role it can see.
+        const organizer = attendingAs(SystemRole.EventOrganizer);
+
+        expect(
+          organizer.can(
+            Action.create,
+            subject(ResourceType.EventAttendee, { eventId: 'ev-1', event: { householdId: null } }),
+          ),
+        ).toBe(false);
+      });
+
+      it.each([SystemRole.EventHost, SystemRole.EventCoHost])(
+        'lets an %s give out and take away every role',
+        (roleName) => {
+          const ability = attendingAs(roleName);
+
+          for (const role of [...ATTENDING_ROLES, ...RUNNING_ROLES]) {
+            expect(ability.can(Action.create, attendeeAs(role))).toBe(true);
+            expect(ability.can(Action.delete, attendeeAs(role))).toBe(true);
+          }
+        },
+      );
+
+      it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+        "lets a %s give out every role on the household's events without attending them",
+        (roleName) => {
+          const ability = factory.createForUser(
+            householdMemberOf('hh-1', roleName, [...ROLE_PERMISSION_CATALOG[roleName]]),
+          );
+
+          for (const role of RUNNING_ROLES) {
+            expect(ability.can(Action.create, attendeeAs(role, 'ev-9'))).toBe(true);
+          }
+        },
+      );
+
+      it("lets the site's Owner give out every role on any event", () => {
+        const ability = factory.createForUser(
+          makeUser({
+            id: 'user-1',
+            roles: [makeRole('Owner', [...ROLE_PERMISSION_CATALOG[SystemRole.Owner]].map(catalogPermission))],
+          }),
+        );
+
+        for (const role of RUNNING_ROLES) {
+          expect(ability.can(Action.create, attendeeAs(role, 'ev-9'))).toBe(true);
+        }
+      });
+    });
+  });
+
+  describe('event creation (#454)', () => {
+    // Real catalog entries, composed the way a signed-in member is: `User`
+    // through the roles pass, plus one household role through the household
+    // pass. `create:event` covers an event outside any household; attaching
+    // one to a household takes that household's own grant.
+    const userRole = () => makeRole('User', [...ROLE_PERMISSION_CATALOG[SystemRole.User]].map(catalogPermission));
+    const plainUser = () => factory.createForUser(makeUser({ id: 'user-1', roles: [userRole()] }));
+    const memberCreating = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          roles: [userRole()],
+          householdMember: [
+            {
+              householdId: 'hh-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const eventIn = (householdId: string | null) => subject(ResourceType.Event, { householdId });
+
+    it("lets any user create an event outside a household, and no user attach one to a household it isn't in", () => {
+      const user = plainUser();
+
+      expect(user.can(Action.create, eventIn(null))).toBe(true);
+      expect(user.can(Action.create, eventIn('hh-1'))).toBe(false);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin, SystemRole.HouseholdMember])(
+      'lets a %s attach an event to its own household and no other',
+      (roleName) => {
+        const ability = memberCreating(roleName);
+
+        expect(ability.can(Action.create, eventIn('hh-1'))).toBe(true);
+        expect(ability.can(Action.create, eventIn('hh-2'))).toBe(false);
+        expect(ability.can(Action.create, eventIn(null))).toBe(true);
+      },
+    );
+
+    it('refuses a HouseholdGuest an event attached to the household it visits', () => {
+      const ability = memberCreating(SystemRole.HouseholdGuest);
+
+      expect(ability.can(Action.create, eventIn('hh-1'))).toBe(false);
+      expect(ability.can(Action.create, eventIn(null))).toBe(true);
+    });
+
+    it('reads a subject built without householdId as an event outside any household', () => {
+      // Why the create path always passes `householdId`, `null` included: the
+      // matcher treats a missing field as `null`, so a subject that left it
+      // out would pass `create:event` whatever household the write names.
+      expect(plainUser().can(Action.create, subject(ResourceType.Event, {}))).toBe(true);
+    });
   });
 
   describe('staff grants (#244)', () => {

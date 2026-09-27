@@ -7,10 +7,12 @@ import { IsEmail, IsEnum, IsIn, IsOptional, IsString, ValidateIf } from 'class-v
  * The roles an attendee can be added with: the event roles, less `EventHost`,
  * which belongs to whoever created the event.
  *
- * This list is the only check on the role. The ability factory applies
- * whatever role an attendee row names, and applies an unconditioned grant
- * everywhere, so a global role accepted here would reach far past the event:
- * `Owner` is `manage:all` (#429).
+ * This list is the only check on which role a row may name. The ability
+ * factory applies whatever role an attendee row names, and applies an
+ * unconditioned grant everywhere, so a global role accepted here would reach
+ * far past the event: `Owner` is `manage:all` (#429). Who may give out each
+ * role is the catalog's: an organizer's or moderator's attendee grants name
+ * the roles they may give out (#539).
  */
 export const ASSIGNABLE_ATTENDEE_ROLES = [
   SystemRole.EventParticipant,

@@ -1,6 +1,6 @@
 import type { Event } from '@bge/database';
 import { Action, Prisma, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -10,7 +10,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateEventDto } from './dto/create-event.dto';
 import { EventService } from './event.service';
@@ -22,11 +22,13 @@ describe('EventService', () => {
   let service: EventService;
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUsers'>>;
   let emitter: { emit: jest.Mock };
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
+    permissions = { invalidateUsers: jest.fn().mockResolvedValue(undefined) };
     emitter = { emit: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
@@ -34,6 +36,7 @@ describe('EventService', () => {
         EventService,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
+        { provide: PermissionsService, useValue: permissions },
       ],
     });
 
@@ -182,6 +185,59 @@ describe('EventService', () => {
     await service.createEvent({ title: 'X' } as CreateEventDto);
 
     expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+  });
+
+  // The route's policy check judges a create by type alone, so it passes
+  // every user: `create:event` exists for all of them. Which household the
+  // event joins is what decides it, and only the service knows that.
+  it('createEvent checks the create against the household the event would join', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
+
+    await service.createEvent({ title: 'X', householdId: 'hh-1' } as CreateEventDto);
+
+    expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Event, {
+      householdId: 'hh-1',
+    });
+  });
+
+  it('createEvent names a null household for an event outside any household', async () => {
+    // Not omitted: the matcher reads a missing field as `null`, so a subject
+    // without it would pass as an event outside any household whatever the
+    // write named.
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1' }));
+
+    await service.createEvent({ title: 'X' } as CreateEventDto);
+
+    expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Event, {
+      householdId: null,
+    });
+  });
+
+  it('createEvent refuses before writing when the instance check denies', async () => {
+    abilityService.assertCurrentActorCan.mockImplementation(() => {
+      throw new ForbiddenException();
+    });
+
+    await expect(service.createEvent({ title: 'X', householdId: 'hh-2' } as CreateEventDto)).rejects.toThrow(
+      ForbiddenException,
+    );
+    expect(db.$transaction).not.toHaveBeenCalled();
+    expect(db.event.create).not.toHaveBeenCalled();
+  });
+
+  // The creator's graph was cached by this very request, before the host row
+  // existed; without the eviction they cannot manage the event they just
+  // created until the cache expires. Each invitee gains a role the same way.
+  it("createEvent evicts the creator's and every invitee's cached permission graph", async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
+    abilityService.getActingUserId.mockReturnValue('user-1');
+
+    await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3', 'user-1'] } as CreateEventDto);
+
+    expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2', 'user-3']);
   });
 
   it('createEvent emits an EventCreatedEvent with the created row snapshot', async () => {

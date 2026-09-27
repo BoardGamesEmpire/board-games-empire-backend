@@ -102,6 +102,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event_game:household',
   'create:event_invite:household',
   'create:event_occurrence:household',
+  'create:event:household',
   'create:game_play_session:household',
   'create:household_invite',
   'create:household_role',
@@ -372,6 +373,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.HouseholdOwner]: HOUSEHOLD_OWNER,
   [SystemRole.HouseholdAdmin]: HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
   [SystemRole.HouseholdMember]: [
+    // Members create household events as they create household sessions;
+    // guests do not. Revisiting who holds it is #168's matrix.
+    'create:event:household',
     'create:game_play_session:household',
     'create:play_record:household',
     'read:attendee_game_list:household',
@@ -397,11 +401,12 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.EventCoHost]: EVENT_HOST.filter((slug) => !EVENT_HOST_ONLY.includes(slug)),
   [SystemRole.EventOrganizer]: [
     'create:attendee_game_list',
+    'create:event_attendee:attending-role',
     'create:event_availability_vote',
     'create:event_invite',
     'create:event_occurrence',
     'delete:attendee_game_list',
-    'manage:event_attendee',
+    'delete:event_attendee:attending-role',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',
@@ -416,10 +421,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:event',
   ],
   [SystemRole.EventModerator]: [
+    'create:event_attendee:attending-role',
+    'delete:event_attendee:attending-role',
     'delete:event_game',
     'delete:game_play_session',
     'manage:attendee_game_list',
-    'manage:event_attendee',
     'read:attendee_game_list',
     'read:event_attendee',
     'read:event_availability_vote',

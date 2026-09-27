@@ -2,7 +2,7 @@ import { EventSchedulingMode, EventType, Visibility } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsOptional, IsString, IsUrl, ValidateNested } from 'class-validator';
+import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUrl, ValidateNested } from 'class-validator';
 import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurrence.dto';
 import { CreateEventPolicyDto } from './create-event-policy.dto';
 
@@ -11,8 +11,14 @@ export class CreateEventDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   title!: string;
 
-  @ApiPropertyOptional({ description: 'Optional household this event is associated with' })
+  @ApiPropertyOptional({
+    description:
+      'Optional household this event is associated with. Requires a role in that household that may create ' +
+      'its events (owner, admin or member); 403 otherwise. Set at creation only: an update cannot change it. ' +
+      'Omit it or send null for an event outside any household; an empty string is rejected.',
+  })
   @IsString({ message: i18nValidationMessage('validation.isString') })
+  @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   @IsOptional()
   householdId?: string;
 

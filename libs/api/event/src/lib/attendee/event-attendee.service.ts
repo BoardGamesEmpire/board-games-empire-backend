@@ -10,7 +10,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -41,6 +41,7 @@ export class EventAttendeeService {
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async getAttendees(eventId: string): Promise<EventAttendee[]> {
@@ -92,8 +93,22 @@ export class EventAttendeeService {
 
   async addAttendee(eventId: string, dto: AddAttendeeDto): Promise<EventAttendee> {
     const initiatedAt = new Date();
-    await assertEventExists(this.db, eventId);
+    const event = await requireEvent(this.db, eventId);
     const invitedByUserId = this.abilityService.getActingUserId();
+    const roleName = dto.role ?? SystemRole.EventParticipant;
+
+    // The route's policy check judges a create by type alone, and every host
+    // holds one for their own event, so on its own it lets the host of any
+    // event add attendees to every event. Bind it to the row about to be
+    // written: the event's own grants name its id, the household variant its
+    // household, and an organizer's or moderator's the roles they may give
+    // out. Those grants refuse a subject that names no role, so the role is
+    // always named.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventAttendee, {
+      eventId,
+      event: { householdId: event.householdId },
+      role: { role: { name: roleName } },
+    });
 
     if (!dto.userId && !dto.guestName) {
       throw new BadRequestException(t('errors.attendee.user_or_guest_required'));
@@ -103,8 +118,6 @@ export class EventAttendeeService {
       where: { eventId_userId: { eventId, userId: invitedByUserId } },
       select: { id: true },
     });
-
-    const roleName = dto.role ?? SystemRole.EventParticipant;
 
     try {
       const attendee = await this.db.eventAttendee.create({
@@ -140,6 +153,10 @@ export class EventAttendeeService {
         ),
       );
 
+      // The added user's cached graph predates this row, so their role here
+      // would otherwise reach them only when the cache expires.
+      await this.permissions.invalidateUser(attendee.userId);
+
       return attendee;
     } catch (error) {
       this.logger.error(`Error adding attendee to event ${eventId}`, error);
@@ -171,7 +188,7 @@ export class EventAttendeeService {
       const deleted = await this.db.eventAttendee.delete({
         where: {
           id: attendeeId,
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.manage),
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.delete),
         },
         include: ATTENDEE_INCLUDE,
       });
@@ -189,6 +206,10 @@ export class EventAttendeeService {
           initiatedAt,
         ),
       );
+
+      // The event just left this user's ability surface. Without the eviction
+      // a removed co-host keeps co-hosting until the cached graph expires.
+      await this.permissions.invalidateUser(deleted.userId);
 
       return deleted;
     } catch (error) {
