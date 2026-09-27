@@ -966,7 +966,7 @@ export const PERMISSION_CATALOG = [
     reason: 'View household details',
   }),
 
-  // Owner/Admin only, matching `delete:household` and `manage:household_member`.
+  // Owner/Admin only, matching `manage:household_member`.
   //
   // The prior condition asked only for membership. That was never as bad as
   // the removed TODO claimed ("any member could update the household") —
@@ -1133,7 +1133,13 @@ export const PERMISSION_CATALOG = [
     reason: 'Transfer household ownership to another member',
   }),
 
-  // TODO: maybe defer to a household policy?
+  // Owner/Admin only, with the role clause in the condition for the same
+  // reason as `update:household`. That holds for a check against an invite
+  // instance: `Invite` also carries event invites, so a type-only
+  // `can(create, Invite)` passes for any holder of `create:event_invite`,
+  // down to EventParticipant. Whether plain members may invite is a default
+  // for the household capability matrix (#168); a per-household override
+  // would be a household setting (#231).
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
