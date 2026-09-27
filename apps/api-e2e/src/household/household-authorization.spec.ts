@@ -285,7 +285,7 @@ describe('household authorization', () => {
       // derived HouseholdAdmin list (the other being ownership transfer). The
       // Admin case is the one worth asserting: the list is derived by
       // subtraction, so a slug added to the owner list without being named in
-      // `disallowedHouseholdAdminPermissions` reaches Admin silently.
+      // `HOUSEHOLD_OWNER_ONLY` reaches Admin silently.
       const owner = await actors.user();
       const admin = await actors.user();
       const member = await actors.user();

@@ -1181,8 +1181,10 @@ describe('AbilityFactory', () => {
       });
 
       it('does not confer the gate on an admin who holds no such grant', () => {
-        // The seed's `disallowedHouseholdAdminPermissions` is what produces this;
-        // asserted here because the derived Admin list gives no compile-time signal.
+        // The role catalog withholds the grant from HouseholdAdmin through
+        // `HOUSEHOLD_OWNER_ONLY`, and `role-permission.catalog.spec.ts` pins that.
+        // This fixture holds only `update:household`, so it asserts the
+        // consequence alone: an admin without the grant fails the gate.
         const ability = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()]));
 
         expect(ability.can(Action.update, asEntity('HouseholdRole', { id: 'hr-1' }))).toBe(false);

@@ -938,6 +938,12 @@ export const PERMISSION_CATALOG = [
   }),
 
   // --- Households ---
+  //
+  // `Low`, though it takes `visibility` as `update:household` does. A new
+  // household's roster is its founder alone, so the reach this write sets
+  // covers only the actor's own data, and anyone who joins later joins into
+  // it. `update:household` changes the reach over members already on the
+  // roster, which is why that write rates `Medium`.
   permission({
     action: Action.create,
     subject: ResourceType.Household,
@@ -966,7 +972,7 @@ export const PERMISSION_CATALOG = [
     reason: 'View household details',
   }),
 
-  // Owner/Admin only, matching `delete:household` and `manage:household_member`.
+  // Owner/Admin only, matching `manage:household_member`.
   //
   // The prior condition asked only for membership. That was never as bad as
   // the removed TODO claimed ("any member could update the household") —
@@ -976,6 +982,16 @@ export const PERMISSION_CATALOG = [
   // the assignment list for its entire security value: grant the slug one
   // role wider and it silently becomes membership-only. The role clause
   // makes the constraint self-describing (#160).
+  //
+  // `Medium`, not `Low`, because this write sets `visibility` over a roster
+  // that already holds other members. It decides who outside the household
+  // can read it and see each of them on it (`read:households:friends`,
+  // `read:household_member:friends`, both `Medium`). The rubric's `Low` is
+  // for writes to the actor's own resources, and this reach covers other
+  // users. The rating follows the field, not the slug: if `visibility` moves
+  // into a settings write (#231), that write takes this rating, and the rule
+  // that makes `Public` a live reach for households (#495) is the point to
+  // re-rate it.
   permission({
     action: Action.update,
     subject: ResourceType.Household,
@@ -989,7 +1005,7 @@ export const PERMISSION_CATALOG = [
       },
     },
     slug: 'update:household',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Update a household',
   }),
   permission({
@@ -1125,7 +1141,20 @@ export const PERMISSION_CATALOG = [
     reason: 'Transfer household ownership to another member',
   }),
 
-  // TODO: maybe defer to a household policy?
+  // Owner/Admin only, with the role clause in the condition for the same
+  // reason as `update:household`.
+  //
+  // The conditions bind only a check against an invite instance, so a route
+  // gate cannot stop at the type: `Invite` also carries event invites, and a
+  // type-only `can(create, Invite)` passes for any holder of
+  // `create:event_invite`, down to EventParticipant. The instance must carry
+  // the household's members with their roles, or the role clause denies it,
+  // and this condition must first leave the relation shorthand, which the
+  // in-memory matcher throws on (#458).
+  //
+  // Whether plain members may invite is a default for the household
+  // capability matrix (#168); a per-household override would be a household
+  // setting (#231).
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
@@ -1145,17 +1174,17 @@ export const PERMISSION_CATALOG = [
     reason: 'Invite to household',
   }),
 
-  // TODO: this is likely too simplistic
-  permission({
-    action: Action.create,
-    subject: ResourceType.HouseholdMember,
-    conditions: {
-      householdId: '{{ householdId }}',
-    },
-    slug: 'create:household_member:join',
-    riskLevel: RiskLevel.Medium,
-    reason: 'Join household',
-  }),
+  // No grant here is a JOIN grant, and joining must not be gated on
+  // `can(create, HouseholdMember)`: `manage` implies `create`, so the
+  // Owner/Admin of any household (`manage:household_member`) and staff
+  // (`manage:household_member:administer`) already pass that check, and
+  // neither is the joiner's act. A joiner-held rule cannot be keyed on
+  // `{{ householdId }}` either, since that renders only for households the
+  // actor already belongs to. A joiner's membership is written by
+  // `addMemberWithin` (#276), which makes no CASL check; the caller that
+  // reaches it owes the proof of the joiner's own act, an accepted invite
+  // (#163) or a join request (#231). An open-join policy, if one ships, needs
+  // a grant designed for a non-member (#231).
 
   // --- Events ---
   permission({
