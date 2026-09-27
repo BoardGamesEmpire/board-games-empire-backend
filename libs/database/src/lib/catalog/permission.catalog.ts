@@ -976,6 +976,14 @@ export const PERMISSION_CATALOG = [
   // the assignment list for its entire security value: grant the slug one
   // role wider and it silently becomes membership-only. The role clause
   // makes the constraint self-describing (#160).
+  //
+  // `Medium`, not `Low`, because this write sets `visibility`, which decides
+  // who outside the household can read it and its roster
+  // (`read:households:friends`, `read:household_member:friends`, both
+  // `Medium`), and it should not rate below the reads it opens. The rating
+  // follows the field, not the slug: if `visibility` moves into a settings
+  // write (#231), that write takes this rating, and the rule that makes
+  // `Public` a live reach for households (#495) is the point to re-rate it.
   permission({
     action: Action.update,
     subject: ResourceType.Household,
@@ -989,7 +997,7 @@ export const PERMISSION_CATALOG = [
       },
     },
     slug: 'update:household',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Update a household',
   }),
   permission({
