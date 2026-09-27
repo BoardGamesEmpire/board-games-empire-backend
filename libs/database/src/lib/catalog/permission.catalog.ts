@@ -1145,17 +1145,17 @@ export const PERMISSION_CATALOG = [
     reason: 'Invite to household',
   }),
 
-  // TODO: this is likely too simplistic
-  permission({
-    action: Action.create,
-    subject: ResourceType.HouseholdMember,
-    conditions: {
-      householdId: '{{ householdId }}',
-    },
-    slug: 'create:household_member:join',
-    riskLevel: RiskLevel.Medium,
-    reason: 'Join household',
-  }),
+  // No grant here is a JOIN grant, and joining must not be gated on
+  // `can(create, HouseholdMember)`: `manage` implies `create`, so the
+  // Owner/Admin of any household (`manage:household_member`) and staff
+  // (`manage:household_member:administer`) already pass that check, and
+  // neither is the joiner's act. A joiner-held rule cannot be keyed on
+  // `{{ householdId }}` either, since that renders only for households the
+  // actor already belongs to. A joiner's membership is written by
+  // `addMemberWithin` (#276), which makes no CASL check; the caller that
+  // reaches it owes the proof of the joiner's own act, an accepted invite
+  // (#163) or a join request (#231). An open-join policy, if one ships, needs
+  // a grant designed for a non-member (#231).
 
   // --- Events ---
   permission({

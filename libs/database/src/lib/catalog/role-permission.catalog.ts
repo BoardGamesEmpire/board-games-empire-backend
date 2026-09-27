@@ -109,7 +109,6 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'delete:event_game:household',
   'delete:event_occurrence:household',
   'manage:quota:household_member',
-  'create:household_member:join',
   'delete:household_member:leave',
   'delete:event',
   'read:quota:household',
