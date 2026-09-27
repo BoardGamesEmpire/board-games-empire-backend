@@ -83,6 +83,10 @@ module.exports = {
    * reports `src/index.ts`, `src/lib/...`, and Codecov cannot tell which
    * project a file belongs to. Anchoring at the workspace root (this file's
    * directory) makes the paths repo-relative and unambiguous.
+   *
+   * The line numbers inside those reports are source lines only while each
+   * project's `.spec.swcrc` sets `"sourceMaps": "inline"`. CI enforces that;
+   * `libs/scripts/src/spec-swcrc/check.js` explains why (#524).
    */
   coverageReporters: ['html', ['lcovonly', { projectRoot: __dirname }]],
 };

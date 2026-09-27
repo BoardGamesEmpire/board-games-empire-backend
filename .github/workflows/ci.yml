@@ -38,6 +38,20 @@ jobs:
           filter: tree:0
           fetch-depth: 0
 
+      # Coverage maps back to source lines only when a project's `.spec.swcrc`
+      # sets `"sourceMaps": "inline"`. With `true`, the value Nx's generator
+      # writes, istanbul silently reports compiled-JS line numbers and Codecov
+      # marks the wrong lines (#524). The script explains why.
+      #
+      # It needs only git and node (the runner's own, since setup-workspace
+      # hasn't run), so it goes first and a bad file fails in seconds rather than
+      # after the install. Whole-tree and uncached, like `format:check --all`
+      # below: a jest spec doing the same job would be served from the Nx cache,
+      # because other projects' `.spec.swcrc` files aren't inputs of its `test`
+      # target.
+      - name: Check spec swcrc source maps
+        run: node libs/scripts/src/bin/check-spec-swcrc.js
+
       - uses: ./.github/actions/setup-workspace
 
       - name: Clean stale dist directories
