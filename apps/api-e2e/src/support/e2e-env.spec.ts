@@ -16,6 +16,7 @@ import {
   redisOwnershipOverride,
   requireBaseUrl,
   schemaFromDatabaseUrl,
+  workerEnvOverrides,
   type RedisEndpoint,
 } from './e2e-env';
 
@@ -152,7 +153,7 @@ describe('e2e-env (pure logic)', () => {
       // Leaving the variable untouched here was the defect: an inherited
       // 'true' (exported in a shell, left in .env, or set by an earlier
       // container-mode run in the same process) would survive and
-      // authorize FLUSHALL against a Redis the harness does not own.
+      // authorize the destructive helpers against a Redis the harness does not own.
       expect(redisOwnershipOverride('external')).toEqual({ [E2E_OWNS_REDIS_VAR]: 'false' });
     });
   });
@@ -216,6 +217,22 @@ describe('e2e-env (pure logic)', () => {
       expect(overrides[API_PORT_VAR]).toBe('55555');
       expect(overrides.BETTER_AUTH_URL).toBe('http://127.0.0.1:55555');
       expect(overrides.TRUSTED_ORIGINS).toContain('http://localhost:55555');
+    });
+  });
+
+  describe('workerEnvOverrides', () => {
+    it('pins the same NODE_ENV the API child runs under', () => {
+      // The worker has no NODE_ENV schema of its own, so a wrong value does not
+      // fail validation outright. It fails one step later: `@bge/env` keys
+      // `defaultsFor` maps on it, and under Jest's `test` the media root has no
+      // default and the worker exits during boot.
+      expect(workerEnvOverrides().NODE_ENV).toBe(API_NODE_ENV);
+    });
+
+    it('emits every override as a string, since process env carries no other type', () => {
+      for (const value of Object.values(workerEnvOverrides())) {
+        expect(typeof value).toBe('string');
+      }
     });
   });
 

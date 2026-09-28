@@ -1,28 +1,5 @@
-import type { ChildProcess } from 'node:child_process';
+import { stopChild } from './child-process';
 import { getE2EGlobalState } from './global-state';
-
-const SIGTERM_GRACE_MS = 10_000;
-
-/**
- * SIGTERM first — the API registers graceful shutdown handlers and should
- * exit cleanly — with a SIGKILL fallback so a wedged process can't hang the
- * suite forever.
- */
-async function stopApi(child: ChildProcess | undefined): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) {
-    return;
-  }
-
-  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-
-  child.kill('SIGTERM');
-  await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, SIGTERM_GRACE_MS))]);
-
-  if (child.exitCode === null && child.signalCode === null) {
-    child.kill('SIGKILL');
-    await exited;
-  }
-}
 
 /**
  * Stops whatever `global-setup` started — the API child process first (it
@@ -35,7 +12,7 @@ async function stopApi(child: ChildProcess | undefined): Promise<void> {
 export default async function globalTeardown(): Promise<void> {
   const { postgres, redis, api } = getE2EGlobalState();
 
-  await stopApi(api);
+  await stopChild(api);
 
   const results = await Promise.allSettled([postgres?.stop(), redis?.stop()]);
 

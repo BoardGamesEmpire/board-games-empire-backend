@@ -8,21 +8,30 @@ Black-box end-to-end suite for the API (#254, #255, #259). The test process neve
 npx nx e2e @boardgamesempire/api-e2e
 ```
 
-Prerequisites: a running Docker daemon (for testcontainers) and nothing else — the `e2e` target's dependency on `@boardgamesempire/api:build` produces the bundle, and the harness owns provisioning, migration, and seeding end to end.
+Prerequisites: a running Docker daemon (for testcontainers) and nothing else — the `e2e` target's dependencies on `@boardgamesempire/api:build` and `@boardgamesempire/worker:build` produce the bundles, and the harness owns provisioning, migration, and seeding end to end.
 
 Note that the api bundle **externalizes its workspace libraries** rather than inlining them (the same reason `apps/api` carries `prune-lockfile` / `copy-workspace-modules` targets for deployment): at runtime `main.js` resolves `@boardgamesempire/*` through the npm-workspace symlinks into each library's `dist/`. `api:build` therefore declares `^build`, without which the bundle starts and then dies on the first workspace import. If you ever see `Cannot find module '.../@boardgamesempire/<lib>/dist/index.js'` during boot, that dependency chain is what broke.
 
 Escape hatches, both optional and both treating the endpoint as **disposable** (migrated, seeded, and swept exactly like a container):
 
-| Variable               | Effect                                                                                                                                                                                                   |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container. The role needs `CREATEDB` on PostgreSQL 13 or later: the bootstrap spec creates and drops a sibling database, `bge_bootstrap_e2e`, in the same cluster. |
-| `BGE_E2E_REDIS_URL`    | Use an existing Redis instead of a container. `resetRedis` (FLUSHALL) additionally requires `BGE_E2E_REDIS_FLUSH_OK=true`.                                                                               |
-| `BGE_E2E_VERBOSE`      | Set to `true` to stream the API child's output live instead of buffering it.                                                                                                                             |
+| Variable               | Effect                                                                                                                                                                                                                                                                       |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BGE_E2E_DATABASE_URL` | Use an existing Postgres instead of a container. The role needs `CREATEDB` on PostgreSQL 13 or later: the bootstrap spec creates and drops a sibling database, `bge_bootstrap_e2e`, in the same cluster.                                                                     |
+| `BGE_E2E_REDIS_URL`    | Use an existing Redis instead of a container. Unless `BGE_E2E_REDIS_FLUSH_OK=true` also marks it disposable, the rate-limit sweep at setup is skipped, and `isolateQueue` and `useWorker` refuse to run: the feedback specs and any worker suite fail, naming that variable. |
+| `BGE_E2E_VERBOSE`      | Set to `true` to stream the API and worker children's output live instead of buffering it.                                                                                                                                                                                   |
 
 ## Isolation model
 
 One database, one Jest worker (`maxWorkers: 1`), truncate sweep between tests (#255). This is deliberate: it is the simplest model that makes cross-test interference structurally impossible, and it stays until the wall-clock budget below says otherwise. The upgrade path — template-database-per-worker parallelism — is #275, and is only warranted if the budget is breached.
+
+## Queues and the worker child
+
+The baseline is **no consumer**: the API registers producers only, so a job a spec causes sits in `waiting`, where the spec can assert on it. Two opt-in helpers in `src/support/` change that for one spec file (#268):
+
+- **`isolateQueue(name)`** obliterates the queue before and after each test, and holds it empty when the file finishes. A file that fills a queue needs this even if it never looks at the queue, because leftover jobs fail `harness.spec.ts`.
+- **`useWorker()`** runs the built worker (`apps/worker/dist/main.js`) beside the API for that file, and returns its queues. Call `markQueueEvents` before the request and `drainQueue` after it. The drain reads the queue's events stream, so it throws on a failed delivery or a retry instead of waiting out the backoff. Don't also `isolateQueue` a queue the worker consumes, because its per-test obliterate would remove jobs the worker is holding.
+
+A worker boot, from spawn to a consumer on every queue, took just under a second locally (two runs, 2026-09-28). Every file that installs `useWorker()` pays it. The worker's output follows the API child's contract: buffered and replayed if it dies during boot, or streamed live with `BGE_E2E_VERBOSE=true`.
 
 ## CI
 
@@ -45,7 +54,7 @@ The `e2e` job in `.github/workflows/ci.yml` is defined for every PR to `master` 
 
 The baseline is the whole job, so it includes checkout, `setup-workspace`, and `nx affected -t build`; the suite step itself is some fraction of it. Two things make it a deliberately conservative figure rather than a best case: the Nx Cloud cache was warm, and because that PR touched `ci.yml` (which is in `sharedGlobals`) every project was affected, making the build step as wide as it ever gets.
 
-The budget covers the current single-boot shape and a suite that is still only the harness, actor fixtures, and support specs. Real domain coverage (#257) is what will move it. #268's optional worker child adds a second boot for suites that opt in — re-measure and amend this table when either lands, rather than letting the number drift silently.
+The budget covers the current single-boot shape and a suite that is still only the harness, actor fixtures, and support specs. Real domain coverage (#257) is what will move it. The worker child adds one boot for each file that opts in (see [Queues and the worker child](#queues-and-the-worker-child)). Re-measuring this table against the suite as it now stands is #301.
 
 If the suite outgrows the budget, the levers in rough order of preference: prune or merge slow specs; split into parallel CI jobs; template-database-per-worker (#275). Measure before reaching for the last one.
 

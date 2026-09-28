@@ -1,7 +1,8 @@
+import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
+import { isolateQueue } from '../support/queue-isolation';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { isolateFeedbackQueue } from './feedback-queue-isolation';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
 import { submitEnvelope } from './feedback-wire';
 
@@ -52,16 +53,18 @@ const USER_THROTTLE_LIMIT = 30;
  * against a reused server it is what stops yesterday's block from failing
  * today's run.
  *
- * The sweep gates on the same flag `resetRedis` does, because a shared Redis
- * may belong to a running API and those buckets are its live rate limits. An
- * external server nobody has marked disposable therefore keeps its state, and
- * this file is where the resulting `429` would surface — the console warning at
- * setup names `BGE_E2E_REDIS_FLUSH_OK` for that case.
+ * The sweep gates on the Redis ownership flag (`mayFlushRedis`), because a
+ * shared Redis may belong to a running API and those buckets are its live rate
+ * limits. An external server nobody has marked disposable therefore keeps its
+ * state, and the console warning at setup names `BGE_E2E_REDIS_FLUSH_OK` for
+ * that case. This file does not get as far as the resulting `429` there: like
+ * every feedback spec it installs `isolateQueue`, which refuses such a server in
+ * `beforeAll` and names the same variable.
  *
  * That sweep is per RUN, not per test. Nothing clears Redis between tests —
- * `test-isolation.ts` says so outright, and `resetRedis` has no call site in the
- * suite — so specs in this file still accumulate against each other's buckets
- * within a run. The headroom above is what covers that.
+ * `test-isolation.ts` says so outright — so specs in this file still accumulate
+ * against each other's buckets within a run. The headroom above is what covers
+ * that.
  */
 describe('feedback submission throttling (#251)', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -74,7 +77,7 @@ describe('feedback submission throttling (#251)', () => {
 
   // Every accepted submission here enqueues a delivery job. This file never
   // looks at the queue, but a job it leaves behind fails `harness.spec.ts`.
-  isolateFeedbackQueue();
+  isolateQueue(FEEDBACK_QUEUE_NAME);
 
   beforeAll(() => {
     db = createTestDatabase();

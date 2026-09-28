@@ -129,8 +129,9 @@ describe('e2e harness', () => {
   describe('queues', () => {
     it('reaches registered queues with nothing consuming them', async () => {
       // No @Processor runs in the API server — enqueued jobs would sit in
-      // 'waiting'. An empty count here pins the paused-by-default baseline
-      // the #262 suite builds on.
+      // 'waiting'. An empty count here pins the no-consumer baseline the #262
+      // suite builds on, and that every file leaves the queue empty, worker
+      // files included.
       await expect(countPendingJobs(feedbackQueue.queue)).resolves.toBe(0);
     });
   });

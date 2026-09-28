@@ -1,5 +1,5 @@
 import Redis, { type RedisOptions } from 'iovalkey';
-import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from './e2e-env';
+import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR, type RedisEnvPrefix } from './e2e-env';
 
 /**
  * Whether destructive Redis helpers are permitted against the currently
@@ -9,11 +9,35 @@ import { E2E_OWNS_REDIS_VAR, E2E_REDIS_FLUSH_OK_VAR, E2E_REDIS_URL_VAR } from '.
  * acknowledged that their escape-hatch server is disposable.
  *
  * Absent means "globalSetup never ran", which is a refusal — the one
- * mistake this file must make impossible is flushing a Redis nobody
+ * mistake this file must make impossible is clearing state on a Redis nobody
  * declared expendable.
  */
 export function mayFlushRedis(env: NodeJS.ProcessEnv = process.env): boolean {
   return env[E2E_OWNS_REDIS_VAR] === 'true' || env[E2E_REDIS_FLUSH_OK_VAR] === 'true';
+}
+
+/**
+ * Throws unless {@link mayFlushRedis} permits destructive work, naming what was
+ * refused and the variable that would permit it. The queue helpers call it
+ * before they open a queue: `isolateQueue` obliterates, and `useWorker` both
+ * empties the worker's queues and consumes them.
+ *
+ * They refuse loudly where {@link sweepThrottleBuckets} skips quietly, because
+ * the costs differ. A skipped sweep costs a confusing `429`. A skipped queue
+ * reset or worker launch leaves the spec's precondition false: it would assert
+ * against another process's jobs, or wait on a drain nothing consumes. On a
+ * server shared with a developer's API and worker it is worse than that, since
+ * both sides use BullMQ database 2 under the same queue names: the reset would
+ * delete their jobs, and the worker would take them and process them against
+ * this run's database. A throw fails only the file that opted in, and says why.
+ */
+export function requireDisposableRedis(action: string, env: NodeJS.ProcessEnv = process.env): void {
+  if (!mayFlushRedis(env)) {
+    throw new Error(
+      `Refusing to ${action} on a Redis the harness did not provision — it may be shared with a running API ` +
+        `or worker. Set ${E2E_REDIS_FLUSH_OK_VAR}=true if the server at ${E2E_REDIS_URL_VAR} is disposable.`,
+    );
+  }
 }
 
 /**
@@ -34,8 +58,8 @@ const THROTTLE_KEY_PATTERN = 'bge:throttle:*';
  * still there, and an hour-long block with them, so a run fails with `429`s
  * that have nothing to do with the behaviour under test.
  *
- * GUARDED on the same policy as {@link resetRedis}, which this deliberately did
- * not do at first. The reasoning then was that rate-limit counters cost nobody
+ * GUARDED on the same policy as the queue helpers ({@link requireDisposableRedis}),
+ * which this deliberately did not do at first. The reasoning then was that rate-limit counters cost nobody
  * anything to lose — true of a developer's data, and false of the thing they
  * actually are. If `BGE_E2E_REDIS_URL` names a Redis shared with a running dev
  * or staging API, this deletes that API's live budgets and standing blocks:
@@ -110,25 +134,33 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
  * the API child reads them. Ignoring them here meant a private CA, an mTLS
  * server, or a deliberately unverified one connected for the API and refused
  * this sweep, killing globalSetup before a test ran.
+ *
+ * Per connection, as `makeRedisConfig` reads it: `prefix` names the one whose
+ * variables apply. The sweep uses the cache connection's (`REDIS_`), and the
+ * test-owned queue handles use the queue connection's (`REDIS_BULLMQ_`), as the
+ * worker child does.
  */
-export function redisTlsOptions(env: NodeJS.ProcessEnv = process.env): Pick<RedisOptions, 'tls'> {
-  if (env['REDIS_TLS_ENABLED'] !== 'true') {
+export function redisTlsOptions(
+  env: NodeJS.ProcessEnv = process.env,
+  prefix: RedisEnvPrefix = 'REDIS_',
+): Pick<RedisOptions, 'tls'> {
+  if (env[`${prefix}TLS_ENABLED`] !== 'true') {
     return {};
   }
 
+  const rejectUnauthorized = env[`${prefix}REJECT_UNAUTHORIZED`];
+
   return {
     tls: {
-      ca: env['REDIS_TLS_CA'] || undefined,
-      key: env['REDIS_TLS_KEY'] || undefined,
-      cert: env['REDIS_TLS_CERT'] || undefined,
+      ca: env[`${prefix}TLS_CA`] || undefined,
+      key: env[`${prefix}TLS_KEY`] || undefined,
+      cert: env[`${prefix}TLS_CERT`] || undefined,
       // `isTrue` over a default of `true`, as `makeRedisConfig` reads it: unset
       // or empty verifies, and only an explicit true-ish value is a value.
       // Matching the app matters more than the stricter reading — a sweep that
       // verified where the app does not is the failure being fixed here,
       // pointed the other way.
-      rejectUnauthorized: env['REDIS_REJECT_UNAUTHORIZED']
-        ? env['REDIS_REJECT_UNAUTHORIZED'].toLowerCase() === 'true'
-        : true,
+      rejectUnauthorized: rejectUnauthorized ? rejectUnauthorized.toLowerCase() === 'true' : true,
     },
   };
 }
@@ -172,34 +204,4 @@ export function connectToHarnessRedis(env: NodeJS.ProcessEnv = process.env): Red
     retryStrategy: () => null,
     ...redisTlsOptions(env),
   });
-}
-
-/**
- * Wipes the ephemeral Redis server — every logical database, so cached
- * abilities, sessions, AND queued BullMQ jobs all go (`FLUSHALL` is
- * server-wide, which is exactly the isolation the sweep wants; the three
- * app connections share one server on different database indices). Uses a
- * short-lived TEST-OWNED connection built from the same `REDIS_*`
- * environment the harness pointed the API at.
- *
- * Guarded: refuses to run unless the harness provisioned the container
- * itself, or the developer explicitly acknowledged their escape-hatch
- * Redis is disposable. Wiping a shared dev Redis by accident is the one
- * mistake this file must make impossible.
- */
-export async function resetRedis(env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  if (!mayFlushRedis(env)) {
-    throw new Error(
-      `Refusing to FLUSHALL a Redis the harness did not provision. ` +
-        `Set ${E2E_REDIS_FLUSH_OK_VAR}=true if the server at ${E2E_REDIS_URL_VAR} is disposable.`,
-    );
-  }
-
-  const client = connectToHarnessRedis(env);
-
-  try {
-    await client.flushall();
-  } finally {
-    await client.quit();
-  }
 }

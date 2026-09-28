@@ -1,8 +1,9 @@
 import { FeedbackCategory, FeedbackSeverity, isPrismaUniqueConstraintError } from '@bge/database';
+import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
+import { isolateQueue } from '../support/queue-isolation';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { isolateFeedbackQueue } from './feedback-queue-isolation';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
 import { submitEnvelope } from './feedback-wire';
 
@@ -45,7 +46,7 @@ describe('feedback submission idempotency (#251 acceptance)', () => {
 
   // Every accepted submission here enqueues a delivery job. This file never
   // looks at the queue, but a job it leaves behind fails `harness.spec.ts`.
-  isolateFeedbackQueue();
+  isolateQueue(FEEDBACK_QUEUE_NAME);
 
   beforeAll(() => {
     db = createTestDatabase();
