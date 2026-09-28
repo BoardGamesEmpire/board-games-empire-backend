@@ -227,7 +227,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   const resolvedAbilityRules = async (userId: string) =>
     (await abilityService.resolveAbilitiesForActor(userActor(userId))).map((ability) => ability.rules);
 
-  const queryLocalGames = jest.fn<Promise<never[]>, [query: string, conditions: unknown[]]>(async () => []);
+  const queryLocalGames = jest.fn<
+    Promise<never[]>,
+    [query: string, conditions: unknown[], limit: number, offset: number]
+  >(async () => []);
 
   /** The actor each coordinator call would carry on its `x-bge-actor` header. */
   const coordinatorSaw: (Actor | null)[] = [];
@@ -463,6 +466,20 @@ describe('AuthenticatedGateway (over a real socket)', () => {
           [userActor(USER_B), await resolvedAbilityRules(USER_B)],
         ]),
       );
+    });
+
+    // The search DTO resolves the local page size and the service keeps no
+    // fallback, so this holds only while the handler's pipe turns the frame
+    // into that DTO (#403).
+    it("sizes a frame that names no limit at the search DTO's page size", async () => {
+      const socket = await connected(socketAs(USER_A));
+      const frame = searchStart();
+      const outcome = searchOutcome(socket, frame.correlationId);
+
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      expect(await outcome).toEqual({ errors: [] });
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, readConditionsOf(USER_A), 20, 0);
     });
 
     it('stops reading with a grant revoked while it stays connected, from its next frame', async () => {
