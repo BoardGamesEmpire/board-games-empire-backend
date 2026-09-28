@@ -1,5 +1,6 @@
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
+  findEventSpanningGrants,
   findShorthandRelationConditions,
   findTemplateDefects,
   findUnboundedGrants,
@@ -460,6 +461,51 @@ describe('catalog guards', () => {
 
       expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([
         { slug: 'read:gadget', role: SystemRole.AnonymousUser },
+      ]);
+    });
+  });
+
+  describe('findEventSpanningGrants', () => {
+    const catalog = [
+      definition({ slug: 'update:own', conditions: { userId: '{{ user.id }}' } }),
+      definition({ slug: 'update:own:here', conditions: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } }),
+      definition({ slug: 'read:household', conditions: { event: { is: { householdId: '{{ householdId }}' } } } }),
+      definition({ slug: 'read:anything' }),
+      definition({ slug: 'read:broken', conditions: { userId: '{{> shared }}' } }),
+    ];
+
+    it('flags each event role holding a grant whose conditions never name the event', () => {
+      const roles = { [SystemRole.EventGuest]: ['update:own', 'update:own:here', 'read:household'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([
+        { slug: 'update:own', role: SystemRole.EventGuest },
+        { slug: 'read:household', role: SystemRole.EventGuest },
+      ]);
+    });
+
+    it('judges only event roles', () => {
+      const roles = { [SystemRole.HouseholdMember]: ['update:own'], [SystemRole.User]: ['update:own'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([]);
+    });
+
+    it('leaves an unconditioned grant to the fail-open guard and a template with a problem to the template guard', () => {
+      const roles = { [SystemRole.EventGuest]: ['read:anything', 'read:broken'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([]);
+    });
+
+    it('names a role the scope map does not classify, even one holding only grants it would skip', () => {
+      const roles = { Wizard: ['read:anything'] };
+
+      expect(() => findEventSpanningGrants(catalog, roles, SCOPE)).toThrow(/Wizard/);
+    });
+
+    it('counts a role once however many times it lists the slug', () => {
+      const roles = { [SystemRole.EventGuest]: ['update:own', 'update:own'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([
+        { slug: 'update:own', role: SystemRole.EventGuest },
       ]);
     });
   });

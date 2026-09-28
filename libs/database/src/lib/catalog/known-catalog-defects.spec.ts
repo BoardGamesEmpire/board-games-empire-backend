@@ -1,5 +1,6 @@
 import { Action, ResourceType, SystemRole } from '../client';
 import {
+  findEventSpanningGrants,
   findShorthandRelationConditions,
   findTemplateDefects,
   findUnboundedGrants,
@@ -23,14 +24,13 @@ import { KNOWN_TEMPLATE_VARIABLES, RENDER_CONTEXT_VARIABLES, ROLE_SCOPE } from '
  * have already emptied theirs; those ledgers stay so the next instance of
  * either class is named at the guard rather than shipped.
  *
- * **Two of these are defect ledgers and one is an allowlist**, and the
- * difference matters to anyone reading a long list here as a backlog.
- * `UNCONDITIONED_SCOPED_GRANTS` and `INERT_STAFF_GRANTS` describe edges that
- * should not exist and are measured by how close to empty they are.
- * `DECLARED_GLOBAL_STAFF_GRANTS` describes edges that mostly SHOULD exist —
- * install-wide reference data has no scope coordinate to bind to — and is
- * measured by whether every line was written on purpose. It ratchets on
- * additions; emptying it is not a goal (#244).
+ * **One of these is an allowlist and the rest are defect ledgers**, and the
+ * difference matters to anyone reading a long list here as a backlog. The
+ * defect ledgers describe edges that should not exist and are measured by how
+ * close to empty they are. `DECLARED_GLOBAL_STAFF_GRANTS` describes edges that
+ * mostly SHOULD exist — install-wide reference data has no scope coordinate to
+ * bind to — and is measured by whether every line was written on purpose. It
+ * ratchets on additions; emptying it is not a goal (#244).
  *
  * The ledgers are typed on `PermissionSlug` and `SystemRole`, so a misspelt
  * entry is a compile error rather than a permanently "fixed" line.
@@ -79,9 +79,23 @@ const INERT_STAFF_GRANTS: readonly Grant[] = [];
 const INERT_HOUSEHOLD_EVENT_GRANTS: readonly Grant[] = [];
 
 /**
+ * Event roles holding a grant whose conditions never name the event. An event
+ * role is rendered once per attendance, so such a clause comes out the same
+ * from every event the actor attends and reaches their rows in all of them,
+ * including events where their role holds no such grant. #458 bound the two
+ * votes, the RSVP and the withdrawal to the event. `delete:event` is the one
+ * left, and it is an open question rather than a slip: it is bound to the
+ * event's creator, and `HouseholdOwner` and `HouseholdAdmin` hold it too,
+ * rendering the same clause from every household they run. Naming the event
+ * in the host's copy alone would not settle who may delete an event. A new
+ * line here is a new defect, not a backlog.
+ */
+const EVENT_SPANNING_GRANTS: readonly Grant[] = [['delete:event', SystemRole.EventHost]];
+
+/**
  * The DECLARED global staff grants: unconditioned permissions held by a global
  * role other than `User`, so they reach every row of their subject. Unlike the
- * two ledgers above this one is an ALLOWLIST, and it is not expected to empty —
+ * ledgers above this one is an ALLOWLIST, and it is not expected to empty —
  * most of what it holds is correct, because install-wide reference data
  * (platforms, gateways, quotas, the audit log) has no scope coordinate for a
  * condition to bind to. Do not read a long list here as a backlog (#244).
@@ -220,6 +234,7 @@ describe('the shipped catalog', () => {
     (roles ?? []).map((role) => edge(slug, role)),
   );
   const inertGrants = [...INERT_STAFF_GRANTS, ...INERT_HOUSEHOLD_EVENT_GRANTS].map(([slug, role]) => edge(slug, role));
+  const eventSpanningGrants = EVENT_SPANNING_GRANTS.map(([slug, role]) => edge(slug, role));
   const declaredGlobalGrants = DECLARED_GLOBAL_STAFF_GRANTS.map(([slug, role, action, subject]) =>
     declaredEdge(slug, role, action, subject),
   );
@@ -279,6 +294,19 @@ describe('the shipped catalog', () => {
     ).toEqual({ unlisted: [], fixed: [] });
   });
 
+  it('names the event in every grant an event role holds, bar the known lines', () => {
+    const found = findEventSpanningGrants(PERMISSION_CATALOG, ROLE_PERMISSION_CATALOG, ROLE_SCOPE);
+
+    expect(
+      reconcile(
+        new Map(
+          found.map(({ slug, role }) => [edge(slug, role), "(reaches the actor's rows in every event they attend)"]),
+        ),
+        eventSpanningGrants,
+      ),
+    ).toEqual({ unlisted: [], fixed: [] });
+  });
+
   it('has exactly the declared unconditioned grants on global staff roles — an allowlist, not a backlog', () => {
     const found = findUnconditionedGlobalGrants(
       PERMISSION_CATALOG,
@@ -303,6 +331,7 @@ describe('the shipped catalog', () => {
   it('lists each known defect once, so a duplicate line cannot stand in for a fix', () => {
     expect(new Set(unconditionedGrants).size).toBe(unconditionedGrants.length);
     expect(new Set(inertGrants).size).toBe(inertGrants.length);
+    expect(new Set(eventSpanningGrants).size).toBe(eventSpanningGrants.length);
     expect(new Set(declaredGlobalGrants).size).toBe(declaredGlobalGrants.length);
   });
 });

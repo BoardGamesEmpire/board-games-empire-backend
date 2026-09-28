@@ -32,7 +32,9 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * reaches (#484). See {@link findUnboundedGrants}. Another judges only a
  * condition's shape: every relation is written with an operator, so an
  * instance check can evaluate it (#458). See
- * {@link findShorthandRelationConditions}.
+ * {@link findShorthandRelationConditions}. And one judges the event roles:
+ * every grant they hold names the event it was rendered for (#458). See
+ * {@link findEventSpanningGrants}.
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw
@@ -99,6 +101,12 @@ export interface UnconditionedGlobalGrant {
 
 /** A grant on a role that may hold only grants narrowing the rows they reach, that narrows nothing. */
 export interface UnboundedGrant {
+  slug: string;
+  role: string;
+}
+
+/** An event role holding a grant whose conditions never name the event, so it spans every event the actor attends. */
+export interface EventSpanningGrant {
   slug: string;
   role: string;
 }
@@ -508,6 +516,44 @@ export function findShorthandRelationConditions(
 
   for (const { slug, conditions } of catalog) {
     walk(slug, conditions, '');
+  }
+
+  return findings;
+}
+
+/**
+ * The event-binding guard (#458): every grant an event-scoped role holds
+ * names `{{ eventId }}`. An event role is rendered once per attendance, so a
+ * clause naming only the actor, `{ userId: '{{ user.id }}' }`, comes out the
+ * same from every event the actor attends and reaches their rows in all of
+ * them, including events where their role holds no such grant. A spectator
+ * voted, RSVPed and withdrew a nomination that way, on the strength of an
+ * event where they participated; #432 found the game-list pair first.
+ *
+ * Naming another coordinate is not enough: a clause bound to the household
+ * spans that household's events the same way. An unconditioned grant is the
+ * fail-open guard's finding and a template with problems the template
+ * guard's, so both are skipped here.
+ */
+export function findEventSpanningGrants(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roleScope: Readonly<Record<string, RoleScope>>,
+): EventSpanningGrant[] {
+  const holders = holdersBySlug(rolePermissions, roleScope);
+  const findings: EventSpanningGrant[] = [];
+
+  for (const { slug, conditions } of catalog) {
+    const { variables, problems } = parseTemplate(conditions);
+    if (variables.length === 0 || problems.length > 0 || variables.includes('eventId')) {
+      continue;
+    }
+
+    for (const { role, scope } of holders.get(slug) ?? []) {
+      if (scope === 'event') {
+        findings.push({ slug, role });
+      }
+    }
   }
 
   return findings;

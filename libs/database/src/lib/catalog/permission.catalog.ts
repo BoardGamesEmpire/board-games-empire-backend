@@ -593,11 +593,14 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the attendees of your household's events",
   }),
+  // Held on the actor's own attendee row in this event, as the votes are.
+  // Bound to the user alone, the grant from an event where the actor RSVPs
+  // passed their RSVP in one where their role makes none.
   permission({
     action: Action.update,
     subject: ResourceType.EventAttendee,
     fields: ['status', 'notes'],
-    conditions: { userId: '{{ user.id }}' },
+    conditions: actingUserAttendeeInEvent,
     slug: 'update:event_attendee:status:self',
     riskLevel: RiskLevel.Low,
     reason: 'Update own RSVP status',
@@ -637,10 +640,12 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Nominate a game for the event',
   }),
+  // The nominator is the actor's own attendee row in this event, for the
+  // reason `update:event_attendee:status:self` gives.
   permission({
     action: Action.update,
     subject: ResourceType.EventGameNomination,
-    conditions: { nominatedBy: { is: { userId: '{{ user.id }}' } } },
+    conditions: { nominatedBy: { is: actingUserAttendeeInEvent } },
     slug: 'update:event_game_nomination:withdraw',
     riskLevel: RiskLevel.Low,
     reason: 'Withdraw your own nomination',

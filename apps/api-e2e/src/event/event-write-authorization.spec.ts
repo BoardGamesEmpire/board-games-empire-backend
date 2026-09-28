@@ -1,5 +1,6 @@
 import {
   AvailabilityResponse,
+  EventParticipationStatus,
   GameMedium,
   NominationStatus,
   OccurrenceStatus,
@@ -76,6 +77,15 @@ describe('event write authorization', () => {
       .post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/availability`)
       .set(actor.headers)
       .send({ response: AvailabilityResponse.Available });
+
+  const updateStatus = (actor: AuthenticatedActor, eventId: string, attendeeId: string) =>
+    request(baseUrl)
+      .patch(`${EVENTS_PATH}/${eventId}/attendees/${attendeeId}/status`)
+      .set(actor.headers)
+      .send({ status: EventParticipationStatus.Attending });
+
+  const withdraw = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
+    request(baseUrl).patch(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/withdraw`).set(actor.headers);
 
   const attendeeCount = (eventId: string) => db.client.eventAttendee.count({ where: { eventId } });
 
@@ -428,40 +438,41 @@ describe('event write authorization', () => {
     });
   });
 
-  describe('voting (#458)', () => {
+  describe("the actor's own attendee row (#458)", () => {
     /**
-     * A voter who attends one event as a spectator, which votes on nothing,
-     * and another as a participant, which casts both kinds of vote. An event
-     * role is rendered once per attendance, so the participant's grants are in
-     * the voter's graph beside the spectator's, and the route's type-only
-     * check passes on them in either event.
+     * An attendee who attends one event as a spectator, which casts no vote,
+     * updates no RSVP and withdraws no nomination, and another as a
+     * participant, which does all three. An event role is rendered once per
+     * attendance, so the participant's grants are in the attendee's graph
+     * beside the spectator's, and each route's type-only check passes on them
+     * in either event.
      */
-    const arrangeVoter = async () => {
+    const arrangeAttendee = async () => {
       const spectatedHost = await actors.user();
       const participatedHost = await actors.user();
-      const voter = await actors.user();
+      const attendee = await actors.user();
       const spectatedId = await createdEventId(spectatedHost);
       const participatedId = await createdEventId(participatedHost);
       await addAttendee(spectatedHost, spectatedId, {
-        userId: voter.user.id,
+        userId: attendee.user.id,
         role: SystemRole.EventSpectator,
       }).expect(201);
       await addAttendee(participatedHost, participatedId, {
-        userId: voter.user.id,
+        userId: attendee.user.id,
         role: SystemRole.EventParticipant,
       }).expect(201);
 
-      return { voter, spectatedHost, spectatedId, participatedHost, participatedId };
+      return { attendee, spectatedHost, spectatedId, participatedHost, participatedId };
     };
 
-    /** An open nomination on `eventId`, made by its host from their own list. */
-    const arrangeNomination = async (eventId: string, hostId: string) => {
-      const { platformGameId, suppliedById } = await arrangeListEntry(eventId, hostId);
+    /** An open nomination on `eventId`, made by `nominatorId` from their own list. */
+    const arrangeNomination = async (eventId: string, nominatorId: string) => {
+      const { platformGameId, suppliedById } = await arrangeListEntry(eventId, nominatorId);
       const nomination = await db.client.eventGameNomination.create({
         data: {
           eventId,
           platformGameId,
-          nominatedById: await attendeeRowId(eventId, hostId),
+          nominatedById: await attendeeRowId(eventId, nominatorId),
           suppliedFromId: suppliedById,
           status: NominationStatus.Open,
         },
@@ -481,27 +492,63 @@ describe('event write authorization', () => {
       ).id;
 
     it('refuses a game vote from a spectator who participates in another event, and writes nothing', async () => {
-      const { voter, spectatedHost, spectatedId, participatedHost, participatedId } = await arrangeVoter();
+      const { attendee, spectatedHost, spectatedId, participatedHost, participatedId } = await arrangeAttendee();
       const spectatedNomination = await arrangeNomination(spectatedId, spectatedHost.user.id);
       const participatedNomination = await arrangeNomination(participatedId, participatedHost.user.id);
 
-      // Control: the voter votes where they participate.
-      await castVote(voter, participatedId, participatedNomination).expect(201);
+      // Control: the attendee votes where they participate.
+      await castVote(attendee, participatedId, participatedNomination).expect(201);
 
-      await castVote(voter, spectatedId, spectatedNomination).expect(403);
+      await castVote(attendee, spectatedId, spectatedNomination).expect(403);
       expect(await db.client.eventGameVote.count({ where: { eventGameNominationId: spectatedNomination } })).toBe(0);
     });
 
     it('refuses availability from a spectator who participates in another event, and writes nothing', async () => {
-      const { voter, spectatedId, participatedId } = await arrangeVoter();
+      const { attendee, spectatedId, participatedId } = await arrangeAttendee();
       const spectatedOccurrence = await arrangeProposedOccurrence(spectatedId);
       const participatedOccurrence = await arrangeProposedOccurrence(participatedId);
 
-      // Control: the voter answers where they participate.
-      await submitAvailability(voter, participatedId, participatedOccurrence).expect(201);
+      // Control: the attendee answers where they participate.
+      await submitAvailability(attendee, participatedId, participatedOccurrence).expect(201);
 
-      await submitAvailability(voter, spectatedId, spectatedOccurrence).expect(403);
+      await submitAvailability(attendee, spectatedId, spectatedOccurrence).expect(403);
       expect(await db.client.eventAvailabilityVote.count({ where: { occurrenceId: spectatedOccurrence } })).toBe(0);
+    });
+
+    it('refuses an RSVP from a spectator who participates in another event, and leaves it as it was', async () => {
+      const { attendee, spectatedId, participatedId } = await arrangeAttendee();
+      const spectatedRow = await attendeeRowId(spectatedId, attendee.user.id);
+      const participatedRow = await attendeeRowId(participatedId, attendee.user.id);
+
+      // Control: the attendee RSVPs where they participate.
+      await updateStatus(attendee, participatedId, participatedRow).expect(200);
+
+      await updateStatus(attendee, spectatedId, spectatedRow).expect(403);
+      expect(
+        await db.client.eventAttendee.findUniqueOrThrow({
+          where: { id: spectatedRow },
+          select: { status: true, rsvpDate: true },
+        }),
+      ).toEqual({ status: EventParticipationStatus.Invited, rsvpDate: null });
+    });
+
+    it('refuses a spectator who participates in another event the withdrawal of their own nomination, and leaves it open', async () => {
+      const { attendee, spectatedId, participatedId } = await arrangeAttendee();
+      // Both nominations are the attendee's own, as a withdrawal demands; the
+      // one where they spectate stands for a nomination made before a demotion.
+      const spectatedNomination = await arrangeNomination(spectatedId, attendee.user.id);
+      const participatedNomination = await arrangeNomination(participatedId, attendee.user.id);
+
+      // Control: the attendee withdraws where they participate.
+      await withdraw(attendee, participatedId, participatedNomination).expect(200);
+
+      await withdraw(attendee, spectatedId, spectatedNomination).expect(403);
+      expect(
+        await db.client.eventGameNomination.findUniqueOrThrow({
+          where: { id: spectatedNomination },
+          select: { status: true },
+        }),
+      ).toEqual({ status: NominationStatus.Open });
     });
   });
 });
