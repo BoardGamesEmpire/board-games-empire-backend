@@ -11,8 +11,9 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -31,6 +32,7 @@ export class EventService {
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -121,17 +123,36 @@ export class EventService {
   async createEvent(dto: CreateEventDto): Promise<Event> {
     const initiatedAt = new Date();
     const userId = this.abilityService.getActingUserId();
-    const { occurrences, policy, householdId, inviteUserIds = [], ...eventFields } = dto;
+    const { occurrences, policy, householdId = null, inviteUserIds = [], ...eventFields } = dto;
+
+    // The route's type-level check passes every user, since `create:event`
+    // exists for all of them. What decides it is the household the event
+    // joins: `create:event` covers none, and each household's own grant
+    // covers that household. `null` goes on the subject explicitly — the
+    // matcher reads a missing field as `null`, so leaving it out would pass
+    // any household as an event outside one. No role renders for a
+    // soft-deleted or unknown household, so no household grant matches it.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Event, { householdId });
 
     this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
     const uniqueInviteIds = Array.from(new Set(inviteUserIds.filter((id) => id !== userId)));
 
     const event = await this.db.$transaction(async (tx) => {
+      // The check above cannot settle whether the household is still live.
+      // It read a graph that may predate a soft-delete, since the graph is
+      // cached and eviction is best-effort, and a delete can commit after the
+      // graph was built. The site Owner's grant names no household at all.
+      // The share lock answers a dead or unknown household with 404, and holds
+      // a concurrent soft-delete off until this event is written.
+      if (householdId !== null) {
+        await lockExistingHousehold(tx, householdId);
+      }
+
       const created = await tx.event.create({
         data: {
           ...eventFields,
 
-          household: householdId ? { connect: { id: householdId } } : undefined,
+          household: householdId !== null ? { connect: { id: householdId } } : undefined,
           status: dto.schedulingMode === EventSchedulingMode.Poll ? EventStatus.Planning : EventStatus.Scheduled,
 
           createdBy: { connect: { id: userId } },
@@ -249,6 +270,11 @@ export class EventService {
       ),
     );
 
+    // The creator's graph was cached by this request, before the host row
+    // existed, and each invitee's predates their participant row. Without the
+    // eviction none of them holds a role on the event until the cache expires.
+    await this.permissions.invalidateUsers([userId, ...uniqueInviteIds]);
+
     return event;
   }
 
@@ -257,7 +283,7 @@ export class EventService {
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, householdId, ...fields } = dto;
+    const { occurrences: _occurrences, policy: _policy, inviteUserIds: _inviteUserIds, ...fields } = dto;
 
     try {
       // Full row (not a count) so the update event can carry a before snapshot.
@@ -266,32 +292,19 @@ export class EventService {
       });
       assert(existing, new NotFoundException(t('errors.event.not_found', { id })));
 
-      let householdRelation: { connect: { id: string } } | { disconnect: true } | undefined;
-      if (householdId === null) {
-        householdRelation = { disconnect: true };
-      } else if (typeof householdId === 'string') {
-        householdRelation = { connect: { id: householdId } };
-      }
-
       const updated = await this.db.event.update({
         where: {
           id,
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
         },
-        data: {
-          ...fields,
-          household: householdRelation,
-        },
+        data: fields,
         include: {
           occurrences: { orderBy: OCCURRENCE_ORDER },
           policy: true,
         },
       });
 
-      const changedKeys = [
-        ...(Object.keys(fields) as (keyof Event)[]),
-        ...(householdRelation ? (['householdId'] as const) : []),
-      ];
+      const changedKeys = Object.keys(fields) as (keyof Event)[];
       // A PATCH touching only relation-managed inputs (occurrences / policy /
       // inviteUserIds) changes no Event columns — an empty-diff "update" audit
       // row would be noise, so emit only when a column actually changed.

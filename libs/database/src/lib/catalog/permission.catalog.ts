@@ -36,6 +36,16 @@ const eventGameInHousehold = {
   ],
 } satisfies Prisma.EventGameWhereInput;
 
+// An attendee row in the event whose role attends it rather than runs it:
+// participant, guest or spectator. The role is matched through the row's role
+// assignment, so an add must name the role it is about to write and a removal
+// matches the row's own. Typed and module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const attendingRoleInEvent = {
+  eventId: '{{ eventId }}',
+  role: { is: { role: { is: { name: { in: ['EventParticipant', 'EventGuest', 'EventSpectator'] } } } } },
+} satisfies Prisma.EventAttendeeWhereInput;
+
 /**
  * The complete seeded permission catalog — the manifest of every permission
  * this code version expects to exist. Data, not behavior: the reconciler (#235) writes
@@ -1187,12 +1197,29 @@ export const PERMISSION_CATALOG = [
   // a grant designed for a non-member (#231).
 
   // --- Events ---
+  //
+  // Creating an event is two grants, split on whether the event joins a
+  // household (#454). Attaching one shows it, and every attendee's name and
+  // avatar, to every member and guest of that household, so it takes a grant
+  // bound to the household rather than one every user holds. The `null`
+  // condition is what keeps `create:event` from matching a household event,
+  // and the matcher reads a missing field as `null`: the create path always
+  // puts `householdId` on the subject it checks, `null` included.
   permission({
     action: Action.create,
     subject: ResourceType.Event,
+    conditions: { householdId: null },
     slug: 'create:event',
     riskLevel: RiskLevel.Low,
-    reason: 'Create an event',
+    reason: 'Create an event outside any household',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.Event,
+    conditions: { householdId: '{{ householdId }}' },
+    slug: 'create:event:household',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Create an event in your household',
   }),
 
   // TODO household specific event permissions? i.e read:household_event etc
@@ -1343,6 +1370,26 @@ export const PERMISSION_CATALOG = [
     slug: 'manage:event_attendee:household',
     riskLevel: RiskLevel.Medium,
     reason: "Manage the participants of your household's events",
+  }),
+  // What a host delegates to an organizer or moderator: adding and removing
+  // the attendees who attend the event. With `manage` they could appoint
+  // co-hosts, organizers and moderators and remove the host, out-ranking the
+  // delegation (#539). Those stay with the grants above.
+  permission({
+    action: Action.create,
+    subject: ResourceType.EventAttendee,
+    conditions: attendingRoleInEvent,
+    slug: 'create:event_attendee:attending-role',
+    riskLevel: RiskLevel.Low,
+    reason: 'Add a participant, guest or spectator to an event',
+  }),
+  permission({
+    action: Action.delete,
+    subject: ResourceType.EventAttendee,
+    conditions: attendingRoleInEvent,
+    slug: 'delete:event_attendee:attending-role',
+    riskLevel: RiskLevel.Low,
+    reason: 'Remove a participant, guest or spectator from an event',
   }),
 
   // --- Game Sessions ---

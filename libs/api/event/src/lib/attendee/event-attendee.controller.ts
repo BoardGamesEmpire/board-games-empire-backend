@@ -45,8 +45,14 @@ export class EventAttendeeController {
   @ApiOperation({ summary: 'Add an attendee to an event' })
   @ApiParam({ name: 'eventId', type: String })
   @ApiResponse({ status: Http.Created, description: 'Attendee added' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'No attendee grant on this event, or a co-host, organizer or moderator role from an organizer or moderator: ' +
+      "only the event's host or co-host, or an owner or admin of its household, gives those out",
+  })
   @ApiResponse({ status: Http.Conflict, description: 'User is already an attendee' })
-  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.EventAttendee))
+  @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventAttendee))
   @Post()
   addAttendee(@Param('eventId') eventId: string, @Body() dto: AddAttendeeDto) {
     return from(this.attendeeService.addAttendee(eventId, dto)).pipe(
@@ -60,7 +66,12 @@ export class EventAttendeeController {
   @ApiParam({ name: 'attendeeId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Attendee removed' })
   @ApiResponse({ status: Http.NotFound, description: 'Attendee not found' })
-  @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.EventAttendee))
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'No attendee grant on this event, or an organizer or moderator removing a host, co-host, organizer or moderator',
+  })
+  @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.EventAttendee))
   @Delete(':attendeeId')
   removeAttendee(@Param('eventId') eventId: string, @Param('attendeeId') attendeeId: string) {
     return from(this.attendeeService.removeAttendee(eventId, attendeeId)).pipe(

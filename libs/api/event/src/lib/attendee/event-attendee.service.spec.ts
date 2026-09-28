@@ -1,6 +1,6 @@
 import type { Event, EventAttendee, EventAttendeeGameList, GameCollection } from '@bge/database';
-import { Action, EventParticipationStatus, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { Action, EventParticipationStatus, ResourceType, SystemRole } from '@bge/database';
+import { AbilityService, PermissionsService } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
@@ -26,11 +26,13 @@ describe('EventAttendeeService', () => {
   let service: EventAttendeeService;
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
+  let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let emitter: { emit: jest.Mock };
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([COND]);
+    permissions = { invalidateUser: jest.fn().mockResolvedValue(undefined) };
     emitter = { emit: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
@@ -38,6 +40,7 @@ describe('EventAttendeeService', () => {
         EventAttendeeService,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
+        { provide: PermissionsService, useValue: permissions },
       ],
     });
 
@@ -70,7 +73,7 @@ describe('EventAttendeeService', () => {
     });
 
     it('addAttendee emits an AttendeeAddedEvent with the created row snapshot', async () => {
-      db.event.count.mockResolvedValue(1);
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
       abilityService.getActingUserId.mockReturnValue('user-host');
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-host' } as EventAttendee);
       db.eventAttendee.create.mockResolvedValue(
@@ -90,7 +93,9 @@ describe('EventAttendeeService', () => {
       );
     });
 
-    it('removeAttendee → manage (matches the route gate, not delete)', async () => {
+    // An organizer's or moderator's delete names the roles they may remove,
+    // so this clause is what refuses them the host's row.
+    it('removeAttendee → delete (matches the route gate)', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendee.delete.mockResolvedValue({ id: 'att-1' } as EventAttendee);
@@ -99,7 +104,7 @@ describe('EventAttendeeService', () => {
 
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
         ResourceType.EventAttendee,
-        Action.manage,
+        Action.delete,
       );
     });
 
@@ -178,6 +183,83 @@ describe('EventAttendeeService', () => {
     it('throws NotFound when removing a non-existent attendee', async () => {
       db.eventAttendee.findUnique.mockResolvedValue(null);
       await expect(service.removeAttendee('event-1', 'att-1')).rejects.toThrow(NotFoundException);
+    });
+
+    // The removed user's cached graph still carries the event role until it
+    // is rebuilt, so without the eviction a removed co-host keeps co-hosting
+    // for the cache's lifetime.
+    it("removeAttendee evicts the removed user's cached permission graph", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
+      db.eventAttendee.delete.mockResolvedValue(
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', userId: 'user-1' }),
+      );
+
+      await service.removeAttendee('event-1', 'att-1');
+
+      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-1');
+    });
+  });
+
+  describe('addAttendee authorization (#539)', () => {
+    beforeEach(() => {
+      abilityService.getActingUserId.mockReturnValue('user-actor');
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: 'hh-1' } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+      );
+    });
+
+    // The route's policy check judges a create on EventAttendee by type
+    // alone, so a host of any event passes it for every event. The row about
+    // to be written names its event, its household and its role, and those
+    // are what the grants bind to. Which roles each grant gives out is the
+    // catalog's, and the ability factory's spec holds it to that.
+    it('checks the create against the event it adds to and the role it writes', async () => {
+      await service.addAttendee('event-1', { userId: 'user-2', role: SystemRole.EventCoHost });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.EventAttendee, {
+        eventId: 'event-1',
+        event: { householdId: 'hh-1' },
+        role: { role: { name: SystemRole.EventCoHost } },
+      });
+    });
+
+    it('checks, and writes, the participant role when the request names none', async () => {
+      await service.addAttendee('event-1', { userId: 'user-2' });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
+        Action.create,
+        ResourceType.EventAttendee,
+        expect.objectContaining({ role: { role: { name: SystemRole.EventParticipant } } }),
+      );
+      expect(db.eventAttendee.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            role: { create: { role: { connect: { name: SystemRole.EventParticipant } } } },
+          }),
+        }),
+      );
+    });
+
+    it('refuses before writing when the instance check denies', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(
+        service.addAttendee('event-1', { userId: 'user-actor', role: SystemRole.EventCoHost }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+    });
+
+    // The added user's graph was cached without this event: their role here
+    // would otherwise reach them only when the cache expires.
+    it("evicts the added user's cached permission graph", async () => {
+      await service.addAttendee('event-1', { userId: 'user-2' });
+
+      expect(permissions.invalidateUser).toHaveBeenCalledWith('user-2');
     });
   });
 

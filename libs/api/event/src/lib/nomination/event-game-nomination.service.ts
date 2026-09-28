@@ -134,24 +134,7 @@ export class EventGameNominationService {
       throw new ForbiddenException(t('errors.nomination.host_only'));
     }
 
-    const supplyEntry = await this.db.eventAttendeeGameList.findUnique({
-      where: { id: dto.suppliedFromId },
-      select: {
-        id: true,
-        attendee: { select: { eventId: true } },
-        collection: { select: { platformGameId: true } },
-      },
-    });
-
-    if (supplyEntry?.attendee?.eventId !== eventId) {
-      throw new NotFoundException(
-        t('errors.nomination.supplied_from_not_found', { suppliedFromId: dto.suppliedFromId }),
-      );
-    }
-
-    if (supplyEntry.collection.platformGameId !== dto.platformGameId) {
-      throw new BadRequestException(t('errors.nomination.supplied_from_mismatch'));
-    }
+    await this.assertSuppliesGame(eventId, dto.suppliedFromId, dto.platformGameId);
 
     let initialStatus: NominationStatus;
     let votingDeadline: Date | undefined;
@@ -524,6 +507,8 @@ export class EventGameNominationService {
       throw new ForbiddenException(t('errors.nomination.direct_add_not_permitted', { mode: policy.gameAdditionMode }));
     }
 
+    await this.assertSuppliesGame(eventId, dto.suppliedById, dto.platformGameId);
+
     const eventGame = await this.db.eventGame.create({
       data: {
         event: dto.occurrenceId ? undefined : { connect: { id: eventId } },
@@ -591,6 +576,33 @@ export class EventGameNominationService {
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
     return occurrence;
+  }
+
+  /**
+   * What makes a game-list entry a valid supplier, for a nomination and a
+   * direct add alike: it belongs to an attendee of this event, and it is for
+   * the game being added. The first keeps a write in one event from naming
+   * another event's attendee as bringing the game (not found, as for any row
+   * outside the event); the second keeps it from recording someone as
+   * bringing a game their entry is not for.
+   */
+  private async assertSuppliesGame(eventId: string, gameListId: string, platformGameId: string): Promise<void> {
+    const supplyEntry = await this.db.eventAttendeeGameList.findUnique({
+      where: { id: gameListId },
+      select: {
+        id: true,
+        attendee: { select: { eventId: true } },
+        collection: { select: { platformGameId: true } },
+      },
+    });
+
+    if (supplyEntry?.attendee?.eventId !== eventId) {
+      throw new NotFoundException(t('errors.nomination.supplier_not_found', { gameListId }));
+    }
+
+    if (supplyEntry.collection.platformGameId !== platformGameId) {
+      throw new BadRequestException(t('errors.nomination.supplier_mismatch'));
+    }
   }
 
   /** Scalar snapshot of a created EventGame row for {@link GameAddedToEventEvent}. */
