@@ -8,6 +8,7 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
+import { HouseholdLivenessGuard, HouseholdPathParam } from './guards/household-liveness.guard';
 import { HouseholdService } from './household.service';
 
 @ApiBearerAuth()
@@ -18,7 +19,10 @@ import { HouseholdService } from './household.service';
 // skips the service, which is where a removed member is refused — the route
 // guards here are type-level (#528).
 @NoCache()
-@UseGuards(PoliciesGuard)
+// Liveness first: a missing or deleted household is 404 whatever the actor
+// holds elsewhere, which the type-level policy check cannot tell (#299).
+@HouseholdPathParam('id')
+@UseGuards(HouseholdLivenessGuard, PoliciesGuard)
 @ApiTags('households')
 @Controller('households')
 export class HouseholdController {
@@ -95,6 +99,7 @@ export class HouseholdController {
   })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
   @Get(':id')
   getById(@Param('id') id: string) {
@@ -105,6 +110,7 @@ export class HouseholdController {
 
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Household))
   @Patch(':id')
   update(@Param('id') id: string, @Body() updateHouseholdDto: UpdateHouseholdDto) {
@@ -115,6 +121,7 @@ export class HouseholdController {
 
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found, or already deleted' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.Household))
   @Delete(':id')
   delete(@Param('id') id: string) {

@@ -374,7 +374,8 @@ export class HouseholdService {
 
     try {
       // Existence first (→ 404); the scoped update below enforces permission
-      // (P2025 → 403). Keeps the two outcomes distinguishable.
+      // (P2025 → 403, unless a delete landed in between: see
+      // `scopedWriteRefusal`). Keeps the two outcomes distinguishable.
       await assertHouseholdExists(this.db, id);
 
       return await this.db.household.update({
@@ -395,11 +396,11 @@ export class HouseholdService {
         },
       });
     } catch (error) {
-      this.logger.error(`Error updating household with id ${id}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException(t('common.forbidden.update'));
+        throw await this.scopedWriteRefusal(id, t('common.forbidden.update'));
       }
 
+      this.logger.error(`Error updating household with id ${id}`, error);
       throw error;
     }
   }
@@ -528,7 +529,8 @@ export class HouseholdService {
     try {
       // Existence first (→ 404); the scoped update below enforces the delete
       // policy (owner-only), and a non-matching `where` (→ P2025) maps to 403 —
-      // consistent with updateHousehold and GameService.delete/update.
+      // consistent with updateHousehold and GameService.delete/update — unless a
+      // concurrent delete landed in between (`scopedWriteRefusal`).
       await assertHouseholdExists(this.db, id);
 
       const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
@@ -567,14 +569,33 @@ export class HouseholdService {
 
       return household;
     } catch (error) {
-      this.logger.error(`Error deleting household with id ${id}`, error);
-      // Existence was confirmed above, so a scoped-update miss means the actor
-      // isn't permitted to delete this household (owner-only) → 403.
+      // A scoped-update miss: the actor may not delete this household
+      // (owner-only), or a concurrent delete got there first.
       if (isPrismaDependentRecordNotFoundError(error)) {
-        throw new ForbiddenException(t('common.forbidden.delete'));
+        throw await this.scopedWriteRefusal(id, t('common.forbidden.delete'));
       }
 
+      this.logger.error(`Error deleting household with id ${id}`, error);
       throw error;
     }
+  }
+
+  /**
+   * What a scoped write on a household that matched nothing (P2025) should
+   * answer. The existence probe in front of it takes no lock, so a soft-delete
+   * can commit in between, and a second of two concurrent deletes then misses
+   * on `deletedAt: null` rather than on permission. The household is gone, so
+   * the answer is the 404 every route gives a deleted household (#299), not a
+   * denial. Otherwise it is there and the actor may not do this: 403.
+   *
+   * Not logged: both are outcomes the endpoint is specified to produce.
+   */
+  private async scopedWriteRefusal(
+    id: string,
+    forbidden: ReturnType<typeof t>,
+  ): Promise<ForbiddenException | NotFoundException> {
+    return (await householdExists(this.db, id))
+      ? new ForbiddenException(forbidden)
+      : new NotFoundException(t('errors.household.not_found', { id }));
   }
 }

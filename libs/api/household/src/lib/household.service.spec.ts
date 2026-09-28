@@ -11,7 +11,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import { PrismaError } from '@status/codes';
+import { Http, PrismaError } from '@status/codes';
 import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
 import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
@@ -368,6 +368,46 @@ describe('HouseholdService', () => {
 
   it('rejects an empty update patch', async () => {
     await expect(service.updateHousehold('hh-1', {} as never)).rejects.toThrow(BadRequestException);
+  });
+
+  describe('a scoped write that matches nothing (#299)', () => {
+    const missed = () =>
+      new Prisma.PrismaClientKnownRequestError('no rows', {
+        code: PrismaError.DependentRecordNotFound,
+        clientVersion: 'test',
+      });
+
+    beforeEach(() => {
+      unwrapTransaction(db);
+      db.household.update.mockRejectedValue(missed());
+    });
+
+    it.each([
+      ['updateHousehold', () => service.updateHousehold('hh-1', { name: 'New' } as never)],
+      ['deleteHousehold', () => service.deleteHousehold('hh-1')],
+    ])('%s answers 404 when a delete landed between its probe and its write', async (_name, act) => {
+      // The probe is unlocked. The second of two concurrent deletes passes it,
+      // then its update re-checks `deletedAt: null` against the committed row
+      // and misses: the household is gone, not forbidden.
+      db.household.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      await expect(act()).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+    });
+
+    it.each([
+      ['updateHousehold', 'common.forbidden.update', () => service.updateHousehold('hh-1', { name: 'New' } as never)],
+      ['deleteHousehold', 'common.forbidden.delete', () => service.deleteHousehold('hh-1')],
+    ])('%s still answers 403 when the household is live', async (_name, key, act) => {
+      db.household.count.mockResolvedValue(1);
+
+      await expect(act()).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key }),
+      });
+    });
   });
 
   it('deleteHousehold soft-deletes under the delete policy, revokes pending invites, and evicts member caches', async () => {
