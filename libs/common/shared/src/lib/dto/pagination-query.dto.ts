@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n-core';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Exclude, Type } from 'class-transformer';
 import {
@@ -61,21 +62,26 @@ export const DEFAULT_MAX_OFFSET = 100_000;
  * either input is not an integer: `?limit=abc` transforms to NaN, and reporting
  * a depth failure on `page` there would answer a question the caller did not
  * ask — the real error is `limit`, and its own validators already say so.
+ *
+ * The ceiling arrives as the decorator's first constraint rather than being
+ * read from the constant here, so the message reports the value the check
+ * used (`{constraints.0}` in the catalog).
  */
 @ValidatorConstraint({ name: 'skipWithinCeiling' })
 class SkipWithinCeiling implements ValidatorConstraintInterface {
   validate(_page: unknown, args: ValidationArguments): boolean {
     const { page, limit, skip } = args.object as PaginationQueryDto;
+    const [maxOffset] = args.constraints as [number];
 
     if (!Number.isInteger(page) || (limit !== undefined && !Number.isInteger(limit))) {
       return true;
     }
 
-    return skip <= DEFAULT_MAX_OFFSET;
+    return skip <= maxOffset;
   }
 
-  defaultMessage(): string {
-    return `page is too deep: (page - 1) × limit must not exceed ${DEFAULT_MAX_OFFSET}`;
+  defaultMessage(args: ValidationArguments): string {
+    return i18nValidationMessage('validation.skipWithinCeiling')(args);
   }
 }
 
@@ -97,16 +103,16 @@ export abstract class PaginationQueryDto {
   // `take` and the derived `skip`, and Prisma rejects a non-integer `take` with
   // a 500 rather than the 400 the caller earned.
   @Type(() => Number)
-  @IsInt()
-  @IsPositive()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   @IsOptional()
   limit?: number;
 
   @ApiPropertyOptional({ description: 'Page number, 1-based', minimum: 1, default: 1 })
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Validate(SkipWithinCeiling)
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(1, { message: i18nValidationMessage('validation.min') })
+  @Validate(SkipWithinCeiling, [DEFAULT_MAX_OFFSET])
   @IsOptional()
   page = 1;
 
@@ -144,8 +150,8 @@ export abstract class PaginationQueryDto {
  */
 export abstract class OffsetPaginationQueryDto {
   @Type(() => Number)
-  @IsInt()
-  @IsPositive()
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   @IsOptional()
   limit?: number;
 
@@ -155,9 +161,9 @@ export abstract class OffsetPaginationQueryDto {
    * per chain and inherits cleanly (no class-validator union hazard).
    */
   @Type(() => Number)
-  @IsInt()
-  @Min(0)
-  @Max(DEFAULT_MAX_OFFSET)
+  @IsInt({ message: i18nValidationMessage('validation.isInt') })
+  @Min(0, { message: i18nValidationMessage('validation.min') })
+  @Max(DEFAULT_MAX_OFFSET, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   offset = 0;
 }

@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n-core';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Exclude, Type } from 'class-transformer';
 import { IsInt, IsOptional, IsPositive, Max } from 'class-validator';
@@ -66,9 +67,9 @@ export function CappedPaginationQueryDto(
       default: defaultPageSize,
     })
     @Type(() => Number)
-    @IsInt()
-    @IsPositive()
-    @Max(maxLimit)
+    @IsInt({ message: i18nValidationMessage('validation.isInt') })
+    @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+    @Max(maxLimit, { message: i18nValidationMessage('validation.max') })
     @IsOptional()
     declare limit?: number;
 
@@ -94,9 +95,9 @@ export function CappedOffsetPaginationQueryDto(
   class CappedOffsetPaginationQuery extends OffsetPaginationQueryDto {
     @ApiPropertyOptional({ description: 'Maximum items per page', maximum: maxLimit })
     @Type(() => Number)
-    @IsInt()
-    @IsPositive()
-    @Max(maxLimit)
+    @IsInt({ message: i18nValidationMessage('validation.isInt') })
+    @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+    @Max(maxLimit, { message: i18nValidationMessage('validation.max') })
     @IsOptional()
     declare limit?: number;
   }

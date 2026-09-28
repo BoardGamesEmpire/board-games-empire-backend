@@ -1,11 +1,17 @@
 import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
+import { validate, type ValidationError } from 'class-validator';
 import {
   CappedOffsetPaginationQueryDto,
   CappedPaginationQueryDto,
   DefaultPaginationQueryDto,
 } from './capped-pagination-query.dto';
-import { DEFAULT_MAX_OFFSET, DEFAULT_MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE } from './pagination-query.dto';
+import {
+  DEFAULT_MAX_OFFSET,
+  DEFAULT_MAX_PAGE_SIZE,
+  DEFAULT_PAGE_SIZE,
+  OffsetPaginationQueryDto,
+  PaginationQueryDto,
+} from './pagination-query.dto';
 
 // Mirror the GLOBAL ValidationPipe transformOptions from apps/api/src/main.ts:
 // query-string values arrive as strings, so implicit conversion is what feeds
@@ -14,6 +20,23 @@ const errorsFor = async (Dto: new () => object, property: string, plain: Record<
   (await validate(plainToInstance(Dto, plain, { enableImplicitConversion: true }))).filter(
     (e) => e.property === property,
   );
+
+// The catalog key each failed constraint's message names, keyed
+// `<property>.<constraint>`: the part of the `key|{…}` marker before the first
+// `|`. Read here rather than through `validationCatalogKeys`, because
+// `@bge/testing`, which holds that helper, depends on this lib.
+const catalogKeys = (errors: readonly ValidationError[]): Record<string, string> =>
+  Object.fromEntries(
+    errors.flatMap((error) =>
+      Object.entries(error.constraints ?? {}).map(([constraint, message]) => [
+        `${error.property}.${constraint}`,
+        message.split('|')[0],
+      ]),
+    ),
+  );
+
+const validateWithPipe = async (Dto: new () => object, plain: Record<string, unknown>) =>
+  validate(plainToInstance(Dto, plain, { enableImplicitConversion: true }));
 
 describe('DefaultPaginationQueryDto — the secure-by-default opt-out DTO', () => {
   it('accepts a limit within range', async () => {
@@ -251,5 +274,62 @@ describe('CappedOffsetPaginationQueryDto — the offset-native transport DTO', (
 
     expect(errors[0].constraints).toHaveProperty('max');
     expect(whitelisted.map((error) => error.property)).toContain('page');
+  });
+});
+
+// Each failure names a validation catalog key, so the edge renders it in the
+// request's locale. A non-numeric input fails every numeric check at once
+// (`@Type` turns it into NaN), so one payload reaches each decorator.
+describe('failure messages', () => {
+  // The factories re-declare `limit`, which drops the bases' own `limit`
+  // validators from the metadata they inherit. Extending a base directly keeps
+  // those in play, so their keys are checked too.
+  class PageShape extends PaginationQueryDto {}
+  class OffsetShape extends OffsetPaginationQueryDto {}
+
+  it('names a catalog key for every page-based failure', async () => {
+    expect(catalogKeys(await validateWithPipe(DefaultPaginationQueryDto, { limit: 'abc', page: 'abc' }))).toEqual({
+      'limit.isInt': 'validation.isInt',
+      'limit.isPositive': 'validation.isPositive',
+      'limit.max': 'validation.max',
+      'page.isInt': 'validation.isInt',
+      'page.min': 'validation.min',
+    });
+  });
+
+  it('names a catalog key for every offset-based failure', async () => {
+    const SearchAt100 = CappedOffsetPaginationQueryDto(100);
+
+    expect(catalogKeys(await validateWithPipe(SearchAt100, { limit: 'abc', offset: 'abc' }))).toEqual({
+      'limit.isInt': 'validation.isInt',
+      'limit.isPositive': 'validation.isPositive',
+      'limit.max': 'validation.max',
+      'offset.isInt': 'validation.isInt',
+      'offset.min': 'validation.min',
+      'offset.max': 'validation.max',
+    });
+  });
+
+  it("names a catalog key for the bases' own limit validators", async () => {
+    expect(catalogKeys(await validateWithPipe(PageShape, { limit: 'abc' }))).toEqual({
+      'limit.isInt': 'validation.isInt',
+      'limit.isPositive': 'validation.isPositive',
+    });
+    expect(catalogKeys(await validateWithPipe(OffsetShape, { limit: 'abc' }))).toEqual({
+      'limit.isInt': 'validation.isInt',
+      'limit.isPositive': 'validation.isPositive',
+    });
+  });
+
+  it('names the depth key, and reports the ceiling it checked as the constraint', async () => {
+    const page = DEFAULT_MAX_OFFSET / 100 + 2;
+    const [error] = await validateWithPipe(DefaultPaginationQueryDto, { page: String(page), limit: '100' });
+    const marker = error.constraints?.skipWithinCeiling ?? '';
+
+    expect(catalogKeys([error])).toEqual({ 'page.skipWithinCeiling': 'validation.skipWithinCeiling' });
+    expect(JSON.parse(marker.slice(marker.indexOf('|') + 1))).toEqual({
+      value: page,
+      constraints: [DEFAULT_MAX_OFFSET],
+    });
   });
 });

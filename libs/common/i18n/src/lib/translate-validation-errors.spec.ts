@@ -77,6 +77,19 @@ describe('translateValidationErrors (real catalog)', () => {
     ]);
   });
 
+  // `@bge/shared`'s depth check wrote this copy as a literal before it named a
+  // key. That lib's specs don't load nestjs-i18n, so the rendering is pinned here.
+  it('renders the pagination depth ceiling as its literal did', () => {
+    const marker = i18nValidationMessage('validation.skipWithinCeiling')({ value: 1002, constraints: [100_000] });
+    const exception = new I18nValidationException([
+      { property: 'page', constraints: { skipWithinCeiling: marker }, children: [] },
+    ]);
+
+    expect(translateValidationErrors(exception, i18n, auditContext)).toEqual([
+      'page is too deep: (page - 1) × limit must not exceed 100000',
+    ]);
+  });
+
   it("translates in the frame's locale", async () => {
     locale = 'fr';
     const translate = jest.spyOn(i18n, 'translate');
