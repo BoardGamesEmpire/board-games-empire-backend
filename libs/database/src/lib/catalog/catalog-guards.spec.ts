@@ -400,6 +400,7 @@ describe('catalog guards', () => {
             deletedAt: { not: null },
             status: { in: ['Accepted', 'Pending'] },
             title: { contains: 'night', mode: 'insensitive' },
+            name: { not: { startsWith: 'e2e' } },
             attendee: { is: { userId: '{{ user.id }}', event: { is: { householdId: '{{ householdId }}' } } } },
             votes: { none: {} },
             occurrence: null,
@@ -430,6 +431,27 @@ describe('catalog guards', () => {
       const catalog = [definition({ slug: 'read:blank', conditions: { title: {} } })];
 
       expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:blank', path: 'title' }]);
+    });
+
+    it('reports equals or not holding an object or array, since the matcher compares only plain values', () => {
+      const catalog = [
+        definition({
+          slug: 'read:values',
+          conditions: {
+            config: { equals: { theme: 'dark' } },
+            tags: { equals: ['solo'] },
+            settings: { not: { theme: 'dark' } },
+            title: { not: { search: 'night' } },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:values', path: 'config' },
+        { slug: 'read:values', path: 'tags' },
+        { slug: 'read:values', path: 'settings' },
+        { slug: 'read:values', path: 'title' },
+      ]);
     });
 
     it('reports a null under is or isNot, which Prisma reads and the matcher refuses', () => {

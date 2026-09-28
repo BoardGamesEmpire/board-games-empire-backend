@@ -464,11 +464,16 @@ const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
  * shorthand, even beside operators the sets hold: `search`, a Json filter's
  * `path` next to its `equals`, or an operator Prisma adds later. The matcher
  * throws on the whole filter, so the report is loud where the check would
- * have been silent. The same holds for a relation operator beside a field of
- * the related model, `{ votes: { some: {}, id } }`: Prisma's types refuse it
- * in a literal, but not in a fragment spliced in. And a missing relation is
- * written bare, `{ occurrence: null }`: Prisma reads `{ is: null }` the same
- * way, but the matcher refuses a null under `is` or `isNot`.
+ * have been silent. It compares only plain values, too, so `equals` holding
+ * an object or array (a Json value, a scalar list) is reported, and so is
+ * `not` holding anything but a plain value or a filter it can read. Prisma's
+ * types allow each of these in a literal.
+ *
+ * Two relation forms fail the same way. A relation operator beside a field
+ * of the related model, `{ votes: { some: {}, id } }`, is refused by Prisma's
+ * types in a literal but not in a fragment spliced in. And a null under `is`
+ * or `isNot` reads in Prisma as a missing relation, but the matcher refuses
+ * it, so a missing relation is written bare, `{ occurrence: null }`.
  *
  * The walk goes into operator bodies and logical branches, and into a
  * shorthand's own body, so a shorthand nested inside one is reported too.
@@ -517,12 +522,16 @@ export function findShorthandRelationConditions(
         continue;
       }
 
-      if (keys.length > 0 && keys.every((operator) => SCALAR_FILTER_OPERATORS.has(operator))) {
+      if (isReadableScalarFilter(value)) {
         continue;
       }
 
       findings.push({ slug, path: here });
-      walk(slug, value, here);
+      // A filter's operands are values, not relations. Only a shorthand
+      // relation's body is walked for more.
+      if (!keys.some((key) => SCALAR_FILTER_OPERATORS.has(key))) {
+        walk(slug, value, here);
+      }
     }
   };
 
@@ -604,6 +613,27 @@ function holdersBySlug(
   }
 
   return holders;
+}
+
+// A scalar filter the matcher can read: every key an operator it knows, with
+// `equals` holding a plain value and `not` a plain value or a filter of its own.
+function isReadableScalarFilter(filter: Record<string, unknown>): boolean {
+  const operands = Object.entries(filter);
+  return (
+    operands.length > 0 &&
+    operands.every(([operator, operand]) => {
+      if (!SCALAR_FILTER_OPERATORS.has(operator)) {
+        return false;
+      }
+      if (operator !== 'equals' && operator !== 'not') {
+        return true;
+      }
+      if (Array.isArray(operand)) {
+        return false;
+      }
+      return !isObject(operand) || (operator === 'not' && isReadableScalarFilter(operand));
+    })
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
