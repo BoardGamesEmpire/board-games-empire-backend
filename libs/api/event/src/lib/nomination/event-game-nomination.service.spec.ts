@@ -17,7 +17,7 @@ import {
   ScheduledGameRole,
   VoteType,
 } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -45,6 +45,7 @@ describe('EventGameNominationService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let emitter: { emit: jest.Mock };
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -55,6 +56,9 @@ describe('EventGameNominationService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventGameNominationService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the list actually runs.
+        ScopeComposer,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
       ],
@@ -62,6 +66,7 @@ describe('EventGameNominationService', () => {
 
     db = ctx.db;
     service = ctx.module.get(EventGameNominationService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
     db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);
     db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
   });
@@ -75,15 +80,16 @@ describe('EventGameNominationService', () => {
       db.eventGameNomination.count.mockResolvedValue(0);
     });
 
-    it('→ read, scoped to the event', async () => {
+    // #512. `EventGameNomination` has left `PENDING_SCOPE_SWEEP`, so the
+    // envelope fails with a 500 unless this read composes. The rows do not
+    // change: the path's event was already the filter, and the ceiling still
+    // clips it.
+    it('asks the composer for its where clause, declaring the path event as its scope', async () => {
       await service.getNominations('event-1', paginationQuery({ limit: 10 }));
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-        ResourceType.EventGameNomination,
-        Action.read,
-      );
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventGameNomination, Action.read, { eventId: 'event-1' });
       expect(db.eventGameNomination.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ eventId: 'event-1', AND: [COND] }) }),
+        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
       );
     });
 

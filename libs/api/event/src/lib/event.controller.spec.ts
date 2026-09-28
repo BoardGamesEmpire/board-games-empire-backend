@@ -1,9 +1,11 @@
-import { Event } from '@bge/database';
+import { Event, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEvent, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -66,6 +68,26 @@ describe('EventController', () => {
           pagination: { page: 3, limit: 10, total: 25, totalPages: 3, hasMore: false },
         }),
       );
+    });
+
+    // The service composes the `Event` scope; the envelope is where the guard
+    // checks for it, under the resource type the handler passes. Built inside a
+    // request with nothing composed, an `Event` envelope must fail. A handler
+    // passing a type still in `PENDING_SCOPE_SWEEP` would pass here instead,
+    // which switches the guard off for that route without a sound.
+    //
+    // The failure has to name `Event` itself. The three event lists left the
+    // sweep together, so a handler passing a sibling's type fails here too, and
+    // in a real request answers 500 because the service composed `Event`.
+    it('builds its envelope under the Event scope guard', async () => {
+      service.getEvents.mockResolvedValue({ rows: [], total: 0 });
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getEvents(paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Event}'`);
     });
   });
 

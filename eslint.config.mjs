@@ -49,9 +49,8 @@ export const restrictedImportPaths = {
 // A required scope parameter on the composer only binds callers who already
 // use it; this is what stops a newly written list from reaching past it. The
 // runtime half (the keyed `paginated()` assertion) covers paginated reads —
-// this one reaches reads that never build an envelope at all, of which three
-// carry the ceiling-only shape today: `GET /quotas`,
-// `GET /events/:eventId/attendees`, and that route's attendee game list.
+// this one reaches reads that never build an envelope at all, of which one
+// carries the ceiling-only shape today: `GET /quotas`.
 //
 // It catches ONE of the two omissions, and only that one. A ceiling used as
 // the answer set is a CALL this selector can name. The inverse — an intrinsic

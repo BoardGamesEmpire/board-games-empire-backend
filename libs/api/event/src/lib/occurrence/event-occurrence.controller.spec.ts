@@ -1,9 +1,17 @@
-import { AvailabilityResponse, EventAvailabilityVote, EventOccurrence, OccurrenceStatus } from '@bge/database';
+import {
+  AvailabilityResponse,
+  EventAvailabilityVote,
+  EventOccurrence,
+  OccurrenceStatus,
+  ResourceType,
+} from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEventOccurrence, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventOccurrenceController } from './event-occurrence.controller';
 import { EventOccurrenceService } from './event-occurrence.service';
@@ -82,6 +90,26 @@ describe('EventOccurrenceController', () => {
           pagination: { page: 1, limit: 5, total: 12, totalPages: 3, hasMore: true },
         }),
       );
+    });
+
+    // The service composes the `EventOccurrence` scope; the envelope is where
+    // the guard checks for it, under the resource type the handler passes.
+    // Built inside a request with nothing composed, it must fail. A handler
+    // passing a type still in `PENDING_SCOPE_SWEEP` would pass here instead,
+    // which switches the guard off for that route without a sound.
+    //
+    // The failure has to name `EventOccurrence` itself. The three event lists
+    // left the sweep together, so a handler passing a sibling's type fails
+    // here too, and in a real request answers 500.
+    it('builds its envelope under the EventOccurrence scope guard', async () => {
+      service.getOccurrences.mockResolvedValue({ rows: [], total: 0 });
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.getOccurrences('event-1', paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.EventOccurrence}'`);
     });
   });
 

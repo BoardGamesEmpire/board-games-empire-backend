@@ -13,7 +13,7 @@ import {
 } from '@bge/database';
 import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -33,19 +33,47 @@ export class EventService {
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
-   * One page of visible events plus the total matching count for the response
-   * envelope (#372). Rows and count come from one REPEATABLE READ snapshot, so
-   * an event created or soft-deleted between the two statements cannot make
-   * `total` describe a list the caller was not served.
+   * One page of the events the caller is an attendee of, plus the total
+   * matching count for the response envelope (#372).
+   *
+   * The scope is the endpoint's own: events with an attendee row for the
+   * caller, hosts included, since creating an event makes its host an
+   * attendee (#512, #365). The row counts whatever its RSVP status, so an
+   * invitation or a declined event is listed too. An RSVP changes only the
+   * row's status, not any event role attached to it, so filtering on status
+   * here would hide events the caller can still read and answer. Before this the caller's ceiling WAS the scope, so
+   * the one route returned a plain user their events, a household member every
+   * event in their households, a friend their friends' `Friends`-visible events
+   * and staff every event on the server. The ceiling is still ANDed in, as the
+   * limit rather than the answer: for an `apiKey` actor it carries the
+   * key ∩ owner floor. It limits which events are listed, not what each one
+   * embeds: the occurrences and policy below come with every listed event and
+   * are not clipped by their own types' ceilings. An event the list no longer
+   * shows stays readable by id for whoever could read it before. It is
+   * narrowed out of the list, not withdrawn.
+   *
+   * `deletedAt: null` stays beside the scope. A soft delete keeps the attendee
+   * rows, so the attendance clause alone still matches a deleted event.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "the events I attend" has no meaning without a user, and the refusal must
+   * never soften into an empty page. PROVISIONAL — #395.
+   *
+   * Rows and count come from one REPEATABLE READ snapshot, so an event created
+   * or soft-deleted between the two statements cannot make `total` describe a
+   * list the caller was not served.
    */
   async getEvents(pagination: PaginationQueryDto): Promise<PaginatedRows<Event>> {
-    const where: Prisma.EventWhereInput = {
+    const userId = resolveScopeSubjectId(this.abilityService);
+
+    const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
       deletedAt: null,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
-    };
+      attendees: { some: { userId } },
+    });
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -80,6 +108,7 @@ export class EventService {
       where: {
         id,
         deletedAt: null,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
       },
 
@@ -295,6 +324,7 @@ export class EventService {
       const updated = await this.db.event.update({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.update),
         },
         data: fields,
@@ -338,6 +368,7 @@ export class EventService {
       const event = await this.db.event.update({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.delete),
         },
         data: {

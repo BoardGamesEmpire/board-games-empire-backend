@@ -1,11 +1,13 @@
 import type { Event } from '@bge/database';
 import { Action, Prisma, ResourceType } from '@bge/database';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
   makeEvent,
+  MOCK_ACTING_USER_ID,
   paginationQuery,
   type MockAbilityService,
   type MockDatabaseService,
@@ -24,6 +26,7 @@ describe('EventService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUsers'>>;
   let emitter: { emit: jest.Mock };
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -34,6 +37,9 @@ describe('EventService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the list actually runs.
+        ScopeComposer,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
@@ -42,55 +48,104 @@ describe('EventService', () => {
 
     db = ctx.db;
     service = ctx.module.get(EventService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getEvents → read', async () => {
-    db.event.findMany.mockResolvedValue([]);
-    db.event.count.mockResolvedValue(0);
-
-    await service.getEvents(paginationQuery({ limit: 20 }));
-
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
-    expect(db.event.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ deletedAt: null, AND: [COND] }) }),
-    );
-  });
-
   /**
-   * The embedded occurrences carry the same tie-breaker as the dedicated
-   * `GET /events/:eventId/occurrences` read. `sortOrder` is an `Int @default(0)`,
-   * so un-reordered rows share a key, and a tie-less embedded sort would let
-   * `GET /events` and the occurrences route disagree about their order — and
-   * let the embedded order change between requests.
+   * #512. `GET /events` used to take the caller's ceiling as its answer set, so
+   * one route returned a plain user the events they attend, a household member
+   * every event in their households, a friend their friends' `Friends`-visible
+   * events, and staff every event on the server, with `total` scoped the same
+   * way. It now declares its own set, the events the caller is an attendee of
+   * whatever their RSVP, and the ceiling only clips it. The by-id read is
+   * unchanged, so an event dropped from the list is narrowed out of it, not
+   * withdrawn.
+   *
+   * `Event` has left `PENDING_SCOPE_SWEEP`, so a regression that stops this read
+   * composing answers 500 at the envelope rather than returning too much. That
+   * is why the first test pins the composer call itself.
    */
-  it('orders embedded occurrences totally, matching the dedicated occurrences read', async () => {
-    db.event.findMany.mockResolvedValue([]);
-    db.event.count.mockResolvedValue(0);
+  describe('getEvents, as a converted event list', () => {
+    const read = () => service.getEvents(paginationQuery({ limit: 20 }));
 
-    await service.getEvents(paginationQuery({ limit: 20 }));
+    beforeEach(() => {
+      db.event.findMany.mockResolvedValue([]);
+      db.event.count.mockResolvedValue(0);
+    });
 
-    const include = db.event.findMany.mock.calls[0][0]?.include as {
-      occurrences?: { orderBy?: unknown };
-    };
-    expect(include?.occurrences?.orderBy).toEqual([{ sortOrder: 'asc' }, { id: 'asc' }]);
-  });
+    it('asks the composer for its where clause, declaring the events the caller is an attendee of', async () => {
+      await read();
 
-  // #372: one snapshot for rows and count, and the soft-delete filter has to
-  // reach the count too or `total` includes events no caller can page to.
-  it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {
-    db.event.findMany.mockResolvedValue([]);
-    db.event.count.mockResolvedValue(12);
+      expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
+        deletedAt: null,
+        attendees: { some: { userId: MOCK_ACTING_USER_ID } },
+      });
+    });
 
-    const page = await service.getEvents(paginationQuery({ limit: 20 }));
+    // Asking is not enough: the query has to use the answer. The ceiling stays
+    // ANDed in, because for an `apiKey` actor it carries the key ∩ owner floor.
+    // `deletedAt: null` stays because a soft delete keeps the attendee rows, so
+    // the attendance clause alone still matches a deleted event.
+    it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
+      await read();
 
-    expect(db.event.count).toHaveBeenCalledWith({ where: { deletedAt: null, AND: [COND] } });
-    expect(page).toEqual({ rows: [], total: 12 });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
+      expect(db.event.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { deletedAt: null, attendees: { some: { userId: MOCK_ACTING_USER_ID } }, AND: [COND] },
+        }),
+      );
+    });
 
-    const { operations, options } = batchTransactionCall(db);
-    expect(operations).toHaveLength(2);
-    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    // #372: one snapshot for rows and count, and the count has to see the same
+    // clause, or `total` describes a population the caller is not paged through.
+    it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {
+      db.event.count.mockResolvedValue(12);
+
+      const page = await read();
+
+      const [findManyArgs] = db.event.findMany.mock.calls[0] as [{ where: unknown }];
+      expect(db.event.count).toHaveBeenCalledWith({ where: findManyArgs.where });
+      expect(page).toEqual({ rows: [], total: 12 });
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    /**
+     * The embedded occurrences carry the same tie-breaker as the dedicated
+     * `GET /events/:eventId/occurrences` read. `sortOrder` is an `Int @default(0)`,
+     * so un-reordered rows share a key, and a tie-less embedded sort would let
+     * `GET /events` and the occurrences route disagree about their order — and
+     * let the embedded order change between requests.
+     */
+    it('orders embedded occurrences totally, matching the dedicated occurrences read', async () => {
+      await read();
+
+      const include = db.event.findMany.mock.calls[0][0]?.include as {
+        occurrences?: { orderBy?: unknown };
+      };
+      expect(include?.occurrences?.orderBy).toEqual([{ sortOrder: 'asc' }, { id: 'asc' }]);
+    });
+
+    // PROVISIONAL (#395). "The events I attend" has no meaning for an actor
+    // with no user behind it, and the refusal must stay one: an empty page
+    // would tell a client it attends nothing. The key is the read's own, not
+    // the write-flavoured one `getActingUserId` throws.
+    it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await read().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.event.findMany).not.toHaveBeenCalled();
+    });
   });
 
   it('getEventById → read', async () => {

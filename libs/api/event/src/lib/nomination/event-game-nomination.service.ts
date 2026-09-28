@@ -17,7 +17,7 @@ import {
   VoteThresholdType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -44,6 +44,7 @@ export class EventGameNominationService {
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -52,7 +53,7 @@ export class EventGameNominationService {
    * Unpaginated until #372: it returned every nomination on the event. Unlike
    * occurrences, this list has no natural ceiling at all — it grows with the
    * attendees, and each nomination accumulates votes — so paging it is the
-   * point rather than a formality (D-372-1). The response is a truncating
+   * point rather than a formality (#372). The response is a truncating
    * change, which pre-alpha allows without a shim.
    *
    * `id` breaks ties on `createdAt`: nominations created in one transaction
@@ -64,14 +65,13 @@ export class EventGameNominationService {
    * list: it is a separate statement, so an event deleted between the probe and
    * the read answers 200 with an empty page. That is a check-then-act window,
    * not the rows-versus-count split the transaction below closes.
+   *
+   * The scope is the path's event, composed with the caller's ceiling (#512).
    */
   async getNominations(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventGameNomination>> {
     await assertEventExists(this.db, eventId);
 
-    const where: Prisma.EventGameNominationWhereInput = {
-      eventId,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
-    };
+    const where = this.scopeComposer.compose(ResourceType.EventGameNomination, Action.read, { eventId });
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -98,6 +98,7 @@ export class EventGameNominationService {
       where: {
         id: nominationId,
         eventId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.read),
       },
       include: NOMINATION_INCLUDE,
@@ -229,6 +230,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: NominationStatus.Withdrawn },
@@ -372,6 +374,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: resolvedStatus },
@@ -442,6 +445,7 @@ export class EventGameNominationService {
       const updated = await this.db.eventGameNomination.update({
         where: {
           id: nominationId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
         data: { status: decision },

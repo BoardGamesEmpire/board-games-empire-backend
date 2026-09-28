@@ -8,7 +8,7 @@ import {
   Prisma,
   ResourceType,
 } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -36,6 +36,7 @@ describe('EventOccurrenceService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let emitter: { emit: jest.Mock };
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -45,6 +46,9 @@ describe('EventOccurrenceService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventOccurrenceService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the reads actually run.
+        ScopeComposer,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
       ],
@@ -52,6 +56,7 @@ describe('EventOccurrenceService', () => {
 
     db = ctx.db;
     service = ctx.module.get(EventOccurrenceService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -62,17 +67,17 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.count.mockResolvedValue(0);
     });
 
-    it('filters by read conditions and scopes to the event', async () => {
+    // #512. `EventOccurrence` has left `PENDING_SCOPE_SWEEP`, so the envelope
+    // fails with a 500 unless this read composes. The rows do not change: the
+    // path's event was already the filter, and the ceiling still clips it.
+    it('asks the composer for its where clause, declaring the path event as its scope', async () => {
       db.event.count.mockResolvedValue(1);
 
       await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-        ResourceType.EventOccurrence,
-        Action.read,
-      );
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventOccurrence, Action.read, { eventId: 'event-1' });
       expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ eventId: 'event-1', AND: [COND] }) }),
+        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
       );
     });
 
@@ -358,17 +363,64 @@ describe('EventOccurrenceService', () => {
     });
   });
 
+  /**
+   * #512. The summary counts three collections, and each composes its own
+   * scope. The route's guard is type-level, `can(read, EventAvailabilityVote)`,
+   * which every event role passes for ANY event, so the query is the only
+   * place the path's event is bound to the caller's own.
+   */
   describe('getAvailabilitySummary', () => {
-    it('filters occurrences by read conditions', async () => {
+    beforeEach(() => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findMany.mockResolvedValue([]);
       db.eventOccurrence.findMany.mockResolvedValue([]);
+    });
 
+    it('composes the occurrence half, declaring the path event as its scope', async () => {
       await service.getAvailabilitySummary('event-1');
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-        ResourceType.EventOccurrence,
-        Action.read,
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventOccurrence, Action.read, { eventId: 'event-1' });
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
+      );
+    });
+
+    // Before #512 this half filtered on `eventId` and ANDed no ceiling at all,
+    // so an attendee of one event could read another event's attendance counts
+    // (`total`, `registered`, `guests`, `byStatus`, `eligibleVoters`). With the
+    // ceiling in, an event the caller holds no attendee rule for counts zero.
+    it('composes the attendee half too, so its counts are clipped by the caller’s attendee ceiling', async () => {
+      await service.getAvailabilitySummary('event-1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read);
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
+      );
+    });
+
+    // The votes are the route's own type and the third collection counted
+    // here. Left to ride on the occurrence, they escaped the vote ceiling and
+    // counted voters the attendee half had already clipped away: an API key
+    // that may read one attendee read `eligibleVoters: 1` beside every vote
+    // cast, and a `participationRate` above 1. Scoping them to the attendees
+    // counted above keeps every number in the summary about the same people.
+    it('composes the votes, scoped to the attendees counted above', async () => {
+      await service.getAvailabilitySummary('event-1');
+
+      const counted = { eventId: 'event-1', AND: [COND] };
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAvailabilityVote, Action.read, {
+        attendee: { is: counted },
+      });
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: {
+            availabilityVotes: {
+              where: { attendee: { is: counted }, AND: [COND] },
+              select: { response: true, attendeeId: true },
+            },
+          },
+        }),
       );
     });
   });
