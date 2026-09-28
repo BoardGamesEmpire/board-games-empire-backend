@@ -313,9 +313,11 @@ describe('CappedOffsetPaginationQueryDto — the offset-native transport DTO', (
 // request's locale. A non-numeric input fails every numeric check at once
 // (`@Type` turns it into NaN), so one payload reaches each decorator.
 describe('failure messages', () => {
-  // The factories re-declare `limit`, which drops the bases' own `limit`
-  // validators from the metadata they inherit. Extending a base directly keeps
-  // those in play, so their keys are checked too.
+  // A subclass of a factory class, as DefaultPaginationQueryDto is, runs the
+  // bases' `limit` validators beside the factory's, and the factory's marker
+  // overwrites the base's under the same constraint name. So a bare base
+  // validator would pass the test above; extending a base directly checks the
+  // bases' keys on their own.
   class PageShape extends PaginationQueryDto {}
   class OffsetShape extends OffsetPaginationQueryDto {}
 

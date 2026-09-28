@@ -24,13 +24,14 @@ export class LanguageQueryDto {
 ```
 
 - `i18nValidationMessage` lives in `@bge/i18n-core` and writes nestjs-i18n's
-  marker format itself, so marking a message loads no runtime; specs in
-  `@bge/i18n` pin it byte for byte to the vendor's helper (#503). Its key is
-  type-checked against the `validation.*` catalog (unknown key fails `tsc`, see
+  marker format itself, so marking a message loads no runtime; a spec in
+  `@bge/i18n` pins it byte for byte to the vendor's helper, fed array
+  constraints joined as below (#503). Its key is type-checked against the
+  `validation.*` catalog (unknown key fails `tsc`, see
   [typed-keys.md](./typed-keys.md)). DTOs import it from `@bge/i18n`, never from
   `nestjs-i18n` directly (mirrors `t()`). `@bge/shared` is the exception and
   imports it from `@bge/i18n-core` (see typed-keys.md for why).
-- The key must live under `validation.*` (the wrapper's type enforces it).
+- The key must live under `validation.*` (its key type enforces it).
 - Catalog strings may interpolate `{property}` (the field name), `{value}` (the
   rejected value), and positional constraint args `{constraints.0}`,
   `{constraints.1}`, … (e.g. the `10` in `@MinLength(10)`). An array

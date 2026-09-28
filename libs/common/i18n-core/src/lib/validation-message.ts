@@ -42,8 +42,9 @@ export interface ValidationMessageArguments {
  * The marker is nestjs-i18n's own format, `key|{"value":…,"constraints":[…],…args}`,
  * with `|` stripped from a string value so the first `|` still separates the
  * key. It is written here rather than by calling nestjs-i18n, so a lib can mark
- * its messages without loading the runtime (#503). Specs in `@bge/i18n` pin it
- * byte for byte to the vendor's function.
+ * its messages without loading the runtime (#503). A spec in `@bge/i18n` pins
+ * it byte for byte to the vendor's function fed constraints joined as below, so
+ * a change to either the format or the join fails it.
  *
  * An array constraint (`@IsIn`'s values, `@IsEnum`'s entries) is joined with
  * ", " before encoding, as class-validator does for its own defaults. The

@@ -23,13 +23,18 @@ import {
  * metadata and the STRICTER `@Max` wins, so a competing base `@Max` would cap
  * everyone at the smaller of the two.
  *
- * The full validation chain (`@Type`, `@IsPositive`, `@IsOptional`) is
- * re-declared here alongside `@Max`, NOT just the `@Max` cap: re-declaring a
- * property replaces the parent's metadata for it, so declaring `@Max` alone
- * would drop the inherited `@IsPositive` and let `limit=-50` through as
- * `take:-50` (oldest rows on a newest-first endpoint) / `limit=0` as an empty
- * page. `page` is intentionally NOT re-declared, so its base validators — and
- * the derived-skip ceiling — are inherited unchanged.
+ * The full validation chain (`@Type`, `@IsInt`, `@IsPositive`, `@IsOptional`)
+ * is re-declared here alongside `@Max`, NOT just the `@Max` cap. When the class
+ * being validated declares validators on a property itself, class-validator
+ * drops the ones of the same kind it inherits there (every validator here but
+ * `@IsOptional` is one kind). The class returned here, validated as it is,
+ * therefore runs only these, so declaring `@Max` alone would drop the inherited
+ * `@IsPositive` and let `limit=-50` through as `take:-50` (oldest rows on a
+ * newest-first endpoint) / `limit=0` as an empty page. A subclass that declares
+ * no `limit` of its own, as `DefaultPaginationQueryDto` and every feature DTO
+ * do, runs the base's `limit` validators beside these: that is the union above.
+ * `page` is intentionally NOT re-declared, so its base validators — and the
+ * derived-skip ceiling — are inherited unchanged.
  *
  * `declare` (not a plain re-declaration) matters under the repo's `es2024`
  * target: define-semantics class fields would emit `limit = undefined` here and

@@ -15,8 +15,9 @@ fails `tsc`.
 `@bge/i18n-core` holds the catalogs, the types generated from them, and the two markers — `t()` for
 exceptions and `i18nValidationMessage` for decorators — and loads nothing at runtime beyond
 `node:path`. It writes the validation marker in nestjs-i18n's format itself, rather than calling
-nestjs-i18n; specs in `@bge/i18n` pin the two byte for byte (#503). `@bge/i18n` re-exports the
-markers and the key types beside the edge machinery that does the translating.
+nestjs-i18n; a spec in `@bge/i18n` pins it byte for byte to the vendor's encoder, with array
+constraints joined first (#503). `@bge/i18n` re-exports the markers and the key types beside the
+edge machinery that does the translating.
 
 **Import from `@bge/i18n`.** Apart from `@bge/i18n` itself, a lib imports `@bge/i18n-core` directly
 only when importing `@bge/i18n` would do one of two things:

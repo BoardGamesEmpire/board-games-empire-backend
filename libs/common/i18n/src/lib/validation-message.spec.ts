@@ -10,8 +10,9 @@ describe('i18nValidationMessage (core) against nestjs-i18n', () => {
     return { value: undefined, constraints: [], targetName: 'Dto', object: {}, property: 'field', ...overrides };
   }
 
-  // The vendor sees the constraints already joined: joining is ours, and is
-  // what the round trip through `translateValidationErrors` covers.
+  // nestjs-i18n never joins an array constraint, so this joins it first, as
+  // the core encoder must. The array case pins the join as well as the format;
+  // the round trip through `translateValidationErrors` shows how it renders.
   function vendorMarker(
     key: I18nValidationPath,
     args: Record<string, unknown> | undefined,
