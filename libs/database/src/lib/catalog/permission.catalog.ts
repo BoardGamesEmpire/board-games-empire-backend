@@ -924,7 +924,7 @@ export const PERMISSION_CATALOG = [
       user: {
         is: {
           AND: [
-            { OR: [{ preferences: { is: null } }, { preferences: { is: { showCollectionToFriends: true } } }] },
+            { OR: [{ preferences: null }, { preferences: { is: { showCollectionToFriends: true } } }] },
             acceptedFriendOfActingUser,
           ],
         },

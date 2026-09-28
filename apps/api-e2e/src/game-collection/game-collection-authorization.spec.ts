@@ -109,6 +109,39 @@ describe('game collection authorization', () => {
       expect(asGuest.total).toBe(1);
     });
 
+    it('serves a friend the Friends entry of an owner with no preferences row, and not one whose preferences hide it', async () => {
+      // The friends grant reads a missing preferences row as the schema
+      // default, showing the collection (#458). Signup always writes the row,
+      // so only a deleted one reaches that branch.
+      const unsetOwner = await actors.user();
+      const hidingOwner = await actors.user();
+      const friend = await actors.user();
+
+      await befriend(db.client, unsetOwner, friend);
+      await befriend(db.client, hidingOwner, friend);
+      await db.client.userPreferences.delete({ where: { userId: unsetOwner.user.id } });
+      await db.client.userPreferences.update({
+        where: { userId: hidingOwner.user.id },
+        data: { showCollectionToFriends: false },
+      });
+      const unset = await arrangeCollection(unsetOwner.user.id);
+      const hiding = await arrangeCollection(hidingOwner.user.id);
+
+      const ofUnset = listCollectionsEnvelope(
+        await listUserCollection(friend, unsetOwner.user.id).expect(200),
+        'GET /api/game-collections/user/:userId, owner without preferences',
+      );
+      expect(ofUnset.collections.map((entry) => entry.id).sort()).toEqual(
+        [unset.publicEntry.id, unset.friendsEntry.id].sort(),
+      );
+
+      const ofHiding = listCollectionsEnvelope(
+        await listUserCollection(friend, hidingOwner.user.id).expect(200),
+        'GET /api/game-collections/user/:userId, owner hiding it from friends',
+      );
+      expect(ofHiding.collections.map((entry) => entry.id)).toEqual([hiding.publicEntry.id]);
+    });
+
     it('refuses a request with no session, where it used to serve the Public entries', async () => {
       const owner = await actors.user();
       await arrangeCollection(owner.user.id);

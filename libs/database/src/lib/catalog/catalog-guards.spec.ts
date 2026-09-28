@@ -402,7 +402,7 @@ describe('catalog guards', () => {
             title: { contains: 'night', mode: 'insensitive' },
             attendee: { is: { userId: '{{ user.id }}', event: { is: { householdId: '{{ householdId }}' } } } },
             votes: { none: {} },
-            occurrence: { is: null },
+            occurrence: null,
           },
         }),
         definition({ slug: 'read:absent' }),
@@ -430,6 +430,17 @@ describe('catalog guards', () => {
       const catalog = [definition({ slug: 'read:blank', conditions: { title: {} } })];
 
       expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:blank', path: 'title' }]);
+    });
+
+    it('reports a null under is or isNot, which Prisma reads and the matcher refuses', () => {
+      const catalog = [
+        definition({ slug: 'read:null-relation', conditions: { occurrence: { is: null }, event: { isNot: null } } }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:null-relation', path: 'occurrence.is' },
+        { slug: 'read:null-relation', path: 'event.isNot' },
+      ]);
     });
 
     it('reports a relation operator beside a field of the related model, and still walks the operator body', () => {

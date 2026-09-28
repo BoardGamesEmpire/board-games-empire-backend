@@ -466,7 +466,9 @@ const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
  * throws on the whole filter, so the report is loud where the check would
  * have been silent. The same holds for a relation operator beside a field of
  * the related model, `{ votes: { some: {}, id } }`: Prisma's types refuse it
- * in a literal, but not in a fragment spliced in.
+ * in a literal, but not in a fragment spliced in. And a missing relation is
+ * written bare, `{ occurrence: null }`: Prisma reads `{ is: null }` the same
+ * way, but the matcher refuses a null under `is` or `isNot`.
  *
  * The walk goes into operator bodies and logical branches, and into a
  * shorthand's own body, so a shorthand nested inside one is reported too.
@@ -506,6 +508,10 @@ export function findShorthandRelationConditions(
           findings.push({ slug, path: here });
         }
         for (const operator of relationOperators) {
+          if (value[operator] === null) {
+            findings.push({ slug, path: `${here}.${operator}` });
+            continue;
+          }
           walk(slug, value[operator], `${here}.${operator}`);
         }
         continue;
