@@ -1,4 +1,5 @@
 import { SystemRole } from '../client';
+import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
 import { ROLE_CATALOG, ROLE_SCOPE } from './role.catalog';
@@ -124,28 +125,78 @@ describe('the shipped catalogs', () => {
       expect(admin.length).toBeLessThan(PERMISSION_CATALOG.length - 1);
 
       expect(admin).toEqual(
-        expect.arrayContaining(['manage:household_member:administer', 'delete:household:administer']),
+        expect.arrayContaining([
+          'manage:household_member:administer',
+          'delete:household:administer',
+          'update:household:restore:administer',
+        ]),
       );
     });
 
     it.each([SystemRole.Admin, SystemRole.Moderator])('give %s no slug bound to a scope it has none of', (roleName) => {
-      const conditioned = ROLE_PERMISSION_CATALOG[roleName]
+      const templated = ROLE_PERMISSION_CATALOG[roleName]
         .map((slug) => PERMISSION_CATALOG.find((permission) => permission.slug === slug))
-        .filter((permission) => Object.keys(permission?.conditions ?? {}).length > 0)
+        .filter((permission) => parseTemplate(permission?.conditions).variables.length > 0)
         .map((permission) => permission?.slug);
 
       // A global role arrives through the `roles` pass, which supplies `user`
-      // and `role` and nothing else. So a condition on a staff role is one of
-      // exactly two things, and neither belongs: templated on `householdId` or
-      // `eventId`, it renders to `''` and matches no row; templated on
-      // `user.id`, it grants what the actor's own household or event role
-      // already grants, because that role's condition renders identically.
-      // Both were shipped and both are gone (#244) — `create:household_role`
-      // duplicated `HouseholdOwner`/`HouseholdAdmin`, `delete:event`
-      // duplicated `EventHost`, which an event's creator always is.
+      // and `role` and nothing else. So a TEMPLATED condition on a staff role
+      // is one of exactly two things, and neither belongs: templated on
+      // `householdId` or `eventId`, it renders to `''` and matches no row;
+      // templated on `user.id`, it grants what the actor's own household or
+      // event role already grants, because that role's condition renders
+      // identically. Both were shipped and both are gone (#244) —
+      // `create:household_role` duplicated `HouseholdOwner`/`HouseholdAdmin`,
+      // `delete:event` duplicated `EventHost`, which an event's creator always
+      // is.
+      //
+      // A STATIC condition is neither. It references no variable, so it
+      // renders the same in every pass, and it narrows an otherwise
+      // install-wide grant: the case below is the one that exists.
       //
       // Listed rather than counted, so a failure names the slug.
-      expect(conditioned).toEqual([]);
+      expect(templated).toEqual([]);
+    });
+
+    it.each([
+      [SystemRole.Admin, ['update:household:restore:administer']],
+      [SystemRole.Moderator, []],
+    ])('give %s exactly the static conditions it is meant to, and no more', (roleName, expected) => {
+      // The case above admits static conditions by shape, so this is what
+      // stops a second one arriving unread: a static condition still reaches
+      // every row it matches on the install. Named, so adding one is an edit
+      // made here on purpose.
+      const conditionsOf = (slug: string) =>
+        PERMISSION_CATALOG.find((permission) => permission.slug === slug)?.conditions;
+      const conditioned = ROLE_PERMISSION_CATALOG[roleName].filter(
+        (slug) => Object.keys(conditionsOf(slug) ?? {}).length > 0,
+      );
+
+      expect(conditioned).toEqual(expected);
+    });
+
+    it('condition staff restore on the tombstone, so it can never edit a live household (#175)', () => {
+      // The one static condition a staff role holds. Unconditioned, this
+      // would be an `update` on every household: `updateHousehold` scopes its
+      // write by the actor's `update` rules, so Admin could rename any live
+      // household or change who may see it, which #244's floor left out on
+      // purpose. With it, the rule and every write path's live filter can
+      // never both match.
+      const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+
+      expect(conditionsOf('update:household:restore:administer')).toStrictEqual({ deletedAt: { not: null } });
+      expect(conditionsOf('update:household:restore')).toStrictEqual({ deletedAt: { not: null } });
+    });
+
+    it('assign the per-household restore slug to no role: the delete grants it, one household at a time', () => {
+      // Held by a role, it would reach every deleted household that role's
+      // pass renders, with no window. It is issued as a `UserPermission`
+      // pinned to one household id, with an expiry, by `deleteHousehold`.
+      const holders = Object.entries(ROLE_PERMISSION_CATALOG)
+        .filter(([, slugs]) => slugs.includes('update:household:restore'))
+        .map(([role]) => role);
+
+      expect(holders).toEqual([]);
     });
 
     it.each([SystemRole.Admin, SystemRole.Moderator])('give %s nothing an ordinary User already holds', (roleName) => {

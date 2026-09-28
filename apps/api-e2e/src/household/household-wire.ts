@@ -183,6 +183,35 @@ export function createEnvelope(response: HttpResponseLike, request: RequestDescr
   return { message, household };
 }
 
+export interface DeleteHouseholdEnvelope extends CreateHouseholdEnvelope {
+  /** ISO timestamp the owners' recovery window ends at, or `null` when the delete issued none (#175). */
+  readonly restorableUntil: string | null;
+}
+
+/**
+ * `DELETE /api/households/:id`: `{ message, household, restorableUntil }`.
+ *
+ * `restorableUntil` must be PRESENT, as a parseable timestamp or `null`. A
+ * missing key would read as `null` to a client, which then offers no undo for
+ * a delete that has one.
+ */
+export function deleteEnvelope(response: HttpResponseLike, request: RequestDescription): DeleteHouseholdEnvelope {
+  const { message, household } = createEnvelope(response, request);
+  const body = response.body as Record<string, unknown>;
+
+  if (!('restorableUntil' in body)) {
+    return fail("it carried no 'restorableUntil' key", request, response);
+  }
+
+  const restorableUntil = body['restorableUntil'];
+
+  if (restorableUntil !== null && (typeof restorableUntil !== 'string' || Number.isNaN(Date.parse(restorableUntil)))) {
+    return fail("its 'restorableUntil' is neither null nor a timestamp", request, response);
+  }
+
+  return { message, household, restorableUntil };
+}
+
 /** `GET /api/households/:id`: `{ household }` with member and language embeds. */
 export function readEnvelope(response: HttpResponseLike, request: RequestDescription): ReadHouseholdEnvelope {
   if (!isRecord(response.body)) {

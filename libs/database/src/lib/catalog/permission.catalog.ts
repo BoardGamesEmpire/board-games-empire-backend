@@ -73,19 +73,23 @@ export const PERMISSION_CATALOG = [
 
   // --- Server staff administration ---
   //
-  // Deliberately UNCONDITIONED, and the only permissions in the catalog that
+  // Deliberately UNTEMPLATED, and the only permissions in the catalog that
   // are so on purpose for a reason other than the subject being install-wide.
   // A global role arrives through the `roles` pass, which supplies neither
   // `householdId` nor `eventId`, so a household-scoped condition would render
   // to a clause matching nothing and the grant would be inert — which is what
-  // every staff grant here replaces (#244). Empty conditions is the same
-  // reasoning #175 relies on for the restore grant.
+  // every staff grant here replaces (#244).
+  //
+  // Untemplated is not the same as unconditioned. Restore carries a STATIC
+  // condition, one that references no variable and so renders the same in
+  // every pass, because without it the grant would be an `update` on every
+  // live household too (see its entry).
   //
   // A floor, not a mirror of what staff nominally held before: administer any
-  // roster, soft-delete any household, and remove a game session. Staff have
-  // no business casting votes or building game lists on an attendee's behalf,
-  // so the event sub-resource grants that used to reach Admin inertly are
-  // simply gone rather than reissued in this shape.
+  // roster, soft-delete any household and restore it, and remove a game
+  // session. Staff have no business casting votes or building game lists on an
+  // attendee's behalf, so the event sub-resource grants that used to reach
+  // Admin inertly are simply gone rather than reissued in this shape.
   //
   // Transferring ownership of a household is NOT here, and the omission is
   // deliberate. `transferOwnership` refuses any actor who is not an owning
@@ -107,10 +111,6 @@ export const PERMISSION_CATALOG = [
   // is #364, #365 and #419's question — #419 settles that its routes grant
   // nothing new — and if that wildcard is ever narrowed, the read variants
   // belong here then and not before.
-  //
-  // Restoring a soft-deleted household is #175's slug and is not seeded here.
-  // When it lands it needs an explicit line in Admin's list: the blanket
-  // derivation that would once have handed it over for free is gone.
   //
   // Keep these staff-only or templated. An unconditioned permission held only
   // by global roles passes the fail-open guard, which flags scoped holders;
@@ -143,6 +143,24 @@ export const PERMISSION_CATALOG = [
     slug: 'delete:household:administer',
     riskLevel: RiskLevel.Critical,
     reason: 'Soft-delete any household as server staff',
+  }),
+  // The undo of the grant above, and of an owner's delete once their own
+  // recovery window has passed (#175). `restoreHousehold` scopes its write by
+  // the actor's `update` rules on Household, and so does `updateHousehold`.
+  // Unconditioned, this would therefore be an `update` on EVERY household,
+  // live ones included: Admin could rename any household or change who may
+  // see it, which this floor leaves out. The condition references no variable,
+  // so it renders in the `roles` pass, and it can never match a row the live
+  // filter on every edit path also matches. Declared in the unconditioned
+  // staff-grant ledger all the same, because it reaches every deleted
+  // household on the install.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Household,
+    conditions: { deletedAt: { not: null } },
+    slug: 'update:household:restore:administer',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Restore any soft-deleted household as server staff',
   }),
   // The one floor entry with no route behind it YET, and the distinction from
   // the transfer-ownership slug above matters: nothing in the tree references
@@ -1023,6 +1041,26 @@ export const PERMISSION_CATALOG = [
     slug: 'delete:household',
     riskLevel: RiskLevel.Medium,
     reason: 'Delete a household',
+  }),
+  // Held by NO role (#175). An owner's delete grants it to each of the
+  // household's owners as a `UserPermission` pinned to that household, with an
+  // expiry, and the restore revokes every one of them. The factory renders a
+  // pinned grant as `{ ...conditions, id }`, so this reaches one household for
+  // one window.
+  //
+  // Conditioned on the tombstone for the same reason as the staff variant,
+  // and for one of its own: a grant that outlived its restore, say because
+  // its holder left the household inside the window, would otherwise be a
+  // live edit right on a household they no longer belong to.
+  //
+  // `Medium`, like `delete:household`, the operation it undoes.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Household,
+    conditions: { deletedAt: { not: null } },
+    slug: 'update:household:restore',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Restore a household you deleted, within the recovery window',
   }),
   permission({
     action: Action.manage,

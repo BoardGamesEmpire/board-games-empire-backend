@@ -12,10 +12,25 @@ import {
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { canonicalizeTag } from '@bge/locale';
-import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
+import {
+  AbilityService,
+  PermissionsService,
+  resolveActingUserIdOrNull,
+  resolveScopeSubjectId,
+  ScopeComposer,
+} from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import assert from 'node:assert';
+import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
 import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
@@ -37,6 +52,15 @@ const HOUSEHOLD_LIST_INCLUDE = {
 } satisfies Prisma.HouseholdInclude;
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
+
+/**
+ * What a soft delete returns: the tombstoned row, and when the actor's window
+ * to restore it ends, or `null` when the delete opened none for them (#175).
+ */
+export interface HouseholdDeletion {
+  readonly household: Household;
+  readonly restorableUntil: Date | null;
+}
 
 @Injectable()
 export class HouseholdService {
@@ -516,16 +540,43 @@ export class HouseholdService {
    * filter `deletedAt: null`. Outstanding invites to the household are revoked
    * in the same transaction so a stale token can never be accepted into a dead
    * household. Members and game-collection shares are intentionally left in
-   * place — a soft delete is reversible and reads already exclude the
-   * household; hard cascade/cleanup is deferred to the (future) purge path.
+   * place — a soft delete is reversible ({@link restoreHousehold}) and reads
+   * already exclude the household; hard cascade/cleanup is deferred to the
+   * purge path (#543).
    *
    * That retention is load-bearing in the other direction too: because the
    * member rows survive, a membership clause alone still matches this household,
    * which is why the scope `getHouseholdsForUser` declares cannot drop its
    * `deletedAt` filter (#364). A read that adopts that scope inherits the
    * filter; one that builds its own membership clause must add it.
+   *
+   * ## Who can undo it (#175)
+   *
+   * When the actor is one of the household's owners, every owner gets a
+   * recovery grant for {@link HOUSEHOLD_RESTORE_WINDOW_MS}, and
+   * `restorableUntil` says when it ends. Every owner, because any owner may
+   * delete, so a co-owner must not lose the household with no way back because
+   * another one did.
+   *
+   * Any other actor gets no window: staff deleting through
+   * `delete:household:administer`, or an actor with no user behind it. That is
+   * moderation, and a grant to the owners would let them reverse it. Staff
+   * restore through their own slug instead, and `restorableUntil` is `null`.
+   *
+   * Ownership decides, not which rule the write matched. Staff who are among
+   * the household's owners delete as its owners, and every owner gets the
+   * window: nothing in the request tells moderation from an owner deleting
+   * their own household. Moderating a household they own is for staff who do
+   * not.
+   *
+   * The other order has no shortcut. When an owner deleted first and staff
+   * want the household to stay down, staff restore it and delete it again:
+   * the restore revokes the owners' windows, and a staff delete issues none.
    */
-  async deleteHousehold(id: string) {
+  async deleteHousehold(id: string): Promise<HouseholdDeletion> {
+    // `null` for an actor with no user behind it, which then owns nothing.
+    const actorUserId = resolveActingUserIdOrNull(this.abilityService);
+
     try {
       // Existence first (→ 404); the scoped update below enforces the delete
       // policy (owner-only), and a non-matching `where` (→ P2025) maps to 403 —
@@ -533,7 +584,7 @@ export class HouseholdService {
       // concurrent delete landed in between (`scopedWriteRefusal`).
       await assertHouseholdExists(this.db, id);
 
-      const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
+      const { household, memberUserIds, restorableUntil } = await this.db.$transaction(async (tx) => {
         const household = await tx.household.update({
           where: {
             id,
@@ -554,20 +605,32 @@ export class HouseholdService {
 
         // Member rows survive the soft delete; capture them so their cached
         // ability graphs can be evicted (the household just left their surface).
+        // Read after the update, which holds the row lock a role transition
+        // needs, so the owners seen here cannot be mid-swap.
         const members = await tx.householdMember.findMany({
           where: { householdId: id },
-          select: { userId: true },
+          select: { userId: true, role: { select: { role: { select: { name: true } } } } },
         });
 
-        return { household, memberUserIds: members.map((member) => member.userId) };
+        const ownerUserIds = members
+          .filter((member) => member.role?.role.name === SystemRole.HouseholdOwner)
+          .map((member) => member.userId);
+
+        const restorableUntil =
+          actorUserId !== null && ownerUserIds.includes(actorUserId)
+            ? await this.grantRecovery(tx, id, ownerUserIds, actorUserId)
+            : null;
+
+        return { household, memberUserIds: members.map((member) => member.userId), restorableUntil };
       });
 
       // Evict every member's graph so stale Household* abilities don't linger for
       // the cache TTL. The graph query also excludes soft-deleted memberships, so
-      // the rebuild omits this household even before the eviction lands.
+      // the rebuild omits this household even before the eviction lands. The
+      // owners are members, so the same eviction picks up their recovery grants.
       await this.permissions.invalidateUsers(memberUserIds);
 
-      return household;
+      return { household, restorableUntil };
     } catch (error) {
       // A scoped-update miss: the actor may not delete this household
       // (owner-only), or a concurrent delete got there first.
@@ -597,5 +660,171 @@ export class HouseholdService {
     return (await householdExists(this.db, id))
       ? new ForbiddenException(forbidden)
       : new NotFoundException(t('errors.household.not_found', { id }));
+  }
+
+  /**
+   * Undoes {@link deleteHousehold} (#175): clears `deletedAt`, so every read
+   * sees the household again and its members' household-scoped grants come
+   * back. Revoked invites stay revoked, and nothing is emitted, like the delete
+   * (#245).
+   *
+   * The write is scoped by the actor's `update` rules on Household, and the
+   * only ones that can match a deleted row are the two restore slugs, both
+   * conditioned on the tombstone: an owner's recovery grant, pinned to this
+   * household until its window ends, or staff's. The `deletedAt: { not: null }`
+   * filter says the same thing again, so no other `update` rule can turn this
+   * into an edit of a live household.
+   *
+   * An actor with no `update` rule on Household at all, such as a stranger or
+   * an owner whose window lapsed, gets CASL's deny-all `{ OR: [] }`. Prisma
+   * drops that inside `AND` (prisma#21856), which would leave only the
+   * tombstone filter; `DatabaseService` installs `createCaslExtension`, which
+   * hoists it to the top of the `where` so it holds.
+   *
+   * In the same transaction every recovery grant for the household goes,
+   * whoever restored it: the window was for undoing THIS delete, and a
+   * co-owner's grant outliving the restore would reach the household's next
+   * one. That includes a grant an operator put on the key: a standing right to
+   * restore is staff's slug, not this one. After commit every member is
+   * evicted, since all of their household grants come back, not only the
+   * restorer's.
+   *
+   * A miss (P2025) is resolved by {@link restoreRefusal}: 409 when the
+   * household is live and the actor may read it, otherwise 404.
+   */
+  async restoreHousehold(id: string): Promise<Household> {
+    try {
+      const { household, memberUserIds } = await this.db.$transaction(async (tx) => {
+        const household = await tx.household.update({
+          where: {
+            id,
+            deletedAt: { not: null },
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
+          },
+          data: { deletedAt: null },
+        });
+
+        // Grants only. An operator's denial on the same key outlives the
+        // restore, as it outlived the delete (`grantRecovery`). `inverted` is
+        // nullable, so "not a denial" is spelled out: `NOT: { inverted: true }`
+        // would drop the null rows.
+        await tx.userPermission.deleteMany({
+          where: {
+            resourceType: ResourceType.Household,
+            resourceId: id,
+            permission: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG },
+            OR: [{ inverted: null }, { inverted: false }],
+          },
+        });
+
+        const members = await tx.householdMember.findMany({
+          where: { householdId: id },
+          select: { userId: true },
+        });
+
+        return { household, memberUserIds: members.map((member) => member.userId) };
+      });
+
+      await this.permissions.invalidateUsers(memberUserIds);
+
+      return household;
+    } catch (error) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        throw await this.restoreRefusal(id);
+      }
+
+      this.logger.error(`Error restoring household with id ${id}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Why a restore matched nothing, in the terms the caller may learn.
+   *
+   * 409 only when the household is live AND the actor can read it: an offline
+   * retry of a restore that already landed, or a co-owner who got there first,
+   * gets a distinct "already done". Everything else is 404, the same answer
+   * whether the id is unknown, the window has lapsed, or the actor is a plain
+   * member or a stranger. The probe is read-scoped for that reason: a stranger
+   * learns nothing from the difference.
+   */
+  private async restoreRefusal(id: string): Promise<ConflictException | NotFoundException> {
+    const readable = await this.db.household.count({
+      where: {
+        id,
+        deletedAt: null,
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
+      },
+    });
+
+    return readable > 0
+      ? new ConflictException(t('errors.household.not_deleted', { id }))
+      : new NotFoundException(t('errors.household.not_found', { id }));
+  }
+
+  /**
+   * Issues each owner the recovery grant, all expiring together, and returns
+   * when the acting owner's undo ends, or `null` when this delete opened none
+   * for them.
+   *
+   * Create-only. Every restore revokes the household's recovery grants, so a
+   * row already on an owner's key was put there by an operator, and it stays
+   * exactly as set: a denial is not turned into a grant, and a grant is not
+   * re-dated or re-attributed. That owner gets no new window, and when the
+   * owner is the actor the result is `null`: the response never promises an
+   * undo this delete did not open.
+   *
+   * An operator's denial of the slug pinned to no household also means `null`
+   * while it is in force, because the loader applies denials after grants and
+   * so it outranks the pinned one. The grant is still written, and counts if
+   * the denial is lifted inside the window.
+   *
+   * A missing slug is a server error that rolls the delete back, not a delete
+   * committed with no way to undo it.
+   */
+  private async grantRecovery(
+    tx: Prisma.TransactionClient,
+    householdId: string,
+    ownerUserIds: readonly string[],
+    grantedById: string,
+  ): Promise<Date | null> {
+    const permission = await tx.permission.findFirst({
+      where: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG, retiredAt: null },
+      select: { id: true },
+    });
+
+    if (!permission) {
+      throw new InternalServerErrorException(
+        t('errors.household.permission_not_provisioned', { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG }),
+      );
+    }
+
+    const now = Date.now();
+    const expiresAt = new Date(now + HOUSEHOLD_RESTORE_WINDOW_MS);
+    const onKey = { permissionId: permission.id, resourceType: ResourceType.Household };
+
+    // One statement for every owner, and an existing row wins (ON CONFLICT DO
+    // NOTHING). What comes back is only what this delete created.
+    const created = await tx.userPermission.createManyAndReturn({
+      data: ownerUserIds.map((userId) => ({ ...onKey, resourceId: householdId, userId, grantedById, expiresAt })),
+      skipDuplicates: true,
+      select: { userId: true },
+    });
+
+    if (!created.some((grant) => grant.userId === grantedById)) {
+      return null;
+    }
+
+    const deniedEverywhere = await tx.userPermission.count({
+      where: {
+        ...onKey,
+        userId: grantedById,
+        resourceId: null,
+        inverted: true,
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date(now) } }],
+      },
+    });
+
+    return deniedEverywhere > 0 ? null : expiresAt;
   }
 }

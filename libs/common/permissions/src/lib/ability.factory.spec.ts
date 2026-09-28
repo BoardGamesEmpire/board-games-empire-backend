@@ -981,8 +981,15 @@ describe('AbilityFactory', () => {
 
       // `update:household` was one of the 77 inert grants and is deliberately
       // not in the floor: staff may read a household's roster and soft-delete
-      // the household, not edit it. A floor, not a mirror.
-      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({ OR: [] });
+      // the household, not edit it. A floor, not a mirror. The one `update`
+      // staff hold on a household is restore (#175), and its condition reaches
+      // tombstones only: every edit path also filters `deletedAt: null`, so
+      // the two never both match.
+      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({
+        OR: [{ deletedAt: { not: null } }],
+      });
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-1', deletedAt: null }))).toBe(false);
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-1', deletedAt: new Date() }))).toBe(true);
 
       // Ownership transfer is NOT staff authority, and this is the assertion
       // that keeps it out. A slug for it was seeded and then removed:
@@ -1082,6 +1089,50 @@ describe('AbilityFactory', () => {
       // being `{}`, the read variants have to be seeded.
       expect(accessibleBy(staff(roleName), Action.read).ofType('Household')).toEqual({});
       expect(accessibleBy(staff(roleName), Action.read).ofType('HouseholdMember')).toEqual({});
+    });
+  });
+
+  describe('household recovery grants (#175)', () => {
+    // What `deleteHousehold` issues each owner: the shipped restore slug as a
+    // `UserPermission` pinned to one household, with an expiry. Built from the
+    // catalog entry so the condition under test is the one that seeds.
+    const recoveryGrant = (resourceId: string, expiresAt: Date | null = null) => {
+      const { action, subject, conditions, fields, inverted } = catalogPermission('update:household:restore');
+
+      return makeUserPermission({
+        resourceType: ResourceType.Household,
+        resourceId,
+        expiresAt,
+        permission: { action, subject, conditions, fields, inverted },
+      });
+    };
+
+    it('renders to the one household, and only while it is deleted', () => {
+      const ability = factory.createForUser(makeUser({ permissions: [recoveryGrant('hh-1')] }));
+
+      // The query `restoreHousehold` scopes its write by. `not: null` is a
+      // Prisma operator `@casl/prisma` has to parse; this is where that is
+      // proven rather than assumed.
+      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({
+        OR: [{ deletedAt: { not: null }, id: 'hh-1' }],
+      });
+    });
+
+    it('matches the named household while it is deleted, and neither a live one nor another tombstone', () => {
+      const ability = factory.createForUser(makeUser({ permissions: [recoveryGrant('hh-1')] }));
+
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-1', deletedAt: new Date() }))).toBe(true);
+      // A grant that outlived its restore would otherwise be a live edit right.
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-1', deletedAt: null }))).toBe(false);
+      expect(ability.can(Action.update, asEntity('Household', { id: 'hh-2', deletedAt: new Date() }))).toBe(false);
+    });
+
+    it('authorizes nothing once the window has passed', () => {
+      const ability = factory.createForUser(
+        makeUser({ permissions: [recoveryGrant('hh-1', new Date(Date.now() - 1_000))] }),
+      );
+
+      expect(accessibleBy(ability, Action.update).ofType('Household')).toEqual({ OR: [] });
     });
   });
 

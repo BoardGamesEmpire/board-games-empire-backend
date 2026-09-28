@@ -1,5 +1,5 @@
 import type { Household } from '@bge/database';
-import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType } from '@bge/database';
+import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
@@ -10,7 +10,12 @@ import {
   unwrapTransaction,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Http, PrismaError } from '@status/codes';
 import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
@@ -466,6 +471,225 @@ describe('HouseholdService', () => {
     await expect(service.deleteHousehold('hh-1')).rejects.toThrow(ForbiddenException);
     // The failed update rolls the transaction back — no invalidation runs.
     expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+  });
+
+  describe('recovery grants on delete (#175)', () => {
+    const NOW = Date.parse('2026-09-27T12:00:00Z');
+    const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1_000;
+
+    const owner = (userId: string) => ({ userId, role: { role: { name: SystemRole.HouseholdOwner } } });
+    const member = (userId: string) => ({ userId, role: { role: { name: SystemRole.HouseholdMember } } });
+
+    beforeEach(() => {
+      jest.spyOn(Date, 'now').mockReturnValue(NOW);
+      db.household.count.mockResolvedValue(1);
+      unwrapTransaction(db);
+      db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
+      db.invite.updateMany.mockResolvedValue({ count: 0 } as never);
+      db.permission.findFirst.mockResolvedValue({ id: 'perm-restore' } as never);
+      db.householdMember.findMany.mockResolvedValue([owner('user-1'), owner('user-2'), member('user-3')] as never);
+      // Every owner's key is free unless a case says otherwise, and no
+      // operator denies the slug outright.
+      db.userPermission.createManyAndReturn.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
+      db.userPermission.count.mockResolvedValue(0);
+    });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    const grant = (userId: string) => ({
+      userId,
+      permissionId: 'perm-restore',
+      resourceType: ResourceType.Household,
+      resourceId: 'hh-1',
+      grantedById: 'user-1',
+      expiresAt: new Date(NOW + THIRTY_DAYS),
+    });
+
+    it('grants every owner the window when an owner deletes, and reports when it ends', async () => {
+      // Every owner, not only the deleter: any owner may delete, so a co-owner
+      // must not lose the household with no way back because another did.
+      const result = await service.deleteHousehold('hh-1');
+
+      expect(db.permission.findFirst).toHaveBeenCalledWith({
+        where: { slug: 'update:household:restore', retiredAt: null },
+        select: { id: true },
+      });
+      // One statement for every owner, and never one that rewrites a row.
+      expect(db.userPermission.createManyAndReturn).toHaveBeenCalledTimes(1);
+      expect(db.userPermission.createManyAndReturn).toHaveBeenCalledWith({
+        data: [grant('user-1'), grant('user-2')],
+        skipDuplicates: true,
+        select: { userId: true },
+      });
+      expect(db.userPermission.upsert).not.toHaveBeenCalled();
+      expect(db.userPermission.updateMany).not.toHaveBeenCalled();
+
+      expect(result).toEqual({ household: { id: 'hh-1' }, restorableUntil: new Date(NOW + THIRTY_DAYS) });
+      // Owners are members, so the eviction that already runs picks their
+      // grants up; nothing is evicted twice.
+      expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2', 'user-3']);
+    });
+
+    it('offers no undo when the deleter’s key already held a row, which it leaves as the operator set it', async () => {
+      // A denial, or a grant with its own expiry: either way this delete
+      // created nothing for the deleter, so it has no window of its own to
+      // report, and the row is not re-dated or re-attributed.
+      db.userPermission.createManyAndReturn.mockResolvedValue([{ userId: 'user-2' }] as never);
+
+      const result = await service.deleteHousehold('hh-1');
+
+      expect(result.restorableUntil).toBeNull();
+      expect(db.userPermission.upsert).not.toHaveBeenCalled();
+      expect(db.userPermission.updateMany).not.toHaveBeenCalled();
+      // Nothing to ask about a denial elsewhere: the answer is already no.
+      expect(db.userPermission.count).not.toHaveBeenCalled();
+    });
+
+    it('offers no undo while an operator denies the deleter the slug on every household', async () => {
+      // The loader applies denials after grants, so an unpinned denial beats
+      // the pinned grant and the restore would 404. The grant is still
+      // written: it counts if the denial is lifted inside the window.
+      db.userPermission.count.mockResolvedValue(1);
+
+      const result = await service.deleteHousehold('hh-1');
+
+      expect(db.userPermission.count).toHaveBeenCalledWith({
+        where: {
+          permissionId: 'perm-restore',
+          resourceType: ResourceType.Household,
+          userId: 'user-1',
+          resourceId: null,
+          inverted: true,
+          // An expired denial is one the loader has already dropped.
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date(NOW) } }],
+        },
+      });
+      expect(db.userPermission.createManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ data: [grant('user-1'), grant('user-2')] }),
+      );
+      expect(result.restorableUntil).toBeNull();
+    });
+
+    it('grants nothing when the deleter is not an owner, so staff moderation is not undoable by owners', async () => {
+      // `delete:household:administer` reaches a household its holder owns no
+      // part of. Handing its owners a grant would let them reverse moderation;
+      // staff restore through their own slug instead.
+      abilityService.getActingUserId.mockReturnValue('staff-1');
+
+      const result = await service.deleteHousehold('hh-1');
+
+      expect(db.permission.findFirst).not.toHaveBeenCalled();
+      expect(db.userPermission.createManyAndReturn).not.toHaveBeenCalled();
+      expect(result.restorableUntil).toBeNull();
+    });
+
+    it('grants nothing to an actor with no user behind it, and still deletes', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('common.forbidden.access'));
+      });
+
+      const result = await service.deleteHousehold('hh-1');
+
+      expect(db.household.update).toHaveBeenCalled();
+      expect(db.userPermission.createManyAndReturn).not.toHaveBeenCalled();
+      expect(result.restorableUntil).toBeNull();
+    });
+
+    it('refuses the delete rather than commit one nobody can undo, when the slug is not provisioned', async () => {
+      db.permission.findFirst.mockResolvedValue(null);
+
+      await expect(service.deleteHousehold('hh-1')).rejects.toBeInstanceOf(InternalServerErrorException);
+      expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreHousehold (#175)', () => {
+    beforeEach(() => {
+      unwrapTransaction(db);
+      db.household.update.mockResolvedValue({ id: 'hh-1', deletedAt: null } as Household);
+      db.userPermission.deleteMany.mockResolvedValue({ count: 2 } as never);
+      db.householdMember.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
+    });
+
+    const missed = () =>
+      new Prisma.PrismaClientKnownRequestError('no rows', {
+        code: PrismaError.DependentRecordNotFound,
+        clientVersion: 'test',
+      });
+
+    it('clears the tombstone under the update scope, matching only a deleted household', async () => {
+      const household = await service.restoreHousehold('hh-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.update);
+      expect(db.household.update).toHaveBeenCalledWith({
+        where: { id: 'hh-1', deletedAt: { not: null }, AND: [COND] },
+        data: { deletedAt: null },
+      });
+      expect(household).toEqual({ id: 'hh-1', deletedAt: null });
+    });
+
+    it('revokes every recovery grant for the household, whoever restores it, and no denial', async () => {
+      await service.restoreHousehold('hh-1');
+
+      expect(db.userPermission.deleteMany).toHaveBeenCalledWith({
+        where: {
+          resourceType: ResourceType.Household,
+          resourceId: 'hh-1',
+          permission: { slug: 'update:household:restore' },
+          OR: [{ inverted: null }, { inverted: false }],
+        },
+      });
+    });
+
+    it('evicts every member, whose household grants all come back', async () => {
+      await service.restoreHousehold('hh-1');
+
+      expect(db.householdMember.findMany).toHaveBeenCalledWith({
+        where: { householdId: 'hh-1' },
+        select: { userId: true },
+      });
+      expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2']);
+    });
+
+    it('answers 404 when there is nothing this actor may restore and nothing live it may read', async () => {
+      // An unknown id, a lapsed or absent grant, a plain member, a stranger:
+      // all the same answer, so none of them learns more than another.
+      db.household.update.mockRejectedValue(missed());
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.restoreHousehold('hh-1')).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.household.count).toHaveBeenCalledWith({
+        where: { id: 'hh-1', deletedAt: null, AND: [COND] },
+      });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
+      expect(db.userPermission.deleteMany).not.toHaveBeenCalled();
+      expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 when the household is live and the actor can read it', async () => {
+      // An offline retry of a restore that already landed, or a co-owner who
+      // got there first. Read-scoped, so a stranger gets the 404 above.
+      db.household.update.mockRejectedValue(missed());
+      db.household.count.mockResolvedValue(1);
+
+      await expect(service.restoreHousehold('hh-1')).rejects.toMatchObject({
+        status: Http.Conflict,
+        response: expect.objectContaining({ key: 'errors.household.not_deleted' }),
+      });
+      expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a failure that is not a scoped miss', async () => {
+      const failure = new Error('connection reset');
+      db.household.update.mockRejectedValue(failure);
+
+      await expect(service.restoreHousehold('hh-1')).rejects.toBe(failure);
+      expect(db.household.count).not.toHaveBeenCalled();
+    });
   });
 
   /**

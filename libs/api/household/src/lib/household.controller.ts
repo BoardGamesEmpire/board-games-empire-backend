@@ -2,13 +2,14 @@ import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, NoCache, paginated } from '@bge/shared';
-import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { HOUSEHOLD_RESTORE_WINDOW_DAYS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
-import { HouseholdLivenessGuard, HouseholdPathParam } from './guards/household-liveness.guard';
+import { AllowsDeletedHousehold, HouseholdLivenessGuard, HouseholdPathParam } from './guards/household-liveness.guard';
 import { HouseholdService } from './household.service';
 
 @ApiBearerAuth()
@@ -42,7 +43,10 @@ export class HouseholdController {
       '`GET /households/:id`; listing another user\u2019s households is #485, and the all-subject staff surface ' +
       'is #419. Because it answers the same question for every caller, a **user session** may treat a ' +
       'household it has cached but does not find in the COMPLETE list as one it was removed from or one that ' +
-      'was deleted. Absence from one page says nothing about the others, and only a first page with ' +
+      'was deleted. Deleted is not necessarily final: server staff can restore a deleted household at any ' +
+      `time, and when one of its owners deleted it, its owners can for ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days ` +
+      '(`POST /households/:id/restore`, #175), so a household can reappear in a later read. Absence from one ' +
+      'page says nothing about the others, and only a first page with ' +
       '`hasMore: false` is a complete, consistent read: a walk across pages is not one snapshot, so a ' +
       'household removed between two page requests shifts the rest up and can carry a live one past the ' +
       'boundary unseen. Treat what a walk missed as something to re-check, not as proof. An **API key** ' +
@@ -119,6 +123,16 @@ export class HouseholdController {
     );
   }
 
+  @ApiOperation({
+    summary: 'Delete a household (soft)',
+    description:
+      'Stamps `deletedAt` and hides the household from every read; the roster and game shares are kept, and ' +
+      'pending invites are revoked. When one of the household’s owners deletes it, every owner can restore it ' +
+      `until \`restorableUntil\` (ISO timestamp, ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days on) through ` +
+      '`POST /households/:id/restore`, and server staff can at any time. `restorableUntil` is `null` when the ' +
+      'delete opened no undo for the caller: a delete by server staff is moderation, and only staff can undo it, ' +
+      'and an operator may have denied the caller the restore. See #175.',
+  })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found, or already deleted' })
@@ -126,7 +140,46 @@ export class HouseholdController {
   @Delete(':id')
   delete(@Param('id') id: string) {
     return from(this.householdService.deleteHousehold(id)).pipe(
-      map((household) => ({ message: t('success.household.deleted', { id }), household })),
+      map(({ household, restorableUntil }) => ({
+        message: t('success.household.deleted', { id }),
+        household,
+        restorableUntil,
+      })),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Restore a soft-deleted household',
+    description:
+      'The undo of `DELETE /households/:id`: clears `deletedAt`, so the household and its roster are back as they ' +
+      'were deleted. Invites the delete revoked stay revoked. Allowed for its owners until the `restorableUntil` ' +
+      'the delete returned, and for server staff at any time. Answers 404 when there is nothing this caller may ' +
+      'restore (an unknown id, a lapsed window, a caller who is not an owner), and 409 when the household is not ' +
+      'deleted and the caller can read it, for instance a retry of a restore that already succeeded. See #175.',
+  })
+  @ApiResponse({ status: Http.Ok, description: 'Household restored' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.NotFound, description: 'Nothing this caller may restore' })
+  @ApiResponse({ status: Http.Conflict, description: 'The household is not deleted' })
+  // `read`, not `update`, and not because restore is a read. The guard can
+  // only ask whether the actor holds ANY rule for the pair. An ex-owner whose
+  // window has lapsed and who holds no other household has no `update` rule on
+  // Household at all, so an `update` check would answer them 403 while the
+  // same user with a second household reached the service and got 404: the
+  // split #299 removed, on the one route the liveness guard skips. Every user
+  // holds `read:households`, so the service decides, scoping its write by the
+  // actor's `update` rules. The guard still denies an actor with no abilities
+  // and still applies an API key's scopes.
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
+  // Its target is a deleted household, which the liveness guard would 404.
+  @AllowsDeletedHousehold()
+  // Nothing is created, so 200, as for transfer-ownership. Nest's default for
+  // a POST is 201.
+  @HttpCode(Http.Ok)
+  @Post(':id/restore')
+  restore(@Param('id') id: string) {
+    return from(this.householdService.restoreHousehold(id)).pipe(
+      map((household) => ({ message: t('success.household.restored', { id }), household })),
     );
   }
 }
