@@ -235,7 +235,8 @@ jobs:
       # `:serve` task as a dependency — a task that never exits, so an
       # affected run that picks any of them up hangs until the job timeout.
       # There is no safe one to unexclude; remove each exclusion only as
-      # #258 implements or deletes that app.
+      # #258 implements or deletes that app. The root `test:e2e` script
+      # carries the same list for local runs, so change both together.
       - name: Run e2e suite
         timeout-minutes: 20
         env:
