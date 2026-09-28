@@ -65,7 +65,8 @@ export const DEFAULT_MAX_OFFSET = 100_000;
  *
  * The ceiling arrives as the decorator's first constraint rather than being
  * read from the constant here, so the message reports the value the check
- * used (`{constraints.0}` in the catalog).
+ * used (`{constraints.0}` in the catalog). The message itself is named on the
+ * decorator, as its siblings' are, where the #145 guardrail can see it.
  */
 @ValidatorConstraint({ name: 'skipWithinCeiling' })
 class SkipWithinCeiling implements ValidatorConstraintInterface {
@@ -78,10 +79,6 @@ class SkipWithinCeiling implements ValidatorConstraintInterface {
     }
 
     return skip <= maxOffset;
-  }
-
-  defaultMessage(args: ValidationArguments): string {
-    return i18nValidationMessage('validation.skipWithinCeiling')(args);
   }
 }
 
@@ -112,7 +109,9 @@ export abstract class PaginationQueryDto {
   @Type(() => Number)
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(1, { message: i18nValidationMessage('validation.min') })
-  @Validate(SkipWithinCeiling, [DEFAULT_MAX_OFFSET])
+  @Validate(SkipWithinCeiling, [DEFAULT_MAX_OFFSET], {
+    message: i18nValidationMessage('validation.skipWithinCeiling'),
+  })
   @IsOptional()
   page = 1;
 
