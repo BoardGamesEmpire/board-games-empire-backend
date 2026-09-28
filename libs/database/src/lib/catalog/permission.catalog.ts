@@ -1831,6 +1831,27 @@ export const PERMISSION_CATALOG = [
     reason: 'View own webhook subscriptions',
   }),
 
+  // --- Notifications ──────────────────────────────────────
+  // Read and update, not `manage`: CASL's `manage` also matches `create` and
+  // `delete`, and only the server's own workers write notifications. The
+  // routes still filter by the session's user themselves (#504, #517).
+  permission({
+    action: Action.read,
+    subject: ResourceType.Notification,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'read:notification:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Read own notifications',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.Notification,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'update:notification:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Mark own notifications read',
+  }),
+
   // --- Audit Log ──────────────────────────────────────────
   // Read-only by design — there is no mutation API for audit rows.
   permission({

@@ -1,6 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { NoCache } from '@bge/shared';
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
@@ -8,6 +9,10 @@ import { MarkReadDto } from './dto/mark-read.dto';
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
+// Never response-cached: the unread list is what a client polls, and it
+// changes with each mark-read and each notification a worker writes. A cached
+// body would repeat the list from before either for the whole TTL (#530).
+@NoCache()
 @UseGuards(PoliciesGuard)
 @ApiTags('notifications')
 @Controller('notifications')

@@ -351,6 +351,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:media_contribution:reclaim',
     'update:media_object:own',
 
+    // notification
+    'read:notification:own',
+    'update:notification:own',
+
     // platform
     'read:platform_game',
     'read:platform',
