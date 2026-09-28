@@ -7,18 +7,16 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
+import { plainToInstance } from 'class-transformer';
 import { firstValueFrom } from 'rxjs';
-import type { SearchQueryDto } from './dto/search-query.dto';
+import { SearchQueryDto } from './dto/search-query.dto';
 import { GameSearchService } from './game-search.service';
 
 const READ = { id: 'sentinel-read-condition' };
 
-const localOnly = (overrides: Partial<SearchQueryDto> = {}): SearchQueryDto => ({
-  query: 'brass',
-  offset: 0,
-  includeExternal: false,
-  ...overrides,
-});
+/** What the global pipe hands the controller: an instance, so `pageSize` resolves. */
+const localOnly = (overrides: Record<string, unknown> = {}): SearchQueryDto =>
+  plainToInstance(SearchQueryDto, { query: 'brass', includeExternal: false, ...overrides });
 
 describe('GameSearchService', () => {
   let service: GameSearchService;
@@ -80,6 +78,18 @@ describe('GameSearchService', () => {
 
       expect(() => service.search(localOnly())).toThrow(unprimed);
       expect(db.game.findMany).not.toHaveBeenCalled();
+    });
+
+    it("takes the DTO's page size, 20 when the caller names none", async () => {
+      await firstValueFrom(service.search(localOnly()));
+
+      expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20, skip: 0 }));
+    });
+
+    it('takes the limit and offset the caller sent', async () => {
+      await firstValueFrom(service.search(localOnly({ limit: 5, offset: 10 })));
+
+      expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 5, skip: 10 }));
     });
 
     it('builds no conditions when the local half is skipped', () => {

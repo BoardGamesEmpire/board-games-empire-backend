@@ -275,6 +275,38 @@ describe('CappedOffsetPaginationQueryDto — the offset-native transport DTO', (
     expect(errors[0].constraints).toHaveProperty('max');
     expect(whitelisted.map((error) => error.property)).toContain('page');
   });
+
+  // #403: the local page size is resolved here, as the page-based factory
+  // resolves its own, rather than by a default in the service that reads it.
+  it('resolves pageSize to the shared default when limit is absent', () => {
+    const dto = plainToInstance(SearchAt100, {}, { enableImplicitConversion: true });
+
+    expect(dto.pageSize).toBe(DEFAULT_PAGE_SIZE);
+  });
+
+  it('resolves pageSize to the default the endpoint names, and to limit when one is sent', () => {
+    class SearchDefault20 extends CappedOffsetPaginationQueryDto(100, 20) {}
+
+    expect(plainToInstance(SearchDefault20, {}, { enableImplicitConversion: true }).pageSize).toBe(20);
+    expect(plainToInstance(SearchDefault20, { limit: '7' }, { enableImplicitConversion: true }).pageSize).toBe(7);
+  });
+
+  it('refuses a default above its own cap when the class is built', () => {
+    expect(() => CappedOffsetPaginationQueryDto(10, 20)).toThrow(RangeError);
+  });
+
+  it('ignores a crafted pageSize parameter instead of failing on it', () => {
+    const dto = plainToInstance(SearchAt100, { limit: '10', pageSize: '99' }, { enableImplicitConversion: true });
+
+    expect(dto.pageSize).toBe(10);
+  });
+
+  it('gives the abstract base the same getter', () => {
+    class OffsetShape extends OffsetPaginationQueryDto {}
+
+    expect(plainToInstance(OffsetShape, {}, { enableImplicitConversion: true }).pageSize).toBe(DEFAULT_PAGE_SIZE);
+    expect(plainToInstance(OffsetShape, { limit: '3' }, { enableImplicitConversion: true }).pageSize).toBe(3);
+  });
 });
 
 // Each failure names a validation catalog key, so the edge renders it in the

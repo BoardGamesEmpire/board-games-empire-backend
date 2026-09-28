@@ -1,7 +1,8 @@
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
+import { plainToInstance } from 'class-transformer';
 import { firstValueFrom, of, throwError } from 'rxjs';
-import type { SearchQueryDto } from './dto/search-query.dto';
+import { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import { GameSearchController } from './game-search.controller';
 import { GameSearchService } from './game-search.service';
@@ -27,14 +28,15 @@ describe('GameSearchController', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  const makeDto = (overrides?: Partial<SearchQueryDto>): SearchQueryDto => ({
-    query: 'Gloomhaven',
-    gatewayIds: ['igdb-gw-1'],
-    includeLocal: true,
-    includeExternal: true,
-    offset: 0,
-    ...overrides,
-  });
+  const makeDto = (overrides?: Record<string, unknown>): SearchQueryDto =>
+    plainToInstance(SearchQueryDto, {
+      query: 'Gloomhaven',
+      gatewayIds: ['igdb-gw-1'],
+      includeLocal: true,
+      includeExternal: true,
+      offset: 0,
+      ...overrides,
+    });
 
   const makeResponse = (overrides?: Partial<SearchResponseDto>): SearchResponseDto => ({
     correlationId: 'corr-1',

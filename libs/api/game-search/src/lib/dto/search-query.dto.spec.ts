@@ -138,6 +138,14 @@ describe('SearchQueryDto', () => {
       const dto = toDto({ query: 'test', limit: '25' });
       expect(dto.limit).toBe(25);
     });
+
+    it('resolves the local page size to 20 when limit is absent', () => {
+      expect(toDtoWithPipe({ query: 'test' }).pageSize).toBe(20);
+    });
+
+    it('resolves the local page size to limit when one is sent', () => {
+      expect(toDtoWithPipe({ query: 'test', limit: '50' }).pageSize).toBe(50);
+    });
   });
 
   describe('offset', () => {

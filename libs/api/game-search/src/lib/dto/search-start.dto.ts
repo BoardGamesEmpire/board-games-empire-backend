@@ -2,7 +2,7 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
-export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
+export class SearchStartDto extends CappedOffsetPaginationQueryDto(100, 20) {
   @IsUUID(undefined, { message: i18nValidationMessage('validation.isUUID') })
   correlationId!: string;
 
@@ -39,9 +39,10 @@ export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   locale?: string;
 
-  // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
-  // are inherited from CappedOffsetPaginationQueryDto — see #17. Offset-native
-  // for the same reason as SearchQueryDto (D-230-5 on #230).
+  // `limit` (capped at 100, local page size 20 when absent) and `offset` (bounded
+  // by DEFAULT_MAX_OFFSET, default 0) are inherited from
+  // CappedOffsetPaginationQueryDto — see #17 and #403. Offset-native for the same
+  // reason as SearchQueryDto (D-230-5 on #230).
 }
 
 export class SearchCancelDto {

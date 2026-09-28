@@ -166,4 +166,14 @@ export abstract class OffsetPaginationQueryDto {
   @Max(DEFAULT_MAX_OFFSET, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
   offset = 0;
+
+  /**
+   * The resolved page size for a query this process runs itself, as on
+   * {@link PaginationQueryDto}. The fan-out to gateways forwards the raw
+   * `limit` instead, so each vendor still applies its own default (#378).
+   */
+  @Exclude()
+  get pageSize(): number {
+    return this.limit ?? DEFAULT_PAGE_SIZE;
+  }
 }

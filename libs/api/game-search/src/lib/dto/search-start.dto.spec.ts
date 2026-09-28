@@ -31,6 +31,16 @@ describe('SearchStartDto', () => {
     });
   });
 
+  describe('pageSize', () => {
+    it('resolves to 20 when limit is absent', () => {
+      expect(toDto(base).pageSize).toBe(20);
+    });
+
+    it('resolves to limit when one is sent', () => {
+      expect(toDto({ ...base, limit: 50 }).pageSize).toBe(50);
+    });
+  });
+
   // Each failure must name a validation catalog key, so the gateway's error
   // frame renders it in the connection's locale. Assigned without the
   // transformers: the boolean transform coerces everything to a boolean, so

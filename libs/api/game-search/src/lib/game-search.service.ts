@@ -38,7 +38,7 @@ export class GameSearchService {
   }
 
   private searchLocal(dto: SearchQueryDto, readConditions: Prisma.GameWhereInput[]): Observable<WsGameSearchResult[]> {
-    return from(this.queryLocalGames(dto.query, readConditions, dto.limit, dto.offset)).pipe(
+    return from(this.queryLocalGames(dto.query, readConditions, dto.pageSize, dto.offset)).pipe(
       catchError((err) => {
         this.logger.error('Local search failed', err);
         return of([]);
@@ -57,12 +57,16 @@ export class GameSearchService {
    * rather than defaulted because the two callers get it differently: REST from
    * the request's primed ability context, WS by resolving the socket's actor.
    * Without it a title search reads every private game (#472).
+   *
+   * `limit` and `offset` are required for the same reason: each caller passes
+   * its DTO's resolved `pageSize` and `offset`, so the default page size lives
+   * on the DTO, once, rather than here (#403).
    */
   async queryLocalGames(
     query: string,
     readConditions: Prisma.GameWhereInput[],
-    limit = 20,
-    offset = 0,
+    limit: number,
+    offset: number,
   ): Promise<WsGameSearchResult[]> {
     this.logger.debug(`Performing local search for query="${query}" with limit=${limit} and offset=${offset}`);
 
