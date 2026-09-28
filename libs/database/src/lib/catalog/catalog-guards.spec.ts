@@ -431,6 +431,20 @@ describe('catalog guards', () => {
 
       expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:blank', path: 'title' }]);
     });
+
+    it('reports a relation operator beside a field of the related model, and still walks the operator body', () => {
+      const catalog = [
+        definition({
+          slug: 'read:mixed',
+          conditions: { gameVotes: { some: { attendee: { userId: '{{ user.id }}' } }, id: 'vote-1' } },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:mixed', path: 'gameVotes' },
+        { slug: 'read:mixed', path: 'gameVotes.some.attendee' },
+      ]);
+    });
   });
 
   describe('findUnboundedGrants', () => {

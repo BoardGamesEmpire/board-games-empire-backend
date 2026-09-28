@@ -464,7 +464,9 @@ const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
  * shorthand, even beside operators the sets hold: `search`, a Json filter's
  * `path` next to its `equals`, or an operator Prisma adds later. The matcher
  * throws on the whole filter, so the report is loud where the check would
- * have been silent.
+ * have been silent. The same holds for a relation operator beside a field of
+ * the related model, `{ votes: { some: {}, id } }`: Prisma's types refuse it
+ * in a literal, but not in a fragment spliced in.
  *
  * The walk goes into operator bodies and logical branches, and into a
  * shorthand's own body, so a shorthand nested inside one is reported too.
@@ -500,6 +502,9 @@ export function findShorthandRelationConditions(
       const keys = Object.keys(value);
       const relationOperators = keys.filter((operator) => RELATION_OPERATORS.has(operator));
       if (relationOperators.length > 0) {
+        if (relationOperators.length < keys.length) {
+          findings.push({ slug, path: here });
+        }
         for (const operator of relationOperators) {
           walk(slug, value[operator], `${here}.${operator}`);
         }
