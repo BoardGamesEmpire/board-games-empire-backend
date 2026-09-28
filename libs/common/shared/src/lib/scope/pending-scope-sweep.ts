@@ -29,9 +29,6 @@
 export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
   new Set([
     // Swept by 418, in the groups the intrinsic-scope table names.
-    'Event',
-    'EventGameNomination',
-    'EventOccurrence',
     'Friendship',
     'Game',
     'GameCollection',

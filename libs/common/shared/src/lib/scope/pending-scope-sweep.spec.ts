@@ -10,19 +10,7 @@ import { PENDING_SCOPE_SWEEP } from './pending-scope-sweep.js';
  * or argue in review for the exemption.
  */
 describe('PENDING_SCOPE_SWEEP', () => {
-  const EXPECTED = [
-    'Event',
-    'EventGameNomination',
-    'EventOccurrence',
-    'Friendship',
-    'Game',
-    'GameCollection',
-    'HouseholdMember',
-    'Job',
-    'MediaObject',
-    'Plugin',
-    'User',
-  ];
+  const EXPECTED = ['Friendship', 'Game', 'GameCollection', 'HouseholdMember', 'Job', 'MediaObject', 'Plugin', 'User'];
 
   it('contains exactly the reads not yet moved onto the invariant', () => {
     expect([...PENDING_SCOPE_SWEEP].sort()).toEqual(EXPECTED);

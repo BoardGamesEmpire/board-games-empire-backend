@@ -10,7 +10,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -42,16 +42,19 @@ export class EventAttendeeService {
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
+  /**
+   * Every attendee of the event the caller may read. The scope is the path's
+   * event, composed with the caller's ceiling (#512). Unpaginated, so no
+   * envelope guard checks it; paging it is #373.
+   */
   async getAttendees(eventId: string): Promise<EventAttendee[]> {
     await assertEventExists(this.db, eventId);
 
     return this.db.eventAttendee.findMany({
-      where: {
-        eventId,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
-      },
+      where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId }),
       include: ATTENDEE_INCLUDE,
       orderBy: { createdAt: 'asc' },
     });
@@ -64,6 +67,7 @@ export class EventAttendeeService {
       where: {
         id: attendeeId,
         eventId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
       include: ATTENDEE_INCLUDE,
@@ -82,6 +86,7 @@ export class EventAttendeeService {
     const attendee = await this.db.eventAttendee.findUnique({
       where: {
         eventId_userId: { eventId, userId },
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by its unique (event, user) key, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.read),
       },
       include: ATTENDEE_INCLUDE,
@@ -188,6 +193,7 @@ export class EventAttendeeService {
       const deleted = await this.db.eventAttendee.delete({
         where: {
           id: attendeeId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.delete),
         },
         include: ATTENDEE_INCLUDE,
@@ -243,6 +249,7 @@ export class EventAttendeeService {
       const updated = await this.db.eventAttendee.update({
         where: {
           id: attendeeId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendee, Action.update),
         },
         data: {
@@ -272,15 +279,17 @@ export class EventAttendeeService {
     }
   }
 
+  /**
+   * The games an attendee has brought to the event, as far as the caller may
+   * read them. The scope is the path's attendee, composed with the caller's
+   * ceiling (#512). Unpaginated, like `getAttendees`.
+   */
   async getGameList(eventId: string, attendeeId: string): Promise<EventAttendeeGameList[]> {
     await assertEventExists(this.db, eventId);
     await this.assertAttendeeExists(eventId, attendeeId);
 
     return this.db.eventAttendeeGameList.findMany({
-      where: {
-        attendeeId,
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendeeGameList, Action.read),
-      },
+      where: this.scopeComposer.compose(ResourceType.EventAttendeeGameList, Action.read, { attendeeId }),
       include: {
         collection: {
           include: {
@@ -417,6 +426,7 @@ export class EventAttendeeService {
       const deleted = await this.db.eventAttendeeGameList.delete({
         where: {
           id: gameListId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventAttendeeGameList, Action.delete),
         },
       });

@@ -12,7 +12,7 @@ import {
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -40,6 +40,7 @@ export class EventOccurrenceService {
     private readonly db: DatabaseService,
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -49,7 +50,7 @@ export class EventOccurrenceService {
    * event, however many that was. A nested list is a tempting exception ("an
    * event has a handful of dates"), but nothing in the schema bounds it, and an
    * unbounded list read is the #11 self-DoS with a smaller number in front of
-   * it. D-372-1 paginates it; the response is a truncating change, which
+   * it. #372 paginates it; the response is a truncating change, which
    * pre-alpha allows without a shim.
    *
    * `id` breaks ties on `sortOrder`, which is an `Int @default(0)` and so shares
@@ -66,14 +67,13 @@ export class EventOccurrenceService {
    * 200 with an empty page rather than 404 — and it is the ordinary TOCTOU any
    * probe-then-read has. It says nothing about the rows and count, which do
    * share one snapshot.
+   *
+   * The scope is the path's event, composed with the caller's ceiling (#512).
    */
   async getOccurrences(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventOccurrence>> {
     await assertEventExists(this.db, eventId);
 
-    const where: Prisma.EventOccurrenceWhereInput = {
-      eventId,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
-    };
+    const where = this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId });
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -100,6 +100,7 @@ export class EventOccurrenceService {
       where: {
         id: occurrenceId,
         eventId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
       },
       include: OCCURRENCE_INCLUDE,
@@ -192,6 +193,7 @@ export class EventOccurrenceService {
       const updated = await this.db.eventOccurrence.update({
         where: {
           id: occurrenceId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
         },
         data: {
@@ -240,6 +242,7 @@ export class EventOccurrenceService {
       return this.db.eventOccurrence.delete({
         where: {
           id: occurrenceId,
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
         },
         include: OCCURRENCE_INCLUDE,
@@ -304,6 +307,7 @@ export class EventOccurrenceService {
         where: {
           id: occurrenceId,
           // Status transitions are mutations → filter by `update`, not `read`.
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
         },
         data: { status: newStatus, ...extraData },
@@ -406,31 +410,64 @@ export class EventOccurrenceService {
    * answers a question nobody asked. The fix is an aggregate in the database
    * (`groupBy` on the votes) or a ceiling on occurrences per event, both of
    * which change what this route serves. #404 owns it.
+   *
+   * Attendees, occurrences and votes each compose the caller's ceiling (#512).
+   * The route's guard checks only the type, `can(read, EventAvailabilityVote)`,
+   * which every event role passes for any event, so the query is where the
+   * path's event meets the caller's own. The attendee half used to AND no
+   * ceiling at all, which let an attendee of one event read another event's
+   * attendance counts. Each collection now counts only the rows the caller may
+   * read, so an event whose attendees or occurrences are outside the caller's
+   * ceiling answers zero counts, like the sibling lists' empty page:
+   * `assertEventExists` checks only that the event exists. Being able to read
+   * the Event row itself, as a friend can, reaches none of them.
+   *
+   * The votes are read on their own and matched in memory to the attendees
+   * and occurrences read beside them, so every ceiling here sits in a
+   * top-level `where`. That is the only place `DatabaseService`'s CASL
+   * extension turns a deny-all, CASL's `{ OR: [] }`, into no rows. Inside an
+   * `include`'s filter, Prisma drops it (prisma#21856), and the votes it was
+   * meant to clip all come back.
+   *
+   * The match also keeps the numbers about the same people. `pendingVotes`
+   * and `participationRate` divide votes by `eligibleVoters`, so a vote whose
+   * attendee the attendee read did not return is never counted, even one
+   * cast between the reads. Every user role binds all three reads to the same
+   * event or household; an API key holding a subset of them is the caller
+   * this protects.
    */
   async getAvailabilitySummary(eventId: string): Promise<AvailabilitySummary> {
     await assertEventExists(this.db, eventId);
 
-    const [attendees, occurrences] = await Promise.all([
+    const [attendees, occurrences, votes] = await Promise.all([
       this.db.eventAttendee.findMany({
-        where: { eventId },
-        select: { userId: true, status: true },
+        where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId }),
+        select: { id: true, userId: true, status: true },
       }),
       this.db.eventOccurrence.findMany({
-        where: {
-          eventId,
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
-        },
-        include: {
-          availabilityVotes: {
-            select: {
-              response: true,
-              attendeeId: true,
-            },
-          },
-        },
+        where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId }),
         orderBy: OCCURRENCE_ORDER,
       }),
+      this.db.eventAvailabilityVote.findMany({
+        where: this.scopeComposer.compose(ResourceType.EventAvailabilityVote, Action.read, {
+          occurrence: { is: { eventId } },
+        }),
+        select: { occurrenceId: true, attendeeId: true, response: true },
+      }),
     ]);
+
+    const countedAttendeeIds = new Set(attendees.map((a) => a.id));
+    const votesByOccurrence = new Map<string, typeof votes>();
+
+    for (const vote of votes) {
+      if (!countedAttendeeIds.has(vote.attendeeId)) {
+        continue;
+      }
+
+      const occurrenceVotes = votesByOccurrence.get(vote.occurrenceId) ?? [];
+      occurrenceVotes.push(vote);
+      votesByOccurrence.set(vote.occurrenceId, occurrenceVotes);
+    }
 
     const registered = attendees.filter((a) => a.userId !== null);
     const guests = attendees.filter((a) => a.userId === null);
@@ -461,11 +498,12 @@ export class EventOccurrenceService {
     }
 
     const occurrenceEntries: AvailabilitySummaryEntry[] = occurrences.map((occ) => {
+      const occurrenceVotes = votesByOccurrence.get(occ.id) ?? [];
       let available = 0;
       let maybe = 0;
       let unavailable = 0;
 
-      for (const vote of occ.availabilityVotes) {
+      for (const vote of occurrenceVotes) {
         switch (vote.response) {
           case AvailabilityResponse.Available:
             available++;
@@ -479,7 +517,7 @@ export class EventOccurrenceService {
         }
       }
 
-      const totalVotes = occ.availabilityVotes.length;
+      const totalVotes = occurrenceVotes.length;
 
       return {
         occurrenceId: occ.id,
@@ -493,7 +531,7 @@ export class EventOccurrenceService {
         totalVotes,
         pendingVotes: Math.max(0, eligibleVoters - totalVotes),
         participationRate: eligibleVoters > 0 ? Math.round((totalVotes / eligibleVoters) * 100) / 100 : 0,
-        voters: occ.availabilityVotes.map((v) => ({
+        voters: occurrenceVotes.map((v) => ({
           attendeeId: v.attendeeId,
           response: v.response,
         })),

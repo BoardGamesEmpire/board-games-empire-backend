@@ -1,6 +1,6 @@
 import type { Event, EventAttendee, EventAttendeeGameList, GameCollection } from '@bge/database';
 import { Action, EventParticipationStatus, ResourceType, SystemRole } from '@bge/database';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
@@ -28,6 +28,7 @@ describe('EventAttendeeService', () => {
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let emitter: { emit: jest.Mock };
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -38,6 +39,9 @@ describe('EventAttendeeService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         EventAttendeeService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the reads actually run.
+        ScopeComposer,
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
@@ -46,20 +50,24 @@ describe('EventAttendeeService', () => {
 
     db = ctx.db;
     service = ctx.module.get(EventAttendeeService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
 
   describe('EventAttendee resource', () => {
-    it('getAttendees → read', async () => {
+    // #512. Unpaginated, so no envelope guard stands behind it (#373), but it
+    // is a collection read and composes like one. The rows do not change: the
+    // path's event was already the filter, and the ceiling still clips it.
+    it('getAttendees asks the composer for its where clause, declaring the path event as its scope', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findMany.mockResolvedValue([]);
 
       await service.getAttendees('event-1');
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read);
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ eventId: 'event-1', AND: [COND] }) }),
+        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
       );
     });
 
@@ -264,19 +272,18 @@ describe('EventAttendeeService', () => {
   });
 
   describe('EventAttendeeGameList resource', () => {
-    it('getGameList → read', async () => {
+    // #512. Same shape as `getAttendees`: unpaginated, a collection read, and
+    // scoped to the path's attendee, which was already its filter.
+    it('getGameList asks the composer for its where clause, declaring the path attendee as its scope', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1', userId: 'user-1' } as EventAttendee);
       db.eventAttendeeGameList.findMany.mockResolvedValue([]);
 
       await service.getGameList('event-1', 'att-1');
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-        ResourceType.EventAttendeeGameList,
-        Action.read,
-      );
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendeeGameList, Action.read, { attendeeId: 'att-1' });
       expect(db.eventAttendeeGameList.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: expect.objectContaining({ attendeeId: 'att-1', AND: [COND] }) }),
+        expect.objectContaining({ where: { attendeeId: 'att-1', AND: [COND] } }),
       );
     });
 
