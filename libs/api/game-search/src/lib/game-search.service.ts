@@ -58,9 +58,9 @@ export class GameSearchService {
    * the request's primed ability context, WS by resolving the socket's actor.
    * Without it a title search reads every private game (#472).
    *
-   * `limit` and `offset` are required for the same reason: each caller passes
-   * its DTO's resolved `pageSize` and `offset`, so the default page size lives
-   * on the DTO, once, rather than here (#403).
+   * `limit` and `offset` are required too: each caller passes its DTO's
+   * resolved `pageSize` and `offset`, so the default page size is the DTO's,
+   * not a fallback here (#403).
    */
   async queryLocalGames(
     query: string,

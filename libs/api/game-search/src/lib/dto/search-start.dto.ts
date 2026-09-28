@@ -42,7 +42,7 @@ export class SearchStartDto extends CappedOffsetPaginationQueryDto(100, 20) {
   // `limit` (capped at 100, local page size 20 when absent) and `offset` (bounded
   // by DEFAULT_MAX_OFFSET, default 0) are inherited from
   // CappedOffsetPaginationQueryDto — see #17 and #403. Offset-native for the same
-  // reason as SearchQueryDto (D-230-5 on #230).
+  // reason as SearchQueryDto (#230).
 }
 
 export class SearchCancelDto {

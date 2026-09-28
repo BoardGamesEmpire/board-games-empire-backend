@@ -91,8 +91,9 @@ export function CappedPaginationQueryDto(
  *
  * `defaultPageSize` is what `pageSize` resolves to when the caller omits
  * `limit`, with the same guard against exceeding the cap. Offset paging derives
- * no `skip` from it, but the local query still needs one page size, and naming
- * it here keeps REST and WS from each defaulting on their own (#403).
+ * no `skip` from it, but a query this process runs itself still needs a page
+ * size, and resolving it on the DTO leaves no service a fallback of its own
+ * (#403).
  */
 export function CappedOffsetPaginationQueryDto(
   maxLimit: number = DEFAULT_MAX_PAGE_SIZE,
@@ -103,11 +104,11 @@ export function CappedOffsetPaginationQueryDto(
   }
 
   class CappedOffsetPaginationQuery extends OffsetPaginationQueryDto {
-    @ApiPropertyOptional({
-      description: 'Maximum items per page',
-      maximum: maxLimit,
-      default: defaultPageSize,
-    })
+    // No `default` here, unlike the page-based factory: `defaultPageSize` sizes
+    // only the local query. The gateway fan-out forwards the raw `limit`, so
+    // each vendor still applies its own, and a documented default would be
+    // true of half the response (#378).
+    @ApiPropertyOptional({ description: 'Maximum items per page', maximum: maxLimit })
     @Type(() => Number)
     @IsInt({ message: i18nValidationMessage('validation.isInt') })
     @IsPositive({ message: i18nValidationMessage('validation.isPositive') })

@@ -15,7 +15,7 @@ import { GameSearchService } from './game-search.service';
 const READ = { id: 'sentinel-read-condition' };
 
 /** What the global pipe hands the controller: an instance, so `pageSize` resolves. */
-const localOnly = (overrides: Record<string, unknown> = {}): SearchQueryDto =>
+const localOnly = (overrides: Partial<SearchQueryDto> = {}): SearchQueryDto =>
   plainToInstance(SearchQueryDto, { query: 'brass', includeExternal: false, ...overrides });
 
 describe('GameSearchService', () => {

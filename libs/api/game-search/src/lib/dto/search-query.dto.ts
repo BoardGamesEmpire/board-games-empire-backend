@@ -40,5 +40,5 @@ export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
   // by DEFAULT_MAX_OFFSET, default 0) are inherited from
   // CappedOffsetPaginationQueryDto — see #17 and #403. Search stays
   // offset-native rather than page-based because the value is forwarded to
-  // gateways and their upstream vendor APIs unchanged (D-230-5 on #230).
+  // gateways and their upstream vendor APIs unchanged (#230).
 }

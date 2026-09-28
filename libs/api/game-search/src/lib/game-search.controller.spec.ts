@@ -28,7 +28,7 @@ describe('GameSearchController', () => {
 
   afterEach(() => jest.clearAllMocks());
 
-  const makeDto = (overrides?: Record<string, unknown>): SearchQueryDto =>
+  const makeDto = (overrides?: Partial<SearchQueryDto>): SearchQueryDto =>
     plainToInstance(SearchQueryDto, {
       query: 'Gloomhaven',
       gatewayIds: ['igdb-gw-1'],
