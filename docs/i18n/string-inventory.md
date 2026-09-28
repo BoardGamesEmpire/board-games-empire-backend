@@ -354,13 +354,13 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 
 ## 7. Validation messages (full list)
 
-| file:line                                                       | source                                            | message                                                                                                                      |
-| --------------------------------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| libs/common/quota/.../dto/set-quota.dto.ts:18                   | inline `@IsNumberString` message                  | `limit must be a non-negative integer string`                                                                                |
-| libs/api/feedback/.../validators/max-json-bytes.validator.ts:51 | `MaxJsonBytesConstraint.defaultMessage()`         | `{property} exceeds the maximum serialized size of {maxBytes} UTF-8 bytes`                                                   |
-| libs/api/safe-http/.../dto/validators.ts:33                     | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")`                                    |
-| libs/api/safe-http/.../dto/validators.ts:71                     | `IsCidrConstraint.defaultMessage()`               | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` |
-| libs/common/shared/.../dto/pagination-query.dto.ts:112          | `@Validate(SkipWithinCeiling)` message (#230)     | `page is too deep: (page - 1) × limit must not exceed {constraints.0}` — `validation.skipWithinCeiling` (#503)               |
+| file:line                                                       | source                                            | message                                                                                                                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| libs/common/quota/.../dto/set-quota.dto.ts:19                   | inline `@IsNumberString` message                  | `{property} must be a non-negative integer string` — `validation.nonNegativeIntegerString` (#144)                                                         |
+| libs/api/feedback/.../validators/max-json-bytes.validator.ts:52 | `MaxJsonBytesConstraint.defaultMessage()`         | `{property} exceeds the maximum serialized size of {constraints.0} UTF-8 bytes` — `validation.maxJsonBytes` (#144)                                        |
+| libs/api/safe-http/.../dto/validators.ts:35                     | `IsHostnameOrWildcardConstraint.defaultMessage()` | `Each entry must be a valid hostname or wildcard (e.g. "example.com" or "*.example.com")` — `validation.isHostnameOrWildcard` (#144)                      |
+| libs/api/safe-http/.../dto/validators.ts:73                     | `IsCidrConstraint.defaultMessage()`               | `Each entry must be a valid CIDR (e.g. "10.0.0.0/8" or "fc00::/7"). Single IPs require explicit prefix (e.g. "10.0.0.5/32")` — `validation.isCidr` (#144) |
+| libs/common/shared/.../dto/pagination-query.dto.ts:112          | `@Validate(SkipWithinCeiling)` message (#230)     | `page is too deep: (page - 1) × limit must not exceed {constraints.0}` — `validation.skipWithinCeiling` (#503)                                            |
 
 Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
 (#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
