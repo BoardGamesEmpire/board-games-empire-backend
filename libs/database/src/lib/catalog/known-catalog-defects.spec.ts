@@ -87,8 +87,8 @@ const INERT_HOUSEHOLD_EVENT_GRANTS: readonly Grant[] = [];
  * left, and it is an open question rather than a slip: it is bound to the
  * event's creator, and `HouseholdOwner` and `HouseholdAdmin` hold it too,
  * rendering the same clause from every household they run. Naming the event
- * in the host's copy alone would not settle who may delete an event. A new
- * line here is a new defect, not a backlog.
+ * in the host's copy alone would not settle who may delete an event (#567).
+ * A new line here is a new defect, not a backlog.
  */
 const EVENT_SPANNING_GRANTS: readonly Grant[] = [['delete:event', SystemRole.EventHost]];
 
