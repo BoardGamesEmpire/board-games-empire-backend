@@ -219,9 +219,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // household scope coordinate, so staff can act on a household they are no
     // member of. Transferring ownership is NOT among them — no route performs
     // it for a non-member, and the catalog says so rather than implying
-    // otherwise (see the block comment on these slugs).
+    // otherwise (see the block comment on these slugs). Restore is conditioned
+    // on the tombstone, so it can never reach a live household.
     'manage:household_member:administer',
     'delete:household:administer',
+    'update:household:restore:administer',
     'delete:game_play_session:moderate',
 
     // The games catalogue. Unconditioned, which is what curating an install

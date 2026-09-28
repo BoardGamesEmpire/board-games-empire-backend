@@ -22,18 +22,39 @@ import type { AbilityService } from '../ability.service';
  * endpoint as the sweep proceeds (418), turning a deferred question into a
  * settled pattern by repetition. Revisiting it should be one edit, not fifteen.
  *
- * The message is re-thrown rather than passed through: `getActingUserId`
+ * The message is replaced rather than passed through: `getActingUserId`
  * phrases its rejection as being about user-attributed WRITES — accurate for
  * its usual callers, wrong on a GET. A MISSING
  * actor is a different failure (a plain `Error`: nothing primed the context)
  * and is left to propagate as the 500 it is.
  */
 export function resolveScopeSubjectId(abilityService: AbilityService): string {
+  const userId = resolveActingUserIdOrNull(abilityService);
+
+  if (userId === null) {
+    throw new ForbiddenException(t('common.forbidden.access'));
+  }
+
+  return userId;
+}
+
+/**
+ * The acting user's id, or `null` for an actor kind with no user behind it.
+ *
+ * For an operation that goes ahead either way and only changes shape when a
+ * user is acting: a household delete gives its owners an undo only when one
+ * of them deleted it (175). It draws the same provisional line as
+ * {@link resolveScopeSubjectId}, which is built on it, so revisiting which
+ * actor kinds have a user (395) moves both answers at once.
+ *
+ * A MISSING actor is not a userless one, and propagates as the 500 it is.
+ */
+export function resolveActingUserIdOrNull(abilityService: AbilityService): string | null {
   try {
     return abilityService.getActingUserId();
   } catch (error) {
     if (error instanceof ForbiddenException) {
-      throw new ForbiddenException(t('common.forbidden.access'));
+      return null;
     }
 
     throw error;

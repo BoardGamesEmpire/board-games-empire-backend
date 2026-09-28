@@ -112,15 +112,22 @@ const DECLARED_GLOBAL_STAFF_GRANTS: readonly DeclaredGrant[] = [
   // that are not install-wide subjects: a household HAS a scope coordinate, and
   // these grants deliberately ignore it so staff can act on a household they
   // are not a member of. That is the whole authority the retired wildcard used
-  // to confer by accident, now three slugs wide instead of every slug wide, and
-  // named where a reviewer can see it. All three are writes — staff reads come
+  // to confer by accident, now four slugs wide instead of every slug wide, and
+  // named where a reviewer can see it. All four are writes — staff reads come
   // from `read:public_content` above, so a read variant here would grant
-  // nothing. A fourth, `update:household_role:transfer-ownership:administer`,
+  // nothing. A fifth, `update:household_role:transfer-ownership:administer`,
   // was declared here and then removed: no route performs an ownership
   // transfer for a non-member, so the ledger was vouching for a capability
   // that did not exist.
+  //
+  // Restore (#175) is listed here although it carries a condition, and that
+  // is the guard working rather than a loophole: `{ deletedAt: { not: null } }`
+  // names no template variable, so the guard counts it as unconditioned, and
+  // it does reach every DELETED household on the install. The condition only
+  // keeps it off the live ones.
   ['manage:household_member:administer', SystemRole.Admin, Action.manage, ResourceType.HouseholdMember],
   ['delete:household:administer', SystemRole.Admin, Action.delete, ResourceType.Household],
+  ['update:household:restore:administer', SystemRole.Admin, Action.update, ResourceType.Household],
   ['delete:game_play_session:moderate', SystemRole.Admin, Action.delete, ResourceType.GamePlaySession],
   ['delete:game_play_session:moderate', SystemRole.Moderator, Action.delete, ResourceType.GamePlaySession],
 

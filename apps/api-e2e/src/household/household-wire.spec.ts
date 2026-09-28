@@ -1,6 +1,7 @@
 import {
   constraintTargetNames,
   createEnvelope,
+  deleteEnvelope,
   HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT,
   listEnvelope,
   readEnvelope,
@@ -57,6 +58,35 @@ describe('household wire parsers (pure logic)', () => {
       const circular: Record<string, unknown> = {};
       circular['self'] = circular;
       expect(() => createEnvelope(response(circular), 'POST')).toThrow(/unserializable body/);
+    });
+  });
+
+  describe('deleteEnvelope', () => {
+    const household = { id: 'h1' };
+
+    it('returns the window end, or null when the delete issued none', () => {
+      const until = '2026-10-27T12:00:00.000Z';
+
+      expect(
+        deleteEnvelope(response({ message: 'm', household, restorableUntil: until }), 'DELETE').restorableUntil,
+      ).toBe(until);
+      expect(
+        deleteEnvelope(response({ message: 'm', household, restorableUntil: null }), 'DELETE').restorableUntil,
+      ).toBeNull();
+    });
+
+    it('rejects a missing restorableUntil rather than reading it as null', () => {
+      // Absent and null mean different things to a client: absent would
+      // silently hide an undo that exists.
+      expect(() => deleteEnvelope(response({ message: 'm', household }), 'DELETE')).toThrow(/no 'restorableUntil' key/);
+    });
+
+    it('rejects a restorableUntil that is not a timestamp', () => {
+      for (const restorableUntil of ['soon', 1_700_000_000_000, {}]) {
+        expect(() => deleteEnvelope(response({ message: 'm', household, restorableUntil }), 'DELETE')).toThrow(
+          /neither null nor a timestamp/,
+        );
+      }
     });
   });
 

@@ -290,38 +290,41 @@ describe('household lifecycle', () => {
       expect(invite.status).toBe(InviteStatus.Pending);
     });
 
-    it('denies a mutation on a tombstone at the guard when the actor holds no other household role', async () => {
-      // The soft delete revokes the owner's household-scoped grants as a side
-      // effect: `loadUserGraph` selects memberships `where household.deletedAt
-      // is null`, and the delete evicts the graph, so the rebuild carries no
-      // HouseholdOwner permission at all. With no `update`/`delete` rule on
-      // Household anywhere in their abilities, `PoliciesGuard` denies before
-      // `assertHouseholdExists` can report the row as gone.
+    it('answers 404 for a mutation on a tombstone when the actor holds no other household role (#299)', async () => {
+      // This was 403. The soft delete revokes the owner's household-scoped
+      // grants as a side effect: `loadUserGraph` selects memberships `where
+      // household.deletedAt is null`, and the delete evicts the graph, so the
+      // rebuild carries no HouseholdOwner permission at all. With no
+      // `update`/`delete` rule on Household anywhere in their abilities,
+      // `PoliciesGuard` denied before `assertHouseholdExists` could report the
+      // row as gone.
+      //
+      // 404 won because the 403 depended on unrelated state (the case below is
+      // the other half of that), and it told an ex-owner "forbidden" about a
+      // household that is gone. The liveness guard now answers before any
+      // policy runs.
       const owner = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'Deleted twice?' });
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${fixture.household.id}`).set(owner.headers).expect(200);
 
-      await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${fixture.household.id}`).set(owner.headers).expect(403);
+      await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${fixture.household.id}`).set(owner.headers).expect(404);
       await request(baseUrl)
         .patch(`${HOUSEHOLDS_PATH}/${fixture.household.id}`)
         .set(owner.headers)
         .send({ name: 'Renaming a tombstone' })
-        .expect(403);
+        .expect(404);
     });
 
-    it('answers 404 for the same tombstone when the actor still owns another household', async () => {
-      // Same request, same tombstone, different status — because the actor's
-      // abilities are not empty this time. Owning a SECOND, live household keeps
-      // a Household `update` rule in the graph, the guard passes on the rule's
-      // existence (a type-level `can` cannot evaluate the `{{ householdId }}`
-      // condition), and the service's existence probe then answers 404.
+    it('answers the same 404 for that tombstone when the actor still owns another household', async () => {
+      // Same request, same tombstone, and now the same status (#299). Owning a
+      // SECOND, live household keeps Household `update`/`delete` rules in the
+      // graph, so the type-level guard would pass on the rules' existence and
+      // the service's probe would 404; before the liveness guard that was the
+      // only path to 404, and the case above got 403 instead.
       //
-      // Asserted deliberately, as a pair with the case above: the status a
-      // client sees for acting on a deleted household depends on UNRELATED
-      // state — whether they happen to hold a household role elsewhere. That
-      // is worth pinning rather than discovering from a bug report, and it is
-      // invisible to any test that owns exactly one household.
+      // Kept as a pair with the case above because the difference between them
+      // is invisible to any test that owns exactly one household.
       const owner = await actors.user();
       const doomed = await actors.householdWithMembers({ owner, name: 'Doomed' });
       const survivor = await actors.householdWithMembers({ owner, name: 'Survivor' });
@@ -333,6 +336,7 @@ describe('household lifecycle', () => {
         .set(owner.headers)
         .send({ name: 'Renaming a tombstone' })
         .expect(404);
+      await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${doomed.household.id}`).set(owner.headers).expect(404);
 
       // The surviving household is untouched and still mutable.
       await request(baseUrl)
@@ -340,6 +344,52 @@ describe('household lifecycle', () => {
         .set(owner.headers)
         .send({ name: 'Still mine' })
         .expect(200);
+    });
+
+    it('answers 404 on every member route of a tombstone, and leaves the roster as it was (#299)', async () => {
+      // The member write routes had the same split: their policies are on
+      // `manage`/`delete` HouseholdMember and `update` HouseholdRole, which an
+      // actor whose only household was deleted no longer holds. The roster is
+      // frozen while the household is deleted (#386), so every one of these is
+      // a refusal, and the counts below show none of them got through.
+      const owner = await actors.user();
+      const member = await actors.user();
+
+      const fixture = await actors.householdWithMembers({
+        owner,
+        name: 'Roster of a tombstone',
+        members: [{ actor: member, role: SystemRole.HouseholdMember }],
+      });
+
+      const householdId = fixture.household.id;
+      const memberId = fixture.members[0].member.id;
+      const membersPath = `${HOUSEHOLDS_PATH}/${householdId}/members`;
+
+      await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${householdId}`).set(owner.headers).expect(200);
+
+      await request(baseUrl).get(membersPath).set(owner.headers).expect(404);
+      await request(baseUrl).get(`${membersPath}/${memberId}`).set(owner.headers).expect(404);
+      await request(baseUrl)
+        .patch(`${membersPath}/${memberId}/role`)
+        .set(owner.headers)
+        .send({ role: SystemRole.HouseholdAdmin })
+        .expect(404);
+      await request(baseUrl).post(`${membersPath}/${memberId}/transfer-ownership`).set(owner.headers).expect(404);
+      await request(baseUrl).delete(`${membersPath}/${memberId}`).set(owner.headers).expect(404);
+      await request(baseUrl).delete(`${membersPath}/me`).set(member.headers).expect(404);
+
+      const roster = await db.client.householdMember.findMany({
+        where: { householdId },
+        select: { userId: true, role: { select: { role: { select: { name: true } } } } },
+      });
+
+      expect(roster).toHaveLength(2);
+      expect(roster).toEqual(
+        expect.arrayContaining([
+          { userId: owner.user.id, role: { role: { name: SystemRole.HouseholdOwner } } },
+          { userId: member.user.id, role: { role: { name: SystemRole.HouseholdMember } } },
+        ]),
+      );
     });
   });
 });

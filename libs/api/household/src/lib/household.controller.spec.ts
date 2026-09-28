@@ -1,7 +1,14 @@
+import { Action, ResourceType } from '@bge/database';
+import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
+import { RequestMethod } from '@nestjs/common';
+import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { Http } from '@status/codes';
 import { ClsServiceManager } from 'nestjs-cls';
+import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
+import { ALLOWS_DELETED_HOUSEHOLD_KEY } from './guards/household-liveness.guard';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
 
@@ -12,7 +19,12 @@ describe('HouseholdController (no-Session delegation)', () => {
   let service: jest.Mocked<
     Pick<
       HouseholdService,
-      'getHouseholdsForUser' | 'getHouseholdById' | 'create' | 'updateHousehold' | 'deleteHousehold'
+      | 'getHouseholdsForUser'
+      | 'getHouseholdById'
+      | 'create'
+      | 'updateHousehold'
+      | 'deleteHousehold'
+      | 'restoreHousehold'
     >
   >;
   beforeEach(() => {
@@ -21,7 +33,8 @@ describe('HouseholdController (no-Session delegation)', () => {
       getHouseholdById: jest.fn().mockResolvedValue({ id: 'hh-1' }),
       create: jest.fn().mockResolvedValue({ id: 'hh-1', createdById: 'user-1' }),
       updateHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
-      deleteHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
+      deleteHousehold: jest.fn().mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil: null }),
+      restoreHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
     };
     controller = new HouseholdController(service as never);
   });
@@ -79,8 +92,59 @@ describe('HouseholdController (no-Session delegation)', () => {
     expect(service.updateHousehold).toHaveBeenCalledWith('hh-1', { name: 'New' });
   });
 
-  it('delete forwards only the id', async () => {
-    await firstValueFrom(controller.delete('hh-1'));
+  it('delete forwards only the id, and says until when it can be undone', async () => {
+    const restorableUntil = new Date('2026-10-27T12:00:00Z');
+    service.deleteHousehold.mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil } as never);
+
+    const response = await firstValueFrom(controller.delete('hh-1'));
+
     expect(service.deleteHousehold).toHaveBeenCalledWith('hh-1');
+    expect(response).toEqual(expect.objectContaining({ household: { id: 'hh-1' }, restorableUntil }));
+  });
+
+  it('delete answers restorableUntil: null when no window was issued, rather than omitting it', async () => {
+    // A staff or system delete. Present and null, so a client can tell "no
+    // undo" from an older server that never sent the field.
+    service.deleteHousehold.mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil: null } as never);
+
+    await expect(firstValueFrom(controller.delete('hh-1'))).resolves.toHaveProperty('restorableUntil', null);
+  });
+
+  describe('restore (#175)', () => {
+    it('forwards only the id and wraps the household', async () => {
+      const response = await firstValueFrom(controller.restore('hh-1'));
+
+      expect(service.restoreHousehold).toHaveBeenCalledWith('hh-1');
+      expect(response).toEqual(expect.objectContaining({ household: { id: 'hh-1' } }));
+    });
+
+    it('binds POST /households/:id/restore', () => {
+      expect(Reflect.getMetadata('path', HouseholdController.prototype.restore)).toBe(':id/restore');
+      expect(Reflect.getMetadata('method', HouseholdController.prototype.restore)).toBe(RequestMethod.POST);
+    });
+
+    it('answers 200: the household already exists, nothing is created', () => {
+      expect(Reflect.getMetadata(HTTP_CODE_METADATA, HouseholdController.prototype.restore)).toBe(Http.Ok);
+    });
+
+    it('opts out of the liveness guard, since its target is a deleted household', () => {
+      expect(Reflect.getMetadata(ALLOWS_DELETED_HOUSEHOLD_KEY, HouseholdController.prototype.restore)).toBe(true);
+    });
+
+    it('asks the guard for read, which every user holds, and leaves the decision to the service', () => {
+      // An `update` check would 403 an ex-owner whose window has lapsed and
+      // who holds no other household, while the same user with a second
+      // household would reach the service and get 404: the split #299 removed.
+      const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdController.prototype.restore) as Array<
+        (ability: AppAbility) => boolean
+      >;
+      const can = jest.fn().mockReturnValue(true);
+
+      expect(handlers).toHaveLength(1);
+      handlers[0]({ can } as unknown as AppAbility);
+
+      expect(can).toHaveBeenCalledTimes(1);
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Household);
+    });
   });
 });

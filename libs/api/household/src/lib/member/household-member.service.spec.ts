@@ -571,6 +571,22 @@ describe('HouseholdMemberService', () => {
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
+    it('answers 404 when the household is soft-deleted before this transaction takes the lock (#386)', async () => {
+      // The existence probe runs before the transaction and takes no lock, so a
+      // soft-delete can commit in between. The lock re-checks liveness and is
+      // the authority: a deleted household's roster stays as it was deleted.
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      stubRawQueries({ householdExists: false });
+
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
+    });
+
     it('throws NotFound when the household does not exist', async () => {
       db.household.count.mockResolvedValue(0);
 
@@ -683,6 +699,20 @@ describe('HouseholdMemberService', () => {
 
       await expect(service.removeMember('hh-missing', 'member-1')).rejects.toThrow(NotFoundException);
       expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the household is soft-deleted before this transaction takes the lock (#386)', async () => {
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+      stubRawQueries({ householdExists: false });
+
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.householdRole.deleteMany).not.toHaveBeenCalled();
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
     it('throws Forbidden — naming the DELETE denial, not view — when the actor may not manage the member', async () => {
@@ -825,6 +855,21 @@ describe('HouseholdMemberService', () => {
 
       await expect(service.leaveHousehold('hh-missing')).rejects.toThrow(NotFoundException);
       expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 when the household is soft-deleted before this transaction takes the lock (#386)', async () => {
+      // Leaving is refused like every other transition. Restore brings back
+      // what was deleted, so a member who wants out leaves once it is live.
+      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
+      stubRawQueries({ householdExists: false });
+
+      await expect(service.leaveHousehold('hh-1')).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+      expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
   });
   describe('transferOwnership', () => {
@@ -986,6 +1031,26 @@ describe('HouseholdMemberService', () => {
       });
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
       expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 and emits nothing when the household is soft-deleted before the lock (#386)', async () => {
+      // The ordering the preflight cannot see: it found a live household, then
+      // a soft-delete committed before this transaction took the lock. Without
+      // the lock's own liveness check the swap went through and the audit trail
+      // and webhooks recorded a transfer on a household the API treats as gone.
+      stubMembers(ACTOR(), TARGET());
+      stubRawQueries({ householdExists: false, owners: ['member-actor'] });
+
+      await expect(service.transferOwnership('hh-1', 'member-2')).rejects.toMatchObject({
+        status: Http.NotFound,
+        response: expect.objectContaining({ key: 'errors.household.not_found' }),
+      });
+
+      // Refused at the lock, which comes first, so nothing after it ran.
+      expect(db.householdMember.findFirst).not.toHaveBeenCalled();
+      expect(db.householdRole.upsert).not.toHaveBeenCalled();
+      expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+      expect(events.emit).not.toHaveBeenCalled();
     });
 
     it('reads both members under the lock, so no pre-lock/post-lock skew exists', async () => {
@@ -1881,7 +1946,11 @@ describe('HouseholdMemberService', () => {
         const text = await captureTransitionLockSql();
         const schema = readSchema();
 
-        for (const identifier of [table(schema, 'Household'), column(schema, 'Household', 'id')]) {
+        for (const identifier of [
+          table(schema, 'Household'),
+          column(schema, 'Household', 'deletedAt'),
+          column(schema, 'Household', 'id'),
+        ]) {
           expect(text).toMatch(new RegExp(`\\b${identifier}\\b`));
         }
       });
@@ -1897,11 +1966,13 @@ describe('HouseholdMemberService', () => {
         expect(text).not.toMatch(/FOR UPDATE OF/);
       });
 
-      it('locks the household even while it is being soft-deleted', async () => {
-        // Deliberately no `deleted_at IS NULL` predicate, unlike the admission
-        // guard: the mutex must still serialize against a soft-delete in flight,
-        // and the callers have already established existence.
-        await expect(captureTransitionLockSql()).resolves.not.toMatch(/deleted_at/);
+      it('re-checks liveness under the lock, like the admission guard (#386)', async () => {
+        // The callers' existence probe runs before the transaction and locks
+        // nothing, so a soft-delete can commit in between. The predicate still
+        // lets the mutex serialize against a delete in flight: the statement
+        // blocks on the row, then re-evaluates its WHERE against the committed
+        // version (EvalPlanQual), matches nothing, and the caller 404s.
+        await expect(captureTransitionLockSql()).resolves.toMatch(/deleted_at IS NULL/);
       });
     });
 

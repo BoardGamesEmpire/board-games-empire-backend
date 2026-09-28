@@ -6,11 +6,13 @@ import {
   describeUngrantedLocks,
   expectAdvisoryWaiter,
   expectBlocked,
+  expectLockWaiter,
   expectNotBlocked,
   quoteIdentifier,
   type AdvisoryWaiter,
   type Barrier,
   type BarrierConnection,
+  type LockWaiter,
   type PendingStatement,
   type UngrantedLock,
 } from './lock-barrier';
@@ -265,5 +267,94 @@ describe('expectAdvisoryWaiter', () => {
         settledEarly: () => undefined,
       }),
     ).rejects.toThrow(/never waited on the advisory key/);
+  });
+});
+
+/**
+ * The row-lock twin. A request blocked on a row waits on the holder's
+ * transaction rather than on a key `pg_locks` can join against, so this asks
+ * `pg_blocking_pids` instead. The polling and its failure reporting are shared
+ * with `expectAdvisoryWaiter`; what differs, and is pinned here, is the
+ * question sent.
+ */
+describe('expectLockWaiter', () => {
+  const HOLDER_PID = 21;
+
+  const stub = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
+    label,
+    pid,
+    query,
+    begin: async () => undefined,
+    commit: async () => undefined,
+    rollback: async () => undefined,
+    issue: () => {
+      throw new Error('not used in this spec');
+    },
+    close: async () => undefined,
+  });
+
+  const barrierWatching = (rows: readonly LockWaiter[], seen: unknown[][] = []): Barrier => ({
+    holder: stub('holder', HOLDER_PID, (async () => []) as BarrierConnection['query']),
+    waiter: stub('waiter', 22, (async () => []) as BarrierConnection['query']),
+    observer: stub('observer', 23, (async (sql: string, params: readonly unknown[] = []) => {
+      seen.push([sql, ...params]);
+
+      return [...rows];
+    }) as BarrierConnection['query']),
+  });
+
+  it('returns the blocked backend and what it is running', async () => {
+    const waiter: LockWaiter = { pid: 99, query: 'SELECT h.id FROM households h FOR NO KEY UPDATE' };
+
+    await expect(
+      expectLockWaiter(barrierWatching([waiter]), { heldBy: HOLDER_PID, description: 'the transfer request' }),
+    ).resolves.toEqual(waiter);
+  });
+
+  it('asks who the HOLDER is blocking, which reaches a backend waiting on a row', async () => {
+    const seen: unknown[][] = [];
+
+    await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: HOLDER_PID,
+      description: 'the transfer request',
+    });
+
+    expect(seen[0]?.[0]).toMatch(/\$1 = ANY\(pg_blocking_pids\(activity\.pid\)\)/);
+    expect(seen[0]?.[0]).toMatch(/ORDER BY activity\.pid/);
+    expect(seen[0]?.[1]).toBe(HOLDER_PID);
+  });
+
+  it('excludes the holder and the barrier’s own connections', async () => {
+    const seen: unknown[][] = [];
+
+    await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: HOLDER_PID,
+      description: 'the transfer request',
+      exclude: [22, 23],
+    });
+
+    expect(seen[0]?.[2]).toEqual([HOLDER_PID, 22, 23]);
+  });
+
+  it('reports a request that answered instead of waiting, rather than timing out', async () => {
+    await expect(
+      expectLockWaiter(barrierWatching([]), {
+        heldBy: HOLDER_PID,
+        description: 'the transfer request',
+        timeoutMs: 5_000,
+        settledEarly: () => 'HTTP 404',
+      }),
+    ).rejects.toThrow(/answered without ever waiting on a lock held by pid 21.*HTTP 404/s);
+  });
+
+  it('still times out when the request has neither waited nor answered', async () => {
+    await expect(
+      expectLockWaiter(barrierWatching([]), {
+        heldBy: HOLDER_PID,
+        description: 'the transfer request',
+        timeoutMs: 50,
+        settledEarly: () => undefined,
+      }),
+    ).rejects.toThrow(/never waited on a lock held by pid 21/);
   });
 });

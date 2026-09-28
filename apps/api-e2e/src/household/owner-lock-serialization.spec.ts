@@ -6,6 +6,7 @@ import {
   arrangeHouseholdWithRoles,
   FK_PARENT_LOCK,
   memberWithRole,
+  RESTORE_HOUSEHOLD,
   SOFT_DELETE_HOUSEHOLD,
   type LockFixture,
 } from './lock-fixtures';
@@ -344,6 +345,84 @@ describe('household role-transition locking', () => {
         expect(owners.map((row) => row.household_member_id)).toEqual([member.memberId]);
 
         await waiter.commit();
+      });
+    });
+
+    it('matches nothing once the household is soft-deleted', async () => {
+      // The `deleted_at IS NULL` predicate is what turns the lock's miss into the
+      // 404 every role transition answers for a deleted household (#386).
+      const fixture = await arrangeOwnerAndMember();
+      await db.client.household.update({ where: { id: fixture.householdId }, data: { deletedAt: new Date() } });
+
+      await withBarrier(async ({ holder }) => {
+        await expect(holder.query(transitionLock.text, [fixture.householdId])).resolves.toHaveLength(0);
+      });
+    });
+
+    it('re-checks its predicate after an in-flight soft-delete commits, and matches nothing', async () => {
+      // The ordering #386 is about. The callers' existence probe is unlocked, so
+      // it can pass while a soft-delete is in flight. The transition then blocks
+      // here on the row, and on release re-evaluates its WHERE against the NEW
+      // version (EvalPlanQual) rather than returning the one it first located.
+      // Without the predicate it would lock a dead household and carry on.
+      const fixture = await arrangeOwnerAndMember();
+
+      await withBarrier(async (barrier) => {
+        const { holder, waiter } = barrier;
+
+        await holder.begin();
+        await expect(holder.query<{ id: string }>(SOFT_DELETE_HOUSEHOLD, [fixture.householdId])).resolves.toHaveLength(
+          1,
+        );
+
+        await waiter.begin();
+        const pending = waiter.issue<{ id: string }>(
+          transitionLock.text,
+          [fixture.householdId],
+          "the transition's household lock",
+        );
+
+        await expectBlocked(barrier, pending);
+        await holder.commit();
+
+        await expect(pending.result()).resolves.toHaveLength(0);
+        await waiter.commit();
+      });
+    });
+
+    it('does not wait behind an in-flight restore: its snapshot still sees the tombstone', async () => {
+      // NOT the mirror image of the case above, and pinned because it is easy
+      // to assume it is. A locking read tests its WHERE against its own snapshot
+      // and locks only the rows that pass; the re-check after a wait applies to
+      // those alone. The restore has not committed, so the row this statement
+      // sees is still deleted, fails `deleted_at IS NULL`, and is never locked.
+      // Nothing waits, and the transition 404s: correct, because the household
+      // was deleted when it asked. Once the restore commits, it matches.
+      const fixture = await arrangeOwnerAndMember();
+      await db.client.household.update({ where: { id: fixture.householdId }, data: { deletedAt: new Date() } });
+
+      await withBarrier(async (barrier) => {
+        const { holder, waiter } = barrier;
+
+        await holder.begin();
+        await expect(holder.query<{ id: string }>(RESTORE_HOUSEHOLD, [fixture.householdId])).resolves.toHaveLength(1);
+
+        await waiter.begin();
+        const pending = waiter.issue<{ id: string }>(
+          transitionLock.text,
+          [fixture.householdId],
+          "the transition's household lock",
+        );
+
+        await expectNotBlocked(barrier, pending);
+        await expect(pending.result()).resolves.toHaveLength(0);
+        await waiter.commit();
+
+        await holder.commit();
+
+        await expect(waiter.query<{ id: string }>(transitionLock.text, [fixture.householdId])).resolves.toEqual([
+          { id: fixture.householdId },
+        ]);
       });
     });
 

@@ -97,11 +97,13 @@ describe('staff grant seeds', () => {
     expect(moderator).toContain('read:public_content');
   });
 
-  it('seeds the staff floor unconditioned, which is the only shape that can reach a foreign household', async () => {
+  it('seeds the staff floor unconditioned, because no scope variable can reach a foreign household', async () => {
     // A global role arrives through the `roles` pass, which supplies neither
     // `householdId` nor `eventId`. A condition naming either would render to
     // `''` and match no row, so empty `conditions` is not laxity here — it is
-    // the only rendering that authorizes anything at all.
+    // the only rendering that authorizes anything at all. Restore is the one
+    // floor slug with a condition, a static one, and is pinned on its own
+    // below.
     const floor = [
       ['manage:household_member:administer', Action.manage, ResourceType.HouseholdMember],
       ['delete:household:administer', Action.delete, ResourceType.Household],
@@ -178,19 +180,62 @@ describe('staff grant seeds', () => {
     // event role whose condition renders identically already carries the slug.
     // `create:household_role` duplicated `HouseholdOwner`/`HouseholdAdmin`;
     // `delete:event` duplicated `EventHost`, which an event's creator is seeded
-    // as. Neither granted anything. A global role should hold no conditions at
-    // all.
+    // as. Neither granted anything. A global role should hold no TEMPLATED
+    // conditions at all.
+    //
+    // A static condition is the one exception, and there is one: restore's
+    // (#175), which references nothing and so renders the same in every pass.
+    // Named exactly rather than allowed by shape, so a second one is a
+    // decision someone makes here.
     const role = await db.client.role.findUniqueOrThrow({
       where: { name: SystemRole.Admin },
       select: { permissions: { select: { permission: { select: { slug: true, conditions: true } } } } },
     });
 
-    const conditioned = role.permissions
-      .filter(({ permission }) => Object.keys((permission.conditions as object | null) ?? {}).length > 0)
-      .map(({ permission }) => permission.slug)
-      .sort();
+    const conditioned = role.permissions.filter(
+      ({ permission }) => Object.keys((permission.conditions as object | null) ?? {}).length > 0,
+    );
 
-    expect(conditioned).toEqual([]);
+    expect(
+      conditioned
+        .filter(({ permission }) => parseTemplate(permission.conditions).variables.length > 0)
+        .map(({ permission }) => permission.slug),
+    ).toEqual([]);
+    expect(conditioned.map(({ permission }) => permission.slug)).toEqual(['update:household:restore:administer']);
+  });
+
+  it('seeds staff restore conditioned on the tombstone, so it can never edit a live household (#175)', async () => {
+    // Unconditioned, an `update` on Household held by Admin would let Admin
+    // rename any live household: `updateHousehold` scopes its write by the
+    // actor's `update` rules. The condition keeps it off every row an edit can
+    // reach. Projected and `toEqual`ed for the reason the floor case above gives.
+    for (const [slug, riskLevel] of [
+      ['update:household:restore:administer', RiskLevel.Critical],
+      ['update:household:restore', RiskLevel.Medium],
+    ] as const) {
+      const row = await permission(slug);
+
+      expect({
+        action: row.action,
+        subject: row.subject,
+        conditions: row.conditions,
+        riskLevel: row.riskLevel,
+      }).toEqual({
+        action: Action.update,
+        subject: ResourceType.Household,
+        conditions: { deletedAt: { not: null } },
+        riskLevel,
+      });
+    }
+
+    await expect(roleSlugs(SystemRole.Admin)).resolves.toContain('update:household:restore:administer');
+    await expect(roleSlugs(SystemRole.Moderator)).resolves.not.toContain('update:household:restore:administer');
+
+    // The owners' slug is granted per household by the delete, never through
+    // a role.
+    await expect(
+      db.client.rolePermission.count({ where: { permission: { slug: 'update:household:restore' } } }),
+    ).resolves.toBe(0);
   });
 
   it('keeps Admin a proper subset of the catalogue, not a derivation of it', async () => {
@@ -300,6 +345,38 @@ describe('staff floor over the wire', () => {
         select: { deletedAt: true },
       }),
     ).resolves.toEqual({ deletedAt: expect.any(Date) });
+  });
+
+  it('lets staff restore a foreign household, and refuses an outsider the same restore (#175)', async () => {
+    // The owner deletes, so the owner holds a window too. The Admin is no
+    // member and holds none; what restores it is the staff slug.
+    const { fixture, owner, admin, outsider } = await foreignHousehold();
+    const path = `${HOUSEHOLDS_PATH}/${fixture.household.id}`;
+
+    await request(baseUrl).delete(path).set(owner.headers).expect(200);
+
+    await request(baseUrl).post(`${path}/restore`).set(outsider.headers).expect(404);
+
+    await request(baseUrl).post(`${path}/restore`).set(admin.headers).expect(200);
+
+    await expect(
+      db.client.household.findUniqueOrThrow({ where: { id: fixture.household.id }, select: { deletedAt: true } }),
+    ).resolves.toEqual({ deletedAt: null });
+  });
+
+  it('does NOT let the restore grant edit a live household staff are no member of (#175)', async () => {
+    // Admin now holds an `update` rule on Household, so the route guard passes
+    // where it used to refuse. The condition is what keeps it out: the service
+    // scopes the write by `{ deletedAt: { not: null } }` AND its own
+    // `deletedAt: null`, which no row satisfies, so the answer is still 403.
+    // The owner's 200 is what keeps this from passing merely because the
+    // route is broken.
+    const { fixture, owner, admin } = await foreignHousehold();
+    const path = `${HOUSEHOLDS_PATH}/${fixture.household.id}`;
+
+    await request(baseUrl).patch(path).set(admin.headers).send({ name: 'Renamed by staff' }).expect(403);
+
+    await request(baseUrl).patch(path).set(owner.headers).send({ name: 'Renamed by its owner' }).expect(200);
   });
 
   it('does NOT let staff transfer ownership of a household they are no member of', async () => {
