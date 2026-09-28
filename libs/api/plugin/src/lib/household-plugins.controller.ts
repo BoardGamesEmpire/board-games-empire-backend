@@ -10,20 +10,7 @@ import {
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
-import { subject } from '@casl/ability';
-import {
-  Body,
-  Controller,
-  ForbiddenException,
-  Get,
-  HttpCode,
-  Param,
-  Patch,
-  Post,
-  Query,
-  UseFilters,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -52,8 +39,9 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
  * stays at the service seam (`PluginGrantAuthorityService` verifies
  * owner/admin of the anchoring household); the instance check is what keeps
  * the READ — which has no service seam — from serving one household's
- * decision states to another's admin. Mirrors PoliciesGuard's
- * every-ability semantics so an API key's floor applies here too.
+ * decision states to another's admin. The instance check is
+ * `AbilityService.assertCurrentActorCan`, which applies PoliciesGuard's
+ * every-ability rule, so an API key's floor applies here too.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -99,7 +87,7 @@ export class HouseholdPluginsController {
     // The instance half of the D-AZ gate. This read has no service seam to
     // re-verify authority, so without it a type-level `can()` would serve one
     // household's enablement states to another household's admin.
-    this.assertHouseholdScope(Action.read, householdId);
+    this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
       this.inventory.listForHousehold(householdId, query, {
@@ -135,7 +123,7 @@ export class HouseholdPluginsController {
     @Param('slug') slug: string,
     @Body() dto: DecidePluginGrantDto,
   ) {
-    this.assertHouseholdScope(Action.manage, householdId);
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
       this.grants.decide({
@@ -174,7 +162,7 @@ export class HouseholdPluginsController {
   @NoCache()
   @Get(':slug/consent')
   consentPresentation(@Param('householdId') householdId: string, @Param('slug') slug: string) {
-    this.assertHouseholdScope(Action.read, householdId);
+    this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
 
@@ -219,7 +207,7 @@ export class HouseholdPluginsController {
     @Param('slug') slug: string,
     @Body() dto: EnableHouseholdPluginDto,
   ) {
-    this.assertHouseholdScope(Action.manage, householdId);
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
       this.units.enableHousehold({
@@ -249,7 +237,7 @@ export class HouseholdPluginsController {
   @HttpCode(Http.Ok)
   @Post(':slug/disable')
   disable(@Param('householdId') householdId: string, @Param('slug') slug: string) {
-    this.assertHouseholdScope(Action.manage, householdId);
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
       this.units.disableHousehold({ slug, householdId, actorId: this.abilityService.getActingUserId() }),
@@ -287,7 +275,7 @@ export class HouseholdPluginsController {
     @Param('slug') slug: string,
     @Body() dto: UpdatePluginConfigDto,
   ) {
-    this.assertHouseholdScope(Action.manage, householdId);
+    this.abilityService.assertCurrentActorCan(Action.manage, ResourceType.HouseholdPlugin, { householdId });
 
     return from(
       this.units.updateHouseholdConfig({
@@ -321,34 +309,12 @@ export class HouseholdPluginsController {
   @NoCache()
   @Get(':slug/features')
   featureStates(@Param('householdId') householdId: string, @Param('slug') slug: string) {
-    this.assertHouseholdScope(Action.read, householdId);
+    this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
     const unit: HouseholdPluginUnit = { scopeType: 'Household', householdId };
 
     return from(this.featureState.resolveForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
       map((featureState) => ({ featureState })),
     );
-  }
-
-  /**
-   * The instance half of the household gate: every current ability must
-   * allow the action on THIS household's `HouseholdPlugin` rows — the same
-   * AND-across-abilities rule PoliciesGuard applies to the type-level
-   * check, so an API key's floor clamps here identically. The empty-array
-   * deny is also PoliciesGuard's: `[].every(...)` is vacuously true, and an
-   * actor kind that primes no abilities must not pass an authorization gate
-   * by having nothing to check. Today the routes' own @CheckPolicies makes
-   * the guard throw on that case first; this keeps the mirror honest when
-   * #323 adds routes to this class.
-   */
-  private assertHouseholdScope(action: Action, householdId: string): void {
-    const abilities = this.abilityService.getCurrentAbilities();
-    const allowed =
-      abilities.length > 0 &&
-      abilities.every((ability) => ability.can(action, subject(ResourceType.HouseholdPlugin, { householdId })));
-
-    if (!allowed) {
-      throw new ForbiddenException(t('common.forbidden.action'));
-    }
   }
 }

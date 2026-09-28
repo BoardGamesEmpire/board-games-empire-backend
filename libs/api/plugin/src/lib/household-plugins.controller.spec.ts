@@ -47,7 +47,6 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForHousehold'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
-  let can: jest.Mock;
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
@@ -60,11 +59,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     featureState = { resolveForUnitBySlug: jest.fn().mockResolvedValue(FEATURE_STATE) };
     inventory = { listForHousehold: jest.fn().mockResolvedValue(INVENTORY_PAGE as never) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
-    can = jest.fn().mockReturnValue(true);
     abilityService = createMockAbilityService();
-    // The instance gate walks the primed abilities the way PoliciesGuard
-    // does (every ability must allow), so the mock supplies one.
-    abilityService.getCurrentAbilities.mockReturnValue([{ can } as unknown as AppAbility]);
     controller = new HouseholdPluginsController(
       grants as never,
       abilityService as never,
@@ -180,18 +175,24 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     it('checks the action against THIS household before delegating', async () => {
       await firstValueFrom(controller.consentPresentation('hh-1', 'demo-sink'));
 
-      expect(can).toHaveBeenCalledWith(Action.read, expect.objectContaining({ householdId: 'hh-1' }));
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.HouseholdPlugin, {
+        householdId: 'hh-1',
+      });
     });
 
     it('refuses a read for a household the actor holds no conditioned rule over — no query runs', async () => {
-      can.mockReturnValue(false);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
 
       expect(() => controller.consentPresentation('hh-other', 'demo-sink')).toThrow(ForbiddenException);
       expect(presentation.presentForUnitBySlug).not.toHaveBeenCalled();
     });
 
     it('refuses a decide the same way — before the service is even asked', async () => {
-      can.mockReturnValue(false);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
 
       expect(() =>
         controller.decideGrant('hh-other', 'demo-sink', {
@@ -203,7 +204,9 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     });
 
     it('binds every #323 write and read to ITS household before the service is asked', async () => {
-      can.mockReturnValue(false);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
 
       expect(() => controller.enable('hh-other', 'demo-sink', {})).toThrow(ForbiddenException);
       expect(() => controller.disable('hh-other', 'demo-sink')).toThrow(ForbiddenException);
@@ -216,29 +219,16 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(featureState.resolveForUnitBySlug).not.toHaveBeenCalled();
       // The read gate asks for read, the writes for manage — mirroring the
       // routes' own @CheckPolicies split.
-      expect(can).toHaveBeenCalledWith(Action.manage, expect.objectContaining({ householdId: 'hh-other' }));
-      expect(can).toHaveBeenCalledWith(Action.read, expect.objectContaining({ householdId: 'hh-other' }));
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.manage, ResourceType.HouseholdPlugin, {
+        householdId: 'hh-other',
+      });
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.HouseholdPlugin, {
+        householdId: 'hh-other',
+      });
     });
 
-    it('EVERY primed ability must allow — an API key floor clamps the household gate too', async () => {
-      const keyCan = jest.fn().mockReturnValue(false);
-      abilityService.getCurrentAbilities.mockReturnValue([
-        { can } as unknown as AppAbility,
-        { can: keyCan } as unknown as AppAbility,
-      ]);
-
-      expect(() => controller.consentPresentation('hh-1', 'demo-sink')).toThrow(ForbiddenException);
-    });
-
-    it('denies an EMPTY primed-abilities array — [].every must not vacuously pass the gate', () => {
-      // PoliciesGuard throws on this case before today's handlers run, but
-      // the mirror must hold on its own for any #323 route added without
-      // @CheckPolicies.
-      abilityService.getCurrentAbilities.mockReturnValue([]);
-
-      expect(() => controller.consentPresentation('hh-1', 'demo-sink')).toThrow(ForbiddenException);
-      expect(presentation.presentForUnitBySlug).not.toHaveBeenCalled();
-    });
+    // That every primed ability must allow, and that none primed is a
+    // denial, is the shared check's rule, pinned in `ability.service.spec.ts`.
   });
 
   describe('installed-plugin inventory (#354)', () => {
@@ -265,7 +255,9 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     // gate is the only thing between an admin of household A and household
     // B's enablement states.
     it('refuses a household the caller has no instance-level read on, before touching the service', async () => {
-      can.mockReturnValue(false);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
 
       expect(() => controller.list('hh-2', query())).toThrow(ForbiddenException);
       expect(inventory.listForHousehold).not.toHaveBeenCalled();
@@ -274,13 +266,15 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     it('checks the instance gate against THIS household as a HouseholdPlugin subject', async () => {
       await firstValueFrom(controller.list('hh-1', query()));
 
-      expect(can).toHaveBeenCalledWith(Action.read, expect.objectContaining({ householdId: 'hh-1' }));
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.HouseholdPlugin, {
+        householdId: 'hh-1',
+      });
     });
   });
 
   // Read from the decorators, not the instance: these specs construct the
   // controller directly, so a deleted @CheckPolicies would be invisible to
-  // every other test here. The instance gate (assertHouseholdScope) is
+  // every other test here. The instance gate (assertCurrentActorCan) is
   // asserted per-route above; this covers the coarse CASL half it layers on.
   describe('policy gates', () => {
     const policiesFor = (handler: string) =>
