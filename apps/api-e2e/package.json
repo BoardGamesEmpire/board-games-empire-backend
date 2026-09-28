@@ -4,7 +4,8 @@
   "private": true,
   "nx": {
     "implicitDependencies": [
-      "@boardgamesempire/api"
+      "@boardgamesempire/api",
+      "@boardgamesempire/worker"
     ],
     "targets": {
       "e2e": {
@@ -17,7 +18,8 @@
           "passWithNoTests": true
         },
         "dependsOn": [
-          "@boardgamesempire/api:build"
+          "@boardgamesempire/api:build",
+          "@boardgamesempire/worker:build"
         ]
       }
     }

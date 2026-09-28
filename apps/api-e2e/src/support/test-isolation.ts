@@ -10,10 +10,12 @@ import { createTestDatabase, type TestDatabase } from './test-db';
  * One plumbing client per spec file (opened lazily on the first test's
  * `beforeEach`, closed in `afterAll`), one sweep before every test. With
  * `maxWorkers: 1` the files run serially, so a single connection is ever
- * open. Redis is NOT swept here — `resetRedis` is destructive to sessions
- * a suite may deliberately carry across tests (e.g. sign-in once in
- * `beforeAll`, exercise endpoints per test), so clearing it is an opt-in
- * per suite.
+ * open. Redis is NOT swept here. Clearing it would destroy sessions a suite
+ * may deliberately carry across tests (e.g. sign-in once in `beforeAll`,
+ * exercise endpoints per test), and obliterating every queue before every
+ * test would remove jobs a running worker holds. Queue cleanup is an opt-in
+ * per suite instead: `isolateQueue` for a queue a spec fills, `useWorker` for
+ * the queues its worker consumes.
  */
 let db: TestDatabase | undefined;
 

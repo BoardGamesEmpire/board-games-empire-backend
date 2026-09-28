@@ -21,13 +21,15 @@ export const E2E_REDIS_URL_VAR = 'BGE_E2E_REDIS_URL';
  * Whether the harness provisioned the Redis server itself. Published by
  * `global-setup` for BOTH provisioning modes (see
  * {@link redisOwnershipOverride}) — never merely left alone — because
- * destructive helpers (`resetRedis`) gate on it.
+ * destructive helpers (the throttle sweep, `isolateQueue`, `useWorker`) gate
+ * on it.
  */
 export const E2E_OWNS_REDIS_VAR = 'BGE_E2E_OWNS_REDIS';
 
 /**
  * Explicit opt-in acknowledging that the external Redis named by
- * {@link E2E_REDIS_URL_VAR} is disposable and may be FLUSHALLed.
+ * {@link E2E_REDIS_URL_VAR} is disposable: its rate-limit buckets may be
+ * swept, its queues obliterated, and a worker attached to them.
  */
 export const E2E_REDIS_FLUSH_OK_VAR = 'BGE_E2E_REDIS_FLUSH_OK';
 
@@ -66,6 +68,8 @@ export const REDIS_IMAGE = 'redis:7-alpine';
  * `DATA_ENCRYPTION_KEY`'s `defaultsFor` map keys off, and it keeps
  * `env.isDevelopment` false so the suite does not silently exercise
  * development-only branches such as Swagger auto-enablement.
+ *
+ * The worker child runs under the same value (see {@link workerEnvOverrides}).
  */
 export const API_NODE_ENV = 'testing';
 
@@ -140,6 +144,30 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
     TRUSTED_ORIGINS: trustedOrigins.join(','),
     THROTTLE_LIMIT: String(API_THROTTLE_LIMIT),
     THROTTLE_TTL_MS: String(API_THROTTLE_TTL_MS),
+  };
+}
+
+/**
+ * Environment the worker child (`useWorker`) gets on top of the inherited
+ * process env. Like the API's, these are values the harness owns rather than
+ * inherits; unlike the API's, there is no port, origin or throttle to pin,
+ * because the worker serves nothing.
+ *
+ * `NODE_ENV` is the API's value, for a reason of its own: the worker's schema
+ * does not validate `NODE_ENV`, so an inherited `test` passes validation and
+ * fails one step later instead. `@bge/env` keys `defaultsFor` maps on it, and
+ * under `test` the media root has no default, so the worker exits during boot
+ * with `Missing environment variable 'MEDIA_LOCAL_DISK_ROOT'`.
+ *
+ * Everything else, `DATA_ENCRYPTION_KEY` included, resolves as it does for the
+ * API: the same inherited environment, the same `.env` at the workspace root,
+ * and the same `testing` defaults. That is what keeps the two on one key, which
+ * matters because the worker decrypts what the API encrypted (webhook signing
+ * secrets).
+ */
+export function workerEnvOverrides(): Record<string, string> {
+  return {
+    NODE_ENV: API_NODE_ENV,
   };
 }
 
@@ -289,7 +317,7 @@ export function redisEnvOverrides(endpoint: RedisEndpoint): Record<string, strin
  * external path must publish `'false'` rather than leaving the variable
  * alone, because an inherited value (exported in a shell, left in `.env`,
  * or set by an earlier container-mode run in the same process) would
- * otherwise still read as `'true'` and authorize FLUSHALL against a Redis
+ * otherwise still read as `'true'` and authorize those helpers against a Redis
  * the harness does not own. The harness is the only writer; whatever was
  * in the environment before is not evidence of anything.
  */

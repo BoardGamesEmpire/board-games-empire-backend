@@ -1,9 +1,9 @@
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import * as fs from 'node:fs';
+import { spawnSync, type ChildProcess } from 'node:child_process';
 import * as net from 'node:net';
 import * as path from 'node:path';
+import { killOnExit, launchChild, requireBundle, WORKSPACE_ROOT } from './child-process';
 import {
   apiEnvOverrides,
   decideProvisioning,
@@ -19,15 +19,11 @@ import {
 import { setE2EGlobalState } from './global-state';
 import { sweepThrottleBuckets } from './redis-reset';
 
-/** apps/api-e2e/src/support → workspace root. */
-const WORKSPACE_ROOT = path.join(__dirname, '..', '..', '..', '..');
-
 /** The deployable artifact under test — built by the e2e target's `api:build` dependency. */
 const API_BUNDLE = path.join(WORKSPACE_ROOT, 'apps', 'api', 'dist', 'main.js');
 
 const READINESS_TIMEOUT_MS = 90_000;
 const READINESS_POLL_MS = 250;
-const OUTPUT_TAIL_LINES = 120;
 const LAUNCH_ATTEMPTS = 3;
 
 /**
@@ -82,10 +78,6 @@ function getFreePort(): Promise<number> {
   });
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
-
 interface LaunchedApi {
   readonly child: ChildProcess;
   readonly baseUrl: string;
@@ -104,47 +96,27 @@ async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<
 
   console.log(`[e2e] launching API (${API_BUNDLE}) on ${baseUrl}...`);
 
-  const child = spawn(process.execPath, [API_BUNDLE], {
-    cwd: WORKSPACE_ROOT,
+  const outcome = await launchChild({
+    label: 'API',
+    bundle: API_BUNDLE,
     env: { ...env, ...apiEnvOverrides(baseUrl, port) },
-    // Always piped, never inherited: the retry path classifies a boot
-    // failure by scanning this output for EADDRINUSE, and inherited stdio
-    // would leave nothing to scan — making verbose runs the flaky ones.
-    // Verbose mode tees each chunk through to the parent instead, so logs
-    // still stream live.
-    stdio: ['ignore', 'pipe', 'pipe'],
+    verbose,
+    isReady: async () => {
+      try {
+        const response = await fetch(`${baseUrl}/health/ready`);
+        return response.status === 200;
+      } catch {
+        // Not listening yet — keep polling.
+        return false;
+      }
+    },
+    timeoutMs: READINESS_TIMEOUT_MS,
+    pollMs: READINESS_POLL_MS,
   });
 
-  const outputTail: string[] = [];
-  const capture = (chunk: Buffer, sink: NodeJS.WriteStream): void => {
-    if (verbose) {
-      sink.write(chunk);
-    }
-
-    for (const line of chunk.toString('utf8').split('\n')) {
-      if (line.length === 0) {
-        continue;
-      }
-
-      outputTail.push(line);
-      if (outputTail.length > OUTPUT_TAIL_LINES) {
-        outputTail.shift();
-      }
-    }
-  };
-
-  child.stdout?.on('data', (chunk: Buffer) => capture(chunk, process.stdout));
-  child.stderr?.on('data', (chunk: Buffer) => capture(chunk, process.stderr));
-
-  let exited = false;
-  child.once('exit', () => {
-    exited = true;
-  });
-
-  const logsFor = (reason: string): string => {
-    const logs = verbose ? '(logs were streamed above)' : `Last output:\n${outputTail.join('\n')}`;
-    return `${reason}\n${logs}`;
-  };
+  if (outcome.kind === 'ready') {
+    return { kind: 'ready', child: outcome.child, baseUrl };
+  }
 
   /**
    * `getFreePort` is probe-then-bind, so another process can take the port
@@ -152,42 +124,9 @@ async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<
    * scans the captured output because Node surfaces the child's bind error
    * only in its own stderr — the parent sees a plain non-zero exit.
    */
-  const lostThePort = (): boolean => outputTail.some((line) => line.includes('EADDRINUSE'));
+  const lostThePort = outcome.kind === 'exited' && outcome.outputTail.some((line) => line.includes('EADDRINUSE'));
 
-  const deadline = Date.now() + READINESS_TIMEOUT_MS;
-  for (;;) {
-    if (exited) {
-      return {
-        kind: lostThePort() ? 'port-collision' : 'failed',
-        child,
-        baseUrl,
-        failure: logsFor(`API process exited during boot (code ${String(child.exitCode)})`),
-      };
-    }
-
-    try {
-      const response = await fetch(`${baseUrl}/health/ready`);
-      if (response.status === 200) {
-        break;
-      }
-    } catch {
-      // Not listening yet — keep polling.
-    }
-
-    if (Date.now() >= deadline) {
-      child.kill('SIGKILL');
-      return {
-        kind: 'failed',
-        child,
-        baseUrl,
-        failure: logsFor(`API did not become ready within ${READINESS_TIMEOUT_MS}ms`),
-      };
-    }
-
-    await delay(READINESS_POLL_MS);
-  }
-
-  return { kind: 'ready', child, baseUrl };
+  return { kind: lostThePort ? 'port-collision' : 'failed', child: outcome.child, baseUrl, failure: outcome.failure };
 }
 
 /**
@@ -203,12 +142,7 @@ async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<
  * race lost — retries on a fresh port up to LAUNCH_ATTEMPTS.
  */
 async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
-  if (!fs.existsSync(API_BUNDLE)) {
-    throw new Error(
-      `API bundle not found at ${API_BUNDLE}. The e2e target depends on '@boardgamesempire/api:build' — ` +
-        `run via 'npx nx e2e @boardgamesempire/api-e2e' (or build the api first).`,
-    );
-  }
+  requireBundle('API', API_BUNDLE, '@boardgamesempire/api:build');
 
   const verbose = env[E2E_VERBOSE_VAR] === 'true';
 
@@ -288,7 +222,8 @@ export default async function globalSetup(): Promise<void> {
     } else {
       redisEndpoint = parseRedisUrl(decision.redis.url);
       console.warn(
-        '[e2e] using external Redis from BGE_E2E_REDIS_URL — set BGE_E2E_REDIS_FLUSH_OK=true to allow resetRedis (FLUSHALL)',
+        '[e2e] using external Redis from BGE_E2E_REDIS_URL — unless BGE_E2E_REDIS_FLUSH_OK=true marks it disposable, ' +
+          'the rate-limit sweep is skipped and specs that isolate a queue or start a worker refuse to run',
       );
     }
 
@@ -296,8 +231,8 @@ export default async function globalSetup(): Promise<void> {
     // Ownership is assigned unconditionally alongside the connection
     // details, not inside the branch above: a branch that sets the flag
     // only on one path leaves an inherited value standing on the other,
-    // and for this flag that means authorizing FLUSHALL on a Redis the
-    // harness did not provision.
+    // and for this flag that means authorizing queue obliteration and a
+    // worker on a Redis the harness did not provision.
     Object.assign(process.env, redisEnvOverrides(redisEndpoint), redisOwnershipOverride(decision.redis.mode));
 
     // Rate-limit buckets outlive the API child now that they live in Redis
@@ -318,15 +253,9 @@ export default async function globalSetup(): Promise<void> {
     api = launched.child;
     process.env[E2E_BASE_URL_VAR] = launched.baseUrl;
 
-    // Best-effort orphan guard: covers every exit path of THIS process
-    // (including unhandled throws). No-ops after a clean teardown, since the
-    // child has already exited by then.
-    const apiChild = api;
-    process.once('exit', () => {
-      if (apiChild.exitCode === null && apiChild.signalCode === null) {
-        apiChild.kill('SIGKILL');
-      }
-    });
+    // Covers every exit path of THIS process, including unhandled throws; a
+    // no-op after a clean teardown, since the child has exited by then.
+    killOnExit(api);
 
     setE2EGlobalState({ postgres, redis, api });
     console.log(`[e2e] harness ready — API at ${launched.baseUrl}`);

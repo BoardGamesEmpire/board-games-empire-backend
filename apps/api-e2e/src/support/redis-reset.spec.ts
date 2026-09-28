@@ -81,4 +81,22 @@ describe('redis-reset TLS options (pure logic)', () => {
       rejectUnauthorized: true,
     });
   });
+
+  it("reads the named connection's own variables, as makeRedisConfig does for each prefix", () => {
+    // The queue connection's certificates live under REDIS_BULLMQ_, and the
+    // worker reads them there. Taking the cache connection's instead would
+    // offer a queue server the wrong CA.
+    const env = {
+      REDIS_TLS_ENABLED: 'false',
+      REDIS_TLS_CA: 'cache-ca',
+      REDIS_BULLMQ_TLS_ENABLED: 'true',
+      REDIS_BULLMQ_TLS_CA: 'queue-ca',
+      REDIS_BULLMQ_REJECT_UNAUTHORIZED: 'false',
+    };
+
+    expect(redisTlsOptions(env, 'REDIS_BULLMQ_')).toEqual({
+      tls: { ca: 'queue-ca', cert: undefined, key: undefined, rejectUnauthorized: false },
+    });
+    expect(redisTlsOptions(env)).toEqual({});
+  });
 });

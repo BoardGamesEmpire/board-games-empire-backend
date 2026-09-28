@@ -11,6 +11,12 @@
       "path": "../../libs/common/shared"
     },
     {
+      "path": "../../libs/queue/webhooks"
+    },
+    {
+      "path": "../../libs/api/game-import"
+    },
+    {
       "path": "../../libs/plugin/manifest"
     },
     {
@@ -20,16 +26,19 @@
       "path": "../../libs/common/i18n"
     },
     {
+      "path": "../../libs/queue/actor-context"
+    },
+    {
       "path": "../../libs/common/services"
     },
     {
       "path": "../../libs/queue/feedback"
     },
     {
-      "path": "../../libs/common/permissions"
+      "path": "../../libs/common/bootstrap"
     },
     {
-      "path": "../../libs/common/bootstrap"
+      "path": "../../libs/common/permissions"
     },
     {
       "path": "../../libs/common/testing-e2e"

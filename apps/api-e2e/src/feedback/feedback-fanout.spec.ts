@@ -1,9 +1,9 @@
-import { FEEDBACK_DELIVERY_JOB } from '@bge/queue-feedback';
+import { FEEDBACK_DELIVERY_JOB, FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import { requireBaseUrl } from '../support/e2e-env';
+import { isolateQueue } from '../support/queue-isolation';
 import { countPendingJobs, obliterateQueue, waitForStableJobCount } from '../support/queues';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { isolateFeedbackQueue } from './feedback-queue-isolation';
 import { createFeedbackClient, freshFeedbackKey, reportPayload } from './feedback-request';
 import { LOCAL_FEEDBACK_SINK_SLUG, submitEnvelope } from './feedback-wire';
 
@@ -32,15 +32,15 @@ import { LOCAL_FEEDBACK_SINK_SLUG, submitEnvelope } from './feedback-wire';
  * re-emit after removal WOULD create a job, and asserting zero afterwards is an
  * assertion that can actually fail.
  *
- * WHAT STILL NEEDS #348. The harness launches only `apps/api`, which registers
+ * WHAT STILL NEEDS #348. This file installs no worker, and `apps/api` registers
  * PRODUCERS only — no `@Processor` runs, so nothing here ever delivers. This
  * file proves the enqueue is suppressed; #348 proves a real worker's completed
  * delivery is not repeated, by asserting `attempts` and `externalId` on the
- * existing `FeedbackSubmission` row are unchanged. That needs a worker child
- * (#268) and the sink's `submit()` actually running.
+ * existing `FeedbackSubmission` row are unchanged. That needs `useWorker()`
+ * and the sink's `submit()` actually running.
  *
  * Queue state is not swept between tests, so cleanup is registered via
- * `isolateFeedbackQueue()` — shared with every other feedback spec,
+ * `isolateQueue(FEEDBACK_QUEUE_NAME)` — shared with every other feedback spec,
  * because they all enqueue jobs even though only this one asserts on them.
  */
 describe('feedback sink fan-out suppression on replay (#251)', () => {
@@ -52,7 +52,7 @@ describe('feedback sink fan-out suppression on replay (#251)', () => {
   let db: TestDatabase;
   let actors: Actors;
 
-  const feedbackQueue = isolateFeedbackQueue();
+  const feedbackQueue = isolateQueue(FEEDBACK_QUEUE_NAME);
 
   beforeAll(() => {
     db = createTestDatabase();
