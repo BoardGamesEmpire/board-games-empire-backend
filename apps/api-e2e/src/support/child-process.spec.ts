@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { launchChild, type ChildLaunch } from './child-process';
 
 /**
@@ -29,6 +30,42 @@ describe('launchChild', () => {
       ...overrides,
     });
 
+  /** A child that records its pid where {@link afterReap} can find it, then exits with code 3. */
+  const exitsLeavingPid = (name: string): { bundle: string; pidFile: string } => {
+    const pidFile = path.join(scripts, `${name}.pid`);
+    const bundle = script(
+      `${name}.cjs`,
+      `require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\nprocess.exit(3);`,
+    );
+
+    return { bundle, pidFile };
+  };
+
+  /**
+   * A probe that settles, as `settle` says, only once the child has been
+   * reaped. A zombie still answers `kill(pid, 0)`, and Node reaps a child in
+   * the same step that emits its 'exit', so the launch has seen the exit by
+   * the time this settles.
+   */
+  const afterReap = (pidFile: string, settle: () => Promise<boolean>) => async (): Promise<boolean> => {
+    for (;;) {
+      const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
+      if (pid > 0) {
+        try {
+          process.kill(pid, 0);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+            return settle();
+          }
+
+          throw error;
+        }
+      }
+
+      await delay(10);
+    }
+  };
+
   beforeAll(() => {
     scripts = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-child-process-'));
   });
@@ -44,6 +81,29 @@ describe('launchChild', () => {
     const outcome = await launch(script('exits.cjs', 'process.exit(3);'), {
       isReady: () => new Promise<boolean>(() => undefined),
       timeoutMs: 1_000,
+    });
+
+    expect(outcome.kind).toBe('exited');
+    expect(outcome.kind !== 'ready' && outcome.failure).toMatch(/exited during boot \(code 3\)/);
+  });
+
+  it('reports a child that exits while the probe is out as a boot exit, even when the probe then passes', async () => {
+    // A probe can pass for a child that has just died: CLIENT LIST still lists
+    // a worker's connections until Redis reads their close. Accepting the
+    // answer called a dead child ready.
+    const { bundle, pidFile } = exitsLeavingPid('exits-then-passes');
+
+    const outcome = await launch(bundle, { isReady: afterReap(pidFile, () => Promise.resolve(true)) });
+
+    expect(outcome.kind).toBe('exited');
+    expect(outcome.kind !== 'ready' && outcome.failure).toMatch(/exited during boot \(code 3\)/);
+  });
+
+  it('reports a child that exits while the probe is out as a boot exit, even when the probe then fails', async () => {
+    const { bundle, pidFile } = exitsLeavingPid('exits-then-fails');
+
+    const outcome = await launch(bundle, {
+      isReady: afterReap(pidFile, () => Promise.reject(new Error('connection lost'))),
     });
 
     expect(outcome.kind).toBe('exited');

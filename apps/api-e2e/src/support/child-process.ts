@@ -103,7 +103,8 @@ async function settleWithin<T>(promise: Promise<T>, ms: number, fallback: T): Pr
 
 /**
  * Spawns `node <bundle>` and polls `isReady` until it passes, the child exits,
- * or the deadline lapses. A probe that never settles counts as not ready, so
+ * or the deadline lapses. An exit seen while a probe is out outranks what the
+ * probe then answers. A probe that never settles counts as not ready, so
  * it cannot hold the launch past its deadline. A child still running when the
  * launch fails is SIGKILLed, and waited for, before this returns, so a failed
  * outcome never leaves a process behind.
@@ -187,21 +188,30 @@ export async function launchChild(launch: ChildLaunch): Promise<ChildLaunchOutco
       );
     }
 
-    try {
-      if (await settleWithin(launch.isReady(), Math.max(deadline - Date.now(), 0), false)) {
-        return { kind: 'ready', child, outputTail };
-      }
-    } catch (error) {
+    const probe = await settleWithin(launch.isReady(), Math.max(deadline - Date.now(), 0), false).then(
+      (ready) => ({ ready }),
+      (error: unknown) => ({ error }),
+    );
+
+    // The child died while the probe was out. Reported at the top of the loop
+    // as the exit it is, whatever the probe answered: a probe can pass for a
+    // child that has just died (CLIENT LIST lists a worker's connections until
+    // Redis reads their close). Nor is it the timeout the check below would
+    // call it.
+    if (exited) {
+      continue;
+    }
+
+    if ('error' in probe) {
+      const { error } = probe;
       return fail(
         'failed',
         `${label} readiness probe failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
-    // The child died while the probe was out. Reported at the top of the loop
-    // as the exit it is, not as the timeout the check below would call it.
-    if (exited) {
-      continue;
+    if (probe.ready) {
+      return { kind: 'ready', child, outputTail };
     }
 
     if (Date.now() >= deadline) {
