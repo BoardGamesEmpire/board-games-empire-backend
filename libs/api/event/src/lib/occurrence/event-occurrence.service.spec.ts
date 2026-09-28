@@ -3,6 +3,7 @@ import {
   AvailabilityResponse,
   EventAvailabilityVote,
   EventOccurrence,
+  EventParticipationStatus,
   EventSchedulingMode,
   OccurrenceStatus,
   Prisma,
@@ -13,6 +14,7 @@ import {
   batchTransactionCall,
   createMockAbilityService,
   createTestingModuleWithDb,
+  makeEventAttendee,
   makeEventOccurrence,
   paginationQuery,
   type MockAbilityService,
@@ -374,6 +376,7 @@ describe('EventOccurrenceService', () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findMany.mockResolvedValue([]);
       db.eventOccurrence.findMany.mockResolvedValue([]);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([]);
     });
 
     it('composes the occurrence half, declaring the path event as its scope', async () => {
@@ -400,28 +403,57 @@ describe('EventOccurrenceService', () => {
     });
 
     // The votes are the route's own type and the third collection counted
-    // here. Left to ride on the occurrence, they escaped the vote ceiling and
-    // counted voters the attendee half had already clipped away: an API key
-    // that may read one attendee read `eligibleVoters: 1` beside every vote
-    // cast, and a `participationRate` above 1. Scoping them to the attendees
-    // counted above keeps every number in the summary about the same people.
-    it('composes the votes, scoped to the attendees counted above', async () => {
+    // here. They are a read of their own, with the ceiling in its top-level
+    // `where`: nested in the occurrence read as an `include` filter, a
+    // deny-all ceiling is dropped by Prisma rather than turned into no rows.
+    it('composes the votes as a read of their own, declaring the path event as its scope', async () => {
       await service.getAvailabilitySummary('event-1');
 
-      const counted = { eventId: 'event-1', AND: [COND] };
       expect(compose).toHaveBeenCalledWith(ResourceType.EventAvailabilityVote, Action.read, {
-        attendee: { is: counted },
+        occurrence: { is: { eventId: 'event-1' } },
       });
-      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          include: {
-            availabilityVotes: {
-              where: { attendee: { is: counted }, AND: [COND] },
-              select: { response: true, attendeeId: true },
-            },
-          },
-        }),
+      expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { occurrence: { is: { eventId: 'event-1' } }, AND: [COND] } }),
       );
+    });
+
+    // Unmatched, a vote from an attendee the caller may not read counted in
+    // `totalVotes` and `voters` but not in `eligibleVoters`: an API key that
+    // may read one attendee read `eligibleVoters: 1` beside every vote cast,
+    // and a `participationRate` above 1.
+    it('counts only the votes of the attendees it counts, on the occurrences it returns', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        makeEventAttendee({
+          id: 'att-1',
+          eventId: 'event-1',
+          userId: 'user-1',
+          status: EventParticipationStatus.Attending,
+        }),
+      ]);
+      db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        { occurrenceId: 'occ-1', attendeeId: 'att-1', response: AvailabilityResponse.Available },
+        // An attendee the attendee read did not return.
+        { occurrenceId: 'occ-1', attendeeId: 'att-2', response: AvailabilityResponse.Unavailable },
+        // An occurrence the occurrence read did not return.
+        { occurrenceId: 'occ-2', attendeeId: 'att-1', response: AvailabilityResponse.Maybe },
+      ] as EventAvailabilityVote[]);
+
+      const summary = await service.getAvailabilitySummary('event-1');
+
+      expect(summary.eligibleVoters).toBe(1);
+      expect(summary.occurrences).toEqual([
+        expect.objectContaining({
+          occurrenceId: 'occ-1',
+          available: 1,
+          maybe: 0,
+          unavailable: 0,
+          totalVotes: 1,
+          pendingVotes: 0,
+          participationRate: 1,
+          voters: [{ attendeeId: 'att-1', response: AvailabilityResponse.Available }],
+        }),
+      ]);
     });
   });
 

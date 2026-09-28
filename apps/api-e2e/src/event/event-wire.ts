@@ -18,10 +18,23 @@ export interface ListEventsEnvelope {
 }
 
 /**
- * The attendance half of the availability summary. Restated rather than
- * imported from `@bge/event`, since the suite checks the wire contract and
- * not the service's own type. The per-occurrence entries are left `unknown`
- * until a spec asserts on one.
+ * One occurrence's entry in the availability summary, restated to the fields
+ * a spec asserts on.
+ */
+export interface AvailabilitySummaryEntryWire {
+  readonly occurrenceId: string;
+  readonly available: number;
+  readonly maybe: number;
+  readonly unavailable: number;
+  readonly totalVotes: number;
+  readonly pendingVotes: number;
+  readonly participationRate: number;
+  readonly voters: readonly { readonly attendeeId: string; readonly response: string }[];
+}
+
+/**
+ * The availability summary. Restated rather than imported from `@bge/event`,
+ * since the suite checks the wire contract and not the service's own type.
  */
 export interface AvailabilitySummaryWire {
   readonly attendees: {
@@ -36,7 +49,7 @@ export interface AvailabilitySummaryWire {
     };
   };
   readonly eligibleVoters: number;
-  readonly occurrences: readonly unknown[];
+  readonly occurrences: readonly AvailabilitySummaryEntryWire[];
 }
 
 const fail = envelopeFailure('apps/api-e2e/src/event/event-wire.ts');

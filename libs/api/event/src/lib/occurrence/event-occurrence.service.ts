@@ -422,39 +422,52 @@ export class EventOccurrenceService {
    * `assertEventExists` checks only that the event exists. Being able to read
    * the Event row itself, as a friend can, reaches none of them.
    *
-   * The votes are also scoped to the attendees counted above. `pendingVotes`
-   * and `participationRate` divide one by the other, so a vote from an
-   * attendee the caller cannot read would count in `totalVotes` and `voters`
-   * but not in `eligibleVoters`. Every user role binds all three reads to the
-   * same event or household, so that takes an API key holding a subset of
-   * them; the scoping keeps the summary consistent for it.
+   * The votes are read on their own and matched in memory to the attendees
+   * and occurrences read beside them, so every ceiling here sits in a
+   * top-level `where`. That is the only place `DatabaseService`'s CASL
+   * extension turns a deny-all, CASL's `{ OR: [] }`, into no rows. Inside an
+   * `include`'s filter, Prisma drops it (prisma#21856), and the votes it was
+   * meant to clip all come back.
+   *
+   * The match also keeps the numbers about the same people. `pendingVotes`
+   * and `participationRate` divide votes by `eligibleVoters`, so a vote whose
+   * attendee the attendee read did not return is never counted, even one
+   * cast between the reads. Every user role binds all three reads to the same
+   * event or household; an API key holding a subset of them is the caller
+   * this protects.
    */
   async getAvailabilitySummary(eventId: string): Promise<AvailabilitySummary> {
     await assertEventExists(this.db, eventId);
 
-    const counted = this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId });
-
-    const [attendees, occurrences] = await Promise.all([
+    const [attendees, occurrences, votes] = await Promise.all([
       this.db.eventAttendee.findMany({
-        where: counted,
-        select: { userId: true, status: true },
+        where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId }),
+        select: { id: true, userId: true, status: true },
       }),
       this.db.eventOccurrence.findMany({
         where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId }),
-        include: {
-          availabilityVotes: {
-            where: this.scopeComposer.compose(ResourceType.EventAvailabilityVote, Action.read, {
-              attendee: { is: counted },
-            }),
-            select: {
-              response: true,
-              attendeeId: true,
-            },
-          },
-        },
         orderBy: OCCURRENCE_ORDER,
       }),
+      this.db.eventAvailabilityVote.findMany({
+        where: this.scopeComposer.compose(ResourceType.EventAvailabilityVote, Action.read, {
+          occurrence: { is: { eventId } },
+        }),
+        select: { occurrenceId: true, attendeeId: true, response: true },
+      }),
     ]);
+
+    const countedAttendeeIds = new Set(attendees.map((a) => a.id));
+    const votesByOccurrence = new Map<string, typeof votes>();
+
+    for (const vote of votes) {
+      if (!countedAttendeeIds.has(vote.attendeeId)) {
+        continue;
+      }
+
+      const occurrenceVotes = votesByOccurrence.get(vote.occurrenceId) ?? [];
+      occurrenceVotes.push(vote);
+      votesByOccurrence.set(vote.occurrenceId, occurrenceVotes);
+    }
 
     const registered = attendees.filter((a) => a.userId !== null);
     const guests = attendees.filter((a) => a.userId === null);
@@ -485,11 +498,12 @@ export class EventOccurrenceService {
     }
 
     const occurrenceEntries: AvailabilitySummaryEntry[] = occurrences.map((occ) => {
+      const occurrenceVotes = votesByOccurrence.get(occ.id) ?? [];
       let available = 0;
       let maybe = 0;
       let unavailable = 0;
 
-      for (const vote of occ.availabilityVotes) {
+      for (const vote of occurrenceVotes) {
         switch (vote.response) {
           case AvailabilityResponse.Available:
             available++;
@@ -503,7 +517,7 @@ export class EventOccurrenceService {
         }
       }
 
-      const totalVotes = occ.availabilityVotes.length;
+      const totalVotes = occurrenceVotes.length;
 
       return {
         occurrenceId: occ.id,
@@ -517,7 +531,7 @@ export class EventOccurrenceService {
         totalVotes,
         pendingVotes: Math.max(0, eligibleVoters - totalVotes),
         participationRate: eligibleVoters > 0 ? Math.round((totalVotes / eligibleVoters) * 100) / 100 : 0,
-        voters: occ.availabilityVotes.map((v) => ({
+        voters: occurrenceVotes.map((v) => ({
           attendeeId: v.attendeeId,
           response: v.response,
         })),

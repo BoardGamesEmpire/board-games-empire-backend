@@ -1,4 +1,10 @@
-import { EventParticipationStatus, SystemRole, Visibility } from '@bge/database';
+import {
+  AvailabilityResponse,
+  EventParticipationStatus,
+  OccurrenceStatus,
+  SystemRole,
+  Visibility,
+} from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -184,15 +190,38 @@ describe('event read scope', () => {
   });
 
   describe('the availability summary (#512)', () => {
-    it("counts no attendees for an event the caller can't read, and every attendee for its host", async () => {
+    it("counts nothing on an event the caller can't read, and every attendee and vote for its host", async () => {
       const host = await actors.user();
       const guest = await actors.user();
       const outsider = await actors.user();
       const eventId = await createdEventId(host);
       const outsidersEventId = await createdEventId(outsider);
-      await addAttendee(host, eventId, { userId: guest.user.id }).expect(201);
+      const guestAttendee = attendeeEnvelope(
+        await addAttendee(host, eventId, { userId: guest.user.id }).expect(201),
+        'POST /api/events/:eventId/attendees as the host',
+      );
 
-      // Control: the host counts both attendees.
+      // Arranged in the database, like the friendship above: this test is
+      // about the summary's reads, and the votes below go through their route.
+      const occurrence = await db.client.eventOccurrence.create({
+        data: { eventId, label: 'Saturday', status: OccurrenceStatus.Proposed },
+        select: { id: true },
+      });
+      const votes = [
+        [host, AvailabilityResponse.Available],
+        [guest, AvailabilityResponse.Unavailable],
+      ] as const;
+
+      for (const [voter, response] of votes) {
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrence.id}/availability`)
+          .set(voter.headers)
+          .send({ response })
+          .expect(201);
+      }
+
+      // Control: the host counts both attendees, and both votes, which come
+      // from a read of their own.
       const own = availabilitySummaryEnvelope(
         await readSummary(host, eventId).expect(200),
         'GET /api/events/:eventId/occurrences/summary/availability as the host',
@@ -204,6 +233,21 @@ describe('event read scope', () => {
         byStatus: { attending: 1, invited: 1, maybe: 0, notAttending: 0 },
       });
       expect(own.eligibleVoters).toBe(2);
+      expect(own.occurrences).toEqual([
+        expect.objectContaining({
+          occurrenceId: occurrence.id,
+          available: 1,
+          maybe: 0,
+          unavailable: 1,
+          totalVotes: 2,
+          pendingVotes: 0,
+          participationRate: 1,
+        }),
+      ]);
+      expect(own.occurrences[0]?.voters).toContainEqual({
+        attendeeId: guestAttendee.id,
+        response: AvailabilityResponse.Unavailable,
+      });
 
       // Control: the outsider passes the route's check, which asks only whether
       // they may read availability votes on some event. Their own event's
@@ -226,6 +270,7 @@ describe('event read scope', () => {
         byStatus: { attending: 0, invited: 0, maybe: 0, notAttending: 0 },
       });
       expect(other.eligibleVoters).toBe(0);
+      expect(other.occurrences).toEqual([]);
     });
   });
 });
