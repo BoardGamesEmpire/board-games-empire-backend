@@ -119,25 +119,47 @@ export async function lockExistingHousehold(tx: Prisma.TransactionClient, househ
  * accidental — both operations are rare, and admitting a member while ownership
  * is mid-swap has no meaning worth preserving.
  *
- * ## What this does NOT check
+ * ## It is also the liveness check
  *
- * The rows are discarded, and there is no `deleted_at` predicate: this is a
- * mutex, not an existence guard, and it must serialize against a soft-delete
- * rather than be filtered out by one. Callers establish liveness with
- * {@link assertHouseholdExists} BEFORE the transaction, which is an unlocked
- * probe — so a soft-delete that commits in between leaves the caller mutating
- * roles on a dead household, and emitting events for it. Tracked as #386, which
- * carries the decision the fix depends on: whether a member may leave a
- * soft-deleted household.
+ * A soft-deleted household answers 404 here, and that is the authority for it.
+ * Callers probe with {@link assertHouseholdExists} before the transaction, but
+ * that probe takes no lock, so a soft-delete can commit between the two. Without
+ * this check the transition then rewrote roles on a household the API treats
+ * as gone, and a transfer emitted its audit and webhook events for it (#386).
+ *
+ * The predicate does not stop this statement serializing against a delete. If
+ * the soft-delete is in flight, this blocks on the row lock, then re-evaluates
+ * its `WHERE` against the committed version (`EvalPlanQual`), finds
+ * `deleted_at` set, matches nothing, and 404s, which is the behaviour
+ * {@link lockExistingHousehold} already relies on.
+ *
+ * A restore in flight is NOT the mirror image, and it is easy to assume it is.
+ * A locking read tests its `WHERE` against its own snapshot first and locks only
+ * the rows that pass there; the re-check after a wait applies to those alone.
+ * An uncommitted restore leaves the row deleted in that snapshot, so it fails
+ * the predicate, is never locked, and this 404s at once rather than waiting.
+ * That is still correct: the household was deleted when the transition asked,
+ * and the same request succeeds once the restore commits.
+ *
+ * All four transitions refuse, leaving included. Restore is an undo and brings
+ * back exactly what was deleted, so a deleted household's roster stays frozen
+ * until then; a member who wants out leaves once it is live again.
  *
  * NOTE: raw SQL because Prisma exposes no row-locking clause. The identifiers
- * are pinned against the checked-in Prisma models by a spec in this lib.
+ * are pinned against the checked-in Prisma models by a spec in this lib; the
+ * interleaving with a real soft-delete is pinned by
+ * `apps/api-e2e/src/household/owner-lock-serialization.spec.ts`.
  */
 export async function lockHouseholdForRoleTransition(tx: Prisma.TransactionClient, householdId: string): Promise<void> {
-  await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+  const rows = await tx.$queryRaw<Array<{ id: string }>>(Prisma.sql`
     SELECT h.id
     FROM households h
     WHERE h.id = ${householdId}
+      AND h.deleted_at IS NULL
     FOR NO KEY UPDATE
   `);
+
+  if (rows.length === 0) {
+    throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
+  }
 }
