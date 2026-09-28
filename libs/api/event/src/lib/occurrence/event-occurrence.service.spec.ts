@@ -363,6 +363,33 @@ describe('EventOccurrenceService', () => {
       expect(emitted.before).toEqual({ id: 'vote-1', response: AvailabilityResponse.Maybe });
       expect(emitted.after).toEqual({ id: 'vote-1', response: AvailabilityResponse.Available });
     });
+
+    // The route's policy check judges the vote by type alone, and an event
+    // role is rendered once per attendance, so the vote grant from one event
+    // passed a vote in any other the actor attends. The service checks the
+    // vote against the attendee casting it, in this event.
+    it('checks the vote against the attendee casting it, in the event in the path', async () => {
+      db.eventAvailabilityVote.findUnique.mockResolvedValue(null);
+
+      await service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available });
+
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
+        Action.create,
+        ResourceType.EventAvailabilityVote,
+        { occurrenceId: 'occ-1', attendeeId: 'att-1', attendee: { userId: 'user-1', eventId: 'event-1' } },
+      );
+    });
+
+    it('refuses before writing when the instance check denies', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(
+        service.submitAvailability('event-1', 'occ-1', { response: AvailabilityResponse.Available }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(db.eventAvailabilityVote.upsert).not.toHaveBeenCalled();
+    });
   });
 
   /**

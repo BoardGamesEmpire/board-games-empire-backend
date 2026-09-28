@@ -36,6 +36,17 @@ const eventGameInHousehold = {
   ],
 } satisfies Prisma.EventGameWhereInput;
 
+// The acting user's own attendee row, in the event the grant was rendered
+// for. An event role is rendered once per attendance, so a grant on the
+// actor's own row names the event as well as the user: a user-only clause
+// rendered from one event matched the actor's row in every event they attend
+// (#432, #458). Typed as the `EventAttendee` where-clause it is spliced into
+// and module-private, for the reasons `acceptedFriendOfActingUser` gives.
+const actingUserAttendeeInEvent = {
+  userId: '{{ user.id }}',
+  eventId: '{{ eventId }}',
+} satisfies Prisma.EventAttendeeWhereInput;
+
 // An attendee row in the event whose role attends it rather than runs it:
 // participant, guest or spectator. The role is matched through the row's role
 // assignment, so an add must name the role it is about to write and a removal
@@ -542,10 +553,14 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View availability votes on your household's events",
   }),
+  // Both vote grants are held on the voter's own attendee row in this event,
+  // and each is checked against the vote about to be written. Bound to the
+  // voter alone, the grant from an event where the actor votes passed their
+  // vote in one where their role casts none.
   permission({
     action: Action.create,
     subject: ResourceType.EventAvailabilityVote,
-    conditions: { attendee: { userId: '{{ user.id }}' } },
+    conditions: { attendee: { is: actingUserAttendeeInEvent } },
     slug: 'create:event_availability_vote',
     riskLevel: RiskLevel.Low,
     reason: 'Submit or update your availability vote on a proposed occurrence',
@@ -673,7 +688,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.create,
     subject: ResourceType.EventGameVote,
-    conditions: { attendee: { userId: '{{ user.id }}' } },
+    conditions: { attendee: { is: actingUserAttendeeInEvent } },
     slug: 'create:event_game_vote',
     riskLevel: RiskLevel.Low,
     reason: 'Cast or update your vote on a nomination',
@@ -748,10 +763,8 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the available game lists of your household's events",
   }),
-  // The own-list pair names the event as well as the user: an event role is
-  // rendered once per attendance, so a user-only condition granted through
-  // one event matched the actor's own attendee row in every other event. The
-  // pair is in operator form too: the game-list create path checks
+  // The own-list pair is held on the actor's own attendee row in this event,
+  // in operator form: the game-list create path checks
   // `create:attendee_game_list` against an instance (a participant may add to
   // their own list, a manager to any list in the event), and the matcher
   // throws on the shorthand this pair used to carry. The delete mirrors the
@@ -759,7 +772,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
+    conditions: { attendee: { is: actingUserAttendeeInEvent } },
     slug: 'create:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Add a game to your own available game list',
@@ -767,7 +780,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.delete,
     subject: ResourceType.EventAttendeeGameList,
-    conditions: { attendee: { is: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } } },
+    conditions: { attendee: { is: actingUserAttendeeInEvent } },
     slug: 'delete:attendee_game_list',
     riskLevel: RiskLevel.Low,
     reason: 'Remove a game from your own available game list',

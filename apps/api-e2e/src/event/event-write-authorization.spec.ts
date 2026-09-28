@@ -1,4 +1,11 @@
-import { GameMedium, SystemRole } from '@bge/database';
+import {
+  AvailabilityResponse,
+  GameMedium,
+  NominationStatus,
+  OccurrenceStatus,
+  SystemRole,
+  VoteType,
+} from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -7,7 +14,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { attendeeEnvelope, eventEnvelope, eventGameEnvelope } from './event-wire';
 
 /**
- * Who may write what on an event, over the real routes (#454, #539, #457).
+ * Who may write what on an event, over the real routes (#454, #539, #457, #458).
  *
  * Each route's policy check judges its action by type alone, so it passes
  * any actor holding the grant on ANY event or household; the service binds it
@@ -58,6 +65,18 @@ describe('event write authorization', () => {
   const directAdd = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`).set(actor.headers).send(body);
 
+  const castVote = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
+    request(baseUrl)
+      .post(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/votes`)
+      .set(actor.headers)
+      .send({ voteType: VoteType.For });
+
+  const submitAvailability = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+    request(baseUrl)
+      .post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/availability`)
+      .set(actor.headers)
+      .send({ response: AvailabilityResponse.Available });
+
   const attendeeCount = (eventId: string) => db.client.eventAttendee.count({ where: { eventId } });
 
   const attendeeRowId = async (eventId: string, userId: string) =>
@@ -69,6 +88,37 @@ describe('event write authorization', () => {
     ).id;
 
   const householdEventCount = (householdId: string) => db.client.event.count({ where: { householdId } });
+
+  /**
+   * A game-list entry for `ownerId`'s attendee row on `eventId`: a fresh
+   * game on the seeded tabletop platform, in the owner's collection, put on
+   * their list for the event. List entries grant nothing, so arranging them
+   * after the actors' first requests is safe.
+   */
+  const arrangeListEntry = async (eventId: string, ownerId: string) => {
+    const platform = await db.client.platform.findUniqueOrThrow({
+      where: { slug: 'tabletop' },
+      select: { id: true },
+    });
+    const game = await db.client.game.create({
+      data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
+      select: { id: true },
+    });
+    const platformGame = await db.client.platformGame.create({
+      data: { gameId: game.id, platformId: platform.id },
+      select: { id: true },
+    });
+    const collection = await db.client.gameCollection.create({
+      data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical },
+      select: { id: true },
+    });
+    const entry = await db.client.eventAttendeeGameList.create({
+      data: { attendeeId: await attendeeRowId(eventId, ownerId), collectionId: collection.id },
+      select: { id: true },
+    });
+
+    return { platformGameId: platformGame.id, suppliedById: entry.id };
+  };
 
   const MANAGING_ROLES = [SystemRole.EventCoHost, SystemRole.EventOrganizer, SystemRole.EventModerator] as const;
 
@@ -349,37 +399,6 @@ describe('event write authorization', () => {
   });
 
   describe('adding a game directly (#457)', () => {
-    /**
-     * A game-list entry for `ownerId`'s attendee row on `eventId`: a fresh
-     * game on the seeded tabletop platform, in the owner's collection, put on
-     * their list for the event. List entries grant nothing, so arranging them
-     * after the actors' first requests is safe.
-     */
-    const arrangeListEntry = async (eventId: string, ownerId: string) => {
-      const platform = await db.client.platform.findUniqueOrThrow({
-        where: { slug: 'tabletop' },
-        select: { id: true },
-      });
-      const game = await db.client.game.create({
-        data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
-        select: { id: true },
-      });
-      const platformGame = await db.client.platformGame.create({
-        data: { gameId: game.id, platformId: platform.id },
-        select: { id: true },
-      });
-      const collection = await db.client.gameCollection.create({
-        data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical },
-        select: { id: true },
-      });
-      const entry = await db.client.eventAttendeeGameList.create({
-        data: { attendeeId: await attendeeRowId(eventId, ownerId), collectionId: collection.id },
-        select: { id: true },
-      });
-
-      return { platformGameId: platformGame.id, suppliedById: entry.id };
-    };
-
     it('refuses a supplier from another event or for another game, and writes nothing', async () => {
       const host = await actors.user();
       const stranger = await actors.user();
@@ -406,6 +425,83 @@ describe('event write authorization', () => {
         'POST /api/events/:eventId/nominations/direct-add',
       );
       expect(added.suppliedById).toBe(own.suppliedById);
+    });
+  });
+
+  describe('voting (#458)', () => {
+    /**
+     * A voter who attends one event as a spectator, which votes on nothing,
+     * and another as a participant, which casts both kinds of vote. An event
+     * role is rendered once per attendance, so the participant's grants are in
+     * the voter's graph beside the spectator's, and the route's type-only
+     * check passes on them in either event.
+     */
+    const arrangeVoter = async () => {
+      const spectatedHost = await actors.user();
+      const participatedHost = await actors.user();
+      const voter = await actors.user();
+      const spectatedId = await createdEventId(spectatedHost);
+      const participatedId = await createdEventId(participatedHost);
+      await addAttendee(spectatedHost, spectatedId, {
+        userId: voter.user.id,
+        role: SystemRole.EventSpectator,
+      }).expect(201);
+      await addAttendee(participatedHost, participatedId, {
+        userId: voter.user.id,
+        role: SystemRole.EventParticipant,
+      }).expect(201);
+
+      return { voter, spectatedHost, spectatedId, participatedHost, participatedId };
+    };
+
+    /** An open nomination on `eventId`, made by its host from their own list. */
+    const arrangeNomination = async (eventId: string, hostId: string) => {
+      const { platformGameId, suppliedById } = await arrangeListEntry(eventId, hostId);
+      const nomination = await db.client.eventGameNomination.create({
+        data: {
+          eventId,
+          platformGameId,
+          nominatedById: await attendeeRowId(eventId, hostId),
+          suppliedFromId: suppliedById,
+          status: NominationStatus.Open,
+        },
+        select: { id: true },
+      });
+
+      return nomination.id;
+    };
+
+    /** A proposed occurrence on `eventId`, open for availability votes. */
+    const arrangeProposedOccurrence = async (eventId: string) =>
+      (
+        await db.client.eventOccurrence.create({
+          data: { eventId, status: OccurrenceStatus.Proposed },
+          select: { id: true },
+        })
+      ).id;
+
+    it('refuses a game vote from a spectator who participates in another event, and writes nothing', async () => {
+      const { voter, spectatedHost, spectatedId, participatedHost, participatedId } = await arrangeVoter();
+      const spectatedNomination = await arrangeNomination(spectatedId, spectatedHost.user.id);
+      const participatedNomination = await arrangeNomination(participatedId, participatedHost.user.id);
+
+      // Control: the voter votes where they participate.
+      await castVote(voter, participatedId, participatedNomination).expect(201);
+
+      await castVote(voter, spectatedId, spectatedNomination).expect(403);
+      expect(await db.client.eventGameVote.count({ where: { eventGameNominationId: spectatedNomination } })).toBe(0);
+    });
+
+    it('refuses availability from a spectator who participates in another event, and writes nothing', async () => {
+      const { voter, spectatedId, participatedId } = await arrangeVoter();
+      const spectatedOccurrence = await arrangeProposedOccurrence(spectatedId);
+      const participatedOccurrence = await arrangeProposedOccurrence(participatedId);
+
+      // Control: the voter answers where they participate.
+      await submitAvailability(voter, participatedId, participatedOccurrence).expect(201);
+
+      await submitAvailability(voter, spectatedId, spectatedOccurrence).expect(403);
+      expect(await db.client.eventAvailabilityVote.count({ where: { occurrenceId: spectatedOccurrence } })).toBe(0);
     });
   });
 });
