@@ -282,9 +282,13 @@ function hostFor(pattern: string, data: unknown) {
   return { client, host };
 }
 
-/** The exception a real `ValidationPipe` throws for `payload`. */
-function validationFailure(payload: object): Promise<BadRequestException> {
-  return failureOf(new ValidationPipe(), SearchStartDto, payload);
+/**
+ * The exception the search gateway's `I18nValidationPipe` throws for
+ * `payload`. `SearchStartDto`'s messages are catalog markers (#503), so a plain
+ * `ValidationPipe` would hand the filter those rather than copy.
+ */
+function validationFailure(payload: object): Promise<I18nValidationException> {
+  return failureOf(new I18nValidationPipe(), SearchStartDto, payload);
 }
 
 /** The exception `pipe` throws validating `payload` as `metatype`. */

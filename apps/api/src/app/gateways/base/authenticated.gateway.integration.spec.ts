@@ -152,7 +152,7 @@ class UnscopedGateway extends AuthenticatedGateway {
   }
 }
 
-/** A frame whose validator names a catalog key, as every WS DTO will (#503). */
+/** A frame whose validator names a catalog key, as the search DTOs' do (#503). */
 class MarkedDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   query!: string;
@@ -595,6 +595,27 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         message: ['query must be a string'],
         pattern: 'mark',
       });
+    });
+
+    // class-validator's own default reads the same, so the copy alone cannot
+    // show the catalog rendered it. The lookup does.
+    it("renders the search DTO's own catalog marker, before the handler runs", async () => {
+      const translate = jest.spyOn(i18n, 'translate');
+      const socket = await connected(socketAs(USER_A));
+      const refused = refusalOf(socket);
+
+      socket.emit(SearchEvents.SearchStart, searchStart({ correlationId: 'not-a-uuid' }));
+
+      expect(await refused).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['correlationId must be a UUID'],
+        pattern: SearchEvents.SearchStart,
+        correlationId: 'not-a-uuid',
+      });
+      expect(translate).toHaveBeenCalledWith('validation.isUUID', expect.objectContaining({ lang: FALLBACK_LOCALE }));
+      expect(queryLocalGames).not.toHaveBeenCalled();
+      translate.mockRestore();
     });
 
     it("translates a frame's copy in the locale its handshake resolved, from its user and Accept-Language", async () => {

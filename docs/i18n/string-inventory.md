@@ -242,11 +242,13 @@ Ordered roughly by value/size. Each is an independent unit of work (good for par
       #503 row below.
 - [x] `libs/api/notifications` — **DONE** (DTO-only). `MarkReadDto` (4).
 - [x] `libs/api/user` — **DONE** (DTO-only). `UserSearchQueryDto` (2).
-- [ ] `libs/common/shared` pagination/search DTOs and the WS `SearchStartDto` / `SearchCancelDto` — **#503**.
-      17 bare decorators plus `SkipWithinCeiling.defaultMessage()` in `@bge/shared`, and 8 on the WS DTOs.
-      #180 put `I18nValidationPipe` on the gateway and taught `WsErrorFilter` to translate its markers, so
-      the WS-reachable ones no longer wait. `@bge/shared` does not depend on `@bge/i18n` yet, and #503
-      decides how it gets the marker.
+- [x] `libs/common/shared` pagination/search DTOs and the WS `SearchStartDto` / `SearchCancelDto` — **DONE**
+      (#503). 17 decorators in `@bge/shared`, and 8 on the WS DTOs, where `gatewayIds` takes
+      `validation.each.isString`. `SkipWithinCeiling` names `validation.skipWithinCeiling`, with the ceiling
+      as its `{constraints.0}`. `@bge/shared` imports `i18nValidationMessage` from `@bge/i18n-core`, so the
+      gateways that load it don't load nestjs-i18n (see [typed-keys.md](./typed-keys.md)). Its specs read the
+      key from the marker inline, because `@bge/testing` depends on `@bge/shared`; the WS DTOs' spec uses
+      `validationCatalogKeys`. The guardrail is enabled on `@bge/shared`.
 
 ---
 
@@ -362,9 +364,9 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 
 Everything else = class-validator **built-in defaults**, which are **NOT** auto-translated. Phase 2
 (#142) installs `I18nValidationPipe` + the `validation.*` catalog + the convention; actually localizing
-these requires adding `i18nValidationMessage<I18nTranslations>('validation.KEY')` to each decorator. #144
-annotated every in-scope DTO except the `@bge/shared` pagination/search DTOs and the WS search
-DTOs, which #503 tracks (§3). The #145 guardrail cannot catch a bare decorator: it only matches string
+these requires adding `i18nValidationMessage('validation.KEY')` to each decorator. #144 annotated
+every in-scope DTO except the `@bge/shared` pagination/search DTOs and the WS search DTOs, which #503
+annotated (§3). The #145 guardrail cannot catch a bare decorator: it only matches string
 literals, and a bare `@IsString()` has none.
 
 ---

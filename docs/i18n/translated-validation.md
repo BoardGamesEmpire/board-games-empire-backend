@@ -117,7 +117,8 @@ HTTP client gets for the same payload.
 
 ## Scope
 
-- **HTTP and WebSocket** (see above). The WS search DTOs themselves are
+- **HTTP and WebSocket** (see above). The WS search DTOs, and the
+  `@bge/shared` pagination DTOs they inherit `limit` and `offset` from, were
   annotated in #503.
 - This issue (#142) installs the machinery + a `validation.*` catalog seed and
   converts one exemplar DTO (`language-query.dto.ts`). Annotating the remaining
