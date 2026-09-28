@@ -259,6 +259,43 @@ describe('household create idempotency (#210 acceptance)', () => {
     });
   });
 
+  describe('after the create', () => {
+    it('refuses to rewrite the key through PATCH, so a queued retry still finds its row (#534)', async () => {
+      // The edit DTO used to inherit the key from the create DTO. A rewritten
+      // key strands the offline queue's retry of the original create, which
+      // then misses its row and makes a second household.
+      const actor = await actors.user();
+      const clientRequestId = freshKey();
+
+      const created = createEnvelope(
+        await post(actor, { name: 'Keyed household', clientRequestId }).expect(201),
+        'POST /api/households',
+      );
+
+      await request(baseUrl)
+        .patch(`${HOUSEHOLDS_PATH}/${created.household.id}`)
+        .set(actor.headers)
+        .send({ name: 'Renamed', clientRequestId: freshKey() })
+        .expect(400);
+
+      const stored = await db.client.household.findUniqueOrThrow({
+        where: { id: created.household.id },
+        select: { name: true, clientRequestId: true },
+      });
+
+      // Refused whole, not stripped: the name in the same body did not land.
+      expect(stored).toEqual({ name: 'Keyed household', clientRequestId });
+
+      const replay = createEnvelope(
+        await post(actor, { name: 'Keyed household', clientRequestId }).expect(201),
+        'POST /api/households (retry)',
+      );
+
+      expect(replay.household.id).toBe(created.household.id);
+      await expect(householdCountFor(actor)).resolves.toBe(1);
+    });
+  });
+
   describe('the P2002 the recovery path relies on', () => {
     it('raises a P2002 that carries no usable meta.target', async () => {
       // #257, and now deliberately NARROWED.
