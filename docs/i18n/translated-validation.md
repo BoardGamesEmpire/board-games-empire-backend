@@ -8,7 +8,7 @@ the global pipe + filter resolve it against the request locale.
 ## The pattern
 
 Point each `class-validator` decorator's `message` at a `validation.*` catalog
-key via the `@bge/i18n` facade:
+key with `i18nValidationMessage`, imported from `@bge/i18n`:
 
 ```ts
 import { i18nValidationMessage } from '@bge/i18n';
@@ -23,12 +23,15 @@ export class LanguageQueryDto {
 }
 ```
 
-- `i18nValidationMessage` is `@bge/i18n`'s pre-bound wrapper over the
-  nestjs-i18n helper — pointed at the generated `I18nTranslations`, so the key
-  is type-checked against the `validation.*` catalog (unknown key fails `tsc`,
-  see [typed-keys.md](./typed-keys.md)). DTOs import it from `@bge/i18n`, never
-  from `nestjs-i18n` directly (mirrors `t()`).
-- The key must live under `validation.*` (the wrapper's type enforces it).
+- `i18nValidationMessage` lives in `@bge/i18n-core` and writes nestjs-i18n's
+  marker format itself, so marking a message loads no runtime; a spec in
+  `@bge/i18n` pins it byte for byte to the vendor's helper, fed array
+  constraints joined as below (#503). Its key is type-checked against the
+  `validation.*` catalog (unknown key fails `tsc`, see
+  [typed-keys.md](./typed-keys.md)). DTOs import it from `@bge/i18n`, never from
+  `nestjs-i18n` directly (mirrors `t()`). `@bge/shared` is the exception and
+  imports it from `@bge/i18n-core` (see typed-keys.md for why).
+- The key must live under `validation.*` (its key type enforces it).
 - Catalog strings may interpolate `{property}` (the field name), `{value}` (the
   rejected value), and positional constraint args `{constraints.0}`,
   `{constraints.1}`, … (e.g. the `10` in `@MinLength(10)`). An array
@@ -115,7 +118,8 @@ HTTP client gets for the same payload.
 
 ## Scope
 
-- **HTTP and WebSocket** (see above). The WS search DTOs themselves are
+- **HTTP and WebSocket** (see above). The WS search DTOs, and the
+  `@bge/shared` pagination DTOs they inherit `limit` and `offset` from, were
   annotated in #503.
 - This issue (#142) installs the machinery + a `validation.*` catalog seed and
   converts one exemplar DTO (`language-query.dto.ts`). Annotating the remaining

@@ -1,3 +1,4 @@
+import { i18nValidationMessage } from '@bge/i18n-core';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Exclude, Type } from 'class-transformer';
 import { IsInt, IsOptional, IsPositive, Max } from 'class-validator';
@@ -22,13 +23,18 @@ import {
  * metadata and the STRICTER `@Max` wins, so a competing base `@Max` would cap
  * everyone at the smaller of the two.
  *
- * The full validation chain (`@Type`, `@IsPositive`, `@IsOptional`) is
- * re-declared here alongside `@Max`, NOT just the `@Max` cap: re-declaring a
- * property replaces the parent's metadata for it, so declaring `@Max` alone
- * would drop the inherited `@IsPositive` and let `limit=-50` through as
- * `take:-50` (oldest rows on a newest-first endpoint) / `limit=0` as an empty
- * page. `page` is intentionally NOT re-declared, so its base validators — and
- * the derived-skip ceiling — are inherited unchanged.
+ * The full validation chain (`@Type`, `@IsInt`, `@IsPositive`, `@IsOptional`)
+ * is re-declared here alongside `@Max`, NOT just the `@Max` cap. When the class
+ * being validated declares validators on a property itself, class-validator
+ * drops the ones of the same kind it inherits there (every validator here but
+ * `@IsOptional` is one kind). The class returned here, validated as it is,
+ * therefore runs only these, so declaring `@Max` alone would drop the inherited
+ * `@IsPositive` and let `limit=-50` through as `take:-50` (oldest rows on a
+ * newest-first endpoint) / `limit=0` as an empty page. A subclass that declares
+ * no `limit` of its own, as `DefaultPaginationQueryDto` and every feature DTO
+ * do, runs the base's `limit` validators beside these: that is the union above.
+ * `page` is intentionally NOT re-declared, so its base validators — and the
+ * derived-skip ceiling — are inherited unchanged.
  *
  * `declare` (not a plain re-declaration) matters under the repo's `es2024`
  * target: define-semantics class fields would emit `limit = undefined` here and
@@ -66,9 +72,9 @@ export function CappedPaginationQueryDto(
       default: defaultPageSize,
     })
     @Type(() => Number)
-    @IsInt()
-    @IsPositive()
-    @Max(maxLimit)
+    @IsInt({ message: i18nValidationMessage('validation.isInt') })
+    @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+    @Max(maxLimit, { message: i18nValidationMessage('validation.max') })
     @IsOptional()
     declare limit?: number;
 
@@ -87,18 +93,38 @@ export function CappedPaginationQueryDto(
  * cap reasoning above applies verbatim; the two factories are kept separate
  * rather than generic over their base because the `@Max`-union hazard is worth
  * reading in full at each declaration site.
+ *
+ * `defaultPageSize` is what `pageSize` resolves to when the caller omits
+ * `limit`, with the same guard against exceeding the cap. Offset paging derives
+ * no `skip` from it, but a query this process runs itself still needs a page
+ * size, and resolving it on the DTO leaves no service a fallback of its own
+ * (#403).
  */
 export function CappedOffsetPaginationQueryDto(
   maxLimit: number = DEFAULT_MAX_PAGE_SIZE,
+  defaultPageSize: number = DEFAULT_PAGE_SIZE,
 ): new () => OffsetPaginationQueryDto {
+  if (defaultPageSize > maxLimit) {
+    throw new RangeError(`defaultPageSize (${defaultPageSize}) cannot exceed maxLimit (${maxLimit})`);
+  }
+
   class CappedOffsetPaginationQuery extends OffsetPaginationQueryDto {
+    // No `default` here, unlike the page-based factory: `defaultPageSize` sizes
+    // only the local query. The gateway fan-out forwards the raw `limit`, so
+    // each vendor still applies its own, and a documented default would be
+    // true of half the response (#378).
     @ApiPropertyOptional({ description: 'Maximum items per page', maximum: maxLimit })
     @Type(() => Number)
-    @IsInt()
-    @IsPositive()
-    @Max(maxLimit)
+    @IsInt({ message: i18nValidationMessage('validation.isInt') })
+    @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
+    @Max(maxLimit, { message: i18nValidationMessage('validation.max') })
     @IsOptional()
     declare limit?: number;
+
+    @Exclude()
+    override get pageSize(): number {
+      return this.limit ?? defaultPageSize;
+    }
   }
 
   return CappedOffsetPaginationQuery;

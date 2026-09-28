@@ -14,13 +14,19 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { WsException } from '@nestjs/websockets';
-import { IsString } from 'class-validator';
+import { IsString, IsUUID } from 'class-validator';
 import { I18nModule, I18nService, I18nValidationException, I18nValidationPipe } from 'nestjs-i18n';
 import { WsErrorFilter } from './ws-error.filter';
 
 class MarkedDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   query!: string;
+}
+
+/** A frame whose validator names no key, so its message is already copy. */
+class BareDto {
+  @IsUUID()
+  correlationId!: string;
 }
 
 describe('WsErrorFilter', () => {
@@ -166,6 +172,23 @@ describe('WsErrorFilter', () => {
     });
   });
 
+  // What a plain `ValidationPipe` throws, as a handler throwing
+  // `BadRequestException([…])` would: a message list that is already copy.
+  it("sends a plain validation failure's messages as they are", async () => {
+    const payload = { correlationId: 'not-a-uuid' };
+    const { client, host } = hostFor('search:cancel', payload);
+
+    await filter.catch(await failureOf(new ValidationPipe(), BareDto, payload), host);
+
+    expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+      statusCode: 400,
+      error: 'Bad Request',
+      message: ['correlationId must be a UUID'],
+      pattern: 'search:cancel',
+      correlationId: 'not-a-uuid',
+    });
+  });
+
   it('keeps the status of any HTTP exception, including one whose body is a plain string', async () => {
     const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
@@ -282,9 +305,16 @@ function hostFor(pattern: string, data: unknown) {
   return { client, host };
 }
 
-/** The exception a real `ValidationPipe` throws for `payload`. */
-function validationFailure(payload: object): Promise<BadRequestException> {
-  return failureOf(new ValidationPipe(), SearchStartDto, payload);
+/**
+ * What an `I18nValidationPipe` throws validating `payload` as `SearchStartDto`.
+ * Its options are the defaults, not the gateway's: those decide which failures
+ * a frame produces, not what this filter does with one, and the gateway's own
+ * pipe runs in authenticated.gateway.integration.spec.ts. `SearchStartDto`'s
+ * messages are catalog markers (#503), so a plain `ValidationPipe` would hand
+ * the filter those rather than copy.
+ */
+function validationFailure(payload: object): Promise<I18nValidationException> {
+  return failureOf(new I18nValidationPipe(), SearchStartDto, payload);
 }
 
 /** The exception `pipe` throws validating `payload` as `metatype`. */

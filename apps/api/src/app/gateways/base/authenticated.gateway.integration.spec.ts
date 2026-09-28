@@ -152,7 +152,7 @@ class UnscopedGateway extends AuthenticatedGateway {
   }
 }
 
-/** A frame whose validator names a catalog key, as every WS DTO will (#503). */
+/** A frame whose validator names a catalog key, as the search DTOs' do (#503). */
 class MarkedDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   query!: string;
@@ -227,7 +227,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   const resolvedAbilityRules = async (userId: string) =>
     (await abilityService.resolveAbilitiesForActor(userActor(userId))).map((ability) => ability.rules);
 
-  const queryLocalGames = jest.fn<Promise<never[]>, [query: string, conditions: unknown[]]>(async () => []);
+  const queryLocalGames = jest.fn<
+    Promise<never[]>,
+    [query: string, conditions: unknown[], limit: number, offset: number]
+  >(async () => []);
 
   /** The actor each coordinator call would carry on its `x-bge-actor` header. */
   const coordinatorSaw: (Actor | null)[] = [];
@@ -465,6 +468,20 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       );
     });
 
+    // The search DTO resolves the local page size and the service keeps no
+    // fallback, so this holds only while the handler's pipe turns the frame
+    // into that DTO (#403).
+    it("sizes a frame that names no limit at the search DTO's page size", async () => {
+      const socket = await connected(socketAs(USER_A));
+      const frame = searchStart();
+      const outcome = searchOutcome(socket, frame.correlationId);
+
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      expect(await outcome).toEqual({ errors: [] });
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, readConditionsOf(USER_A), 20, 0);
+    });
+
     it('stops reading with a grant revoked while it stays connected, from its next frame', async () => {
       const socket = await connected(socketAs(USER_A));
       const before = searchStart();
@@ -595,6 +612,27 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         message: ['query must be a string'],
         pattern: 'mark',
       });
+    });
+
+    // class-validator's own default reads the same, so the copy alone cannot
+    // show the catalog rendered it. The lookup does.
+    it("renders the search DTO's own catalog marker, before the handler runs", async () => {
+      const translate = jest.spyOn(i18n, 'translate');
+      const socket = await connected(socketAs(USER_A));
+      const refused = refusalOf(socket);
+
+      socket.emit(SearchEvents.SearchStart, searchStart({ correlationId: 'not-a-uuid' }));
+
+      expect(await refused).toEqual({
+        statusCode: 400,
+        error: 'Bad Request',
+        message: ['correlationId must be a UUID'],
+        pattern: SearchEvents.SearchStart,
+        correlationId: 'not-a-uuid',
+      });
+      expect(translate).toHaveBeenCalledWith('validation.isUUID', expect.objectContaining({ lang: FALLBACK_LOCALE }));
+      expect(queryLocalGames).not.toHaveBeenCalled();
+      translate.mockRestore();
     });
 
     it("translates a frame's copy in the locale its handshake resolved, from its user and Accept-Language", async () => {

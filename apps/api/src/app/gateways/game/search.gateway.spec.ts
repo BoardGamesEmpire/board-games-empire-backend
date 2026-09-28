@@ -306,6 +306,27 @@ describe('GameSearchGateway', () => {
         expect(gameCount).toBe(2);
       });
 
+      it("takes the DTO's page size, 20 when the frame names none", async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
+
+        expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20, skip: 0 }));
+      });
+
+      it('takes the limit and offset the frame sent', async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+
+        await gateway.handleSearchStart(
+          client,
+          makeStartDto({ includeLocal: true, includeExternal: false, limit: 10, offset: 5 }),
+        );
+
+        expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10, skip: 5 }));
+      });
+
       it('reads only what the frame’s actor may read', async () => {
         // Every frame runs with its actor's abilities primed, as a request
         // does over HTTP (#498).

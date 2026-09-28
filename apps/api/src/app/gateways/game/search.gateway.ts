@@ -174,7 +174,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       const results = await this.gameSearch.queryLocalGames(
         options.query,
         readConditions,
-        options.limit,
+        options.pageSize,
         options.offset,
       );
 

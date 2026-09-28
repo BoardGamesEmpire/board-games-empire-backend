@@ -1,18 +1,19 @@
+import { i18nValidationMessage } from '@bge/i18n';
 import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
 import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
 
-export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
-  @IsUUID()
+export class SearchStartDto extends CappedOffsetPaginationQueryDto(100, 20) {
+  @IsUUID(undefined, { message: i18nValidationMessage('validation.isUUID') })
   correlationId!: string;
 
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   query!: string;
 
   /**
    * Gateway IDs to include in the search.
    */
-  @IsArray()
-  @IsString({ each: true })
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @IsOptional()
   gatewayIds?: string[];
 
@@ -21,7 +22,7 @@ export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
    * Defaults to true — local results are always fast-pathed in parallel.
    */
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
   includeLocal?: boolean = true;
 
@@ -30,20 +31,21 @@ export class SearchStartDto extends CappedOffsetPaginationQueryDto(100) {
    * Defaults to true — external results are always fast-pathed in parallel.
    */
   @IsOptional()
-  @IsBoolean()
+  @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   @TransformBoolean()
   includeExternal?: boolean = true;
 
   @IsOptional()
-  @IsString()
+  @IsString({ message: i18nValidationMessage('validation.isString') })
   locale?: string;
 
-  // `limit` (capped at 100) and `offset` (bounded by DEFAULT_MAX_OFFSET, default 0)
-  // are inherited from CappedOffsetPaginationQueryDto — see #17. Offset-native
-  // for the same reason as SearchQueryDto (D-230-5 on #230).
+  // `limit` (capped at 100, local page size 20 when absent) and `offset` (bounded
+  // by DEFAULT_MAX_OFFSET, default 0) are inherited from
+  // CappedOffsetPaginationQueryDto — see #17 and #403. Offset-native for the same
+  // reason as SearchQueryDto (#230).
 }
 
 export class SearchCancelDto {
-  @IsUUID()
+  @IsUUID(undefined, { message: i18nValidationMessage('validation.isUUID') })
   correlationId!: string;
 }

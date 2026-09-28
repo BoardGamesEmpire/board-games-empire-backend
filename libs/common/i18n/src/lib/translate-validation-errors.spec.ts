@@ -1,11 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
-import { I18N_CATALOG_DIR, type I18nTranslations } from '@bge/i18n-core';
+import { I18N_CATALOG_DIR, i18nValidationMessage, type I18nTranslations } from '@bge/i18n-core';
 import { Test } from '@nestjs/testing';
 import { IsIn, IsString, IsUUID } from 'class-validator';
 import { I18nModule, I18nService, I18nValidationException, I18nValidationPipe } from 'nestjs-i18n';
 import { FALLBACK_LOCALE } from './locale.constants';
 import { translateValidationErrors } from './translate-validation-errors';
-import { i18nValidationMessage } from './validation-message';
 
 const VALID_UUID = '9f1c2c8e-8a4e-4c1e-9d0e-3c2b1a0f9e8d';
 
@@ -75,6 +74,19 @@ describe('translateValidationErrors (real catalog)', () => {
 
     expect(translateValidationErrors(exception, i18n, auditContext)).toEqual([
       'action must be one of the following values: create, update, delete',
+    ]);
+  });
+
+  // `@bge/shared`'s depth check wrote this copy as a literal before it named a
+  // key. That lib's specs don't load nestjs-i18n, so the rendering is pinned here.
+  it('renders the pagination depth ceiling as its literal did', () => {
+    const marker = i18nValidationMessage('validation.skipWithinCeiling')({ value: 1002, constraints: [100_000] });
+    const exception = new I18nValidationException([
+      { property: 'page', constraints: { skipWithinCeiling: marker }, children: [] },
+    ]);
+
+    expect(translateValidationErrors(exception, i18n, auditContext)).toEqual([
+      'page is too deep: (page - 1) × limit must not exceed 100000',
     ]);
   });
 
