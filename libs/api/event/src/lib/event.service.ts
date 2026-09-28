@@ -11,6 +11,7 @@ import {
   ResourceType,
   SystemRole,
 } from '@bge/database';
+import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
@@ -129,14 +130,24 @@ export class EventService {
     // joins: `create:event` covers none, and each household's own grant
     // covers that household. `null` goes on the subject explicitly — the
     // matcher reads a missing field as `null`, so leaving it out would pass
-    // any household as an event outside one. A soft-deleted or unknown
-    // household answers 403 too: no role renders for it, so no rule matches.
+    // any household as an event outside one. No role renders for a
+    // soft-deleted or unknown household, so no household grant matches it.
     this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Event, { householdId });
 
     this.validateOccurrencesForMode(dto.schedulingMode ?? EventSchedulingMode.Fixed, occurrences);
     const uniqueInviteIds = Array.from(new Set(inviteUserIds.filter((id) => id !== userId)));
 
     const event = await this.db.$transaction(async (tx) => {
+      // The check above cannot settle whether the household is still live.
+      // It read a graph that may predate a soft-delete, since the graph is
+      // cached and eviction is best-effort, and a delete can commit after the
+      // graph was built. The site Owner's grant names no household at all.
+      // The share lock answers a dead or unknown household with 404, and holds
+      // a concurrent soft-delete off until this event is written.
+      if (householdId !== null) {
+        await lockExistingHousehold(tx, householdId);
+      }
+
       const created = await tx.event.create({
         data: {
           ...eventFields,

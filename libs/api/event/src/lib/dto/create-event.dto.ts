@@ -16,11 +16,12 @@ export class CreateEventDto {
       'Optional household this event is associated with. Requires a role in that household that may create ' +
       'its events (owner, admin or member); 403 otherwise. Set at creation only: an update cannot change it. ' +
       'Omit it or send null for an event outside any household; an empty string is rejected.',
+    nullable: true,
   })
   @IsString({ message: i18nValidationMessage('validation.isString') })
   @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   @IsOptional()
-  householdId?: string;
+  householdId?: string | null;
 
   @ApiPropertyOptional()
   @IsString({ message: i18nValidationMessage('validation.isString') })

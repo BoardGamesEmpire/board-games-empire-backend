@@ -192,6 +192,7 @@ describe('EventService', () => {
   // event joins is what decides it, and only the service knows that.
   it('createEvent checks the create against the household the event would join', async () => {
     db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
     db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', householdId: 'hh-1' }));
 
     await service.createEvent({ title: 'X', householdId: 'hh-1' } as CreateEventDto);
@@ -199,6 +200,19 @@ describe('EventService', () => {
     expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Event, {
       householdId: 'hh-1',
     });
+  });
+
+  // The ability check passes on a graph that can predate a soft-delete, and
+  // the site Owner's passes for any household. The lock inside the write is
+  // what finds the household dead.
+  it('createEvent answers 404 and writes nothing when the household is not live at the write', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.$queryRaw.mockResolvedValue([] as never);
+
+    await expect(service.createEvent({ title: 'X', householdId: 'hh-gone' } as CreateEventDto)).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(db.event.create).not.toHaveBeenCalled();
   });
 
   it('createEvent names a null household for an event outside any household', async () => {
@@ -213,6 +227,7 @@ describe('EventService', () => {
     expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Event, {
       householdId: null,
     });
+    expect(db.$queryRaw).not.toHaveBeenCalled();
   });
 
   it('createEvent refuses before writing when the instance check denies', async () => {

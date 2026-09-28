@@ -133,6 +133,47 @@ describe('event write authorization', () => {
       expect(await householdEventCount(deleted.id)).toBe(0);
     });
 
+    it("refuses an event attached to a household soft-deleted after the creator's graph was cached", async () => {
+      const owner = await actors.user();
+      const { household } = await actors.householdWithMembers({ owner });
+
+      // Control: the owner creates an event there while it is live.
+      await createEvent(owner, { householdId: household.id }).expect(201);
+
+      // That create evicted the owner's graph, so this request caches a fresh
+      // one that still holds the household role. The soft-delete skips the
+      // delete route and its eviction, as a delete committing after the graph
+      // was built does, or an eviction that failed.
+      await request(baseUrl).get(EVENTS_PATH).set(owner.headers).expect(200);
+      await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+      // 404 rather than 403: the cached grant still passes the check, and the
+      // write is what finds the household dead.
+      await createEvent(owner, { householdId: household.id }).expect(404);
+      expect(await householdEventCount(household.id)).toBe(1);
+    });
+
+    it("answers the site's Owner 404 for a soft-deleted or unknown household, and writes nothing", async () => {
+      const siteOwner = await actors.owner();
+      const { household: live } = await actors.householdWithMembers({
+        owner: await actors.user(),
+        name: 'e2e live household',
+      });
+      const { household: deleted } = await actors.householdWithMembers({
+        owner: await actors.user(),
+        name: 'e2e deleted household',
+      });
+      await db.client.household.update({ where: { id: deleted.id }, data: { deletedAt: new Date() } });
+
+      // Control: the Owner's grant reaches a household they hold no role in,
+      // so the refusals below come from the household and not the grant.
+      await createEvent(siteOwner, { householdId: live.id }).expect(201);
+
+      await createEvent(siteOwner, { householdId: deleted.id }).expect(404);
+      await createEvent(siteOwner, { householdId: randomUUID() }).expect(404);
+      expect(await householdEventCount(deleted.id)).toBe(0);
+    });
+
     it("answers 400 to a PATCH naming a household, and leaves the event's household as it was", async () => {
       const owner = await actors.user();
       const { household } = await actors.householdWithMembers({ owner });
