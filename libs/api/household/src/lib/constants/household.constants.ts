@@ -1,3 +1,29 @@
+import type { PermissionSlug } from '@bge/database';
+
+/**
+ * How long an owner's delete stays undoable by the household's owners (#175).
+ * `deleteHousehold` stamps each owner's recovery grant with this expiry and
+ * reports it as `restorableUntil`; after it, only server staff can restore.
+ *
+ * A constant rather than an environment variable: nothing about a deployment
+ * should need a different window to work, and a knob nobody has asked for is
+ * one more thing to set wrong. Promote it to an operator setting when an
+ * operator asks.
+ *
+ * Kept in days as well, for the route descriptions that publish it, so the
+ * contract cannot drift from the code.
+ */
+export const HOUSEHOLD_RESTORE_WINDOW_DAYS = 30;
+
+export const HOUSEHOLD_RESTORE_WINDOW_MS = HOUSEHOLD_RESTORE_WINDOW_DAYS * 24 * 60 * 60 * 1_000;
+
+/**
+ * The catalog slug an owner's delete grants each owner, pinned to the one
+ * household for {@link HOUSEHOLD_RESTORE_WINDOW_MS}, and that a restore
+ * revokes. Held by no role.
+ */
+export const HOUSEHOLD_RESTORE_PERMISSION_SLUG = 'update:household:restore' satisfies PermissionSlug;
+
 /**
  * Wire-contract cap for `CreateHouseholdDto.clientRequestId` (#210). Mirrors
  * `FEEDBACK_MAX_CLIENT_REQUEST_ID_LENGTH`: generous enough for any client id

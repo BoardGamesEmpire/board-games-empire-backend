@@ -8,6 +8,7 @@ import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UpdateMemberRoleDto } from '../dto';
+import { HouseholdLivenessGuard, HouseholdPathParam } from '../guards/household-liveness.guard';
 import { HouseholdMemberService } from './household-member.service';
 
 @ApiBearerAuth()
@@ -17,7 +18,12 @@ import { HouseholdMemberService } from './household-member.service';
 // read must reflect the role change or removal its caller just made, and a
 // cache hit skips the service's row scoping (#528).
 @NoCache()
-@UseGuards(PoliciesGuard)
+// Liveness first, as on `HouseholdController` (#299). Every route here names a
+// household, and the write policies are ones an actor whose only household was
+// deleted no longer holds, so without it they answered 403 for a household
+// that is gone.
+@HouseholdPathParam('householdId')
+@UseGuards(HouseholdLivenessGuard, PoliciesGuard)
 @Controller('households/:householdId/members')
 export class HouseholdMemberController {
   constructor(private readonly memberService: HouseholdMemberService) {}

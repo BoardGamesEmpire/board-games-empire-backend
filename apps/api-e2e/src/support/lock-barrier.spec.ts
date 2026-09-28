@@ -7,11 +7,13 @@ import {
   expectAdvisoryWaiter,
   expectBackendsQueuedBehind,
   expectBlocked,
+  expectLockWaiter,
   expectNotBlocked,
   quoteIdentifier,
   type AdvisoryWaiter,
   type Barrier,
   type BarrierConnection,
+  type LockWaiter,
   type PendingStatement,
   type QueuedBackend,
   type UngrantedLock,
@@ -156,7 +158,7 @@ describe('the blocking assertions watch the backend that issued the statement', 
   });
 });
 
-/** The holder, waiter and observer pids the two lock watchers below are handed. */
+/** The holder, waiter and observer pids the lock watchers below are handed. */
 const WATCHED_HOLDER_PID = 11;
 const WATCHED_WAITER_PID = 12;
 const WATCHED_OBSERVER_PID = 13;
@@ -175,7 +177,7 @@ const stub = (label: string, pid: number, query: BarrierConnection['query']): Ba
 });
 
 /** A barrier whose observer answers `rows` to every query, recording each query and its parameters in `seen`. */
-const barrierWatching = (rows: readonly AdvisoryWaiter[], seen: unknown[][] = []): Barrier => ({
+const barrierWatching = (rows: readonly (AdvisoryWaiter | LockWaiter)[], seen: unknown[][] = []): Barrier => ({
   holder: stub('holder', WATCHED_HOLDER_PID, (async () => []) as BarrierConnection['query']),
   waiter: stub('waiter', WATCHED_WAITER_PID, (async () => []) as BarrierConnection['query']),
   observer: stub('observer', WATCHED_OBSERVER_PID, (async (sql: string, params: readonly unknown[] = []) => {
@@ -278,8 +280,72 @@ describe('expectAdvisoryWaiter', () => {
 });
 
 /**
- * The row-lock form of the same inverted question: how many backends are
- * queued behind the holder, directly or behind one another. Signup
+ * The row-lock twin. A request blocked on a row waits on the holder's
+ * transaction rather than on a key `pg_locks` can join against, so this asks
+ * `pg_blocking_pids` instead. The polling and its failure reporting are shared
+ * with `expectAdvisoryWaiter`; what differs, and is pinned here, is the
+ * question sent.
+ */
+describe('expectLockWaiter', () => {
+  it('returns the blocked backend and what it is running', async () => {
+    const waiter: LockWaiter = { pid: 99, query: 'SELECT h.id FROM households h FOR NO KEY UPDATE' };
+
+    await expect(
+      expectLockWaiter(barrierWatching([waiter]), { heldBy: WATCHED_HOLDER_PID, description: 'the transfer request' }),
+    ).resolves.toEqual(waiter);
+  });
+
+  it('asks who the HOLDER is blocking, which reaches a backend waiting on a row', async () => {
+    const seen: unknown[][] = [];
+
+    await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: WATCHED_HOLDER_PID,
+      description: 'the transfer request',
+    });
+
+    expect(seen[0]?.[0]).toMatch(/\$1 = ANY\(pg_blocking_pids\(activity\.pid\)\)/);
+    expect(seen[0]?.[0]).toMatch(/ORDER BY activity\.pid/);
+    expect(seen[0]?.[1]).toBe(WATCHED_HOLDER_PID);
+  });
+
+  it('excludes the holder and the barrier’s own connections', async () => {
+    const seen: unknown[][] = [];
+
+    await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: WATCHED_HOLDER_PID,
+      description: 'the transfer request',
+      exclude: [12, 13],
+    });
+
+    expect(seen[0]?.[2]).toEqual([WATCHED_HOLDER_PID, 12, 13]);
+  });
+
+  it('reports a request that answered instead of waiting, rather than timing out', async () => {
+    await expect(
+      expectLockWaiter(barrierWatching([]), {
+        heldBy: WATCHED_HOLDER_PID,
+        description: 'the transfer request',
+        timeoutMs: 5_000,
+        settledEarly: () => 'HTTP 404',
+      }),
+    ).rejects.toThrow(/answered without ever waiting on a lock held by pid 11.*HTTP 404/s);
+  });
+
+  it('still times out when the request has neither waited nor answered', async () => {
+    await expect(
+      expectLockWaiter(barrierWatching([]), {
+        heldBy: WATCHED_HOLDER_PID,
+        description: 'the transfer request',
+        timeoutMs: 50,
+        settledEarly: () => undefined,
+      }),
+    ).rejects.toThrow(/never waited on a lock held by pid 11/);
+  });
+});
+
+/**
+ * `expectLockWaiter`'s question asked of the whole queue: how many backends
+ * are queued behind the holder, directly or behind one another. Signup
  * provisioning contends two application transactions for an advisory key of
  * their own while one of them waits on the holder's row lock, so a query for
  * direct waiters alone would see one backend where two are queued.

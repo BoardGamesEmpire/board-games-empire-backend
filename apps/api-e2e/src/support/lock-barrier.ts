@@ -389,22 +389,107 @@ export async function advisoryWaiters(
  * the caller passes a probe for its own request, and a request that answered is
  * reported as answered instead of timing out with three guesses.
  */
-export async function expectAdvisoryWaiter(
-  barrier: Barrier,
-  options: {
-    readonly heldBy: number;
-    readonly description: string;
-    readonly timeoutMs?: number;
-    readonly exclude?: readonly number[];
-    readonly settledEarly?: () => string | undefined;
-  },
-): Promise<AdvisoryWaiter> {
+export async function expectAdvisoryWaiter(barrier: Barrier, options: WaiterSearch): Promise<AdvisoryWaiter> {
+  return pollForWaiter(() => advisoryWaiters(barrier.observer, options.heldBy, options.exclude), options, {
+    answered: (settled) =>
+      `${options.description} answered without ever queueing behind the advisory key held by pid ` +
+      `${options.heldBy}: ${settled}. Most likely something in front of the lock refused it — an ` +
+      `authorization gate, a missing fixture, a rejected body — so this case raced nothing. A 5xx here ` +
+      `means the opposite: it reached the lock and its own transaction budget ran out while waiting.`,
+    timedOut: (timeoutMs) =>
+      `${options.description} never waited on the advisory key held by pid ${options.heldBy}: after ` +
+      `${timeoutMs}ms no other backend held an ungranted lock on it, and it had not answered either. ` +
+      `Either it takes a different key, or it is still working its way toward the lock — which on a cold ` +
+      `run can take longer than this budget.`,
+  });
+}
+
+/** A backend {@link lockWaiters} found blocked behind the holder. */
+export interface LockWaiter {
+  readonly pid: number;
+
+  /** The statement the waiting backend is running, per `pg_stat_activity`. */
+  readonly query: string;
+}
+
+/**
+ * The backends blocked by ANY lock `heldBy` holds, a row lock included, and
+ * what each is running while it waits.
+ *
+ * The row-lock counterpart of {@link advisoryWaiters}, asked from the holder's
+ * side for the same reason. It cannot be the same join: a backend waiting on a
+ * row does not wait on anything `pg_locks` names by row. It waits on the
+ * holder's transaction id. `pg_blocking_pids` answers the question directly,
+ * "whom is this backend waiting for".
+ *
+ * It finds the FIRST backend queued on the row, not a second one. That one
+ * waits on the tuple lock the first waiter took, so `pg_blocking_pids` names
+ * the first waiter as its blocker rather than the holder. Every spec using this
+ * sends one request at a time behind the barrier; {@link backendsQueuedBehind}
+ * follows the chain for one that sends more.
+ *
+ * `exclude` and the ordering serve as they do for {@link advisoryWaiters}.
+ */
+export async function lockWaiters(
+  observer: BarrierConnection,
+  heldBy: number,
+  exclude: readonly number[] = [],
+): Promise<LockWaiter[]> {
+  return observer.query<LockWaiter>(
+    `SELECT activity.pid, coalesce(activity.query, '') AS query
+     FROM pg_stat_activity activity
+     WHERE $1 = ANY(pg_blocking_pids(activity.pid))
+       AND activity.pid <> ALL($2::int[])
+     ORDER BY activity.pid`,
+    [heldBy, [heldBy, ...exclude]],
+  );
+}
+
+/**
+ * Asserts that some other backend is blocked by a lock `heldBy` holds, and
+ * returns it. {@link expectAdvisoryWaiter} for row locks: the barrier holds a
+ * row the application is about to lock, and this says the request queued
+ * behind it rather than answering first. It sees only the first request
+ * queued on a row, as {@link lockWaiters} explains.
+ */
+export async function expectLockWaiter(barrier: Barrier, options: WaiterSearch): Promise<LockWaiter> {
+  return pollForWaiter(() => lockWaiters(barrier.observer, options.heldBy, options.exclude), options, {
+    answered: (settled) =>
+      `${options.description} answered without ever waiting on a lock held by pid ${options.heldBy}: ` +
+      `${settled}. Most likely something in front of the lock answered first — a guard, an existence ` +
+      `probe that already saw the change, a missing fixture — so this case raced nothing. A 5xx here means ` +
+      `the opposite: it reached the lock and its own transaction budget ran out while waiting.`,
+    timedOut: (timeoutMs) =>
+      `${options.description} never waited on a lock held by pid ${options.heldBy}: after ${timeoutMs}ms ` +
+      `no other backend was blocked by it, and it had not answered either. Either it locks something else, ` +
+      `or it is still working its way toward the lock — which on a cold run can take longer than this budget.`,
+  });
+}
+
+/** What {@link expectAdvisoryWaiter} and {@link expectLockWaiter} are asked. */
+export interface WaiterSearch {
+  readonly heldBy: number;
+  readonly description: string;
+  readonly timeoutMs?: number;
+  readonly exclude?: readonly number[];
+  readonly settledEarly?: () => string | undefined;
+}
+
+/**
+ * The polling both waiter assertions share. One copy, so the two cannot drift
+ * on the order that matters: a waiter found wins over a request that has since
+ * answered, and an answered request is reported before the deadline is.
+ */
+async function pollForWaiter<T>(
+  find: () => Promise<readonly T[]>,
+  options: WaiterSearch,
+  failure: { readonly answered: (settled: string) => string; readonly timedOut: (timeoutMs: number) => string },
+): Promise<T> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_BLOCKED_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
 
   for (;;) {
-    const waiters = await advisoryWaiters(barrier.observer, options.heldBy, options.exclude);
-    const waiter = waiters[0];
+    const waiter = (await find())[0];
 
     if (waiter !== undefined) {
       return waiter;
@@ -413,21 +498,11 @@ export async function expectAdvisoryWaiter(
     const settled = options.settledEarly?.();
 
     if (settled !== undefined) {
-      throw new Error(
-        `${options.description} answered without ever queueing behind the advisory key held by pid ` +
-          `${options.heldBy}: ${settled}. Most likely something in front of the lock refused it — an ` +
-          `authorization gate, a missing fixture, a rejected body — so this case raced nothing. A 5xx here ` +
-          `means the opposite: it reached the lock and its own transaction budget ran out while waiting.`,
-      );
+      throw new Error(failure.answered(settled));
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(
-        `${options.description} never waited on the advisory key held by pid ${options.heldBy}: after ` +
-          `${timeoutMs}ms no other backend held an ungranted lock on it, and it had not answered either. ` +
-          `Either it takes a different key, or it is still working its way toward the lock — which on a cold ` +
-          `run can take longer than this budget.`,
-      );
+      throw new Error(failure.timedOut(timeoutMs));
     }
 
     await sleep(POLL_INTERVAL_MS);
@@ -439,16 +514,15 @@ export type QueuedBackend = AdvisoryWaiter;
 
 /**
  * The backends queued behind `heldBy`: waiting on a lock it holds, of any kind,
- * or waiting on a backend that is. The row-lock counterpart of
- * {@link advisoryWaiters}, for the same reason: an application transaction runs
- * on a connection this suite cannot name, so the question is asked from the
- * holder's side.
+ * or waiting on a backend that is. {@link lockWaiters} followed down the queue,
+ * and asked from the holder's side for the same reason: an application
+ * transaction runs on a connection this suite cannot name.
  *
  * Transitive on purpose. When two application transactions contend for a lock
  * of their own while one of them also waits on the holder, only the first is
  * blocked BY the holder; the second waits on the first. Asking only for direct
- * waiters would see one backend where two are queued, and which one depends on
- * which application lock the code takes.
+ * waiters, as {@link lockWaiters} does, would see one backend where two are
+ * queued, and which one depends on which application lock the code takes.
  *
  * `pg_blocking_pids` answers for every lock type, so this needs no join
  * against `pg_locks`. It is asked once per poll, and only of backends waiting

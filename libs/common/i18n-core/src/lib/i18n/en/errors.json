@@ -142,7 +142,9 @@
     "transfer_target_already_owner": "Member {memberId} is already an owner of this household",
     "member_role_not_assignable": "Household role '{role}' cannot be assigned when adding a member — ownership is transferred, not granted",
     "already_a_member": "User is already a member of household {householdId}",
-    "member_origin_not_admissible": "Membership origin '{origin}' cannot be recorded by the member-admission path — founder membership is created with the household"
+    "member_origin_not_admissible": "Membership origin '{origin}' cannot be recorded by the member-admission path — founder membership is created with the household",
+    "not_deleted": "Household {id} is not deleted, so there is nothing to restore",
+    "permission_not_provisioned": "Permission '{slug}' is not provisioned on this server"
   },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",

@@ -30,6 +30,15 @@ export const SOFT_DELETE_HOUSEHOLD =
   'UPDATE households SET deleted_at = now(), updated_at = now() WHERE id = $1 RETURNING id';
 
 /**
+ * The reverse of {@link SOFT_DELETE_HOUSEHOLD}: what a restore does to the row.
+ * Also non-key, so it takes the same lock mode. What a role transition does
+ * while one is in flight is not the reverse of what it does behind a delete,
+ * which is why the role-transition suite pins both (#386).
+ */
+export const RESTORE_HOUSEHOLD =
+  'UPDATE households SET deleted_at = NULL, updated_at = now() WHERE id = $1 RETURNING id';
+
+/**
  * The lock a `household_members` insert takes on its parent row implicitly,
  * through the foreign key. Stated explicitly so a spec can ask what that mode
  * does — it is the mode that does NOT close the admission race, and the one a

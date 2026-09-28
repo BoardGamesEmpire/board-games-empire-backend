@@ -26,6 +26,10 @@ import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
  *
  * Both are asserted. A single status arriving for two unrelated reasons is
  * exactly the arrangement where one path quietly stops holding.
+ *
+ * Neither applies to a household that is missing or soft-deleted. The liveness
+ * guard runs before `PoliciesGuard` and answers 404 on every route that names
+ * one, whatever the actor holds (#299).
  */
 describe('household authorization', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -263,19 +267,25 @@ describe('household authorization', () => {
       expect(persisted.name).toBe('Members cannot rename this');
     });
 
-    it('denies a non-member with 403 rather than 404, and denies before reaching the service', async () => {
+    it('denies a non-member with 403 rather than 404', async () => {
       const owner = await actors.user();
       const outsider = await actors.user();
       const fixture = await actors.householdWithMembers({ owner, name: 'Untouchable' });
 
       await renameHousehold(outsider, fixture.household.id, 'Renamed by an outsider').expect(403);
+    });
 
-      // The guard denies on the ability alone, so a household that does not
-      // exist gets the same 403 — the existence probe in `updateHousehold` is
-      // never reached. Asserting it pins where the boundary actually is: a
-      // future change moving the check into the service would turn this into a
-      // 404 and change what an attacker can learn about which ids exist.
-      await renameHousehold(outsider, `missing-${randomUUID()}`, 'Renamed').expect(403);
+    it('answers 404 for an id that does not exist, even to an actor holding no household role (#299)', async () => {
+      // This was 403, and pinned as 403: `PoliciesGuard` denied on the ability
+      // alone, so the existence probe was never reached. 404 won because the
+      // 403 depended on unrelated state. An outsider who owns some OTHER
+      // household holds an `update` rule, passes the guard, and got 404 for
+      // the same request. The liveness guard now answers first for everyone.
+      // It discloses nothing the read route did not already: `GET` answers
+      // 404 here and 403 for a hidden live household.
+      const outsider = await actors.user();
+
+      await renameHousehold(outsider, `missing-${randomUUID()}`, 'Renamed').expect(404);
     });
   });
 
