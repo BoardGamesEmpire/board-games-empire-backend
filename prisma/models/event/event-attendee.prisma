@@ -42,5 +42,9 @@ model EventAttendee {
 
   @@unique([eventId, userId])
   @@index([eventId])
+  // "The events this user is an attendee of", which `GET /events` scopes to
+  // (#512). The unique above leads on `event_id`, so it cannot serve a lookup
+  // by user alone.
+  @@index([userId])
   @@map("event_attendees")
 }
