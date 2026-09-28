@@ -29,7 +29,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  *
  * One guard judges a role rather than a pairing: every grant on `AnonymousUser`,
  * which anyone who opens an anonymous session holds, must narrow the rows it
- * reaches (#484). See {@link findUnboundedGrants}.
+ * reaches (#484). See {@link findUnboundedGrants}. Another judges only a
+ * condition's shape: every relation is written with an operator, so an
+ * instance check can evaluate it (#458). See
+ * {@link findShorthandRelationConditions}.
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw
@@ -43,7 +46,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * so fixtures exercise the negative cases and the shipped catalogs go through
  * the same code path. The shipped maps are `ROLE_SCOPE`,
  * `RENDER_CONTEXT_VARIABLES` and `KNOWN_TEMPLATE_VARIABLES` in
- * `role.catalog.ts`.
+ * `role.catalog.ts`. The shorthand guard's operator sets are module-level
+ * rather than arguments: they are the in-memory matcher's filter vocabulary,
+ * not a map the catalog is judged against, and no fixture has reason to vary
+ * them.
  *
  * The guards classify a role by that scope map — the pass its name is meant
  * to arrive through. That a household role is only ever assigned through a
@@ -95,6 +101,17 @@ export interface UnconditionedGlobalGrant {
 export interface UnboundedGrant {
   slug: string;
   role: string;
+}
+
+/** A relation filter written without an operator, which the in-memory matcher cannot evaluate. */
+export interface ShorthandRelationCondition {
+  slug: string;
+
+  /**
+   * Where the relation sits in the conditions, from the root: keys joined by
+   * `.`, through any operator on the way, and array positions as `[n]`.
+   */
+  path: string;
 }
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
@@ -394,6 +411,108 @@ export function findUnboundedGrants(
   return findings;
 }
 
+const LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['AND', 'OR', 'NOT']);
+
+const RELATION_OPERATORS: ReadonlySet<string> = new Set(['is', 'isNot', 'some', 'every', 'none']);
+
+const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
+  'equals',
+  'in',
+  'notIn',
+  'not',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+  'contains',
+  'startsWith',
+  'endsWith',
+  'mode',
+  'has',
+  'hasEvery',
+  'hasSome',
+  'isEmpty',
+]);
+
+/**
+ * The shorthand guard (#458): every relation in a condition is written with
+ * an operator. Prisma reads `{ household: { deletedAt: null } }` and
+ * `{ household: { is: { deletedAt: null } } }` alike, so a query filter built
+ * from either is correct, but the in-memory matcher behind
+ * `ability.can(action, subject(type, instance))` throws on the first. An
+ * instance check against a shorthand grant is logged and denied, whatever
+ * the instance, so the grant silently refuses everyone who holds it.
+ *
+ * Judged by shape alone, because the generated client exports no data model
+ * to read relations from (see `permission-entry.ts`). A key whose value is an
+ * object holding no relation operator and no scalar filter operator is a
+ * shorthand relation. That is exact rather than a guess for three reasons.
+ * Every entry's conditions are typed as its subject's `WhereInput`, so each
+ * key is a real field or an operator. A scalar field's object value is always
+ * a filter, so it names an operator. And no model has a field named after an
+ * operator, so a relation's body cannot pass for a filter. The sets below
+ * hold the scalar and list filter operators both Prisma and the matcher read,
+ * which is fewer than Prisma's own: a filter written with any other, such as
+ * `search`, a Json path filter or an operator Prisma adds later, is reported
+ * as a shorthand. The matcher would throw on it too, so the report is loud
+ * where the check would have been silent.
+ *
+ * The walk goes into operator bodies and logical branches, and into a
+ * shorthand's own body, so a shorthand nested inside one is reported too.
+ */
+export function findShorthandRelationConditions(
+  catalog: readonly PermissionSeedDefinition[],
+): ShorthandRelationCondition[] {
+  const findings: ShorthandRelationCondition[] = [];
+
+  const walk = (slug: string, node: unknown, path: string): void => {
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(slug, item, `${path}[${index}]`));
+      return;
+    }
+
+    if (!isObject(node)) {
+      return;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      const here = path === '' ? key : `${path}.${key}`;
+
+      if (LOGICAL_OPERATORS.has(key)) {
+        walk(slug, value, here);
+        continue;
+      }
+
+      // Scalar equality, a null relation, or a scalar list's value.
+      if (!isObject(value)) {
+        continue;
+      }
+
+      const keys = Object.keys(value);
+      const relationOperators = keys.filter((operator) => RELATION_OPERATORS.has(operator));
+      if (relationOperators.length > 0) {
+        for (const operator of relationOperators) {
+          walk(slug, value[operator], `${here}.${operator}`);
+        }
+        continue;
+      }
+
+      if (keys.some((operator) => SCALAR_FILTER_OPERATORS.has(operator))) {
+        continue;
+      }
+
+      findings.push({ slug, path: here });
+      walk(slug, value, here);
+    }
+  };
+
+  for (const { slug, conditions } of catalog) {
+    walk(slug, conditions, '');
+  }
+
+  return findings;
+}
+
 interface Holder {
   role: string;
   scope: RoleScope;
@@ -427,6 +546,10 @@ function holdersBySlug(
   }
 
   return holders;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function scopeOf(role: string, roleScope: Readonly<Record<string, RoleScope>>): RoleScope {

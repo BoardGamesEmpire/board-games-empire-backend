@@ -57,6 +57,16 @@ const attendingRoleInEvent = {
   role: { is: { role: { is: { name: { in: ['EventParticipant', 'EventGuest', 'EventSpectator'] } } } } },
 } satisfies Prisma.EventAttendeeWhereInput;
 
+// The acting user's membership row, holding `HouseholdOwner` or
+// `HouseholdAdmin`, in the household whose `members.some` it is spliced into.
+// Four grants gate on it, and one fragment keeps an edit to who counts from
+// missing a copy. Typed and module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const ownerOrAdminMembershipOfActingUser = {
+  userId: '{{ user.id }}',
+  role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
+} satisfies Prisma.HouseholdMemberWhereInput;
+
 /**
  * The complete seeded permission catalog — the manifest of every permission
  * this code version expects to exist. Data, not behavior: the reconciler (#235) writes
@@ -255,7 +265,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.Event,
-    conditions: { visibility: 'Friends', createdBy: acceptedFriendOfActingUser },
+    conditions: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } },
     slug: 'read:event:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's friends-visible events",
@@ -263,7 +273,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.Household,
-    conditions: { visibility: 'Friends', members: { some: { user: acceptedFriendOfActingUser } } },
+    conditions: { visibility: 'Friends', members: { some: { user: { is: acceptedFriendOfActingUser } } } },
     slug: 'read:households:friends',
     riskLevel: RiskLevel.Medium,
     reason: "View a friend's friends-visible households",
@@ -570,7 +580,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.EventAttendee,
-    conditions: { event: { id: '{{ eventId }}' } },
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'read:event_attendee',
     riskLevel: RiskLevel.Medium,
     reason: 'View event attendees',
@@ -596,7 +606,7 @@ export const PERMISSION_CATALOG = [
     action: Action.update,
     subject: ResourceType.EventAttendee,
     fields: ['status', 'notes'],
-    conditions: { event: { id: '{{ eventId }}' } },
+    conditions: { eventId: '{{ eventId }}' },
     slug: 'update:event_attendee:status',
     riskLevel: RiskLevel.Medium,
     reason: 'Update any attendee status within an event (host-managed)',
@@ -630,7 +640,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.update,
     subject: ResourceType.EventGameNomination,
-    conditions: { nominatedBy: { userId: '{{ user.id }}' } },
+    conditions: { nominatedBy: { is: { userId: '{{ user.id }}' } } },
     slug: 'update:event_game_nomination:withdraw',
     riskLevel: RiskLevel.Low,
     reason: 'Withdraw your own nomination',
@@ -877,16 +887,18 @@ export const PERMISSION_CATALOG = [
       deletedAt: null,
       visibility: { in: ['Household', 'Friends', 'FriendsOfFriends', 'Public'] },
       user: {
-        householdMember: {
-          some: {
-            showAllGames: true,
-            household: { members: { some: { userId: '{{ user.id }}' } } },
+        is: {
+          householdMember: {
+            some: {
+              showAllGames: true,
+              household: { is: { members: { some: { userId: '{{ user.id }}' } } } },
+            },
           },
         },
       },
       excludedFromHouseholds: {
         none: {
-          householdMember: { household: { members: { some: { userId: '{{ user.id }}' } } } },
+          householdMember: { is: { household: { is: { members: { some: { userId: '{{ user.id }}' } } } } } },
         },
       },
     },
@@ -905,10 +917,12 @@ export const PERMISSION_CATALOG = [
       deletedAt: null,
       visibility: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
       user: {
-        AND: [
-          { OR: [{ preferences: { is: null } }, { preferences: { showCollectionToFriends: true } }] },
-          acceptedFriendOfActingUser,
-        ],
+        is: {
+          AND: [
+            { OR: [{ preferences: { is: null } }, { preferences: { is: { showCollectionToFriends: true } } }] },
+            acceptedFriendOfActingUser,
+          ],
+        },
       },
     },
     slug: 'read:game_collection:friends',
@@ -1038,12 +1052,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.Household,
     conditions: {
       id: '{{ householdId }}',
-      members: {
-        some: {
-          userId: '{{ user.id }}',
-          role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
-        },
-      },
+      members: { some: ownerOrAdminMembershipOfActingUser },
     },
     slug: 'update:household',
     riskLevel: RiskLevel.Medium,
@@ -1057,7 +1066,7 @@ export const PERMISSION_CATALOG = [
       members: {
         some: {
           userId: '{{ user.id }}',
-          role: { role: { name: 'HouseholdOwner' } },
+          role: { is: { role: { is: { name: 'HouseholdOwner' } } } },
         },
       },
     },
@@ -1093,14 +1102,7 @@ export const PERMISSION_CATALOG = [
       // Defense-in-depth only: the `{{ householdId }}` pin already scopes to
       // households where the actor holds the granting role. The relation path
       // must go through `household` — HouseholdMember has no `members` field.
-      household: {
-        members: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
-          },
-        },
-      },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
     },
     slug: 'manage:household_member',
     riskLevel: RiskLevel.High,
@@ -1121,7 +1123,7 @@ export const PERMISSION_CATALOG = [
     action: Action.read,
     subject: ResourceType.HouseholdMember,
     conditions: {
-      household: { visibility: 'Friends', members: { some: { user: acceptedFriendOfActingUser } } },
+      household: { is: { visibility: 'Friends', members: { some: { user: { is: acceptedFriendOfActingUser } } } } },
     },
     slug: 'read:household_member:friends',
     riskLevel: RiskLevel.Medium,
@@ -1149,16 +1151,7 @@ export const PERMISSION_CATALOG = [
     conditions: {
       // HouseholdRole carries neither `householdId` nor `members` — the only
       // path to the household is through its 1:1 member row.
-      householdMember: {
-        household: {
-          members: {
-            some: {
-              userId: '{{ user.id }}',
-              role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
-            },
-          },
-        },
-      },
+      householdMember: { is: { household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } } } },
     },
     slug: 'create:household_role',
     riskLevel: RiskLevel.High,
@@ -1186,12 +1179,16 @@ export const PERMISSION_CATALOG = [
       // neither `householdId` nor `members`, so the household is reachable
       // only through the 1:1 member row.
       householdMember: {
-        household: {
-          id: '{{ householdId }}',
-          members: {
-            some: {
-              userId: '{{ user.id }}',
-              role: { role: { name: 'HouseholdOwner' } },
+        is: {
+          household: {
+            is: {
+              id: '{{ householdId }}',
+              members: {
+                some: {
+                  userId: '{{ user.id }}',
+                  role: { is: { role: { is: { name: 'HouseholdOwner' } } } },
+                },
+              },
             },
           },
         },
@@ -1209,9 +1206,7 @@ export const PERMISSION_CATALOG = [
   // gate cannot stop at the type: `Invite` also carries event invites, and a
   // type-only `can(create, Invite)` passes for any holder of
   // `create:event_invite`, down to EventParticipant. The instance must carry
-  // the household's members with their roles, or the role clause denies it,
-  // and this condition must first leave the relation shorthand, which the
-  // in-memory matcher throws on (#458).
+  // the household's members with their roles, or the role clause denies it.
   //
   // Whether plain members may invite is a default for the household
   // capability matrix (#168); a per-household override would be a household
@@ -1221,14 +1216,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.Invite,
     conditions: {
       householdId: '{{ householdId }}',
-      household: {
-        members: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
-          },
-        },
-      },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
     },
     slug: 'create:household_invite',
     riskLevel: RiskLevel.Medium,
@@ -1308,7 +1296,9 @@ export const PERMISSION_CATALOG = [
       attendees: {
         some: {
           userId: '{{ user.id }}',
-          role: { role: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventModerator'] } } },
+          role: {
+            is: { role: { is: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventModerator'] } } } },
+          },
         },
       },
     },
@@ -1352,7 +1342,7 @@ export const PERMISSION_CATALOG = [
       attendees: {
         some: {
           userId: '{{ user.id }}',
-          role: { role: { name: { in: ['EventHost', 'EventCoHost'] } } },
+          role: { is: { role: { is: { name: { in: ['EventHost', 'EventCoHost'] } } } } },
         },
       },
     },
@@ -1372,7 +1362,7 @@ export const PERMISSION_CATALOG = [
       attendees: {
         some: {
           userId: '{{ user.id }}',
-          role: { role: { name: 'EventHost' } },
+          role: { is: { role: { is: { name: 'EventHost' } } } },
         },
       },
     },
@@ -1386,10 +1376,16 @@ export const PERMISSION_CATALOG = [
     conditions: {
       eventId: '{{ eventId }}',
       event: {
-        attendees: {
-          some: {
-            userId: '{{ user.id }}',
-            role: { role: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventParticipant'] } } },
+        is: {
+          attendees: {
+            some: {
+              userId: '{{ user.id }}',
+              role: {
+                is: {
+                  role: { is: { name: { in: ['EventHost', 'EventCoHost', 'EventOrganizer', 'EventParticipant'] } } },
+                },
+              },
+            },
           },
         },
       },

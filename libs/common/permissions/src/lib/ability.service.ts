@@ -155,10 +155,9 @@ export class AbilityService {
    * nested objects (`{ event: { householdId } }` on the instance for an
    * `{ event: { is: { householdId } } }` condition), and the matcher accepts
    * only that operator form — the `{ relation: { field } }` shorthand Prisma
-   * also takes in a query throws here. Every grant a create path checks this
-   * way writes its traversals with `is` and `some`; a grant still in the
-   * shorthand has to be converted before it can be checked against an
-   * instance.
+   * also takes in a query throws here. Every catalog grant writes its
+   * traversals in the operator form, and `findShorthandRelationConditions`
+   * (`@bge/database`) fails the catalog's specs on one that does not (#458).
    */
   assertCurrentActorCan(action: Action, resourceType: ModelResourceType, instance: Record<string, unknown>): void {
     const abilities = this.getCurrentAbilities();

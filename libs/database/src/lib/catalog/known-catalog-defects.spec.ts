@@ -1,5 +1,6 @@
 import { Action, ResourceType, SystemRole } from '../client';
 import {
+  findShorthandRelationConditions,
   findTemplateDefects,
   findUnboundedGrants,
   findUnconditionedGlobalGrants,
@@ -225,6 +226,14 @@ describe('the shipped catalog', () => {
 
   it('has no template that fails to parse, uses a token the factory refuses, or names a variable no context supplies', () => {
     expect(findTemplateDefects(PERMISSION_CATALOG, KNOWN_TEMPLATE_VARIABLES)).toEqual([]);
+  });
+
+  it('writes every relation in a condition with an operator, so an instance check can evaluate it', () => {
+    // No ledger: the list this guard was written against went from twenty to
+    // none in one change (#458), so a ledger would start and end empty. The
+    // matcher an instance check runs throws on a shorthand relation, and the
+    // check then refuses every holder of the grant.
+    expect(findShorthandRelationConditions(PERMISSION_CATALOG)).toEqual([]);
   });
 
   it('conditions every AnonymousUser grant, whatever User holds', () => {

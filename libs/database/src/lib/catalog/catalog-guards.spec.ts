@@ -1,5 +1,6 @@
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
+  findShorthandRelationConditions,
   findTemplateDefects,
   findUnboundedGrants,
   findUnconditionedGlobalGrants,
@@ -348,6 +349,72 @@ describe('catalog guards', () => {
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.email' },
         { slug: 'read:thing', kind: 'unknown-variable', variable: 'user.householdId' },
       ]);
+    });
+  });
+
+  describe('findShorthandRelationConditions', () => {
+    it('finds a relation written without an operator, and one written inside an operator body', () => {
+      const catalog = [
+        definition({ slug: 'read:shorthand', conditions: { event: { householdId: '{{ householdId }}' } } }),
+        definition({
+          slug: 'read:nested',
+          conditions: {
+            household: {
+              is: { members: { some: { userId: '{{ user.id }}', role: { role: { name: 'HouseholdOwner' } } } } },
+            },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:shorthand', path: 'event' },
+        { slug: 'read:nested', path: 'household.is.members.some.role' },
+        { slug: 'read:nested', path: 'household.is.members.some.role.role' },
+      ]);
+    });
+
+    it('finds a shorthand under AND, OR and NOT, naming the branch', () => {
+      const catalog = [
+        definition({
+          slug: 'read:branches',
+          conditions: {
+            OR: [{ eventId: '{{ eventId }}' }, { occurrence: { eventId: '{{ eventId }}' } }],
+            AND: { NOT: { event: { deletedAt: null } } },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:branches', path: 'OR[1].occurrence' },
+        { slug: 'read:branches', path: 'AND.NOT.event' },
+      ]);
+    });
+
+    it('passes the operator form, scalar filter objects, scalar equality and a null relation', () => {
+      const catalog = [
+        definition({
+          slug: 'read:operators',
+          conditions: {
+            eventId: '{{ eventId }}',
+            deletedAt: { not: null },
+            status: { in: ['Accepted', 'Pending'] },
+            title: { contains: 'night', mode: 'insensitive' },
+            attendee: { is: { userId: '{{ user.id }}', event: { is: { householdId: '{{ householdId }}' } } } },
+            votes: { none: {} },
+            occurrence: { is: null },
+          },
+        }),
+        definition({ slug: 'read:absent' }),
+        definition({ slug: 'read:empty', conditions: {} }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([]);
+    });
+
+    it('reports a filter written with an operator Prisma reads and the matcher does not', () => {
+      const catalog = [definition({ slug: 'read:search', conditions: { title: { search: 'night' } } })];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:search', path: 'title' }]);
     });
   });
 
