@@ -5,6 +5,7 @@ import {
   barrierSessionSettings,
   describeUngrantedLocks,
   expectAdvisoryWaiter,
+  expectBackendsQueuedBehind,
   expectBlocked,
   expectLockWaiter,
   expectNotBlocked,
@@ -14,6 +15,7 @@ import {
   type BarrierConnection,
   type LockWaiter,
   type PendingStatement,
+  type QueuedBackend,
   type UngrantedLock,
 } from './lock-barrier';
 
@@ -156,6 +158,35 @@ describe('the blocking assertions watch the backend that issued the statement', 
   });
 });
 
+/** The holder, waiter and observer pids the lock watchers below are handed. */
+const WATCHED_HOLDER_PID = 11;
+const WATCHED_WAITER_PID = 12;
+const WATCHED_OBSERVER_PID = 13;
+
+const stub = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
+  label,
+  pid,
+  query,
+  begin: async () => undefined,
+  commit: async () => undefined,
+  rollback: async () => undefined,
+  issue: () => {
+    throw new Error('not used in this spec');
+  },
+  close: async () => undefined,
+});
+
+/** A barrier whose observer answers `rows` to every query, recording each query and its parameters in `seen`. */
+const barrierWatching = (rows: readonly (AdvisoryWaiter | LockWaiter)[], seen: unknown[][] = []): Barrier => ({
+  holder: stub('holder', WATCHED_HOLDER_PID, (async () => []) as BarrierConnection['query']),
+  waiter: stub('waiter', WATCHED_WAITER_PID, (async () => []) as BarrierConnection['query']),
+  observer: stub('observer', WATCHED_OBSERVER_PID, (async (sql: string, params: readonly unknown[] = []) => {
+    seen.push([sql, ...params]);
+
+    return [...rows];
+  }) as BarrierConnection['query']),
+});
+
 /**
  * Watching the LOCK rather than a backend.
  *
@@ -167,36 +198,14 @@ describe('the blocking assertions watch the backend that issued the statement', 
  * caller's exclusion list, is what keeps that from meaning "anyone, anywhere".
  */
 describe('expectAdvisoryWaiter', () => {
-  const HOLDER_PID = 11;
-
-  const stub = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
-    label,
-    pid,
-    query,
-    begin: async () => undefined,
-    commit: async () => undefined,
-    rollback: async () => undefined,
-    issue: () => {
-      throw new Error('not used in this spec');
-    },
-    close: async () => undefined,
-  });
-
-  const barrierWatching = (rows: readonly AdvisoryWaiter[], seen: unknown[][] = []): Barrier => ({
-    holder: stub('holder', HOLDER_PID, (async () => []) as BarrierConnection['query']),
-    waiter: stub('waiter', 12, (async () => []) as BarrierConnection['query']),
-    observer: stub('observer', 13, (async (sql: string, params: readonly unknown[] = []) => {
-      seen.push([sql, ...params]);
-
-      return [...rows];
-    }) as BarrierConnection['query']),
-  });
-
   it('returns the waiting backend and what it is running', async () => {
     const waiter: AdvisoryWaiter = { pid: 99, query: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))' };
 
     await expect(
-      expectAdvisoryWaiter(barrierWatching([waiter]), { heldBy: HOLDER_PID, description: 'the enable request' }),
+      expectAdvisoryWaiter(barrierWatching([waiter]), {
+        heldBy: WATCHED_HOLDER_PID,
+        description: 'the enable request',
+      }),
     ).resolves.toEqual(waiter);
   });
 
@@ -204,12 +213,12 @@ describe('expectAdvisoryWaiter', () => {
     const seen: unknown[][] = [];
 
     await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
-      heldBy: HOLDER_PID,
+      heldBy: WATCHED_HOLDER_PID,
       description: 'the enable request',
     });
 
     expect(seen[0]?.[0]).toMatch(/NOT waiting\.granted/);
-    expect(seen[0]?.[1]).toBe(HOLDER_PID);
+    expect(seen[0]?.[1]).toBe(WATCHED_HOLDER_PID);
   });
 
   it('scopes the join to one database and orders the result', async () => {
@@ -220,7 +229,7 @@ describe('expectAdvisoryWaiter', () => {
     const seen: unknown[][] = [];
 
     await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
-      heldBy: HOLDER_PID,
+      heldBy: WATCHED_HOLDER_PID,
       description: 'the enable request',
     });
 
@@ -236,12 +245,12 @@ describe('expectAdvisoryWaiter', () => {
     const seen: unknown[][] = [];
 
     await expectAdvisoryWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
-      heldBy: HOLDER_PID,
+      heldBy: WATCHED_HOLDER_PID,
       description: 'the enable request',
       exclude: [12, 13],
     });
 
-    expect(seen[0]?.[2]).toEqual([HOLDER_PID, 12, 13]);
+    expect(seen[0]?.[2]).toEqual([WATCHED_HOLDER_PID, 12, 13]);
   });
 
   it('reports a request that answered instead of waiting, rather than timing out', async () => {
@@ -250,7 +259,7 @@ describe('expectAdvisoryWaiter', () => {
     // causes sends the reader to the lock instead of to the arrange.
     await expect(
       expectAdvisoryWaiter(barrierWatching([]), {
-        heldBy: HOLDER_PID,
+        heldBy: WATCHED_HOLDER_PID,
         description: 'the enable request',
         timeoutMs: 5_000,
         settledEarly: () => 'HTTP 403',
@@ -261,7 +270,7 @@ describe('expectAdvisoryWaiter', () => {
   it('still times out when the request has neither queued nor answered', async () => {
     await expect(
       expectAdvisoryWaiter(barrierWatching([]), {
-        heldBy: HOLDER_PID,
+        heldBy: WATCHED_HOLDER_PID,
         description: 'the enable request',
         timeoutMs: 50,
         settledEarly: () => undefined,
@@ -278,36 +287,11 @@ describe('expectAdvisoryWaiter', () => {
  * question sent.
  */
 describe('expectLockWaiter', () => {
-  const HOLDER_PID = 21;
-
-  const stub = (label: string, pid: number, query: BarrierConnection['query']): BarrierConnection => ({
-    label,
-    pid,
-    query,
-    begin: async () => undefined,
-    commit: async () => undefined,
-    rollback: async () => undefined,
-    issue: () => {
-      throw new Error('not used in this spec');
-    },
-    close: async () => undefined,
-  });
-
-  const barrierWatching = (rows: readonly LockWaiter[], seen: unknown[][] = []): Barrier => ({
-    holder: stub('holder', HOLDER_PID, (async () => []) as BarrierConnection['query']),
-    waiter: stub('waiter', 22, (async () => []) as BarrierConnection['query']),
-    observer: stub('observer', 23, (async (sql: string, params: readonly unknown[] = []) => {
-      seen.push([sql, ...params]);
-
-      return [...rows];
-    }) as BarrierConnection['query']),
-  });
-
   it('returns the blocked backend and what it is running', async () => {
     const waiter: LockWaiter = { pid: 99, query: 'SELECT h.id FROM households h FOR NO KEY UPDATE' };
 
     await expect(
-      expectLockWaiter(barrierWatching([waiter]), { heldBy: HOLDER_PID, description: 'the transfer request' }),
+      expectLockWaiter(barrierWatching([waiter]), { heldBy: WATCHED_HOLDER_PID, description: 'the transfer request' }),
     ).resolves.toEqual(waiter);
   });
 
@@ -315,46 +299,133 @@ describe('expectLockWaiter', () => {
     const seen: unknown[][] = [];
 
     await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
-      heldBy: HOLDER_PID,
+      heldBy: WATCHED_HOLDER_PID,
       description: 'the transfer request',
     });
 
     expect(seen[0]?.[0]).toMatch(/\$1 = ANY\(pg_blocking_pids\(activity\.pid\)\)/);
     expect(seen[0]?.[0]).toMatch(/ORDER BY activity\.pid/);
-    expect(seen[0]?.[1]).toBe(HOLDER_PID);
+    expect(seen[0]?.[1]).toBe(WATCHED_HOLDER_PID);
   });
 
   it('excludes the holder and the barrier’s own connections', async () => {
     const seen: unknown[][] = [];
 
     await expectLockWaiter(barrierWatching([{ pid: 99, query: '' }], seen), {
-      heldBy: HOLDER_PID,
+      heldBy: WATCHED_HOLDER_PID,
       description: 'the transfer request',
-      exclude: [22, 23],
+      exclude: [12, 13],
     });
 
-    expect(seen[0]?.[2]).toEqual([HOLDER_PID, 22, 23]);
+    expect(seen[0]?.[2]).toEqual([WATCHED_HOLDER_PID, 12, 13]);
   });
 
   it('reports a request that answered instead of waiting, rather than timing out', async () => {
     await expect(
       expectLockWaiter(barrierWatching([]), {
-        heldBy: HOLDER_PID,
+        heldBy: WATCHED_HOLDER_PID,
         description: 'the transfer request',
         timeoutMs: 5_000,
         settledEarly: () => 'HTTP 404',
       }),
-    ).rejects.toThrow(/answered without ever waiting on a lock held by pid 21.*HTTP 404/s);
+    ).rejects.toThrow(/answered without ever waiting on a lock held by pid 11.*HTTP 404/s);
   });
 
   it('still times out when the request has neither waited nor answered', async () => {
     await expect(
       expectLockWaiter(barrierWatching([]), {
-        heldBy: HOLDER_PID,
+        heldBy: WATCHED_HOLDER_PID,
         description: 'the transfer request',
         timeoutMs: 50,
         settledEarly: () => undefined,
       }),
-    ).rejects.toThrow(/never waited on a lock held by pid 21/);
+    ).rejects.toThrow(/never waited on a lock held by pid 11/);
+  });
+});
+
+/**
+ * `expectLockWaiter`'s question asked of the whole queue: how many backends
+ * are queued behind the holder, directly or behind one another. Signup
+ * provisioning contends two application transactions for an advisory key of
+ * their own while one of them waits on the holder's row lock, so a query for
+ * direct waiters alone would see one backend where two are queued.
+ */
+describe('expectBackendsQueuedBehind', () => {
+  it('returns once the requested number of backends is queued', async () => {
+    const queued: QueuedBackend[] = [
+      { pid: 98, query: 'INSERT INTO "user_roles"' },
+      { pid: 99, query: 'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))' },
+    ];
+
+    await expect(
+      expectBackendsQueuedBehind(barrierWatching(queued), {
+        heldBy: WATCHED_HOLDER_PID,
+        count: 2,
+        description: 'two signups',
+      }),
+    ).resolves.toEqual(queued);
+  });
+
+  it('follows the chain: a backend waiting on a waiter counts, not only one waiting on the holder', async () => {
+    const seen: unknown[][] = [];
+
+    await expectBackendsQueuedBehind(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: WATCHED_HOLDER_PID,
+      count: 1,
+      description: 'one signup',
+    });
+
+    expect(seen[0]?.[0]).toMatch(/WITH RECURSIVE/);
+    expect(seen[0]?.[0]).toMatch(/JOIN queued ON queued\.pid = ANY\(waiting\.blockers\)/);
+    expect(seen[0]?.[1]).toBe(WATCHED_HOLDER_PID);
+  });
+
+  it("scopes the search to one database, orders it, and never counts or chains through the barrier's own connections", async () => {
+    // A spec that also contends on `waiter` would otherwise see its own
+    // statement and read it as the application queueing, or count a backend
+    // queued behind the waiter as queued behind the holder.
+    const seen: unknown[][] = [];
+
+    await expectBackendsQueuedBehind(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: WATCHED_HOLDER_PID,
+      count: 1,
+      description: 'one signup',
+    });
+
+    const sql = String(seen[0]?.[0]);
+
+    expect(sql).toMatch(/datname = current_database\(\)/);
+    expect(sql).toMatch(/ORDER BY waiting\.pid/);
+    // Left out of `waiting`, which both the first step and the chain draw from.
+    expect(sql).toMatch(/waiting AS MATERIALIZED \([\s\S]*pid <> ALL\(\$2::int\[\]\)[\s\S]*queued\(pid\) AS/);
+    expect(seen[0]?.[2]).toEqual([WATCHED_HOLDER_PID, WATCHED_WAITER_PID, WATCHED_OBSERVER_PID]);
+  });
+
+  it('asks for blockers once per poll, and only of backends waiting on a lock', async () => {
+    // `pg_blocking_pids` briefly takes the lock manager's locks, and this
+    // polls beside the very transactions it watches.
+    const seen: unknown[][] = [];
+
+    await expectBackendsQueuedBehind(barrierWatching([{ pid: 99, query: '' }], seen), {
+      heldBy: WATCHED_HOLDER_PID,
+      count: 1,
+      description: 'one signup',
+    });
+
+    const sql = String(seen[0]?.[0]);
+
+    expect(sql.match(/pg_blocking_pids/g)).toHaveLength(1);
+    expect(sql).toMatch(/wait_event_type = 'Lock'/);
+  });
+
+  it('names how many were queued when fewer than requested ever arrive', async () => {
+    await expect(
+      expectBackendsQueuedBehind(barrierWatching([{ pid: 99, query: 'INSERT INTO "user_roles"' }]), {
+        heldBy: WATCHED_HOLDER_PID,
+        count: 2,
+        description: 'two signups',
+        timeoutMs: 50,
+      }),
+    ).rejects.toThrow(/Expected 2 backend\(s\) queued behind pid 11 for two signups, but .* there were 1 \(pid 99/);
   });
 });

@@ -1,4 +1,4 @@
-import { HUMAN_USER_WHERE, SystemRole, type PrismaClient, type User } from '@bge/database';
+import { PROVISIONED_HUMAN_WHERE, SystemRole, type PrismaClient, type User } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 import { createHouseholdWithMembers, type HouseholdFixture, type HouseholdWithMembersOptions } from './household.js';
 import { pollUntil } from './poll.js';
@@ -16,9 +16,10 @@ import type { ActorDeps, AuthenticatedActor, SessionActor } from './types.js';
  */
 export interface Actors {
   /**
-   * The server-scope Owner sentinel. `UserProvisioningService` grants the
-   * FIRST human user in the database the base `SystemRole.User` role plus
-   * `SystemRole.Owner` on top; elevation is additive (#410), never a swap.
+   * The server-scope Owner sentinel. `UserProvisioningService` elects the
+   * first human it provisions while no human holds a role, and grants them
+   * the base `SystemRole.User` role plus `SystemRole.Owner` on top; elevation
+   * is additive (#410), never a swap.
    * The between-test sweep truncates users, so without a designated first
    * signup, whichever actor a test happened to create first would silently
    * become a superuser and authorization denials would stop being asserted
@@ -107,7 +108,7 @@ const PROVISIONING_TIMEOUT_MS = 15_000;
  * with the message below, while "provisioning granted the wrong set" fails at
  * the caller, which can name both sets.
  */
-async function waitForProvisionedRoleNames(
+export async function waitForProvisionedRoleNames(
   prisma: PrismaClient,
   userId: string,
   username: string,
@@ -187,14 +188,14 @@ export function createActors(deps: ActorDeps): Actors {
 
   async function mintSentinel(): Promise<SessionActor> {
     // Provisioning's own predicate, so the seat this refuses is exactly the seat
-    // provisioning considers taken (#484).
-    const humans = await prisma.user.count({ where: HUMAN_USER_WHERE });
-    if (humans > 0) {
+    // provisioning considers taken (#430, #484).
+    const provisioned = await prisma.user.count({ where: PROVISIONED_HUMAN_WHERE });
+    if (provisioned > 0) {
       throw new Error(
-        `Cannot mint the Owner sentinel: ${humans} human user(s) already exist, so the Owner seat is ` +
-          `taken (provisioning grants Owner only to the FIRST human). If a spec arranges users directly, ` +
-          `it must create its actors through the factories first — or accept that no Owner actor is ` +
-          `available in that test.`,
+        `Cannot mint the Owner sentinel: ${provisioned} provisioned human(s) already hold a role, so the ` +
+          `Owner seat is taken (provisioning grants Owner only while no human holds one). If a spec ` +
+          `arranges users directly, it must create its actors through the factories first — or accept ` +
+          `that no Owner actor is available in that test.`,
       );
     }
 

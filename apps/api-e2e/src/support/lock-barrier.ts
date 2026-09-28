@@ -425,7 +425,8 @@ export interface LockWaiter {
  * It finds the FIRST backend queued on the row, not a second one. That one
  * waits on the tuple lock the first waiter took, so `pg_blocking_pids` names
  * the first waiter as its blocker rather than the holder. Every spec using this
- * sends one request at a time behind the barrier.
+ * sends one request at a time behind the barrier; {@link backendsQueuedBehind}
+ * follows the chain for one that sends more.
  *
  * `exclude` and the ordering serve as they do for {@link advisoryWaiters}.
  */
@@ -502,6 +503,98 @@ async function pollForWaiter<T>(
 
     if (Date.now() >= deadline) {
       throw new Error(failure.timedOut(timeoutMs));
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+/** A backend queued behind the holder, and what it is running. The same shape as {@link AdvisoryWaiter}. */
+export type QueuedBackend = AdvisoryWaiter;
+
+/**
+ * The backends queued behind `heldBy`: waiting on a lock it holds, of any kind,
+ * or waiting on a backend that is. {@link lockWaiters} followed down the queue,
+ * and asked from the holder's side for the same reason: an application
+ * transaction runs on a connection this suite cannot name.
+ *
+ * Transitive on purpose. When two application transactions contend for a lock
+ * of their own while one of them also waits on the holder, only the first is
+ * blocked BY the holder; the second waits on the first. Asking only for direct
+ * waiters, as {@link lockWaiters} does, would see one backend where two are
+ * queued, and which one depends on which application lock the code takes.
+ *
+ * `pg_blocking_pids` answers for every lock type, so this needs no join
+ * against `pg_locks`. It is asked once per poll, and only of backends waiting
+ * on a lock: each call briefly takes the lock manager's own locks, and this
+ * runs every {@link POLL_INTERVAL_MS} beside the transactions it watches. It
+ * is scoped to the current database like the advisory query. `exclude` rules
+ * out the barrier's own connections as links in a chain, not only as results,
+ * so nothing queued behind the barrier's waiter counts as queued behind the
+ * holder.
+ */
+export async function backendsQueuedBehind(
+  observer: BarrierConnection,
+  heldBy: number,
+  exclude: readonly number[] = [],
+): Promise<QueuedBackend[]> {
+  return observer.query<QueuedBackend>(
+    `WITH RECURSIVE waiting AS MATERIALIZED (
+       SELECT pid, pg_blocking_pids(pid) AS blockers, query
+       FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND wait_event_type = 'Lock'
+         AND pid <> ALL($2::int[])
+     ),
+     queued(pid) AS (
+       SELECT pid FROM waiting WHERE $1::int = ANY(blockers)
+       UNION
+       SELECT waiting.pid FROM waiting JOIN queued ON queued.pid = ANY(waiting.blockers)
+     )
+     SELECT waiting.pid, coalesce(waiting.query, '') AS query
+     FROM queued
+     JOIN waiting ON waiting.pid = queued.pid
+     ORDER BY waiting.pid`,
+    [heldBy, [heldBy, ...exclude]],
+  );
+}
+
+/**
+ * Waits until at least `count` backends are queued behind `heldBy`, and
+ * returns them. The positive form of "the application's work has not finished
+ * yet", with the same discipline as {@link expectAdvisoryWaiter}. The
+ * barrier's own waiter and observer never count: what is being waited for is
+ * the application queueing.
+ */
+export async function expectBackendsQueuedBehind(
+  barrier: Barrier,
+  options: {
+    readonly heldBy: number;
+    readonly count: number;
+    readonly description: string;
+    readonly timeoutMs?: number;
+  },
+): Promise<QueuedBackend[]> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_BLOCKED_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
+  const ownConnections = [barrier.waiter.pid, barrier.observer.pid];
+
+  for (;;) {
+    const queued = await backendsQueuedBehind(barrier.observer, options.heldBy, ownConnections);
+
+    if (queued.length >= options.count) {
+      return queued;
+    }
+
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `Expected ${options.count} backend(s) queued behind pid ${options.heldBy} for ${options.description}, ` +
+          `but after ${timeoutMs}ms there were ${queued.length}` +
+          (queued.length > 0
+            ? ` (${queued.map((backend) => `pid ${backend.pid}: ${backend.query}`).join('; ')})`
+            : '') +
+          `. Either the work never reached the lock the holder has, or it finished without needing it.`,
+      );
     }
 
     await sleep(POLL_INTERVAL_MS);

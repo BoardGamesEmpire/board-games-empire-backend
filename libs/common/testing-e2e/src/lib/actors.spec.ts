@@ -8,11 +8,12 @@ import { SET_AUTH_TOKEN_HEADER, SIGN_IN_ANONYMOUS_PATH } from './signup.js';
  * `createActors` whose failure mode only appears under interleaving, which
  * the e2e acceptance spec (sequential by nature) cannot pin. The fake below
  * mirrors the two behaviors that matter: signup creates a user row, and
- * "provisioning" grants Owner to the first human and User to everyone
- * after, exactly like `UserProvisioningService`. Everything else the
- * factories touch is answered minimally, except the user count: it evaluates
- * the filter the factory sends, so the sentinel's idea of a human is checked
- * against the fake provisioning's rather than against itself.
+ * "provisioning" grants Owner to a human signing up while no human holds a
+ * role, and User to everyone after, exactly like `UserProvisioningService`
+ * (#430). Everything else the factories touch is answered minimally, except
+ * the user count: it evaluates the filter the factory sends, so the
+ * sentinel's idea of a taken seat is checked against the fake provisioning's
+ * rather than against itself.
  */
 interface FakeWorld {
   readonly prisma: PrismaClient;
@@ -22,16 +23,36 @@ interface FakeWorld {
   clearUsers(): void;
 }
 
+/** Prisma's "at least one related row" filter, `{ some: {} }`, and nothing narrower. */
+function isAnyRelatedFilter(expected: unknown): boolean {
+  if (expected === null || typeof expected !== 'object') {
+    return false;
+  }
+
+  const { some, ...rest } = expected as { some?: unknown };
+  return (
+    Object.keys(rest).length === 0 &&
+    some !== null &&
+    typeof some === 'object' &&
+    Object.keys(some as object).length === 0
+  );
+}
+
 /**
- * Answers the equality-and-`OR` subset of a Prisma `where` the factories send,
- * so a count honours the filter it was given rather than a rule of the fake's
- * own. Anything richer throws: a silently wrong count is what this exists to
- * expose.
+ * Answers the equality, `OR` and `{ some: {} }` subset of a Prisma `where` the
+ * factories send, so a count honours the filter it was given rather than a
+ * rule of the fake's own. A relation filter reads a boolean the caller
+ * projects onto the row under the relation's name. Anything richer throws: a
+ * silently wrong count is what this exists to expose.
  */
 function matchesWhere(row: object, where: Readonly<Record<string, unknown>>): boolean {
   return Object.entries(where).every(([key, expected]) => {
     if (key === 'OR' && Array.isArray(expected)) {
       return expected.some((branch: Readonly<Record<string, unknown>>) => matchesWhere(row, branch));
+    }
+
+    if (isAnyRelatedFilter(expected)) {
+      return (row as Record<string, unknown>)[key] === true;
     }
 
     if (expected !== null && typeof expected === 'object') {
@@ -46,8 +67,12 @@ function createFakeWorld(
   options: {
     preexistingHumans?: number;
     // Rows already in the database, for the cases a plain human cannot
-    // arrange: a leftover guest, a NULL anonymous flag.
+    // arrange: a leftover guest, a NULL anonymous flag. Like the humans above,
+    // they have been provisioned and hold a role.
     preexistingRows?: readonly Partial<User>[];
+    // Human rows that exist but that provisioning has not reached yet: a
+    // signup whose row committed and whose handler has not run (#430).
+    unprovisionedHumans?: number;
     firstHumanRoles?: readonly SystemRole[];
     laterHumanRoles?: readonly SystemRole[];
     anonymousRoles?: readonly SystemRole[];
@@ -66,23 +91,34 @@ function createFakeWorld(
   const users = new Map<string, User>();
   const ownerIds = new Set<string>();
   const anonymousIds = new Set<string>();
+  // The users provisioning has run for, so the ones holding a role.
+  const provisionedIds = new Set<string>();
   let signups = 0;
   let anonymousSignIns = 0;
   // The fake provisioning's own rule, written independently of the
-  // factory's filter: service accounts and anonymous rows are not people, and
-  // a NULL anonymous flag is.
-  const humanCount = () =>
-    [...users.values()].filter((user) => user.isServiceAccount !== true && user.isAnonymous !== true).length;
+  // factory's filter: the seat is taken once a person holds a role. Service
+  // accounts and anonymous rows are not people, and a NULL anonymous flag is.
+  const provisionedHumanCount = () =>
+    [...users.values()].filter(
+      (user) => provisionedIds.has(user.id) && user.isServiceAccount !== true && user.isAnonymous !== true,
+    ).length;
 
   for (let i = 0; i < (options.preexistingHumans ?? 0); i += 1) {
     const preexisting = makeUser({ id: `usr_preexisting_${i}` });
     users.set(preexisting.id, preexisting);
+    provisionedIds.add(preexisting.id);
   }
 
   (options.preexistingRows ?? []).forEach((overrides, i) => {
     const preexisting = makeUser({ id: `usr_preexisting_row_${i}`, ...overrides });
     users.set(preexisting.id, preexisting);
+    provisionedIds.add(preexisting.id);
   });
+
+  for (let i = 0; i < (options.unprovisionedHumans ?? 0); i += 1) {
+    const unprovisioned = makeUser({ id: `usr_unprovisioned_${i}` });
+    users.set(unprovisioned.id, unprovisioned);
+  }
 
   const fetchFn: typeof fetch = async (url, init) => {
     if (String(url).endsWith(SIGN_IN_ANONYMOUS_PATH)) {
@@ -96,6 +132,7 @@ function createFakeWorld(
       });
       anonymousIds.add(guest.id);
       users.set(guest.id, guest);
+      provisionedIds.add(guest.id);
 
       return new Response(JSON.stringify({ token: `tok_${guest.id}`, user: { id: guest.id } }), {
         status: 200,
@@ -107,13 +144,14 @@ function createFakeWorld(
     signups += 1;
 
     const user = makeUser({ id: `usr_${signups}`, username: body.name, email: body.email });
-    // First human becomes Owner — mirrors UserProvisioningService, which
-    // counts neither service accounts nor anonymous rows. The check-then-set
-    // pair contains no await, so it is atomic per signup.
-    if (humanCount() === 0) {
+    // Owner while no person holds a role — mirrors UserProvisioningService
+    // (#430). The check-then-set pair contains no await, so it is atomic per
+    // signup, which is what the election lock makes the real one.
+    if (provisionedHumanCount() === 0) {
       ownerIds.add(user.id);
     }
     users.set(user.id, user);
+    provisionedIds.add(user.id);
 
     return new Response(JSON.stringify({ token: `tok_${user.id}`, user: { id: user.id } }), {
       status: 200,
@@ -132,7 +170,8 @@ function createFakeWorld(
         return user;
       },
       count: async (args: { where: Readonly<Record<string, unknown>> }) =>
-        [...users.values()].filter((user) => matchesWhere(user, args.where)).length,
+        [...users.values()].filter((user) => matchesWhere({ ...user, roles: provisionedIds.has(user.id) }, args.where))
+          .length,
     },
     userRole: {
       findMany: async (args: { where: { userId: string } }) =>
@@ -162,6 +201,7 @@ function createFakeWorld(
     clearUsers: () => {
       users.clear();
       ownerIds.clear();
+      provisionedIds.clear();
     },
   };
 }
@@ -211,6 +251,18 @@ describe('createActors — sentinel concurrency', () => {
     // database does not hold the seat. A sentinel count that took anonymous
     // rows for people would refuse to mint here.
     const world = createFakeWorld({ preexistingRows: [{ isAnonymous: true }] });
+    const actors = createActors({ baseUrl, prisma: world.prisma, fetchFn: world.fetchFn });
+
+    await actors.owner();
+
+    expect(world.ownerCount()).toBe(1);
+  });
+
+  it('leaves the Owner seat open when the only human has not been provisioned yet', async () => {
+    // A human row is not the seat; a human holding a role is (#430). A row
+    // whose provisioning has not run cannot have been elected, so the sentinel
+    // still takes the seat — which is exactly what provisioning will do.
+    const world = createFakeWorld({ unprovisionedHumans: 1 });
     const actors = createActors({ baseUrl, prisma: world.prisma, fetchFn: world.fetchFn });
 
     await actors.owner();
