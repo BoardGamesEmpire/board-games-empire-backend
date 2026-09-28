@@ -1,11 +1,10 @@
 import { AuditContextService } from '@bge/actor-context';
-import { I18N_CATALOG_DIR, type I18nTranslations } from '@bge/i18n-core';
+import { I18N_CATALOG_DIR, i18nValidationMessage, type I18nTranslations } from '@bge/i18n-core';
 import { Test } from '@nestjs/testing';
 import { IsIn, IsString, IsUUID } from 'class-validator';
 import { I18nModule, I18nService, I18nValidationException, I18nValidationPipe } from 'nestjs-i18n';
 import { FALLBACK_LOCALE } from './locale.constants';
 import { translateValidationErrors } from './translate-validation-errors';
-import { i18nValidationMessage } from './validation-message';
 
 const VALID_UUID = '9f1c2c8e-8a4e-4c1e-9d0e-3c2b1a0f9e8d';
 

@@ -8,7 +8,7 @@ the global pipe + filter resolve it against the request locale.
 ## The pattern
 
 Point each `class-validator` decorator's `message` at a `validation.*` catalog
-key via the `@bge/i18n` facade:
+key with `i18nValidationMessage`, imported from `@bge/i18n`:
 
 ```ts
 import { i18nValidationMessage } from '@bge/i18n';
@@ -23,11 +23,13 @@ export class LanguageQueryDto {
 }
 ```
 
-- `i18nValidationMessage` is `@bge/i18n`'s pre-bound wrapper over the
-  nestjs-i18n helper — pointed at the generated `I18nTranslations`, so the key
-  is type-checked against the `validation.*` catalog (unknown key fails `tsc`,
-  see [typed-keys.md](./typed-keys.md)). DTOs import it from `@bge/i18n`, never
-  from `nestjs-i18n` directly (mirrors `t()`).
+- `i18nValidationMessage` lives in `@bge/i18n-core` and writes nestjs-i18n's
+  marker format itself, so marking a message loads no runtime; specs in
+  `@bge/i18n` pin it byte for byte to the vendor's helper (#503). Its key is
+  type-checked against the `validation.*` catalog (unknown key fails `tsc`, see
+  [typed-keys.md](./typed-keys.md)). DTOs import it from `@bge/i18n`, never from
+  `nestjs-i18n` directly (mirrors `t()`). `@bge/shared` is the exception and
+  imports it from `@bge/i18n-core` (see typed-keys.md for why).
 - The key must live under `validation.*` (the wrapper's type enforces it).
 - Catalog strings may interpolate `{property}` (the field name), `{value}` (the
   rejected value), and positional constraint args `{constraints.0}`,

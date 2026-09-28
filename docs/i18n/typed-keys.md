@@ -12,13 +12,24 @@ fails `tsc`.
 | Generated types            | `libs/common/i18n-core/src/lib/generated/i18n.generated.ts` |
 | Public re-export           | `I18nTranslations`, `I18nPath` from `@bge/i18n`             |
 
-`@bge/i18n-core` holds the catalogs, the types generated from them, and the `t()` marker, and loads
-nothing at runtime beyond `node:path`. `@bge/i18n` re-exports the marker and the key types beside
-`i18nValidationMessage` (a nestjs-i18n facade, which is why it stays out of the core lib) and the
-edge machinery that does the translating. **Import from `@bge/i18n`.** Apart from `@bge/i18n`
-itself, only a lib that `@bge/i18n` depends on imports `@bge/i18n-core` directly — today that is
-`@bge/actor-context`, which the edge filters read the locale from, so importing `@bge/i18n` there
-would form a circular project reference that `tsc --build` rejects (#189).
+`@bge/i18n-core` holds the catalogs, the types generated from them, and the two markers — `t()` for
+exceptions and `i18nValidationMessage` for decorators — and loads nothing at runtime beyond
+`node:path`. It writes the validation marker in nestjs-i18n's format itself, rather than calling
+nestjs-i18n; specs in `@bge/i18n` pin the two byte for byte (#503). `@bge/i18n` re-exports the
+markers and the key types beside the edge machinery that does the translating.
+
+**Import from `@bge/i18n`.** Apart from `@bge/i18n` itself, a lib imports `@bge/i18n-core` directly
+only when importing `@bge/i18n` would do one of two things:
+
+- **Form a cycle.** `@bge/actor-context`, which the edge filters read the locale from, is a
+  dependency of `@bge/i18n`, so importing `@bge/i18n` there would form a circular project reference
+  that `tsc --build` rejects (#189).
+- **Load the runtime into processes that emit no localized text.** `@bge/shared`'s pagination DTOs
+  mark their messages, and the IGDB and BGG gateways load `@bge/shared` at boot (through
+  `@bge/gateway-host` and `@bge/utils`). Importing `@bge/i18n` there would carry nestjs-i18n and
+  `@bge/database` into both gateways (#503).
+
+No lint rule enforces this.
 
 The generated file is **not committed** — it is gitignored (`**/generated/*`) and produced on
 demand, the same as the Prisma client and the protobuf output (#260). It carries its own
@@ -104,15 +115,15 @@ experience the Prisma client and protobuf types already have.
 Type your i18n call sites against `I18nTranslations` so invalid keys are caught by the compiler:
 
 ```ts
-import { I18nTranslations } from '@bge/i18n';
-import { I18nContext, i18nValidationMessage } from 'nestjs-i18n';
+import { I18nTranslations, i18nValidationMessage } from '@bge/i18n';
+import { I18nContext } from 'nestjs-i18n';
 
 // In a resolver / edge component that reads I18nContext:
 const i18n = I18nContext.current<I18nTranslations>();
 i18n.t('common.at_least_one_field');
 
-// In a DTO decorator (Phase 2, #142):
-@IsNotEmpty({ message: i18nValidationMessage<I18nTranslations>('validation.isNotEmpty') })
+// In a DTO decorator (Phase 2, #142); the key is checked against validation.*:
+@IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
 name: string;
 ```
 

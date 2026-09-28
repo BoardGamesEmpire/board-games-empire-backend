@@ -1,5 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
-import { I18N_CATALOG_DIR, t } from '@bge/i18n-core';
+import { I18N_CATALOG_DIR, i18nValidationMessage, t } from '@bge/i18n-core';
 import { Body, Controller, Get, type INestApplication, NotFoundException, Param, Post } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
@@ -7,7 +7,6 @@ import { ArrayNotEmpty, ArrayUnique, IsEnum, IsIn, IsOptional, IsString } from '
 import { I18nModule, I18nValidationExceptionFilter, I18nValidationPipe } from 'nestjs-i18n';
 import { I18nExceptionFilter } from './i18n-exception.filter';
 import { FALLBACK_LOCALE } from './locale.constants';
-import { i18nValidationMessage } from './validation-message';
 
 /**
  * End-to-end proof of the #142 validation machinery AND its interaction with the
