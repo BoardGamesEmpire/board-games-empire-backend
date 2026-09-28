@@ -742,14 +742,18 @@ describe('AbilityFactory', () => {
 
         expect(ability.rules.at(-1)?.conditions).toEqual({
           household: {
-            visibility: 'Friends',
-            members: {
-              some: {
-                user: {
-                  OR: [
-                    { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
-                    { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
-                  ],
+            is: {
+              visibility: 'Friends',
+              members: {
+                some: {
+                  user: {
+                    is: {
+                      OR: [
+                        { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+                        { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+                      ],
+                    },
+                  },
                 },
               },
             },
@@ -793,10 +797,12 @@ describe('AbilityFactory', () => {
         expect(conditions).toEqual({
           householdId: 'hh-1',
           household: {
-            members: {
-              some: {
-                userId: 'user-1',
-                role: { role: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } },
+            is: {
+              members: {
+                some: {
+                  userId: 'user-1',
+                  role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
+                },
               },
             },
           },
@@ -1399,9 +1405,13 @@ describe('AbilityFactory', () => {
 
         expect(conditions).toEqual({
           householdMember: {
-            household: {
-              id: 'hh-1',
-              members: { some: { userId: 'user-1', role: { role: { name: 'HouseholdOwner' } } } },
+            is: {
+              household: {
+                is: {
+                  id: 'hh-1',
+                  members: { some: { userId: 'user-1', role: { is: { role: { is: { name: 'HouseholdOwner' } } } } } },
+                },
+              },
             },
           },
         });
@@ -1455,7 +1465,8 @@ describe('AbilityFactory', () => {
           .rules.filter((rule) => rule.subject === ResourceType.HouseholdRole)
           .map(
             (rule) =>
-              (rule.conditions as { householdMember: { household: { id: string } } }).householdMember.household.id,
+              (rule.conditions as { householdMember: { is: { household: { is: { id: string } } } } }).householdMember.is
+                .household.is.id,
           );
 
         expect(rendered).toEqual(['hh-1']);
@@ -1480,7 +1491,7 @@ describe('AbilityFactory', () => {
 
         expect(conditions).toEqual({
           id: 'hh-1',
-          members: { some: { userId: 'user-1', role: { role: { name: OWNER_OR_ADMIN } } } },
+          members: { some: { userId: 'user-1', role: { is: { role: { is: { name: OWNER_OR_ADMIN } } } } } },
         });
       });
 
@@ -1488,9 +1499,9 @@ describe('AbilityFactory', () => {
         // `accessibleBy` unions every rule for an (action, subject) pair, so a
         // narrower Household+update rule could not have restricted this to owners.
         const conditions = factory.createForUser(holder('HouseholdAdmin', [updateHousehold()])).rules.at(-1)
-          ?.conditions as { members: { some: { role: { role: { name: { in: string[] } } } } } };
+          ?.conditions as { members: { some: { role: { is: { role: { is: { name: { in: string[] } } } } } } } };
 
-        expect(conditions.members.some.role.role.name.in).toContain('HouseholdAdmin');
+        expect(conditions.members.some.role.is.role.is.name.in).toContain('HouseholdAdmin');
       });
     });
   });

@@ -16,7 +16,7 @@ import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
-import type { AppAbility, ModelResourceType } from './interfaces';
+import type { AppAbility, ModelResourceType, SubjectInstance } from './interfaces';
 import { PermissionsService } from './permissions.service';
 import { AbilityContextInternalService } from './services/ability-context-internal.service';
 
@@ -150,17 +150,22 @@ export class AbilityService {
    * and denied rather than surfaced as a 500, mirroring
    * {@link getResourceConditionsForAbilities}.
    *
-   * The instance is `subject()`-tagged so its type resolves by the tag rather
-   * than by a plain object's constructor. Relation conditions reach it as
-   * nested objects (`{ event: { householdId } }` on the instance for an
+   * The instance is typed from the schema ({@link SubjectInstance}), so a key
+   * no model has fails to compile rather than reaching the matcher as a field
+   * no condition names. It is `subject()`-tagged so its type resolves by the
+   * tag rather than by a plain object's constructor. Relation conditions reach
+   * it as nested objects (`{ event: { householdId } }` on the instance for an
    * `{ event: { is: { householdId } } }` condition), and the matcher accepts
    * only that operator form — the `{ relation: { field } }` shorthand Prisma
-   * also takes in a query throws here. Every grant a create path checks this
-   * way writes its traversals with `is` and `some`; a grant still in the
-   * shorthand has to be converted before it can be checked against an
-   * instance.
+   * also takes in a query throws here. Every catalog grant writes its
+   * traversals in the operator form, and `findShorthandRelationConditions`
+   * (`@bge/database`) fails the catalog's specs on one that does not (#458).
    */
-  assertCurrentActorCan(action: Action, resourceType: ModelResourceType, instance: Record<string, unknown>): void {
+  assertCurrentActorCan<TResource extends ModelResourceType>(
+    action: Action,
+    resourceType: TResource,
+    instance: SubjectInstance<TResource>,
+  ): void {
     const abilities = this.getCurrentAbilities();
 
     let allowed: boolean;

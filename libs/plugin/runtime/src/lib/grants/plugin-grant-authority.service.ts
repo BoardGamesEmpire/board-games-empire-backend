@@ -11,7 +11,7 @@ import { Injectable } from '@nestjs/common';
  * These are a SECOND layer, not the only one. Every HTTP path into a grant
  * decision is already gated in the ability layer: the household routes carry a
  * CASL INSTANCE check on the route's `:householdId`
- * (`HouseholdPluginsController.assertHouseholdScope`, one per route), and the
+ * (`AbilityService.assertCurrentActorCan`, one per route), and the
  * server routes carry `@CheckPolicies(manage/read:plugin)` — unconditioned by
  * design, the registry being server-owned with no scope to bind to.
  * `PluginInstallerService.install` is the exception, reached by no route at

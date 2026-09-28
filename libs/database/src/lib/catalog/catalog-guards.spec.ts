@@ -1,5 +1,7 @@
 import { Action, ResourceType, RiskLevel, SystemRole } from '../client';
 import {
+  findEventSpanningGrants,
+  findShorthandRelationConditions,
   findTemplateDefects,
   findUnboundedGrants,
   findUnconditionedGlobalGrants,
@@ -351,6 +353,133 @@ describe('catalog guards', () => {
     });
   });
 
+  describe('findShorthandRelationConditions', () => {
+    it('finds a relation written without an operator, and one written inside an operator body', () => {
+      const catalog = [
+        definition({ slug: 'read:shorthand', conditions: { event: { householdId: '{{ householdId }}' } } }),
+        definition({
+          slug: 'read:nested',
+          conditions: {
+            household: {
+              is: { members: { some: { userId: '{{ user.id }}', role: { role: { name: 'HouseholdOwner' } } } } },
+            },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:shorthand', path: 'event' },
+        { slug: 'read:nested', path: 'household.is.members.some.role' },
+        { slug: 'read:nested', path: 'household.is.members.some.role.role' },
+      ]);
+    });
+
+    it('finds a shorthand under AND, OR and NOT, naming the branch', () => {
+      const catalog = [
+        definition({
+          slug: 'read:branches',
+          conditions: {
+            OR: [{ eventId: '{{ eventId }}' }, { occurrence: { eventId: '{{ eventId }}' } }],
+            AND: { NOT: { event: { deletedAt: null } } },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:branches', path: 'OR[1].occurrence' },
+        { slug: 'read:branches', path: 'AND.NOT.event' },
+      ]);
+    });
+
+    it('passes the operator form, scalar filter objects, scalar equality and a null relation', () => {
+      const catalog = [
+        definition({
+          slug: 'read:operators',
+          conditions: {
+            eventId: '{{ eventId }}',
+            deletedAt: { not: null },
+            status: { in: ['Accepted', 'Pending'] },
+            title: { contains: 'night', mode: 'insensitive' },
+            name: { not: { startsWith: 'e2e' } },
+            attendee: { is: { userId: '{{ user.id }}', event: { is: { householdId: '{{ householdId }}' } } } },
+            votes: { none: {} },
+            occurrence: null,
+          },
+        }),
+        definition({ slug: 'read:absent' }),
+        definition({ slug: 'read:empty', conditions: {} }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([]);
+    });
+
+    it('reports a filter written with an operator Prisma reads and the matcher does not', () => {
+      const catalog = [definition({ slug: 'read:search', conditions: { title: { search: 'night' } } })];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:search', path: 'title' }]);
+    });
+
+    it('reports a filter mixing an operator the matcher lacks with one it reads', () => {
+      const catalog = [
+        definition({ slug: 'update:config', conditions: { config: { path: ['theme'], equals: 'dark' } } }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'update:config', path: 'config' }]);
+    });
+
+    it('reports an empty filter, which names no operator at all', () => {
+      const catalog = [definition({ slug: 'read:blank', conditions: { title: {} } })];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:blank', path: 'title' }]);
+    });
+
+    it('reports equals or not holding an object or array, since the matcher compares only plain values', () => {
+      const catalog = [
+        definition({
+          slug: 'read:values',
+          conditions: {
+            config: { equals: { theme: 'dark' } },
+            tags: { equals: ['solo'] },
+            settings: { not: { theme: 'dark' } },
+            title: { not: { search: 'night' } },
+          },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:values', path: 'config' },
+        { slug: 'read:values', path: 'tags' },
+        { slug: 'read:values', path: 'settings' },
+        { slug: 'read:values', path: 'title' },
+      ]);
+    });
+
+    it('reports a null under is or isNot, which Prisma reads and the matcher refuses', () => {
+      const catalog = [
+        definition({ slug: 'read:null-relation', conditions: { occurrence: { is: null }, event: { isNot: null } } }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:null-relation', path: 'occurrence.is' },
+        { slug: 'read:null-relation', path: 'event.isNot' },
+      ]);
+    });
+
+    it('reports a relation operator beside a field of the related model, and still walks the operator body', () => {
+      const catalog = [
+        definition({
+          slug: 'read:mixed',
+          conditions: { gameVotes: { some: { attendee: { userId: '{{ user.id }}' } }, id: 'vote-1' } },
+        }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([
+        { slug: 'read:mixed', path: 'gameVotes' },
+        { slug: 'read:mixed', path: 'gameVotes.some.attendee' },
+      ]);
+    });
+  });
+
   describe('findUnboundedGrants', () => {
     const catalog = [
       definition({ slug: 'read:gadget' }),
@@ -393,6 +522,51 @@ describe('catalog guards', () => {
 
       expect(findUnboundedGrants(catalog, roles, SystemRole.AnonymousUser)).toEqual([
         { slug: 'read:gadget', role: SystemRole.AnonymousUser },
+      ]);
+    });
+  });
+
+  describe('findEventSpanningGrants', () => {
+    const catalog = [
+      definition({ slug: 'update:own', conditions: { userId: '{{ user.id }}' } }),
+      definition({ slug: 'update:own:here', conditions: { userId: '{{ user.id }}', eventId: '{{ eventId }}' } }),
+      definition({ slug: 'read:household', conditions: { event: { is: { householdId: '{{ householdId }}' } } } }),
+      definition({ slug: 'read:anything' }),
+      definition({ slug: 'read:broken', conditions: { userId: '{{> shared }}' } }),
+    ];
+
+    it('flags each event role holding a grant whose conditions never name the event', () => {
+      const roles = { [SystemRole.EventGuest]: ['update:own', 'update:own:here', 'read:household'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([
+        { slug: 'update:own', role: SystemRole.EventGuest },
+        { slug: 'read:household', role: SystemRole.EventGuest },
+      ]);
+    });
+
+    it('judges only event roles', () => {
+      const roles = { [SystemRole.HouseholdMember]: ['update:own'], [SystemRole.User]: ['update:own'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([]);
+    });
+
+    it('leaves an unconditioned grant to the fail-open guard and a template with a problem to the template guard', () => {
+      const roles = { [SystemRole.EventGuest]: ['read:anything', 'read:broken'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([]);
+    });
+
+    it('names a role the scope map does not classify, even one holding only grants it would skip', () => {
+      const roles = { Wizard: ['read:anything'] };
+
+      expect(() => findEventSpanningGrants(catalog, roles, SCOPE)).toThrow(/Wizard/);
+    });
+
+    it('counts a role once however many times it lists the slug', () => {
+      const roles = { [SystemRole.EventGuest]: ['update:own', 'update:own'] };
+
+      expect(findEventSpanningGrants(catalog, roles, SCOPE)).toEqual([
+        { slug: 'update:own', role: SystemRole.EventGuest },
       ]);
     });
   });

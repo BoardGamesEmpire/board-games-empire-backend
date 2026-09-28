@@ -29,7 +29,12 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  *
  * One guard judges a role rather than a pairing: every grant on `AnonymousUser`,
  * which anyone who opens an anonymous session holds, must narrow the rows it
- * reaches (#484). See {@link findUnboundedGrants}.
+ * reaches (#484). See {@link findUnboundedGrants}. Another judges only a
+ * condition's shape: every relation is written with an operator, so an
+ * instance check can evaluate it (#458). See
+ * {@link findShorthandRelationConditions}. And one judges the event roles:
+ * every grant they hold names the event it was rendered for (#458). See
+ * {@link findEventSpanningGrants}.
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw
@@ -43,7 +48,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * so fixtures exercise the negative cases and the shipped catalogs go through
  * the same code path. The shipped maps are `ROLE_SCOPE`,
  * `RENDER_CONTEXT_VARIABLES` and `KNOWN_TEMPLATE_VARIABLES` in
- * `role.catalog.ts`.
+ * `role.catalog.ts`. The shorthand guard's operator sets are module-level
+ * rather than arguments: they are the in-memory matcher's filter vocabulary,
+ * not a map the catalog is judged against, and no fixture has reason to vary
+ * them.
  *
  * The guards classify a role by that scope map — the pass its name is meant
  * to arrive through. That a household role is only ever assigned through a
@@ -95,6 +103,23 @@ export interface UnconditionedGlobalGrant {
 export interface UnboundedGrant {
   slug: string;
   role: string;
+}
+
+/** An event role holding a grant whose conditions never name the event, so it spans every event the actor attends. */
+export interface EventSpanningGrant {
+  slug: string;
+  role: string;
+}
+
+/** A relation filter written without an operator, which the in-memory matcher cannot evaluate. */
+export interface ShorthandRelationCondition {
+  slug: string;
+
+  /**
+   * Where the relation sits in the conditions, from the root: keys joined by
+   * `.`, through any operator on the way, and array positions as `[n]`.
+   */
+  path: string;
 }
 
 /** A role→permission edge whose pass never supplies a variable the conditions need. */
@@ -394,6 +419,167 @@ export function findUnboundedGrants(
   return findings;
 }
 
+const LOGICAL_OPERATORS: ReadonlySet<string> = new Set(['AND', 'OR', 'NOT']);
+
+const RELATION_OPERATORS: ReadonlySet<string> = new Set(['is', 'isNot', 'some', 'every', 'none']);
+
+const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
+  'equals',
+  'in',
+  'notIn',
+  'not',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+  'contains',
+  'startsWith',
+  'endsWith',
+  'mode',
+  'has',
+  'hasEvery',
+  'hasSome',
+  'isEmpty',
+]);
+
+/**
+ * The shorthand guard (#458): every relation in a condition is written with
+ * an operator. Prisma reads `{ household: { deletedAt: null } }` and
+ * `{ household: { is: { deletedAt: null } } }` alike, so a query filter built
+ * from either is correct, but the in-memory matcher behind
+ * `ability.can(action, subject(type, instance))` throws on the first. An
+ * instance check against a shorthand grant is logged and denied, whatever
+ * the instance, so the grant silently refuses everyone who holds it.
+ *
+ * Judged by shape alone, because the generated client exports no data model
+ * to read relations from (see `permission-entry.ts`). A key whose value is an
+ * object holding no relation operator and no scalar filter operator is a
+ * shorthand relation. That is exact rather than a guess for three reasons.
+ * Every entry's conditions are typed as its subject's `WhereInput`, so each
+ * key is a real field or an operator. A scalar field's object value is always
+ * a filter, so it names an operator. And no model has a field named after an
+ * operator, so a relation's body cannot pass for a filter. The sets below
+ * hold the scalar and list filter operators both Prisma and the matcher read,
+ * which is fewer than Prisma's own. A filter using any other is reported as a
+ * shorthand, even beside operators the sets hold: `search`, a Json filter's
+ * `path` next to its `equals`, or an operator Prisma adds later. The matcher
+ * throws on the whole filter, so the report is loud where the check would
+ * have been silent. It compares only plain values, too, so `equals` holding
+ * an object or array (a Json value, a scalar list) is reported, and so is
+ * `not` holding anything but a plain value or a filter it can read. Prisma's
+ * types allow each of these in a literal.
+ *
+ * Two relation forms fail the same way. A relation operator beside a field
+ * of the related model, `{ votes: { some: {}, id } }`, is refused by Prisma's
+ * types in a literal but not in a fragment spliced in. And a null under `is`
+ * or `isNot` reads in Prisma as a missing relation, but the matcher refuses
+ * it, so a missing relation is written bare, `{ occurrence: null }`.
+ *
+ * The walk goes into operator bodies and logical branches, and into a
+ * shorthand's own body, so a shorthand nested inside one is reported too.
+ */
+export function findShorthandRelationConditions(
+  catalog: readonly PermissionSeedDefinition[],
+): ShorthandRelationCondition[] {
+  const findings: ShorthandRelationCondition[] = [];
+
+  const walk = (slug: string, node: unknown, path: string): void => {
+    if (Array.isArray(node)) {
+      node.forEach((item, index) => walk(slug, item, `${path}[${index}]`));
+      return;
+    }
+
+    if (!isObject(node)) {
+      return;
+    }
+
+    for (const [key, value] of Object.entries(node)) {
+      const here = path === '' ? key : `${path}.${key}`;
+
+      if (LOGICAL_OPERATORS.has(key)) {
+        walk(slug, value, here);
+        continue;
+      }
+
+      // Scalar equality, a null relation, or a scalar list's value.
+      if (!isObject(value)) {
+        continue;
+      }
+
+      const keys = Object.keys(value);
+      const relationOperators = keys.filter((operator) => RELATION_OPERATORS.has(operator));
+      if (relationOperators.length > 0) {
+        if (relationOperators.length < keys.length) {
+          findings.push({ slug, path: here });
+        }
+        for (const operator of relationOperators) {
+          if (value[operator] === null) {
+            findings.push({ slug, path: `${here}.${operator}` });
+            continue;
+          }
+          walk(slug, value[operator], `${here}.${operator}`);
+        }
+        continue;
+      }
+
+      if (isReadableScalarFilter(value)) {
+        continue;
+      }
+
+      findings.push({ slug, path: here });
+      // A filter's operands are values, not relations. Only a shorthand
+      // relation's body is walked for more.
+      if (!keys.some((key) => SCALAR_FILTER_OPERATORS.has(key))) {
+        walk(slug, value, here);
+      }
+    }
+  };
+
+  for (const { slug, conditions } of catalog) {
+    walk(slug, conditions, '');
+  }
+
+  return findings;
+}
+
+/**
+ * The event-binding guard (#458): every grant an event-scoped role holds
+ * names `{{ eventId }}`. An event role is rendered once per attendance, so a
+ * clause naming only the actor, `{ userId: '{{ user.id }}' }`, comes out the
+ * same from every event the actor attends and reaches their rows in all of
+ * them, including events where their role holds no such grant. A spectator
+ * voted, RSVPed and withdrew a nomination that way, on the strength of an
+ * event where they participated; #432 found the game-list pair first.
+ *
+ * Naming another coordinate is not enough: a clause bound to the household
+ * spans that household's events the same way. An unconditioned grant is the
+ * fail-open guard's finding and a template with problems the template
+ * guard's, so both are skipped here.
+ */
+export function findEventSpanningGrants(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roleScope: Readonly<Record<string, RoleScope>>,
+): EventSpanningGrant[] {
+  const holders = holdersBySlug(rolePermissions, roleScope);
+  const findings: EventSpanningGrant[] = [];
+
+  for (const { slug, conditions } of catalog) {
+    const { variables, problems } = parseTemplate(conditions);
+    if (variables.length === 0 || problems.length > 0 || variables.includes('eventId')) {
+      continue;
+    }
+
+    for (const { role, scope } of holders.get(slug) ?? []) {
+      if (scope === 'event') {
+        findings.push({ slug, role });
+      }
+    }
+  }
+
+  return findings;
+}
+
 interface Holder {
   role: string;
   scope: RoleScope;
@@ -427,6 +613,31 @@ function holdersBySlug(
   }
 
   return holders;
+}
+
+// A scalar filter the matcher can read: every key an operator it knows, with
+// `equals` holding a plain value and `not` a plain value or a filter of its own.
+function isReadableScalarFilter(filter: Record<string, unknown>): boolean {
+  const operands = Object.entries(filter);
+  return (
+    operands.length > 0 &&
+    operands.every(([operator, operand]) => {
+      if (!SCALAR_FILTER_OPERATORS.has(operator)) {
+        return false;
+      }
+      if (operator !== 'equals' && operator !== 'not') {
+        return true;
+      }
+      if (Array.isArray(operand)) {
+        return false;
+      }
+      return !isObject(operand) || (operator === 'not' && isReadableScalarFilter(operand));
+    })
+  );
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function scopeOf(role: string, roleScope: Readonly<Record<string, RoleScope>>): RoleScope {

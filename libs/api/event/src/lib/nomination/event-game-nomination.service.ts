@@ -259,6 +259,17 @@ export class EventGameNominationService {
   async castVote(eventId: string, nominationId: string, dto: CastVoteDto): Promise<EventGameVote> {
     const initiatedAt = new Date();
     const attendeeId = await resolveActingAttendeeId(this.db, this.abilityService, eventId);
+
+    // The route's policy check judges the vote by type alone, and an event
+    // role is rendered once per attendance, so a vote grant from any event the
+    // actor attends passes it. Bind it to the vote about to be written: the
+    // actor's attendee row in this event.
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.EventGameVote, {
+      eventGameNominationId: nominationId,
+      attendeeId,
+      attendee: { userId: this.abilityService.getActingUserId(), eventId },
+    });
+
     const nomination = await this.db.eventGameNomination.findUnique({
       where: { id: nominationId, eventId },
       select: { id: true, status: true },
