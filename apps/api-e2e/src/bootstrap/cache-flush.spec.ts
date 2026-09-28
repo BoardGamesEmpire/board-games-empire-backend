@@ -21,6 +21,7 @@ import type { Logger } from '@nestjs/common';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
 import Keyv from 'keyv';
+import { API_CACHE_NAMESPACE } from '../support/api-cache';
 import { REDIS_IMAGE } from '../support/e2e-env';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
@@ -54,8 +55,7 @@ const neverMigrates: Migrator = {
   },
 };
 
-/** The api's `API_CACHE_NAMESPACE`; the api composes its flush patterns from it exactly as below. */
-const API_CACHE_NAMESPACE = 'api:cache';
+/** The api composes its flush patterns from `API_CACHE_NAMESPACE` exactly as below. */
 const PATTERNS = [PermissionsService.userGraphCacheKey('*'), PermissionsService.apiKeyScopeCacheKey('*')].map(
   (key) => `${API_CACHE_NAMESPACE}:${key}`,
 );

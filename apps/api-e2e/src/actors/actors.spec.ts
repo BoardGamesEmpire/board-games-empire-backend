@@ -95,10 +95,18 @@ describe('actor fixtures (#256)', () => {
       await expect(globalRoleNames(after.user.id)).resolves.toEqual([SystemRole.Owner, SystemRole.User].sort());
     });
 
-    it('refuses the Owner seat when a human user already exists, loudly', async () => {
-      await db.client.user.create({
+    it('refuses the Owner seat when a provisioned human already exists, loudly', async () => {
+      // A human holding a role takes the seat, not a human row (#430): a row
+      // provisioning has not reached yet leaves it open, and the sentinel would
+      // rightly be elected over it.
+      const preexisting = await db.client.user.create({
         data: { username: 'e2e-preexisting-human', email: 'preexisting@e2e.invalid' },
       });
+      const baseRole = await db.client.role.findUniqueOrThrow({
+        where: { name: SystemRole.User },
+        select: { id: true },
+      });
+      await db.client.userRole.create({ data: { userId: preexisting.id, roleId: baseRole.id } });
 
       await expect(actors.owner()).rejects.toThrow(/Owner seat is taken/);
     });

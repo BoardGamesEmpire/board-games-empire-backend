@@ -65,6 +65,14 @@ export class PermissionsService {
       `user role graph for user ${userId}`,
       () => this.loadUserGraph(userId),
       (graph) => this.cacheTtlForGraph(graph),
+      // A graph holding no global role was read before its user's provisioning
+      // committed (#490): every provisioned user holds one, and provisioning
+      // writes them all in one transaction. Caching it would refuse that user
+      // for the whole TTL after their roles exist, and nothing would say why.
+      // Served, not cached: the request is refused, and the next one reloads.
+      // Provisioning's eviction after its commit does not cover this: a
+      // request that read before the commit can write the cache after it.
+      (graph) => graph.roles.length > 0,
     );
 
     return userGraph as UserWithRoles | null;
@@ -162,13 +170,16 @@ export class PermissionsService {
    *
    * `ttlFor` lets a caller derive a per-entry TTL from the loaded value (used to
    * clamp the user graph to a soon-to-expire permission); it defaults to the
-   * static TTL.
+   * static TTL. `cacheable` lets a caller serve a value without caching it
+   * (used for a user graph read before provisioning committed); by default
+   * every non-null value is cached.
    */
   private async getOrLoad<T extends object>(
     cacheKey: string,
     label: string,
     loader: () => Promise<T | null>,
     ttlFor: (value: T) => number = () => PermissionsService.CACHE_TTL_IN_MILLISECONDS,
+    cacheable: (value: T) => boolean = () => true,
   ): Promise<T | null> {
     const cached = await this.cache.get<T>(cacheKey);
     if (cached) {
@@ -180,6 +191,11 @@ export class PermissionsService {
     if (!fresh) {
       this.logger.warn(`Not found while loading ${label}`);
       return null;
+    }
+
+    if (!cacheable(fresh)) {
+      this.logger.debug(`Loaded ${label} from database, not caching it`);
+      return fresh;
     }
 
     const ttl = ttlFor(fresh);

@@ -154,6 +154,36 @@ describe('PermissionsService', () => {
       expect(cache.set).not.toHaveBeenCalled();
     });
 
+    it('serves but does not cache a graph holding no global role', async () => {
+      // Every provisioned user holds one, and provisioning writes them all in
+      // one transaction, so a graph with none was read before that commit
+      // (#490). Caching it would refuse the user for the whole TTL after their
+      // roles exist. This request is still refused; the next one reloads.
+      cache.get.mockResolvedValue(undefined);
+      const graph = makeUserGraph({ roles: [] });
+      db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+      const result = await service.getUserRoleGraph('user-1');
+
+      expect(result).toBe(graph);
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+
+    it('reads provisioning off the global roles alone, not off whatever else the graph grants', async () => {
+      // A membership is not the mark provisioning leaves; a global role is. A
+      // graph with one and not the other is not a provisioned user's graph.
+      cache.get.mockResolvedValue(undefined);
+      const graph = makeUserGraph({
+        roles: [],
+        householdMember: [{ householdId: 'hh-1', role: null }],
+      });
+      db.user.findUnique.mockResolvedValue(graph as unknown as User);
+
+      await service.getUserRoleGraph('user-1');
+
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+
     describe('cache TTL', () => {
       it('uses the default TTL when no permission expires within the window', async () => {
         cache.get.mockResolvedValue(undefined);
@@ -571,10 +601,11 @@ function makeApiKeyGraph(scopes: ApikeyWithScopes['scopes'] = []): ApikeyWithSco
   };
 }
 
+/** A provisioned user's graph: every one holds a global role, `User` at the least. */
 function makeUserGraph(overrides: Partial<UserWithRoles> = {}): UserWithRoles {
   return {
     id: 'user-1',
-    roles: [],
+    roles: [{ role: { name: 'User', permissions: [] } }],
     householdMember: [],
     eventsAttended: [],
     permissions: [],

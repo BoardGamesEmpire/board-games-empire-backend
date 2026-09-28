@@ -67,7 +67,7 @@ export async function sweepThrottleBuckets(env: NodeJS.ProcessEnv = process.env)
     return 0;
   }
 
-  const client = connect(env);
+  const client = connectToHarnessRedis(env);
   let cursor = '0';
   let removed = 0;
 
@@ -152,7 +152,7 @@ export function redisTlsOptions(env: NodeJS.ProcessEnv = process.env): Pick<Redi
  * failure looks identical to a wrong port from outside, and lands in the same
  * place before any test has started, so it gets the same five seconds.
  */
-function connect(env: NodeJS.ProcessEnv): Redis {
+export function connectToHarnessRedis(env: NodeJS.ProcessEnv = process.env): Redis {
   const host = env['REDIS_HOST'];
   const port = Number(env['REDIS_PORT']);
 
@@ -195,7 +195,7 @@ export async function resetRedis(env: NodeJS.ProcessEnv = process.env): Promise<
     );
   }
 
-  const client = connect(env);
+  const client = connectToHarnessRedis(env);
 
   try {
     await client.flushall();

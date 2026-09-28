@@ -1,6 +1,14 @@
-import { DatabaseService, HUMAN_USER_WHERE, SystemRole, Theme } from '@bge/database';
+import { DatabaseService, Prisma, PROVISIONED_HUMAN_WHERE, SystemRole, Theme } from '@bge/database';
+import { PermissionsService } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import { Injectable, Logger } from '@nestjs/common';
+
+/**
+ * The Owner election's advisory lock. Postgres derives the 64-bit key from the
+ * name (`hashtextextended`), as it does for the bootstrap lock and the plugin
+ * unit-scope locks, so no caller computes the key itself.
+ */
+const OWNER_ELECTION_LOCK_NAME = 'bge:owner-election';
 
 @Injectable()
 export class UserProvisioningService {
@@ -9,6 +17,7 @@ export class UserProvisioningService {
   constructor(
     private readonly db: DatabaseService,
     private readonly serviceAccount: ServiceAccountService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   async provisionNewUser(userId: string): Promise<void> {
@@ -28,14 +37,21 @@ export class UserProvisioningService {
     // handed better-auth's admin role.
     const isAnonymous = user.isAnonymous === true;
 
-    // Service accounts and anonymous users are real User rows, so they must be
-    // excluded or they'd shift the first human out of this branch.
-    const isFirstHuman = !isAnonymous && (await this.db.user.count({ where: HUMAN_USER_WHERE })) === 1;
+    // Is this the first human? Asked of what provisioning writes, never of the
+    // user rows (#430). better-auth commits the row before this handler runs,
+    // so two first signups can both be committed before either one looks: a
+    // count sees two humans and elects nobody, and the install never gets an
+    // Owner. The seat is taken once any human holds a global role.
+    //
+    // An unlocked look first. Once someone is provisioned the seat stays
+    // taken, so every signup after an install's first few answers here and
+    // never touches the election lock. The look is repeated under the lock.
+    const seatMayBeOpen = !isAnonymous && !(await this.ownerSeatTaken(this.db));
 
     // Two separate questions, deliberately not one comparison (#410). "Is this
     // the first human" drives the side effects below — service-account birth,
     // `emailVerified`, the better-auth `role` column. "Which roles do they
-    // get" is this list. A setup wizard changes the second and not the first,
+    // get" is the role set. A setup wizard changes the second and not the first,
     // so a single `roleName === Owner` test would make the wizard's first
     // change silently skip system birth.
     // Elevation is additive: the first human holds `User` AND `Owner`, never
@@ -50,37 +66,55 @@ export class UserProvisioningService {
     // An anonymous user holds `AnonymousUser` INSTEAD of `User`, never beside
     // it: the row's roles are resolved like anyone else's, so `User` here would
     // hand an anonymous session everything a signed-in user can do (#484).
-    const roleNames = isAnonymous
-      ? [SystemRole.AnonymousUser]
-      : isFirstHuman
-        ? [SystemRole.User, SystemRole.Owner]
-        : [SystemRole.User];
+    const baseRoleNames = isAnonymous ? [SystemRole.AnonymousUser] : [SystemRole.User];
+    const firstHumanRoleNames = [SystemRole.User, SystemRole.Owner];
 
     // Resolved BEFORE the transaction opens. An unseeded catalog is a constant
     // of the deployment, not a property of this signup, so discovering it
     // after two inserts would make every signup against a half-seeded database
-    // pay those writes plus a rollback to learn the same thing.
-    const assignments = await this.resolveRoleAssignments(user.id, roleNames);
+    // pay those writes plus a rollback to learn the same thing. Both sets while
+    // the seat may be open: which one this signup writes is only known once it
+    // holds the election lock. So while the seat is open, a catalog without
+    // `Owner` fails every signup, not only the first one — each is a candidate
+    // until someone is provisioned.
+    const baseAssignments = await this.resolveRoleAssignments(user.id, baseRoleNames);
+    const firstHumanAssignments = seatMayBeOpen
+      ? await this.resolveRoleAssignments(user.id, firstHumanRoleNames)
+      : null;
 
-    await this.db.$transaction(async (db) => {
+    const isFirstHuman = await this.db.$transaction(async (db) => {
+      const elected = firstHumanAssignments !== null && (await this.holdOwnerElection(db));
+
       await db.userPreferences.create({
         data: { userId: user.id, theme: Theme.System, emailNotifications: {}, pushNotifications: {} },
       });
       await db.userProfile.create({ data: { userId: user.id, displayName } });
-      await db.userRole.createMany({ data: assignments });
+      await db.userRole.createMany({ data: elected ? firstHumanAssignments : baseAssignments });
 
-      // `isFirstHuman`, deliberately NOT `roleNames.includes(Owner)`. The two
-      // are extensionally identical today, so no test can tell them apart —
+      // First-human-ness, deliberately NOT `roleNames.includes(Owner)`. The
+      // two are extensionally identical today, so no test can tell them apart —
       // this is held by review until provisioning can hand the first human a
       // set without `Owner`, which is what a setup wizard introduces. Do not
       // "simplify" it back to reading the role set.
-      if (isFirstHuman) {
+      if (elected) {
         await db.user.update({
           where: { id: user.id },
           data: { role: SystemRole.Admin.toLowerCase(), emailVerified: true },
         });
       }
+
+      return elected;
     });
+
+    // Provisioning assigns roles, and every role assignment evicts the user's
+    // graph (`PermissionsService.invalidateUser`). Today this removes nothing:
+    // a graph read before the commit above held no global role, and a user
+    // graph without one is never cached (#490). That rule, not this eviction,
+    // is what stops a pre-commit read outliving provisioning, since such a
+    // read can write the cache after the eviction. This covers a provisioning
+    // that writes roles in more than one transaction, as a setup wizard might:
+    // after its first commit the graph holds a role and is cached.
+    await this.permissions.invalidateUser(user.id);
 
     if (isFirstHuman) {
       // Same reasoning as the branch above: keyed on first-human-ness, not on
@@ -90,7 +124,31 @@ export class UserProvisioningService {
       await this.serviceAccount.ensure();
     }
 
+    const roleNames = isFirstHuman ? firstHumanRoleNames : baseRoleNames;
     this.logger.debug(`Provisioned user ${user.id} with role(s) '${roleNames.join("', '")}'`);
+  }
+
+  /**
+   * The election itself, inside the provisioning transaction: take the lock,
+   * then look again.
+   *
+   * The lock is what makes the answer hold. Without it, two transactions that
+   * both look before either writes would both find the seat open and both
+   * elect — the two-Owner case that counting user rows could never reach. With
+   * it, whichever takes the lock second waits for the first to commit, and
+   * then sees its roles. That second look sees the commit because the
+   * transaction runs at READ COMMITTED, where every statement takes a fresh
+   * snapshot. At REPEATABLE READ the snapshot would come from the lock
+   * statement, before the wait, and both would elect.
+   */
+  private async holdOwnerElection(db: Prisma.TransactionClient): Promise<boolean> {
+    await db.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${OWNER_ELECTION_LOCK_NAME}, 0))`;
+    return !(await this.ownerSeatTaken(db));
+  }
+
+  private async ownerSeatTaken(db: Prisma.TransactionClient | DatabaseService): Promise<boolean> {
+    const provisioned = await db.user.findFirst({ where: PROVISIONED_HUMAN_WHERE, select: { id: true } });
+    return provisioned !== null;
   }
 
   /**
