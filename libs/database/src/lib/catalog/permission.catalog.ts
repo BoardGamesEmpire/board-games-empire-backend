@@ -1750,6 +1750,21 @@ export const PERMISSION_CATALOG = [
       'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
   }),
 
+  // ─── SystemSetting ──────────────────────────────────────
+  // Update only. Both staff roles already read the settings through
+  // `read:public_content`, so a read slug here would grant nothing (see the
+  // staff block above). Unconditioned because the row is the server's own
+  // singleton, with no scope to bind to. Critical because the row holds the
+  // server's security switches, sign-ups, password resets and feedback
+  // redaction among them (#441).
+  permission({
+    action: Action.update,
+    subject: ResourceType.SystemSetting,
+    slug: 'update:system_setting',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Change server-wide settings, such as sign-ups, password resets and feedback redaction',
+  }),
+
   // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
   // Server-scope pair: Owner/Admin only, per the locked role assignment on
   // #59. Owner holds it via `manage:all`; Admin names both slugs outright in

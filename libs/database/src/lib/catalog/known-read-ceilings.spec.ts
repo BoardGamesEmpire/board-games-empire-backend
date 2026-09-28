@@ -54,7 +54,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     Admin: { 'read:public_content': 'every row' },
     Moderator: { 'read:public_content': 'every row' },
   },
-  System: {},
+  SystemSetting: {},
   AuditLog: {
     Admin: { 'read:audit_log': 'every row' },
     Moderator: { 'read:audit_log': 'every row' },
