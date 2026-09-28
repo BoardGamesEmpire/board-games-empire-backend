@@ -66,9 +66,7 @@ describe('a request sent before signup provisioning commits', () => {
 
       // The same read once caching should happen, so a key this spec spells
       // wrong fails here instead of passing the pending read for nothing.
-      // Provisioning's eviction cannot undo it: it runs straight after the
-      // commit, while this request still had its graph to load.
-      const cachedOnceProvisioned = await apiCacheHas(PermissionsService.userGraphCacheKey(signup.userId));
+      const cachedOnceProvisioned = await cachedPastEviction(baseUrl, headers, signup.userId);
 
       expect({ early: early.status, cachedWhilePending, later: later.status, cachedOnceProvisioned }).toEqual({
         early: 403,
@@ -79,3 +77,32 @@ describe('a request sent before signup provisioning commits', () => {
     });
   });
 });
+
+/**
+ * Whether the api holds the user's graph cached once provisioning's eviction
+ * has run, sending one more request if the eviction removed what the last one
+ * wrote.
+ *
+ * The eviction runs after provisioning's commit, and the role rows a spec
+ * waits for show the commit, not the eviction, so it can land just after a
+ * request cached the graph. It runs once, and a request's cache write lands
+ * before its response. So a read that finds the key gone after such a request
+ * means the eviction has already run, and the next request's write stays. Two
+ * requests always settle it, and a key this spec spells wrong reads false both
+ * times.
+ */
+async function cachedPastEviction(
+  baseUrl: string,
+  headers: Readonly<Record<string, string>>,
+  userId: string,
+): Promise<boolean> {
+  const cacheKey = PermissionsService.userGraphCacheKey(userId);
+
+  if (await apiCacheHas(cacheKey)) {
+    return true;
+  }
+
+  await request(baseUrl).get(HOUSEHOLDS_PATH).set(headers);
+
+  return apiCacheHas(cacheKey);
+}
