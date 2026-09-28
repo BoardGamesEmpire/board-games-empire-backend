@@ -460,10 +460,11 @@ const SCALAR_FILTER_OPERATORS: ReadonlySet<string> = new Set([
  * a filter, so it names an operator. And no model has a field named after an
  * operator, so a relation's body cannot pass for a filter. The sets below
  * hold the scalar and list filter operators both Prisma and the matcher read,
- * which is fewer than Prisma's own: a filter written with any other, such as
- * `search`, a Json path filter or an operator Prisma adds later, is reported
- * as a shorthand. The matcher would throw on it too, so the report is loud
- * where the check would have been silent.
+ * which is fewer than Prisma's own. A filter using any other is reported as a
+ * shorthand, even beside operators the sets hold: `search`, a Json filter's
+ * `path` next to its `equals`, or an operator Prisma adds later. The matcher
+ * throws on the whole filter, so the report is loud where the check would
+ * have been silent.
  *
  * The walk goes into operator bodies and logical branches, and into a
  * shorthand's own body, so a shorthand nested inside one is reported too.
@@ -505,7 +506,7 @@ export function findShorthandRelationConditions(
         continue;
       }
 
-      if (keys.some((operator) => SCALAR_FILTER_OPERATORS.has(operator))) {
+      if (keys.length > 0 && keys.every((operator) => SCALAR_FILTER_OPERATORS.has(operator))) {
         continue;
       }
 

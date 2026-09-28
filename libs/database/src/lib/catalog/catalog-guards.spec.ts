@@ -417,6 +417,20 @@ describe('catalog guards', () => {
 
       expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:search', path: 'title' }]);
     });
+
+    it('reports a filter mixing an operator the matcher lacks with one it reads', () => {
+      const catalog = [
+        definition({ slug: 'update:config', conditions: { config: { path: ['theme'], equals: 'dark' } } }),
+      ];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'update:config', path: 'config' }]);
+    });
+
+    it('reports an empty filter, which names no operator at all', () => {
+      const catalog = [definition({ slug: 'read:blank', conditions: { title: {} } })];
+
+      expect(findShorthandRelationConditions(catalog)).toEqual([{ slug: 'read:blank', path: 'title' }]);
+    });
   });
 
   describe('findUnboundedGrants', () => {
