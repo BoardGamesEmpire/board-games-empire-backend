@@ -291,10 +291,10 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 - **quota registry** (`libs/common/quota/.../registry`): 3 plain `Error` throws — internal.
 - **actor-context-transport gRPC interceptors** (#144): 17 `HttpException` frames — 16 in
   `GrpcInternalActorInterceptor` (registered only on `gateway-coordinator`) and 1 in the unwired
-  `GrpcActorInterceptor`. These are real exception classes, not custom errors, but no caller ever reads
-  them: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error" and
-  only logs the exception. A `t()` marker body would make that log line the generic class phrase (#501),
-  so they stay English. The lib's eslint config exempts those two files from the guardrail by name.
+  `GrpcActorInterceptor`. These are real exception classes, not custom errors, but nothing reads their
+  text: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error", and
+  it logs no `HttpException` (#574). Translating them would gain nothing, so they stay English. The lib's
+  eslint config exempts those two files from the guardrail by name.
 - **game-import webhook copy** (#188): `game.import.failed.v1` carries `errorCode` plus the
   `SAFE_MESSAGE` English `error` (`libs/api/game-import/src/lib/utils/emit-job-failed.ts`). Not an error
   class, but machine-facing like the rest of this section. A webhook subscription has no locale, and the
@@ -311,7 +311,10 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
     caller-supplied via `requireAbilities(message)`; translate at the call sites, not here.
   - `game-gateway.controller.ts:131,164` — response `message:` passes through raw caught
     `error.message`. **Not just an i18n gap — a potential info leak.** Replace with a translated,
-    sanitized string.
+    sanitized string. **Resolved (#144, #501):** in `connectToGateway` and `disconnectFromGateway`, a
+    failed coordinator call (#144) and a coordinator answer of `success: false` (#501) both get
+    `errors.game_gateway.connect_failed` or `disconnect_failed`. The coordinator's own error is only
+    logged.
   - `grpc-internal-actor.interceptor.ts:143` — embeds `(error as Error).message` in a
     BadRequestException. **Resolved (#144):** it stays English with the other gRPC frames (§5).
 - **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor

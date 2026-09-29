@@ -1,9 +1,11 @@
 import { AuditContextService } from '@bge/actor-context';
-import { isI18nMessage, type I18nTranslations } from '@bge/i18n-core';
-import { HttpException } from '@nestjs/common';
+import { isI18nMessage, type I18nMessage, type I18nTranslations } from '@bge/i18n-core';
+import { HttpException, Logger } from '@nestjs/common';
 import { I18nService } from 'nestjs-i18n';
 import { STATUS_CODES } from 'node:http';
 import { FALLBACK_LOCALE } from './locale.constants';
+
+const logger = new Logger('translateException');
 
 /**
  * Resolves the request locale from CLS for edge translation, degrading to
@@ -32,7 +34,8 @@ export function resolveEdgeLocale(auditContext: AuditContextService): string {
  *    Translates just the `message` field in place, preserving every other field
  *    and the custom `error` label.
  *
- * In both cases the original status and `cause` are preserved. Any other
+ * In both cases the original status and `cause` are preserved, and a catalog
+ * entry that cannot render is sent as its key rather than thrown. Any other
  * exception is returned untouched (referentially, so callers can `super.catch`
  * it byte-for-byte as before).
  *
@@ -54,7 +57,7 @@ export function translateException(
 
   // (1) Whole body is a marker → replace it with Nest's default error shape.
   if (isI18nMessage(body)) {
-    const message = i18n.translate(body.key, { lang: resolveEdgeLocale(auditContext), args: body.args });
+    const message = render(body, i18n, auditContext);
     // Carry the original `cause` across the re-issue so server-side context is not
     // stripped (e.g. StorageExceptionFilter attaches the raw storage error as
     // `cause` for logs). `{ cause: undefined }` is a no-op in Nest's `initCause`,
@@ -70,10 +73,29 @@ export function translateException(
   if (body !== null && typeof body === 'object') {
     const marker = (body as { message?: unknown }).message;
     if (isI18nMessage(marker)) {
-      const message = i18n.translate(marker.key, { lang: resolveEdgeLocale(auditContext), args: marker.args });
+      const message = render(marker, i18n, auditContext);
       return new HttpException({ ...body, message }, status, { cause: exception.cause });
     }
   }
 
   return exception;
+}
+
+/**
+ * A marker in the request locale, or its key when the catalog entry cannot
+ * render (a template string-format rejects). That failure is logged, and the
+ * key keeps the exception's status and every other body field. A throw would
+ * escape the filter that called this: over HTTP the client would get Express's
+ * own 500, and a WS frame no answer at all. The args stay off the wire, since
+ * some carry request input. `WsTranslator` answers the same failure the same
+ * way.
+ */
+function render(marker: I18nMessage, i18n: I18nService<I18nTranslations>, auditContext: AuditContextService): string {
+  const lang = resolveEdgeLocale(auditContext);
+  try {
+    return i18n.translate(marker.key, { lang, args: marker.args });
+  } catch (error) {
+    logger.error(`Could not render '${marker.key}' in '${lang}'`, error instanceof Error ? error.stack : error);
+    return marker.key;
+  }
 }

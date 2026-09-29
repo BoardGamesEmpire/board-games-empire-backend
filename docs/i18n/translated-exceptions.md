@@ -122,17 +122,40 @@ re-issued into Nest's default `{ statusCode, message, error }` shape.) The
 `error` field is not a `message`, so the #145 guardrail leaves it alone — it's a
 machine-readable label, not localized copy.
 
-### Observability trade-off
+### Copy that cannot render
 
-Because the message is deferred, `t()` gives the exception an **object** response
-body with no string `.message`, so Nest sets `HttpException.message` to the
-generic class phrase (e.g. `"Not Found Exception"`). Anything that logs the raw
-thrown exception's `.message` before the edge filter runs (a Sentry breadcrumb,
-a pino error serializer) therefore records that generic phrase rather than the
-old inline string. The **client-facing** response is unaffected — it always
-carries the fully translated message. This is inherent to translating at the
-edge; if a call site needs a descriptive server-side log line, log it
-explicitly at the throw site.
+A catalog entry whose template string-format rejects makes the translation
+throw. `translateException` logs it and sends the marker's key in its place,
+so the response keeps its status, and a structured body keeps its other fields
+and its `error` label. A throw would escape the filter: over HTTP the client
+would get Express's own 500, and a WebSocket frame no answer. The args stay off
+the wire, since some carry request input. Every edge that renders a marker
+answers this way, as `WsTranslator` does for the copy a gateway sends itself.
+
+### Where no edge translates it
+
+An exception can be thrown where no filter translates it: in a worker, in a
+gRPC server, or in code that logs or stores it before the filter runs. There
+its `.message` names the marker's key and args (#501), for example
+`errors.gateway_registry.auth_type_not_implemented {"authType":"Bearer"}`, or
+the key alone when there are no args. A marker's `message` is what Nest copies
+into the exception's own, so the stack, a log line and a stored `Job.error` all
+say which refusal it was, not just `"Not Implemented Exception"`.
+
+The **client-facing** response is unaffected — it always carries the translated
+message. The marker still serializes as its brand, key and args alone: its
+`message` lives on the prototype, which `JSON.stringify` and the response
+cache's serializer skip.
+
+Two cases still get the class phrase, or no log line at all:
+
+- **A structured body** such as `QuotaExceededException`'s. Nest reads only a
+  string `message`, and its `message` is a marker, so `.message` is the class
+  phrase (`"Quota Exceeded Exception"`). The two such exceptions,
+  `QuotaExceededException` and `TransactionDeadlockError`, are thrown only over
+  HTTP, where the filter renders them.
+- **A gRPC server** logs no `HttpException`: Nest's default RPC filter answers
+  "Internal server error" and skips logging it (#574).
 
 ### On WebSocket frames (#180)
 
@@ -169,8 +192,9 @@ structured body keeps its own `error` label and extra fields, as over HTTP.
 ## Scope
 
 - **HTTP and WebSocket** (see above). The gRPC actor interceptors' refusals stay
-  English on purpose: Nest answers them with a generic "Internal server error",
-  so the log is the only reader (see [string-inventory.md](./string-inventory.md) §5).
+  English on purpose: Nest answers them with a generic "Internal server error"
+  and logs none of them, so nothing reads their text (#574; see
+  [string-inventory.md](./string-inventory.md) §5).
 - This issue (#143) establishes the pattern + filter and converts one exemplar
   site (`language.service.ts`). Converting the remaining ~165 throw sites — and
   collapsing repeated messages into shared `common.*` keys — is Phase 3 (#144);

@@ -31,6 +31,36 @@ export class I18nMessage {
 }
 
 /**
+ * A marker's `message` names its key and args, as
+ * `errors.gateway_registry.auth_type_not_implemented {"authType":"Bearer"}`, or
+ * the key alone when it has no args. Nest reads a body's string `message` into
+ * the exception's own, so a marker thrown where no edge translates it (a
+ * worker, a gRPC server) still says which refusal it was in `error.message`,
+ * the stack and anything that stores them, instead of only the class name
+ * (#501).
+ *
+ * It lives on the prototype, where `JSON.stringify`, the response cache's
+ * serializer, spread and `structuredClone` all skip it, so a marker serializes
+ * as its brand, key and args and nothing else. It is defined here rather than
+ * as a class getter only to keep it off the type: `isI18nMessage` narrows a
+ * rehydrated plain object to `I18nMessage`, and that object has no `message`.
+ *
+ * It runs inside the exception's constructor and must never throw, or a
+ * BigInt or circular arg would replace the intended status with a TypeError.
+ */
+Object.defineProperty(I18nMessage.prototype, 'message', {
+  get(this: I18nMessage): string {
+    let args: string | undefined;
+    try {
+      args = JSON.stringify(this.args);
+    } catch {
+      return `${this.key} [unserializable args]`;
+    }
+    return args === undefined || args === '{}' ? this.key : `${this.key} ${args}`;
+  },
+});
+
+/**
  * Marks an error message for edge translation. Pass the result straight to any
  * standard Nest HTTP exception — the exception type still supplies the status
  * code, and `I18nExceptionFilter` translates the key/args:
@@ -41,7 +71,8 @@ export class I18nMessage {
  *
  * Nest stores the returned object as the exception's response body verbatim, so
  * the filter recovers the exact `I18nMessage` instance (same-process reference,
- * no serialization in between).
+ * no serialization in between). Where no filter runs, the exception's `message`
+ * names the key and args instead.
  */
 export function t(key: I18nPath, args?: Record<string, unknown>): I18nMessage {
   return new I18nMessage(key, args);
