@@ -81,12 +81,13 @@ export class WsErrorFilter implements WsExceptionFilter {
    * An `I18nValidationException` keeps its messages on `errors`, and its body
    * is only the status text, so it is formatted from those. Anything else goes
    * through the same `translateException` the HTTP filter uses, which renders
-   * a marker body and leaves every other body as it is.
+   * a marker body, sends a marker whose copy cannot render as its key, and
+   * leaves every other body as it is.
    *
-   * Copy that cannot render (a template string-format rejects) is logged, and
-   * the frame is answered as it was before its copy was translated, with the
-   * exception's status and its own message. Nest does not await this filter,
-   * so a throw here would go unhandled and the frame would get no answer.
+   * Validation messages that cannot render (a template string-format rejects)
+   * are logged, and the frame is answered with the exception's status and its
+   * own message, the status text. Nest does not await this filter, so a throw
+   * here would go unhandled and the frame would get no answer.
    */
   private translatedPayload(exception: HttpException, frame: WsFrame): WsErrorPayload {
     try {

@@ -119,26 +119,91 @@ describe('WsErrorFilter', () => {
       });
     });
 
+    /** Makes every translation throw, as a template string-format rejects does. */
+    const failTranslation = (error = new Error('cannot switch from implicit to explicit numbering')) =>
+      jest.spyOn(i18n, 'translate').mockImplementation(() => {
+        throw error;
+      });
+
     it("still answers, with the exception's status, when its copy cannot be translated, and logs why", async () => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const malformed = new Error('cannot switch from implicit to explicit numbering');
-      jest.spyOn(i18n, 'translate').mockImplementation(() => {
-        throw malformed;
-      });
+      failTranslation(malformed);
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
       await filter.catch(new UnauthorizedException(t('errors.auth.session_invalid')), host);
 
-      // What the frame was answered with before its copy was translated.
+      // The marker's key, as WsTranslator answers the same failure.
       expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.AuthError, {
         statusCode: 401,
         error: 'Unauthorized',
-        message: 'Unauthorized Exception',
+        message: 'errors.auth.session_invalid',
         pattern: 'search:start',
         correlationId: 'corr-1',
       });
       expect(client.disconnect).toHaveBeenCalledWith(true);
-      expect(logged).toHaveBeenCalledWith(expect.stringContaining('search:start'), malformed);
+      expect(logged).toHaveBeenCalledWith("Could not render 'errors.auth.session_invalid' in 'en'", malformed.stack);
+    });
+
+    it('sends the key of a marker that is the whole body, and none of its args, when its copy cannot be translated', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      failTranslation();
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+
+      await filter.catch(new ForbiddenException(t('errors.game.not_found', { id: 'game-1' })), host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 403,
+        error: 'Forbidden',
+        message: 'errors.game.not_found',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+    });
+
+    it("sends the key of a marker that is the body's message, and none of its args, beside the body's own label and fields, when its copy cannot be translated", async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      failTranslation();
+      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+      const exceeded = new HttpException(
+        {
+          statusCode: 402,
+          error: 'Quota Exceeded',
+          message: t('errors.quota.exceeded', { resource: 'storage_bytes', scope: 'User' }),
+          resource: 'storage_bytes',
+        },
+        402,
+      );
+
+      await filter.catch(exceeded, host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 402,
+        error: 'Quota Exceeded',
+        message: 'errors.quota.exceeded',
+        resource: 'storage_bytes',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+    });
+
+    it("sends an exception's own message when its copy cannot be translated and it carries no marker, and logs why", async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const malformed = new Error('cannot switch from implicit to explicit numbering');
+      failTranslation(malformed);
+      const payload = { correlationId: 'corr-1', query: 42 };
+      const { client, host } = hostFor('search:start', payload);
+
+      await filter.catch(await failureOf(new I18nValidationPipe(), MarkedDto, payload), host);
+
+      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
+        statusCode: 400,
+        error: 'Bad Request',
+        message: 'Bad Request',
+        pattern: 'search:start',
+        correlationId: 'corr-1',
+      });
+      expect(logged).toHaveBeenCalledWith('Could not translate the 400 on search:start', malformed);
     });
 
     it('takes the status and the frame from the exception and the frame, not from body fields of the same name', async () => {

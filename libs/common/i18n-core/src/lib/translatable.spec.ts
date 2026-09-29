@@ -1,6 +1,58 @@
+import { ForbiddenException } from '@nestjs/common';
+import Keyv from 'keyv';
 import { I18nMessage, isI18nMessage, t } from './translatable';
 
 describe('translatable', () => {
+  describe('a Nest exception built from a marker', () => {
+    it("names the marker's key and args in its message and stack, where no edge translates it", () => {
+      const refused = new ForbiddenException(
+        t('errors.gateway_registry.auth_type_not_implemented', { authType: 'Bearer' }),
+      );
+
+      expect(refused.message).toBe('errors.gateway_registry.auth_type_not_implemented {"authType":"Bearer"}');
+      expect(refused.stack?.split('\n')[0]).toBe(
+        'ForbiddenException: errors.gateway_registry.auth_type_not_implemented {"authType":"Bearer"}',
+      );
+    });
+
+    it('names the key alone when the marker has no args, or empty ones', () => {
+      expect(new ForbiddenException(t('common.forbidden.action')).message).toBe('common.forbidden.action');
+      expect(new ForbiddenException(t('common.forbidden.action', {})).message).toBe('common.forbidden.action');
+    });
+
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    it.each([
+      ['a BigInt', { id: 42n }],
+      ['a circular reference', circular],
+    ])('is still built, with its own status, when its args hold %s', (_, args) => {
+      const refused = new ForbiddenException(t('errors.language.not_found', args));
+
+      expect(refused.getStatus()).toBe(403);
+      expect(refused.message).toBe('errors.language.not_found [unserializable args]');
+    });
+  });
+
+  describe('serialized shape', () => {
+    // A marker in a success body is serialized into the response cache and
+    // recognized again on a hit by its brand, key and args. The message a Nest
+    // exception reads must not be written beside them.
+    const serialized = { __i18nMessage: true, key: 'errors.language.not_found', args: { id: '42' } };
+
+    it('is the brand, key and args, in JSON', () => {
+      expect(JSON.parse(JSON.stringify(t('errors.language.not_found', { id: '42' })))).toStrictEqual(serialized);
+    });
+
+    it('is the brand, key and args, as the response cache writes it through Keyv', async () => {
+      const store = new Map<string, string>();
+
+      await new Keyv({ store }).set('body', { notice: t('errors.language.not_found', { id: '42' }) });
+
+      expect([...store.values()].map((entry) => JSON.parse(entry))).toStrictEqual([{ value: { notice: serialized } }]);
+    });
+  });
+
   describe('t', () => {
     it('builds an I18nMessage carrying the key and args', () => {
       const message = t('errors.language.not_found', { id: '42' });

@@ -24,12 +24,10 @@ export default [
     // user-facing strings must fail the build. Specs are exempt: they assert on
     // rendered English copy on purpose.
     //
-    // The two gRPC actor interceptors are exempt as whole files. No caller
-    // ever reads their refusals: Nest's BaseRpcExceptionFilter answers any
-    // non-RpcException with "Internal server error" and only logs the
-    // exception. That log line is the one place the text is readable, and a
-    // `t()` marker body would reduce it to the class-derived "Bad Request
-    // Exception" / "Unauthorized Exception" (#501).
+    // The two gRPC actor interceptors are exempt as whole files. Nothing reads
+    // their refusals' text: Nest's BaseRpcExceptionFilter answers any
+    // non-RpcException with "Internal server error", and it logs no
+    // HttpException (#574). Translating them would gain nothing.
     files: ['**/*.ts'],
     ignores: ['**/*.spec.ts', '**/grpc-internal-actor.interceptor.ts', '**/grpc-actor.interceptor.ts'],
     rules: {

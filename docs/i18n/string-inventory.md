@@ -291,10 +291,10 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
 - **quota registry** (`libs/common/quota/.../registry`): 3 plain `Error` throws — internal.
 - **actor-context-transport gRPC interceptors** (#144): 17 `HttpException` frames — 16 in
   `GrpcInternalActorInterceptor` (registered only on `gateway-coordinator`) and 1 in the unwired
-  `GrpcActorInterceptor`. These are real exception classes, not custom errors, but no caller ever reads
-  them: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error" and
-  only logs the exception. A `t()` marker body would make that log line the generic class phrase (#501),
-  so they stay English. The lib's eslint config exempts those two files from the guardrail by name.
+  `GrpcActorInterceptor`. These are real exception classes, not custom errors, but nothing reads their
+  text: Nest's `BaseRpcExceptionFilter` answers any non-`RpcException` with "Internal server error", and
+  it logs no `HttpException` (#574). Translating them would gain nothing, so they stay English. The lib's
+  eslint config exempts those two files from the guardrail by name.
 - **game-import webhook copy** (#188): `game.import.failed.v1` carries `errorCode` plus the
   `SAFE_MESSAGE` English `error` (`libs/api/game-import/src/lib/utils/emit-job-failed.ts`). Not an error
   class, but machine-facing like the rest of this section. A webhook subscription has no locale, and the
