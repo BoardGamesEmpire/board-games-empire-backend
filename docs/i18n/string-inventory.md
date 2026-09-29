@@ -311,7 +311,10 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
     caller-supplied via `requireAbilities(message)`; translate at the call sites, not here.
   - `game-gateway.controller.ts:131,164` — response `message:` passes through raw caught
     `error.message`. **Not just an i18n gap — a potential info leak.** Replace with a translated,
-    sanitized string.
+    sanitized string. **Resolved (#144, #501):** in `connectToGateway` and `disconnectFromGateway`, a
+    failed coordinator call (#144) and a coordinator answer of `success: false` (#501) both get
+    `errors.game_gateway.connect_failed` or `disconnect_failed`. The coordinator's own error is only
+    logged.
   - `grpc-internal-actor.interceptor.ts:143` — embeds `(error as Error).message` in a
     BadRequestException. **Resolved (#144):** it stays English with the other gRPC frames (§5).
 - **Centralized-in-constructor:** `QuotaExceededException` builds its message once in its ctor

@@ -127,22 +127,30 @@ export class GameGatewayController {
       authParametersJson: JSON.stringify(gateway.authParameters || {}),
     };
 
+    // Log the coordinator's error server-side, whether it answers with one or
+    // the call itself fails, but never surface it to the client — return a
+    // generic, translated message instead (§6).
+    const failedAnswer = () => ({
+      gateway,
+      connection_response: { success: false, message: t('errors.game_gateway.connect_failed') },
+      connection_attempt: true,
+    });
+
     return this.coordinator.connectGateway(request).pipe(
-      tap((response) => this.logger.log(`Connect gateway response for ${gateway.id}: ${JSON.stringify(response)}`)),
-      map((response) => ({
-        gateway,
-        connection_response: response,
-        connection_attempt: true,
-      })),
+      map((response) => {
+        if (!response.success) {
+          this.logger.error(
+            `Coordinator could not connect gateway ${gateway.id}: ${response.error ?? 'No additional info'}`,
+          );
+          return failedAnswer();
+        }
+
+        this.logger.log(`Connect gateway response for ${gateway.id}: ${JSON.stringify(response)}`);
+        return { gateway, connection_response: response, connection_attempt: true };
+      }),
       catchError((error) => {
-        // Log the raw coordinator error server-side, but never surface it to
-        // the client — return a generic, translated message instead (§6).
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
-        return of({
-          gateway,
-          connection_response: { success: false, message: t('errors.game_gateway.connect_failed') },
-          connection_attempt: true,
-        });
+        return of(failedAnswer());
       }),
     );
   }
@@ -162,22 +170,28 @@ export class GameGatewayController {
       gatewayId: gateway.id,
     };
 
+    // As on connect, the coordinator's error stays in the server log (§6).
+    const failedAnswer = () => ({
+      gateway,
+      disconnection_response: { success: false, message: t('errors.game_gateway.disconnect_failed') },
+      disconnection_attempt: true,
+    });
+
     return this.coordinator.disconnectGateway(request).pipe(
-      tap((response) => this.logger.log(`Disconnect gateway response for ${gateway.id}: ${JSON.stringify(response)}`)),
-      map((response) => ({
-        gateway,
-        disconnection_response: response,
-        disconnection_attempt: true,
-      })),
+      map((response) => {
+        if (!response.success) {
+          this.logger.error(
+            `Coordinator could not disconnect gateway ${gateway.id}: ${response.error ?? 'No additional info'}`,
+          );
+          return failedAnswer();
+        }
+
+        this.logger.log(`Disconnect gateway response for ${gateway.id}: ${JSON.stringify(response)}`);
+        return { gateway, disconnection_response: response, disconnection_attempt: true };
+      }),
       catchError((error) => {
-        // Log the raw coordinator error server-side, but never surface it to
-        // the client — return a generic, translated message instead (§6).
         this.logger.error(`Error disconnecting from gateway ${gateway.id}`, error);
-        return of({
-          gateway,
-          disconnection_response: { success: false, message: t('errors.game_gateway.disconnect_failed') },
-          disconnection_attempt: true,
-        });
+        return of(failedAnswer());
       }),
     );
   }
