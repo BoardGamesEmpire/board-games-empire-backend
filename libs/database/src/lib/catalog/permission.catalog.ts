@@ -1249,12 +1249,23 @@ export const PERMISSION_CATALOG = [
   // condition is what keeps `create:event` from matching a household event,
   // and the matcher reads a missing field as `null`: the create path always
   // puts `householdId` on the subject it checks, `null` included.
+  //
+  // `create:event` rates `Medium` where `create:household` rates `Low`,
+  // because an event is not created with its author alone: `inviteUserIds`
+  // writes each invitee onto it as an attendee in the same request. So the
+  // reach this write sets covers the invitees' names and avatars in the
+  // attendee embed as well as the creator's, and `read:event:friends`
+  // (`Medium`) opens that to the creator's friends. Two decisions re-rate
+  // it. If invitees hold no role and don't appear until they accept (#546),
+  // the write covers the creator alone and goes back to `Low`. And the rule
+  // that makes public reach live for events (#495) is the point to rate it
+  // again, alongside the updates below (#533).
   permission({
     action: Action.create,
     subject: ResourceType.Event,
     conditions: { householdId: null },
     slug: 'create:event',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Create an event outside any household',
   }),
   permission({
@@ -1293,6 +1304,14 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: "View your household's events",
   }),
+
+  // `Medium`, both, on `update:household`'s reasoning. The PATCH takes
+  // `visibility` over an event whose attendees are already on it, so it
+  // decides who outside the event reads it and sees each of them in the
+  // attendee embed (`read:event:friends`, `Medium`). That reach covers other
+  // users' data, not only the actor's. The household variant is the same
+  // write on any of the household's events. The rule that makes public reach
+  // live for events (#495) is the point to re-rate them (#533).
   permission({
     action: Action.update,
     subject: ResourceType.Event,
@@ -1308,7 +1327,7 @@ export const PERMISSION_CATALOG = [
       },
     },
     slug: 'update:event',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Update an event',
   }),
   permission({
@@ -1316,7 +1335,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.Event,
     conditions: { householdId: '{{ householdId }}' },
     slug: 'update:event:household',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: "Update your household's events",
   }),
   permission({
@@ -1375,6 +1394,21 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Archive a cancelled event',
   }),
+
+  // `Medium`, both, as `create:household_invite` is. Neither has a route
+  // yet, and the invite that exists today, `inviteUserIds` on the create,
+  // writes the invitee as an attendee. `read:event:participant` then lets
+  // them read the event, its attendee embed included, so an invite extends
+  // the event's reach over the attendees already on it. They re-rate with
+  // `create:event`: if invitees hold no role and don't appear until they
+  // accept (#546), an invite reaches no one else's data and both go back to
+  // `Low`. The rule that makes public reach live for events (#495) is the
+  // point to rate them again (#533).
+  //
+  // The direct add further down, `create:event_attendee:attending-role`,
+  // stays `Low` by the decision at #544's reconcile, though it reaches at
+  // least as far without asking the user it adds. The two disagree on
+  // purpose until that decision is revisited.
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
@@ -1396,7 +1430,7 @@ export const PERMISSION_CATALOG = [
       },
     },
     slug: 'create:event_invite',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Invite to event',
   }),
   permission({
@@ -1404,7 +1438,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.Invite,
     conditions: { event: { is: { householdId: '{{ householdId }}' } } },
     slug: 'create:event_invite:household',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: "Invite to your household's events",
   }),
   permission({
@@ -1427,6 +1461,14 @@ export const PERMISSION_CATALOG = [
   // the attendees who attend the event. With `manage` they could appoint
   // co-hosts, organizers and moderators and remove the host, out-ranking the
   // delegation (#539). Those stay with the grants above.
+  //
+  // The pair rates apart, by the decision at #544's reconcile (#533). The
+  // add stays `Low`, though the user it adds then appears in the attendee
+  // embed to every reader of the event, `read:event:participant` and
+  // `read:event:friends` among them (see the invite grants above). The
+  // removal is `Medium`: it deletes another user's attendee row, and their
+  // role and game list for the event go with it. The rule that makes public
+  // reach live for events (#495) is the point to rate the add again.
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendee,
@@ -1440,7 +1482,7 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.EventAttendee,
     conditions: attendingRoleInEvent,
     slug: 'delete:event_attendee:attending-role',
-    riskLevel: RiskLevel.Low,
+    riskLevel: RiskLevel.Medium,
     reason: 'Remove a participant, guest or spectator from an event',
   }),
 
@@ -1750,6 +1792,21 @@ export const PERMISSION_CATALOG = [
       'Manage the outbound HTTP SSRF policy — timeouts, redirect limits, strict mode, and host/CIDR allow/block lists',
   }),
 
+  // ─── SystemSetting ──────────────────────────────────────
+  // Update only. Both staff roles already read the settings through
+  // `read:public_content`, so a read slug here would grant nothing (see the
+  // staff block above). Unconditioned because the row is the server's own
+  // singleton, with no scope to bind to. Critical because the row holds the
+  // server's security switches, sign-ups, password resets and feedback
+  // redaction among them (#441).
+  permission({
+    action: Action.update,
+    subject: ResourceType.SystemSetting,
+    slug: 'update:system_setting',
+    riskLevel: RiskLevel.Critical,
+    reason: 'Change server-wide settings, such as sign-ups, password resets and feedback redaction',
+  }),
+
   // ─── Plugin administration (#59 Phase C4) ───────────────────────────────
   // Server-scope pair: Owner/Admin only, per the locked role assignment on
   // #59. Owner holds it via `manage:all`; Admin names both slugs outright in
@@ -1829,6 +1886,27 @@ export const PERMISSION_CATALOG = [
     slug: 'read:webhook_subscription:own',
     riskLevel: RiskLevel.Low,
     reason: 'View own webhook subscriptions',
+  }),
+
+  // --- Notifications ──────────────────────────────────────
+  // Read and update, not `manage`: CASL's `manage` also matches `create` and
+  // `delete`, and only the server's own workers write notifications. The
+  // routes still filter by the session's user themselves (#504, #517).
+  permission({
+    action: Action.read,
+    subject: ResourceType.Notification,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'read:notification:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Read own notifications',
+  }),
+  permission({
+    action: Action.update,
+    subject: ResourceType.Notification,
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'update:notification:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'Mark own notifications read',
   }),
 
   // --- Audit Log ──────────────────────────────────────────

@@ -54,12 +54,14 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     Admin: { 'read:public_content': 'every row' },
     Moderator: { 'read:public_content': 'every row' },
   },
-  System: {},
+  SystemSetting: {},
   AuditLog: {
     Admin: { 'read:audit_log': 'every row' },
     Moderator: { 'read:audit_log': 'every row' },
   },
-  Notification: {},
+  Notification: {
+    User: { 'read:notification:own': 'binds user.id' },
+  },
   SafeHttpPolicy: {
     Admin: { 'read:safe_http_policy': 'every row', 'manage:safe_http_policy': 'every row' },
     Moderator: { 'read:safe_http_policy': 'every row' },

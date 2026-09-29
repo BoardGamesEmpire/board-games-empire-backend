@@ -51,7 +51,7 @@ type ForEverySubject<T extends Record<CatalogSubject, unknown>> = T;
 /** The Prisma `WhereInput` a subject's conditions are checked against. */
 export type SubjectWhereInput = ForEverySubject<{
   // System
-  System: never; // no model
+  SystemSetting: Prisma.SystemSettingWhereInput;
   AuditLog: Prisma.AuditLogWhereInput;
   Notification: Prisma.NotificationWhereInput;
   SafeHttpPolicy: Prisma.SafeHttpPolicyWhereInput;
@@ -110,7 +110,7 @@ export type SubjectWhereInput = ForEverySubject<{
 /** The Prisma scalar-field enum a subject's `fields` entries are checked against. */
 export type SubjectScalarField = ForEverySubject<{
   // System
-  System: never; // no model
+  SystemSetting: Prisma.SystemSettingScalarFieldEnum;
   AuditLog: Prisma.AuditLogScalarFieldEnum;
   Notification: Prisma.NotificationScalarFieldEnum;
   SafeHttpPolicy: Prisma.SafeHttpPolicyScalarFieldEnum;

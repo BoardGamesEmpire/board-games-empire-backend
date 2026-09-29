@@ -36,11 +36,7 @@ describe('notification read-back', () => {
   });
 
   it('renders an ImportFailed message stored as a marker to its text, and keeps the code', async () => {
-    // An admin reading their own notification. No role grants a plain user
-    // `read` on Notification yet, so a user is refused before any row is read
-    // (#504); staff pass through their `read` on `all`. The route still returns
-    // only the caller's rows. Switch to `actors.user()` once #504 lands.
-    const reader = await actors.admin();
+    const reader = await actors.user();
 
     await notifications.create({
       userId: reader.user.id,
@@ -58,13 +54,11 @@ describe('notification read-back', () => {
     });
 
     const response = await request(baseUrl).get(UNREAD_PATH).set(reader.headers).expect(200);
-    // Staff also receive audit alerts, so pick the row out by type.
-    const importFailures = unreadNotifications(response, `GET ${UNREAD_PATH}`).filter(
-      (unread) => unread.type === NotificationType.ImportFailed,
-    );
+    const unread = unreadNotifications(response, `GET ${UNREAD_PATH}`);
 
-    expect(importFailures).toHaveLength(1);
-    const [notification] = importFailures;
+    expect(unread).toHaveLength(1);
+    const [notification] = unread;
+    expect(notification.type).toBe(NotificationType.ImportFailed);
     expect(notification.payload['errorCode']).toBe('GATEWAY_ERROR');
     expect(notification.payload['error']).toBe('Fetching game data from the gateway failed.');
   });

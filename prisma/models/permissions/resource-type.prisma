@@ -1,6 +1,6 @@
 enum ResourceType {
   // ─── System ─────────────────────────────────────────────
-  System
+  SystemSetting
   AuditLog
   Notification
   SafeHttpPolicy

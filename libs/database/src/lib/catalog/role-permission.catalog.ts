@@ -273,6 +273,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:audit_log',
     'manage:quota',
     'read:quota',
+    'update:system_setting',
   ],
   [SystemRole.Moderator]: [
     // Cross-subject read: a moderator triages content in households they are
@@ -350,6 +351,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:media_object:public',
     'update:media_contribution:reclaim',
     'update:media_object:own',
+
+    // notification
+    'read:notification:own',
+    'update:notification:own',
 
     // platform
     'read:platform_game',
