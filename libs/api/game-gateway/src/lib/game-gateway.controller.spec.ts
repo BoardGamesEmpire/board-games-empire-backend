@@ -7,7 +7,7 @@ import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { ClsServiceManager } from 'nestjs-cls';
-import { firstValueFrom, of } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
 import { GameGatewayController } from './game-gateway.controller';
 import { GameGatewayService } from './game-gateway.service';
 
@@ -75,6 +75,12 @@ describe('GameGatewayController', () => {
       expect(response.connection_response).toEqual({ success: true });
     });
 
+    it('is sent as it came when the gateway disconnected', async () => {
+      const response = await firstValueFrom(controller.disconnect('gw-1'));
+
+      expect(response.disconnection_response).toEqual({ success: true });
+    });
+
     it("is replaced with the generic copy when the gateway would not connect, and the coordinator's reason is logged", async () => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       coordinator.connectGateway.mockReturnValue(of({ success: false, error: reason }));
@@ -116,6 +122,26 @@ describe('GameGatewayController', () => {
 
       expect(logged).toHaveBeenCalledWith(line);
     });
+
+    // No answer at all: the call itself fails, and its error is as much the
+    // server's business as a failed answer's reason.
+    it.each([
+      ['connect', 'connection_response', 'errors.game_gateway.connect_failed'],
+      ['disconnect', 'disconnection_response', 'errors.game_gateway.disconnect_failed'],
+    ] as const)(
+      'is the generic copy when the %s call itself fails, and the error is logged',
+      async (action, field, key) => {
+        const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        const failure = new Error('14 UNAVAILABLE: connect ECONNREFUSED 127.0.0.1:50051');
+        coordinator.connectGateway.mockReturnValue(throwError(() => failure));
+        coordinator.disconnectGateway.mockReturnValue(throwError(() => failure));
+
+        const response = await firstValueFrom<Record<string, unknown>>(controller[action]('gw-1'));
+
+        expect(response[field]).toEqual({ success: false, message: t(key) });
+        expect(logged).toHaveBeenCalledWith(expect.any(String), failure);
+      },
+    );
   });
 });
 

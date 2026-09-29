@@ -119,6 +119,25 @@ describe('translateException', () => {
         limit: '100',
       });
     });
+
+    // A throw need not be an Error; with no stack to log, the thrown value is.
+    it('logs a thrown non-Error as it was thrown', () => {
+      translate.mockImplementation(() => {
+        throw 'unterminated placeholder';
+      });
+
+      const rebuilt = translateException(
+        new NotFoundException(t('errors.language.not_found')),
+        i18n as never,
+        auditContext,
+      );
+
+      expect(rebuilt.getResponse()).toEqual(expect.objectContaining({ message: 'errors.language.not_found' }));
+      expect(logged).toHaveBeenCalledWith(
+        "Could not render 'errors.language.not_found' in 'en'",
+        'unterminated placeholder',
+      );
+    });
   });
 
   it('preserves the original cause across the re-issue', () => {
