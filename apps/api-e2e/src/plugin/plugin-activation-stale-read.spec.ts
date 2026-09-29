@@ -31,10 +31,11 @@ import { LOCK_SOURCES, stageNamed } from './lock-order';
  * ## When these go red
  *
  * Do not "fix" the test. Going red is the intended outcome of #361, which
- * proposes to re-read the plugin row inside the decision transaction and may
- * add a plugin-row lock to it. If that lands and activation starts joining the
- * unit-scope scheme, delete or invert these cases as part of that work, and say
- * so in its PR — the residual will have stopped being real.
+ * proposes to re-judge every decision against the plugin row inside the
+ * decision transaction (the plugin-row lock itself landed with #398; the
+ * content re-read is what remains). If that lands and activation starts joining
+ * the unit-scope scheme, delete or invert these cases as part of that work, and
+ * say so in its PR — the residual will have stopped being real.
  */
 describe('activation reads its unit set unlocked (characterization — #361)', () => {
   const { updateService: UPDATE_SERVICE, unitScopeLock: UNIT_SCOPE_LOCK } = LOCK_SOURCES;

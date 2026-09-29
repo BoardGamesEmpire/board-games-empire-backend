@@ -43,9 +43,11 @@ export interface HouseholdDormancyTransition {
  * exclusively before reaching this, and every household unit writer reads that
  * row `FOR SHARE` before touching a unit row — so a concurrent enable either
  * committed before the claim (and is in the rows read here) or blocks until the
- * caller's transaction commits. `decide()` is the writer that does not take the
- * plugin row (#361), and it cannot create or re-scope a household row: it only
- * suspends and re-enables existing ones.
+ * caller's transaction commits. `decide()` joined that discipline in #398 — it
+ * claims the plugin row `FOR SHARE` as the first statement of its transaction —
+ * and could not invalidate this read even before it did: it cannot create or
+ * re-scope a household row, only suspend and re-enable existing ones. What it
+ * still judges against a pre-transaction manifest is #361's residual.
  */
 export async function reconcileHouseholdDormancy(args: {
   readonly tx: Prisma.TransactionClient;
