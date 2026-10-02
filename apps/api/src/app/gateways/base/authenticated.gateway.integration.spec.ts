@@ -23,6 +23,7 @@ import { BGE_ACTOR_HEADER, WsErrorEvents, type WsErrorPayload } from '@bge/share
 import { Metadata } from '@grpc/grpc-js';
 import { type INestApplication, Logger, Module, UsePipes } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
 import { MessageBody, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import { IsString } from 'class-validator';
 import { ClsModule } from 'nestjs-cls';
@@ -33,6 +34,7 @@ import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Observable } from 'rxjs';
 import { type Socket as ClientSocket, io } from 'socket.io-client';
+import { createThrottlers } from '../../lib/throttlers';
 import { WsErrorFilter } from '../filters';
 import { GameSearchGateway } from '../game/search.gateway';
 import { AuthenticatedGateway } from './authenticated.gateway';
@@ -47,6 +49,20 @@ const USER_WITHOUT_ROLE_GRAPH = 'user-without-role-graph';
 
 /** Each token authenticates as the user of the same name; one fails its lookup. */
 const OUTAGE_TOKEN = 'token-outage';
+
+/**
+ * How many frames one user may send one handler in the throttle window. Low
+ * enough for a test to reach: no other test sends one handler more than two
+ * frames as one user, and the counts are cleared after each test.
+ */
+const FRAME_LIMIT = 3;
+
+/** The app's own throttler tiers, at {@link FRAME_LIMIT}. */
+const THROTTLE_CONFIG: Record<string, number> = {
+  'throttle.ttlMs': 60_000,
+  'throttle.limit': FRAME_LIMIT,
+  'throttle.trustedProxyHops': 0,
+};
 
 /**
  * A role graph whose only grant reads the games its holder created, so the
@@ -217,6 +233,8 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   /** Users whose session has ended since they connected. */
   const endedSessions = new Set<string>();
 
+  const throttlerStorage = new ThrottlerStorageService();
+
   /** The actor each frame ran as when its session was checked. */
   const sessionGuardSaw: (Actor | null)[] = [];
 
@@ -292,6 +310,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
           fallbackLanguage: FALLBACK_LOCALE,
           loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
         }),
+        ThrottlerModule.forRoot({
+          throttlers: createThrottlers({ getOrThrow: <T>(key: string) => THROTTLE_CONFIG[key] as T }),
+          storage: throttlerStorage,
+        }),
       ],
       providers: [
         WsActorScope,
@@ -327,6 +349,9 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
     revoked.clear();
     endedSessions.clear();
+    // Its pending expiry timers first, which would otherwise fire on keys cleared here.
+    throttlerStorage.onApplicationShutdown();
+    throttlerStorage.storage.clear();
     auth.lookups.length = 0;
     sessionGuardSaw.length = 0;
     policiesGuardSaw.length = 0;
@@ -625,6 +650,67 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       expect(await told).toMatchObject({ statusCode: 401, message: 'Session expired or invalid' });
       expect(queryLocalGames).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a socket over its frame limit', () => {
+    /** Sends `count` searches one after another, each of which must be served. */
+    const searchesServed = async (socket: ClientSocket, count: number) => {
+      for (let sent = 0; sent < count; sent++) {
+        const frame = searchStart();
+        const outcome = searchOutcome(socket, frame.correlationId);
+        socket.emit(SearchEvents.SearchStart, frame);
+        expect(await outcome).toEqual({ errors: [] });
+      }
+    };
+
+    /** Sends one search more, and resolves with its refusal. */
+    const overTheLimit = async (socket: ClientSocket) => {
+      const frame = searchStart();
+      const refusal = refusalOf(socket, frame.correlationId);
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      return { frame, refusal: await refusal };
+    };
+
+    it('is refused the frame over the limit with a 429 on `exception`, and stays connected', async () => {
+      const socket = await connected(socketAs(USER_A));
+      const closed = jest.fn();
+      socket.on('disconnect', closed);
+      await searchesServed(socket, FRAME_LIMIT);
+
+      const { frame, refusal } = await overTheLimit(socket);
+
+      expect(refusal).toMatchObject({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        pattern: SearchEvents.SearchStart,
+        correlationId: frame.correlationId,
+      });
+      // Long past the pause a 401 waits out before it disconnects.
+      await delay(300);
+      expect(closed).not.toHaveBeenCalled();
+      expect(socket.connected).toBe(true);
+    });
+
+    it("leaves another user's frames alone", async () => {
+      const [flooding, other] = await Promise.all([connected(socketAs(USER_A)), connected(socketAs(USER_B))]);
+      await searchesServed(flooding, FRAME_LIMIT);
+      expect((await overTheLimit(flooding)).refusal).toMatchObject({ statusCode: 429 });
+
+      await searchesServed(other, 1);
+    });
+
+    it('refuses the frame before its session or its abilities are looked up', async () => {
+      const socket = await connected(socketAs(USER_A));
+      await searchesServed(socket, FRAME_LIMIT);
+
+      expect((await overTheLimit(socket)).refusal).toMatchObject({ statusCode: 429 });
+
+      // The connection's lookup, and one for each frame served.
+      expect(auth.lookups).toHaveLength(1 + FRAME_LIMIT);
+      expect(sessionGuardSaw).toHaveLength(FRAME_LIMIT);
+      expect(getUserRoleGraph).toHaveBeenCalledTimes(FRAME_LIMIT);
     });
   });
 

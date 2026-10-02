@@ -10,6 +10,7 @@ import type { Namespace, Socket } from 'socket.io';
 import { WsConnectionRefusal, WsErrorFilter } from '../filters';
 import { WsFrameScope, WsFrameScopeGuard } from './ws-frame-scope';
 import { connectionCredential, WsSessionGuard } from './ws-session';
+import { WsThrottlerGuard } from './ws-throttler.guard';
 import { WsTranslator } from './ws-translator';
 
 /**
@@ -71,11 +72,13 @@ class HandshakeRefusal extends Error {
  * enhancer runs on a gateway message, so a gateway that left them out would
  * go on serving a revoked session, ignore `@CheckPolicies`, and answer in
  * Nest's default shape, and nothing would fail. Nest reads a class's enhancers
- * from its parents too. The session guard comes first, so a frame whose
- * session has ended is refused before its abilities are looked up, and the
- * scope guard primes them before `PoliciesGuard` reads them.
+ * from its parents too. The throttler comes first, as it does over HTTP, so a
+ * flood of frames costs a counter each and no session lookup (#510). The
+ * session guard comes next, so a frame whose session has ended is refused
+ * before its abilities are looked up, and the scope guard primes them before
+ * `PoliciesGuard` reads them.
  */
-@UseGuards(WsSessionGuard, WsFrameScopeGuard, PoliciesGuard)
+@UseGuards(WsThrottlerGuard, WsSessionGuard, WsFrameScopeGuard, PoliciesGuard)
 @UseFilters(WsErrorFilter)
 export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayConnection {
   protected abstract readonly logger: Logger;

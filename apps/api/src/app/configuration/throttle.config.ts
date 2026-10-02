@@ -17,10 +17,11 @@ import Joi from 'joi';
  * spelled that way rather than as a literal because "sixty seconds" is the
  * intent; the value is milliseconds either way.
  *
- * The ceiling is per ROUTE per IP, not a single budget per IP: `ThrottlerGuard`
- * hashes the controller and handler name into the storage key, so every
- * endpoint carries its own count. Sizing this as though a page load's worth of
- * calls came out of one bucket over-provisions every endpoint at once.
+ * The ceiling is per ROUTE per IP over HTTP, and per gateway handler per user
+ * over WebSocket (#510), not a single budget per caller: `ThrottlerGuard`
+ * hashes the controller or gateway and the handler name into the storage key,
+ * so every endpoint carries its own count. Sizing this as though a page load's
+ * worth of calls came out of one bucket over-provisions every endpoint at once.
  *
  * Defaults live here rather than on the Joi schema, matching the convention
  * `plugins.config.spec.ts` states: defaulting is `@bge/env`'s job, validation
@@ -71,7 +72,7 @@ export const throttleConfigValidationSchema = {
     .integer()
     .min(1)
     .description(
-      'Requests allowed per route, per IP, within one THROTTLE_TTL_MS window. Must be at least 1: the guard reads 0 as "reject everything".',
+      'Requests allowed per route and IP over HTTP, and per gateway handler and user over WebSocket, within one THROTTLE_TTL_MS window. Must be at least 1: the guard reads 0 as "reject everything".',
     ),
   // Every hop configured here is one `X-Forwarded-For` entry the app agrees to
   // believe, so an over-count reads client-written text as infrastructure and
