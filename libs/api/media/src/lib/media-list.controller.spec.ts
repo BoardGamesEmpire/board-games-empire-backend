@@ -1,4 +1,10 @@
-import { MediaContributionStatus, Visibility, type MediaContribution, type MediaObject } from '@bge/database';
+import {
+  MediaContributionStatus,
+  ResourceType,
+  Visibility,
+  type MediaContribution,
+  type MediaObject,
+} from '@bge/database';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
@@ -54,7 +60,7 @@ const contributionRow = {
  * holds a BigInt that would not survive serialization.
  */
 describe('media list envelopes (#372)', () => {
-  describe('GET /media-objects', () => {
+  describe('GET /media', () => {
     it('maps rows to the public shape, then wraps them with the requested paging', async () => {
       const media = { list: jest.fn().mockResolvedValue({ rows: [mediaRow], total: 31 }) };
       const controller = new MediaObjectController(media as never, {} as never, {} as never);
@@ -76,6 +82,22 @@ describe('media list envelopes (#372)', () => {
       };
 
       expect(response.pagination.total).toBe(31);
+    });
+
+    // The service composes the `MediaObject` scope; the envelope is where the
+    // guard checks for it. Built inside a request with nothing composed, this
+    // envelope must fail. The name is asserted too: an envelope naming another
+    // swept type would also fail, for the wrong reason.
+    it('builds its envelope under the MediaObject scope guard', async () => {
+      const media = { list: jest.fn().mockResolvedValue({ rows: [mediaRow], total: 1 }) };
+      const controller = new MediaObjectController(media as never, {} as never, {} as never);
+
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.list(paginationQuery({ limit: 10 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.MediaObject}'`);
     });
   });
 

@@ -33,7 +33,6 @@ export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
     'Game',
     'HouseholdMember',
     'Job',
-    'MediaObject',
     // THREE routes read this one, across two libs: the server list, the
     // per-household inventory and the per-user inventory. All three query
     // `db.plugin` — the household/user axis is a filtered `select`, not a

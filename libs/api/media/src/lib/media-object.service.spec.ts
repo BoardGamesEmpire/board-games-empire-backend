@@ -3,7 +3,8 @@ import { imageSize } from 'image-size';
 
 import type { MediaObject } from '@bge/database';
 import { Action, ContributionOrigin, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { MediaUrlSigner, StorageService } from '@bge/storage';
 import type { MockAbilityService, MockDatabaseService } from '@bge/testing';
@@ -47,6 +48,7 @@ describe('MediaObjectService', () => {
   let quota: jest.Mocked<Pick<QuotaService, 'check' | 'consume' | 'emitSoftOverages'>>;
   let contributions: jest.Mocked<Pick<MediaContributionService, 'createContributionWithin'>>;
   let mediaLink: jest.Mocked<Pick<MediaLinkService, 'canLink'>>;
+  let compose: jest.SpyInstance;
 
   const stored: StoredObject = {
     key: 'k',
@@ -116,6 +118,9 @@ describe('MediaObjectService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         MediaObjectService,
+        // The REAL composer, over the mocked ability service, so the list's
+        // where clause asserted below is the merge it actually runs.
+        ScopeComposer,
         { provide: AbilityService, useValue: ability },
         { provide: StorageService, useValue: storage },
         { provide: MediaUrlSigner, useValue: signer },
@@ -131,6 +136,7 @@ describe('MediaObjectService', () => {
     // transaction, and the paginated list reads rows + count as an array batch.
     unwrapTransaction(db);
     service = ctx.module.get(MediaObjectService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => {
@@ -545,31 +551,71 @@ describe('MediaObjectService', () => {
     });
   });
 
-  describe('list (#372)', () => {
+  /**
+   * #514. `GET /media` took the caller's ceiling as its answer set, so it
+   * listed a user their own media plus every other user's Public media, and
+   * staff every object on the server, `read:public_content` being a read on
+   * `all`. It now declares the caller's own media, and the ceiling only clips
+   * it. Another user's media stays readable by id for whoever could read it
+   * before. It is narrowed out of the list, not withdrawn.
+   *
+   * `MediaObject` has left `PENDING_SCOPE_SWEEP`, so a regression that stops
+   * this read composing answers 500 at the envelope rather than returning too
+   * much. That is why the first test pins the composer call itself.
+   */
+  describe('list', () => {
     beforeEach(() => {
       db.mediaObject.findMany.mockResolvedValue([]);
       db.mediaObject.count.mockResolvedValue(0);
     });
 
-    it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
+    it("asks the composer for its where clause, declaring the caller's own media", async () => {
       await service.list(paginationQuery({ limit: 10 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.MediaObject, Action.read, { ownerId: MOCK_ACTING_USER_ID });
+    });
+
+    // Asking is not enough: the query has to use the answer. The ceiling stays
+    // ANDed in, because for an `apiKey` actor it carries the key ∩ owner floor.
+    it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
+      await service.list(paginationQuery({ limit: 10 }));
+
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.read);
+      expect(db.mediaObject.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ownerId: MOCK_ACTING_USER_ID, AND: [MOCK_RESOURCE_CONDITION] } }),
+      );
+    });
+
+    // #372: one snapshot for rows and count, and the count has to see the same
+    // clause, or `total` describes a set the caller is not paged through.
+    it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {
+      db.mediaObject.count.mockResolvedValue(9);
+
+      const page = await service.list(paginationQuery({ limit: 10 }));
+
+      const [findManyArgs] = db.mediaObject.findMany.mock.calls[0] as [{ where: unknown }];
+      expect(db.mediaObject.count).toHaveBeenCalledWith({ where: findManyArgs.where });
+      expect(page).toEqual({ rows: [], total: 9 });
 
       const { operations, options } = batchTransactionCall(db);
       expect(operations).toHaveLength(2);
       expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
     });
 
-    // The ability conditions are the whole access control on this read, so a
-    // count that skipped them would tell a caller how much media exists that
-    // it is not allowed to see.
-    it('counts through the same ability-scoped where as the rows', async () => {
-      db.mediaObject.count.mockResolvedValue(9);
+    // PROVISIONAL (#395). "My media" has no meaning for an actor with no user
+    // behind it, and the refusal must stay one: an empty page would tell a
+    // client it owns nothing. Before #514 such an actor received whatever its
+    // ceiling admitted.
+    it('refuses an actor kind with no user behind it rather than answering an empty page', async () => {
+      ability.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
 
-      const page = await service.list(paginationQuery({ limit: 10 }));
+      const rejection: unknown = await service.list(paginationQuery({ limit: 10 })).catch((error: unknown) => error);
 
-      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.MediaObject, Action.read);
-      expect(db.mediaObject.count).toHaveBeenCalledWith({ where: { AND: [MOCK_RESOURCE_CONDITION] } });
-      expect(page).toEqual({ rows: [], total: 9 });
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.mediaObject.findMany).not.toHaveBeenCalled();
     });
   });
 });

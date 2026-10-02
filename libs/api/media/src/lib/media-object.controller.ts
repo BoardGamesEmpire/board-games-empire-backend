@@ -89,10 +89,11 @@ export class MediaObjectController {
   }
 
   @ApiOperation({
-    summary: 'List media objects the caller may read',
+    summary: "List the caller's own media objects",
     description:
-      'Newest first. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
-      '`total`, `totalPages` and `hasMore`. See #230.',
+      'The media the caller owns, newest first. Media the caller may read but does not own, such as another ' +
+      "user's public media, is not listed; it is read by id. Paginated: `?page=` (1-based) and `?limit=`, " +
+      'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedMediaResponse })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))

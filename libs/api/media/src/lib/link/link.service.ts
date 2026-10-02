@@ -39,6 +39,7 @@ export class MediaLinkService {
     const accessible = await this.db.mediaObject.findUnique({
       where: {
         id: mediaObjectId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update),
       },
       select: { id: true },
@@ -113,6 +114,7 @@ export class MediaLinkService {
     const media = await this.db.mediaObject.findUnique({
       where: {
         id: mediaObjectId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update),
       },
       select: { mimeType: true, media: { select: { id: true } } },
@@ -149,6 +151,7 @@ export class MediaLinkService {
     subjectId: string,
     client: Prisma.TransactionClient = this.db,
   ): Promise<void> {
+    // eslint-disable-next-line no-restricted-syntax -- single-row existence check on the link subject, not a collection read
     const AND = this.ability.getCurrentResourceConditions(subjectType as ModelResourceType, Action.read);
 
     let found: { id: string } | null;
