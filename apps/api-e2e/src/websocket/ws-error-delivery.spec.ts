@@ -179,7 +179,7 @@ describe('WebSocket error delivery', () => {
       expect(await refused).toEqual({
         statusCode: 401,
         error: 'Unauthorized',
-        message: 'Unauthorized',
+        message: 'Session expired or invalid',
         pattern: SEARCH_START,
         correlationId: frame.correlationId,
       });

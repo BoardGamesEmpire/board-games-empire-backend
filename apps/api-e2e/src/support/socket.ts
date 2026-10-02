@@ -8,17 +8,24 @@ const EVENT_TIMEOUT_MS = 10_000;
  * spec can attach listeners before anything arrives: a refused connection is
  * answered the moment it opens.
  *
- * With credentials, it sends both of the ones the API reads. The connection
- * authenticates `auth.token`, and every frame is authenticated again from the
- * handshake headers (#511).
+ * With credentials, it sends their token as `auth.token` and nothing else, as
+ * a token-only client does. `headers` go on the handshake as they are: an
+ * `Authorization` header, a cookie, an `Origin`. The API authenticates the
+ * connection and every frame from one of these, the token first (#511).
  */
-export function openSocket(baseUrl: string, namespace: string, credentials?: SessionCredentials): Socket {
+export function openSocket(
+  baseUrl: string,
+  namespace: string,
+  credentials?: Pick<SessionCredentials, 'token'>,
+  headers?: Record<string, string>,
+): Socket {
   return io(`${baseUrl}/${namespace}`, {
     autoConnect: false,
     forceNew: true,
     reconnection: false,
     transports: ['websocket'],
-    ...(credentials && { auth: { token: credentials.token }, extraHeaders: { ...credentials.headers } }),
+    ...(credentials && { auth: { token: credentials.token } }),
+    ...(headers && { extraHeaders: headers }),
   });
 }
 

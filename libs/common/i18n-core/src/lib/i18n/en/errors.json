@@ -126,7 +126,8 @@
     "no_token": "No token provided",
     "session_invalid": "Session expired or invalid",
     "session_unresolved": "Session could not be resolved",
-    "anonymous_not_permitted": "Anonymous access not permitted"
+    "anonymous_not_permitted": "Anonymous access not permitted",
+    "untrusted_origin": "Origin missing or not trusted"
   },
   "household": {
     "not_found": "Household with ID {id} not found",

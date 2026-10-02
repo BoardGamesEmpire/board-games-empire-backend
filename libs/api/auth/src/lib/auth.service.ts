@@ -3,6 +3,7 @@ import type { UserSession } from '@thallesp/nestjs-better-auth';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { authFactory } from './auth-factory';
 import { AUTH_INSTANCE } from './constants';
+import { hasSessionCookie, isBearerAuthorization } from './session-credential';
 
 /**
  * Minimal record returned by {@link AuthService.verifyApiKey} on success.
@@ -17,20 +18,6 @@ export interface ResolvedApiKey {
 @Injectable()
 export class AuthService {
   constructor(@Inject(AUTH_INSTANCE) private readonly auth: ReturnType<typeof authFactory>) {}
-
-  /**
-   * Retrieves the user session associated with the provided token.
-   *
-   * @param token The authentication token.
-   * @returns The user session or null
-   */
-  getSessionFromToken(token: string) {
-    return this.auth.api.getSession({
-      headers: new Headers({
-        Authorization: `Bearer ${token}`,
-      }),
-    });
-  }
 
   /**
    * Resolves a session from raw Node request headers (cookies + bearer +
@@ -60,6 +47,36 @@ export class AuthService {
   }
 
   /**
+   * Whether a request with these headers may authenticate with the session
+   * cookie, by the rule better-auth applies to its own requests that carry
+   * one: the request's `Origin`, or its `Referer` when it sent no `Origin`,
+   * must be trusted (`TRUSTED_ORIGINS`, matched as better-auth matches them),
+   * and a request with neither, or with the opaque `null` origin, is refused.
+   * `DISABLE_ORIGIN_CHECK` lifts the rule, as it does over HTTP.
+   *
+   * The `Referer` is what a browser's same-origin GET carries in place of an
+   * `Origin`, and socket.io's long-polling handshake is one. A page cannot
+   * write either header for another site, only leave the `Referer` out.
+   *
+   * For a transport better-auth never sees, such as a WebSocket handshake.
+   * There, nothing else stops a page on another site from opening a
+   * connection the browser attaches the cookie to, and reading what it hears.
+   */
+  async isTrustedCookieRequest(headers: IncomingHttpHeaders): Promise<boolean> {
+    const context = await this.auth.$context;
+    if (context.skipCSRFCheck || context.skipOriginCheck === true) {
+      return true;
+    }
+
+    const origin = headers.origin || headers.referer;
+    if (!origin || origin === 'null') {
+      return false;
+    }
+
+    return context.isTrustedOrigin(origin);
+  }
+
+  /**
    * Verifies an API key via the BetterAuth `apiKey` plugin. Returns the
    * resolved key (id + owning userId) on success, or `null` for any failure
    * (unknown / revoked / expired / rate-limited).
@@ -84,29 +101,14 @@ export class AuthService {
   /**
    * Cheap presence check for a session credential on the inbound request.
    * Recognizes BetterAuth's session cookie and Bearer-token authorization
-   * headers.
-   *
-   * BetterAuth names the cookie `<prefix>.session_token` (or
-   * `<prefix>-session_token`), prepending `__Secure-` when secure cookies are
-   * enabled. The prefix is `bge_auth_` per `auth-factory`, so the live cookie
-   * is e.g. `bge_auth_.session_token` / `__Secure-bge_auth_.session_token`.
+   * headers ({@link hasSessionCookie}, {@link isBearerAuthorization}).
    *
    * Used by entry-point interceptors to short-circuit the session path and to
    * detect the "API key + session both present" anomaly without paying for a
    * full `getSession` call.
    */
   hasSessionCredential(headers: IncomingHttpHeaders): boolean {
-    const cookie = headers.cookie;
-    if (typeof cookie === 'string' && /(?:^|;\s*)(?:__Secure-)?bge_auth_[.-]session_token=/.test(cookie)) {
-      return true;
-    }
-
-    const authorization = headers.authorization;
-    if (typeof authorization === 'string' && /^Bearer\s+/i.test(authorization)) {
-      return true;
-    }
-
-    return false;
+    return hasSessionCookie(headers.cookie) || isBearerAuthorization(headers.authorization);
   }
 
   private toFetchHeaders(headers: IncomingHttpHeaders): Headers {
