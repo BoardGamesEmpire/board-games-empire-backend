@@ -16,9 +16,10 @@ import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collecti
  * friend of its owner — so a denial cannot pass because the row was unreadable
  * to everyone, or because the route answered nothing at all.
  *
- * `GET /api/game-collections/user/:userId` stopped being public in the same
+ * `GET /api/users/:userId/game-collections` stopped being public in the same
  * change. A request with no session used to be served the Public entries by a
  * branch around the ability layer; it is now refused before the route runs.
+ * The route was `GET /api/game-collections/user/:userId` until #514.
  */
 describe('game collection authorization', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -36,8 +37,10 @@ describe('game collection authorization', () => {
     await db.close();
   });
 
+  const userCollectionPath = (userId: string) => `/api/users/${userId}/game-collections`;
+
   const listUserCollection = (actor: AuthenticatedActor, userId: string) =>
-    request(baseUrl).get(`${COLLECTIONS_PATH}/user/${userId}`).set(actor.headers);
+    request(baseUrl).get(userCollectionPath(userId)).set(actor.headers);
 
   const readEntry = (actor: AuthenticatedActor, id: string) =>
     request(baseUrl).get(`${COLLECTIONS_PATH}/${id}`).set(actor.headers);
@@ -96,13 +99,13 @@ describe('game collection authorization', () => {
 
       const asFriend = listCollectionsEnvelope(
         await listUserCollection(friend, owner.user.id).expect(200),
-        'GET /api/game-collections/user/:userId as a friend',
+        'GET /api/users/:userId/game-collections as a friend',
       );
       expect(asFriend.collections.map((entry) => entry.id).sort()).toEqual([publicEntry.id, friendsEntry.id].sort());
 
       const asGuest = listCollectionsEnvelope(
         await listUserCollection(guest, owner.user.id).expect(200),
-        'GET /api/game-collections/user/:userId as an anonymous guest',
+        'GET /api/users/:userId/game-collections as an anonymous guest',
       );
       expect(asGuest.collections.map((entry) => entry.id)).toEqual([publicEntry.id]);
       // Counted over the same scope as the page (#230), not the owner's whole collection.
@@ -129,7 +132,7 @@ describe('game collection authorization', () => {
 
       const ofUnset = listCollectionsEnvelope(
         await listUserCollection(friend, unsetOwner.user.id).expect(200),
-        'GET /api/game-collections/user/:userId, owner without preferences',
+        'GET /api/users/:userId/game-collections, owner without preferences',
       );
       expect(ofUnset.collections.map((entry) => entry.id).sort()).toEqual(
         [unset.publicEntry.id, unset.friendsEntry.id].sort(),
@@ -137,7 +140,7 @@ describe('game collection authorization', () => {
 
       const ofHiding = listCollectionsEnvelope(
         await listUserCollection(friend, hidingOwner.user.id).expect(200),
-        'GET /api/game-collections/user/:userId, owner hiding it from friends',
+        'GET /api/users/:userId/game-collections, owner hiding it from friends',
       );
       expect(ofHiding.collections.map((entry) => entry.id)).toEqual([hiding.publicEntry.id]);
     });
@@ -146,7 +149,7 @@ describe('game collection authorization', () => {
       const owner = await actors.user();
       await arrangeCollection(owner.user.id);
 
-      await request(baseUrl).get(`${COLLECTIONS_PATH}/user/${owner.user.id}`).expect(401);
+      await request(baseUrl).get(userCollectionPath(owner.user.id)).expect(401);
     });
   });
 

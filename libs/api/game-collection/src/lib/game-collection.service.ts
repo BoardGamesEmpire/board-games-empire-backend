@@ -1,6 +1,6 @@
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
@@ -38,24 +38,37 @@ export class GameCollectionService {
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
    * The acting user's own collection. Tombstoned (previously owned) entries are
    * excluded by default; `includeDeleted` adds them (delta sync), `deletedOnly`
    * is the resurrection view.
+   *
+   * The scope is the acting user's entries, and the ceiling only clips it
+   * (#514). For an `apiKey` actor it carries the key ∩ owner floor. The
+   * tombstone, medium, favourite and date filters are caller input, so they
+   * sit beside the composed clause rather than inside it.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my collection" has no meaning without a user, and the refusal must never
+   * soften into an empty page. PROVISIONAL — #395.
    */
   async listOwn(query: ListGameCollectionsQueryDto) {
     const { includeDeleted, deletedOnly, medium, favorite, updatedSince } = query;
-    const userId = this.abilityService.getActingUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
 
     const where = {
-      userId,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
-      ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
-      ...(medium ? { medium } : {}),
-      ...(favorite !== undefined ? { favorite } : {}),
-      ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+      AND: [
+        this.scopeComposer.compose(ResourceType.GameCollection, Action.read, { userId }),
+        {
+          ...(deletedOnly ? { deletedAt: { not: null } } : includeDeleted ? {} : { deletedAt: null }),
+          ...(medium ? { medium } : {}),
+          ...(favorite !== undefined ? { favorite } : {}),
+          ...(updatedSince ? { updatedAt: { gte: updatedSince } } : {}),
+        },
+      ],
     } satisfies Prisma.GameCollectionWhereInput;
 
     return this.paginate(where, query);
@@ -67,13 +80,17 @@ export class GameCollectionService {
    * anonymous viewer — a guest holding `AnonymousUser` instead of `User` —
    * reaches Public entries only, through those same conditions rather than a
    * branch of its own (#484). Tombstones are never exposed through this view.
+   *
+   * The scope is the path user's live entries; the viewer's ceiling is what
+   * clips them (#514), so the viewer need not be a user at all. The medium
+   * filter is caller input and sits beside the composed clause.
    */
   async listForUser(targetUserId: string, query: ListUserGameCollectionsQueryDto) {
     const where = {
-      userId: targetUserId,
-      deletedAt: null,
-      ...(query.medium ? { medium: query.medium } : {}),
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
+      AND: [
+        this.scopeComposer.compose(ResourceType.GameCollection, Action.read, { userId: targetUserId, deletedAt: null }),
+        query.medium ? { medium: query.medium } : {},
+      ],
     } satisfies Prisma.GameCollectionWhereInput;
 
     return this.paginate(where, query);
@@ -116,6 +133,7 @@ export class GameCollectionService {
     const collection = await this.db.gameCollection.findUnique({
       where: {
         id,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.read),
       },
       include: COLLECTION_INCLUDE,
@@ -189,6 +207,7 @@ export class GameCollectionService {
       const existing = await this.db.gameCollection.findUnique({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
         },
         select: { platformGameId: true },
@@ -205,6 +224,7 @@ export class GameCollectionService {
       return await this.db.gameCollection.update({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.update),
         },
         data: { ...data, lastUpdated: new Date() },
@@ -231,6 +251,7 @@ export class GameCollectionService {
         where: {
           id,
           deletedAt: null,
+          // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.GameCollection, Action.delete),
         },
         data: { deletedAt: now, deleteReason: reason ?? null, lastUpdated: now },

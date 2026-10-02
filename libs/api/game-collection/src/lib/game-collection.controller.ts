@@ -13,13 +13,12 @@ import {
   GameCollectionMessageResponseDto,
   GameCollectionResponseDto,
   ListGameCollectionsQueryDto,
-  ListUserGameCollectionsQueryDto,
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
 import { GameCollectionService } from './game-collection.service';
 
-/** Swagger model for the paginated list envelope both collection reads return. */
+/** Swagger model for the paginated list envelope `GET /game-collections` returns. */
 const PaginatedGameCollectionResponse = PaginatedResponseDto(GameCollectionDto, 'collections');
 
 @ApiBearerAuth()
@@ -47,24 +46,6 @@ export class GameCollectionController {
   @Get()
   getOwnCollection(@Query() query: ListGameCollectionsQueryDto) {
     return from(this.gameCollectionService.listOwn(query)).pipe(
-      map((page) => paginated('collections', page, query, ResourceType.GameCollection)),
-    );
-  }
-
-  @ApiOperation({
-    summary: "List another user's visible collection",
-    description:
-      'Entries filtered by visibility: household-shared, friend-shared, and public for signed-in viewers; ' +
-      'public only for an anonymous (guest) session. A session is required.',
-  })
-  @ApiParam({ name: 'userId', type: String })
-  @ApiResponse({ status: Http.Ok, type: PaginatedGameCollectionResponse })
-  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.GameCollection))
-  @Get('user/:userId')
-  getUserCollection(@Param('userId') userId: string, @Query() query: ListUserGameCollectionsQueryDto) {
-    return from(this.gameCollectionService.listForUser(userId, query)).pipe(
       map((page) => paginated('collections', page, query, ResourceType.GameCollection)),
     );
   }
