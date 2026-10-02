@@ -128,45 +128,123 @@ describe('HouseholdService', () => {
     await expect(service.getHouseholdById('hh-1')).rejects.toThrow(ForbiddenException);
   });
 
-  it('samples member games DB-side and fetches only the sampled rows', async () => {
-    db.household.findUnique.mockResolvedValue({
-      id: 'hh-1',
-      members: [
-        {
-          userId: 'member-1',
-          user: { id: 'member-1', username: 'm1' },
-          excludedFromHouseholds: [{ gameCollectionId: 'excluded-1' }],
+  /**
+   * #514. `GET /households/:id` embeds a sample of up to five of each member's
+   * collection entries. The sample was raw SQL that filtered only the owner
+   * and the tombstone, so it asked for no ceiling and served members' Private
+   * entries to everyone who could read the household. It now reads through the
+   * `GameCollection` ceiling like every other collection read: a viewer sees an
+   * entry in the sample only if they could read that entry by id.
+   */
+  describe('getHouseholdById, the member game sample', () => {
+    const household = (excluded: string[] = []) =>
+      ({
+        id: 'hh-1',
+        members: [
+          {
+            userId: 'member-1',
+            user: { id: 'member-1', username: 'm1' },
+            excludedFromHouseholds: excluded.map((gameCollectionId) => ({ gameCollectionId })),
+          },
+        ],
+      }) as unknown as HouseholdWithMembers;
+
+    const ids = (count: number) => Array.from({ length: count }, (_, index) => ({ id: `gc-${index + 1}` }));
+
+    /** The ids the rich fetch asked for, from its composed scope. */
+    const sampledIds = () => {
+      const call = compose.mock.calls.find(([, , scope]) => (scope as { id?: unknown }).id !== undefined);
+      return (call?.[2] as { id: { in: string[] } }).id.in;
+    };
+
+    it("asks the composer for the member's live entries, under the GameCollection read ceiling", async () => {
+      db.household.findUnique.mockResolvedValue(household());
+      db.gameCollection.findMany.mockResolvedValueOnce([]);
+
+      await service.getHouseholdById('hh-1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.GameCollection, Action.read, {
+        userId: 'member-1',
+        deletedAt: null,
+      });
+    });
+
+    // The exclusions are this household's, carried on the member row, so they
+    // sit beside the composed clause rather than inside it.
+    it("reads the candidate ids with the composed clause, this household's exclusions beside it", async () => {
+      db.household.findUnique.mockResolvedValue(household(['excluded-1']));
+      db.gameCollection.findMany.mockResolvedValueOnce([]);
+
+      await service.getHouseholdById('hh-1');
+
+      expect(db.gameCollection.findMany).toHaveBeenCalledWith({
+        where: {
+          AND: [{ userId: 'member-1', deletedAt: null, AND: [COND] }, { id: { notIn: ['excluded-1'] } }],
         },
-      ],
-    } as unknown as HouseholdWithMembers);
-    db.$queryRaw.mockResolvedValue([{ id: 'gc-1' }, { id: 'gc-2' }]);
-    db.gameCollection.findMany.mockResolvedValue([
-      { id: 'gc-1', platformGame: { id: 'pg-1', game: { id: 'g-1', title: 'A' } } },
-      { id: 'gc-2', platformGame: { id: 'pg-2', game: { id: 'g-2', title: 'B' } } },
-    ] as never);
+        select: { id: true },
+      });
+    });
 
-    const result = await service.getHouseholdById('hh-1');
+    it('adds no exclusion filter when the member excludes nothing', async () => {
+      db.household.findUnique.mockResolvedValue(household());
+      db.gameCollection.findMany.mockResolvedValueOnce([]);
 
-    // One bounded raw sample query...
-    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
-    // ...then a rich fetch scoped to only the sampled ids (never the full set).
-    expect(db.gameCollection.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['gc-1', 'gc-2'] } } }),
-    );
-    expect(result.members[0].user.gameCollections).toHaveLength(2);
-  });
+      await service.getHouseholdById('hh-1');
 
-  it('skips the rich fetch when a member has no sampled games', async () => {
-    db.household.findUnique.mockResolvedValue({
-      id: 'hh-1',
-      members: [{ userId: 'member-1', user: { id: 'member-1' }, excludedFromHouseholds: [] }],
-    } as unknown as HouseholdWithMembers);
-    db.$queryRaw.mockResolvedValue([]);
+      expect(db.gameCollection.findMany).toHaveBeenCalledWith({
+        where: { AND: [{ userId: 'member-1', deletedAt: null, AND: [COND] }] },
+        select: { id: true },
+      });
+    });
 
-    const result = await service.getHouseholdById('hh-1');
+    it('samples five distinct entries from the visible ones, and loads only those', async () => {
+      db.household.findUnique.mockResolvedValue(household());
+      const visible = ids(8);
+      db.gameCollection.findMany.mockResolvedValueOnce(visible as never).mockResolvedValueOnce([] as never);
 
-    expect(db.gameCollection.findMany).not.toHaveBeenCalled();
-    expect(result.members[0].user.gameCollections).toEqual([]);
+      await service.getHouseholdById('hh-1');
+
+      const sampled = sampledIds();
+      expect(sampled).toHaveLength(5);
+      expect(new Set(sampled).size).toBe(5);
+      expect(visible.map(({ id }) => id)).toEqual(expect.arrayContaining(sampled));
+    });
+
+    // The rich fetch carries the same scope, exclusions and ceiling, so an
+    // entry deleted or made Private between the two reads is not served from
+    // the second one.
+    it('loads the sampled rows through the same scope, exclusions and ceiling', async () => {
+      db.household.findUnique.mockResolvedValue(household(['excluded-1']));
+      db.gameCollection.findMany.mockResolvedValueOnce(ids(2) as never).mockResolvedValueOnce([
+        { id: 'gc-1', platformGame: { id: 'pg-1', game: { id: 'g-1', title: 'A' } } },
+        { id: 'gc-2', platformGame: { id: 'pg-2', game: { id: 'g-2', title: 'B' } } },
+      ] as never);
+
+      const result = await service.getHouseholdById('hh-1');
+
+      expect([...sampledIds()].sort()).toEqual(['gc-1', 'gc-2']);
+      expect(db.gameCollection.findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              { userId: 'member-1', deletedAt: null, id: { in: sampledIds() }, AND: [COND] },
+              { id: { notIn: ['excluded-1'] } },
+            ],
+          },
+        }),
+      );
+      expect(result.members[0].user.gameCollections).toHaveLength(2);
+    });
+
+    it('skips the rich fetch when the member has no entries the viewer may read', async () => {
+      db.household.findUnique.mockResolvedValue(household());
+      db.gameCollection.findMany.mockResolvedValueOnce([]);
+
+      const result = await service.getHouseholdById('hh-1');
+
+      expect(db.gameCollection.findMany).toHaveBeenCalledTimes(1);
+      expect(result.members[0].user.gameCollections).toEqual([]);
+    });
   });
 
   it('create attributes the owner to the acting user (no userId param)', async () => {

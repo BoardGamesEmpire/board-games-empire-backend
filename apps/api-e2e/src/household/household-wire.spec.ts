@@ -4,6 +4,7 @@ import {
   deleteEnvelope,
   HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT,
   listEnvelope,
+  memberGameSampleIds,
   readEnvelope,
   type HttpResponseLike,
 } from './household-wire';
@@ -117,6 +118,37 @@ describe('household wire parsers (pure logic)', () => {
       expect(() => readEnvelope(response({ household: { id: 'h1', members: [] } }), 'GET')).toThrow(
         /no 'invites' array/,
       );
+    });
+  });
+
+  describe('memberGameSampleIds', () => {
+    const detail = (members: unknown[]) => response({ household: { id: 'h1', members, invites: [] } });
+
+    it("returns the ids of the named member's sample", () => {
+      const body = detail([
+        { userId: 'u1', user: { id: 'u1', gameCollections: [{ id: 'gc-1' }] } },
+        { userId: 'u2', user: { id: 'u2', gameCollections: [{ id: 'gc-2' }, { id: 'gc-3' }] } },
+      ]);
+
+      expect(memberGameSampleIds(body, 'GET', 'u2')).toEqual(['gc-2', 'gc-3']);
+    });
+
+    // The suite asserts which entries a sample does NOT show, and each of
+    // those checks passes against a member or sample that was never returned.
+    it('rejects a household without the named member', () => {
+      expect(() => memberGameSampleIds(detail([]), 'GET', 'u1')).toThrow(/no member with userId 'u1'/);
+    });
+
+    it('rejects a member without the sample embed', () => {
+      expect(() => memberGameSampleIds(detail([{ userId: 'u1', user: { id: 'u1' } }]), 'GET', 'u1')).toThrow(
+        /no 'user\.gameCollections' array/,
+      );
+    });
+
+    it('rejects a sampled game without a string id', () => {
+      const body = detail([{ userId: 'u1', user: { id: 'u1', gameCollections: [{}] } }]);
+
+      expect(() => memberGameSampleIds(body, 'GET', 'u1')).toThrow(/has no string id/);
     });
   });
 

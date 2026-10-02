@@ -53,6 +53,25 @@ const HOUSEHOLD_LIST_INCLUDE = {
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
 
+/** How many of each member's entries the household detail embeds. */
+const MEMBER_GAME_SAMPLE_SIZE = 5;
+
+/**
+ * Up to `size` distinct items, uniformly at random: a partial Fisher-Yates
+ * over a copy, so the input is untouched and each item is equally likely.
+ */
+function sampleWithoutReplacement<T>(items: readonly T[], size: number): T[] {
+  const pool = [...items];
+  const count = Math.min(size, pool.length);
+
+  for (let index = 0; index < count; index++) {
+    const pick = index + Math.floor(Math.random() * (pool.length - index));
+    [pool[index], pool[pick]] = [pool[pick], pool[index]];
+  }
+
+  return pool.slice(0, count);
+}
+
 /**
  * What a soft delete returns: the tombstoned row, and when the actor's window
  * to restore it ends, or `null` when the delete opened none for them (#175).
@@ -154,36 +173,52 @@ export class HouseholdService {
   }
 
   /**
-   * @todo refine game selection permissions
+   * Up to five of a member's collection entries, sampled at random from those
+   * the viewer may read.
+   *
+   * Both reads compose the `GameCollection` read ceiling, top-level, so the
+   * sample can never show an entry the viewer could not read by id (#514).
+   * Before, the sample was raw SQL over `game_collections` that filtered only
+   * the owner and the tombstone, and served members' Private entries.
+   *
+   * The ids are sampled in memory rather than with `ORDER BY random()`: the
+   * ceiling is a Prisma where clause, and restating it in SQL would copy the
+   * catalog's rule by hand. Only ids are loaded for the whole visible set, and
+   * the full shape only for the five sampled.
+   *
+   * This household's exclusions sit beside the composed clause. The ceiling's
+   * household rule approximates `showAllGames` and exclusions across every
+   * household the owner and viewer share, not just this one; the exact rule
+   * for a single household belongs to the collection pool read (#367).
    */
   private async getSelectMemberGames(memberId: string, excludedCollectionIds: string[]) {
-    // Sample the 5 collection ids DB-side (ORDER BY random() LIMIT 5) rather
-    // than loading every owned row — with full game descriptions — into memory
-    // just to shuffle and slice. random() is also a uniform sample, unlike the
-    // former `sort(() => 0.5 - Math.random())`, which is biased and O(n log n).
-    const exclusion =
-      excludedCollectionIds.length > 0
-        ? Prisma.sql`AND id NOT IN (${Prisma.join(excludedCollectionIds)})`
-        : Prisma.empty;
+    // One where for both reads: the member's live entries under the ceiling,
+    // this household's exclusions beside it. The second read narrows it to the
+    // sample, so an entry deleted or made Private between the two reads is not
+    // served from it.
+    const memberEntriesWhere = (sampled?: string[]) => ({
+      AND: [
+        this.scopeComposer.compose(ResourceType.GameCollection, Action.read, {
+          userId: memberId,
+          deletedAt: null,
+          ...(sampled ? { id: { in: sampled } } : {}),
+        }),
+        ...(excludedCollectionIds.length > 0 ? [{ id: { notIn: excludedCollectionIds } }] : []),
+      ],
+    });
 
-    const sampled = await this.db.$queryRaw<Array<{ id: string }>>(Prisma.sql`
-      SELECT id FROM game_collections
-      WHERE user_id = ${memberId}
-        AND deleted_at IS NULL
-        ${exclusion}
-      ORDER BY random()
-      LIMIT 5
-    `);
+    const visible = await this.db.gameCollection.findMany({ where: memberEntriesWhere(), select: { id: true } });
 
-    const sampledIds = sampled.map((row) => row.id);
+    const sampledIds = sampleWithoutReplacement(
+      visible.map((row) => row.id),
+      MEMBER_GAME_SAMPLE_SIZE,
+    );
     if (sampledIds.length === 0) {
       return { gameCollections: [], memberId };
     }
 
-    // Fetch the rich shape for only the sampled rows (order is irrelevant for a
-    // random sample, so `id IN (...)` is fine).
     const gameCollections = await this.db.gameCollection.findMany({
-      where: { id: { in: sampledIds } },
+      where: memberEntriesWhere(sampledIds),
       select: {
         id: true,
         platformGame: {
