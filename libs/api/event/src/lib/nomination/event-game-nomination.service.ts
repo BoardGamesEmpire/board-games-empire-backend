@@ -22,6 +22,7 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
 import { assertEventExists, requireEvent, resolveActingAttendeeId } from '../event-access.helpers';
 import { ResolutionResult, VotingPolicy } from '../interfaces/vote.interface';
@@ -689,13 +690,7 @@ export class EventGameNominationService {
 }
 
 const NOMINATION_INCLUDE = {
-  platformGame: {
-    select: {
-      id: true,
-      game: { select: { id: true, title: true, thumbnail: true } },
-      platform: { select: { id: true, name: true, platformType: true } },
-    },
-  },
+  platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
   nominatedBy: {
     select: {
       id: true,
@@ -730,4 +725,4 @@ const NOMINATION_INCLUDE = {
       comment: true,
     },
   },
-} as const;
+} as const satisfies Prisma.EventGameNominationInclude;

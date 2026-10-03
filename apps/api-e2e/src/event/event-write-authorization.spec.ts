@@ -1,7 +1,6 @@
 import {
   AvailabilityResponse,
   EventParticipationStatus,
-  GameMedium,
   NominationStatus,
   OccurrenceStatus,
   SystemRole,
@@ -12,10 +11,13 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { attendeeEnvelope, eventEnvelope, eventGameEnvelope } from './event-wire';
+import { arrangeListEntry } from './event-fixtures';
+import { createEventClient, EVENTS_PATH } from './event-request';
+import { attendeeEnvelope, eventEnvelope, eventGameEnvelope, occurrenceEnvelope } from './event-wire';
 
 /**
- * Who may write what on an event, over the real routes (#454, #539, #457, #458).
+ * Who may write what on an event, over the real routes (#454, #539, #457, #458,
+ * #558).
  *
  * Each route's policy check judges its action by type alone, so it passes
  * any actor holding the grant on ANY event or household; the service binds it
@@ -31,7 +33,6 @@ import { attendeeEnvelope, eventEnvelope, eventGameEnvelope } from './event-wire
  */
 describe('event write authorization', () => {
   const baseUrl = requireBaseUrl(process.env);
-  const EVENTS_PATH = '/api/events';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -45,14 +46,7 @@ describe('event write authorization', () => {
     await db.close();
   });
 
-  const createEvent = (actor: AuthenticatedActor, body: Record<string, unknown> = {}) =>
-    request(baseUrl)
-      .post(EVENTS_PATH)
-      .set(actor.headers)
-      .send({ title: `e2e event ${randomUUID().slice(0, 8)}`, ...body });
-
-  const createdEventId = async (actor: AuthenticatedActor, body: Record<string, unknown> = {}) =>
-    eventEnvelope(await createEvent(actor, body).expect(201), 'POST /api/events').id;
+  const { createEvent, createdEventId } = createEventClient(baseUrl);
 
   const updateEvent = (actor: AuthenticatedActor, eventId: string, body: Record<string, unknown>) =>
     request(baseUrl).patch(`${EVENTS_PATH}/${eventId}`).set(actor.headers).send(body);
@@ -87,6 +81,19 @@ describe('event write authorization', () => {
   const withdraw = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
     request(baseUrl).patch(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/withdraw`).set(actor.headers);
 
+  const addedOccurrenceId = async (actor: AuthenticatedActor, eventId: string) =>
+    occurrenceEnvelope(
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+        .set(actor.headers)
+        .send({ label: 'Saturday' })
+        .expect(201),
+      'POST /api/events/:eventId/occurrences',
+    ).id;
+
+  const removeOccurrence = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+    request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`).set(actor.headers);
+
   const attendeeCount = (eventId: string) => db.client.eventAttendee.count({ where: { eventId } });
 
   const attendeeRowId = async (eventId: string, userId: string) =>
@@ -98,37 +105,6 @@ describe('event write authorization', () => {
     ).id;
 
   const householdEventCount = (householdId: string) => db.client.event.count({ where: { householdId } });
-
-  /**
-   * A game-list entry for `ownerId`'s attendee row on `eventId`: a fresh
-   * game on the seeded tabletop platform, in the owner's collection, put on
-   * their list for the event. List entries grant nothing, so arranging them
-   * after the actors' first requests is safe.
-   */
-  const arrangeListEntry = async (eventId: string, ownerId: string) => {
-    const platform = await db.client.platform.findUniqueOrThrow({
-      where: { slug: 'tabletop' },
-      select: { id: true },
-    });
-    const game = await db.client.game.create({
-      data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
-      select: { id: true },
-    });
-    const platformGame = await db.client.platformGame.create({
-      data: { gameId: game.id, platformId: platform.id },
-      select: { id: true },
-    });
-    const collection = await db.client.gameCollection.create({
-      data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical },
-      select: { id: true },
-    });
-    const entry = await db.client.eventAttendeeGameList.create({
-      data: { attendeeId: await attendeeRowId(eventId, ownerId), collectionId: collection.id },
-      select: { id: true },
-    });
-
-    return { platformGameId: platformGame.id, suppliedById: entry.id };
-  };
 
   const MANAGING_ROLES = [SystemRole.EventCoHost, SystemRole.EventOrganizer, SystemRole.EventModerator] as const;
 
@@ -415,9 +391,9 @@ describe('event write authorization', () => {
       const eventId = await createdEventId(host);
       const strangersEventId = await createdEventId(stranger);
 
-      const own = await arrangeListEntry(eventId, host.user.id);
-      const otherGame = await arrangeListEntry(eventId, host.user.id);
-      const foreign = await arrangeListEntry(strangersEventId, stranger.user.id);
+      const own = await arrangeListEntry(db.client, eventId, host.user.id);
+      const otherGame = await arrangeListEntry(db.client, eventId, host.user.id);
+      const foreign = await arrangeListEntry(db.client, strangersEventId, stranger.user.id);
 
       await directAdd(host, eventId, {
         platformGameId: foreign.platformGameId,
@@ -435,6 +411,23 @@ describe('event write authorization', () => {
         'POST /api/events/:eventId/nominations/direct-add',
       );
       expect(added.suppliedById).toBe(own.suppliedById);
+    });
+  });
+
+  describe('removing an occurrence (#558)', () => {
+    it("refuses the host of one event the removal of another event's occurrence, and removes nothing", async () => {
+      const host = await actors.user();
+      const victim = await actors.user();
+      const ownId = await createdEventId(host);
+      const targetId = await createdEventId(victim);
+      const ownOccurrence = await addedOccurrenceId(host, ownId);
+      const targetOccurrence = await addedOccurrenceId(victim, targetId);
+
+      await removeOccurrence(host, targetId, targetOccurrence).expect(403);
+      expect(await db.client.eventOccurrence.count({ where: { id: targetOccurrence } })).toBe(1);
+
+      // Control: the same host removes their own event's occurrence.
+      await removeOccurrence(host, ownId, ownOccurrence).expect(200);
     });
   });
 
@@ -467,7 +460,7 @@ describe('event write authorization', () => {
 
     /** An open nomination on `eventId`, made by `nominatorId` from their own list. */
     const arrangeNomination = async (eventId: string, nominatorId: string) => {
-      const { platformGameId, suppliedById } = await arrangeListEntry(eventId, nominatorId);
+      const { platformGameId, suppliedById } = await arrangeListEntry(db.client, eventId, nominatorId);
       const nomination = await db.client.eventGameNomination.create({
         data: {
           eventId,
