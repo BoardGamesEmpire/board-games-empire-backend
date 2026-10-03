@@ -230,13 +230,13 @@ jobs:
       # project's implicitDependencies pull it in for any api-affecting
       # change, and ci.yml itself is in sharedGlobals.
       #
-      # The --exclude list is load-bearing, not tidiness: all five scaffolded
-      # *-e2e apps (#258) carry generated `e2e` targets that declare a
-      # `:serve` task as a dependency — a task that never exits, so an
-      # affected run that picks any of them up hangs until the job timeout.
-      # There is no safe one to unexclude; remove each exclusion only as
-      # #258 implements or deletes that app. The root `test:e2e` script
-      # carries the same list for local runs, so change both together.
+      # The --exclude list is load-bearing, not tidiness: the two scaffolded
+      # gateway *-e2e apps (#258) carry generated `e2e` targets that declare
+      # a `:serve` task as a dependency — a task that never exits, so an
+      # affected run that picks either of them up hangs until the job
+      # timeout. Neither is safe to unexclude until #258 gives it a real
+      # suite. The root `test:e2e` script carries the same list for local
+      # runs, so change both together.
       - name: Run e2e suite
         timeout-minutes: 20
         env:
@@ -246,4 +246,4 @@ jobs:
           BGE_E2E_VERBOSE: 'true'
         run: >-
           npx nx affected -t e2e --parallel=1
-          --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/gateway-coordinator-e2e,@boardgamesempire/gateway-worker-e2e,@boardgamesempire/igdb-gateway-e2e,@boardgamesempire/worker-e2e
+          --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/igdb-gateway-e2e
