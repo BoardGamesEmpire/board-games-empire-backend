@@ -1,6 +1,7 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
 import { Action, GameMedium, GameRemovalReason, Prisma, ResourceType, Visibility } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -43,6 +44,7 @@ describe('GameCollectionService', () => {
   let service: GameCollectionService;
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = {
@@ -51,24 +53,51 @@ describe('GameCollectionService', () => {
     };
 
     const ctx = await createTestingModuleWithDb({
-      providers: [GameCollectionService, { provide: AbilityService, useValue: abilityService }],
+      providers: [
+        GameCollectionService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the lists actually run.
+        ScopeComposer,
+        { provide: AbilityService, useValue: abilityService },
+      ],
     });
 
     db = ctx.db;
     service = ctx.module.get(GameCollectionService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
 
+  /**
+   * #514. `GET /game-collections` declares its own set, the acting user's
+   * entries, and the ceiling only clips it. It already filtered on `userId`, so
+   * no caller's rows change; what changes is that a later edit cannot drop the
+   * scope without the envelope noticing. `GameCollection` has left
+   * `PENDING_SCOPE_SWEEP`, so a read that stops composing answers 500 at the
+   * envelope rather than widening to whatever the ceiling admits, which for
+   * staff is every entry on the server. That is why the first test pins the
+   * composer call itself.
+   */
   describe('listOwn', () => {
-    it('scopes to the acting user and excludes tombstones by default', async () => {
+    it("asks the composer for its where clause, declaring the acting user's entries", async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+
+      await service.listOwn(paginationQuery({ limit: 20 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.GameCollection, Action.read, { userId: ME });
+    });
+
+    // The tombstone, medium, favourite and date filters are caller input, not
+    // scope, so they sit beside the composed clause rather than inside it.
+    it('queries with the composed clause, its filters beside it, and excludes tombstones by default', async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
       await service.listOwn(paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: ME, AND: [COND], deletedAt: null }),
+          where: { AND: [{ userId: ME, AND: [COND] }, { deletedAt: null }] },
         }),
       );
     });
@@ -78,8 +107,7 @@ describe('GameCollectionService', () => {
 
       await service.listOwn(Object.assign(paginationQuery({ limit: 20 }), { includeDeleted: true }));
 
-      const where = db.gameCollection.findMany.mock.calls[0][0]?.where;
-      expect(where).not.toHaveProperty('deletedAt');
+      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({ AND: [{ userId: ME, AND: [COND] }, {}] });
     });
 
     it('deletedOnly returns the resurrection view', async () => {
@@ -87,11 +115,24 @@ describe('GameCollectionService', () => {
 
       await service.listOwn(Object.assign(paginationQuery({ limit: 20 }), { deletedOnly: true }));
 
-      expect(db.gameCollection.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({ deletedAt: { not: null } }),
-        }),
-      );
+      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
+        AND: [{ userId: ME, AND: [COND] }, { deletedAt: { not: null } }],
+      });
+    });
+
+    // PROVISIONAL (#395). "My collection" has no meaning for an actor with no
+    // user behind it. The refusal predates the sweep; what the sweep changes is
+    // its message, which is now the read's own rather than one about writes.
+    it('refuses an actor kind with no user behind it, with a message about reading', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await service.listOwn(paginationQuery({ limit: 20 })).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.gameCollection.findMany).not.toHaveBeenCalled();
     });
 
     // The count is what `pagination.total` reports, so it must carry the SAME
@@ -139,29 +180,74 @@ describe('GameCollectionService', () => {
         }),
       );
 
-      expect(db.gameCollection.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            medium: GameMedium.Digital,
-            favorite: false,
-            updatedAt: { gte: updatedSince },
-          }),
-        }),
-      );
+      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
+        AND: [
+          { userId: ME, AND: [COND] },
+          { deletedAt: null, medium: GameMedium.Digital, favorite: false, updatedAt: { gte: updatedSince } },
+        ],
+      });
     });
   });
 
+  /**
+   * #514. `GET /users/:userId/game-collections` declares the path user's live
+   * entries, and the viewer's ceiling decides which of them they may see:
+   * household-shared, friend-shared and public for a signed-in viewer, public
+   * only for a guest. Composing changes no rows, since the read already
+   * filtered on `userId`; it is the guard's precondition now that
+   * `GameCollection` has left `PENDING_SCOPE_SWEEP`.
+   */
   describe('listForUser', () => {
-    it('applies CASL read conditions for an authenticated viewer', async () => {
+    it("asks the composer for its where clause, declaring the path user's live entries", async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+
+      await service.listForUser('user-2', paginationQuery({ limit: 20 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.GameCollection, Action.read, {
+        userId: 'user-2',
+        deletedAt: null,
+      });
+    });
+
+    it("queries with the composed clause, the viewer's ceiling clipping the path user's entries", async () => {
       db.gameCollection.findMany.mockResolvedValue([]);
 
       await service.listForUser('user-2', paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ userId: 'user-2', deletedAt: null, AND: [COND] }),
+          where: { AND: [{ userId: 'user-2', deletedAt: null, AND: [COND] }, {}] },
         }),
       );
+    });
+
+    // The medium filter is caller input, so it sits beside the scope.
+    it('applies the medium filter beside the composed clause', async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+
+      await service.listForUser(
+        'user-2',
+        Object.assign(paginationQuery({ limit: 20 }), { medium: GameMedium.Digital }),
+      );
+
+      expect(db.gameCollection.findMany.mock.calls[0][0]?.where).toEqual({
+        AND: [{ userId: 'user-2', deletedAt: null, AND: [COND] }, { medium: GameMedium.Digital }],
+      });
+    });
+
+    // The viewer need not be a user: a guest reads Public entries through its
+    // own role (#484), so this read must not ask who the viewer is.
+    it('does not require the viewer to be a user', async () => {
+      db.gameCollection.findMany.mockResolvedValue([]);
+      db.gameCollection.count.mockResolvedValue(0);
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      await expect(service.listForUser('user-2', paginationQuery({ limit: 20 }))).resolves.toEqual({
+        rows: [],
+        total: 0,
+      });
     });
 
     it("counts the viewer-visible scope, not the target user's whole collection", async () => {
@@ -171,7 +257,7 @@ describe('GameCollectionService', () => {
       const page = await service.listForUser('user-2', paginationQuery({ limit: 20 }));
 
       expect(db.gameCollection.count).toHaveBeenCalledWith({
-        where: expect.objectContaining({ userId: 'user-2', deletedAt: null, AND: [COND] }),
+        where: db.gameCollection.findMany.mock.calls[0][0]?.where,
       });
       expect(page.total).toBe(4);
     });

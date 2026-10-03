@@ -237,6 +237,46 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
   return { household: household as unknown as HouseholdDetail };
 }
 
+/**
+ * The ids in one member's game sample on `GET /api/households/:id`, from
+ * `members[].user.gameCollections` (#514).
+ *
+ * A parser of its own rather than a field on {@link HouseholdMemberProjection}:
+ * only the detail read embeds the sample, and only one suite reads it. A
+ * missing member or sample fails here, because an absent array would make
+ * every "this entry is not shown" assertion pass without reading a response.
+ */
+export function memberGameSampleIds(
+  response: HttpResponseLike,
+  request: RequestDescription,
+  memberUserId: string,
+): string[] {
+  const { household } = readEnvelope(response, request);
+
+  const member: unknown = household.members.find((entry) => entry.userId === memberUserId);
+  if (!isRecord(member)) {
+    return fail(`it carried no member with userId '${memberUserId}'`, request, response);
+  }
+
+  const user = member['user'];
+  const sample = isRecord(user) ? user['gameCollections'] : undefined;
+  if (!Array.isArray(sample)) {
+    return fail(`member '${memberUserId}' carried no 'user.gameCollections' array`, request, response);
+  }
+
+  const ids: string[] = [];
+  for (const entry of sample) {
+    const id = isRecord(entry) ? entry['id'] : undefined;
+    if (typeof id !== 'string' || id.length === 0) {
+      return fail(`one of member '${memberUserId}'s sampled games has no string id`, request, response);
+    }
+
+    ids.push(id);
+  }
+
+  return ids;
+}
+
 const isNonNegativeInteger = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
 
 /**

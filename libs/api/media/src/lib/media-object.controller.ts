@@ -40,6 +40,11 @@ const PaginatedMediaResponse = PaginatedResponseDto(MediaObjectResponseDto, 'med
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
+// Never response-cached (#530). `GET /media` is the caller's own media, so an
+// upload, publish or delete followed by a list would be served the old page
+// for the cache TTL, and `GET /media/:id` would keep serving an unpublished
+// item's metadata to other callers for the same window.
+@NoCache()
 @UseGuards(PoliciesGuard)
 @UseFilters(StorageExceptionFilter, MulterExceptionFilter)
 @ApiTags('media')
@@ -89,10 +94,11 @@ export class MediaObjectController {
   }
 
   @ApiOperation({
-    summary: 'List media objects the caller may read',
+    summary: "List the caller's own media objects",
     description:
-      'Newest first. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying ' +
-      '`total`, `totalPages` and `hasMore`. See #230.',
+      'The media the caller owns, newest first. Media the caller may read but does not own, such as another ' +
+      "user's public media, is not listed; it is read by id. Paginated: `?page=` (1-based) and `?limit=`, " +
+      'with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedMediaResponse })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
@@ -116,6 +122,9 @@ export class MediaObjectController {
 
   // Never response-cached: a signed URL lives as long as the cache TTL by
   // default, so a cached body hands out URLs that are already expiring (#528).
+  // Deliberately kept beside the class-level opt-out, which covers this route
+  // too: that one rests on the list and by-id reads, and this reason holds
+  // whatever is decided for them.
   @NoCache()
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
   @Get(':id/url')

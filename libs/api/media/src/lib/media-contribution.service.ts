@@ -46,6 +46,7 @@ export class MediaContributionService {
     const media = await this.db.mediaObject.findUnique({
       where: {
         id: mediaObjectId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update),
       },
       select: { ownerId: true },
@@ -190,6 +191,7 @@ export class MediaContributionService {
     const contribution = await this.db.mediaContribution.findUnique({
       where: {
         id: contributionId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.update),
       },
     });
@@ -280,6 +282,7 @@ export class MediaContributionService {
     const contribution = await this.db.mediaContribution.findUnique({
       where: {
         id: contributionId,
+        // eslint-disable-next-line no-restricted-syntax -- single-row pre-read for a write by id, not a collection read
         AND: this.ability.getCurrentResourceConditions(ResourceType.MediaContribution, Action.update),
       },
     });

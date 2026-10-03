@@ -33,7 +33,7 @@ function asCollection(value: unknown): GameCollectionWire | undefined {
 }
 
 /**
- * `GET /api/game-collections` and `GET /api/game-collections/user/:userId`:
+ * `GET /api/game-collections` and `GET /api/users/:userId/game-collections`:
  * `{ collections: [...], pagination }`. The total is checked against the page
  * because both count the same actor-scoped set (#230): a total below the rows
  * on screen means the two disagree about scope.

@@ -3,6 +3,14 @@ import { MediaObjectController } from './media-object.controller';
 
 // The list envelopes on this controller are covered in `media-list.controller.spec.ts`.
 describe('MediaObjectController', () => {
+  // `GET /media` is the caller's own media, so an upload, publish or delete
+  // followed by a list would be served the old page for the cache TTL.
+  // `GET /media/:id` would keep serving an unpublished item's metadata to
+  // other callers for the same window (#530).
+  it('is exempt from the response cache', () => {
+    expect(Reflect.getMetadata(NO_CACHE_KEY, MediaObjectController)).toBe(true);
+  });
+
   describe('signedUrl', () => {
     it('is exempt from the response cache', () => {
       // A signed URL's default lifetime is five minutes, the same as the

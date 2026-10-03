@@ -9,7 +9,7 @@ import {
   Visibility,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { QuotaSoftOverageEvent } from '@bge/quota';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
@@ -54,6 +54,7 @@ export class MediaObjectService {
     private readonly quota: QuotaService,
     private readonly contributions: MediaContributionService,
     private readonly mediaLink: MediaLinkService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   async upload(file: UploadedMediaFile) {
@@ -209,6 +210,7 @@ export class MediaObjectService {
 
   async findById(id: string) {
     const media = await this.db.mediaObject.findUnique({
+      // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
       where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read) },
     });
 
@@ -220,15 +222,24 @@ export class MediaObjectService {
   }
 
   /**
-   * One page of readable media objects plus the total matching count for the
-   * response envelope (#372). Both statements share a REPEATABLE READ snapshot,
-   * so an upload or a delete landing mid-request cannot make `total` describe a
-   * set the caller was not served.
+   * One page of the caller's own media objects plus the total matching count
+   * for the response envelope (#372). Both statements share a REPEATABLE READ
+   * snapshot, so an upload or a delete landing mid-request cannot make `total`
+   * describe a set the caller was not served.
+   *
+   * The scope is the media the caller owns, and the ceiling only clips it
+   * (#514). For an `apiKey` actor it carries the key ∩ owner floor. Before,
+   * the ceiling was the answer set, so a user also listed every other user's
+   * Public media and staff listed every object on the server. Media that
+   * leaves the list stays readable by id for whoever could read it before.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my media" has no meaning without a user, and the refusal must never
+   * soften into an empty page. PROVISIONAL — #395.
    */
   async list(pagination: PaginationQueryDto): Promise<PaginatedRows<MediaObject>> {
-    const where: Prisma.MediaObjectWhereInput = {
-      AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.read),
-    };
+    const ownerId = resolveScopeSubjectId(this.ability);
+    const where = this.scopeComposer.compose(ResourceType.MediaObject, Action.read, { ownerId });
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -279,6 +290,7 @@ export class MediaObjectService {
   private async deleteRowChecked(id: string): Promise<MediaObject> {
     try {
       return await this.db.mediaObject.delete({
+        // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
         where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.delete) },
       });
     } catch (error) {
@@ -359,6 +371,7 @@ export class MediaObjectService {
   private async setVisibility(id: string, visibility: Visibility) {
     try {
       return await this.db.mediaObject.update({
+        // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
         where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update) },
         data: { visibility },
       });
