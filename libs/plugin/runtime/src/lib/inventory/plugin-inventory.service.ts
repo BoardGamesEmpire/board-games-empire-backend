@@ -249,7 +249,15 @@ const SERVER_SELECT = {
 /** `enabled` only, surfaced as `serverEnabled` — no provenance, no staging. */
 const UNIT_SELECT = { ...IDENTITY_SELECT, enabled: true } satisfies Prisma.PluginSelect;
 
-const UNIT_STATE_SELECT = { enabled: true, suspendedForConsent: true, suspendedAt: true } as const;
+/**
+ * Checked against both models it selects from. The household list spreads it
+ * into a wider select, and a spread's keys are not checked there.
+ */
+const UNIT_STATE_SELECT = {
+  enabled: true,
+  suspendedForConsent: true,
+  suspendedAt: true,
+} as const satisfies Prisma.UserPluginSelect satisfies Prisma.HouseholdPluginSelect;
 
 type IdentityRow = Prisma.PluginGetPayload<{ select: typeof IDENTITY_SELECT }>;
 type ServerRow = Prisma.PluginGetPayload<{ select: typeof SERVER_SELECT }>;
