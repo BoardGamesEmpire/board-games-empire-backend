@@ -56,6 +56,22 @@ describe('event occurrences', () => {
       'POST /api/events/:eventId/occurrences',
     );
 
+  /** Puts a game from the host's list on the occurrence, under `sortOrder` when one is given. */
+  const directAddedGameId = async (
+    actor: AuthenticatedActor,
+    eventId: string,
+    occurrenceId: string,
+    sortOrder?: number,
+  ) =>
+    eventGameEnvelope(
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+        .set(actor.headers)
+        .send({ ...(await arrangeListEntry(db.client, eventId, actor.user.id)), occurrenceId, sortOrder })
+        .expect(201),
+      'POST /api/events/:eventId/nominations/direct-add with a sort order',
+    ).id;
+
   it('adds an occurrence, lists it, reads it and updates it', async () => {
     const host = await actors.user();
     const eventId = await createdEventId(host);
@@ -145,21 +161,8 @@ describe('event occurrences', () => {
 
     // Added in the reverse of their order, so a read that returns them as
     // they were written comes back wrong.
-    const addedGameId = async (sortOrder: number) =>
-      eventGameEnvelope(
-        await request(baseUrl)
-          .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
-          .set(host.headers)
-          .send({
-            ...(await arrangeListEntry(db.client, eventId, host.user.id)),
-            occurrenceId: occurrence.id,
-            sortOrder,
-          })
-          .expect(201),
-        'POST /api/events/:eventId/nominations/direct-add with a sort order',
-      ).id;
-    const second = await addedGameId(1);
-    const first = await addedGameId(0);
+    const second = await directAddedGameId(host, eventId, occurrence.id, 1);
+    const first = await directAddedGameId(host, eventId, occurrence.id, 0);
 
     const read = occurrenceEnvelope(
       await readOccurrence(host, eventId, occurrence.id).expect(200),
@@ -172,6 +175,40 @@ describe('event occurrences', () => {
       'GET /api/events/:eventId/occurrences with two games',
     );
     expect(page.occurrences.map((listed) => listed.games.map((game) => game.id))).toEqual([[first, second]]);
+  });
+
+  it("breaks a tie in the host's order by the game's id", async () => {
+    const host = await actors.user();
+    const eventId = await createdEventId(host);
+    const occurrence = await addedOccurrence(host, eventId);
+
+    // No game here is given a sort order, so each takes the default and they
+    // all tie, as in any lineup the host leaves unnumbered. Ids are random, so
+    // games added in turn may already be in id order, and a read returning
+    // ties as they were written would pass. Adding stops once one sorts before
+    // an earlier one; eight in id order by chance is 1 in 40,320.
+    const inIdOrder = (ids: readonly string[]) => ids.every((id, index) => index === 0 || ids[index - 1] < id);
+    const addedIds: string[] = [];
+    do {
+      addedIds.push(await directAddedGameId(host, eventId, occurrence.id));
+    } while (inIdOrder(addedIds) && addedIds.length < 8);
+    expect(inIdOrder(addedIds)).toBe(false);
+
+    // The ids are lowercase letters and digits of one length, so the
+    // database's order and a string sort agree.
+    const byId = [...addedIds].sort();
+
+    const read = occurrenceEnvelope(
+      await readOccurrence(host, eventId, occurrence.id).expect(200),
+      'GET /api/events/:eventId/occurrences/:occurrenceId with tied games',
+    );
+    expect(read.games.map((game) => game.id)).toEqual(byId);
+
+    const page = listOccurrencesEnvelope(
+      await listOccurrences(host, eventId).expect(200),
+      'GET /api/events/:eventId/occurrences with tied games',
+    );
+    expect(page.occurrences.map((listed) => listed.games.map((game) => game.id))).toEqual([byId]);
   });
 
   it('cancels a confirmed occurrence, then deletes it', async () => {
