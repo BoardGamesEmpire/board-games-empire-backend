@@ -39,14 +39,15 @@ export class WsFrameScope {
 }
 
 /**
- * Primes each frame's abilities, after `AuthGuard` has found the frame's
+ * Primes each frame's abilities, after `WsSessionGuard` has found the frame's
  * session still live and before `PoliciesGuard` reads them.
  *
  * A guard rather than part of the packet middleware: guards run only for a
  * frame some handler listens for, so a client sending made-up events buys no
  * permission lookup with them, and a failure reaches the gateway's exception
- * filter like any other refusal. After `AuthGuard`, so a frame whose session
- * has ended is refused for that before any of its abilities are looked up.
+ * filter like any other refusal. After `WsSessionGuard`, so a frame whose
+ * session has ended is refused for that before any of its abilities are
+ * looked up.
  *
  * It also refuses a frame that does not run inside its connection's actor
  * scope, which `AuthenticatedGateway` should make impossible. A subclass that

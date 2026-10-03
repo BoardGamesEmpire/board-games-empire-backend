@@ -24,7 +24,7 @@ import {
 import type { User } from 'better-auth/types';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
-import { AUTH_BASE_PATH } from './constants';
+import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
 
 interface UserCreatedHookDeps {
@@ -174,7 +174,7 @@ export function authFactory(
   return betterAuth({
     telemetry: { enabled: false },
     advanced: {
-      cookiePrefix: 'bge_auth_',
+      cookiePrefix: AUTH_COOKIE_PREFIX,
       disableOriginCheck: options.disableOriginCheck,
     },
     basePath: AUTH_BASE_PATH,

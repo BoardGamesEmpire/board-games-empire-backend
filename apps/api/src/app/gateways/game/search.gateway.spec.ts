@@ -34,13 +34,14 @@ import {
   SearchGamesRequest,
 } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ConflictException, HttpException, Logger } from '@nestjs/common';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
 import { NEVER, of, throwError } from 'rxjs';
 import { Server, Socket } from 'socket.io';
 import { WsFrameScope, WsFrameScopeGuard } from '../base/ws-frame-scope';
+import { WsSessionGuard } from '../base/ws-session';
+import { WsThrottlerGuard } from '../base/ws-throttler.guard';
 import { WsTranslator } from '../base/ws-translator';
 import { GameSearchGateway } from './search.gateway';
 
@@ -75,7 +76,7 @@ describe('GameSearchGateway', () => {
     abilityService.getCurrentResourceConditions.mockReturnValue([FRAME_READ]);
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
-      overrideGuards: [AuthGuard, WsFrameScopeGuard, PoliciesGuard],
+      overrideGuards: [WsThrottlerGuard, WsSessionGuard, WsFrameScopeGuard, PoliciesGuard],
       // The shipped catalog, so the copy the gateway sends itself is asserted
       // as a client reads it.
       imports: [

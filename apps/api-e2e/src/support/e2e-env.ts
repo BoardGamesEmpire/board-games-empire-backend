@@ -133,6 +133,11 @@ export const API_THROTTLE_TTL_MS = 60_000;
  * `127.0.0.1`, and an `Origin: http://127.0.0.1:<port>` does not match a
  * trusted `http://localhost:<port>`. Both spellings are listed so a spec may
  * address the server either way.
+ *
+ * `DISABLE_ORIGIN_CHECK` is pinned off, as CI and `.env.example` have it. A
+ * developer's `.env` may turn it on, and then every cookie is accepted from
+ * any origin: the WebSocket specs that prove a cookie from an untrusted or
+ * missing origin is refused (#511) would fail on that machine alone.
  */
 export function apiEnvOverrides(baseUrl: string, port: number): Record<string, string> {
   const trustedOrigins = [baseUrl, baseUrl.replace('127.0.0.1', 'localhost')];
@@ -144,6 +149,7 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
     TRUSTED_ORIGINS: trustedOrigins.join(','),
     THROTTLE_LIMIT: String(API_THROTTLE_LIMIT),
     THROTTLE_TTL_MS: String(API_THROTTLE_TTL_MS),
+    DISABLE_ORIGIN_CHECK: 'false',
   };
 }
 

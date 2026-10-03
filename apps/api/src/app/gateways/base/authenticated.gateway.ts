@@ -6,10 +6,11 @@ import { buildWsClientData, type WsRefusalReason } from '@bge/utils';
 import { Logger, UseFilters, UseGuards } from '@nestjs/common';
 import { OnGatewayConnection, OnGatewayInit } from '@nestjs/websockets';
 import { Http } from '@status/codes';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { Namespace, Socket } from 'socket.io';
 import { WsConnectionRefusal, WsErrorFilter } from '../filters';
 import { WsFrameScope, WsFrameScopeGuard } from './ws-frame-scope';
+import { connectionCredential, WsSessionGuard } from './ws-session';
+import { WsThrottlerGuard } from './ws-throttler.guard';
 import { WsTranslator } from './ws-translator';
 
 /**
@@ -52,6 +53,13 @@ class HandshakeRefusal extends Error {
  * before it is accepted, so the middleware leaves no window. A refusal reaches
  * the client as its `connect_error`, with the envelope as its `data`.
  *
+ * A connection authenticates with one credential, from whichever channel
+ * carries it ({@link connectionCredential}), and every frame is checked
+ * against that same credential (#511). A cookie is accepted only from a
+ * trusted origin: the browser attaches it to a socket any page opens, so
+ * without the check another site could connect as the user and read what the
+ * socket hears.
+ *
  * The middleware also resolves the connection's locale, which every frame's
  * scope then carries (#180). A refusal renders in the handshake's
  * `Accept-Language` alone, since there is no user to consult yet.
@@ -64,11 +72,13 @@ class HandshakeRefusal extends Error {
  * enhancer runs on a gateway message, so a gateway that left them out would
  * go on serving a revoked session, ignore `@CheckPolicies`, and answer in
  * Nest's default shape, and nothing would fail. Nest reads a class's enhancers
- * from its parents too. `AuthGuard` comes first, so a frame whose session has
- * ended is refused before its abilities are looked up, and the scope guard
- * primes them before `PoliciesGuard` reads them.
+ * from its parents too. The throttler comes first, as it does over HTTP, so a
+ * flood of frames costs a counter each and no session lookup (#510). The
+ * session guard comes next, so a frame whose session has ended is refused
+ * before its abilities are looked up, and the scope guard primes them before
+ * `PoliciesGuard` reads them.
  */
-@UseGuards(AuthGuard, WsFrameScopeGuard, PoliciesGuard)
+@UseGuards(WsThrottlerGuard, WsSessionGuard, WsFrameScopeGuard, PoliciesGuard)
 @UseFilters(WsErrorFilter)
 export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayConnection {
   protected abstract readonly logger: Logger;
@@ -121,15 +131,23 @@ export abstract class AuthenticatedGateway implements OnGatewayInit, OnGatewayCo
   }
 
   private async authenticate(client: Socket): Promise<void> {
-    const token = client.handshake?.auth?.token;
-    this.logger.log(`WS connection attempt: socketId=${client.id} token=${token ? 'present' : 'absent'}`);
+    const credential = connectionCredential(client.handshake);
+    this.logger.log(`WS connection attempt: socketId=${client.id} credential=${credential?.channel ?? 'absent'}`);
 
-    if (!token) {
+    if (!credential) {
       this.logger.warn(`Unauthorized WS connection attempt: socketId=${client.id}`);
       throw new HandshakeRefusal(Http.Unauthorized, t('errors.auth.no_token'));
     }
 
-    const session = await this.authService.getSessionFromToken(token);
+    const { headers } = client.handshake;
+    if (credential.channel === 'cookie' && !(await this.authService.isTrustedCookieRequest(headers))) {
+      this.logger.warn(
+        `WS connection refused (untrusted origin): socketId=${client.id} origin=${headers.origin ?? 'absent'}`,
+      );
+      throw new HandshakeRefusal(Http.Forbidden, t('errors.auth.untrusted_origin'));
+    }
+
+    const session = await this.authService.getSessionFromHeaders(credential.headers);
     if (!this.authService.isValidSession(session)) {
       this.logger.warn(`Invalid session for WS connection: socketId=${client.id}`);
       throw new HandshakeRefusal(Http.Unauthorized, t('errors.auth.session_invalid'));

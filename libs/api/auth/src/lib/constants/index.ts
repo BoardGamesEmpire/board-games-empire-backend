@@ -17,3 +17,10 @@ export enum AuthEvent {
  * The base path for all BetterAuth endpoints
  */
 export const AUTH_BASE_PATH = '/api/auth';
+
+/**
+ * The prefix BetterAuth names its cookies with (`advanced.cookiePrefix`), so
+ * the session cookie is `bge_auth_.session_token`. `hasSessionCookie` builds
+ * its match from the same value.
+ */
+export const AUTH_COOKIE_PREFIX = 'bge_auth_';

@@ -2,7 +2,6 @@ import { AuditContextService } from '@bge/actor-context';
 import { type I18nTranslations, translateException, translateValidationErrors } from '@bge/i18n';
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { ArgumentsHost, Catch, HttpException, Logger, WsExceptionFilter } from '@nestjs/common';
-import { WsException } from '@nestjs/websockets';
 import { Http } from '@status/codes';
 import { I18nService, I18nValidationException } from 'nestjs-i18n';
 import type { Socket } from 'socket.io';
@@ -21,8 +20,8 @@ import { refuseSocket, wsErrorPayload, wsExceptionPayload, type WsFrame } from '
  *
  * It is also where a frame's copy is translated (#180), as the global filters
  * do over HTTP: validation messages and `t()` markers, in the locale the
- * frame's CLS scope carries. Its own fixed copy for AuthGuard's refusals and
- * the 500 stays English, as those same refusals are over HTTP.
+ * frame's CLS scope carries. Its own fixed copy, the 500's, stays English, as
+ * Nest's own 500 does over HTTP.
  *
  * No app-wide filter runs on a gateway message (Nest builds the WS exception
  * context without the application's global enhancers), so it is bound on
@@ -43,9 +42,8 @@ export class WsErrorFilter implements WsExceptionFilter {
     const client = ws.getClient<Socket>();
     const frame = { pattern: ws.getPattern(), data: ws.getData() };
 
-    // Validation failures, and the refusals handlers throw. A 401 says the
-    // session is gone however it was raised, so it ends the connection the way
-    // AuthGuard's own does below.
+    // Validation failures, and the refusals guards and handlers throw. A 401
+    // says the session is gone, so it ends the connection.
     if (exception instanceof HttpException) {
       const payload = this.translatedPayload(exception, frame);
       if (payload.statusCode === Http.Unauthorized) {
@@ -57,20 +55,8 @@ export class WsErrorFilter implements WsExceptionFilter {
       return;
     }
 
-    // AuthGuard's two WS refusals. Only the missing session ends the
-    // connection: a frame the client may not send says nothing about the next.
-    if (exception instanceof WsException && exception.message === 'UNAUTHORIZED') {
-      await refuseSocket(client, wsErrorPayload(Http.Unauthorized, 'Unauthorized', frame));
-      return;
-    }
-
-    if (exception instanceof WsException && exception.message === 'FORBIDDEN') {
-      client.emit(WsErrorEvents.Exception, wsErrorPayload(Http.Forbidden, 'Insufficient permissions', frame));
-      return;
-    }
-
-    // Anything else is unexpected, a WsException with any other message
-    // included: its text was written for whoever threw it, not for the client.
+    // Anything else is unexpected, a WsException included: its text was
+    // written for whoever threw it, not for the client.
     this.logger.error(`Unhandled exception on ${frame.pattern}: socketId=${client.id}`, exception);
     client.emit(WsErrorEvents.Exception, wsErrorPayload(Http.InternalServerError, 'Internal server error', frame));
   }

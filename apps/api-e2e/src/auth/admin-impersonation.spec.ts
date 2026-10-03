@@ -44,10 +44,8 @@ describe('better-auth admin impersonation', () => {
    * Not load-bearing for these particular requests, and the comment should not
    * imply otherwise: `validateOrigin` returns early unless the request carries
    * a `Cookie` or CSRF forcing applies (`api/middlewares/origin-check.mjs`),
-   * and these authenticate by bearer token. `.env` also sets
-   * `DISABLE_ORIGIN_CHECK=true` locally, which `apiEnvOverrides` does not pin.
-   * `Origin` is sent so the request stays correct wherever the check IS armed
-   * — `.env.example` ships it enabled.
+   * and these authenticate by bearer token. `Origin` is sent so the request
+   * stays correct with the check armed, as `apiEnvOverrides` pins it.
    *
    * `baseUrl` is used verbatim: `apiEnvOverrides` puts exactly this value into
    * `TRUSTED_ORIGINS`, so any normalization here could only diverge from it.

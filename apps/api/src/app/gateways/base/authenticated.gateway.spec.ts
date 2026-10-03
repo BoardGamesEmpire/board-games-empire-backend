@@ -43,23 +43,33 @@ const frameScope = { bind: jest.fn() } as unknown as WsFrameScope;
 const connection = ({
   token = 'token-1',
   acceptLanguage,
-}: { token?: string | null; acceptLanguage?: string } = {}): Socket =>
+  headers = {},
+}: { token?: string | null; acceptLanguage?: string; headers?: Record<string, string> } = {}): Socket =>
   ({
     id: 'socket-1',
     handshake: {
       auth: token === null ? {} : { token },
-      headers: acceptLanguage ? { 'accept-language': acceptLanguage } : {},
+      headers: { ...(acceptLanguage && { 'accept-language': acceptLanguage }), ...headers },
     },
     data: {},
     onAny: jest.fn(),
   }) as unknown as Socket;
 
-/** An auth service whose every token looks up `session`. */
+const COOKIE = 'bge_auth_.session_token=cookie-token.signature';
+const TRUSTED_ORIGIN = 'https://app.example';
+
+/**
+ * An auth service whose every credential looks up `session`, and which
+ * trusts a cookie from {@link TRUSTED_ORIGIN} alone.
+ */
 const authServiceFor = (session: unknown, valid = true) =>
   ({
-    getSessionFromToken: jest.fn().mockResolvedValue(session),
+    getSessionFromHeaders: jest.fn().mockResolvedValue(session),
     isValidSession: () => valid,
+    isTrustedCookieRequest: jest.fn(async ({ origin }: { origin?: string }) => origin === TRUSTED_ORIGIN),
   }) as unknown as AuthService;
+
+const liveSession = { user: { id: 'user-1', isAnonymous: false }, session: {} };
 
 describe('AuthenticatedGateway', () => {
   let resolve: jest.Mock;
@@ -80,7 +90,7 @@ describe('AuthenticatedGateway', () => {
   it('refuses a connection whose session cannot be looked up with a 500, and logs why', async () => {
     const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const outage = new Error('connect ECONNREFUSED redis:6379');
-    const authService = { getSessionFromToken: jest.fn().mockRejectedValue(outage) } as unknown as AuthService;
+    const authService = { getSessionFromHeaders: jest.fn().mockRejectedValue(outage) } as unknown as AuthService;
     const { namespace, middleware } = fakeNamespace();
 
     new TestGateway(authService, frameScope, translator).afterInit(namespace);
@@ -97,8 +107,8 @@ describe('AuthenticatedGateway', () => {
   });
 
   it("looks up a connection's session once, however many gateways share its namespace", async () => {
-    const getSessionFromToken = jest.fn().mockResolvedValue(null);
-    const authService = { getSessionFromToken, isValidSession: () => false } as unknown as AuthService;
+    const getSessionFromHeaders = jest.fn().mockResolvedValue(null);
+    const authService = { getSessionFromHeaders, isValidSession: () => false } as unknown as AuthService;
     jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const { namespace, middleware } = fakeNamespace();
 
@@ -106,7 +116,71 @@ describe('AuthenticatedGateway', () => {
     new OtherTestGateway(authService, frameScope, translator).afterInit(namespace);
     await handshake(middleware, connection());
 
-    expect(getSessionFromToken).toHaveBeenCalledTimes(1);
+    expect(getSessionFromHeaders).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the credential', () => {
+    beforeEach(() => jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined));
+
+    it("looks up the token's session from the token alone, and checks no origin", async () => {
+      const authService = authServiceFor(liveSession);
+      const { namespace, middleware } = fakeNamespace();
+      const client = connection({
+        headers: { authorization: 'Bearer other-token', cookie: COOKIE, origin: 'https://evil.example' },
+      });
+
+      new TestGateway(authService, frameScope, translator).afterInit(namespace);
+
+      await expect(handshake(middleware, client)).resolves.toBeUndefined();
+      expect(authService.getSessionFromHeaders).toHaveBeenCalledWith({ authorization: 'Bearer token-1' });
+      expect(authService.isTrustedCookieRequest).not.toHaveBeenCalled();
+      expect(client.data).toMatchObject({ userId: 'user-1' });
+    });
+
+    it('connects with the Authorization header alone when no token is sent, and checks no origin', async () => {
+      const authService = authServiceFor(liveSession);
+      const { namespace, middleware } = fakeNamespace();
+      const client = connection({ token: null, headers: { authorization: 'Bearer header-token', cookie: COOKIE } });
+
+      new TestGateway(authService, frameScope, translator).afterInit(namespace);
+
+      await expect(handshake(middleware, client)).resolves.toBeUndefined();
+      expect(authService.getSessionFromHeaders).toHaveBeenCalledWith({ authorization: 'Bearer header-token' });
+      expect(authService.isTrustedCookieRequest).not.toHaveBeenCalled();
+    });
+
+    it('connects with the cookie alone from a trusted origin', async () => {
+      const authService = authServiceFor(liveSession);
+      const { namespace, middleware } = fakeNamespace();
+      const client = connection({ token: null, headers: { cookie: COOKIE, origin: TRUSTED_ORIGIN } });
+
+      new TestGateway(authService, frameScope, translator).afterInit(namespace);
+
+      await expect(handshake(middleware, client)).resolves.toBeUndefined();
+      expect(authService.isTrustedCookieRequest).toHaveBeenCalledWith(client.handshake.headers);
+      expect(authService.getSessionFromHeaders).toHaveBeenCalledWith({ cookie: COOKIE });
+      expect(client.data).toMatchObject({ userId: 'user-1' });
+    });
+
+    it.each([
+      ['an untrusted origin', { origin: 'https://evil.example' }],
+      ['no origin', {}],
+    ])('refuses a cookie from %s with a 403, before looking its session up', async (_, origin) => {
+      const authService = authServiceFor(liveSession);
+      const { namespace, middleware } = fakeNamespace();
+      const client = connection({ token: null, acceptLanguage: 'fr', headers: { cookie: COOKIE, ...origin } });
+
+      new TestGateway(authService, frameScope, translator).afterInit(namespace);
+      const refusal = await handshake(middleware, client);
+
+      expect(refusal).toBeInstanceOf(WsConnectionRefusal);
+      expect(refusal).toMatchObject({
+        message: 'fr:errors.auth.untrusted_origin',
+        data: { statusCode: 403, message: 'fr:errors.auth.untrusted_origin' },
+      });
+      expect(authService.getSessionFromHeaders).not.toHaveBeenCalled();
+      expect(client.data).toEqual({});
+    });
   });
 
   describe('the locale', () => {

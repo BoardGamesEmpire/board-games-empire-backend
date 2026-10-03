@@ -202,6 +202,11 @@ describe('e2e-env (pure logic)', () => {
       expect(apiEnvOverrides(baseUrl, 41234).THROTTLE_TTL_MS).toBe(String(API_THROTTLE_TTL_MS));
     });
 
+    it("arms the origin check whatever a developer's .env says", () => {
+      // The cookie-origin refusals over WebSocket (#511) pass only while it is armed.
+      expect(apiEnvOverrides(baseUrl, 41234).DISABLE_ORIGIN_CHECK).toBe('false');
+    });
+
     it('emits every override as a string, since process env carries no other type', () => {
       // A numeric value here reaches `spawn`'s env object as a number and is
       // stringified inconsistently across platforms; Joi would then validate

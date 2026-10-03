@@ -281,7 +281,7 @@ describe('WsErrorFilter', () => {
     expect(sent).not.toHaveProperty('correlationId');
   });
 
-  it('ends the connection for an HTTP 401 as for a missing session: `auth:error`, then a disconnect', async () => {
+  it('ends the connection for any HTTP 401: `auth:error`, then a disconnect', async () => {
     const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
     await filter.catch(new UnauthorizedException('Session revoked'), host);
@@ -297,38 +297,21 @@ describe('WsErrorFilter', () => {
     expect(client.disconnect).toHaveBeenCalledWith(true);
   });
 
-  describe('the WsExceptions AuthGuard throws', () => {
-    it('answers a frame whose session is gone on `auth:error`, then disconnects', async () => {
-      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
+  it("tells a frame whose session has ended in the session guard's copy, before it disconnects", async () => {
+    const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
 
-      await filter.catch(new WsException('UNAUTHORIZED'), host);
+    await filter.catch(new UnauthorizedException(t('errors.auth.session_invalid')), host);
 
-      expect(client.emit).toHaveBeenCalledTimes(1);
-      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.AuthError, {
-        statusCode: 401,
-        error: 'Unauthorized',
-        message: 'Unauthorized',
-        pattern: 'search:start',
-        correlationId: 'corr-1',
-      });
-      expect(client.disconnect).toHaveBeenCalledWith(true);
-      expect(client.emit.mock.invocationCallOrder[0]).toBeLessThan(client.disconnect.mock.invocationCallOrder[0]);
+    expect(client.emit).toHaveBeenCalledTimes(1);
+    expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.AuthError, {
+      statusCode: 401,
+      error: 'Unauthorized',
+      message: 'Session expired or invalid',
+      pattern: 'search:start',
+      correlationId: 'corr-1',
     });
-
-    it('refuses a frame the client may not send on `exception`, and keeps the socket open', async () => {
-      const { client, host } = hostFor('search:start', { correlationId: 'corr-1' });
-
-      await filter.catch(new WsException('FORBIDDEN'), host);
-
-      expect(client.emit).toHaveBeenCalledWith(WsErrorEvents.Exception, {
-        statusCode: 403,
-        error: 'Forbidden',
-        message: 'Insufficient permissions',
-        pattern: 'search:start',
-        correlationId: 'corr-1',
-      });
-      expect(client.disconnect).not.toHaveBeenCalled();
-    });
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.emit.mock.invocationCallOrder[0]).toBeLessThan(client.disconnect.mock.invocationCallOrder[0]);
   });
 
   describe('anything else', () => {
@@ -336,7 +319,9 @@ describe('WsErrorFilter', () => {
 
     it.each([
       ['an unexpected error', new Error('connect ECONNREFUSED postgres://bge:secret@db:5432')],
-      ['a WsException with a message AuthGuard never throws', new WsException('meaningful only to its thrower')],
+      ['a WsException', new WsException('meaningful only to its thrower')],
+      // better-auth's AuthGuard throws this one. No gateway runs that guard.
+      ['a WsException naming a refusal', new WsException('UNAUTHORIZED')],
     ])('answers %s with a generic 500, and logs it', async (_, exception) => {
       const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
       const { client, host } = hostFor('search:start', { correlationId: 'corr-1', query: 'Gloomhaven' });

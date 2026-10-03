@@ -16,10 +16,12 @@ interface ThrottleConfigReader {
  * Builds the global throttler set: `default` tracks by source IP and applies to
  * every route, and `user` tracks by authenticated user but stays inert unless a
  * route opts in (feedback submission does — 30/user/hr + 100/IP/hr, issue #45).
+ * Gateways run the same set through `WsThrottlerGuard`, which counts each frame
+ * against its user rather than an IP, for every tier (#510).
  *
  * "Applies to every route" is per route, not across them: `ThrottlerGuard`
- * hashes the controller and handler name into the storage key, so the limit
- * below is a ceiling on each endpoint separately.
+ * hashes the controller or gateway and the handler name into the storage key,
+ * so the limit below is a ceiling on each endpoint separately.
  *
  * Extracted from `AppModule` rather than inlined into `ThrottlerModule.forRootAsync`
  * so it can be asserted directly. The defect this guards against (#293) lived in

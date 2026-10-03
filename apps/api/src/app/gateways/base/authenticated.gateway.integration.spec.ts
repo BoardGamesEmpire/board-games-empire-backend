@@ -21,22 +21,25 @@ import {
 } from '@bge/permissions';
 import { BGE_ACTOR_HEADER, WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { Metadata } from '@grpc/grpc-js';
-import { type CanActivate, type INestApplication, Logger, Module, UsePipes } from '@nestjs/common';
+import { type INestApplication, Logger, Module, UsePipes } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { MessageBody, SubscribeMessage, WebSocketGateway, WsException } from '@nestjs/websockets';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
+import { ThrottlerModule, ThrottlerStorageService } from '@nestjs/throttler';
+import { MessageBody, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import { IsString } from 'class-validator';
 import { ClsModule } from 'nestjs-cls';
 import { I18nModule, I18nService, I18nValidationPipe } from 'nestjs-i18n';
 import { randomUUID } from 'node:crypto';
+import type { IncomingHttpHeaders } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Observable } from 'rxjs';
 import { type Socket as ClientSocket, io } from 'socket.io-client';
+import { createThrottlers } from '../../lib/throttlers';
 import { WsErrorFilter } from '../filters';
 import { GameSearchGateway } from '../game/search.gateway';
 import { AuthenticatedGateway } from './authenticated.gateway';
 import { WsFrameScope } from './ws-frame-scope';
+import { WsSessionGuard } from './ws-session';
 import { WsTranslator } from './ws-translator';
 
 const USER_A = 'user-a';
@@ -46,6 +49,20 @@ const USER_WITHOUT_ROLE_GRAPH = 'user-without-role-graph';
 
 /** Each token authenticates as the user of the same name; one fails its lookup. */
 const OUTAGE_TOKEN = 'token-outage';
+
+/**
+ * How many frames one user may send one handler in the throttle window. Low
+ * enough for a test to reach: no other test sends one handler more than two
+ * frames as one user, and the counts are cleared after each test.
+ */
+const FRAME_LIMIT = 3;
+
+/** The app's own throttler tiers, at {@link FRAME_LIMIT}. */
+const THROTTLE_CONFIG: Record<string, number> = {
+  'throttle.ttlMs': 60_000,
+  'throttle.limit': FRAME_LIMIT,
+  'throttle.trustedProxyHops': 0,
+};
 
 /**
  * A role graph whose only grant reads the games its holder created, so the
@@ -76,7 +93,9 @@ const readConditionsOf = (userId: string) => [{ OR: [{ createdById: userId }] }]
 
 /**
  * A session lookup that can be held open, so a client's first frame reaches
- * the server while its connection is still being authenticated.
+ * the server while its connection is still being authenticated. Each bearer
+ * token names the user of the same name, and a user's session is gone once
+ * it is in `endedSessions`.
  */
 class GatedAuthService {
   private gate: Promise<void> = Promise.resolve();
@@ -86,6 +105,11 @@ class GatedAuthService {
   /** Resolves once a held lookup has begun. */
   lookupStarted: Promise<void> = Promise.resolve();
 
+  /** The headers each lookup was given, in order. */
+  readonly lookups: IncomingHttpHeaders[] = [];
+
+  constructor(private readonly endedSessions: ReadonlySet<string>) {}
+
   /** Holds every lookup until the returned function is called. */
   hold(): () => void {
     this.gate = new Promise<void>((settle) => (this.release = settle));
@@ -94,16 +118,23 @@ class GatedAuthService {
     return () => this.release();
   }
 
-  async getSessionFromToken(token: string) {
+  async getSessionFromHeaders(headers: IncomingHttpHeaders) {
+    this.lookups.push(headers);
     this.markLookupStarted();
     await this.gate;
 
+    const token = headers.authorization?.replace(/^Bearer /, '');
     if (token === OUTAGE_TOKEN) {
       throw new Error('connect ECONNREFUSED redis:6379');
     }
 
+    const userId = token?.replace(/^token-/, '');
+    if (!userId || this.endedSessions.has(userId)) {
+      return null;
+    }
+
     return {
-      user: { id: token.replace(/^token-/, ''), isAnonymous: false },
+      user: { id: userId, isAnonymous: false },
       session: { expiresAt: new Date(Date.now() + 60_000) },
     };
   }
@@ -202,23 +233,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   /** Users whose session has ended since they connected. */
   const endedSessions = new Set<string>();
 
-  /**
-   * Stands in for `AuthGuard`, recording the actor each frame runs as when it
-   * checks the frame's session, and refusing a session that has ended the way
-   * `AuthGuard` does.
-   */
-  const authGuardSaw: (Actor | null)[] = [];
-  const recordingAuthGuard: CanActivate = {
-    canActivate: () => {
-      const actor = getActorSnapshotFromCls().actor ?? null;
-      authGuardSaw.push(actor);
-      if (actor?.kind === 'user' && endedSessions.has(actor.userId)) {
-        throw new WsException('UNAUTHORIZED');
-      }
+  const throttlerStorage = new ThrottlerStorageService();
 
-      return true;
-    },
-  };
+  /** The actor each frame ran as when its session was checked. */
+  const sessionGuardSaw: (Actor | null)[] = [];
 
   /** What `PoliciesGuard` read on each frame: the actor, and the rules of its abilities. */
   const policiesGuardSaw: { actor: Actor | null; abilityRules: unknown[] }[] = [];
@@ -260,6 +278,12 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   let i18n: I18nService<I18nTranslations>;
 
   beforeAll(async () => {
+    const sessionCanActivate = WsSessionGuard.prototype.canActivate;
+    jest.spyOn(WsSessionGuard.prototype, 'canActivate').mockImplementation(function (this: WsSessionGuard, ...args) {
+      sessionGuardSaw.push(getActorSnapshotFromCls().actor ?? null);
+      return sessionCanActivate.apply(this, args);
+    });
+
     const filterCatch = WsErrorFilter.prototype.catch;
     jest.spyOn(WsErrorFilter.prototype, 'catch').mockImplementation(function (this: WsErrorFilter, ...args) {
       filterSaw.push(getActorSnapshotFromCls().actor ?? null);
@@ -275,7 +299,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       return policiesCanActivate.apply(this, args);
     });
 
-    auth = new GatedAuthService();
+    auth = new GatedAuthService(endedSessions);
 
     const moduleRef = await Test.createTestingModule({
       imports: [
@@ -285,6 +309,10 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         I18nModule.forRoot({
           fallbackLanguage: FALLBACK_LOCALE,
           loaderOptions: { path: I18N_CATALOG_DIR, watch: false },
+        }),
+        ThrottlerModule.forRoot({
+          throttlers: createThrottlers({ getOrThrow: <T>(key: string) => THROTTLE_CONFIG[key] as T }),
+          storage: throttlerStorage,
         }),
       ],
       providers: [
@@ -305,8 +333,6 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       .useModule(StubDatabaseModule)
       .overrideProvider(PermissionsService)
       .useValue({ getUserRoleGraph })
-      .overrideGuard(AuthGuard)
-      .useValue(recordingAuthGuard)
       .compile();
 
     app = moduleRef.createNestApplication({ logger: false });
@@ -323,7 +349,11 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
     revoked.clear();
     endedSessions.clear();
-    authGuardSaw.length = 0;
+    // Its pending expiry timers first, which would otherwise fire on keys cleared here.
+    throttlerStorage.onApplicationShutdown();
+    throttlerStorage.storage.clear();
+    auth.lookups.length = 0;
+    sessionGuardSaw.length = 0;
     policiesGuardSaw.length = 0;
     filterSaw.length = 0;
     coordinatorSaw.length = 0;
@@ -336,15 +366,23 @@ describe('AuthenticatedGateway (over a real socket)', () => {
     await app.close();
   });
 
-  /** A socket authenticating as `userId`, not yet connected. */
-  const socketAs = (userId: string, namespace = 'games/search', acceptLanguage?: string): ClientSocket => {
+  /**
+   * A socket authenticating as `userId`, not yet connected. `headers` go on
+   * its handshake beside the token.
+   */
+  const socketAs = (
+    userId: string,
+    namespace = 'games/search',
+    acceptLanguage?: string,
+    headers: Record<string, string> = {},
+  ): ClientSocket => {
     const socket = io(`${baseUrl}/${namespace}`, {
       autoConnect: false,
       forceNew: true,
       reconnection: false,
       transports: ['websocket'],
       auth: { token: `token-${userId}` },
-      ...(acceptLanguage && { extraHeaders: { 'accept-language': acceptLanguage } }),
+      extraHeaders: { ...(acceptLanguage && { 'accept-language': acceptLanguage }), ...headers },
     });
     sockets.push(socket);
 
@@ -432,7 +470,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       expect(await outcome).toEqual({ errors: [] });
       expect(await refusal).toMatchObject({ statusCode: 400, correlationId: refused.correlationId });
-      expect(authGuardSaw).toEqual([userActor(USER_A), userActor(USER_A)]);
+      expect(sessionGuardSaw).toEqual([userActor(USER_A), userActor(USER_A)]);
       expect(policiesGuardSaw.map(({ actor }) => actor)).toEqual([userActor(USER_A), userActor(USER_A)]);
       expect(queryLocalGames.mock.calls.map(([, conditions]) => conditions)).toEqual([readConditionsOf(USER_A)]);
       expect(coordinatorSaw).toEqual([userActor(USER_A)]);
@@ -556,7 +594,13 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       socket.emit(SearchEvents.SearchStart, searchStart());
 
-      expect(await told).toMatchObject({ statusCode: 401, pattern: SearchEvents.SearchStart });
+      // The copy the handshake gives the same session, not AuthGuard's bare
+      // "Unauthorized" (#511).
+      expect(await told).toMatchObject({
+        statusCode: 401,
+        message: 'Session expired or invalid',
+        pattern: SearchEvents.SearchStart,
+      });
       expect(getUserRoleGraph).not.toHaveBeenCalled();
     });
 
@@ -572,6 +616,101 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       // would have begun before the search's.
       await answered;
       expect(getUserRoleGraph).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('the session each frame is checked against', () => {
+    /** Another user's session, on the handshake headers beside the token. */
+    const theirSession = { authorization: `Bearer token-${USER_B}`, cookie: `bge_auth_.session_token=token-${USER_B}` };
+
+    it("is its connection's, whatever session its handshake headers name", async () => {
+      const socket = await connected(socketAs(USER_A, 'games/search', undefined, theirSession));
+      endedSessions.add(USER_B);
+      const frame = searchStart();
+      const outcome = searchOutcome(socket, frame.correlationId);
+
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      expect(await outcome).toEqual({ errors: [] });
+      expect(policiesGuardSaw.map(({ actor }) => actor)).toEqual([userActor(USER_A)]);
+      expect(queryLocalGames.mock.calls.map(([, conditions]) => conditions)).toEqual([readConditionsOf(USER_A)]);
+      // The connection's lookup and the frame's each saw the token alone.
+      expect(auth.lookups).toEqual([
+        { authorization: `Bearer token-${USER_A}` },
+        { authorization: `Bearer token-${USER_A}` },
+      ]);
+    });
+
+    it('refuses a frame once its own session ends, though its handshake headers name a live one', async () => {
+      const socket = await connected(socketAs(USER_A, 'games/search', undefined, theirSession));
+      endedSessions.add(USER_A);
+      const told = new Promise<WsErrorPayload>((resolve) => socket.once(WsErrorEvents.AuthError, resolve));
+
+      socket.emit(SearchEvents.SearchStart, searchStart());
+
+      expect(await told).toMatchObject({ statusCode: 401, message: 'Session expired or invalid' });
+      expect(queryLocalGames).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a socket over its frame limit', () => {
+    /** Sends `count` searches one after another, each of which must be served. */
+    const searchesServed = async (socket: ClientSocket, count: number) => {
+      for (let sent = 0; sent < count; sent++) {
+        const frame = searchStart();
+        const outcome = searchOutcome(socket, frame.correlationId);
+        socket.emit(SearchEvents.SearchStart, frame);
+        expect(await outcome).toEqual({ errors: [] });
+      }
+    };
+
+    /** Sends one search more, and resolves with its refusal. */
+    const overTheLimit = async (socket: ClientSocket) => {
+      const frame = searchStart();
+      const refusal = refusalOf(socket, frame.correlationId);
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      return { frame, refusal: await refusal };
+    };
+
+    it('is refused the frame over the limit with a 429 on `exception`, and stays connected', async () => {
+      const socket = await connected(socketAs(USER_A));
+      const closed = jest.fn();
+      socket.on('disconnect', closed);
+      await searchesServed(socket, FRAME_LIMIT);
+
+      const { frame, refusal } = await overTheLimit(socket);
+
+      expect(refusal).toMatchObject({
+        statusCode: 429,
+        error: 'Too Many Requests',
+        pattern: SearchEvents.SearchStart,
+        correlationId: frame.correlationId,
+      });
+      // Long past the pause a 401 waits out before it disconnects.
+      await delay(300);
+      expect(closed).not.toHaveBeenCalled();
+      expect(socket.connected).toBe(true);
+    });
+
+    it("leaves another user's frames alone", async () => {
+      const [flooding, other] = await Promise.all([connected(socketAs(USER_A)), connected(socketAs(USER_B))]);
+      await searchesServed(flooding, FRAME_LIMIT);
+      expect((await overTheLimit(flooding)).refusal).toMatchObject({ statusCode: 429 });
+
+      await searchesServed(other, 1);
+    });
+
+    it('refuses the frame before its session or its abilities are looked up', async () => {
+      const socket = await connected(socketAs(USER_A));
+      await searchesServed(socket, FRAME_LIMIT);
+
+      expect((await overTheLimit(socket)).refusal).toMatchObject({ statusCode: 429 });
+
+      // The connection's lookup, and one for each frame served.
+      expect(auth.lookups).toHaveLength(1 + FRAME_LIMIT);
+      expect(sessionGuardSaw).toHaveLength(FRAME_LIMIT);
+      expect(getUserRoleGraph).toHaveBeenCalledTimes(FRAME_LIMIT);
     });
   });
 
