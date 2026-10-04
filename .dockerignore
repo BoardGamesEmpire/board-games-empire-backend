@@ -1,0 +1,58 @@
+# The build context is a clean checkout: everything git ignores stays out, so a
+# local `docker build` builds what CI builds. These are .gitignore's rules and
+# the nested ones in libs/database and libs/proto/gateway, anchored as git
+# anchors them: a pattern git matches at any depth carries `**/` here. A few
+# entries go further and drop the whole directory where git keeps a file or
+# two (data, .nx, .vscode). Everything generated (the Prisma client, the
+# protobuf types and exports, the i18n types, the version stamp) is
+# regenerated inside the build.
+**/node_modules
+**/dist
+**/out-tsc
+**/tmp
+**/test-output
+**/coverage
+**/*.tsbuildinfo
+**/generated/*
+**/dist-schema
+**/zenstack
+**/.private
+**/.claude
+**/.env
+**/.env.*
+# The build copies it to .env first, as CI's setup does.
+!.env.example
+libs/proto/gateway/src/gen
+libs/proto/gateway/proto-export
+private
+typings
+data
+.nx
+.sass-cache
+connect.lock
+libpeerconnection.log
+
+# Editors, operating systems and logs.
+.idea
+.vscode
+**/.project
+**/.classpath
+**/.c9
+**/.settings
+**/*.launch
+**/*.sublime-workspace
+**/.DS_Store
+**/Thumbs.db
+**/npm-debug.log
+**/yarn-error.log
+**/testem.log
+
+# Not build inputs. Left out so that changing them does not invalidate the
+# layers that copy the source.
+.git
+.github
+docs
+**/*.md
+Dockerfile
+.dockerignore
+compose.yaml

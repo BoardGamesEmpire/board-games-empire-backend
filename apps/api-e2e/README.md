@@ -10,7 +10,7 @@ npx nx e2e @boardgamesempire/api-e2e
 
 Prerequisites: a running Docker daemon (for testcontainers) and nothing else — the `e2e` target's dependencies on `@boardgamesempire/api:build` and `@boardgamesempire/worker:build` produce the bundles, and the harness owns provisioning, migration, and seeding end to end.
 
-Note that the api bundle **externalizes its workspace libraries** rather than inlining them (the same reason `apps/api` carries `prune-lockfile` / `copy-workspace-modules` targets for deployment): at runtime `main.js` resolves `@boardgamesempire/*` through the npm-workspace symlinks into each library's `dist/`. `api:build` therefore declares `^build`, without which the bundle starts and then dies on the first workspace import. If you ever see `Cannot find module '.../@boardgamesempire/<lib>/dist/index.js'` during boot, that dependency chain is what broke.
+Note that the api bundle **externalizes its workspace libraries** rather than inlining them (the same reason the production image ships those libraries' `dist/` beside its install; see the root `Dockerfile`): at runtime `main.js` resolves `@boardgamesempire/*` through the npm-workspace symlinks into each library's `dist/`. `api:build` therefore declares `^build`, without which the bundle starts and then dies on the first workspace import. If you ever see `Cannot find module '.../@boardgamesempire/<lib>/dist/index.js'` during boot, that dependency chain is what broke.
 
 Escape hatches, both optional and both treating the endpoint as **disposable** (migrated, seeded, and swept exactly like a container):
 

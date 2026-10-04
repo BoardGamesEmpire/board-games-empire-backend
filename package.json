@@ -164,7 +164,6 @@
     "@eslint/js": "9.39.4",
     "@nestjs/schematics": "11.1.0",
     "@nestjs/testing": "11.1.27",
-    "@nx/docker": "22.7.3",
     "@nx/eslint": "22.7.3",
     "@nx/eslint-plugin": "22.7.3",
     "@nx/jest": "22.7.3",
