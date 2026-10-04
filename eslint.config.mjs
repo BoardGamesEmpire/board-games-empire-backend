@@ -37,6 +37,20 @@ export const restrictedImportPaths = {
     message:
       'Internal writer for the composed-scope registry. ScopeComposer only — a service calling this satisfies the paginated() guard without composing a scope, which is the erosion the guard exists to prevent (#365/#416). Inject ScopeComposer and call compose() instead.',
   },
+
+  // Only the api migrates (#236), and every role now ships in one image with
+  // the Prisma CLI (#593). The api's entry point is the one file that may
+  // import this, plus the e2e spec that drives the real CLI (each lifts it in
+  // its own eslint config). In the image, a migrator built anywhere else would
+  // also find no Prisma project, since only the api's bundle has
+  // `prisma.config.ts` beside it. In a checkout it would find the root's, so
+  // there this rule is the only guard.
+  prismaCliMigrator: {
+    name: '@bge/bootstrap',
+    importNames: ['createPrismaCliMigrator'],
+    message:
+      "Only the api applies migrations (#236): the other roles wait for the api to bring the schema up. Don't pass a migrator to runBootstrap outside apps/api/src/main.ts.",
+  },
 };
 
 // #365/#416 guardrail: a collection read must get its `where` from
