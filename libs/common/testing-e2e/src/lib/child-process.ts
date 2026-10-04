@@ -1,12 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /**
- * Launch and stop for the application bundles the harness runs as child
- * processes: the API from `global-setup`, and the worker from specs that opt
- * into one (`useWorker`). Both follow one contract, so it lives here once:
+ * Launch and stop for the application bundles the e2e suites run as child
+ * processes: in `api-e2e`, the API from `global-setup` and the worker from
+ * specs that opt into one (`useWorker`); in each gateway e2e app, the gateway.
+ * All follow one contract, so it lives here once:
  *
  * - Output is always piped, never inherited, and the last lines are kept so a
  *   child that dies during boot can be diagnosed from its own logs. With
@@ -14,11 +16,21 @@ import { setTimeout as delay } from 'node:timers/promises';
  *   is how CI, which runs verbose (#259), shows the child's full output.
  * - Readiness is polled against a caller-supplied probe, and a child that exits
  *   before the probe passes is reported as a boot failure, not a timeout.
+ * - A child that listens is given a free port, and launched again on a fresh
+ *   one if another process takes that port first (`launchOnFreePort`).
  * - Stopping is SIGTERM first, SIGKILL after a grace period.
+ *
+ * This module also ships as `@bge/testing-e2e/child-process`, for Jest's
+ * global setup and teardown. Jest loads those with Node's own resolver, which
+ * cannot follow a `.js` specifier to its `.ts` source, so this file imports
+ * Node built-ins only.
  */
 
-/** apps/api-e2e/src/support → workspace root. */
-export const WORKSPACE_ROOT = path.join(__dirname, '..', '..', '..', '..');
+/** libs/common/testing-e2e/src/lib → workspace root. */
+export const WORKSPACE_ROOT = path.join(__dirname, '..', '..', '..', '..', '..');
+
+/** Set to `true` to stream every child's output to the runner as it arrives. */
+export const E2E_VERBOSE_VAR = 'BGE_E2E_VERBOSE';
 
 const OUTPUT_TAIL_LINES = 120;
 const SIGTERM_GRACE_MS = 10_000;
@@ -35,7 +47,7 @@ export function requireBundle(label: string, bundle: string, buildTarget: string
   if (!fs.existsSync(bundle)) {
     throw new Error(
       `${label} bundle not found at ${bundle}. The e2e target depends on '${buildTarget}' — ` +
-        `run via 'npx nx e2e @boardgamesempire/api-e2e' (or run '${buildTarget}' first).`,
+        `run the suite through its Nx e2e target (or run '${buildTarget}' first).`,
     );
   }
 }
@@ -115,7 +127,7 @@ export async function launchChild(launch: ChildLaunch): Promise<ChildLaunchOutco
   const child = spawn(process.execPath, [launch.bundle], {
     cwd: WORKSPACE_ROOT,
     env: launch.env,
-    // Always piped, never inherited: the API's retry path classifies a boot
+    // Always piped, never inherited: `launchOnFreePort` classifies a boot
     // failure by scanning this output for EADDRINUSE, and inherited stdio
     // would leave nothing to scan — making verbose runs the flaky ones.
     // Verbose mode tees each chunk through to the parent instead, so logs
@@ -170,8 +182,8 @@ export async function launchChild(launch: ChildLaunch): Promise<ChildLaunchOutco
 
     // Awaited in both cases. After a SIGKILL, so the child is gone when this
     // returns. After an exit, so the report carries the final lines, which
-    // 'exit' does not wait for. For the API those include the EADDRINUSE its
-    // port retry looks for.
+    // 'exit' does not wait for. For a child on a free port, those include the
+    // EADDRINUSE that `launchOnFreePort` retries on.
     await settleWithin(closed, OUTPUT_DRAIN_MS, undefined);
 
     return { kind, child, failure: withChildOutput(reason, verbose, outputTail), outputTail };
@@ -223,10 +235,72 @@ export async function launchChild(launch: ChildLaunch): Promise<ChildLaunchOutco
   }
 }
 
+/** How many ports {@link launchOnFreePort} tries before a lost port is the failure. */
+const PORT_ATTEMPTS = 3;
+
 /**
- * SIGTERM first — both apps register graceful shutdown handlers and should
- * exit cleanly — with a SIGKILL fallback so a wedged process can't hang the
- * suite forever.
+ * Grabs an OS-assigned free port, then releases it for a child to bind.
+ * Inherently racy (probe-then-bind): another process can claim the port in
+ * the gap. {@link launchOnFreePort} compensates for that.
+ */
+function getFreePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address === null || typeof address === 'string') {
+        server.close();
+        reject(new Error('Failed to acquire a free port'));
+        return;
+      }
+
+      const { port } = address;
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+}
+
+/**
+ * Launches a child on a port from {@link getFreePort}, and launches it again
+ * on a fresh port when it loses that one in the probe-then-bind gap, up to
+ * {@link PORT_ATTEMPTS} ports. Every other failure is final and thrown, with
+ * the launch's failure report: the reason, then the child's output or, when
+ * verbose, a pointer to where it streamed.
+ *
+ * A lost port is recognised by EADDRINUSE in the child's output, because
+ * Node surfaces the bind error only in the child's own stderr. The parent
+ * sees a plain non-zero exit.
+ */
+export async function launchOnFreePort(
+  launch: (port: number) => ChildLaunch,
+): Promise<{ readonly child: ChildProcess; readonly port: number }> {
+  for (let attempt = 1; ; attempt += 1) {
+    const port = await getFreePort();
+    const config = launch(port);
+    const outcome = await launchChild(config);
+
+    if (outcome.kind === 'ready') {
+      return { child: outcome.child, port };
+    }
+
+    const lostThePort = outcome.kind === 'exited' && outcome.outputTail.some((line) => line.includes('EADDRINUSE'));
+    if (lostThePort && attempt < PORT_ATTEMPTS) {
+      console.warn(
+        `[e2e] ${config.label} lost port ${port} on launch attempt ${attempt}/${PORT_ATTEMPTS}, retrying on a fresh port...`,
+      );
+      continue;
+    }
+
+    throw new Error(outcome.failure);
+  }
+}
+
+/**
+ * SIGTERM first — every app launched here registers graceful shutdown
+ * handlers and should exit cleanly — with a SIGKILL fallback so a wedged
+ * process can't hang the suite forever.
  */
 export async function stopChild(child: ChildProcess | undefined): Promise<void> {
   if (!child || child.exitCode !== null || child.signalCode !== null) {

@@ -33,9 +33,6 @@ export const E2E_OWNS_REDIS_VAR = 'BGE_E2E_OWNS_REDIS';
  */
 export const E2E_REDIS_FLUSH_OK_VAR = 'BGE_E2E_REDIS_FLUSH_OK';
 
-/** Set truthy to route application logs through nestjs-pino during e2e runs. */
-export const E2E_VERBOSE_VAR = 'BGE_E2E_VERBOSE';
-
 /**
  * Where the harness-launched API is listening. Assigned by `global-setup`
  * after the server process passes its readiness probe; specs read it back

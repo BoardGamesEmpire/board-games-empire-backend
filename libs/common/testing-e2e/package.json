@@ -11,6 +11,11 @@
       "import": "./src/index.ts",
       "default": "./src/index.ts"
     },
+    "./child-process": {
+      "types": "./src/lib/child-process.ts",
+      "import": "./src/lib/child-process.ts",
+      "default": "./src/lib/child-process.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {

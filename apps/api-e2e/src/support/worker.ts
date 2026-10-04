@@ -1,11 +1,18 @@
 import { QueueNames } from '@bge/game-import';
 import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { WEBHOOK_QUEUE_NAME } from '@bge/queue-webhooks';
+import {
+  E2E_VERBOSE_VAR,
+  launchChild,
+  requireBundle,
+  stopChild,
+  withChildOutput,
+  WORKSPACE_ROOT,
+} from '@bge/testing-e2e/child-process';
 import type { Queue } from 'bullmq';
 import type { ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
-import { launchChild, requireBundle, stopChild, withChildOutput, WORKSPACE_ROOT } from './child-process';
-import { E2E_VERBOSE_VAR, workerEnvOverrides } from './e2e-env';
+import { workerEnvOverrides } from './e2e-env';
 import { emptyQueue } from './queue-isolation';
 import { createTestQueue, type TestQueue } from './queues';
 import { requireDisposableRedis } from './redis-reset';

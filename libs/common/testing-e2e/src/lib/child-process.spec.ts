@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchChild, type ChildLaunch } from './child-process';
+import { launchChild, launchOnFreePort, stopChild, type ChildLaunch } from './child-process.js';
 
 /**
  * `launchChild`'s failure paths, against real `node` children built from the
@@ -139,5 +139,106 @@ describe('launchChild', () => {
 
     expect(outcome.kind).toBe('failed');
     expect(outcome.child.signalCode).toBe('SIGKILL');
+  });
+});
+
+/**
+ * `launchOnFreePort`'s retry, against a `node` child that reports EADDRINUSE,
+ * as a server that lost its port does, until a given attempt.
+ */
+describe('launchOnFreePort', () => {
+  let scripts: string;
+
+  /**
+   * A child that counts its launches in `marker`, reports a lost port on every
+   * launch before `bindsOn`, and otherwise writes the PORT it was given to
+   * `boundTo` and stays up. Each call gets its own files.
+   */
+  const losesItsPortUntil = (name: string, bindsOn: number) => {
+    const marker = path.join(scripts, `${name}.launches`);
+    const boundTo = path.join(scripts, `${name}.port`);
+    const bundle = path.join(scripts, `${name}.cjs`);
+    fs.writeFileSync(
+      bundle,
+      [
+        `const fs = require('node:fs');`,
+        `const launch = fs.existsSync(${JSON.stringify(marker)}) ? Number(fs.readFileSync(${JSON.stringify(marker)}, 'utf8')) + 1 : 1;`,
+        `fs.writeFileSync(${JSON.stringify(marker)}, String(launch));`,
+        `if (launch < ${bindsOn}) {`,
+        `  console.error('Error: listen EADDRINUSE: address already in use 127.0.0.1:' + process.env.PORT);`,
+        `  process.exit(1);`,
+        `}`,
+        `fs.writeFileSync(${JSON.stringify(boundTo)}, process.env.PORT);`,
+        `setInterval(() => undefined, 1_000);`,
+      ].join('\n'),
+    );
+
+    return { bundle, boundTo };
+  };
+
+  const launchOn =
+    (bundle: string, ready: () => boolean, ports: number[]) =>
+    (port: number): ChildLaunch => {
+      ports.push(port);
+
+      return {
+        label: 'fixture',
+        bundle,
+        env: { ...process.env, PORT: String(port) },
+        verbose: false,
+        isReady: () => Promise.resolve(ready()),
+        timeoutMs: 5_000,
+        pollMs: 20,
+      };
+    };
+
+  beforeAll(() => {
+    scripts = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-free-port-'));
+  });
+
+  afterAll(() => {
+    fs.rmSync(scripts, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('launches again on a fresh port when the child loses its port, and reports the port it kept', async () => {
+    const { bundle, boundTo } = losesItsPortUntil('second-time-lucky', 2);
+    const ports: number[] = [];
+
+    const launched = await launchOnFreePort(launchOn(bundle, () => fs.existsSync(boundTo), ports));
+
+    try {
+      expect(ports).toHaveLength(2);
+      expect(launched.port).toBe(ports[1]);
+      expect(fs.readFileSync(boundTo, 'utf8')).toBe(String(launched.port));
+    } finally {
+      await stopChild(launched.child);
+    }
+  });
+
+  it('does not launch again after a boot death that is not a lost port', async () => {
+    const bundle = path.join(scripts, 'dies.cjs');
+    fs.writeFileSync(bundle, 'process.exit(3);');
+    const ports: number[] = [];
+
+    await expect(launchOnFreePort(launchOn(bundle, () => false, ports))).rejects.toThrow(
+      /exited during boot \(code 3\)/,
+    );
+    expect(ports).toHaveLength(1);
+  });
+
+  it('reports the lost port as the failure once its three attempts run out', async () => {
+    const { bundle } = losesItsPortUntil('never-binds', Number.POSITIVE_INFINITY);
+    const ports: number[] = [];
+
+    await expect(launchOnFreePort(launchOn(bundle, () => false, ports))).rejects.toThrow(/EADDRINUSE/);
+    expect(ports).toHaveLength(3);
   });
 });
