@@ -7,7 +7,7 @@ import { fetchAccessToken } from './lib/fetch-access-token';
  */
 @Injectable()
 export class IgdbAuthService {
-  fetchAccessToken(credentials: Credentials): Promise<TokenResponse> {
-    return fetchAccessToken(credentials);
+  fetchAccessToken(credentials: Credentials, tokenUrl: string): Promise<TokenResponse> {
+    return fetchAccessToken(credentials, tokenUrl);
   }
 }
