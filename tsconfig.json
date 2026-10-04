@@ -43,9 +43,6 @@
       "path": "./libs/common/shared"
     },
     {
-      "path": "./apps/gateway-coordinator-e2e"
-    },
-    {
       "path": "./apps/gateway-coordinator"
     },
     {
@@ -100,13 +97,7 @@
       "path": "./libs/api/well-known"
     },
     {
-      "path": "./apps/worker-e2e"
-    },
-    {
       "path": "./apps/worker"
-    },
-    {
-      "path": "./apps/gateway-worker-e2e"
     },
     {
       "path": "./apps/gateway-worker"

@@ -48,7 +48,7 @@
     "pretest": "npm run nx:sync",
     "test": "nx run-many -t test --parallel=5 --passWithNoTests",
     "pretest:e2e": "npm run nx:sync",
-    "test:e2e": "nx run-many -t e2e --parallel=1 --passWithNoTests --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/gateway-coordinator-e2e,@boardgamesempire/gateway-worker-e2e,@boardgamesempire/igdb-gateway-e2e,@boardgamesempire/worker-e2e",
+    "test:e2e": "nx run-many -t e2e --parallel=1 --passWithNoTests --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/igdb-gateway-e2e",
     "typecheck": "nx run-many -t typecheck --parallel",
     "update": "nx migrate latest",
     "workspace-schematic": "nx workspace-schematic",

@@ -16,12 +16,23 @@ import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpt
 const DEDUP_CONCURRENCY = 10;
 
 /**
- * gatewayId placed on error frames not attributable to a single gateway —
- * the GameSource lookup itself failed, or the game has no sources at all.
- * Deliberately not a valid gateway id so consumers and logs never
- * mis-attribute an aggregate failure to a real source.
+ * gatewayId placed on fetchExpansions' error frames that no single gateway
+ * answers for — the game's GameSource lookup itself failed, or the game has
+ * no sources at all. Deliberately not a valid gateway id so consumers and
+ * logs never mis-attribute an aggregate failure to a real source.
  */
 const NO_GATEWAY_ATTRIBUTION = '__no_gateway__';
+
+/**
+ * One live gateway stream's games, cached when the gateway sends SOURCE_DONE.
+ * A status frame before that (rate limit, unavailability, error) marks the
+ * set partial: replayed for the cache TTL, it would hide the failure behind a
+ * short result list.
+ */
+interface SearchAccumulator {
+  games: proto.GameSearchData[];
+  partial: boolean;
+}
 
 /**
  * Fan-out game search + fetch across gateway drivers. Extracted from the
@@ -160,27 +171,17 @@ export class GatewayGameSearchService {
       // and a genuinely unavailable one yields an UNAVAILABLE frame below —
       // never a silent skip that masquerades as "no expansions".
       filter((source) => Boolean(source.gatewayId && source.externalId)),
+      // fetchExpansionsFromGateway answers its own failures with a frame for
+      // that gateway, so only the source lookup reaches the catch below.
       mergeMap((source) =>
-        this.fetchExpansionsFromGateway(
-          source.gatewayId,
-          source.externalId,
-          request.correlationId,
-          request.locale,
-        ).pipe(
-          catchError((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            this.logger.error(`FetchExpansions failed for gameId ${request.gameId}: ${message}`);
-
-            return this.errorGameSearchResult(NO_GATEWAY_ATTRIBUTION, request.correlationId, message);
-          }),
-        ),
+        this.fetchExpansionsFromGateway(source.gatewayId, source.externalId, request.correlationId, request.locale),
       ),
 
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`FetchExpansions failed for gameId ${request.gameId}: ${message}`);
 
-        return this.errorGameSearchResult(request.gameId, request.correlationId, message);
+        return this.errorGameSearchResult(NO_GATEWAY_ATTRIBUTION, request.correlationId, message);
       }),
     );
   }
@@ -222,7 +223,7 @@ export class GatewayGameSearchService {
   ): Observable<proto.SearchGameResult> {
     return from(this.registry.resolve(gatewayId)).pipe(
       mergeMap((driver) => {
-        const accumulated: proto.GameSearchData[] = [];
+        const accumulator: SearchAccumulator = { games: [], partial: false };
 
         return driver
           .searchGames({
@@ -239,7 +240,7 @@ export class GatewayGameSearchService {
             // source early. Serializing preserves gateway emission order (and
             // caps dedup concurrency on the live path as a side effect).
             concatMap((result: proto.GatewaySearchResult) =>
-              this.mapGatewayResult(gatewayId, result, accumulated, cacheKey),
+              this.mapGatewayResult(gatewayId, result, accumulator, cacheKey),
             ),
             catchError((err) => {
               const message = err instanceof Error ? err.message : String(err);
@@ -268,11 +269,18 @@ export class GatewayGameSearchService {
   private mapGatewayResult(
     gatewayId: string,
     result: proto.GatewaySearchResult,
-    accumulated: proto.GameSearchData[],
+    accumulator: SearchAccumulator,
     cacheKey: string,
   ): Observable<proto.SearchGameResult> {
     this.logger.debug(`Received search result from gateway ${gatewayId} with status ${result.status}`);
     const base = { correlationId: result.correlationId, gatewayId };
+
+    if (
+      result.status !== proto.ResultStatus.RESULT_STATUS_RESULT &&
+      result.status !== proto.ResultStatus.RESULT_STATUS_SOURCE_DONE
+    ) {
+      accumulator.partial = true;
+    }
 
     switch (result.status) {
       case proto.ResultStatus.RESULT_STATUS_RESULT: {
@@ -283,7 +291,7 @@ export class GatewayGameSearchService {
         }
 
         this.logger.debug(`Accumulating game with externalId ${result.game.externalId} from gateway ${gatewayId}`);
-        accumulated.push(result.game);
+        accumulator.games.push(result.game);
 
         // Async dedup check
         return this.toResultFrame(gatewayId, result.correlationId, result.game);
@@ -292,14 +300,17 @@ export class GatewayGameSearchService {
       case proto.ResultStatus.RESULT_STATUS_SOURCE_DONE: {
         this.logger.debug(`Gateway ${gatewayId} has completed sending results`);
 
-        // Persist accumulated results to cache once the gateway signals completion
-        void this.cache
-          .set(cacheKey, accumulated, this.searchCacheTTL)
-          .catch((err) =>
-            this.logger.warn(
-              `Search cache write failed for gateway ${gatewayId}: ${err instanceof Error ? err.message : err}`,
-            ),
-          );
+        // Persist accumulated results to cache once the gateway signals
+        // completion, unless it reported a problem first
+        if (!accumulator.partial) {
+          void this.cache
+            .set(cacheKey, accumulator.games, this.searchCacheTTL)
+            .catch((err) =>
+              this.logger.warn(
+                `Search cache write failed for gateway ${gatewayId}: ${err instanceof Error ? err.message : err}`,
+              ),
+            );
+        }
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
@@ -327,6 +338,7 @@ export class GatewayGameSearchService {
         return of<proto.SearchGameResult>({
           ...base,
           status: proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
+          message: result.message,
         });
       }
       case proto.ResultStatus.RESULT_STATUS_ERROR: {

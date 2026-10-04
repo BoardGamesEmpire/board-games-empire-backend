@@ -21,6 +21,15 @@
       "path": "../../proto/gateway/tsconfig.lib.json"
     },
     {
+      "path": "../driver/contract-testing/tsconfig.lib.json"
+    },
+    {
+      "path": "../driver/contract/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../driver/runtime/tsconfig.lib.json"
     },
     {
