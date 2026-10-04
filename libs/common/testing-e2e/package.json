@@ -16,6 +16,11 @@
       "import": "./src/lib/child-process.ts",
       "default": "./src/lib/child-process.ts"
     },
+    "./gateway": {
+      "types": "./src/lib/gateway.ts",
+      "import": "./src/lib/gateway.ts",
+      "default": "./src/lib/gateway.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {
