@@ -32,18 +32,15 @@ module.exports = {
           output: 'i18n',
         },
         // The migrator (#236): `prisma migrate deploy` runs as a child
-        // process from the bundle's directory, so the schema, the migration
-        // chain and the config that points at them ship beside main.js. The
-        // `prisma` CLI itself is a runtime dependency in package.json.
+        // process from the bundle's directory, so the datasource
+        // (`schema.prisma`), the migration chain and the config that points at
+        // them ship beside main.js. The models stay behind: `migrate deploy`
+        // applies the chain and never reads them (#452). The `prisma` CLI
+        // itself is a runtime dependency in package.json.
         {
           glob: '**/*',
           input: '../../prisma/migrations',
           output: 'prisma/migrations',
-        },
-        {
-          glob: '**/*.prisma',
-          input: '../../prisma/models',
-          output: 'prisma/models',
         },
         {
           glob: 'schema.prisma',
