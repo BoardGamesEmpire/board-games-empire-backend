@@ -186,12 +186,12 @@ describe('event occurrences', () => {
     // all tie, as in any lineup the host leaves unnumbered. Ids are random, so
     // games added in turn may already be in id order, and a read returning
     // ties as they were written would pass. Adding stops once one sorts before
-    // an earlier one; eight in id order by chance is 1 in 40,320.
+    // an earlier one; twelve in id order by chance is 1 in 479,001,600.
     const inIdOrder = (ids: readonly string[]) => ids.every((id, index) => index === 0 || ids[index - 1] < id);
     const addedIds: string[] = [];
     do {
       addedIds.push(await directAddedGameId(host, eventId, occurrence.id));
-    } while (inIdOrder(addedIds) && addedIds.length < 8);
+    } while (inIdOrder(addedIds) && addedIds.length < 12);
     expect(inIdOrder(addedIds)).toBe(false);
 
     // The ids are lowercase letters and digits of one length, so the
