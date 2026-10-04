@@ -26,9 +26,15 @@ export default registerAs('gateway', () =>
   ]),
 );
 
+/**
+ * Checks only. The defaults are the config's above: ConfigModule copies each
+ * validated value into an unset process.env variable, so a default here
+ * would override the per-environment ones.
+ */
 export const gatewayConfigValidationSchema = {
-  GATEWAY_GRPC_HOST: Joi.alternatives()
-    .try(Joi.string().hostname(), Joi.string().ip({ version: ['ipv4', 'ipv6'] }))
-    .default('0.0.0.0'),
-  GATEWAY_GRPC_PORT: Joi.number().default(50053),
+  BOARDGAMEGEEK_GATEWAY_GRPC_HOST: Joi.alternatives().try(
+    Joi.string().hostname(),
+    Joi.string().ip({ version: ['ipv4', 'ipv6'] }),
+  ),
+  BOARDGAMEGEEK_GATEWAY_GRPC_PORT: Joi.number(),
 };
