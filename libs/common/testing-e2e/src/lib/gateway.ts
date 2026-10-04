@@ -6,8 +6,8 @@ import * as path from 'node:path';
 import { E2E_VERBOSE_VAR, launchOnFreePort, requireBundle, stopChild, WORKSPACE_ROOT } from './child-process.js';
 
 /**
- * Launch and a gRPC client for a game gateway's built bundle, shared by the
- * gateway e2e apps. Everything here speaks the gateway's published proto over
+ * Launches a game gateway's built bundle and hands out a gRPC client for it,
+ * shared by the gateway e2e apps. Everything here speaks the gateway's published proto over
  * a real channel; nothing imports gateway code.
  *
  * Shipped as `@bge/testing-e2e/gateway`, not from the package root: Jest

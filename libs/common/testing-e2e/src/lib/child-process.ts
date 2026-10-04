@@ -249,15 +249,9 @@ function getFreePort(): Promise<number> {
     server.unref();
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        server.close();
-        reject(new Error('Failed to acquire a free port'));
-        return;
-      }
-
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolve(port)));
+      // A TCP server that is listening always reports an AddressInfo.
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
     });
   });
 }

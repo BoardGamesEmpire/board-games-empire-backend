@@ -1,6 +1,7 @@
 import { env } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
+import { TWITCH_TOKEN_URL } from '../lib/fetch-access-token';
 
 export interface IGDBConfig {
   clientId: string;
@@ -33,7 +34,7 @@ export default registerAs('igdb', () =>
     {
       key: 'IGDB_TOKEN_URL',
       keyTo: 'tokenUrl',
-      defaultValue: 'https://id.twitch.tv/oauth2/token',
+      defaultValue: TWITCH_TOKEN_URL,
     },
   ]),
 );

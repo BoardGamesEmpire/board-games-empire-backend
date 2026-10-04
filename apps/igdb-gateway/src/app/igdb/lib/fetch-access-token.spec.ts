@@ -63,6 +63,21 @@ describe('fetchAccessToken', () => {
     }
   });
 
+  it("requests from Twitch's endpoint when given no URL", async () => {
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ access_token: 'stub-token' })));
+
+    try {
+      await fetchAccessToken(credentials);
+
+      const url = new URL(String(fetchSpy.mock.calls[0][0]));
+      expect(`${url.origin}${url.pathname}`).toBe('https://id.twitch.tv/oauth2/token');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('fails with the status when the endpoint refuses', async () => {
     const endpoint = await startTokenEndpoint(400);
 
