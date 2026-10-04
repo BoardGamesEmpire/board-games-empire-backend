@@ -1,0 +1,33 @@
+{
+  "name": "@boardgamesempire/launcher",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "targets": {
+      "build": {
+        "executor": "nx:run-commands",
+        "// command": "Plain tsc, not webpack: the launcher imports only Node builtins, and a webpack config would make @nx/webpack/plugin infer a `serve` target that `npm run start:local` would then start (#593).",
+        "cache": true,
+        "inputs": [
+          "{projectRoot}/package.json",
+          "{workspaceRoot}/tsconfig.base.json",
+          "{projectRoot}/tsconfig.app.json",
+          "{projectRoot}/src/**/*.ts",
+          "!{projectRoot}/src/**/*.spec.ts"
+        ],
+        "outputs": [
+          "{projectRoot}/dist/**/*.{js,d.ts}{,.map}",
+          "{projectRoot}/dist/tsconfig.app.tsbuildinfo"
+        ],
+        "options": {
+          "cwd": "apps/launcher",
+          "command": "tsc --build tsconfig.app.json"
+        }
+      }
+    },
+    "tags": [
+      "app",
+      "launcher"
+    ]
+  }
+}
