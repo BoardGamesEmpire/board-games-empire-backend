@@ -27,12 +27,23 @@ describe('the IGDB gateway configuration schema', () => {
     expect(validate(environment).error?.message).toMatch(key);
   });
 
-  it('adds no gRPC address of its own when the environment sets none', () => {
-    // ConfigModule copies each validated value into process.env when the
-    // variable is unset, so a default here would override the gateway
-    // config's per-environment ones (production binds 50051).
+  // ConfigModule copies these defaults into process.env, where the bootstrap
+  // reads the address the gateway listens on.
+  it.each([
+    [undefined, 50054],
+    ['development', 50054],
+    ['test', 50054],
+    ['production', 50051],
+  ])('defaults the gRPC address for NODE_ENV %s to 0.0.0.0:%i', (nodeEnv, port) => {
     const credentials = { IGDB_CLIENT_ID: 'test-client-id', IGDB_CLIENT_SECRET: 'test-client-secret' };
+    const { value } = validate(nodeEnv ? { ...credentials, NODE_ENV: nodeEnv } : credentials);
 
-    expect(validate(credentials).value).toEqual(credentials);
+    expect(value).toMatchObject({ IGDB_GATEWAY_GRPC_HOST: '0.0.0.0', IGDB_GATEWAY_GRPC_PORT: port });
+  });
+
+  it('keeps the gRPC address the environment sets, in production too', () => {
+    const { value } = validate({ ...BOOTABLE, NODE_ENV: 'production' });
+
+    expect(value).toMatchObject({ IGDB_GATEWAY_GRPC_HOST: 'localhost', IGDB_GATEWAY_GRPC_PORT: 50054 });
   });
 });

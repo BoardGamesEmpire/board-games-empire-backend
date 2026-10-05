@@ -31,12 +31,26 @@ describe('the BoardGameGeek gateway configuration schema', () => {
     expect(error?.message).toMatch(/BOARDGAMEGEEK_GATEWAY_GRPC_HOST/);
   });
 
-  it('adds no gRPC address of its own when the environment sets none', () => {
-    // ConfigModule copies each validated value into process.env when the
-    // variable is unset, so a default here would override the gateway
-    // config's per-environment ones (production binds 50051).
-    const { value } = validate({ BOARDGAMEGEEK_API_KEY: 'test-api-key' });
+  // ConfigModule copies these defaults into process.env, where the bootstrap
+  // reads the address the gateway listens on.
+  it.each([
+    [undefined, 50053],
+    ['development', 50053],
+    ['test', 50053],
+    ['production', 50051],
+  ])('defaults the gRPC address for NODE_ENV %s to 0.0.0.0:%i', (nodeEnv, port) => {
+    const apiKey = { BOARDGAMEGEEK_API_KEY: 'test-api-key' };
+    const { value } = validate(nodeEnv ? { ...apiKey, NODE_ENV: nodeEnv } : apiKey);
 
-    expect(value).toEqual({ BOARDGAMEGEEK_API_KEY: 'test-api-key' });
+    expect(value).toMatchObject({ BOARDGAMEGEEK_GATEWAY_GRPC_HOST: '0.0.0.0', BOARDGAMEGEEK_GATEWAY_GRPC_PORT: port });
+  });
+
+  it('keeps the gRPC address the environment sets, in production too', () => {
+    const { value } = validate({ ...BOOTABLE, NODE_ENV: 'production' });
+
+    expect(value).toMatchObject({
+      BOARDGAMEGEEK_GATEWAY_GRPC_HOST: 'localhost',
+      BOARDGAMEGEEK_GATEWAY_GRPC_PORT: 50053,
+    });
   });
 });
