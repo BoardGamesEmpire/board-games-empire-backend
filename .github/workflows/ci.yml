@@ -80,10 +80,12 @@ jobs:
       # than a cosmetic one.
       #
       # `i18n.generated.ts` is generated and gitignored, so it is absent from Nx's
-      # file map and cannot be a `typecheck` input; the catalog JSONs are not inputs
-      # either. A catalog-only change therefore regenerates the type while leaving
-      # every `typecheck` hash unchanged, and Nx serves the verdict it cached for the
-      # PREVIOUS type. Deleting a key without touching its call sites goes green.
+      # file map and cannot be a `typecheck` input. The catalog JSONs are inputs of
+      # `i18n-core:typecheck` alone (see below), not of the projects that compile
+      # against it. A catalog-only change therefore regenerates the type while
+      # leaving every other `typecheck` hash unchanged, and Nx serves the verdict it
+      # cached for the PREVIOUS type. Deleting a key without touching its call sites
+      # goes green.
       #
       # Nothing else catches it: the app builds do not type-check (tsPlugins is not
       # wired to ts-loader's `transformers`, so it runs transpileOnly), and Jest
@@ -100,7 +102,18 @@ jobs:
       # typecheck tasks are therefore absent from the Nx Cloud report, their results
       # are not written to the remote cache (so the follow-on master push
       # re-typechecks uncached), and `nx fix-ci` below has no record of them to act
-      # on. Correctness is preserved — self-healing and reporting are not.
+      # on. Self-healing and reporting are lost on those runs.
+      #
+      # Correctness after them holds only because the catalogs are inputs of
+      # `i18n-core:typecheck`, which emits the declarations every other project
+      # compiles against. Before the input, a catalog change left that task's hash
+      # unchanged, and since this step writes nothing, the entry cached before the
+      # change stayed current. Every later run whose own diff missed the catalogs
+      # restored declarations without the change: #615 failed on a key #605 had
+      # added (#619). With the input, the old entry stops matching, and the first
+      # run that uses the cache writes a fresh one. docs/NX_CACHING.md has why the
+      # target names its inputs and how to keep the list current.
+      #
       # `--no-renames` is load-bearing: with rename detection on (the default),
       # `git diff --name-only` reports ONLY the destination path, so moving a
       # catalog out of `src/lib/i18n/` would not match this pattern — while
