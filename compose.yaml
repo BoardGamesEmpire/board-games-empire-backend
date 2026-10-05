@@ -30,15 +30,13 @@ x-bge: &bge
     redis:
       condition: service_healthy
 
-# What every role reads. The api and the worker must share DATA_ENCRYPTION_KEY:
-# the worker decrypts what the api encrypted.
+# What every role reads.
 x-bge-environment: &bge-environment
   NODE_ENV: production
   # A direct connection (docs/BOOTSTRAP.md, #596), in the `public` schema.
   DATABASE_URL: postgresql://bge:bge@postgres:5432/bge
   REDIS_HOST: redis
   REDIS_BULLMQ_HOST: redis
-  DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
   LOG_LEVEL: ${LOG_LEVEL:-info}
 
 # A TCP connect to the gRPC port: neither the coordinator nor the gateways
@@ -63,8 +61,14 @@ services:
       timeout: 5s
       retries: 12
 
+  # The job queues and the sign-in sessions live here, so Redis logs each write
+  # and flushes the log every second, as BullMQ advises. Snapshots alone lose
+  # whatever was written after the last one.
   redis:
     image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes:
+      - redis:/data
     healthcheck:
       test: [CMD, redis-cli, ping]
       interval: 5s
@@ -80,14 +84,18 @@ services:
       SERVER_PORT: '33333'
       REDIS_WEBSOCKET_HOST: redis
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
       BETTER_AUTH_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}
       TRUSTED_ORIGINS: ${BGE_PUBLIC_URL:-http://localhost:33333}
       # Signed media links point here, at the stream route under `/api`.
       MEDIA_BASE_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}/api
       GATEWAY_COORDINATOR_HOST: coordinator
       GATEWAY_COORDINATOR_PORT: '50052'
+    # Loopback only, unless BGE_BIND_ADDRESS names another address: the first
+    # account to sign up becomes the owner, and the default keeps a new
+    # deployment off the network.
     ports:
-      - ${BGE_PORT:-33333}:33333
+      - ${BGE_BIND_ADDRESS:-127.0.0.1}:${BGE_PORT:-33333}:33333
     volumes:
       - media:/var/lib/bge/media
       - plugins:/var/lib/bge/plugins
@@ -110,6 +118,9 @@ services:
     environment:
       <<: *bge-environment
       BGE_ROLES: worker
+      # The api's key: the worker decrypts what the api encrypted. No other
+      # role reads it.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
     volumes:
       - media:/var/lib/bge/media
 
@@ -186,5 +197,6 @@ services:
 
 volumes:
   postgres:
+  redis:
   media:
   plugins:
