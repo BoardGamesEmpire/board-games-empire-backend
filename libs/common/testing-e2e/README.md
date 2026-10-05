@@ -62,7 +62,8 @@ Every e2e suite runs the apps it tests from their built bundles, as child proces
 
 - `launchChild`, `launchOnFreePort`, `stopChild` and `killOnExit`, from
   `@bge/testing-e2e/child-process`, launch and stop a bundle. `api-e2e` runs the API and the worker
-  on them.
+  on them. `igdb-gateway-e2e` calls `launchChild` directly, against a token endpoint that answers
+  with an error, to check that a gateway whose boot fails exits 1.
 - `useGateway`, from `@bge/testing-e2e/gateway`, runs a game gateway for one spec file, on a free
   port, and hands out a gRPC client once the gateway answers `Check` with `SERVING`. The
   `boardgamegeek-gateway-e2e` and `igdb-gateway-e2e` suites are built on it.

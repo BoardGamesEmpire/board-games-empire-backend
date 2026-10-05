@@ -11,17 +11,23 @@ export interface TokenEndpoint {
   requests(): readonly Record<string, string>[];
 }
 
+export interface TokenEndpointOptions {
+  /** Answer every token request with this status and no token, so the gateway's boot fails. */
+  readonly failWith?: number;
+}
+
 /**
  * Stands in for Twitch's OAuth endpoint, which the IGDB gateway calls while
  * it boots, for the spec file that calls it: listening from `beforeAll`,
  * closed in `afterAll`. Every POST to the token path gets a client-credentials
- * token; anything else is a 404, so a request for the wrong path fails the
- * gateway's boot instead of passing unnoticed.
+ * token, or the `failWith` status when one is given; anything else is a 404,
+ * so a request for the wrong path fails the gateway's boot instead of passing
+ * unnoticed.
  *
  * Install it before `useGateway`, whose launch reads {@link TokenEndpoint.url}:
  * Jest runs `beforeAll` hooks in the order they are declared.
  */
-export function useTokenEndpoint(): TokenEndpoint {
+export function useTokenEndpoint(options: TokenEndpointOptions = {}): TokenEndpoint {
   const received: Record<string, string>[] = [];
   let server: http.Server | undefined;
   let url: string | undefined;
@@ -36,6 +42,12 @@ export function useTokenEndpoint(): TokenEndpoint {
       }
 
       received.push(Object.fromEntries(target.searchParams));
+
+      if (options.failWith !== undefined) {
+        response.writeHead(options.failWith).end();
+        return;
+      }
+
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ access_token: 'e2e-access-token', expires_in: 3600, token_type: 'bearer' }));
     });
