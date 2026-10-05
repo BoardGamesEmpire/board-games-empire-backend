@@ -10,9 +10,7 @@ const DEFAULT_SENTINEL_FILE = '.bge-storage-sentinel';
 /**
  * Per-environment fallbacks for `MEDIA_LOCAL_DISK_ROOT`. This key has no plain
  * `defaultValue`, so an environment absent from this map has no fallback at
- * all — and `@bge/env` answers a missing required variable by logging
- * `[ENV ERROR]` and calling `process.exit(1)`, so the omission surfaces as a
- * bare boot death rather than an exception anything can catch.
+ * all: the factory throws `MissingEnvironmentError` and the app fails to boot.
  *
  * `testing` was missing until #259: nothing set `NODE_ENV=testing` until the
  * e2e harness pinned it, so the gap stayed invisible. It mirrors `development`
@@ -22,9 +20,7 @@ const DEFAULT_SENTINEL_FILE = '.bge-storage-sentinel';
  * `staging` is deliberately absent: a staging deployment should configure real
  * storage rather than silently inherit a temp directory.
  *
- * Exported so the coverage of this map can be asserted directly. A behavioural
- * test cannot: the failure mode is `process.exit`, which takes the Jest worker
- * with it instead of failing an assertion.
+ * Exported so the environments this map covers can be asserted directly.
  */
 export const MEDIA_LOCAL_DISK_ROOT_DEFAULTS: Record<string, string> = {
   production: '/var/lib/bge/media',
