@@ -6,7 +6,7 @@ import { useTokenEndpoint } from '../support/token-endpoint';
 const LABEL = 'IGDB gateway';
 const BUNDLE = path.join(WORKSPACE_ROOT, 'apps', 'igdb-gateway', 'dist', 'main.js');
 
-/** Long enough for the bundle to load and fail; the gateway gives up on the first failed token request. */
+/** Long enough for the bundle to load and fail, on its config or on its first failed token request. */
 const BOOT_TIMEOUT_MS = 30_000;
 const EXIT_POLL_MS = 250;
 
@@ -57,6 +57,52 @@ describe('the IGDB gateway, when its boot fails', () => {
       expect(outcome.outputTail).toContainEqual(
         expect.stringContaining('Failed to obtain IGDB access token: 503 Service Unavailable'),
       );
+    },
+    BOOT_TIMEOUT_MS * 2,
+  );
+});
+
+/**
+ * A production host that sets no gRPC address and no client credentials. The
+ * gateway has to name what is missing, a credential, and not the address it
+ * has a default for (#636). Empty is what the split profile passes for a
+ * credential that is unset.
+ */
+describe('the IGDB gateway, when its client credentials are missing', () => {
+  it.each([
+    ['empty', ''],
+    ['unset', undefined],
+  ])(
+    'names the client id, not its gRPC address, and exits with code 1 (%s)',
+    async (_case, credential) => {
+      requireBundle(LABEL, BUNDLE, '@boardgamesempire/igdb-gateway:build');
+
+      const outcome = await launchChild({
+        label: LABEL,
+        bundle: BUNDLE,
+        // Not the workspace root, whose `.env` would supply the credentials.
+        cwd: path.dirname(BUNDLE),
+        env: {
+          ...process.env,
+          // The child's environment leaves out undefined values.
+          IGDB_CLIENT_ID: credential,
+          IGDB_CLIENT_SECRET: credential,
+          IGDB_GATEWAY_GRPC_HOST: undefined,
+          IGDB_GATEWAY_GRPC_PORT: undefined,
+          NODE_ENV: 'production',
+        },
+        verbose: process.env[E2E_VERBOSE_VAR] === 'true',
+        // Never ready: the only passing outcome is an exit during boot.
+        isReady: async () => false,
+        timeoutMs: BOOT_TIMEOUT_MS,
+        pollMs: EXIT_POLL_MS,
+      });
+
+      expect(outcome.kind).toBe('exited');
+      expect(outcome.child.exitCode).toBe(1);
+      // Validation stops at the first failure, and the client id comes first.
+      expect(outcome.outputTail).toContainEqual(expect.stringContaining('IGDB_CLIENT_ID'));
+      expect(outcome.outputTail).not.toContainEqual(expect.stringContaining('IGDB_GATEWAY_GRPC_HOST'));
     },
     BOOT_TIMEOUT_MS * 2,
   );

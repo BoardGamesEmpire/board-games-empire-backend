@@ -15,7 +15,8 @@ copy:
   pino loggers a gateway app needs.
 - **`bootstrapGrpcGateway(config)`** — the gRPC microservice bootstrap (proto
   walk, `createMicroservice`, logger wiring, shutdown handlers) parameterised by
-  service name and host/port env keys.
+  service name and the app's address config, which it reads once the app's
+  config is validated.
 
 A new gateway app wires up by: implementing `GatewayServiceHost`, binding it
 (`{ provide: GatewayServiceHost, useClass: GameGatewayService }`), registering

@@ -12,6 +12,7 @@ import { nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
 import { bootstrapGrpcMicroservice } from '@bge/gateway-host';
 import * as path from 'node:path';
 import { AppModule } from './app/app.module';
+import coordinatorConfig from './app/configuration/coordinator.config';
 
 const onBootstrapError = (): void => void otel.shutdown().finally(() => process.exit(1));
 
@@ -23,8 +24,7 @@ async function bootstrap(): Promise<void> {
   await bootstrapGrpcMicroservice({
     appModule: AppModule,
     displayName: 'BoardgamesEmpire Gateway Coordinator',
-    hostEnv: 'COORDINATOR_GRPC_HOST',
-    portEnv: 'COORDINATOR_GRPC_PORT',
+    addressConfig: coordinatorConfig,
     protoPackage: 'bge.coordinator.v1',
     // The shared proto tree also carries the gateway package — the coordinator
     // serves only its own.

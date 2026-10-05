@@ -1,11 +1,65 @@
-import { Injectable, Module, type INestMicroservice, type OnModuleInit } from '@nestjs/common';
+import { env } from '@bge/env';
+import {
+  ConsoleLogger,
+  Injectable,
+  Logger,
+  Module,
+  type INestMicroservice,
+  type OnModuleInit,
+  type Type,
+} from '@nestjs/common';
+import { ConfigModule, registerAs } from '@nestjs/config';
+import Joi from 'joi';
 import { LoggerModule } from 'nestjs-pino';
+import * as fs from 'node:fs';
+import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Writable } from 'node:stream';
 import pino from 'pino';
-import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
+import {
+  bootstrapGrpcMicroservice,
+  type GrpcListenAddress,
+  type GrpcMicroserviceBootstrapConfig,
+} from './bootstrap-grpc-microservice';
 
 const HOST_ENV = 'GATEWAY_HOST_SPEC_GRPC_HOST';
 const PORT_ENV = 'GATEWAY_HOST_SPEC_GRPC_PORT';
+const CREDENTIAL_ENV = 'GATEWAY_HOST_SPEC_CREDENTIAL';
+
+const PROTO_PACKAGE = 'bge.spec.v1';
+const PROTO = `syntax = "proto3";
+package ${PROTO_PACKAGE};
+service SpecService { rpc Ping (PingRequest) returns (PingReply); }
+message PingRequest {}
+message PingReply {}
+`;
+
+/** The port {@link defaultedAddress} falls back to, picked free for each test. */
+let defaultPort = 0;
+
+/** An address config as the apps declare theirs: read from the environment, with defaults. */
+const defaultedAddress = registerAs('defaultedAddress', () =>
+  env.provideMany<GrpcListenAddress>([
+    { key: HOST_ENV, keyTo: 'host', defaultValue: '127.0.0.1' },
+    { key: PORT_ENV, keyTo: 'port', defaultValue: defaultPort, mutators: parseInt },
+  ]),
+);
+
+/** An address config with no defaults, so reading it with nothing set throws, naming {@link HOST_ENV}. */
+const requiredAddress = registerAs('requiredAddress', () =>
+  env.provideMany<GrpcListenAddress>([
+    { key: HOST_ENV, keyTo: 'host' },
+    { key: PORT_ENV, keyTo: 'port', mutators: parseInt },
+  ]),
+);
+
+const silentLogger = LoggerModule.forRoot({ pinoHttp: { level: 'silent' } });
+
+@Module({
+  imports: [ConfigModule.forRoot({ ignoreEnvFile: true, load: [defaultedAddress] }), silentLogger],
+})
+class ServingAppModule {}
 
 const bootFailure = new Error('the token endpoint refused the connection');
 
@@ -18,10 +72,31 @@ class FailsWhileInitializing implements OnModuleInit {
 }
 
 @Module({
-  imports: [LoggerModule.forRoot({ pinoHttp: { level: 'silent' } })],
+  imports: [ConfigModule.forRoot({ ignoreEnvFile: true, load: [defaultedAddress] }), silentLogger],
   providers: [FailsWhileInitializing],
 })
 class FailingAppModule {}
+
+/**
+ * An app whose root config rejects its environment, as a gateway's does when
+ * its credential is missing. Built when called: `forRoot` validates at once,
+ * and its rejection must reach the bootstrap before Node reports it unhandled.
+ */
+function appWithInvalidConfig(): Type<unknown> {
+  @Module({
+    imports: [
+      ConfigModule.forRoot({
+        ignoreEnvFile: true,
+        load: [requiredAddress],
+        validationSchema: Joi.object({ [CREDENTIAL_ENV]: Joi.string().required() }),
+      }),
+      silentLogger,
+    ],
+  })
+  class InvalidConfigAppModule {}
+
+  return InvalidConfigAppModule;
+}
 
 interface LogRecord {
   readonly msg: string;
@@ -47,27 +122,126 @@ interface HandOff {
   readonly logged: readonly LogRecord[];
 }
 
+/** An OS-assigned port, released for the server to bind. */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as net.AddressInfo;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+/** Resolves once a TCP connection to `host:port` opens. */
+function connects(host: string, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = net.connect({ host, port }, () => {
+      socket.end();
+      resolve();
+    });
+    socket.on('error', reject);
+  });
+}
+
 describe('bootstrapGrpcMicroservice', () => {
+  let protoDir: string;
+
   // Jest's copy of `process` shares the real exit code, so a test that sets it
   // would fail the run unless it is put back. Cleared for each test, so a code
   // left by anything earlier cannot pass for one the bootstrap set.
   let exitCodeBefore: typeof process.exitCode;
   let started: INestMicroservice | undefined;
 
-  beforeEach(() => {
+  const bootstrap = (overrides: Partial<GrpcMicroserviceBootstrapConfig>): Promise<void> =>
+    bootstrapGrpcMicroservice({
+      appModule: ServingAppModule,
+      displayName: 'spec service',
+      addressConfig: defaultedAddress,
+      protoPackage: PROTO_PACKAGE,
+      protoDir,
+      bootstrapLogger: recordingLogger().logger,
+      registerShutdown: (app) => {
+        started = app;
+      },
+      onBootstrapError: () => undefined,
+      ...overrides,
+    });
+
+  beforeAll(() => {
+    protoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-gateway-host-'));
+    fs.writeFileSync(path.join(protoDir, 'spec.proto'), PROTO);
+  });
+
+  afterAll(() => {
+    fs.rmSync(protoDir, { recursive: true, force: true });
+  });
+
+  beforeEach(async () => {
     exitCodeBefore = process.exitCode;
     process.exitCode = undefined;
-    process.env[HOST_ENV] = '127.0.0.1';
-    process.env[PORT_ENV] = '0';
+    // A boot leaves Nest's logger as its app's silent one, and nothing puts it
+    // back. Each test starts from the logger a fresh process has instead, so
+    // none depends on what ran before it.
+    Logger.overrideLogger(new ConsoleLogger());
+    defaultPort = await freePort();
   });
 
   afterEach(async () => {
     process.exitCode = exitCodeBefore;
     delete process.env[HOST_ENV];
-    delete process.env[PORT_ENV];
+    jest.restoreAllMocks();
 
     await started?.close();
     started = undefined;
+  });
+
+  it('listens on the address its config resolves, defaults included', async () => {
+    const onBootstrapError = jest.fn();
+
+    await bootstrap({ onBootstrapError });
+
+    expect(onBootstrapError).not.toHaveBeenCalled();
+    await expect(connects('127.0.0.1', defaultPort)).resolves.toBeUndefined();
+  });
+
+  it('listens on an IPv6 address its config resolves', async () => {
+    process.env[HOST_ENV] = '::1';
+    const onBootstrapError = jest.fn();
+
+    await bootstrap({ onBootstrapError });
+
+    expect(onBootstrapError).not.toHaveBeenCalled();
+    await expect(connects('::1', defaultPort)).resolves.toBeUndefined();
+  });
+
+  describe('when the config fails validation', () => {
+    it('lets Nest name the variable that failed, before anything reads the address', async () => {
+      // Nest prints the failure, then exits the process. Thrown here instead,
+      // so the boot stops where it would have. Nest aborts when that exit
+      // throws, so the abort throws too.
+      const stopped = (): never => {
+        throw new Error('the process would have ended here');
+      };
+      const exit = jest.spyOn(process, 'exit').mockImplementation(stopped);
+      jest.spyOn(process, 'abort').mockImplementation(stopped);
+      const stderr = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+      const stdout = jest.spyOn(process.stdout, 'write').mockImplementation(() => true);
+
+      const { logger, records } = recordingLogger();
+
+      await bootstrap({ appModule: appWithInvalidConfig(), addressConfig: requiredAddress, bootstrapLogger: logger });
+
+      const printed = stderr.mock.calls.map(([chunk]) => String(chunk)).join('');
+      stderr.mockRestore();
+      stdout.mockRestore();
+
+      expect(exit).toHaveBeenCalledWith(1);
+      expect(printed).toContain(`"${CREDENTIAL_ENV}" is required`);
+      // Neither Nest's output nor the bootstrap's own log names the address.
+      expect(printed + JSON.stringify(records)).not.toContain(HOST_ENV);
+    });
   });
 
   describe('when the boot fails', () => {
@@ -79,19 +253,7 @@ describe('bootstrapGrpcMicroservice', () => {
         handedOff = { exitCode: process.exitCode, logged: [...records] };
       });
 
-      await bootstrapGrpcMicroservice({
-        appModule: FailingAppModule,
-        displayName: 'spec service',
-        hostEnv: HOST_ENV,
-        portEnv: PORT_ENV,
-        protoPackage: 'bge.spec.v1',
-        protoDir: __dirname,
-        bootstrapLogger: logger,
-        registerShutdown: (app) => {
-          started = app;
-        },
-        onBootstrapError,
-      });
+      await bootstrap({ appModule: FailingAppModule, bootstrapLogger: logger, onBootstrapError });
 
       expect(onBootstrapError).toHaveBeenCalledTimes(1);
       expect(onBootstrapError).toHaveBeenCalledWith(bootFailure);
