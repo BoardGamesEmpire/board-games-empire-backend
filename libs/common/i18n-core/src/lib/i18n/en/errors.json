@@ -188,6 +188,7 @@
   },
   "system_settings": {
     "not_found": "No system settings found! Run the seed script to create default settings.",
+    "id_not_found": "System settings with ID {id} not found",
     "multiple": "Multiple system settings found! There can be only one. Please fix the database."
   },
   "well_known": {

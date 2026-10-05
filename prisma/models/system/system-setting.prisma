@@ -28,5 +28,10 @@ model SystemSetting {
   /// Pending links for admin review instead of being auto-added.
   reviewGatewayLanguages Boolean @default(false) @map("review_gateway_languages")
 
+  // The three day counts (feedbackReportRetentionDays, contributionReclaimDays
+  // and auditLogRetentionDays) are held to 1..36500 by CHECK constraints in
+  // hand-written migration SQL (20261005000000_system_setting_day_bounds),
+  // because Prisma cannot express them here. Null still passes for
+  // auditLogRetentionDays.
   @@map("system_settings")
 }
