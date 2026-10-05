@@ -40,6 +40,7 @@ describe('IGDBService', () => {
             getOrThrow: jest.fn().mockReturnValue({
               clientId: 'test-client-id',
               clientSecret: 'test-client-secret',
+              tokenUrl: 'http://127.0.0.1:4010/oauth2/token',
             }),
           },
         },
@@ -116,14 +117,17 @@ describe('IGDBService', () => {
       expect(request).toHaveBeenCalledTimes(2);
     });
 
-    it('refreshes the token using credentials from ConfigService', async () => {
+    it('refreshes the token from the configured token URL, using credentials from ConfigService', async () => {
       const request = makeRequest401ThenSuccess(MOCK_GAMES);
       await firstValueFrom(service.call(request));
 
-      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledWith({
-        client_id: 'test-client-id',
-        client_secret: 'test-client-secret',
-      });
+      expect(mockAuthService.fetchAccessToken).toHaveBeenCalledWith(
+        {
+          client_id: 'test-client-id',
+          client_secret: 'test-client-secret',
+        },
+        'http://127.0.0.1:4010/oauth2/token',
+      );
     });
   });
 

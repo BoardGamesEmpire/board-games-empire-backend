@@ -13,12 +13,10 @@
           "{projectRoot}/test-output/jest/coverage"
         ],
         "options": {
-          "jestConfig": "apps/boardgamegeek-gateway-e2e/jest.config.cts",
-          "passWithNoTests": true
+          "jestConfig": "apps/boardgamegeek-gateway-e2e/jest.config.cts"
         },
         "dependsOn": [
-          "@boardgamesempire/boardgamegeek-gateway:build",
-          "@boardgamesempire/boardgamegeek-gateway:serve"
+          "@boardgamesempire/boardgamegeek-gateway:build"
         ]
       }
     }

@@ -1,4 +1,3 @@
-/* eslint-disable */
 import { readFileSync } from 'fs';
 
 // Reading the SWC compilation config for the spec files
@@ -10,9 +9,6 @@ swcJestConfig.swcrc = false;
 export default {
   displayName: '@boardgamesempire/igdb-gateway-e2e',
   preset: '../../jest.preset.js',
-  globalSetup: '<rootDir>/src/support/global-setup.ts',
-  globalTeardown: '<rootDir>/src/support/global-teardown.ts',
-  setupFiles: ['<rootDir>/src/support/test-setup.ts'],
   testEnvironment: 'node',
   transform: {
     '^.+\\.(t|j|mj)s$': ['@swc/jest', swcJestConfig],

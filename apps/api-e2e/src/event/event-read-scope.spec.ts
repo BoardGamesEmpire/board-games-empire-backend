@@ -6,15 +6,16 @@ import {
   Visibility,
 } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
-import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createEventClient, EVENTS_PATH } from './event-request';
 import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
   eventEnvelope,
   listEventsEnvelope,
+  occurrenceEnvelope,
   type ListEventsEnvelope,
 } from './event-wire';
 
@@ -37,7 +38,6 @@ import {
  */
 describe('event read scope', () => {
   const baseUrl = requireBaseUrl(process.env);
-  const EVENTS_PATH = '/api/events';
 
   let db: TestDatabase;
   let actors: Actors;
@@ -51,15 +51,7 @@ describe('event read scope', () => {
     await db.close();
   });
 
-  const createdEventId = async (actor: AuthenticatedActor, body: Record<string, unknown> = {}) =>
-    eventEnvelope(
-      await request(baseUrl)
-        .post(EVENTS_PATH)
-        .set(actor.headers)
-        .send({ title: `e2e event ${randomUUID().slice(0, 8)}`, ...body })
-        .expect(201),
-      'POST /api/events',
-    ).id;
+  const { createdEventId } = createEventClient(baseUrl);
 
   const readEvent = (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl).get(`${EVENTS_PATH}/${eventId}`).set(actor.headers);
@@ -201,12 +193,17 @@ describe('event read scope', () => {
         'POST /api/events/:eventId/attendees as the host',
       );
 
-      // Arranged in the database, like the friendship above: this test is
-      // about the summary's reads, and the votes below go through their route.
-      const occurrence = await db.client.eventOccurrence.create({
-        data: { eventId, label: 'Saturday', status: OccurrenceStatus.Proposed },
-        select: { id: true },
-      });
+      // Proposed, so it is open for availability votes: in the event's
+      // default Fixed scheduling mode an occurrence is otherwise created
+      // Confirmed.
+      const occurrence = occurrenceEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+          .set(host.headers)
+          .send({ label: 'Saturday', status: OccurrenceStatus.Proposed })
+          .expect(201),
+        'POST /api/events/:eventId/occurrences as the host',
+      );
       const votes = [
         [host, AvailabilityResponse.Available],
         [guest, AvailabilityResponse.Unavailable],

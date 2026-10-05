@@ -103,11 +103,14 @@ export class IGDBService implements OnModuleInit {
    * @see https://dev.twitch.tv/docs/authentication/refresh-tokens
    */
   private async performRefresh() {
-    const credentials = this.configService.getOrThrow<IGDBConfig>('igdb');
-    const accessTokenResponse = await this.authService.fetchAccessToken({
-      client_id: credentials.clientId,
-      client_secret: credentials.clientSecret,
-    });
+    const config = this.configService.getOrThrow<IGDBConfig>('igdb');
+    const accessTokenResponse = await this.authService.fetchAccessToken(
+      {
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+      },
+      config.tokenUrl,
+    );
 
     this.accessToken = accessTokenResponse.access_token;
     this.logger.log('IGDB access token refreshed');

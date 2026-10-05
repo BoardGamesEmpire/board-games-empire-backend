@@ -18,6 +18,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
+import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
 import { pickSnapshot } from '../utils/pick-snapshot.util';
 import { OccurrenceEvents } from './constants';
@@ -239,7 +240,7 @@ export class EventOccurrenceService {
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     try {
-      return this.db.eventOccurrence.delete({
+      return await this.db.eventOccurrence.delete({
         where: {
           id: occurrenceId,
           // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
@@ -563,6 +564,9 @@ export class EventOccurrenceService {
 }
 
 const OCCURRENCE_INCLUDE = {
+  // Unbounded: every vote on every occurrence on the page. The page size caps
+  // the occurrences, not their votes (#404). The votes are served to whoever
+  // reads the occurrence, under no ceiling of their own (#560).
   availabilityVotes: {
     select: {
       id: true,
@@ -578,9 +582,12 @@ const OCCURRENCE_INCLUDE = {
   games: {
     select: {
       id: true,
-      gameId: true,
+      platformGameId: true,
       role: true,
-      game: { select: { id: true, title: true, thumbnail: true } },
+      platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
     },
+    // In the host's order. `id` breaks ties on `sortOrder`, which defaults to
+    // 0, as it does for the occurrences themselves.
+    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
   },
-} as const;
+} as const satisfies Prisma.EventOccurrenceInclude;

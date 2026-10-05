@@ -1,5 +1,5 @@
 import { assertPluginUnit, type PluginUnit } from '@bge/actor-context';
-import { DatabaseService, RiskLevel } from '@bge/database';
+import { DatabaseService, Prisma, RiskLevel } from '@bge/database';
 import {
   resolveLocalizedStringDetailed,
   type LocalizedString,
@@ -49,7 +49,7 @@ const PRESENTABLE_PLUGIN_SELECT = {
   manifestJson: true,
   pendingVersion: true,
   pendingManifestJson: true,
-} as const;
+} as const satisfies Prisma.PluginSelect;
 
 /**
  * The install/update consent-presentation assembler: manifest

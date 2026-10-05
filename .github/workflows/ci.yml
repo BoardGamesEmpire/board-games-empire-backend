@@ -203,9 +203,10 @@ jobs:
     timeout-minutes: 30
     env:
       # Same value and reasoning as the `main` job. Covers the Jest process,
-      # prisma migrate, and prisma db seed — NOT the API child, which the
-      # harness pins separately (apiEnvOverrides) because Jest's CLI assigns
-      # `test` whenever the variable is unset.
+      # prisma migrate, and prisma db seed — NOT the API, worker and gateway
+      # children, which the harness pins separately (apiEnvOverrides,
+      # workerEnvOverrides, useGateway) because Jest's CLI assigns `test`
+      # whenever the variable is unset.
       NODE_ENV: testing
 
     steps:
@@ -225,24 +226,14 @@ jobs:
       - name: Build affected projects
         run: npx nx affected -t build --parallel --maxParallel=3
 
-      # `affected` keeps doc-only PRs from paying the suite; the api-e2e
-      # project's implicitDependencies pull it in for any api-affecting
-      # change, and ci.yml itself is in sharedGlobals.
-      #
-      # The --exclude list is load-bearing, not tidiness: the two scaffolded
-      # gateway *-e2e apps (#258) carry generated `e2e` targets that declare
-      # a `:serve` task as a dependency — a task that never exits, so an
-      # affected run that picks either of them up hangs until the job
-      # timeout. Neither is safe to unexclude until #258 gives it a real
-      # suite. The root `test:e2e` script carries the same list for local
-      # runs, so change both together.
+      # `affected` keeps doc-only PRs from paying the suites; each e2e app's
+      # implicitDependencies pull it in for any change to the app it tests,
+      # and ci.yml itself is in sharedGlobals.
       - name: Run e2e suite
         timeout-minutes: 20
         env:
-          # D-259-3: stream the API child's full output into the job log so a
-          # mid-run assertion failure is diagnosable without a local repro.
-          # Failure-scoped alternative tracked as #274.
+          # Stream every child's full output (API, worker, gateways) into the
+          # job log so a mid-run assertion failure is diagnosable without a
+          # local repro (#259). Failure-scoped alternative tracked as #274.
           BGE_E2E_VERBOSE: 'true'
-        run: >-
-          npx nx affected -t e2e --parallel=1
-          --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/igdb-gateway-e2e
+        run: npx nx affected -t e2e --parallel=1

@@ -13,12 +13,10 @@
           "{projectRoot}/test-output/jest/coverage"
         ],
         "options": {
-          "jestConfig": "apps/igdb-gateway-e2e/jest.config.cts",
-          "passWithNoTests": true
+          "jestConfig": "apps/igdb-gateway-e2e/jest.config.cts"
         },
         "dependsOn": [
-          "@boardgamesempire/igdb-gateway:build",
-          "@boardgamesempire/igdb-gateway:serve"
+          "@boardgamesempire/igdb-gateway:build"
         ]
       }
     }
