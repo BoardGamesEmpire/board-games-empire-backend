@@ -4,7 +4,6 @@ import Joi from 'joi';
 
 export interface HealthConfig {
   httpHealthCheckUrls: string[];
-  grpcHealthCheckAddress: string;
   enableHealthChecks: boolean;
 }
 
@@ -17,11 +16,6 @@ export default registerAs('health', () =>
       mutators: (value) => splitTrimFilter(value),
     },
     {
-      keyTo: 'grpcHealthCheckAddress',
-      key: 'GRPC_HEALTH_CHECK_ADDRESS',
-      defaultValue: 'localhost:50051',
-    },
-    {
       keyTo: 'enableHealthChecks',
       key: 'ENABLE_HEALTH_CHECKS',
       defaultValue: true,
@@ -32,6 +26,5 @@ export default registerAs('health', () =>
 
 export const healthConfigValidationSchema = {
   HTTP_HEALTH_CHECK_URLS: Joi.string().default('google|https://www.google.com,github|https://www.github.com'),
-  GRPC_HEALTH_CHECK_ADDRESS: Joi.string().default('localhost:50051'),
   ENABLE_HEALTH_CHECKS: Joi.boolean().default(true),
 };
