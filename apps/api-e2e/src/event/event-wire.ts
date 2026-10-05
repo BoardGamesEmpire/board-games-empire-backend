@@ -1,4 +1,4 @@
-import type { Event, EventAttendee, EventGame } from '@bge/database';
+import type { Event, EventAttendee, EventGame, EventOccurrence, Game, Platform } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -14,6 +14,28 @@ export type EventGameWire = Wire<EventGame>;
 
 export interface ListEventsEnvelope {
   readonly events: readonly EventWire[];
+  readonly total: number;
+}
+
+/**
+ * One game on an occurrence, as the occurrence routes embed it: the lineup
+ * row's key fields, and the platform game it schedules with its game and
+ * platform. The columns are picked from the models, so renaming one fails
+ * typecheck here. The relation keys and `platformGame.id` are written out.
+ */
+export type OccurrenceGameWire = Pick<EventGameWire, 'id' | 'platformGameId' | 'role'> & {
+  readonly platformGame: {
+    readonly id: string;
+    readonly game: Pick<Wire<Game>, 'id' | 'title' | 'thumbnail'>;
+    readonly platform: Pick<Wire<Platform>, 'id' | 'name' | 'platformType'>;
+  };
+};
+
+/** An occurrence as its routes serve it, with its games. */
+export type EventOccurrenceWire = Wire<EventOccurrence> & { readonly games: readonly OccurrenceGameWire[] };
+
+export interface ListOccurrencesEnvelope {
+  readonly occurrences: readonly EventOccurrenceWire[];
   readonly total: number;
 }
 
@@ -76,26 +98,39 @@ export function eventEnvelope(response: HttpResponseLike, request: RequestDescri
   return event ?? fail("it carried no 'event' object with a string id", request, response);
 }
 
+/** What a row must be for {@link withId}. */
+const ROW_WITH_ID = 'an object with a string id';
+
+/** What a row must be for {@link occurrenceRow}. */
+const OCCURRENCE_ROW = "an object with a string id and a 'games' array";
+
 /**
- * `GET /api/events`: `{ events: [...], pagination }`. The total is checked
- * against the page because both count the same caller-scoped set (#372): a
- * total below the rows on screen means the two disagree about scope.
+ * A paginated list's rows under `key`, and its `pagination.total`. The total
+ * is checked against the page because both count the same caller-scoped set
+ * (#372): a total below the rows on screen means the two disagree about scope.
+ * Each row passes `parseRow`, which accepts `rowShape`, or the envelope fails.
  */
-export function listEventsEnvelope(response: HttpResponseLike, request: RequestDescription): ListEventsEnvelope {
+function paginatedEnvelope<TRow>(
+  key: string,
+  parseRow: (value: unknown) => TRow | undefined,
+  rowShape: string,
+  response: HttpResponseLike,
+  request: RequestDescription,
+): { rows: TRow[]; total: number } {
   if (!isRecord(response.body)) {
     return fail('the body is not an object', request, response);
   }
 
-  const events = response.body['events'];
-  if (!Array.isArray(events)) {
-    return fail("it carried no 'events' array", request, response);
+  const entries = response.body[key];
+  if (!Array.isArray(entries)) {
+    return fail(`it carried no '${key}' array`, request, response);
   }
 
-  const rows: EventWire[] = [];
-  for (const entry of events) {
-    const row = withId<EventWire>(entry);
+  const rows: TRow[] = [];
+  for (const entry of entries) {
+    const row = parseRow(entry);
     if (row === undefined) {
-      return fail('one of its events is not an object with a string id', request, response);
+      return fail(`one of its ${key} is not ${rowShape}`, request, response);
     }
 
     rows.push(row);
@@ -107,7 +142,46 @@ export function listEventsEnvelope(response: HttpResponseLike, request: RequestD
     return fail("it carried no integer 'pagination.total' at least as large as its page", request, response);
   }
 
+  return { rows, total };
+}
+
+/** `GET /api/events`: `{ events: [...], pagination }`. */
+export function listEventsEnvelope(response: HttpResponseLike, request: RequestDescription): ListEventsEnvelope {
+  const { rows, total } = paginatedEnvelope('events', withId<EventWire>, ROW_WITH_ID, response, request);
+
   return { events: rows, total };
+}
+
+/**
+ * An occurrence row: an id, and a `games` array, since the embed is what a
+ * renamed include breaks. The games themselves are compared against definite
+ * values by the specs.
+ */
+function occurrenceRow(value: unknown): EventOccurrenceWire | undefined {
+  const row = withId<EventOccurrenceWire>(value);
+
+  return row !== undefined && Array.isArray(row.games) ? row : undefined;
+}
+
+/**
+ * `GET /api/events/:eventId/occurrences/:occurrenceId`: `{ occurrence }`. The
+ * occurrence writes (`POST`, `PATCH`, `DELETE`, and the status transitions)
+ * answer `{ message, occurrence }`.
+ */
+export function occurrenceEnvelope(response: HttpResponseLike, request: RequestDescription): EventOccurrenceWire {
+  const occurrence = isRecord(response.body) ? occurrenceRow(response.body['occurrence']) : undefined;
+
+  return occurrence ?? fail(`it carried no 'occurrence' that is ${OCCURRENCE_ROW}`, request, response);
+}
+
+/** `GET /api/events/:eventId/occurrences`: `{ occurrences: [...], pagination }`. */
+export function listOccurrencesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListOccurrencesEnvelope {
+  const { rows, total } = paginatedEnvelope('occurrences', occurrenceRow, OCCURRENCE_ROW, response, request);
+
+  return { occurrences: rows, total };
 }
 
 /**

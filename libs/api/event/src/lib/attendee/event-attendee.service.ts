@@ -6,6 +6,7 @@ import {
   EventParticipationStatus,
   isPrismaDependentRecordNotFoundError,
   isPrismaUniqueConstraintError,
+  Prisma,
   ResourceType,
   SystemRole,
 } from '@bge/database';
@@ -520,4 +521,4 @@ const ATTENDEE_INCLUDE = {
       },
     },
   },
-} as const;
+} as const satisfies Prisma.EventAttendeeInclude;
