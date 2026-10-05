@@ -150,3 +150,30 @@ find libs/database/src/lib/generated -type f | wc -l   # must also be 136
 
 If the second count is lower, the capture is still lossy and caching must stay
 off.
+
+## `i18n-core:typecheck` names its inputs
+
+`libs/common/i18n-core/package.json` gives the `typecheck` target an explicit
+`inputs` list: the list the `@nx/js/typescript` plugin infers, unchanged, plus
+`{projectRoot}/src/lib/i18n/**/*.json`.
+
+The task emits the declarations every other project compiles against,
+`dist/lib/generated/i18n.generated.d.ts` among them. The generated source is
+gitignored, so it is absent from Nx's file map, and the inferred inputs cover
+only the lib's TypeScript. Without the catalogs as inputs, a catalog change left
+the task's hash unchanged. CI's catalog guard ("Detect i18n catalog changes" in
+`.github/workflows/ci.yml`) runs that change's typecheck with `--skip-nx-cache`,
+which writes nothing, so the entry cached before the change stayed current.
+Every later run whose own diff missed the catalogs restored declarations without
+the change: #615 failed on a key #605 had added (#619).
+
+The list repeats the inferred one because, in Nx 22.7.3, an explicit `inputs`
+replaces the inferred list rather than extending it, and a `"..."` entry is kept
+as a literal rather than spread. After an `@nx/js` upgrade, re-derive it: remove
+the `inputs` key, read the inferred list from
+`nx show project @board-games-empire/i18n-core --json`, and add the catalog glob
+back.
+
+To check that the input works, run the target twice, so that the second run is a
+cache hit. Then change a catalog and run it again: it should execute rather than
+restore.
