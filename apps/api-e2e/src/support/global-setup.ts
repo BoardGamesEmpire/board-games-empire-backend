@@ -1,14 +1,21 @@
+// The subpath, not the package root: Jest loads global setup and teardown
+// with Node's resolver, which cannot follow the root's `.js` specifiers to
+// their `.ts` sources.
+import {
+  E2E_VERBOSE_VAR,
+  killOnExit,
+  launchOnFreePort,
+  requireBundle,
+  WORKSPACE_ROOT,
+} from '@bge/testing-e2e/child-process';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import { spawnSync, type ChildProcess } from 'node:child_process';
-import * as net from 'node:net';
 import * as path from 'node:path';
-import { killOnExit, launchChild, requireBundle, WORKSPACE_ROOT } from './child-process';
 import {
   apiEnvOverrides,
   decideProvisioning,
   E2E_BASE_URL_VAR,
-  E2E_VERBOSE_VAR,
   parseRedisUrl,
   POSTGRES_IMAGE,
   REDIS_IMAGE,
@@ -24,7 +31,6 @@ const API_BUNDLE = path.join(WORKSPACE_ROOT, 'apps', 'api', 'dist', 'main.js');
 
 const READINESS_TIMEOUT_MS = 90_000;
 const READINESS_POLL_MS = 250;
-const LAUNCH_ATTEMPTS = 3;
 
 /**
  * Runs the Prisma CLI as a child process with `DATABASE_URL` overridden to
@@ -53,81 +59,12 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
   }
 }
 
-/**
- * Grabs an OS-assigned free port, then releases it for the API to bind.
- * Inherently racy (probe-then-bind): another process can claim the port in
- * the gap. `launchApi` compensates — an EADDRINUSE boot failure retries on
- * a fresh port instead of surfacing as a launch error.
- */
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = net.createServer();
-    server.unref();
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
-        server.close();
-        reject(new Error('Failed to acquire a free port for the API'));
-        return;
-      }
-
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-}
-
 interface LaunchedApi {
   readonly child: ChildProcess;
   readonly baseUrl: string;
 }
 
-interface LaunchOutcome {
-  readonly kind: 'ready' | 'port-collision' | 'failed';
-  readonly child: ChildProcess;
-  readonly baseUrl: string;
-  readonly failure?: string;
-}
-
-async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<LaunchOutcome> {
-  const port = await getFreePort();
-  const baseUrl = `http://127.0.0.1:${port}`;
-
-  console.log(`[e2e] launching API (${API_BUNDLE}) on ${baseUrl}...`);
-
-  const outcome = await launchChild({
-    label: 'API',
-    bundle: API_BUNDLE,
-    env: { ...env, ...apiEnvOverrides(baseUrl, port) },
-    verbose,
-    isReady: async () => {
-      try {
-        const response = await fetch(`${baseUrl}/health/ready`);
-        return response.status === 200;
-      } catch {
-        // Not listening yet — keep polling.
-        return false;
-      }
-    },
-    timeoutMs: READINESS_TIMEOUT_MS,
-    pollMs: READINESS_POLL_MS,
-  });
-
-  if (outcome.kind === 'ready') {
-    return { kind: 'ready', child: outcome.child, baseUrl };
-  }
-
-  /**
-   * `getFreePort` is probe-then-bind, so another process can take the port
-   * in the gap. That is retryable; every other boot death is not. Detection
-   * scans the captured output because Node surfaces the child's bind error
-   * only in its own stderr — the parent sees a plain non-zero exit.
-   */
-  const lostThePort = outcome.kind === 'exited' && outcome.outputTail.some((line) => line.includes('EADDRINUSE'));
-
-  return { kind: lostThePort ? 'port-collision' : 'failed', child: outcome.child, baseUrl, failure: outcome.failure };
-}
+const apiBaseUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
 /**
  * Launches the built API bundle as a real child process — the same
@@ -138,28 +75,38 @@ async function launchApiOnce(env: NodeJS.ProcessEnv, verbose: boolean): Promise<
  *
  * Output is captured and replayed on failure (or streamed live with
  * `BGE_E2E_VERBOSE`), because a server that dies during boot is useless to
- * debug without its logs. An EADDRINUSE boot failure — the getFreePort
- * race lost — retries on a fresh port up to LAUNCH_ATTEMPTS.
+ * debug without its logs. A port lost before the API could bind it is
+ * retried on a fresh one (`launchOnFreePort`).
  */
 async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
   requireBundle('API', API_BUNDLE, '@boardgamesempire/api:build');
 
   const verbose = env[E2E_VERBOSE_VAR] === 'true';
 
-  for (let attempt = 1; ; attempt += 1) {
-    const outcome = await launchApiOnce(env, verbose);
+  const { child, port } = await launchOnFreePort((port) => {
+    const baseUrl = apiBaseUrl(port);
+    console.log(`[e2e] launching API (${API_BUNDLE}) on ${baseUrl}...`);
 
-    if (outcome.kind === 'ready') {
-      return { child: outcome.child, baseUrl: outcome.baseUrl };
-    }
+    return {
+      label: 'API',
+      bundle: API_BUNDLE,
+      env: { ...env, ...apiEnvOverrides(baseUrl, port) },
+      verbose,
+      isReady: async () => {
+        try {
+          const response = await fetch(`${baseUrl}/health/ready`);
+          return response.status === 200;
+        } catch {
+          // Not listening yet — keep polling.
+          return false;
+        }
+      },
+      timeoutMs: READINESS_TIMEOUT_MS,
+      pollMs: READINESS_POLL_MS,
+    };
+  });
 
-    if (outcome.kind === 'port-collision' && attempt < LAUNCH_ATTEMPTS) {
-      console.warn(`[e2e] port collision on launch attempt ${attempt}/${LAUNCH_ATTEMPTS}, retrying on a fresh port...`);
-      continue;
-    }
-
-    throw new Error(outcome.failure ?? 'API launch failed');
-  }
+  return { child, baseUrl: apiBaseUrl(port) };
 }
 
 /**

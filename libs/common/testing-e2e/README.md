@@ -55,3 +55,38 @@ it('an owner can list their households', async () => {
 
 API-key actors are deliberately absent — deferred to #270 while the key permission model is
 unbuilt; restricted-key scoping is #266.
+
+## Child processes and gateways
+
+Every e2e suite runs the apps it tests from their built bundles, as child processes (#258):
+
+- `launchChild`, `launchOnFreePort`, `stopChild` and `killOnExit`, from
+  `@bge/testing-e2e/child-process`, launch and stop a bundle. `api-e2e` runs the API and the worker
+  on them.
+- `useGateway`, from `@bge/testing-e2e/gateway`, runs a game gateway for one spec file, on a free
+  port, and hands out a gRPC client once the gateway answers `Check` with `SERVING`. The
+  `boardgamegeek-gateway-e2e` and `igdb-gateway-e2e` suites are built on it.
+
+```ts
+import { useGateway } from '@bge/testing-e2e/gateway';
+
+const gateway = useGateway({
+  app: 'boardgamegeek-gateway',
+  label: 'BoardGameGeek gateway',
+  hostEnv: 'BOARDGAMEGEEK_GATEWAY_GRPC_HOST',
+  portEnv: 'BOARDGAMEGEEK_GATEWAY_GRPC_PORT',
+  env: () => ({ ...process.env, BOARDGAMEGEEK_API_KEY: 'e2e-placeholder-key' }),
+});
+
+it('serves', async () => {
+  await expect(gateway().check()).resolves.toEqual({ status: 'SERVING' });
+});
+```
+
+The launcher has its own subpath, rather than a place in the package root, because Jest loads
+global setup and teardown with Node's own resolver. That resolver cannot follow the root's `.js`
+specifiers to their `.ts` sources, so `child-process.ts` imports Node built-ins only. The same
+limit is why gateways launch per spec file rather than from global setup.
+
+The gateway helper has its own subpath too, so the `api-e2e` specs that import the root do not
+each load the gRPC stack. Jest loads modules afresh for every spec file.

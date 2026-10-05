@@ -1,4 +1,5 @@
-import { stopChild } from './child-process';
+// The subpath, for the reason given in global-setup.
+import { stopChild } from '@bge/testing-e2e/child-process';
 import { getE2EGlobalState } from './global-state';
 
 /**
