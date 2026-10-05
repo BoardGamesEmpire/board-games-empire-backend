@@ -53,17 +53,6 @@
         "targetName": "test"
       },
       "exclude": ["apps/api-e2e/**/*", "apps/boardgamegeek-gateway-e2e/**/*", "apps/igdb-gateway-e2e/**/*"]
-    },
-    {
-      "plugin": "@nx/docker",
-      "options": {
-        "buildTarget": {
-          "name": "docker:build"
-        },
-        "runTarget": {
-          "name": "docker:run"
-        }
-      }
     }
   ],
   "targetDefaults": {

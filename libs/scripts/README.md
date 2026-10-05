@@ -2,17 +2,19 @@
 
 Build-path and CI scripts that run under bare `node`, plus the modules behind them.
 
-Nothing imports this library. Its entrypoints are invoked by path, from Nx targets or from CI:
+Nothing imports this library. Its entrypoints are invoked by path, from Nx targets, from CI or from the image build:
 
-| Entrypoint                        | Invoked by                                                       |
-| --------------------------------- | ---------------------------------------------------------------- |
-| `src/bin/prisma-generate.js`      | `@bge/database:generate`                                         |
-| `src/bin/generate-bge-version.js` | `@boardgamesempire/api:generate`                                 |
-| `src/bin/check-spec-swcrc.js`     | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
+| Entrypoint                          | Invoked by                                                       |
+| ----------------------------------- | ---------------------------------------------------------------- |
+| `src/bin/prisma-generate.js`        | `@bge/database:generate`                                         |
+| `src/bin/generate-bge-version.js`   | `@boardgamesempire/api:generate`                                 |
+| `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
+| `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
 
 Because the call sites are command strings rather than imports, Nx cannot infer
 the dependency. Each consuming target declares these files in its own `inputs`.
-The CI step needs no inputs, because it runs uncached.
+The CI step needs no inputs, because it runs uncached. The image build mounts
+`src/` from its build context, so Docker's own layer cache tracks the file.
 
 ## Why it is unbuilt
 
@@ -40,6 +42,14 @@ not ignored, with a conflicted file listed once. It also covers which repository
 gets checked: a root below the top is refused, and git hook variables pointing
 elsewhere are ignored. The header of `src/spec-swcrc/check.js` explains why
 coverage needs `"inline"` (#524).
+
+`src/bundle-externals/check.spec.js` runs the bundle-externals check against
+throwaway directories laid out like the image. It covers externals that resolve
+and one that does not, a subpath through a package's `exports`, a package
+installed under one app's own `node_modules` (found for that app only), text
+that mentions `require` without being an external, and a bundle with no
+externals it can read, which it reports instead of passing. The header of
+`src/bundle-externals/check.js` explains why the image needs it (#593).
 
 `src/bgg` and `src/igdb` are **not** part of this library; those ad-hoc scripts
 still live in the top-level `scripts/` directory and are covered by no target

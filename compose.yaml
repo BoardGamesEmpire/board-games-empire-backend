@@ -1,0 +1,202 @@
+# The split profile (#593): each BGE role in a container of its own, all from
+# the one image, with Postgres, Redis and the two game gateways. From the
+# repository root:
+#
+#   docker compose --profile split up --build
+#
+# Without `--profile split`, only Postgres and Redis start. docs/DEPLOYMENT.md
+# covers the settings, what "ready" means for each role, and the first boot.
+#
+# Secrets come from the environment Compose interpolates from: the shell, or a
+# `.env` file beside this one. BETTER_AUTH_SECRET and DATA_ENCRYPTION_KEY are
+# required; a role that lacks one names it in its log and exits.
+
+name: bge
+
+x-bge: &bge
+  image: ${BGE_IMAGE:-bge:local}
+  build:
+    context: .
+    target: bge
+  profiles: [split]
+  restart: unless-stopped
+  # Node runs as PID 1 otherwise, and PID 1 ignores SIGTERM until a handler
+  # exists. The roles register theirs after the boot sequence, so a container
+  # stopped while it waits for the schema would sit out the stop timeout.
+  init: true
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+# What every role reads.
+x-bge-environment: &bge-environment
+  NODE_ENV: production
+  # A direct connection (docs/BOOTSTRAP.md, #596), in the `public` schema.
+  DATABASE_URL: postgresql://bge:bge@postgres:5432/bge
+  REDIS_HOST: redis
+  REDIS_BULLMQ_HOST: redis
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+# A TCP connect to the gRPC port: neither the coordinator nor the gateways
+# serve the standard gRPC health service yet (#612).
+x-grpc-healthcheck: &grpc-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 3
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: bge
+      POSTGRES_PASSWORD: bge
+      POSTGRES_DB: bge
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U bge -d bge]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # The job queues and the sign-in sessions live here, so Redis logs each write
+  # and flushes the log every second, as BullMQ advises. Snapshots alone lose
+  # whatever was written after the last one.
+  redis:
+    image: redis:7-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Migrates the database and seeds it, then serves HTTP and WebSocket.
+  api:
+    <<: *bge
+    environment:
+      <<: *bge-environment
+      BGE_ROLES: api
+      SERVER_PORT: '33333'
+      REDIS_WEBSOCKET_HOST: redis
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+      BETTER_AUTH_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}
+      TRUSTED_ORIGINS: ${BGE_PUBLIC_URL:-http://localhost:33333}
+      # Signed media links point here, at the stream route under `/api`.
+      MEDIA_BASE_URL: ${BGE_PUBLIC_URL:-http://localhost:33333}/api
+      GATEWAY_COORDINATOR_HOST: coordinator
+      GATEWAY_COORDINATOR_PORT: '50052'
+    # Loopback only, unless BGE_BIND_ADDRESS names another address: the first
+    # account to sign up becomes the owner, and the default keeps a new
+    # deployment off the network.
+    ports:
+      - ${BGE_BIND_ADDRESS:-127.0.0.1}:${BGE_PORT:-33333}:33333
+    volumes:
+      - media:/var/lib/bge/media
+      - plugins:/var/lib/bge/plugins
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:33333/health/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      # Covers a first boot, which migrates and seeds before anything listens.
+      start_period: 5m
+
+  # No healthcheck: the worker listens on nothing. Its `Bootstrap complete`
+  # log line is the evidence that it came up.
+  worker:
+    <<: *bge
+    environment:
+      <<: *bge-environment
+      BGE_ROLES: worker
+      # The api's key: the worker decrypts what the api encrypted. No other
+      # role reads it.
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}
+    volumes:
+      - media:/var/lib/bge/media
+
+  # No healthcheck, for the same reason as the worker.
+  gateway-fetch:
+    <<: *bge
+    environment:
+      <<: *bge-environment
+      BGE_ROLES: gateway-fetch
+
+  coordinator:
+    <<: *bge
+    environment:
+      <<: *bge-environment
+      BGE_ROLES: coordinator
+      COORDINATOR_GRPC_HOST: 0.0.0.0
+      COORDINATOR_GRPC_PORT: '50052'
+    healthcheck:
+      <<: *grpc-healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:net').connect(50052, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"
+      # It waits for the api's first migration before it listens.
+      start_period: 5m
+
+  # The game gateways are images of their own (#194). Register each one with
+  # the api to search through it; docs/DEPLOYMENT.md shows how.
+  boardgamegeek-gateway:
+    image: ${BGE_BOARDGAMEGEEK_GATEWAY_IMAGE:-bge-boardgamegeek-gateway:local}
+    build:
+      context: .
+      target: boardgamegeek-gateway
+    profiles: [split]
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      BOARDGAMEGEEK_API_KEY: ${BOARDGAMEGEEK_API_KEY:-}
+      BOARDGAMEGEEK_GATEWAY_GRPC_HOST: 0.0.0.0
+      BOARDGAMEGEEK_GATEWAY_GRPC_PORT: '50053'
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    healthcheck:
+      <<: *grpc-healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:net').connect(50053, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"
+
+  igdb-gateway:
+    image: ${BGE_IGDB_GATEWAY_IMAGE:-bge-igdb-gateway:local}
+    build:
+      context: .
+      target: igdb-gateway
+    profiles: [split]
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      IGDB_CLIENT_ID: ${IGDB_CLIENT_ID:-}
+      IGDB_CLIENT_SECRET: ${IGDB_CLIENT_SECRET:-}
+      IGDB_GATEWAY_GRPC_HOST: 0.0.0.0
+      IGDB_GATEWAY_GRPC_PORT: '50054'
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    healthcheck:
+      <<: *grpc-healthcheck
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:net').connect(50054, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"
+
+volumes:
+  postgres:
+  redis:
+  media:
+  plugins:

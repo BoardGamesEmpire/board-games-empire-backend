@@ -1,4 +1,13 @@
-import baseConfig, { i18nHardcodedStringSelectors } from '../../eslint.config.mjs';
+import baseConfig, { i18nHardcodedStringSelectors, restrictedImportPaths } from '../../eslint.config.mjs';
+
+// The api is the one role that migrates (#236), so its entry point is the one
+// file that may hand the bootstrap the Prisma CLI migrator. Only that entry is
+// dropped for it, and every other repo-wide restriction re-applies to main.ts
+// unchanged. The entry restricts a single name, so narrowing it to none would
+// still refuse `import * as` from `@bge/bootstrap` here.
+const migratorAllowedImportPaths = Object.entries(restrictedImportPaths)
+  .filter(([key]) => key !== 'prismaCliMigrator')
+  .map(([, entry]) => entry);
 
 export default [
   ...baseConfig,
@@ -12,6 +21,12 @@ export default [
     ignores: ['**/*.spec.ts'],
     rules: {
       'no-restricted-syntax': ['error', ...i18nHardcodedStringSelectors],
+    },
+  },
+  {
+    files: ['src/main.ts'],
+    rules: {
+      'no-restricted-imports': ['error', { paths: migratorAllowedImportPaths }],
     },
   },
 ];

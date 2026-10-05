@@ -232,8 +232,7 @@ jobs:
 
       # Built separately from the suite step for two reasons: `--parallel=1`
       # below serializes the entire task graph, and the api bundle
-      # externalizes its workspace libraries (hence the `prune` /
-      # copy-workspace-modules targets), so `api:build` pulls ~40 `^build`
+      # externalizes its workspace libraries, so `api:build` pulls ~40 `^build`
       # tasks that have no business running one at a time. Affected-scoped:
       # a doc-only PR runs no build tasks here, though the job still pays
       # checkout and setup regardless.

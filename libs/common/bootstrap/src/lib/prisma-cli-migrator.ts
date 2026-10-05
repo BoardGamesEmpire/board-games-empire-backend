@@ -42,7 +42,9 @@ export class MigratorUnavailableError extends Error {
 /**
  * The first candidate directory holding `prisma.config.ts`. Pure so the search
  * order is a unit test: the working directory first (`nx serve`, the e2e
- * harness), then the bundle directory (`/app` in the container).
+ * harness), then the entry script's directory. In the image that is
+ * `apps/api/dist`, because the launcher names the api's bundle as the entry
+ * script; the image's working directory has no config.
  */
 export function findPrismaProjectRoot(
   candidates: readonly string[],

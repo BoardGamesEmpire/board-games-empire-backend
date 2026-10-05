@@ -215,6 +215,9 @@
     },
     {
       "path": "./libs/common/i18n-core"
+    },
+    {
+      "path": "./apps/launcher"
     }
   ]
 }
