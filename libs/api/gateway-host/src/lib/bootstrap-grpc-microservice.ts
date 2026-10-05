@@ -55,9 +55,11 @@ export interface GrpcMicroserviceBootstrapConfig {
   readonly registerShutdown: (app: INestMicroservice) => void;
 
   /**
-   * Bootstrap-failure handler. The error is already logged; this only performs
-   * the host-specific flush/shutdown before `process.exit(1)` (pino flush for
-   * gateways, `otel.shutdown()` for the coordinator).
+   * Bootstrap-failure handler. When the bootstrap calls it, the error is
+   * already logged and `process.exitCode` is already 1; this only performs the
+   * host-specific flush/shutdown before `process.exit(1)` (pino flush for
+   * gateways, `otel.shutdown()` for the coordinator). If that exit is never
+   * reached, a process left with nothing to do still ends with code 1.
    */
   readonly onBootstrapError: (error: unknown) => void;
 }
@@ -65,9 +67,12 @@ export interface GrpcMicroserviceBootstrapConfig {
 /**
  * Boots a gRPC microservice: walks the proto assets, creates the microservice,
  * installs the pino logger, wires the (host-supplied) shutdown handlers, and
- * listens. Owns its failure path (log, then delegate flush/exit to
- * {@link GrpcMicroserviceBootstrapConfig.onBootstrapError}), so each app's
- * `main.ts` is a single declarative call.
+ * listens. Owns its failure path (log, set exit code 1, then delegate
+ * flush/exit to {@link GrpcMicroserviceBootstrapConfig.onBootstrapError}), so
+ * each app's `main.ts` is a single declarative call. The exception is an error
+ * thrown while Nest builds the app's providers, such as a config factory
+ * reading a missing variable: Nest prints it through its own `ExceptionHandler`
+ * and exits 1 itself, so it never reaches the catch below (#627).
  *
  * The one gRPC bootstrap for the whole workspace. `bootstrapGrpcGateway`
  * specializes it for the gateway hosts; the gateway-coordinator app calls it
@@ -130,6 +135,11 @@ export async function bootstrapGrpcMicroservice(config: GrpcMicroserviceBootstra
     bootstrapLogger.info({ url }, '🚀 application is running on grpc');
   } catch (error) {
     bootstrapLogger.error({ err: error }, 'bootstrap failed');
+    // Set before the host's handler runs, which may never finish: a pino
+    // transport's flush callback does not run once nothing else holds the
+    // event loop, so a gateway's `exit(1)` inside it is never reached and the
+    // process ends on its own, with this code (#630).
+    process.exitCode = 1;
     onBootstrapError(error);
   }
 }
