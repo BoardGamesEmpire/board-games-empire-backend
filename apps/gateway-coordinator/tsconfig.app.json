@@ -49,6 +49,9 @@
       "path": "../../libs/gateway/game-search/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {

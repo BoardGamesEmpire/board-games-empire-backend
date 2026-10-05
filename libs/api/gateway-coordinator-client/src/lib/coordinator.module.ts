@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { createOutboundActorMetadataInterceptor } from '@bge/actor-context-transport';
+import { joinHostPort } from '@bge/utils';
 import type { ChannelOptions } from '@grpc/grpc-js';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -21,7 +22,10 @@ import { GatewayCoordinatorClientService } from './coordinator.service';
           useFactory: (config: ConfigService) => ({
             transport: Transport.GRPC,
             options: {
-              url: `${config.getOrThrow('coordinatorClient.host')}:${config.getOrThrow('coordinatorClient.port')}`,
+              url: joinHostPort(
+                config.getOrThrow<string>('coordinatorClient.host'),
+                config.getOrThrow<number>('coordinatorClient.port'),
+              ),
               package: 'bge.coordinator.v1',
               protoPath: [path.join(__dirname, 'proto', 'bge', 'coordinator', 'v1', 'coordinator.proto')],
               loader: {

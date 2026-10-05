@@ -24,10 +24,13 @@
       "path": "../../common/testing/tsconfig.lib.json"
     },
     {
-      "path": "../../common/actor-context/tsconfig.lib.json"
+      "path": "../../common/utils/tsconfig.lib.json"
     },
     {
       "path": "../actor-context-transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/actor-context/tsconfig.lib.json"
     },
     {
       "path": "../../common/env/tsconfig.lib.json"
