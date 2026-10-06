@@ -118,10 +118,12 @@ async function bootstrap() {
   // The web client, when the image carries its build beside this bundle
   // (#598). It runs before Nest's routes are registered, which is why it is
   // told which paths are the server's rather than relying on route order.
+  // Socket.IO answers `/socket.io/` itself but passes on `/socket.io` without
+  // the slash, so its path is listed too.
   const webClientRoot = join(__dirname, 'web');
   const webClient = await createWebClient({
     root: webClientRoot,
-    serverRoutes: [globalPrefix, ...unprefixedRoutes.map(({ path }) => path)],
+    serverRoutes: [globalPrefix, 'socket.io', ...unprefixedRoutes.map(({ path }) => path)],
   });
   if (webClient) {
     app.use(webClient);

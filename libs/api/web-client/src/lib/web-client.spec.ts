@@ -23,8 +23,8 @@ const BUILD: Record<string, string> = {
   'version.json': '{"version":"1.0.0"}',
 };
 
-/** The api's routes that sit outside the client, as main.ts names them to Nest. */
-const SERVER_ROUTES = ['api', 'metrics', 'health', 'health/*path', '.well-known/*path'];
+/** The api's routes that sit outside the client, as main.ts names them. */
+const SERVER_ROUTES = ['api', 'socket.io', 'metrics', 'health', 'health/*path', '.well-known/*path'];
 
 const NAVIGATION = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
 
@@ -145,6 +145,7 @@ describe('createWebClient', () => {
       ['/health/ready', { route: 'ready' }],
       ['/.well-known/bge-identity', { route: 'identity' }],
       ['/api/no-such-route', { statusCode: 404, message: 'Cannot GET /api/no-such-route' }],
+      ['/socket.io', { statusCode: 404, message: 'Cannot GET /socket.io' }],
     ])('leaves a page navigation to %s to the server', async (path, body) => {
       const response = await request(app).get(path).set('Accept', NAVIGATION);
 

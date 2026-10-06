@@ -36,7 +36,7 @@ The BGE image carries the web client's build (#598). It is copied from the clien
 
 The api serves the client from its own origin. A browser pointed at the api's URL (`BGE_PUBLIC_URL` in the split profile) loads the app, and the app's sign-in cookies work without a proxy in front.
 
-- **The server's paths stay the server's:** `/api` and everything under it, and likewise `/health`, `/metrics` and `/.well-known`. Socket.IO answers `/socket.io/` before any of the api's routes see it.
+- **The server's paths stay the server's:** `/api` and everything under it, and likewise `/socket.io`, `/health`, `/metrics` and `/.well-known`. Socket.IO answers under `/socket.io/` before any of the api's routes see it.
 - **Paths in the build** are served from it.
 - **Paths the build lacks:** a browser loading a page gets the app's `index.html`, and the app routes from there. Everything else gets a 404, so a missing script or asset is never answered with a page.
 - **Caching:** every file is sent with `Cache-Control: no-cache` and an ETag taken from its content. Flutter names its files the same in every release, so browsers ask about each file on every load, and the api answers 304 for any file the new build didn't change.
