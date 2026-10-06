@@ -29,9 +29,9 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  *
  * Before this constant the order lived in prose, in three service doc comments
  * that had to be kept in agreement by hand. Pinning it in one place is what
- * gives #361 — which may add a plugin-row lock to the decision transaction — a
- * single literal to amend, and what makes a writer that disagrees with the
- * claim surface as a red test rather than as reasoning in a PR description.
+ * gave #398 a single literal to amend when `decide()` gained its plugin-row
+ * claim (below), and what makes a writer that disagrees with the claim surface
+ * as a red test rather than as reasoning in a PR description.
  *
  * The stages are LOCKS, not accesses, and the patterns are held to it. A unit
  * row READ under the advisory key is not a unit-row lock, so the two fused
