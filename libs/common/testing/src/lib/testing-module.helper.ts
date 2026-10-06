@@ -9,7 +9,7 @@ import { createMockDatabaseService } from './mocks/database.service.mock.js';
 
 // ---------------------------------------------------------------------------
 // PassThroughGuard — canActivate always returns true.
-// Use this to bypass AuthGuard, PoliciesGuard, etc. in unit
+// Use this to bypass PoliciesGuard and other guards in unit
 // tests so their dependency chains are never resolved.
 // ---------------------------------------------------------------------------
 export class PassThroughGuard implements CanActivate {
@@ -80,7 +80,7 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
    * Pass every guard class applied to the controller under test.
    *
    * @example
-   *   overrideGuards: [AuthGuard, PoliciesGuard]
+   *   overrideGuards: [PoliciesGuard]
    */
   overrideGuards?: Type<CanActivate>[];
 
@@ -116,7 +116,7 @@ export interface CreateTestingModuleOptions extends ModuleMetadata {
  *   const { module, db, cls } = await createTestingModuleWithDb({
  *     controllers: [GameController],
  *     providers: [GameService],
- *     overrideGuards: [AuthGuard, PoliciesGuard],
+ *     overrideGuards: [PoliciesGuard],
  *   });
  */
 export async function createTestingModuleWithDb(options: CreateTestingModuleOptions): Promise<TestingModuleWithDb> {

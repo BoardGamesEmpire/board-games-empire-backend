@@ -1,8 +1,13 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { JobStatus } from '@bge/database';
-import { PoliciesGuard } from '@bge/permissions';
+import { AbilityService, PoliciesGuard } from '@bge/permissions';
 import { NO_CACHE_KEY } from '@bge/shared';
-import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
+import {
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  MOCK_ACTING_USER_ID,
+  paginationQuery,
+} from '@bge/testing';
 import { firstValueFrom, of } from 'rxjs';
 import { GameImportController } from './game-import.controller';
 import { ImportBatchStatus } from './interfaces/import-job.interface';
@@ -56,6 +61,7 @@ describe('GameImportController', () => {
           } satisfies Partial<jest.Mocked<GatewayCoordinatorClientService>>,
         },
         { provide: GameImportStatusService, useValue: importStatus },
+        { provide: AbilityService, useValue: createMockAbilityService() },
       ],
     });
 
@@ -84,13 +90,12 @@ describe('GameImportController', () => {
   });
 
   describe('listImports', () => {
-    it("lists the session user's batches with the given pagination", async () => {
-      const session = { user: { id: 'user-7' } } as Parameters<GameImportController['listImports']>[0];
+    it("lists the acting user's batches with the given pagination", async () => {
       const pagination = paginationQuery({ limit: 5 });
 
-      const response = await firstValueFrom(controller.listImports(session, pagination));
+      const response = await firstValueFrom(controller.listImports(pagination));
 
-      expect(importStatus.listBatchesForUser).toHaveBeenCalledWith('user-7', pagination);
+      expect(importStatus.listBatchesForUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID, pagination);
       expect(response).toEqual({
         batches: [batchStatus],
         pagination: { page: 1, limit: 5, total: 1, totalPages: 1, hasMore: false },
@@ -100,10 +105,9 @@ describe('GameImportController', () => {
     // #372: the batches are the rows, so `total` is a batch count — the value a
     // client needs to say how far back the import history goes.
     it('echoes the requested page and the service total', async () => {
-      const session = { user: { id: 'user-7' } } as Parameters<GameImportController['listImports']>[0];
       importStatus.listBatchesForUser.mockResolvedValue({ rows: [batchStatus], total: 23 });
 
-      const response = await firstValueFrom(controller.listImports(session, paginationQuery({ page: 3, limit: 5 })));
+      const response = await firstValueFrom(controller.listImports(paginationQuery({ page: 3, limit: 5 })));
 
       expect(response).toEqual(
         expect.objectContaining({

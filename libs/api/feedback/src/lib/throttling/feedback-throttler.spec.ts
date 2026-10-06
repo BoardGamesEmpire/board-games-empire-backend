@@ -79,7 +79,7 @@ describe('skipUserThrottle', () => {
     expect(skipUserThrottle(contextFor(handlerWithOptIn(true)))).toBe(false);
   });
 
-  it('skips opted-in routes when no user is present (IP tier + AuthGuard handle it)', () => {
+  it('skips opted-in routes when no user is present (IP tier + ActorAuthGuard handle it)', () => {
     snapshot.mockReturnValue({});
 
     expect(skipUserThrottle(contextFor(handlerWithOptIn(true)))).toBe(true);

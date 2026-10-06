@@ -1,5 +1,6 @@
 export { ActorContextTransportModule } from './lib/actor-context-transport.module';
 export { SKIP_ACTOR_CONTEXT_KEY, SkipActorContext } from './lib/decorators/skip-actor-context.decorator';
+export { ActorAuthGuard } from './lib/guards/actor-auth.guard';
 export { GrpcInternalActorInterceptor } from './lib/interceptors/grpc-internal-actor.interceptor';
 export {
   createOutboundActorMetadataInterceptor,

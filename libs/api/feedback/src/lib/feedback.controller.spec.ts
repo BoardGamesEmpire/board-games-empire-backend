@@ -9,9 +9,9 @@ import {
   type FeedbackReport,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AppAbility, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, AppAbility, CHECK_POLICIES_KEY, PoliciesGuard } from '@bge/permissions';
+import { createMockAbilityService, type MockAbilityService } from '@bge/testing';
 import { Test, TestingModule } from '@nestjs/testing';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import { CreateFeedbackReportDto } from './dto/create-feedback-report.dto';
 import { FeedbackReceiptDto } from './dto/feedback-receipt.dto';
@@ -21,13 +21,18 @@ import { FeedbackService } from './feedback.service';
 describe('FeedbackController', () => {
   let controller: FeedbackController;
   let feedback: jest.Mocked<Pick<FeedbackService, 'submit'>>;
+  let abilityService: MockAbilityService;
 
   beforeEach(async () => {
     feedback = { submit: jest.fn() };
+    abilityService = createMockAbilityService();
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [FeedbackController],
-      providers: [{ provide: FeedbackService, useValue: feedback }],
+      providers: [
+        { provide: FeedbackService, useValue: feedback },
+        { provide: AbilityService, useValue: abilityService },
+      ],
     })
       .overrideGuard(PoliciesGuard)
       .useValue({ canActivate: () => true })
@@ -39,11 +44,12 @@ describe('FeedbackController', () => {
   afterEach(() => jest.clearAllMocks());
 
   describe('POST /api/feedback/reports', () => {
-    it('forwards the authenticated user id and dto to FeedbackService.submit', async () => {
+    it("forwards the acting user's id and the dto to FeedbackService.submit", async () => {
       const created = stubReport({ id: 'fb-controller-1', userId: 'user-42' });
       feedback.submit.mockResolvedValue(created);
+      abilityService.getActingUserId.mockReturnValue('user-42');
 
-      const result = await firstValueFrom(controller.submitReport(stubSession('user-42'), makeDto()));
+      const result = await firstValueFrom(controller.submitReport(makeDto()));
 
       expect(feedback.submit).toHaveBeenCalledWith('user-42', expect.objectContaining({ message: 'Crash on load' }));
       expect(result.feedbackReport.id).toBe('fb-controller-1');
@@ -64,7 +70,7 @@ describe('FeedbackController', () => {
       feedback.submit.mockResolvedValue(created);
 
       const result = await firstValueFrom(
-        controller.submitReport(stubSession('user-1'), makeDto({ category: FeedbackCategory.FeatureRequest })),
+        controller.submitReport(makeDto({ category: FeedbackCategory.FeatureRequest })),
       );
 
       expect(result.feedbackReport).toBeInstanceOf(FeedbackReceiptDto);
@@ -77,7 +83,7 @@ describe('FeedbackController', () => {
       const error = new Error('Database connection lost');
       feedback.submit.mockRejectedValue(error);
 
-      await expect(firstValueFrom(controller.submitReport(stubSession('user-1'), makeDto()))).rejects.toBe(error);
+      await expect(firstValueFrom(controller.submitReport(makeDto()))).rejects.toBe(error);
     });
   });
 
@@ -123,10 +129,6 @@ function makeDto(overrides: Partial<CreateFeedbackReportDto> = {}): CreateFeedba
     severity: FeedbackSeverity.High,
     ...overrides,
   } as CreateFeedbackReportDto;
-}
-
-function stubSession(userId: string): UserSession {
-  return { user: { id: userId } } as UserSession;
 }
 
 function stubReport(overrides: Partial<FeedbackReport> = {}): FeedbackReport {

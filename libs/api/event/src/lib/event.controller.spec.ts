@@ -4,7 +4,6 @@ import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEvent, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { CreateEventDto } from './dto/create-event.dto';
@@ -33,7 +32,7 @@ describe('EventController', () => {
         { provide: EventService, useValue: service },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(EventController);

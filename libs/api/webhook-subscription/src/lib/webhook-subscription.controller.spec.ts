@@ -3,7 +3,6 @@ import { AbilityService, PoliciesGuard } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import { createMockAbilityService, createTestingModuleWithDb } from '@bge/testing';
 import { WebhooksModule } from '@bge/webhooks';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { WebhookSubscriptionController } from './webhook-subscription.controller';
 import { WebhookSubscriptionService } from './webhook-subscription.service';
 
@@ -22,7 +21,7 @@ describe('WebhookSubscriptionController', () => {
         { provide: AbilityService, useValue: createMockAbilityService() },
       ],
       controllers: [WebhookSubscriptionController],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(WebhookSubscriptionController);

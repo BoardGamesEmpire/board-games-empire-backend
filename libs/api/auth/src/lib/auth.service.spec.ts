@@ -1,5 +1,7 @@
 import type { UserSession } from '@thallesp/nestjs-better-auth';
 import { betterAuth } from 'better-auth';
+import { memoryAdapter } from 'better-auth/adapters/memory';
+import { admin } from 'better-auth/plugins/admin';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { authFactory } from './auth-factory';
 import { AuthService } from './auth.service';
@@ -120,6 +122,44 @@ describe('AuthService', () => {
       const verifyApiKey = jest.fn().mockResolvedValue(result);
 
       await expect(serviceOver({ verifyApiKey }).verifyApiKey('the-key')).resolves.toBeNull();
+    });
+  });
+
+  describe('findUserById', () => {
+    /** A real instance over the memory adapter, with one field better-auth must never return. */
+    const serviceOverMemory = () => {
+      const auth = betterAuth({
+        telemetry: { enabled: false },
+        secret: 'a-test-secret-that-is-long-enough-for-better-auth',
+        baseURL: 'http://localhost:3000',
+        database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
+        user: { additionalFields: { privateNote: { type: 'string', required: false, returned: false } } },
+        plugins: [admin()],
+      });
+
+      return { auth, service: new AuthService(auth as unknown as ReturnType<typeof authFactory>) };
+    };
+
+    it("returns the user as a session carries it: the admin plugin's ban included, unreturned fields left out", async () => {
+      const { auth, service } = serviceOverMemory();
+      const context = await auth.$context;
+      const created = await context.internalAdapter.createUser({
+        email: 'alice@example.test',
+        name: 'alice',
+        emailVerified: false,
+        privateNote: 'not for the wire',
+      });
+
+      const found = await service.findUserById(created.id);
+
+      expect(found).toMatchObject({ id: created.id, email: 'alice@example.test', name: 'alice', banned: false });
+      expect(found).not.toHaveProperty('privateNote');
+    });
+
+    it('returns null for an id no user has', async () => {
+      const { service } = serviceOverMemory();
+
+      await expect(service.findUserById('no-such-user')).resolves.toBeNull();
     });
   });
 

@@ -1,13 +1,11 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import type { UserSession } from '@thallesp/nestjs-better-auth';
-import { Session } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
 import { ImportStartDto } from './dto/import-start.dto';
@@ -31,6 +29,7 @@ export class GameImportController {
   constructor(
     private readonly coordinator: GatewayCoordinatorClientService,
     private readonly importStatus: GameImportStatusService,
+    private readonly abilityService: AbilityService,
   ) {}
 
   @ApiOperation({
@@ -46,8 +45,9 @@ export class GameImportController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.Game))
   @Post()
-  startImport(@Session() session: UserSession, @Body() dto: ImportStartDto) {
-    this.logger.log(`REST import: user=${session.user.id} gateway=${dto.gatewayId} externalId=${dto.externalId}`);
+  startImport(@Body() dto: ImportStartDto) {
+    const userId = this.abilityService.getActingUserId();
+    this.logger.log(`REST import: user=${userId} gateway=${dto.gatewayId} externalId=${dto.externalId}`);
 
     return this.coordinator
       .startGameImport({
@@ -56,7 +56,7 @@ export class GameImportController {
         externalId: dto.externalId,
         expansionExternalIds: dto.expansionExternalIds ?? [],
         locale: dto.locale,
-        userId: session.user.id,
+        userId,
       })
       .pipe(
         tap((result) => this.logger.log(`Import enqueued: batchId=${result.batchId} baseJobId=${result.baseJobId}`)),
@@ -86,8 +86,8 @@ export class GameImportController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Job))
   @Get()
-  listImports(@Session() session: UserSession, @Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.importStatus.listBatchesForUser(session.user.id, pagination)).pipe(
+  listImports(@Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.importStatus.listBatchesForUser(this.abilityService.getActingUserId(), pagination)).pipe(
       map((page) => paginated('batches', page, pagination, ResourceType.Job)),
     );
   }

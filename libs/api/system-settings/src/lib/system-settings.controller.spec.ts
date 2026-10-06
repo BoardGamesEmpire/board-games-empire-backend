@@ -2,7 +2,6 @@ import { Action, ResourceType } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { ConfigService } from '@nestjs/config';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { SystemSettingsController } from './system-settings.controller';
 import { SystemSettingsService } from './system-settings.service';
 
@@ -19,7 +18,7 @@ describe('SystemSettingsController', () => {
         },
       ],
       controllers: [SystemSettingsController],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(SystemSettingsController);

@@ -1,5 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import {
+  ActorAuthGuard,
   ActorContextTransportModule,
   HttpActorMiddleware,
   LocaleResolutionMiddleware,
@@ -47,7 +48,6 @@ import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import type { RedisClient } from 'bullmq';
 import type { Request } from 'express';
 import Keyv from 'keyv';
@@ -298,9 +298,12 @@ import { createThrottlers } from './lib/throttlers';
       provide: APP_GUARD,
       useClass: ThrottlerGuard,
     },
+    // Authenticates from the actor HttpActorMiddleware resolved, so an API
+    // key passes as a session does (#529). better-auth's own AuthGuard is
+    // switched off in AuthModule.
     {
       provide: APP_GUARD,
-      useClass: AuthGuard,
+      useClass: ActorAuthGuard,
     },
 
     // WS Gateways

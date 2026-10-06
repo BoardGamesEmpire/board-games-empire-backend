@@ -1,11 +1,11 @@
+import { AuthService } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
-import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { AuthGuard, Session, type UserSession } from '@thallesp/nestjs-better-auth';
-import { from, of } from 'rxjs';
+import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UserSearchQueryDto, UserSearchResultDto } from './dto';
 import { UserService } from './user.service';
@@ -14,13 +14,22 @@ const PaginatedUsersResponse = PaginatedResponseDto(UserSearchResultDto, 'users'
 
 @ApiTags('users')
 @Controller('users')
-@UseGuards(AuthGuard)
 export class UserController {
-  constructor(private userService: UserService) {}
+  constructor(
+    private userService: UserService,
+    private authService: AuthService,
+    private abilityService: AbilityService,
+  ) {}
 
+  /**
+   * The caller's own user: for a session, the user it belongs to, and for an
+   * API key, the key's owner (#529). Read from the user's row, not the
+   * session's copy of it, which is the row as it stood at sign-in. The
+   * response cache still answers a repeat request within its TTL.
+   */
   @Get('me')
-  me(@Session() session: UserSession) {
-    return of({ user: session?.user });
+  me() {
+    return from(this.authService.findUserById(this.abilityService.getActingUserId())).pipe(map((user) => ({ user })));
   }
 
   @ApiOperation({
@@ -36,11 +45,11 @@ export class UserController {
   @UseGuards(PoliciesGuard)
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.UserProfile))
   @Get('search')
-  search(@Query() query: UserSearchQueryDto, @Session() session: UserSession) {
+  search(@Query() query: UserSearchQueryDto) {
     // No `search: query.q` alongside the rows any more (D-372-5): the caller
     // sent `q`, and a per-endpoint third field is how a shared envelope stops
     // being shared.
-    return from(this.userService.searchUsers(session.user.id, query)).pipe(
+    return from(this.userService.searchUsers(this.abilityService.getActingUserId(), query)).pipe(
       map((page) => paginated('users', page, query, ResourceType.User)),
     );
   }

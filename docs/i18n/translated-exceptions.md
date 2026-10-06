@@ -50,15 +50,17 @@ handling — nothing about existing error responses changes.
 The entry seam runs as ordered middleware (`AppModule.configure`):
 `HttpActorMiddleware` resolves the actor, then `LocaleResolutionMiddleware`
 resolves the locale. It has to come second, because the actor's stored language
-preference heads its precedence chain. So `HttpActorMiddleware`'s own two
+preference heads its precedence chain. So `HttpActorMiddleware`'s own
 refusals throw while CLS holds no locale yet, and they always render in
 `FALLBACK_LOCALE`:
 
-- an invalid API key (`errors.api_key.invalid`)
+- an invalid API key, or one whose owner no longer exists
+  (`errors.api_key.invalid`)
+- an API key whose owner is banned (`errors.api_key.owner_banned`)
 - an impersonated session (`errors.auth.impersonated_session`)
 
 With only `en` shipping, the difference is invisible. The order cannot flip, so
-once a second locale ships, the way to localize these two is for the edge to
+once a second locale ships, the way to localize these is for the edge to
 read the request's `Accept-Language` header when CLS holds no locale. Everything
 thrown later — guards, pipes, handlers — sees the resolved locale.
 
@@ -174,10 +176,15 @@ structured body keeps its own `error` label and extra fields, as over HTTP.
 - **What a gateway sends itself**, such as a `search:error` frame, is not
   thrown, so no filter sees it. The gateway renders it with `WsTranslator`,
   from the socket's locale.
-- **The framework's own copy stays English**, on both transports: AuthGuard's
-  "Unauthorized" and "Insufficient permissions", and the 500's "Internal
-  server error". Over HTTP those are better-auth's and Nest's bodies, so the WS
-  filter matches them (#527).
+- **The framework's own copy stays English**: the 500's "Internal server
+  error", which the filter writes on WebSocket and Nest's body says over HTTP
+  (#527). A frame whose session has ended is refused with catalog copy,
+  `errors.auth.session_invalid` (#511).
+- **Over HTTP, a request with no credential** is refused by `ActorAuthGuard`
+  (#529). It sends the body better-auth's guard sent, `code: 'UNAUTHORIZED'`
+  included, and renders its `message` from `errors.auth.unauthenticated`, whose
+  English is still "Unauthorized". It has no WebSocket counterpart: a socket
+  without a credential is refused at the handshake.
 
 ## Adding a new message
 

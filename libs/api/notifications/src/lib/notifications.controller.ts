@@ -1,10 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
-import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { NoCache } from '@bge/shared';
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
-import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { MarkReadDto } from './dto/mark-read.dto';
 
 @ApiBearerAuth()
@@ -17,29 +16,32 @@ import { MarkReadDto } from './dto/mark-read.dto';
 @ApiTags('notifications')
 @Controller('notifications')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly abilityService: AbilityService,
+  ) {}
 
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Notification))
   @Get('unread')
-  async getUnread(@Session() session: UserSession) {
-    return this.notificationsService.getUnread(session.user.id);
+  async getUnread() {
+    return this.notificationsService.getUnread(this.abilityService.getActingUserId());
   }
 
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Notification))
   @Post('mark-read')
-  async markRead(@Session() session: UserSession, @Body() markReadDto: MarkReadDto) {
-    return this.notificationsService.markRead(session.user.id, markReadDto.notificationIds);
+  async markRead(@Body() markReadDto: MarkReadDto) {
+    return this.notificationsService.markRead(this.abilityService.getActingUserId(), markReadDto.notificationIds);
   }
 
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Notification))
   @Post('mark-all-read')
-  async markAllRead(@Session() session: UserSession) {
-    return this.notificationsService.markAllRead(session.user.id);
+  async markAllRead() {
+    return this.notificationsService.markAllRead(this.abilityService.getActingUserId());
   }
 }

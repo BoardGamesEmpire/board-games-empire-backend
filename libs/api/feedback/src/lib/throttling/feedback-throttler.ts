@@ -14,11 +14,10 @@ import { Throttle, type ThrottlerGetTrackerFunction, type ThrottlerOptions } fro
  * globally in `ThrottlerModule` via {@link createUserThrottler}, but kept inert
  * everywhere except routes that opt in with {@link FeedbackSubmissionThrottle}.
  *
- * Why the user id comes from CLS and not `req.user`: the global `ThrottlerGuard`
- * runs BEFORE `AuthGuard` (guard registration order in `AppModule`), so
- * better-auth has not attached `req.user` yet when the tracker runs.
- * `HttpActorMiddleware` populates the actor into CLS before any guard, so that
- * is the only reliable source at this point.
+ * Why the user id comes from CLS and not `req.user`: nothing sets `req.user`
+ * (see `HttpActorMiddleware`). The actor that middleware puts in CLS, before
+ * any guard runs, is the only source, and it names the user behind an API key
+ * as well as a session's.
  */
 
 /**
@@ -74,8 +73,8 @@ export const getUserTracker: ThrottlerGetTrackerFunction = () => {
 /**
  * Skips the `user` throttler unless the route opted in AND an authenticated
  * user is present. Unauthenticated requests to an opted-in route fall through
- * to the IP tier and are then rejected by `AuthGuard` — they must never share
- * a single empty-string user bucket.
+ * to the IP tier and are then rejected by `ActorAuthGuard` — they must never
+ * share a single empty-string user bucket.
  */
 export const skipUserThrottle = (context: ExecutionContext): boolean => {
   const optedIn = reflector.getAllAndOverride<boolean>(PER_USER_THROTTLE_KEY, [

@@ -1,6 +1,5 @@
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import type { UpdateSafeHttpPolicyDto } from './dto/update-safe-http-policy.dto';
 import { SafeHttpController } from './safe-http.controller';
@@ -19,7 +18,7 @@ describe('SafeHttpController', () => {
     const { module } = await createTestingModuleWithDb({
       controllers: [SafeHttpController],
       providers: [{ provide: SafeHttpService, useValue: safeHttpService }],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(SafeHttpController);

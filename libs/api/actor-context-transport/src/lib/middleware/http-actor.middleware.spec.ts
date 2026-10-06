@@ -5,7 +5,7 @@ import {
   CORRELATION_ID_CLS_KEY,
   SOURCE_CLS_KEY,
 } from '@bge/actor-context';
-import { AuthService } from '@bge/auth';
+import { AuthService, type AuthUser } from '@bge/auth';
 import { I18nMessage, t } from '@bge/i18n';
 import { ForbiddenException, Logger, UnauthorizedException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
@@ -14,11 +14,18 @@ import type { NextFunction, Request, Response } from 'express';
 import { ClsModule, ClsService } from 'nestjs-cls';
 import { API_KEY_HEADER, HttpActorMiddleware } from './http-actor.middleware';
 
-type AuthMock = jest.Mocked<Pick<AuthService, 'verifyApiKey' | 'getSessionFromHeaders' | 'hasSessionCredential'>>;
+type AuthMock = jest.Mocked<
+  Pick<AuthService, 'verifyApiKey' | 'findUserById' | 'getSessionFromHeaders' | 'hasSessionCredential'>
+>;
+
+/** A key's owner as `findUserById` returns one; unbanned unless the test says otherwise. */
+const owner = (ban: { banned?: boolean | null; banExpires?: Date | null } = {}): AuthUser =>
+  ({ id: 'user-9', banned: false, banExpires: null, ...ban }) as unknown as AuthUser;
 
 const buildAuthMock = (): AuthMock =>
   ({
     verifyApiKey: jest.fn(),
+    findUserById: jest.fn().mockResolvedValue(owner()),
     getSessionFromHeaders: jest.fn(),
     hasSessionCredential: jest.fn().mockReturnValue(false),
   }) satisfies AuthMock;
@@ -251,6 +258,60 @@ describe('HttpActorMiddleware', () => {
       expect((captured.nextArg as UnauthorizedException).getResponse()).toEqual(t('errors.api_key.invalid'));
       // CLS was not populated because populate is reached after resolveActor.
       expect(captured.actor).toBeUndefined();
+    });
+
+    describe("the key's owner", () => {
+      const DAY_MS = 24 * 60 * 60 * 1000;
+
+      beforeEach(() => authMock.verifyApiKey.mockResolvedValue({ id: 'key-1', userId: 'user-9' }));
+
+      it.each<[string, AuthUser]>([
+        ['banned with no expiry', owner({ banned: true, banExpires: null })],
+        ['banned until tomorrow', owner({ banned: true, banExpires: new Date(Date.now() + DAY_MS) })],
+      ])('refuses the key with a 403 when its owner is %s', async (_, banned) => {
+        authMock.findUserById.mockResolvedValue(banned);
+
+        const captured = await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+
+        expect(authMock.findUserById).toHaveBeenCalledWith('user-9');
+        expect(captured.nextArg).toBeInstanceOf(ForbiddenException);
+        expect((captured.nextArg as ForbiddenException).getResponse()).toEqual(t('errors.api_key.owner_banned'));
+        expect(captured.actor).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/key-1.*user-9.*banned/));
+      });
+
+      it.each<[string, AuthUser]>([
+        ['whose ban expired yesterday', owner({ banned: true, banExpires: new Date(Date.now() - DAY_MS) })],
+        ['whose ban flag is unset', owner({ banned: null })],
+      ])('admits the key of an owner %s', async (_, unbanned) => {
+        authMock.findUserById.mockResolvedValue(unbanned);
+
+        const captured = await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+
+        expect(captured.actor).toEqual({ kind: 'apiKey', apiKeyId: 'key-1', userId: 'user-9' });
+        expect(captured.nextArg).toBeUndefined();
+      });
+
+      it('reads the owner on every request, so a ban stops the key on its next one', async () => {
+        authMock.findUserById.mockResolvedValueOnce(owner()).mockResolvedValueOnce(owner({ banned: true }));
+
+        const before = await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+        const after = await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+
+        expect(before.nextArg).toBeUndefined();
+        expect(after.nextArg).toBeInstanceOf(ForbiddenException);
+      });
+
+      it('refuses the key as invalid when its owner no longer exists', async () => {
+        authMock.findUserById.mockResolvedValue(null);
+
+        const captured = await run(buildRequest({ [API_KEY_HEADER]: 'secret' }));
+
+        expect(captured.nextArg).toBeInstanceOf(UnauthorizedException);
+        expect((captured.nextArg as UnauthorizedException).getResponse()).toEqual(t('errors.api_key.invalid'));
+        expect(captured.actor).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/key-1.*user-9/));
+      });
     });
   });
 

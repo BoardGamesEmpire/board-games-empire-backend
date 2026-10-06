@@ -3,7 +3,6 @@ import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import * as crypto from 'node:crypto';
 import { AuthStrategyType } from './constants';
 import { BgeDiscoveryDto } from './dto/bge-discovery.dto';
@@ -73,7 +72,7 @@ describe('WellKnownController', () => {
           useValue: { get: jest.fn(), getOrThrow: jest.fn() },
         },
       ],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(WellKnownController);

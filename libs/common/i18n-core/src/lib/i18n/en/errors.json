@@ -119,7 +119,8 @@
   },
   "api_key": {
     "not_found_or_revoked": "API key not found or has been revoked.",
-    "invalid": "Invalid API key"
+    "invalid": "Invalid API key",
+    "owner_banned": "This API key's owner is banned"
   },
   "auth": {
     "impersonated_session": "Impersonated sessions are not supported",
@@ -127,7 +128,8 @@
     "session_invalid": "Session expired or invalid",
     "session_unresolved": "Session could not be resolved",
     "anonymous_not_permitted": "Anonymous access not permitted",
-    "untrusted_origin": "Origin missing or not trusted"
+    "untrusted_origin": "Origin missing or not trusted",
+    "unauthenticated": "Unauthorized"
   },
   "household": {
     "not_found": "Household with ID {id} not found",
