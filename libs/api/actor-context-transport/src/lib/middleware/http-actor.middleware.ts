@@ -1,6 +1,6 @@
 import type { Actor } from '@bge/actor-context';
 import { AuditContextInternalService } from '@bge/actor-context';
-import { AuthService } from '@bge/auth';
+import { AuthService, type AuthUser } from '@bge/auth';
 import { t } from '@bge/i18n';
 import { CORRELATION_ID_HEADER, TRACEPARENT_HEADER } from '@bge/shared';
 import { firstValue, resolveCorrelationId, sessionImpersonatorId } from '@bge/utils';
@@ -20,7 +20,8 @@ export const API_KEY_HEADER = 'x-api-key' as const;
  *
  * Resolution rules:
  *  1. If `x-api-key` is present → delegate to `AuthService.verifyApiKey`.
- *     - Success → `{ kind: 'apiKey', apiKeyId, userId }`.
+ *     - Success → `{ kind: 'apiKey', apiKeyId, userId }`, once the key's
+ *       owner is read and found able to use it. See below.
  *     - Failure → forwards `UnauthorizedException` to the next error handler.
  *  2. Otherwise → delegate to `AuthService.getSessionFromHeaders`.
  *     - Impersonated   → refuse the request (`ForbiddenException`). See below.
@@ -45,6 +46,20 @@ export const API_KEY_HEADER = 'x-api-key' as const;
  * map — not this guard — is what denies the impersonation endpoint. It also
  * leaves `/admin/stop-impersonating` reachable, so an already-impersonated
  * session can still unwind itself.
+ *
+ * A key's owner (#529): better-auth checks a ban only when it creates a
+ * session or a key, so a key minted before its owner was banned would keep
+ * working with the owner's roles. The owner's row is therefore read on every
+ * key request: an owner under a ban that has not expired gets a 403, and an
+ * expired ban lets the key work again. A key whose owner no longer exists is
+ * refused as invalid, since deleting a user leaves their keys behind (see the
+ * TODO in `authFactory`).
+ *
+ * Nothing sets `request.session` or `request.user`, which better-auth's
+ * guard used to and its `@Session()` decorator reads. A handler that needs
+ * the caller reads the actor (`getActingUserId()`), which names the user
+ * behind a key as well as a session's; one written against `@Session()`
+ * fails its first test instead of failing only for keys.
  *
  * Correlation: `traceparent` → `x-correlation-id` → generated UUID.
  *
@@ -100,6 +115,18 @@ export class HttpActorMiddleware implements NestMiddleware {
       throw new UnauthorizedException(t('errors.api_key.invalid'));
     }
 
+    const owner = await this.authService.findUserById(resolved.userId);
+
+    if (!owner) {
+      this.logger.warn(`Refusing API key ${resolved.id}: its owner ${resolved.userId} no longer exists`);
+      throw new UnauthorizedException(t('errors.api_key.invalid'));
+    }
+
+    if (isBanInForce(owner)) {
+      this.logger.warn(`Refusing API key ${resolved.id}: its owner ${resolved.userId} is banned`);
+      throw new ForbiddenException(t('errors.api_key.owner_banned'));
+    }
+
     return {
       kind: 'apiKey',
       apiKeyId: resolved.id,
@@ -127,7 +154,7 @@ export class HttpActorMiddleware implements NestMiddleware {
       // an internal tracker number, so the marker carries no args. This
       // middleware runs BEFORE LocaleResolutionMiddleware (see
       // AppModule.configure), so no request locale exists yet: this refusal and
-      // the API-key one above render in the fallback locale.
+      // the API-key ones above render in the fallback locale.
       this.logger.warn(`Refusing impersonated session (#408): target=${user?.id} impersonatedBy=${impersonatorId}`);
       throw new ForbiddenException(t('errors.auth.impersonated_session'));
     }
@@ -139,4 +166,16 @@ export class HttpActorMiddleware implements NestMiddleware {
 
     return { kind: 'user', userId: user.id };
   }
+}
+
+/**
+ * Whether the user is under a ban, by the rule better-auth applies when one
+ * signs in: banned with no expiry, or with an expiry still to come.
+ */
+function isBanInForce(user: AuthUser): boolean {
+  if (!user.banned) {
+    return false;
+  }
+
+  return !user.banExpires || new Date(user.banExpires).getTime() > Date.now();
 }

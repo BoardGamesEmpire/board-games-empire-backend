@@ -9,7 +9,7 @@ import type { NextFunction, Request, Response } from 'express';
  * other consumer read it via `AuditContextService.getLocale()`.
  *
  * Implemented as **middleware** rather than a nestjs-i18n resolver so the
- * locale exists BEFORE guards run — guard-thrown errors (AuthGuard,
+ * locale exists BEFORE guards run — guard-thrown errors (ActorAuthGuard,
  * ThrottlerGuard) can be translated (#142/#143), while nestjs-i18n's own
  * resolution happens in a post-guard interceptor.
  *

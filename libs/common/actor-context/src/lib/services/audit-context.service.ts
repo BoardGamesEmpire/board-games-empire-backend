@@ -70,7 +70,7 @@ export class AuditContextService {
   /**
    * Like `getActor`, but throws if no actor is set. Use at points where the
    * absence of an actor would be a programmer error (e.g. inside a controller
-   * route that has gone through the auth interceptor).
+   * route, where `ActorAuthGuard` has refused any request without one).
    */
   getActorOrThrow(): Actor {
     const actor = this.getActor();

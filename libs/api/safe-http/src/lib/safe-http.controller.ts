@@ -2,14 +2,13 @@ import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UpdateSafeHttpPolicyDto } from './dto/update-safe-http-policy.dto';
 import { SafeHttpService } from './safe-http.service';
 
 @ApiTags('safe-http-policy')
-@UseGuards(AuthGuard, PoliciesGuard)
+@UseGuards(PoliciesGuard)
 @Controller('safe-http-policy')
 export class SafeHttpController {
   constructor(private readonly safeHttpService: SafeHttpService) {}

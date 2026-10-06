@@ -1,10 +1,9 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, AppAbility, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { Body, Controller, HttpCode, Logger, Post, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
-import { Session, type UserSession } from '@thallesp/nestjs-better-auth';
 import { from, map, Observable, tap } from 'rxjs';
 import {
   FEEDBACK_IP_THROTTLE_LIMIT,
@@ -31,7 +30,10 @@ interface SubmitFeedbackResponse {
 export class FeedbackController {
   private readonly logger = new Logger(FeedbackController.name);
 
-  constructor(private readonly feedback: FeedbackService) {}
+  constructor(
+    private readonly feedback: FeedbackService,
+    private readonly abilityService: AbilityService,
+  ) {}
 
   @ApiOperation({
     summary: 'Submit a feedback report (crash, bug, or feature request).',
@@ -57,14 +59,13 @@ export class FeedbackController {
   })
   @HttpCode(Http.Created)
   @Post('reports')
-  submitReport(
-    @Session() session: UserSession,
-    @Body() dto: CreateFeedbackReportDto,
-  ): Observable<SubmitFeedbackResponse> {
-    return from(this.feedback.submit(session.user.id, dto)).pipe(
+  submitReport(@Body() dto: CreateFeedbackReportDto): Observable<SubmitFeedbackResponse> {
+    const userId = this.abilityService.getActingUserId();
+
+    return from(this.feedback.submit(userId, dto)).pipe(
       tap((report) =>
         this.logger.log(
-          `Feedback report ${report.id} (${report.category}/${report.context}) submitted by user ${session.user.id}`,
+          `Feedback report ${report.id} (${report.category}/${report.context}) submitted by user ${userId}`,
         ),
       ),
       map((report) => ({

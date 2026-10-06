@@ -3,7 +3,6 @@ import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, makeEventAttendee } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { firstValueFrom } from 'rxjs';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -43,7 +42,7 @@ describe('EventAttendeeController', () => {
         { provide: EventAttendeeService, useValue: service },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(EventAttendeeController);

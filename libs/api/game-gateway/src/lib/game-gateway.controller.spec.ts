@@ -5,7 +5,6 @@ import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { Logger } from '@nestjs/common';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { GameGatewayController } from './game-gateway.controller';
@@ -37,7 +36,7 @@ describe('GameGatewayController', () => {
           } satisfies Partial<jest.Mocked<GatewayCoordinatorClientService>>,
         },
       ],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(GameGatewayController);

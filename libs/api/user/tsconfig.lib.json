@@ -24,10 +24,13 @@
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
-      "path": "../../common/i18n/tsconfig.lib.json"
+      "path": "../auth/tsconfig.lib.json"
     },
     {
       "path": "../../common/shared/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/i18n/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"

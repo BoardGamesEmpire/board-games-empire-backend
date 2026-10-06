@@ -3,7 +3,6 @@ import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { NoCache } from '@bge/shared';
 import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { UpdateSystemSettingsDto } from './dto/update-system-settings.dto';
@@ -14,7 +13,7 @@ import { SystemSettingsService } from './system-settings.service';
 // and a cached read would repeat the value from before the write for the
 // whole TTL (#530).
 @NoCache()
-@UseGuards(AuthGuard, PoliciesGuard)
+@UseGuards(PoliciesGuard)
 @Controller('system-settings')
 export class SystemSettingsController {
   constructor(private readonly systemSettingsService: SystemSettingsService) {}

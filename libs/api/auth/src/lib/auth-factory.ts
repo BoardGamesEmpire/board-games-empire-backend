@@ -142,7 +142,12 @@ export function authFactory(
     // short-circuits it ahead of the role map.
     admin(ADMIN_PLUGIN_OPTIONS),
     anonymous(),
-    apiKey(),
+    // The plugin's per-key rate limit is off (#529). Its default, 10 requests
+    // a day, was every key's limit, since only a server-side call can set one
+    // and none does, and a key over it was refused as invalid. The IP
+    // throttler still applies to every route. How keys should be limited is
+    // #642.
+    apiKey({ rateLimit: { enabled: false } }),
     bearer(),
     lastLoginMethod(),
     oneTap(),

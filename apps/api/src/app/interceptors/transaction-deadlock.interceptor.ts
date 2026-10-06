@@ -62,11 +62,13 @@ export class TransactionDeadlockError extends HttpException {
  * is what makes the refusal legible where the retry is absent or exhausted.
  *
  * What it does NOT cover: middleware and guards, which Nest runs BEFORE the
- * interceptor chain. `AbilityContextMiddleware`, `AuthGuard`, and `PoliciesGuard`
- * all query the database, and a deadlock victim in one of them still renders as a
- * bare 500. Those paths are reads today, so a deadlock there needs a writer to
- * contend with and has never been observed; the honest statement is that this is
- * the HTTP handler's answer, not the whole request's.
+ * interceptor chain. `HttpActorMiddleware`, `AbilityContextMiddleware`, and
+ * `PoliciesGuard` all query the database, and a deadlock victim in one of
+ * them still renders as a bare 500. Those paths are reads today, apart from
+ * the one-row update verifying an API key makes in a statement of its own,
+ * so a deadlock there needs a writer to contend with and has never been
+ * observed; the honest statement is that this is the HTTP handler's answer,
+ * not the whole request's.
  */
 @Injectable()
 export class TransactionDeadlockInterceptor implements NestInterceptor {

@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { UserSession } from '@thallesp/nestjs-better-auth';
+import { parseUserOutput } from 'better-auth/db';
+import type { UserWithRole } from 'better-auth/plugins';
 import type { IncomingHttpHeaders } from 'node:http';
 import type { authFactory } from './auth-factory';
 import { AUTH_INSTANCE } from './constants';
@@ -14,6 +16,14 @@ export interface ResolvedApiKey {
   readonly id: string;
   readonly userId: string;
 }
+
+/**
+ * A user as better-auth returns one with a session: its own fields, plus
+ * those its plugins add, such as the admin plugin's `banned` and
+ * `banExpires`. The admin plugin's fields are added by hand, because
+ * inference over this instance's plugin list leaves them out.
+ */
+export type AuthUser = ReturnType<typeof authFactory>['$Infer']['Session']['user'] & UserWithRole;
 
 @Injectable()
 export class AuthService {
@@ -96,6 +106,21 @@ export class AuthService {
       id: result.key.id,
       userId: result.key.referenceId,
     } satisfies ResolvedApiKey;
+  }
+
+  /**
+   * Reads the user with this id, in the shape a session carries it: fields
+   * better-auth never returns are left out. Read fresh on every call, unlike
+   * a session's user, which is the row as it stood when the session was
+   * created.
+   *
+   * @returns The user, or `null` when no user has this id
+   */
+  async findUserById(userId: string): Promise<AuthUser | null> {
+    const context = await this.auth.$context;
+    const user = await context.internalAdapter.findUserById(userId);
+
+    return user ? (parseUserOutput(context.options, user) as AuthUser) : null;
   }
 
   /**

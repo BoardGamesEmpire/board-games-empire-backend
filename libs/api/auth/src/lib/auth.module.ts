@@ -23,6 +23,11 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
     // the user-created database hook (#57 emit-site migration).
     AuditContextModule,
     BetterAuthModule.forRootAsync({
+      // The package's AuthGuard authenticates by calling getSession, so it
+      // refuses every request an API key makes. The API app registers
+      // ActorAuthGuard globally instead, which reads the actor
+      // HttpActorMiddleware resolved (#529).
+      disableGlobalAuthGuard: true,
       // better-auth re-adds the app-wide body parsers (Nest's are disabled in
       // main.ts so better-auth can read raw bodies on its own routes). Cap them
       // here — the only place the limit can be set. See MAX_REQUEST_BODY_BYTES.

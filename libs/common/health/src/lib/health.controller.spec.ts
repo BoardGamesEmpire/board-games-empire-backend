@@ -6,7 +6,6 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HealthCheckResult, HttpHealthIndicator, TerminusModule } from '@nestjs/terminus';
 import { TestingModule } from '@nestjs/testing';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { HealthController } from './health.controller';
 import { CacheRedisHealthIndicator } from './indicators/cache-redis.health-indicator';
 import { PrismaHealthIndicator } from './indicators/prisma.health-indicator';
@@ -114,7 +113,6 @@ async function buildController(options: BuildOptions = {}): Promise<BuildResult>
       ...(cacheRedis !== null ? [{ provide: CACHE_REDIS_CLIENT, useValue: cacheRedis }] : []),
       ...(queueRedis !== null ? [{ provide: QUEUE_REDIS_CLIENT, useValue: queueRedis }] : []),
     ],
-    overrideGuards: [AuthGuard],
     overrideProviders: [{ provide: HttpHealthIndicator, useValue: http }],
   });
 

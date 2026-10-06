@@ -69,7 +69,7 @@ describe('e2e harness', () => {
       expect(response.status).toBeLessThan(500);
     });
 
-    it('rejects unauthenticated requests via the global AuthGuard', async () => {
+    it('rejects unauthenticated requests via the global ActorAuthGuard', async () => {
       const response = await request(baseUrl).get('/api/households');
 
       expect(response.status).toBe(401);

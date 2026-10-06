@@ -10,7 +10,6 @@ import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, makeEventOccurrence, paginationQuery } from '@bge/testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { AuthGuard } from '@thallesp/nestjs-better-auth';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventOccurrenceController } from './event-occurrence.controller';
@@ -55,7 +54,7 @@ describe('EventOccurrenceController', () => {
         { provide: EventOccurrenceService, useValue: service },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
-      overrideGuards: [AuthGuard, PoliciesGuard],
+      overrideGuards: [PoliciesGuard],
     });
 
     controller = module.get(EventOccurrenceController);

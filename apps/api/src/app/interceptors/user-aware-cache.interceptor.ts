@@ -1,4 +1,4 @@
-import { AuditContextService } from '@bge/actor-context';
+import { AuditContextService, type Actor } from '@bge/actor-context';
 import { FALLBACK_LOCALE } from '@bge/i18n';
 import { NO_CACHE_KEY } from '@bge/shared';
 import { CACHE_MANAGER, CacheInterceptor } from '@nestjs/cache-manager';
@@ -6,14 +6,18 @@ import { ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 
 /**
- * Response cache keyed per acting user and request locale.
+ * Response cache keyed per caller and request locale.
  *
  * The stock {@link CacheInterceptor} tracks by request URL alone, so with
  * authenticated, user-scoped routes one user's cached response is served to
  * the next user who requests the same URL — a cross-user data leak. This
- * subclass namespaces the key by the authenticated user id (populated on the
- * request by the better-auth guard), with a shared `anon` namespace for
- * unauthenticated requests.
+ * subclass namespaces the key by the actor `HttpActorMiddleware` resolved,
+ * with a shared `anon` namespace for unauthenticated requests.
+ *
+ * An API key gets a namespace of its own, apart from its owner's (#529). A
+ * key is checked against its own scopes as well as its owner's roles, so it
+ * may read less than its owner. A shared entry would serve the owner's body
+ * to the key, or the key's narrower body to the owner.
  *
  * The locale is in the key too (#358). Bodies cached today carry translation
  * markers that `I18nResponseInterceptor` renders after a hit, so none of them
@@ -47,8 +51,30 @@ export class UserAwareCacheInterceptor extends CacheInterceptor {
       return undefined;
     }
 
-    const request = context.switchToHttp().getRequest();
+    const caller = callerNamespace(this.auditContext.getActor());
+    if (!caller) {
+      return undefined;
+    }
+
     const locale = this.auditContext.getLocale() ?? FALLBACK_LOCALE;
-    return `user:${request?.user?.id ?? 'anon'}:${locale}:${key}`;
+    return `${caller}:${locale}:${key}`;
+  }
+}
+
+/**
+ * The cache namespace for a caller, or `undefined` for an actor that no HTTP
+ * request resolves to, whose response is then not cached.
+ */
+function callerNamespace(actor: Actor | null): string | undefined {
+  switch (actor?.kind) {
+    case undefined:
+      return 'anon';
+    case 'apiKey':
+      return `apikey:${actor.apiKeyId}`;
+    case 'user':
+    case 'anonymous':
+      return `user:${actor.userId}`;
+    default:
+      return undefined;
   }
 }

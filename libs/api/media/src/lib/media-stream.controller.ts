@@ -9,8 +9,9 @@ import { MediaObjectService } from './media-object.service';
 
 /**
  * Sessionless byte streaming for signed GET URLs. `@AllowAnonymous()`
- * opts out of the global AuthGuard; no PoliciesGuard (the HMAC signature is the
- * authorization). `nosniff` + a server-chosen disposition mitigate stored XSS.
+ * opts out of the global ActorAuthGuard; no PoliciesGuard (the HMAC
+ * signature is the authorization). `nosniff` + a server-chosen disposition
+ * mitigate stored XSS.
  */
 @ApiTags('media')
 @UseFilters(StorageExceptionFilter)

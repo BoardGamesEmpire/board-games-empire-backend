@@ -594,7 +594,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       socket.emit(SearchEvents.SearchStart, searchStart());
 
-      // The copy the handshake gives the same session, not AuthGuard's bare
+      // The copy the handshake gives the same session, not a bare
       // "Unauthorized" (#511).
       expect(await told).toMatchObject({
         statusCode: 401,
