@@ -1,11 +1,13 @@
 import { AuditContextModule, AuditContextService, SystemActorScope } from '@bge/actor-context';
 import { DatabaseModule, DatabaseService } from '@bge/database';
+import type { I18nTranslations } from '@bge/i18n';
 import { ServicesModule } from '@bge/services';
 import { Cache, CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthModule as BetterAuthModule } from '@thallesp/nestjs-better-auth';
+import { I18nService } from 'nestjs-i18n';
 import { authFactory } from './auth-factory';
 import { AuthService } from './auth.service';
 import authConfig from './configuration/auth.config';
@@ -52,8 +54,19 @@ import { UserProvisioningService } from './provisioning/user-provisioning.servic
         eventEmitter: EventEmitter2,
         auditContext: AuditContextService,
         systemActorScope: SystemActorScope,
-      ) => authFactory(databaseClient, configService, cache, eventEmitter, auditContext, systemActorScope),
-      inject: [DatabaseService, ConfigService, CACHE_MANAGER, EventEmitter2, AuditContextService, SystemActorScope],
+        // Global: the app's I18nConfigModule registers it. It renders the
+        // settings gates' refusals (#585).
+        i18n: I18nService<I18nTranslations>,
+      ) => authFactory(databaseClient, configService, cache, eventEmitter, auditContext, systemActorScope, i18n),
+      inject: [
+        DatabaseService,
+        ConfigService,
+        CACHE_MANAGER,
+        EventEmitter2,
+        AuditContextService,
+        SystemActorScope,
+        I18nService,
+      ],
     },
     AuthService,
     UserProvisioningService,

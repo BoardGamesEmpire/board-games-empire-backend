@@ -125,10 +125,14 @@ export class BgeDiscoveryDto {
   bgeTwoFactorSupported!: boolean;
 
   /**
-   * Anonymous authentication is always available.
+   * Anonymous authentication is available while the server's settings allow
+   * registration, because an anonymous sign-in creates an account.
    * Clients may create anonymous sessions that can later be linked to a real account.
    */
-  @ApiProperty({ description: 'Whether anonymous authentication is supported', example: true })
+  @ApiProperty({
+    description: 'Whether anonymous authentication is supported. False while registration is closed.',
+    example: true,
+  })
   bgeAnonymousAuthSupported!: boolean;
 
   /**

@@ -6,6 +6,17 @@ export class OidcStrategyDto {
   readonly type = AuthStrategyType.Oidc as const;
 
   /**
+   * A first sign-in creates the account, so it is refused while registration
+   * is closed. The strategy stays listed regardless: existing accounts still
+   * sign in through it.
+   */
+  @ApiProperty({
+    description:
+      "Whether a first sign-in, which would create the account, is refused. Follows the server settings' registration switch; existing accounts still sign in.",
+  })
+  signUpDisabled!: boolean;
+
+  /**
    * The provider identifier passed to BetterAuth's oauth2 sign-in endpoint.
    * Clients construct: GET <authorizationEndpoint>?callbackURL=<yourCallback>
    */

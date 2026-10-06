@@ -1,4 +1,5 @@
 import { t } from '@bge/i18n';
+import { NoCache } from '@bge/shared';
 import { Controller, Get, Header, HttpCode, NotFoundException, Options, UseInterceptors } from '@nestjs/common';
 import { ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -43,8 +44,15 @@ export class WellKnownController {
    * BGE server identity and authentication discovery document.
    * Modeled after RFC 8414 and OpenID Connect Discovery.
    * Keys are snake_case per de-facto auth discovery convention.
+   *
+   * Never response-cached (#585). The document advertises the settings row's
+   * registration switch, and a cached body would keep offering sign-up for
+   * the cache TTL after an admin closed it, while the server refuses every
+   * attempt. The cache keys are per caller and locale, so a PATCH has no one
+   * entry it could evict instead.
    */
   @Get('bge-identity')
+  @NoCache()
   @UseInterceptors(SnakeCaseInterceptor)
   @Header('Cache-Control', 'public, max-age=300')
   @ApiOkResponse({ type: BgeDiscoveryDto, description: 'BGE server identity and available auth strategies' })

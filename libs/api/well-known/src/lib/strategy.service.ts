@@ -20,7 +20,12 @@ export class StrategyService {
 
     const dto = new BgeDiscoveryDto();
 
-    const settings = await this.db.systemSetting.findFirst();
+    // The singleton row, which the auth gates read too: the registration
+    // switch advertised below is then the one they enforce (#585).
+    const settings = await this.db.systemSetting.findUnique({
+      where: { singleton: true },
+      select: { identifier: true, name: true, allowUserRegistration: true },
+    });
     assert(settings, 'System settings not found in database');
 
     dto.wellKnownSchemaVersion = WELL_KNOWN_SCHEMA_VERSION;
@@ -46,29 +51,32 @@ export class StrategyService {
     // capability flags — always-on plugins (see auth-factory.ts)
     dto.bgePasskeySupported = true;
     dto.bgeTwoFactorSupported = true;
-    dto.bgeAnonymousAuthSupported = true;
 
-    dto.strategies = this.buildStrategies();
+    // An anonymous sign-in creates an account, so it is refused while
+    // registration is closed (#585).
+    dto.bgeAnonymousAuthSupported = settings.allowUserRegistration;
+
+    dto.strategies = this.buildStrategies(settings.allowUserRegistration);
 
     return dto;
   }
 
-  private buildStrategies(): AuthStrategyDto[] {
+  private buildStrategies(registrationOpen: boolean): AuthStrategyDto[] {
     const strategies: AuthStrategyDto[] = [];
 
     if (this.configService.get<boolean>('auth.useEmailPasswordAuth')) {
-      strategies.push(this.buildEmailAndPasswordStrategy());
+      strategies.push(this.buildEmailAndPasswordStrategy(registrationOpen));
     }
 
     if (this.isOidcConfigured()) {
-      strategies.push(this.buildOidcStrategy());
+      strategies.push(this.buildOidcStrategy(registrationOpen));
     }
 
     return strategies;
   }
 
-  private buildEmailAndPasswordStrategy(): EmailAndPasswordStrategyDto {
-    const signUpDisabled = this.configService.get<boolean>('auth.disableEmailSignUp') ?? false;
+  private buildEmailAndPasswordStrategy(registrationOpen: boolean): EmailAndPasswordStrategyDto {
+    const signUpDisabled = !registrationOpen;
 
     const dto = new EmailAndPasswordStrategyDto();
     dto.signUpDisabled = signUpDisabled;
@@ -81,8 +89,11 @@ export class StrategyService {
     return dto;
   }
 
-  private buildOidcStrategy(): OidcStrategyDto {
+  private buildOidcStrategy(registrationOpen: boolean): OidcStrategyDto {
     const dto = new OidcStrategyDto();
+    // Listed either way, since existing accounts sign in through it; only a
+    // first sign-in, which creates the account, is refused (#585).
+    dto.signUpDisabled = !registrationOpen;
     dto.providerId = this.configService.get<string>('auth.oidcProviderId') || 'default-oidc-provider';
     // discoveryUrl points at an external IdP, so it stays an absolute URL.
     dto.discoveryUrl = this.configService.getOrThrow<string>('auth.oidcWellKnownUrl');

@@ -1,5 +1,6 @@
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
+import { NO_CACHE_KEY } from '@bge/shared';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -129,6 +130,10 @@ describe('WellKnownController', () => {
 
       expect(strategies).toHaveLength(1);
       expect(strategies[0].type).toBe(AuthStrategyType.EmailAndPassword);
+    });
+
+    it('is never response-cached, so a settings change shows on the next read', () => {
+      expect(Reflect.getMetadata(NO_CACHE_KEY, WellKnownController.prototype.getDiscovery)).toBe(true);
     });
   });
 

@@ -5,7 +5,10 @@ export class EmailAndPasswordStrategyDto {
   @ApiProperty({ enum: [AuthStrategyType.EmailAndPassword], example: AuthStrategyType.EmailAndPassword })
   readonly type = AuthStrategyType.EmailAndPassword as const;
 
-  @ApiProperty({ description: 'Whether new account registration via email/password is disabled' })
+  @ApiProperty({
+    description:
+      "Whether new account registration via email/password is disabled. Follows the server settings' registration switch.",
+  })
   signUpDisabled!: boolean;
 
   @ApiProperty({
