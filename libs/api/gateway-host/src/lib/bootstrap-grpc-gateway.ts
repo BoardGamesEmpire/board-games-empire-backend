@@ -1,7 +1,7 @@
 import { registerLoggerShutdown } from '@bge/logger';
 import { PROTO_PACKAGE_NAME } from '@boardgamesempire/proto-gateway';
 import type { Type } from '@nestjs/common';
-import { bootstrapGrpcMicroservice } from './bootstrap-grpc-microservice';
+import { bootstrapGrpcMicroservice, type GrpcAddressConfig } from './bootstrap-grpc-microservice';
 import type { GatewayLoggers } from './gateway-logger';
 
 /** Proto walk skips the coordinator package — gateways serve only their own. */
@@ -18,14 +18,10 @@ export interface GrpcGatewayBootstrapConfig {
   readonly displayName: string;
 
   /**
-   * Env key holding the gRPC bind host, e.g. `'BOARDGAMEGEEK_GATEWAY_GRPC_HOST'`.
+   * The gateway's config for the address it listens on, its `gatewayConfig`.
+   * See {@link GrpcMicroserviceBootstrapConfig.addressConfig}.
    */
-  readonly hostEnv: string;
-
-  /**
-   * Env key holding the gRPC bind port, e.g. `'BOARDGAMEGEEK_GATEWAY_GRPC_PORT'`.
-   */
-  readonly portEnv: string;
+  readonly addressConfig: GrpcAddressConfig;
 
   /**
    * Absolute directory the app's `.proto` assets are copied into at build.
@@ -50,13 +46,12 @@ export interface GrpcGatewayBootstrapConfig {
  * shares this one call instead of carrying a near-identical `bootstrap()`.
  */
 export function bootstrapGrpcGateway(config: GrpcGatewayBootstrapConfig): Promise<void> {
-  const { appModule, displayName, hostEnv, portEnv, protoDir, bootstrapLogger } = config;
+  const { appModule, displayName, addressConfig, protoDir, bootstrapLogger } = config;
 
   return bootstrapGrpcMicroservice({
     appModule,
     displayName,
-    hostEnv,
-    portEnv,
+    addressConfig,
     protoDir,
     protoPackage: PROTO_PACKAGE_NAME,
     protoExclude: [COORDINATOR_PROTO_EXCLUSION],

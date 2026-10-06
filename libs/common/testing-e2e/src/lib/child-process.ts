@@ -57,6 +57,15 @@ export interface ChildLaunch {
   readonly label: string;
   readonly bundle: string;
   readonly env: NodeJS.ProcessEnv;
+
+  /**
+   * The child's working directory, the workspace root unless given. An app
+   * reads `.env` from there, and fills even a variable set to `''` from it,
+   * so a launch that has to control the child's whole environment names a
+   * directory without one.
+   */
+  readonly cwd?: string;
+
   readonly verbose: boolean;
 
   /**
@@ -125,7 +134,7 @@ export async function launchChild(launch: ChildLaunch): Promise<ChildLaunchOutco
   const { label, verbose } = launch;
 
   const child = spawn(process.execPath, [launch.bundle], {
-    cwd: WORKSPACE_ROOT,
+    cwd: launch.cwd ?? WORKSPACE_ROOT,
     env: launch.env,
     // Always piped, never inherited: `launchOnFreePort` classifies a boot
     // failure by scanning this output for EADDRINUSE, and inherited stdio

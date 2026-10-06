@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchChild, launchOnFreePort, stopChild, type ChildLaunch } from './child-process.js';
+import { launchChild, launchOnFreePort, stopChild, WORKSPACE_ROOT, type ChildLaunch } from './child-process.js';
 
 /**
  * `launchChild`'s failure paths, against real `node` children built from the
@@ -130,6 +130,16 @@ describe('launchChild', () => {
 
     expect(outcome.kind).toBe('exited');
     expect(outcome.outputTail).toContain('written after the exit');
+  });
+
+  it('runs the child from the workspace root unless the launch names a directory', async () => {
+    const bundle = script('prints-cwd.cjs', 'console.log(process.cwd());\nprocess.exit(3);');
+
+    const fromRoot = await launch(bundle, {});
+    const fromScripts = await launch(bundle, { cwd: scripts });
+
+    expect(fromRoot.outputTail).toEqual([fs.realpathSync(WORKSPACE_ROOT)]);
+    expect(fromScripts.outputTail).toEqual([fs.realpathSync(scripts)]);
   });
 
   it('has stopped a child it gave up on by the time it returns', async () => {

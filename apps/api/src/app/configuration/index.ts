@@ -1,3 +1,4 @@
+import { coordinatorClientConfigValidationSchema } from '@bge/coordinator';
 import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
 import { bgeIdentityConfigValidationSchema } from '@bge/well-known';
 import Joi from 'joi';
@@ -26,6 +27,7 @@ export const configuration = {
 export const configurationValidationSchema = Joi.object({
   ...bgeIdentityConfigValidationSchema,
   ...cacheConfigValidationSchema,
+  ...coordinatorClientConfigValidationSchema,
   ...mediaConfigValidationSchema,
   ...pluginsConfigValidationSchema,
   ...redisConfigValidationSchema,

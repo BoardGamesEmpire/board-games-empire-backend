@@ -45,7 +45,7 @@ export interface GatewayLaunch {
   /** How the gateway is named in log lines and failure messages. */
   readonly label: string;
 
-  /** The variables the gateway's `main.ts` binds from (`hostEnv` / `portEnv`). */
+  /** The variables the gateway's address config reads its host and port from. */
   readonly hostEnv: string;
   readonly portEnv: string;
 
