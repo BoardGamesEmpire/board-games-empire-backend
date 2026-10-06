@@ -176,13 +176,15 @@ structured body keeps its own `error` label and extra fields, as over HTTP.
 - **What a gateway sends itself**, such as a `search:error` frame, is not
   thrown, so no filter sees it. The gateway renders it with `WsTranslator`,
   from the socket's locale.
-- **The framework's own copy stays English** on WebSocket: the filter's
-  "Unauthorized" and "Insufficient permissions", and the 500's "Internal
-  server error", which Nest's body also says over HTTP (#527). Over HTTP a
-  request with no credential is now refused by `ActorAuthGuard` (#529). It
-  sends the body better-auth's guard sent, `code: 'UNAUTHORIZED'` included,
-  and renders its `message` from `errors.auth.unauthenticated`. That key's
-  English is "Unauthorized", so it still matches the WS filter's copy.
+- **The framework's own copy stays English**: the 500's "Internal server
+  error", which the filter writes on WebSocket and Nest's body says over HTTP
+  (#527). A frame whose session has ended is refused with catalog copy,
+  `errors.auth.session_invalid` (#511).
+- **Over HTTP, a request with no credential** is refused by `ActorAuthGuard`
+  (#529). It sends the body better-auth's guard sent, `code: 'UNAUTHORIZED'`
+  included, and renders its `message` from `errors.auth.unauthenticated`, whose
+  English is still "Unauthorized". It has no WebSocket counterpart: a socket
+  without a credential is refused at the handshake.
 
 ## Adding a new message
 

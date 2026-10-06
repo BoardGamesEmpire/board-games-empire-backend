@@ -33,9 +33,9 @@ const UNENFORCED_KEYS = ['ROLES', 'ORG_ROLES', 'USER_HAS_PERMISSION', 'MEMBER_HA
  * key. Reading the actor also checks the credential once per request: the
  * middleware's lookup is the only one.
  *
- * The 401's body is the one better-auth's guard sent, `code` included, and
- * its English copy is unchanged: the WebSocket filter words the same refusal
- * the same way, and #527 moves both transports' copy together.
+ * The 401's body is the one better-auth's guard sent, `code` included, so a
+ * client matching on it still matches. Its message renders from the catalog,
+ * in the request's locale, and its English is still "Unauthorized".
  *
  * Gateways never run global guards; they authenticate at the handshake.
  */

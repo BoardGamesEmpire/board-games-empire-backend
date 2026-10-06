@@ -99,7 +99,7 @@ describe('API key requests', () => {
       expect(response.body).toMatchObject({ message: 'Invalid API key' });
     });
 
-    // The body better-auth's guard sent, which the WebSocket filter's copy matches.
+    // The body better-auth's guard sent, so a client matching on it still matches.
     it('still refuses a request with no credential at all with a 401', async () => {
       const response = await request(baseUrl).get(UNREAD_PATH);
 
