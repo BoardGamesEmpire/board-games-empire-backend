@@ -8,15 +8,27 @@
 #   docker build --target igdb-gateway -t bge-igdb-gateway .
 #
 # The BGE image runs one role per container, chosen by BGE_ROLES. How to run
-# it, and what each role needs, is in docs/DEPLOYMENT.md.
+# it, and what each role needs, is in docs/DEPLOYMENT.md. It also carries the
+# web client's build, which the api serves (#598).
 #
 # Building needs network access: to the npm registry, to binaries.prisma.sh for
-# Prisma's schema engine (or a PRISMA_ENGINES_MIRROR), and to buf.build for the
-# gateway protos' dependencies.
+# Prisma's schema engine (or a PRISMA_ENGINES_MIRROR), to buf.build for the
+# gateway protos' dependencies, and to ghcr.io for the web client's image.
 #
 # Every stage works in /app, the directory the images run from. The images keep
 # the workspace's layout, so a bundle runs exactly as it does from a checkout,
 # and a path that a build writes into a bundle names the same place at runtime.
+
+# The web client's build (#598): an image that holds only its static files, at
+# /web, published from the client repository. Renovate moves the digest when
+# the client's `edge` moves (#599). The BGE image records this reference as a
+# label, so it names the client it carries.
+ARG CLIENT_WEB_IMAGE=ghcr.io/boardgamesempire/bge-client-web:edge@sha256:c17de82a6d3283ca6c0136479ae1add921cfecf348390fd7d2a690aa57e8a8f4
+# The client's image is a single linux/amd64 manifest, and its files are the
+# same on every platform, so every build takes that one. Naming the platform
+# keeps BuildKit from warning that an arm64 build pulled an amd64 image; it is
+# an argument because BuildKit also warns about a constant platform.
+ARG CLIENT_WEB_PLATFORM=linux/amd64
 
 # Node 24, the major CI runs (.github/actions/setup-workspace). Renovate moves
 # the digest (#599); a new major changes CI and this line together.
@@ -103,14 +115,19 @@ LABEL org.opencontainers.image.source="https://github.com/BoardGamesEmpire/board
 USER node
 CMD ["node", "apps/igdb-gateway/dist/main.js"]
 
+# The web client's files, for the BGE image only: the gateways don't serve it.
+FROM --platform=${CLIENT_WEB_PLATFORM} ${CLIENT_WEB_IMAGE} AS client-web
+
 # The BGE image, and the default target. The launcher reads BGE_ROLES and runs
 # that role's bundle in its own process, so the role's signal handlers are the
 # process's. The media and plugin roots are created for the image's user, so a
 # volume mounted on either starts out writable by it; storage refuses to boot
 # without its root, rather than writing to a directory nobody provisioned.
+# The web client goes beside the api's bundle, where the api looks for it.
 FROM runtime AS bge
 COPY --from=build /app/apps/launcher/dist apps/launcher/dist
 COPY --from=build /app/apps/api/dist apps/api/dist
+COPY --from=client-web /web apps/api/dist/web
 COPY --from=build /app/apps/worker/dist apps/worker/dist
 COPY --from=build /app/apps/gateway-worker/dist apps/gateway-worker/dist
 COPY --from=build /app/apps/gateway-coordinator/dist apps/gateway-coordinator/dist
@@ -125,9 +142,11 @@ RUN --mount=type=bind,source=libs/scripts/src,target=/tmp/bge-scripts \
 ARG REVISION
 ARG VERSION
 ARG CREATED
+ARG CLIENT_WEB_IMAGE
 LABEL org.opencontainers.image.source="https://github.com/BoardGamesEmpire/board-games-empire-backend" \
       org.opencontainers.image.revision="${REVISION}" \
       org.opencontainers.image.version="${VERSION}" \
-      org.opencontainers.image.created="${CREATED}"
+      org.opencontainers.image.created="${CREATED}" \
+      io.github.boardgamesempire.web.image="${CLIENT_WEB_IMAGE}"
 USER node
 CMD ["node", "apps/launcher/dist/main.js"]
