@@ -1,8 +1,11 @@
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
+import type { PrismaClient } from '@bge/database';
+import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import type { User } from 'better-auth/types';
-import { createUserCreatedHook } from './auth-factory';
+import { authFactory, createUserCreatedHook } from './auth-factory';
 import { UserCreatedEvent } from './events/auth.events';
+import { createSettingGates } from './setting-gates';
 
 /** better-auth-shaped user, as the `user.create.after` hook receives it. */
 const makeAuthUser = (overrides: Partial<User & { isAnonymous?: boolean }> = {}): User =>
@@ -74,5 +77,59 @@ describe('createUserCreatedHook', () => {
     const bare = createUserCreatedHook({});
 
     await expect(bare(makeAuthUser())).rejects.toThrow('EventEmitter2 not provided to authFactory');
+  });
+});
+
+/**
+ * The password-reset switch refuses a list of routes, so a reset route the
+ * list does not name would finish a reset with resets switched off (#585).
+ * Every password route the instance serves is pinned here as refused or as
+ * not a reset. A plugin that brings one (emailOTP and phoneNumber each do),
+ * or a better-auth upgrade that adds one, fails this until someone decides
+ * which it is.
+ */
+describe('the password routes authFactory serves', () => {
+  const config = new ConfigService({
+    auth: {
+      url: 'http://localhost:33333',
+      secret: 'a-unit-test-secret-of-at-least-32-characters',
+      trustedOrigins: [],
+      useEmailPasswordAuth: true,
+    },
+  });
+
+  const resetsOff = createSettingGates({
+    readSwitches: async () => ({ allowUserRegistration: true, allowPasswordResets: false, allowUsernameChange: true }),
+    readUsername: async () => null,
+    render: (key) => key,
+  });
+
+  it('are each refused while resets are off, or are not resets', async () => {
+    const auth = authFactory({} as PrismaClient, config);
+    // Server-only functions, such as `setPassword`, carry no path: no route
+    // reaches them.
+    const paths = Object.values(auth.api)
+      .map((endpoint) => (endpoint as { readonly path?: string }).path)
+      .filter((path): path is string => path?.includes('password') === true);
+
+    const outcomes: Record<string, string> = {};
+    for (const path of paths) {
+      outcomes[path] = await resetsOff.beforeRoute({ path }).then(
+        () => 'allowed',
+        (error: { body?: { code?: string } }) => error.body?.code ?? 'thrown',
+      );
+    }
+
+    expect(outcomes).toEqual({
+      '/request-password-reset': 'PASSWORD_RESET_DISABLED',
+      '/reset-password': 'PASSWORD_RESET_DISABLED',
+      // Not resets: a signed-in change, an admin's set, a check of the current
+      // password, and the GET a reset mail links to, which only redirects to
+      // the client with the token.
+      '/change-password': 'allowed',
+      '/admin/set-user-password': 'allowed',
+      '/verify-password': 'allowed',
+      '/reset-password/:token': 'allowed',
+    });
   });
 });

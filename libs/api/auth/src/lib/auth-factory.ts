@@ -226,6 +226,9 @@ export function authFactory(
           before: settingGates.beforeUserCreate,
           after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
         },
+        update: {
+          before: settingGates.beforeUserUpdate,
+        },
         // TODO: clean up API keys on user delete. The upstream better-auth
         // apikey schema dropped the Apikey -> User FK (and its onDelete:
         // Cascade) in favour of an unconstrained `referenceId`, so deleting a

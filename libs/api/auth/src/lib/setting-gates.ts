@@ -17,6 +17,8 @@ export type SettingSwitches = Pick<
 export interface SettingGateDeps {
   /** The row's switches, or `null` when the row is missing. A missing row refuses everything gated. */
   readonly readSwitches: () => Promise<SettingSwitches | null>;
+  /** A user's username as stored, or `null` when there is no such user. */
+  readonly readUsername: (userId: string) => Promise<string | null>;
   /** Renders a refusal's catalog key. */
   readonly render: (key: I18nPath) => string;
 }
@@ -33,6 +35,18 @@ const REGISTRATION: Gate = {
   message: 'errors.auth.registration_disabled',
 };
 
+const PASSWORD_RESET: Gate = {
+  switch: 'allowPasswordResets',
+  code: 'PASSWORD_RESET_DISABLED',
+  message: 'errors.auth.password_reset_disabled',
+};
+
+const USERNAME_CHANGE: Gate = {
+  switch: 'allowUsernameChange',
+  code: 'USERNAME_CHANGE_DISABLED',
+  message: 'errors.auth.username_change_disabled',
+};
+
 /**
  * Routes refused before their handler runs, by better-auth endpoint path.
  *
@@ -41,8 +55,16 @@ const REGISTRATION: Gate = {
  * answers `USER_ALREADY_EXISTS` for a registered one. Left to the create hook
  * alone, a closed server would tell a caller which emails hold accounts, at no
  * cost and with nothing written.
+ *
+ * Both halves of a password reset are refused, so a link sent before resets
+ * were switched off cannot finish one after. Neither `/change-password` nor
+ * an admin's `/admin/set-user-password` is a reset, and neither is here.
  */
-const ROUTE_GATES: ReadonlyMap<string, Gate> = new Map([['/sign-up/email', REGISTRATION]]);
+const ROUTE_GATES: ReadonlyMap<string, Gate> = new Map([
+  ['/sign-up/email', REGISTRATION],
+  ['/request-password-reset', PASSWORD_RESET],
+  ['/reset-password', PASSWORD_RESET],
+]);
 
 /** The one account creation a closed server still allows: an admin's, which is how it adds people. */
 const ADMIN_CREATE_USER_PATH = '/admin/create-user';
@@ -56,9 +78,20 @@ const ADMIN_CREATE_USER_PATH = '/admin/create-user';
  */
 const OAUTH_CALLBACK_PATHS: ReadonlySet<string> = new Set(['/oauth2/callback/:providerId', '/callback/:id']);
 
+/**
+ * The route through which users edit their own profile. better-auth maps its
+ * `name` onto our `username` column, so it is also how a username changes. An
+ * admin's `/admin/update-user` is not gated.
+ */
+const UPDATE_USER_PATH = '/update-user';
+
 /** The slice of better-auth's endpoint context the gates read. It is `null` outside an endpoint. */
 export interface SettingGateContext {
   readonly path?: string;
+  readonly context?: {
+    /** Set by the route's session middleware. */
+    readonly session?: { readonly user: { readonly id: string } } | null;
+  };
 }
 
 export interface SettingGates {
@@ -71,6 +104,15 @@ export interface SettingGates {
    * a callback.
    */
   beforeUserCreate(user: unknown, context: SettingGateContext | null): Promise<void>;
+  /**
+   * `databaseHooks.user.update.before`. Refuses `/update-user` only when it
+   * would change the username, so a client that resends the whole profile
+   * still saves the other fields.
+   */
+  beforeUserUpdate(
+    data: { readonly name?: unknown; readonly [field: string]: unknown },
+    context: SettingGateContext | null,
+  ): Promise<void>;
   /** `hooks.before`, wrapped in `createAuthMiddleware`. */
   beforeRoute(context: SettingGateContext): Promise<void>;
 }
@@ -82,14 +124,18 @@ export interface SettingGates {
  * locale is resolved for it and nothing translates the body afterwards.
  */
 export function createSettingGates(deps: SettingGateDeps): SettingGates {
-  const refuseUnlessAllowed = async (gate: Gate, path?: string): Promise<void> => {
-    const switches = await deps.readSwitches();
-    if (switches?.[gate.switch]) {
-      return;
-    }
+  const allows = async (gate: Gate): Promise<boolean> => (await deps.readSwitches())?.[gate.switch] === true;
 
-    const message = path !== undefined && OAUTH_CALLBACK_PATHS.has(path) ? gate.code : deps.render(gate.message);
-    throw new APIError('FORBIDDEN', { code: gate.code, message });
+  const refusal = (gate: Gate, path?: string): APIError =>
+    new APIError('FORBIDDEN', {
+      code: gate.code,
+      message: path !== undefined && OAUTH_CALLBACK_PATHS.has(path) ? gate.code : deps.render(gate.message),
+    });
+
+  const refuseUnlessAllowed = async (gate: Gate, path?: string): Promise<void> => {
+    if (!(await allows(gate))) {
+      throw refusal(gate, path);
+    }
   };
 
   return {
@@ -99,6 +145,20 @@ export function createSettingGates(deps: SettingGateDeps): SettingGates {
       }
 
       await refuseUnlessAllowed(REGISTRATION, context?.path);
+    },
+
+    async beforeUserUpdate(data, context) {
+      if (context?.path !== UPDATE_USER_PATH || data.name === undefined || (await allows(USERNAME_CHANGE))) {
+        return;
+      }
+
+      // Without a current username to compare against, as when there is no
+      // session or no such user, the change is refused, whatever name it sets.
+      const userId = context.context?.session?.user.id;
+      const current = userId === undefined ? null : await deps.readUsername(userId);
+      if (current === null || current !== data.name) {
+        throw refusal(USERNAME_CHANGE);
+      }
     },
 
     async beforeRoute(context) {
@@ -124,6 +184,11 @@ export function settingGateDeps(prisma: PrismaClient, i18n?: I18nService<I18nTra
         where: { singleton: true },
         select: { allowUserRegistration: true, allowPasswordResets: true, allowUsernameChange: true },
       }),
+
+    // Read from the table rather than the session, whose copy of the user can
+    // predate an admin's rename.
+    readUsername: async (userId) =>
+      (await prisma.user.findUnique({ where: { id: userId }, select: { username: true } }))?.username ?? null,
 
     // Never throws: a catalog entry that cannot render would otherwise turn
     // the refusal into a 500.
