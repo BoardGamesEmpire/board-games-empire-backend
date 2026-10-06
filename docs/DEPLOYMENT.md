@@ -21,9 +21,31 @@ Each image:
 - keeps the workspace's layout under `/app`: one production install of every workspace's dependencies, and each bundle at `apps/<app>/dist/main.js`. A bundle runs exactly as it does from a checkout. The three images share that install, so the gateway images are about as large as the BGE image, but pulling all three downloads it once.
 - carries the OCI labels `org.opencontainers.image.source`, `.revision`, `.version` and `.created`, from the build arguments `REVISION`, `VERSION` and `CREATED`. They are empty unless passed. Publishing and tags are #600.
 
-Building needs network access to the npm registry, to `binaries.prisma.sh` for Prisma's schema engine (or a `PRISMA_ENGINES_MIRROR`), and to `buf.build` for the gateway protos' dependencies.
+Building needs network access:
+
+- to the npm registry;
+- to `binaries.prisma.sh` for Prisma's schema engine, or to a `PRISMA_ENGINES_MIRROR`;
+- to `buf.build` for the gateway protos' dependencies;
+- to `ghcr.io` for the web client's image, which is public.
 
 The bundles load their npm dependencies at runtime instead of inlining them, so a package the code imports but `package.json` lists under `devDependencies` would be missing from the image. The build checks for that: every package a bundle requires directly must resolve from the production install, or the build fails naming the bundle and the package (`libs/scripts/src/bundle-externals`). What those packages load in turn, and what the code loads by name at runtime, only a boot from the image shows (#600).
+
+## The web client
+
+The BGE image carries the web client's build (#598). It is copied from the client's own image, `ghcr.io/boardgamesempire/bge-client-web`, to `apps/api/dist/web`, beside the api's bundle. The `Dockerfile` pins that image by digest in `CLIENT_WEB_IMAGE`, and the BGE image records the reference in its `io.github.boardgamesempire.web.image` label, so every image names the client it carries. The game gateway images don't carry it.
+
+The api serves the client from its own origin. A browser pointed at the api's URL (`BGE_PUBLIC_URL` in the split profile) loads the app, and the app's sign-in cookies work without a proxy in front.
+
+- **The server's paths stay the server's:** `/api` and everything under it, and likewise `/health`, `/metrics` and `/.well-known`. Socket.IO answers `/socket.io/` before any of the api's routes see it.
+- **Paths in the build** are served from it.
+- **Paths the build lacks:** a browser loading a page gets the app's `index.html`, and the app routes from there. Everything else gets a 404, so a missing script or asset is never answered with a page.
+- **Caching:** every file is sent with `Cache-Control: no-cache` and an ETag taken from its content. Flutter names its files the same in every release, so browsers ask about each file on every load, and the api answers 304 for any file the new build didn't change.
+- **Content-Security-Policy:** the client's files carry their own policy. It is helmet's default, which the API's own responses keep, with three changes:
+  - `'wasm-unsafe-eval'`, because the client compiles WebAssembly;
+  - `https://fonts.gstatic.com` in `connect-src`, for the fonts Flutter fetches when the text has glyphs its bundled fonts lack, such as emoji or Chinese and Japanese characters;
+  - no `upgrade-insecure-requests`, so a deployment on plain HTTP works.
+
+When `apps/api/dist/web` has no `index.html`, the api serves only the API. It logs which case it is at boot. Working on the client locally needs no bundled client: the client repository's dev proxy gives the browser one origin (`docs/dev/web-proxy.md` there).
 
 ## Roles
 
@@ -85,7 +107,7 @@ docker compose --profile split up --build
 
 - **Secrets** come from the shell, or from a `.env` file beside `compose.yaml`, which Compose reads for interpolation only. Set `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY`, and the gateways' credentials for search. In a development checkout, that `.env` is the development one.
 - **The roles start together.** The api migrates and seeds an empty database while the others log that they are waiting, then they boot ([BOOTSTRAP.md](BOOTSTRAP.md)).
-- **The api** is on `http://localhost:33333`, published on the host's loopback interface only: the first account to sign up becomes the owner, so a new deployment starts out unreachable from other machines. Once the owner has signed up, `BGE_BIND_ADDRESS` opens it, as `0.0.0.0` for every IPv4 interface or one interface's address. `BGE_PORT` changes the port. `BGE_PUBLIC_URL` sets the URL the api trusts for sign-in and the base of the media links it signs, which defaults to the one above; set it, without a trailing slash, whenever clients reach the api at another URL, including after changing `BGE_PORT`.
+- **The api** is on `http://localhost:33333`, and so is the web client: open that address in a browser. It is published on the host's loopback interface only: the first account to sign up becomes the owner, so a new deployment starts out unreachable from other machines. Once the owner has signed up, `BGE_BIND_ADDRESS` opens it, as `0.0.0.0` for every IPv4 interface or one interface's address. `BGE_PORT` changes the port. `BGE_PUBLIC_URL` sets the URL the api trusts for sign-in and the base of the media links it signs, which defaults to the one above; set it, without a trailing slash, whenever clients reach the api at another URL, including after changing `BGE_PORT`.
 - **Postgres and Redis** keep their data in the `postgres` and `redis` volumes, which `docker compose down` leaves in place and `down --volumes` deletes. Redis holds the job queues and the sign-in sessions, so it logs each write and flushes the log every second (append-only persistence), as BullMQ advises.
 - **Published images** replace the local builds through `BGE_IMAGE`, `BGE_BOARDGAMEGEEK_GATEWAY_IMAGE` and `BGE_IGDB_GATEWAY_IMAGE`.
 
