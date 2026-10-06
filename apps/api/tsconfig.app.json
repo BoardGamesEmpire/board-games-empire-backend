@@ -23,6 +23,9 @@
   ],
   "references": [
     {
+      "path": "../../libs/api/web-client/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/bootstrap/tsconfig.lib.json"
     },
     {

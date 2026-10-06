@@ -218,6 +218,9 @@
     },
     {
       "path": "./apps/launcher"
+    },
+    {
+      "path": "./libs/api/web-client"
     }
   ]
 }
