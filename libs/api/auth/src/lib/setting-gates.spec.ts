@@ -1,5 +1,9 @@
+import type { PrismaClient } from '@bge/database';
+import { FALLBACK_LOCALE, type I18nTranslations } from '@bge/i18n';
+import { Logger } from '@nestjs/common';
 import { isAPIError } from 'better-auth/api';
-import { createSettingGates, type SettingGateDeps, type SettingSwitches } from './setting-gates';
+import type { I18nService } from 'nestjs-i18n';
+import { createSettingGates, settingGateDeps, type SettingGateDeps, type SettingSwitches } from './setting-gates';
 
 const ALL_OPEN: SettingSwitches = {
   allowUserRegistration: true,
@@ -179,6 +183,7 @@ describe('createSettingGates', () => {
     // `name: null` included: with no username read, null would otherwise
     // compare equal to it and pass.
     it.each([
+      ['no endpoint context', 'alice', { path: '/update-user' }],
       ['no session', 'alice', { path: '/update-user', context: { session: null } }],
       ['no session', null, { path: '/update-user', context: { session: null } }],
       ['no such user', null, { path: '/update-user', context: { session: { user: { id: 'gone' } } } }],
@@ -240,5 +245,83 @@ describe('createSettingGates', () => {
       await expect(gates().beforeRoute({ path })).resolves.toBeUndefined();
       expect(deps.readSwitches).not.toHaveBeenCalled();
     });
+
+    it('leaves a call with no path alone without reading the row', async () => {
+      switches = null;
+
+      await expect(gates().beforeRoute({})).resolves.toBeUndefined();
+      expect(deps.readSwitches).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('settingGateDeps', () => {
+  const prismaReading = (row: SettingSwitches | null, user: { username: string } | null) => ({
+    systemSetting: { findUnique: jest.fn().mockResolvedValue(row) },
+    user: { findUnique: jest.fn().mockResolvedValue(user) },
+  });
+
+  const depsOver = (
+    prisma: ReturnType<typeof prismaReading>,
+    i18n?: Pick<I18nService<I18nTranslations>, 'translate'>,
+  ) => settingGateDeps(prisma as unknown as PrismaClient, i18n as I18nService<I18nTranslations> | undefined);
+
+  it('reads the switches off the singleton row, as discovery does', async () => {
+    const prisma = prismaReading(ALL_OPEN, null);
+
+    await expect(depsOver(prisma).readSwitches()).resolves.toEqual(ALL_OPEN);
+    expect(prisma.systemSetting.findUnique).toHaveBeenCalledWith({
+      where: { singleton: true },
+      select: { allowUserRegistration: true, allowPasswordResets: true, allowUsernameChange: true },
+    });
+  });
+
+  it('reads a username from the users table', async () => {
+    const prisma = prismaReading(ALL_OPEN, { username: 'alice' });
+
+    await expect(depsOver(prisma).readUsername('u1')).resolves.toBe('alice');
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({ where: { id: 'u1' }, select: { username: true } });
+  });
+
+  it('reads no username for a user that does not exist', async () => {
+    await expect(depsOver(prismaReading(ALL_OPEN, null)).readUsername('gone')).resolves.toBeNull();
+  });
+
+  describe('render', () => {
+    afterEach(() => jest.restoreAllMocks());
+
+    it('renders a refusal in the fallback locale', () => {
+      const translate = jest.fn().mockReturnValue('This server is not accepting new accounts');
+
+      expect(depsOver(prismaReading(null, null), { translate }).render('errors.auth.registration_disabled')).toBe(
+        'This server is not accepting new accounts',
+      );
+      expect(translate).toHaveBeenCalledWith('errors.auth.registration_disabled', { lang: FALLBACK_LOCALE });
+    });
+
+    it('renders the catalog key without an I18nService, as for the better-auth CLI', () => {
+      expect(depsOver(prismaReading(null, null)).render('errors.auth.registration_disabled')).toBe(
+        'errors.auth.registration_disabled',
+      );
+    });
+
+    // A throw here would turn the refusal into a 500.
+    it.each([new Error('catalog unreadable'), 'catalog unreadable'])(
+      'renders the catalog key, and logs, when the catalog throws %p',
+      (thrown) => {
+        const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+        const translate = jest.fn(() => {
+          throw thrown;
+        });
+
+        expect(depsOver(prismaReading(null, null), { translate }).render('errors.auth.registration_disabled')).toBe(
+          'errors.auth.registration_disabled',
+        );
+        expect(logged).toHaveBeenCalledWith(
+          "Could not render 'errors.auth.registration_disabled'",
+          thrown instanceof Error ? thrown.stack : thrown,
+        );
+      },
+    );
   });
 });
