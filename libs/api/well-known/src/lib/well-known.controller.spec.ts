@@ -3,6 +3,7 @@ import { PoliciesGuard } from '@bge/permissions';
 import { NO_CACHE_KEY } from '@bge/shared';
 import { createTestingModuleWithDb } from '@bge/testing';
 import { NotFoundException } from '@nestjs/common';
+import { HEADERS_METADATA } from '@nestjs/common/constants';
 import { ConfigService } from '@nestjs/config';
 import * as crypto from 'node:crypto';
 import { AuthStrategyType } from './constants';
@@ -134,6 +135,13 @@ describe('WellKnownController', () => {
 
     it('is never response-cached, so a settings change shows on the next read', () => {
       expect(Reflect.getMetadata(NO_CACHE_KEY, WellKnownController.prototype.getDiscovery)).toBe(true);
+    });
+
+    it('tells HTTP caches to revalidate on every use, for the same reason', () => {
+      expect(Reflect.getMetadata(HEADERS_METADATA, WellKnownController.prototype.getDiscovery)).toContainEqual({
+        name: 'Cache-Control',
+        value: 'no-cache',
+      });
     });
   });
 

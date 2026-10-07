@@ -120,4 +120,21 @@ describe('the registration switch', () => {
     expect(emailStrategy(after)).toMatchObject({ sign_up_disabled: true });
     expect(emailStrategy(after)).not.toHaveProperty('sign_up_endpoint');
   });
+
+  // An HTTP cache keeps its copy but revalidates it on every use, so it
+  // also sees the change on its next read. An unchanged document answers
+  // 304, without its body.
+  it('shows in discovery to an HTTP cache when it next revalidates', async () => {
+    const first = await request(baseUrl).get(DISCOVERY_PATH).expect(200);
+    expect(first.headers['cache-control']).toBe('no-cache');
+    const etag: string = first.headers['etag'];
+    expect(etag).toEqual(expect.any(String));
+
+    await request(baseUrl).get(DISCOVERY_PATH).set('If-None-Match', etag).expect(304);
+
+    await setRegistration(false);
+
+    const revalidated = await request(baseUrl).get(DISCOVERY_PATH).set('If-None-Match', etag).expect(200);
+    expect(revalidated.body.bge_anonymous_auth_supported).toBe(false);
+  });
 });
