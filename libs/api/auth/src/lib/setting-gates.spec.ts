@@ -136,13 +136,15 @@ describe('createSettingGates', () => {
     });
 
     // A client that saves a whole profile form resends the username it
-    // already has.
-    it('lets the current username through while changes are off', async () => {
+    // already has. Written back, it would undo an admin's rename that landed
+    // between the gate's read and the write. better-auth merges the returned
+    // data over the update, so the name must be present and undefined.
+    it('lets the current username through while changes are off, leaving it out of the write', async () => {
       switches = { ...ALL_OPEN, allowUsernameChange: false };
 
       await expect(
         gates().beforeUserUpdate({ name: 'alice', firstName: 'Alice' }, signedIn('/update-user')),
-      ).resolves.toBeUndefined();
+      ).resolves.toStrictEqual({ data: { name: undefined } });
     });
 
     it('lets profile fields through while changes are off, without reading the row', async () => {

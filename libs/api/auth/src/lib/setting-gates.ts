@@ -85,6 +85,14 @@ const OAUTH_CALLBACK_PATHS: ReadonlySet<string> = new Set(['/oauth2/callback/:pr
  */
 const UPDATE_USER_PATH = '/update-user';
 
+/**
+ * What the update hook returns to drop an unchanged username from the write.
+ * better-auth merges a hook's `data` over the pending update, so a key can
+ * only be overridden, not removed; its adapter then leaves an `undefined`
+ * field out of an update.
+ */
+const UNCHANGED_NAME = { data: { name: undefined } } as const;
+
 /** The slice of better-auth's endpoint context the gates read. It is `null` outside an endpoint. */
 export interface SettingGateContext {
   readonly path?: string;
@@ -107,12 +115,13 @@ export interface SettingGates {
   /**
    * `databaseHooks.user.update.before`. Refuses `/update-user` only when it
    * would change the username, so a client that resends the whole profile
-   * still saves the other fields.
+   * still saves the other fields. While changes are off, the unchanged
+   * username is dropped from that write ({@link UNCHANGED_NAME}).
    */
   beforeUserUpdate(
     data: { readonly name?: unknown; readonly [field: string]: unknown },
     context: SettingGateContext | null,
-  ): Promise<void>;
+  ): Promise<typeof UNCHANGED_NAME | undefined>;
   /** `hooks.before`, wrapped in `createAuthMiddleware`. */
   beforeRoute(context: SettingGateContext): Promise<void>;
 }
@@ -159,6 +168,10 @@ export function createSettingGates(deps: SettingGateDeps): SettingGates {
       if (current === null || current !== data.name) {
         throw refusal(USERNAME_CHANGE);
       }
+
+      // The name is unchanged, so it is left out of the write. Written back,
+      // it would undo an admin's rename that landed after the read above.
+      return UNCHANGED_NAME;
     },
 
     async beforeRoute(context) {
