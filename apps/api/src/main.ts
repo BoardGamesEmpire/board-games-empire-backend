@@ -8,6 +8,7 @@ import { bootstrapLogger, otel } from './app/lib/logger';
 // Imports below this line are instrumented by the OTel auto-instrumentations.
 import { AUTH_INSTANCE } from '@bge/auth';
 import { createPrismaCliMigrator, nestLoggerFromPino, runBootstrap } from '@bge/bootstrap';
+import { createWebClient } from '@bge/web-client';
 import { Logger, RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
@@ -18,6 +19,7 @@ import compression from 'compression';
 import helmet from 'helmet';
 import { I18nValidationPipe } from 'nestjs-i18n';
 import { Logger as PinoLogger } from 'nestjs-pino';
+import { join } from 'node:path';
 import { RedisIoAdapter } from './app/adapters/redis-io.adapter';
 import { AppModule } from './app/app.module';
 import { bootstrapCacheFlushPatterns } from './app/configuration/cache-flush';
@@ -59,6 +61,15 @@ async function bootstrap() {
   app.useLogger(app.get(PinoLogger));
 
   const globalPrefix = 'api';
+  // The routes that sit outside the global prefix. The bundled web client
+  // never answers under these or under the prefix itself.
+  const unprefixedRoutes = [
+    { path: 'metrics', method: RequestMethod.GET },
+    { path: 'health', method: RequestMethod.GET },
+    { path: 'health/*path', method: RequestMethod.GET },
+    { path: '.well-known/*path', method: RequestMethod.GET },
+    { path: '.well-known/*path', method: RequestMethod.OPTIONS },
+  ];
   const configService = app.get(ConfigService);
 
   app.enable('trust proxy').set('etag', 'strong').set('x-powered-by', false);
@@ -96,36 +107,30 @@ async function bootstrap() {
     )
     .use(helmet())
     .use(compression())
-    .setGlobalPrefix(globalPrefix, {
-      exclude: [
-        {
-          path: 'metrics',
-          method: RequestMethod.GET,
-        },
-        {
-          path: 'health',
-          method: RequestMethod.GET,
-        },
-        {
-          path: 'health/*path',
-          method: RequestMethod.GET,
-        },
-        {
-          path: '.well-known/*path',
-          method: RequestMethod.GET,
-        },
-        {
-          path: '.well-known/*path',
-          method: RequestMethod.OPTIONS,
-        },
-      ],
-    })
+    .setGlobalPrefix(globalPrefix, { exclude: unprefixedRoutes })
     .enableCors({
       origin: [env.provide('BETTER_AUTH_URL', { defaultValue: '*' }), '*'],
       credentials: true,
       methods: ['GET', 'PATCH', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     });
+
+  // The web client, when the image carries its build beside this bundle
+  // (#598). It runs before Nest's routes are registered, which is why it is
+  // told which paths are the server's rather than relying on route order.
+  // Socket.IO answers `/socket.io/` itself but passes on `/socket.io` without
+  // the slash, so its path is listed too.
+  const webClientRoot = join(__dirname, 'web');
+  const webClient = await createWebClient({
+    root: webClientRoot,
+    serverRoutes: [globalPrefix, 'socket.io', ...unprefixedRoutes.map(({ path }) => path)],
+  });
+  if (webClient) {
+    app.use(webClient);
+    Logger.log(`Serving the web client from ${webClientRoot}`, LOGGER_CONTEXT);
+  } else {
+    Logger.log(`No web client in ${webClientRoot}; serving the API only`, LOGGER_CONTEXT);
+  }
 
   // NOTE: `enableShutdownHooks()` is intentionally omitted. The manual
   // signal handlers registered below sequence `app.close()` BEFORE
