@@ -33,7 +33,7 @@ jobs:
       NODE_ENV: testing
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           filter: tree:0
           fetch-depth: 0
@@ -179,7 +179,7 @@ jobs:
           echo "coverage reports: $(printf '%s' "$files" | tr ',' '\n' | grep -c . || true)"
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ steps.coverage.outputs.files }}
@@ -223,7 +223,7 @@ jobs:
       NODE_ENV: testing
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           filter: tree:0
           fetch-depth: 0

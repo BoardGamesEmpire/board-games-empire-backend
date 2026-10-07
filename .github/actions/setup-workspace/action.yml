@@ -13,7 +13,7 @@ description: >-
 runs:
   using: composite
   steps:
-    - uses: actions/setup-node@v6
+    - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
       id: node
       with:
         node-version: 24
@@ -63,7 +63,7 @@ runs:
     # races to rewrite the entry.
     - name: Restore node_modules
       id: node-modules
-      uses: actions/cache@v6
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: |
           node_modules
@@ -92,7 +92,7 @@ runs:
           exit 1
         fi
 
-    - uses: nrwl/nx-set-shas@v4
+    - uses: nrwl/nx-set-shas@3e9ad7370203c1e93d109be57f3b72eb0eb511b1 # v4.4.0
       with:
         main-branch-name: master
 
