@@ -22,6 +22,23 @@ concurrency:
   group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Renovate's PR runs don't connect to Nx Cloud (#599). Nx Cloud bills a flat
+# 500 credits per CI pipeline execution against the free plan's monthly
+# allowance, and Renovate pushes to its branch again every time an update
+# moves. Those runs lose the remote cache and run every task on the runner,
+# which a public repository doesn't pay for. Merges to master still connect:
+# that run fills the cache the other runs read.
+#
+# Matched on the PR's branch and its author, not on whoever pushed last, so a
+# person's fix pushed to a Renovate branch stays off Nx Cloud too. Either match
+# is enough on its own: `renovate/` is the `branchPrefix` in
+# .github/renovate.json and `renovate[bot]` is the app's account, so a change
+# to one doesn't put Renovate's runs back on Nx Cloud. The value reaches Nx as
+# the string 'true' or 'false', and Nx disconnects only on exactly 'true', so
+# every other run is unchanged.
+env:
+  NX_NO_CLOUD: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'renovate/') || github.event.pull_request.user.login == 'renovate[bot]') }}
+
 jobs:
   main:
     runs-on: ubuntu-latest
@@ -190,9 +207,10 @@ jobs:
 
       # Nx Cloud self-healing stays scoped to this job (D-259-1): letting it
       # act on e2e failures against real containers is not something to
-      # invite while the suite's flake profile is uncharacterised.
+      # invite while the suite's flake profile is uncharacterised. It needs Nx
+      # Cloud, so it is skipped on the runs that `NX_NO_CLOUD` keeps off it.
       - run: npx nx fix-ci
-        if: always()
+        if: always() && env.NX_NO_CLOUD != 'true'
 
   # Black-box e2e gate (#259). Provisions real Postgres + Redis via
   # testcontainers on the runner's Docker daemon (D-1 on #255). Advisory at
@@ -206,7 +224,8 @@ jobs:
   # cache pays for that graph twice; run after, those builds are Nx Cloud
   # cache hits and a failing lint or unit suite costs no container minutes
   # at all. Unit feedback timing is unchanged either way — only the e2e
-  # verdict arrives later.
+  # verdict arrives later. Renovate's runs are the exception: they skip Nx
+  # Cloud (NX_NO_CLOUD above), so this job builds the affected graph again.
   e2e:
     needs: main
     runs-on: ubuntu-latest
