@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "out-tsc/@boardgamesempire/image-smoke",
+    "esModuleInterop": true,
+    "types": ["jest", "node"],
+    // The functions handed to Playwright's `page.evaluate` run in the browser.
+    "lib": ["es2022", "dom"]
+  },
+  "include": ["src/**/*.ts"],
+  "references": [
+    {
+      "path": "../../libs/common/testing-e2e"
+    }
+  ]
+}

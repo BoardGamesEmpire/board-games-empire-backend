@@ -177,6 +177,20 @@ Requirements and knobs:
 - `BGE_E2E_VERBOSE=true` — streams the server's logs live instead of
   buffering them for failure replay.
 
+### Image smoke tests
+
+```bash
+docker compose --profile split build
+npx playwright install --only-shell chromium
+npx nx run @boardgamesempire/image-smoke:smoke
+```
+
+The images themselves, rather than a checkout: the split Compose profile,
+driven from outside, from a first boot to a clean shutdown, with the bundled
+web client in headless Chromium (#600). CI runs it for amd64 and arm64 on every
+pull request. [apps/image-smoke/README.md](apps/image-smoke/README.md) covers
+what it checks and how to look at a failure.
+
 ### Type checking
 
 ```bash

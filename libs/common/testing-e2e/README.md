@@ -67,6 +67,10 @@ Every e2e suite runs the apps it tests from their built bundles, as child proces
 - `useGateway`, from `@bge/testing-e2e/gateway`, runs a game gateway for one spec file, on a free
   port, and hands out a gRPC client once the gateway answers `Check` with `SERVING`. The
   `boardgamegeek-gateway-e2e` and `igdb-gateway-e2e` suites are built on it.
+- `apps/stub-gateway` is a game gateway that answers every RPC from fixtures and calls no
+  upstream, so a search or an import can reach a gateway with no credentials. `useGateway` runs it
+  as it runs the real ones: `app: 'stub-gateway'`, with its address in `STUB_GATEWAY_GRPC_HOST`
+  and `STUB_GATEWAY_GRPC_PORT`. The image smoke suite (`apps/image-smoke`) runs it in a container.
 
 ```ts
 import { useGateway } from '@bge/testing-e2e/gateway';
@@ -91,3 +95,7 @@ limit is why gateways launch per spec file rather than from global setup.
 
 The gateway helper has its own subpath too, so the `api-e2e` specs that import the root do not
 each load the gRPC stack. Jest loads modules afresh for every spec file.
+
+`performSignup` and `pollUntil` are also on subpaths of their own, `@bge/testing-e2e/signup` and
+`@bge/testing-e2e/poll`, for a suite that reaches a stack only over the wire and has no database to
+read. The root imports `@bge/database`; these don't. The image smoke suite uses them.
