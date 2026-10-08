@@ -4,11 +4,13 @@ import { prismaAdapter } from '@better-auth/prisma-adapter';
 import type { AuditContextService, SystemActorScope } from '@bge/actor-context';
 import type { PrismaClient } from '@bge/database';
 import { isTrue, splitTrimFilter } from '@bge/env';
+import type { I18nTranslations } from '@bge/i18n';
 import type { Cache } from '@nestjs/cache-manager';
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { EventEmitter2 } from '@nestjs/event-emitter';
 import { betterAuth } from 'better-auth';
+import { createAuthMiddleware } from 'better-auth/api';
 import {
   admin,
   anonymous,
@@ -22,10 +24,12 @@ import {
   twoFactor,
 } from 'better-auth/plugins';
 import type { User } from 'better-auth/types';
+import type { I18nService } from 'nestjs-i18n';
 import process from 'node:process';
 import { ADMIN_PLUGIN_OPTIONS } from './access/admin-roles';
 import { AUTH_BASE_PATH, AUTH_COOKIE_PREFIX } from './constants';
 import { UserCreatedEvent } from './events/auth.events';
+import { createSettingGates, settingGateDeps } from './setting-gates';
 
 interface UserCreatedHookDeps {
   eventEmitter?: EventEmitter2;
@@ -105,6 +109,7 @@ export function authFactory(
   eventEmitter?: EventEmitter2,
   auditContext?: AuditContextService,
   systemActorScope?: SystemActorScope,
+  i18n?: I18nService<I18nTranslations>,
 ) {
   const logger = new Logger('AuthFactory');
   logger.log(`Initializing BetterAuth with ConfigService: ${configService instanceof ConfigService}`);
@@ -127,6 +132,8 @@ export function authFactory(
   if (options.useEmailPass) {
     logger.log('Enabling Email & Password authentication');
   }
+
+  const settingGates = createSettingGates(settingGateDeps(prisma, i18n));
 
   const usingSwagger = configService?.get<boolean>('swagger.enabled');
   if (usingSwagger) {
@@ -202,7 +209,9 @@ export function authFactory(
         },
       },
     },
-    hooks: {},
+    hooks: {
+      before: createAuthMiddleware(settingGates.beforeRoute),
+    },
     experimental: { joins: true },
     url: options.hostUrl,
     secret: options.secret,
@@ -214,7 +223,11 @@ export function authFactory(
     databaseHooks: {
       user: {
         create: {
+          before: settingGates.beforeUserCreate,
           after: createUserCreatedHook({ eventEmitter, auditContext, systemActorScope }),
+        },
+        update: {
+          before: settingGates.beforeUserUpdate,
         },
         // TODO: clean up API keys on user delete. The upstream better-auth
         // apikey schema dropped the Apikey -> User FK (and its onDelete:

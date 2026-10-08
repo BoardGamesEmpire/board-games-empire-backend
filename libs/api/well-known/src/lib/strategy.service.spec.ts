@@ -39,7 +39,6 @@ const AUTH_BASE = AUTH_BASE_PATH;
 interface MockAuthConfig {
   url?: string;
   useEmailPasswordAuth?: boolean;
-  disableEmailSignUp?: boolean;
   oidcWellKnownUrl?: string;
   oidcClientId?: string;
   oidcClientSecret?: string;
@@ -52,7 +51,6 @@ function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'ge
   const configMap: Record<string, unknown> = {
     'auth.url': config.url ?? BASE_ISSUER,
     'auth.useEmailPasswordAuth': config.useEmailPasswordAuth ?? false,
-    'auth.disableEmailSignUp': config.disableEmailSignUp ?? false,
     'auth.oidcWellKnownUrl': config.oidcWellKnownUrl ?? '',
     'auth.oidcClientId': config.oidcClientId ?? '',
     'auth.oidcClientSecret': config.oidcClientSecret ?? '',
@@ -80,7 +78,10 @@ function buildMockConfigService(config: MockAuthConfig): Pick<ConfigService, 'ge
 const MOCK_SYSTEM_SETTING = {
   identifier: 'test-server-id-00000000',
   name: 'Test Server',
+  allowUserRegistration: true,
 };
+
+const REGISTRATION_CLOSED = { ...MOCK_SYSTEM_SETTING, allowUserRegistration: false };
 
 const OIDC_CONFIG: Pick<MockAuthConfig, 'oidcWellKnownUrl' | 'oidcClientId' | 'oidcClientSecret'> = {
   oidcWellKnownUrl: 'https://auth.example.com/.well-known/openid-configuration',
@@ -96,8 +97,10 @@ async function createService(
     providers: [StrategyService, { provide: ConfigService, useValue: buildMockConfigService(config) }],
   });
 
-  db.systemSetting.findFirst.mockResolvedValue(systemSetting as SystemSetting);
-  db.systemSetting.findMany.mockResolvedValue([systemSetting] as SystemSetting[]);
+  // Only the singleton row resolves: it is the row the auth gates enforce, so
+  // discovery must advertise that one and no other.
+  db.systemSetting.findUnique.mockImplementation(((args: { where?: { singleton?: boolean } }) =>
+    Promise.resolve(args.where?.singleton === true ? systemSetting : null)) as never);
 
   return module.get(StrategyService);
 }
@@ -290,12 +293,23 @@ describe('StrategyService', () => {
 
         expect(discovery.bgeTwoFactorSupported).toBe(true);
       });
+    });
 
-      it('reports bgeAnonymousAuthSupported as true', async () => {
+    describe('anonymous sign-in flag', () => {
+      it('reports anonymous sign-in as supported while registration is open', async () => {
         const service = await createService({});
         const discovery = await service.getDiscovery();
 
         expect(discovery.bgeAnonymousAuthSupported).toBe(true);
+      });
+
+      // An anonymous sign-in creates an account, so closing registration
+      // refuses it too (#585).
+      it('reports anonymous sign-in as unsupported while registration is closed', async () => {
+        const service = await createService({}, REGISTRATION_CLOSED);
+        const discovery = await service.getDiscovery();
+
+        expect(discovery.bgeAnonymousAuthSupported).toBe(false);
       });
     });
 
@@ -333,7 +347,7 @@ describe('StrategyService', () => {
         });
 
         it('includes signUpEndpoint when registration is open', async () => {
-          const service = await createService({ useEmailPasswordAuth: true, disableEmailSignUp: false });
+          const service = await createService({ useEmailPasswordAuth: true });
           const discovery = await service.getDiscovery();
 
           const [strategy] = discovery.strategies as EmailAndPasswordStrategyDto[];
@@ -341,8 +355,8 @@ describe('StrategyService', () => {
           expect(strategy.signUpEndpoint).toBe(`${AUTH_BASE}/sign-up/email`);
         });
 
-        it('omits signUpEndpoint when registration is disabled', async () => {
-          const service = await createService({ useEmailPasswordAuth: true, disableEmailSignUp: true });
+        it('omits signUpEndpoint when registration is closed', async () => {
+          const service = await createService({ useEmailPasswordAuth: true }, REGISTRATION_CLOSED);
           const discovery = await service.getDiscovery();
 
           const [strategy] = discovery.strategies as EmailAndPasswordStrategyDto[];
@@ -351,7 +365,7 @@ describe('StrategyService', () => {
         });
 
         it('sets signUpDisabled: false when registration is open', async () => {
-          const service = await createService({ useEmailPasswordAuth: true, disableEmailSignUp: false });
+          const service = await createService({ useEmailPasswordAuth: true });
           const discovery = await service.getDiscovery();
 
           const [strategy] = discovery.strategies as EmailAndPasswordStrategyDto[];
@@ -360,7 +374,7 @@ describe('StrategyService', () => {
         });
 
         it('sets signUpDisabled: true when registration is closed', async () => {
-          const service = await createService({ useEmailPasswordAuth: true, disableEmailSignUp: true });
+          const service = await createService({ useEmailPasswordAuth: true }, REGISTRATION_CLOSED);
           const discovery = await service.getDiscovery();
 
           const [strategy] = discovery.strategies as EmailAndPasswordStrategyDto[];
@@ -401,6 +415,25 @@ describe('StrategyService', () => {
           const [strategy] = discovery.strategies as OidcStrategyDto[];
 
           expect(strategy.providerId).toBe('default-oidc-provider');
+        });
+
+        it('sets signUpDisabled: false when registration is open', async () => {
+          const service = await createService({ ...OIDC_CONFIG });
+          const discovery = await service.getDiscovery();
+
+          const [strategy] = discovery.strategies as OidcStrategyDto[];
+
+          expect(strategy.signUpDisabled).toBe(false);
+        });
+
+        it('stays listed with signUpDisabled: true when registration is closed, for existing accounts', async () => {
+          const service = await createService({ ...OIDC_CONFIG }, REGISTRATION_CLOSED);
+          const discovery = await service.getDiscovery();
+
+          const [strategy] = discovery.strategies as OidcStrategyDto[];
+
+          expect(strategy.type).toBe(AuthStrategyType.Oidc);
+          expect(strategy.signUpDisabled).toBe(true);
         });
 
         it('sets discoveryUrl from config', async () => {

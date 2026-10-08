@@ -1,4 +1,5 @@
 import { t } from '@bge/i18n';
+import { NoCache } from '@bge/shared';
 import { Controller, Get, Header, HttpCode, NotFoundException, Options, UseInterceptors } from '@nestjs/common';
 import { ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -20,11 +21,10 @@ import { StrategyService } from './strategy.service';
  * corporate proxy, one CGNAT range — share this endpoint's budget and CAN 429
  * each other.
  *
- * `Cache-Control: public, max-age=300` below makes that unlikely to bite rather
- * than impossible. The header permits caching; it does not oblige a client to
- * cache, retain, or reuse anything, so a well-behaved client that revalidates
- * eagerly still reaches the endpoint. The limit is a backstop against volume,
- * not a guarantee derived from the caching policy.
+ * Caching does not soften that. The discovery document is `no-cache`, so a
+ * client revalidates it on every use, and a 304 spends the budget as a 200
+ * does. The limit is a backstop against volume, not a guarantee derived from
+ * the caching policy.
  *
  * If federation ever puts a large shared-egress population behind one address,
  * this is the endpoint that notices first, and the answer is a route-level
@@ -43,10 +43,20 @@ export class WellKnownController {
    * BGE server identity and authentication discovery document.
    * Modeled after RFC 8414 and OpenID Connect Discovery.
    * Keys are snake_case per de-facto auth discovery convention.
+   *
+   * Never served stale, by the api or by an HTTP cache (#585). The document
+   * advertises the settings row's registration switch, and a cached body
+   * would keep offering sign-up after an admin closed it, while the server
+   * refuses every attempt. The api's response cache is skipped: its keys are
+   * per caller and locale, so a PATCH has no one entry it could evict
+   * instead. `no-cache` lets an HTTP cache keep a copy but makes it
+   * revalidate on every use, and the ETag Express sets lets an unchanged
+   * document answer 304 without its body.
    */
   @Get('bge-identity')
+  @NoCache()
   @UseInterceptors(SnakeCaseInterceptor)
-  @Header('Cache-Control', 'public, max-age=300')
+  @Header('Cache-Control', 'no-cache')
   @ApiOkResponse({ type: BgeDiscoveryDto, description: 'BGE server identity and available auth strategies' })
   getDiscovery(): Promise<BgeDiscoveryDto> {
     return this.strategyService.getDiscovery();

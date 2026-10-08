@@ -129,7 +129,10 @@
     "session_unresolved": "Session could not be resolved",
     "anonymous_not_permitted": "Anonymous access not permitted",
     "untrusted_origin": "Origin missing or not trusted",
-    "unauthenticated": "Unauthorized"
+    "unauthenticated": "Unauthorized",
+    "registration_disabled": "This server is not accepting new accounts",
+    "password_reset_disabled": "Password resets are turned off on this server",
+    "username_change_disabled": "Username changes are turned off on this server"
   },
   "household": {
     "not_found": "Household with ID {id} not found",
