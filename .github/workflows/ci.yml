@@ -269,3 +269,83 @@ jobs:
           # local repro (#259). Failure-scoped alternative tracked as #274.
           BGE_E2E_VERBOSE: 'true'
         run: npx nx affected -t e2e --parallel=1
+
+  # The image smoke suite (#600). It builds the BGE image and both gateway
+  # images, then runs them as the split profile and drives them from outside:
+  # a first boot on an empty database, an account, a search and an import
+  # through a stub gateway, the bundled web client in Chromium, and a clean
+  # shutdown (apps/image-smoke). No other test runs the images, and none
+  # boots the worker, gateway-fetch and coordinator roles.
+  #
+  # Each platform builds and runs on a runner of its own, natively: the
+  # arm64 image migrates with its own Prisma engine, which no amd64 run
+  # loads. Nothing is pushed, and the job writes nothing outside the runner.
+  #
+  # Not gated on `main`: the images build from the Dockerfile, not from Nx's
+  # cache, so nothing here waits on main's builds. And not `affected`: every
+  # change reaches the images' build context, and a client bump changes only
+  # the Dockerfile.
+  image-smoke:
+    name: image smoke (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      # The suite runs the images these name. compose.yaml reads the same
+      # variables.
+      BGE_IMAGE: bge:smoke
+      BGE_BOARDGAMEGEEK_GATEWAY_IMAGE: bge-boardgamegeek-gateway:smoke
+      BGE_IGDB_GATEWAY_IMAGE: bge-igdb-gateway:smoke
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          filter: tree:0
+          fetch-depth: 0
+          # Nothing after the checkout needs the token.
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-workspace
+
+      # Built by the runner's own Docker, so each image lands where Compose
+      # finds it. The labels are those a published image carries: the
+      # commit, the version the build stamps, and the commit's date, in UTC.
+      - name: Build the images
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision="$(git rev-parse HEAD)"
+          version="$(node -p 'require("./package.json").version')"
+          created="$(TZ=UTC0 git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)"
+          labels=(--build-arg "REVISION=$revision" --build-arg "VERSION=$version" --build-arg "CREATED=$created")
+          docker build --target bge "${labels[@]}" --tag "$BGE_IMAGE" .
+          docker build --target boardgamegeek-gateway "${labels[@]}" --tag "$BGE_BOARDGAMEGEEK_GATEWAY_IMAGE" .
+          docker build --target igdb-gateway "${labels[@]}" --tag "$BGE_IGDB_GATEWAY_IMAGE" .
+          for image in "$BGE_IMAGE" "$BGE_BOARDGAMEGEEK_GATEWAY_IMAGE" "$BGE_IGDB_GATEWAY_IMAGE"; do
+            docker image inspect --format "$image {{.Id}}" "$image"
+          done
+          docker image inspect --format 'web client: {{index .Config.Labels "io.github.boardgamesempire.web.image"}}' "$BGE_IMAGE"
+
+      # Only the headless shell: the suite runs Chromium headless.
+      - name: Install Chromium
+        run: npx playwright install --with-deps --only-shell chromium
+
+      # Builds the stub gateway first (the target's dependency); the suite
+      # then adds it to the BGE image it is about to test.
+      - name: Run the image smoke suite
+        timeout-minutes: 25
+        run: npx nx run @boardgamesempire/image-smoke:smoke
+
+      # The suite saves every container's output before removing the stack, in
+      # a directory named after its Compose project. A job that failed before
+      # the suite started a stack has nothing to print.
+      - name: Print the stack's logs
+        if: failure() && hashFiles('apps/image-smoke/test-output/*/logs/*.log') != ''
+        run: tail -n +1 apps/image-smoke/test-output/*/logs/*.log
