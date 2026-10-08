@@ -11,9 +11,10 @@ import {
   startImport,
   type Session,
 } from './support/api';
-import { driftDatabaseName, visitClient } from './support/browser';
+import { visitClient } from './support/browser';
 import { recordFields, unexpectedErrors } from './support/logs';
 import { GATEWAYS, KEEP_STACK, ROLES, Stack } from './support/stack';
+import { driftDatabaseName } from './support/web-client';
 
 /**
  * The images as a self-hoster runs them (#600): the split profile, with every

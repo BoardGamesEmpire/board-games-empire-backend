@@ -1,4 +1,4 @@
-import { driftDatabaseName, isProblemMessage } from './browser';
+import { driftDatabaseName, isProblemMessage } from './web-client';
 
 describe('driftDatabaseName', () => {
   it("names the client's database for a server after the server's id", () => {

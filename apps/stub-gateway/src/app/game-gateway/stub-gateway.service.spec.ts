@@ -44,10 +44,16 @@ describe('StubGatewayService', () => {
     });
   });
 
-  it('lists its languages by BCP 47 tag', () => {
-    expect(service.listLanguages({ correlationId: 'languages-1' })).toEqual({
-      correlationId: 'languages-1',
-      languages: STUB_LANGUAGES,
+  describe('listLanguages', () => {
+    it('lists its languages by BCP 47 tag', () => {
+      expect(service.listLanguages({ correlationId: 'languages-1' })).toEqual({
+        correlationId: 'languages-1',
+        languages: STUB_LANGUAGES,
+      });
+    });
+
+    it('makes up a correlation id when the request carries none', () => {
+      expect(service.listLanguages({}).correlationId).toEqual(expect.any(String));
     });
   });
 
