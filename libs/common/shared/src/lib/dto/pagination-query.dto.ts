@@ -1,6 +1,6 @@
 import { i18nValidationMessage } from '@bge/i18n-core';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Exclude, Type } from 'class-transformer';
+import { Exclude, Transform, Type } from 'class-transformer';
 import {
   IsInt,
   IsOptional,
@@ -48,6 +48,9 @@ export const DEFAULT_MAX_PAGE_SIZE = 100;
  * is O(skip) at the database regardless of this cap.
  */
 export const DEFAULT_MAX_OFFSET = 100_000;
+
+/** Where an offset-native read starts when the caller names no offset. */
+const DEFAULT_OFFSET = 0;
 
 /**
  * Enforces the ceiling against the DERIVED skip rather than against `page`
@@ -158,13 +161,21 @@ export abstract class OffsetPaginationQueryDto {
    * Bounded like {@link DEFAULT_MAX_OFFSET} describes. Unlike `limit`, `offset`
    * is declared here and re-declared nowhere, so it stays the single declarer
    * per chain and inherits cleanly (no class-validator union hazard).
+   *
+   * A null is the first page, as a null `limit` is the default page size
+   * (#564). A WebSocket frame is JSON and can send one, `@IsOptional` lets it
+   * through, and class-transformer would write it over the default, so the
+   * local query would ask Prisma for `skip: null` and fail. Resolved here
+   * rather than by each reader, so the local query and the gateway fan-out
+   * read the same offset.
    */
   @Type(() => Number)
+  @Transform(({ value }) => value ?? DEFAULT_OFFSET)
   @IsInt({ message: i18nValidationMessage('validation.isInt') })
   @Min(0, { message: i18nValidationMessage('validation.min') })
   @Max(DEFAULT_MAX_OFFSET, { message: i18nValidationMessage('validation.max') })
   @IsOptional()
-  offset = 0;
+  offset = DEFAULT_OFFSET;
 
   /**
    * The resolved page size for a query this process runs itself, as on

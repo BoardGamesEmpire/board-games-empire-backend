@@ -249,6 +249,18 @@ describe('CappedOffsetPaginationQueryDto — the offset-native transport DTO', (
     expect(dto.offset).toBe(0);
   });
 
+  // #564. A JSON frame can send null, which `@IsOptional` lets through, and
+  // class-transformer wrote it over the default, so Prisma refused `skip:
+  // null`. A null `limit` already falls back to the page size; a null offset
+  // now falls back to the first page the same way.
+  it('treats a null offset as absent, as it does a null limit', async () => {
+    const dto = plainToInstance(SearchAt100, { offset: null, limit: null }, { enableImplicitConversion: true });
+
+    expect(dto.offset).toBe(0);
+    expect(dto.pageSize).toBe(DEFAULT_PAGE_SIZE);
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
   it('accepts the offset cap exactly', async () => {
     expect(await errorsFor(SearchAt100, 'offset', { offset: String(DEFAULT_MAX_OFFSET) })).toHaveLength(0);
   });

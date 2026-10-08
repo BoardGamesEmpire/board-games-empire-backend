@@ -535,6 +535,23 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0);
     });
 
+    // #564. The pipe let a null offset through and wrote it over the DTO's
+    // default, so the local query asked Prisma for `skip: null` and the client
+    // was sent a failed local search. A null offset now reads the first page,
+    // as a null limit reads the default page size, and the gateways are sent
+    // the offset the local query used.
+    it('reads a frame whose offset is null from the first page, locally and through the gateways', async () => {
+      const socket = await connected(socketAs(USER_A));
+      const frame = searchStart({ offset: null, includeExternal: true, gatewayIds: ['bgg-gw-1'] });
+      const outcome = searchOutcome(socket, frame.correlationId);
+
+      socket.emit(SearchEvents.SearchStart, frame);
+
+      expect(await outcome).toEqual({ errors: [] });
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0);
+      expect(searchGames).toHaveBeenCalledWith(expect.objectContaining({ offset: 0 }));
+    });
+
     it('stops reading with a grant revoked while it stays connected, from its next frame', async () => {
       const socket = await connected(socketAs(USER_A));
       const before = searchStart();
