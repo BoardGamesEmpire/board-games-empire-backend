@@ -51,11 +51,12 @@
       ]
     },
     {
-      "description": "A Node major moves the base image and the version CI runs (setup-workspace's node-version) in one PR, as the Dockerfile's comment on its node stage says they must. Neither half waits: their dates come from different registries, so one half could clear the wait first and open the PR without the other. A Node major is adopted at LTS, months after its first release, so the wait adds nothing.",
+      "description": "A Node major moves the base image and the version CI runs (setup-workspace's node-version) in one PR, as the Dockerfile's comment on its node stage says they must. The PR opens only once both halves are found, so a lookup that fails on one side can't open it with the other alone; until then the Dependency Dashboard lists it. Neither half waits: a Node major is adopted at LTS, months after its first release, so a wait adds nothing.",
       "matchManagers": ["dockerfile", "github-actions"],
       "matchDepNames": ["node"],
       "matchUpdateTypes": ["major"],
       "groupName": "Node.js",
+      "minimumGroupSize": 2,
       "semanticCommitType": "build",
       "minimumReleaseAge": null,
       "prBodyNotes": [
