@@ -23,16 +23,9 @@
       "minimumReleaseAge": null
     },
     {
-      "description": "The images ship in the BGE image, and a new one waits five days like an action. Docker Hub dates a tag by its last push, so a node:24-alpine rebuild waits five days from the rebuild.",
+      "description": "The images ship in the BGE image. Unlike actions, they get no wait, because Renovate holds an update that has no release timestamp. GHCR's client digests carry none. Docker Hub dates node's tags only for a signed-in reader: it cuts an anonymous tag listing off at 1,000, and node has more. A wait would hold every client bump and every node rebuild.",
       "matchManagers": ["dockerfile"],
-      "semanticCommitType": "build",
-      "minimumReleaseAge": "5 days"
-    },
-    {
-      "description": "The client image has no wait. Renovate holds an update that has no release timestamp, and GHCR's digests carry none, so a wait would hold every client bump.",
-      "matchManagers": ["dockerfile"],
-      "matchPackageNames": ["ghcr.io/boardgamesempire/bge-client-web"],
-      "minimumReleaseAge": null
+      "semanticCommitType": "build"
     },
     {
       "description": "Minor and patch action releases share one PR a week; majors get their own. Every merge is a billed Nx Cloud execution. The window is all of Monday (UTC) because the Mend app reaches a repository only every few hours, and a narrower window can miss a week.",
