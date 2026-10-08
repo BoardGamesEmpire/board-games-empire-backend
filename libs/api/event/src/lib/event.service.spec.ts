@@ -7,6 +7,8 @@ import {
   createMockAbilityService,
   createTestingModuleWithDb,
   makeEvent,
+  makeEventOccurrence,
+  makeEventPolicy,
   MOCK_ACTING_USER_ID,
   paginationQuery,
   type MockAbilityService,
@@ -148,20 +150,84 @@ describe('EventService', () => {
     });
   });
 
-  it('getEventById → read', async () => {
-    db.event.findUnique.mockResolvedValue({ id: 'event-1' } as Event);
+  /**
+   * #560. The event read embedded its occurrences, attendees and policy, so
+   * each went to whoever could read the event: a friend of the host, or a
+   * household guest, got every attendee. Each is now a read of its own, with
+   * its type's ceiling in that read's top-level `where`, the only place a
+   * deny-all ceiling is enforced (#559).
+   */
+  describe('getEventById', () => {
+    const event = makeEvent({ id: 'event-1' });
 
-    await service.getEventById('event-1');
+    beforeEach(() => {
+      db.event.findUnique.mockResolvedValue(event);
+      db.eventOccurrence.findMany.mockResolvedValue([]);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+      db.eventPolicy.findUnique.mockResolvedValue(null);
+    });
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
-    expect(db.event.findUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ id: 'event-1', AND: [COND] }) }),
-    );
-  });
+    // Exact, so an embed put back on the event read fails here.
+    it('reads the event under its own ceiling, embedding nothing', async () => {
+      await service.getEventById('event-1');
 
-  it('throws NotFound when the event is not visible', async () => {
-    db.event.findUnique.mockResolvedValue(null);
-    await expect(service.getEventById('event-1')).rejects.toThrow(NotFoundException);
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
+      expect(db.event.findUnique).toHaveBeenCalledWith({ where: { id: 'event-1', deletedAt: null, AND: [COND] } });
+    });
+
+    it("reads the occurrences and attendees as the event's lists, each composed with its own type's ceiling", async () => {
+      await service.getEventById('event-1');
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventOccurrence, Action.read, { eventId: 'event-1' });
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+      });
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
+        where: { eventId: 'event-1', AND: [COND] },
+        include: {
+          user: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
+          role: { include: { role: { select: { id: true, name: true } } } },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+    });
+
+    it("reads the event's policy under the policy ceiling", async () => {
+      await service.getEventById('event-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventPolicy, Action.read);
+      expect(db.eventPolicy.findUnique).toHaveBeenCalledWith({ where: { eventId: 'event-1', AND: [COND] } });
+    });
+
+    it('serves each part as its own read returned it, under the keys the embed used', async () => {
+      const occurrence = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+      const policy = makeEventPolicy('event-1');
+      db.eventOccurrence.findMany.mockResolvedValue([occurrence]);
+      db.eventPolicy.findUnique.mockResolvedValue(policy);
+
+      await expect(service.getEventById('event-1')).resolves.toEqual({
+        ...event,
+        occurrences: [occurrence],
+        attendees: [],
+        policy,
+      });
+    });
+
+    it('takes the four reads from one REPEATABLE READ snapshot', async () => {
+      await service.getEventById('event-1');
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(4);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    it('throws NotFound when the event is not visible', async () => {
+      db.event.findUnique.mockResolvedValue(null);
+      await expect(service.getEventById('event-1')).rejects.toThrow(NotFoundException);
+    });
   });
 
   it('updateEvent → update', async () => {

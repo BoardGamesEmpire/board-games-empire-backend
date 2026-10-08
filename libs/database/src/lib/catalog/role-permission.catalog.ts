@@ -315,6 +315,8 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:friendship:own',
     'delete:friendship:own',
     'read:event:friends',
+    'read:event_occurrence:friends',
+    'read:event_policy:friends',
     'read:households:friends',
     'read:household_member:friends',
 
@@ -399,8 +401,12 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:household',
   ],
   [SystemRole.HouseholdGuest]: [
+    // A guest reads the household's events with their dates and rules, but
+    // not who attends them. The rest of a guest's reach is #168's matrix.
     'delete:household_member:leave',
     'read:event:participant:household',
+    'read:event_occurrence:household',
+    'read:event_policy:household',
     'read:household',
     'read:household_member',
   ],

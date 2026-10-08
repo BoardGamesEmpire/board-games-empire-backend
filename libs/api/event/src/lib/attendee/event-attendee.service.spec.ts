@@ -71,6 +71,19 @@ describe('EventAttendeeService', () => {
       );
     });
 
+    // Attendees added together can share a `createdAt`; `id` keeps their order
+    // the same between requests, and the same as the event detail's.
+    it('getAttendees lists them in the order they joined, with id breaking ties', async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findMany.mockResolvedValue([]);
+
+      await service.getAttendees('event-1');
+
+      expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] }),
+      );
+    });
+
     it('getAttendeeByUserId → read', async () => {
       db.event.count.mockResolvedValue(1);
       db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-1' } as EventAttendee);

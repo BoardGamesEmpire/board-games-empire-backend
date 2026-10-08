@@ -3,7 +3,6 @@ import {
   AvailabilityResponse,
   DatabaseService,
   EventAvailabilityVote,
-  EventOccurrence,
   EventParticipationStatus,
   EventSchedulingMode,
   isPrismaDependentRecordNotFoundError,
@@ -70,17 +69,19 @@ export class EventOccurrenceService {
    * share one snapshot.
    *
    * The scope is the path's event, composed with the caller's ceiling (#512).
+   * Each occurrence's votes and games come from reads of their own, after the
+   * page: see {@link withVotesAndGames}.
    */
-  async getOccurrences(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<EventOccurrence>> {
+  async getOccurrences(eventId: string, pagination: PaginationQueryDto): Promise<PaginatedRows<OccurrenceDetail>> {
     await assertEventExists(this.db, eventId);
 
     const where = this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId });
 
-    const [rows, total] = await this.db.$transaction(
+    const [occurrences, total] = await this.db.$transaction(
       [
         this.db.eventOccurrence.findMany({
           where,
-          include: OCCURRENCE_INCLUDE,
+          include: { policy: true },
           orderBy: OCCURRENCE_ORDER,
           skip: pagination.skip,
           take: pagination.pageSize,
@@ -91,10 +92,10 @@ export class EventOccurrenceService {
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
-    return { rows, total };
+    return { rows: await this.withVotesAndGames(occurrences), total };
   }
 
-  async getOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async getOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     await assertEventExists(this.db, eventId);
 
     const occurrence = await this.db.eventOccurrence.findUnique({
@@ -104,14 +105,72 @@ export class EventOccurrenceService {
         // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.read),
       },
-      include: OCCURRENCE_INCLUDE,
+      include: { policy: true },
     });
 
     assert(occurrence, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
-    return occurrence;
+
+    const [detail] = await this.withVotesAndGames([occurrence]);
+    return detail;
   }
 
-  async addOccurrence(eventId: string, dto: AddOccurrenceDto): Promise<EventOccurrence> {
+  /**
+   * The occurrences, each with its availability votes and games, read under
+   * the votes' and the games' own ceilings (#560). Every occurrence route
+   * answers through here, the writes as well as the reads.
+   *
+   * Reading an occurrence, or writing one, is not reading its votes or its
+   * games. A friend of the host, or a household guest, reads the event's
+   * occurrences but neither of the other two: each vote names the attendee
+   * who cast it, and the user behind them, which is who attends the event.
+   * Every catalog role that writes an occurrence reads both, but an API key or
+   * a plugin can hold the write alone. Embedded in the occurrence, both went
+   * to whoever could read or write it. Clipping them inside the `include`
+   * would fail open (#559), so each is its own read with its ceiling in the
+   * top-level `where`, and is matched to its occurrence here. A caller with no
+   * read on votes or games gets `[]` for them.
+   *
+   * They are read after the occurrences, outside the page's snapshot and
+   * after a write's statement, since which occurrences to read them for is
+   * the answer to that read or write. A vote cast in between can appear; it
+   * is one on an occurrence the caller was served.
+   *
+   * Unbounded, as the embed was: every vote and game on every occurrence
+   * given. The page size caps the occurrences, not their votes (#404).
+   */
+  private async withVotesAndGames<TOccurrence extends { id: string }>(
+    occurrences: TOccurrence[],
+  ): Promise<(TOccurrence & VotesAndGames)[]> {
+    if (occurrences.length === 0) {
+      return [];
+    }
+
+    const occurrenceId = { in: occurrences.map((occurrence) => occurrence.id) };
+
+    const [votes, games] = await Promise.all([
+      this.db.eventAvailabilityVote.findMany({
+        where: this.scopeComposer.compose(ResourceType.EventAvailabilityVote, Action.read, { occurrenceId }),
+        select: { ...OCCURRENCE_VOTE_SELECT, occurrenceId: true },
+        orderBy: OCCURRENCE_VOTE_ORDER,
+      }),
+      this.db.eventGame.findMany({
+        where: this.scopeComposer.compose(ResourceType.EventGame, Action.read, { occurrenceId }),
+        select: { ...OCCURRENCE_GAME_SELECT, occurrenceId: true },
+        orderBy: OCCURRENCE_GAME_ORDER,
+      }),
+    ]);
+
+    const votesByOccurrence = groupByOccurrence(votes);
+    const gamesByOccurrence = groupByOccurrence(games);
+
+    return occurrences.map((occurrence) => ({
+      ...occurrence,
+      availabilityVotes: votesByOccurrence.get(occurrence.id) ?? [],
+      games: gamesByOccurrence.get(occurrence.id) ?? [],
+    }));
+  }
+
+  async addOccurrence(eventId: string, dto: AddOccurrenceDto): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const event = await this.db.event.findUnique({
       where: { id: eventId, deletedAt: null },
@@ -152,7 +211,7 @@ export class EventOccurrenceService {
         status,
         sortOrder: dto.sortOrder ?? 0,
       },
-      include: OCCURRENCE_INCLUDE,
+      include: { policy: true },
     });
 
     this.eventEmitter.emit(
@@ -172,14 +231,15 @@ export class EventOccurrenceService {
       ),
     );
 
-    return occurrence;
+    const [detail] = await this.withVotesAndGames([occurrence]);
+    return detail;
   }
 
   async updateOccurrence(
     eventId: string,
     occurrenceId: string,
     dto: UpdateEventOccurrenceDto,
-  ): Promise<EventOccurrence> {
+  ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     assert(Object.keys(dto).length > 0, new BadRequestException(t('common.at_least_one_field')));
 
@@ -204,7 +264,7 @@ export class EventOccurrenceService {
           location: dto.location,
           sortOrder: dto.sortOrder,
         },
-        include: OCCURRENCE_INCLUDE,
+        include: { policy: true },
       });
 
       const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
@@ -219,7 +279,8 @@ export class EventOccurrenceService {
         ),
       );
 
-      return updated;
+      const [detail] = await this.withVotesAndGames([updated]);
+      return detail;
     } catch (error) {
       this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -229,7 +290,7 @@ export class EventOccurrenceService {
     }
   }
 
-  async removeOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async removeOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     this.logger.debug(`Attempting to remove occurrence ${occurrenceId} from event ${eventId}`);
 
     const existing = await this.db.eventOccurrence.findUnique({
@@ -239,15 +300,21 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
+    // The votes and games are deleted with the occurrence, so they are read
+    // first, to answer with what was removed.
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
+
     try {
-      return await this.db.eventOccurrence.delete({
+      const removed = await this.db.eventOccurrence.delete({
         where: {
           id: occurrenceId,
           // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
         },
-        include: OCCURRENCE_INCLUDE,
+        include: { policy: true },
       });
+
+      return { ...removed, availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error removing occurrence ${occurrenceId} from event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -257,19 +324,19 @@ export class EventOccurrenceService {
     }
   }
 
-  async confirmOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async confirmOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Confirmed, {
       confirmedAt: new Date(),
     });
   }
 
-  async declineOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async declineOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Proposed], OccurrenceStatus.Declined, {
       declinedAt: new Date(),
     });
   }
 
-  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<EventOccurrence> {
+  async cancelOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
     return this.transitionStatus(eventId, occurrenceId, [OccurrenceStatus.Confirmed], OccurrenceStatus.Cancelled, {
       cancelledAt: new Date(),
       cancelledById: this.abilityService.getActingUserId(),
@@ -282,7 +349,7 @@ export class EventOccurrenceService {
     allowedFrom: OccurrenceStatus[],
     newStatus: OccurrenceStatus,
     extraData: Record<string, unknown> = {},
-  ): Promise<EventOccurrence> {
+  ): Promise<OccurrenceDetail> {
     const initiatedAt = new Date();
     const existing = await this.db.eventOccurrence.findUnique({
       where: { id: occurrenceId, eventId },
@@ -312,7 +379,7 @@ export class EventOccurrenceService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
         },
         data: { status: newStatus, ...extraData },
-        include: OCCURRENCE_INCLUDE,
+        include: { policy: true },
       });
 
       const domainEvent =
@@ -331,7 +398,8 @@ export class EventOccurrenceService {
         ),
       );
 
-      return updated;
+      const [detail] = await this.withVotesAndGames([updated]);
+      return detail;
     } catch (error) {
       this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -432,7 +500,9 @@ export class EventOccurrenceService {
    * read, so an event whose attendees or occurrences are outside the caller's
    * ceiling answers zero counts, like the sibling lists' empty page:
    * `assertEventExists` checks only that the event exists. Being able to read
-   * the Event row itself, as a friend can, reaches none of them.
+   * the Event row itself reaches none of them. A friend of the host, or a
+   * household guest, reads the event's occurrences but not its attendees or
+   * votes (#560), so their summary lists each occurrence with zero counts.
    *
    * The votes are read on their own and matched in memory to the attendees
    * and occurrences read beside them, so every ceiling here sits in a
@@ -469,17 +539,7 @@ export class EventOccurrenceService {
     ]);
 
     const countedAttendeeIds = new Set(attendees.map((a) => a.id));
-    const votesByOccurrence = new Map<string, typeof votes>();
-
-    for (const vote of votes) {
-      if (!countedAttendeeIds.has(vote.attendeeId)) {
-        continue;
-      }
-
-      const occurrenceVotes = votesByOccurrence.get(vote.occurrenceId) ?? [];
-      occurrenceVotes.push(vote);
-      votesByOccurrence.set(vote.occurrenceId, occurrenceVotes);
-    }
+    const votesByOccurrence = groupByOccurrence(votes.filter((vote) => countedAttendeeIds.has(vote.attendeeId)));
 
     const registered = attendees.filter((a) => a.userId !== null);
     const guests = attendees.filter((a) => a.userId === null);
@@ -563,31 +623,68 @@ export class EventOccurrenceService {
   }
 }
 
-const OCCURRENCE_INCLUDE = {
-  // Unbounded: every vote on every occurrence on the page. The page size caps
-  // the occurrences, not their votes (#404). The votes are served to whoever
-  // reads the occurrence, under no ceiling of their own (#560).
-  availabilityVotes: {
-    select: {
-      id: true,
-      attendeeId: true,
-      response: true,
+/** Each vote as the occurrence routes serve it: the response, the attendee who cast it, and their user. */
+const OCCURRENCE_VOTE_SELECT = {
+  id: true,
+  attendeeId: true,
+  response: true,
 
-      attendee: {
-        select: { userId: true },
-      },
-    },
+  attendee: {
+    select: { userId: true },
   },
-  policy: true,
-  games: {
-    select: {
-      id: true,
-      platformGameId: true,
-      role: true,
-      platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
-    },
-    // In the host's order. `id` breaks ties on `sortOrder`, which defaults to
-    // 0, as it does for the occurrences themselves.
-    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
-  },
-} as const satisfies Prisma.EventOccurrenceInclude;
+} as const satisfies Prisma.EventAvailabilityVoteSelect;
+
+// In the order each attendee first voted. A changed vote keeps its place, and
+// `id` breaks ties between votes cast in the same millisecond.
+const OCCURRENCE_VOTE_ORDER = [
+  { createdAt: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.EventAvailabilityVoteOrderByWithRelationInput[];
+
+/** Each game on an occurrence: the lineup row and the platform game it schedules. */
+const OCCURRENCE_GAME_SELECT = {
+  id: true,
+  platformGameId: true,
+  role: true,
+  platformGame: { select: PLATFORM_GAME_SUMMARY_SELECT },
+} as const satisfies Prisma.EventGameSelect;
+
+// In the host's order. `id` breaks ties on `sortOrder`, which defaults to 0,
+// as it does for the occurrences themselves.
+const OCCURRENCE_GAME_ORDER = [
+  { sortOrder: 'asc' },
+  { id: 'asc' },
+] satisfies Prisma.EventGameOrderByWithRelationInput[];
+
+/**
+ * An occurrence as every occurrence route serves it, reads and writes alike:
+ * the shape it had when the votes and games were embedded in it.
+ */
+export type OccurrenceDetail = Prisma.EventOccurrenceGetPayload<{
+  include: {
+    policy: true;
+    availabilityVotes: { select: typeof OCCURRENCE_VOTE_SELECT };
+    games: { select: typeof OCCURRENCE_GAME_SELECT };
+  };
+}>;
+
+type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
+
+/** Rows grouped under the occurrence each belongs to, without the key itself, in the order given. */
+function groupByOccurrence<TRow extends { occurrenceId: string | null }>(
+  rows: TRow[],
+): Map<string, Omit<TRow, 'occurrenceId'>[]> {
+  const groups = new Map<string, Omit<TRow, 'occurrenceId'>[]>();
+
+  for (const { occurrenceId, ...row } of rows) {
+    if (occurrenceId === null) {
+      continue;
+    }
+
+    const group = groups.get(occurrenceId) ?? [];
+    group.push(row);
+    groups.set(occurrenceId, group);
+  }
+
+  return groups;
+}

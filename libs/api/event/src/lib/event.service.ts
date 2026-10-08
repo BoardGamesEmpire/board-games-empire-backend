@@ -18,6 +18,8 @@ import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
+import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
@@ -103,50 +105,63 @@ export class EventService {
     return { rows, total };
   }
 
-  async getEventById(id: string): Promise<Event> {
-    const event = await this.db.event.findUnique({
-      where: {
-        id,
-        deletedAt: null,
-        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
-      },
-
-      include: {
-        occurrences: {
-          orderBy: OCCURRENCE_ORDER,
-        },
-
-        attendees: {
-          include: {
-            user: {
-              select: {
-                id: true,
-                username: true,
-                profile: {
-                  select: {
-                    avatarUrl: true,
-                    displayName: true,
-                  },
-                },
-              },
-            },
-
-            role: {
-              include: {
-                role: {
-                  select: { id: true, name: true },
-                },
-              },
-            },
+  /**
+   * The event, with its occurrences, attendees and policy.
+   *
+   * Each of the three is a read of its own, under its own type's ceiling
+   * (#560). Embedded in the event read, they went to whoever could read the
+   * event: a friend of the host, or a household guest, got every attendee,
+   * with the email address of each guest who has no account. Clipping them
+   * inside the `include` would fail open (#559), so each ceiling sits in its
+   * own read's top-level `where`, bound to this event. A caller with no read
+   * on one of them gets `[]` for it, or `null` for the policy.
+   *
+   * The four reads share one REPEATABLE READ snapshot, as the list's rows and
+   * count do, so the parts describe the event at one moment. They run whether
+   * or not the caller can read the event; if not, the 404 discards them. Each
+   * is an indexed lookup by event, so a 404 costs three small reads. Reading
+   * the event first would cost every 200 an interactive transaction, or the
+   * shared snapshot.
+   *
+   * The occurrences and attendees are unbounded, as the embed was. Capping
+   * them is #404's.
+   */
+  async getEventById(id: string): Promise<EventDetail> {
+    const [event, occurrences, attendees, policy] = await this.db.$transaction(
+      [
+        this.db.event.findUnique({
+          where: {
+            id,
+            deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.Event, Action.read),
           },
-        },
-        policy: true,
-      },
-    });
+        }),
+
+        this.db.eventOccurrence.findMany({
+          where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId: id }),
+          orderBy: OCCURRENCE_ORDER,
+        }),
+
+        this.db.eventAttendee.findMany({
+          where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId: id }),
+          include: ATTENDEE_USER_AND_ROLE_INCLUDE,
+          orderBy: ATTENDEE_ORDER,
+        }),
+
+        this.db.eventPolicy.findUnique({
+          where: {
+            eventId: id,
+            // eslint-disable-next-line no-restricted-syntax -- the event's one policy row, not a collection read
+            AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventPolicy, Action.read),
+          },
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
     assert(event, new NotFoundException(t('errors.event.not_found', { id })));
-    return event;
+    return { ...event, occurrences, attendees, policy };
   }
 
   async createEvent(dto: CreateEventDto): Promise<Event> {
@@ -402,3 +417,15 @@ export class EventService {
     }
   }
 }
+
+/**
+ * `GET /events/:id`. The shape is the one the event read embedded before
+ * #560, so the route's response is unchanged; only who gets each part is.
+ */
+export type EventDetail = Prisma.EventGetPayload<{
+  include: {
+    occurrences: true;
+    attendees: { include: typeof ATTENDEE_USER_AND_ROLE_INCLUDE };
+    policy: true;
+  };
+}>;
