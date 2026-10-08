@@ -114,6 +114,19 @@ describe('parseLogRecords', () => {
     );
   });
 
+  // Node prints an error the logger is handed after its line: the stack's
+  // frames indented, then the error's own fields, closed at the margin.
+  it('keeps what Node nests under a better-auth warning with it', () => {
+    const warning = [
+      `${betterAuthLine('WARN', 'Could not update user info on account link')} Error: boom`,
+      '    at linkAccount (/app/main.js:1:1) {',
+      "  code: 'P2002'",
+      '}',
+    ].join('\n');
+
+    expect(parseLogRecords(warning)).toEqual([{ level: 'WARN', text: warning }]);
+  });
+
   it('reads no records from empty output', () => {
     expect(parseLogRecords('')).toEqual([]);
   });
@@ -160,10 +173,26 @@ describe('unexpectedErrors', () => {
     expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([betterAuthLine('ERROR', 'sign-up failed')]);
   });
 
+  it('reports output after a better-auth warning, which is no part of it', () => {
+    const records = parseLogRecords(
+      [betterAuthLine('WARN', 'rate limiting is best-effort'), CONSOLE_ERROR_STACK].join('\n'),
+    );
+
+    expect(unexpectedErrors(records).map(({ text }) => text)).toEqual([CONSOLE_ERROR_STACK]);
+  });
+
   // Until #638 lands, each role's first boot reads the ledger before the api
   // has created it, and Prisma reports the failed query. The roles expect it.
   it("lets the first boot's ledger read pass", () => {
     expect(unexpectedErrors(parseLogRecords(FIRST_BOOT_LEDGER_ERROR))).toEqual([]);
+  });
+
+  it('reports output that the ledger read runs on over, with the read', () => {
+    const records = parseLogRecords([FIRST_BOOT_LEDGER_ERROR, CONSOLE_ERROR_STACK].join('\n'));
+
+    expect(unexpectedErrors(records)).toEqual([
+      { level: 'ERROR', text: `${FIRST_BOOT_LEDGER_ERROR}\n${CONSOLE_ERROR_STACK}` },
+    ]);
   });
 
   it('reports any other Prisma error', () => {

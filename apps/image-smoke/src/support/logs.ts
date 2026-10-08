@@ -5,12 +5,14 @@
  * libs/common/logger/src/lib/base-pino.options.ts), except that pino-pretty
  * still prints an `err` or `error` field on the indented lines under it.
  * Two libraries write to the console themselves: Prisma, and better-auth's
- * own logger. Their records run on: the lines after one, up to the next
- * record, are an error's details or stack.
+ * own logger. An error of theirs runs on, up to the next record: Prisma
+ * prints an error's details at the margin, under its line. Any other record
+ * of theirs keeps only the lines nested under it, as the roles' records do.
  *
  * Anything else a container writes is no record of these, such as a crash's
  * stack trace or a library writing to the console. It is kept as a record of
- * its own, without a level, rather than read as part of the record before it.
+ * its own, without a level, unless an error runs on over it. Either way the
+ * check reports it: no record that passes takes in a line that isn't its own.
  */
 
 export interface LogRecord {
@@ -39,25 +41,31 @@ const ERROR_LEVELS = new Set(['ERROR', 'FATAL']);
 /**
  * The ledger read every role makes on a first boot, before the api has
  * created the table: the roles expect it to fail (#638). Only the missing
- * table passes; any other failure of that read is a broken ledger.
+ * table passes; any other failure of that read is a broken ledger. It must
+ * end its record, so nothing the record ran on over passes with it.
  */
-const FIRST_BOOT_LEDGER_READ = /Code: `42P01`\. Message: `relation "_prisma_migrations" does not exist`/;
+const FIRST_BOOT_LEDGER_READ = /Code: `42P01`\. Message: `relation "_prisma_migrations" does not exist`$/;
 
 export function stripAnsi(text: string): string {
   return text.replace(ANSI_SEQUENCE, '');
 }
 
-/** A line that starts with whitespace and has more than whitespace on it. */
-const INDENTED_LINE = /^\s+\S/;
+/**
+ * A line nested under the one above it, as Node prints what a logger is
+ * handed after its line: indented, as a stack's frames and an object's
+ * fields are, or the bracket that closes the object, at the margin.
+ */
+const NESTED_LINE = /^(\s+\S|[}\]])/;
 
 interface PendingRecord {
   readonly level: string | undefined;
 
   /**
    * Which lines after this one, up to the next record, are part of it: only
-   * indented ones, under a pino-pretty line, or any.
+   * the nested ones, or any, under an error of Prisma's or better-auth's and
+   * under output that is no record.
    */
-  readonly runsOn: 'indented' | 'any';
+  readonly runsOn: 'nested' | 'any';
 
   readonly lines: string[];
 }
@@ -66,16 +74,18 @@ interface PendingRecord {
 function recordStartedBy(line: string): PendingRecord | undefined {
   const pino = PINO_RECORD.exec(line);
   if (pino) {
-    return { level: pino[1], runsOn: 'indented', lines: [line] };
+    return { level: pino[1], runsOn: 'nested', lines: [line] };
   }
 
-  const prisma = PRISMA_RECORD.exec(line);
-  if (prisma) {
-    return { level: prisma[1].toUpperCase(), runsOn: 'any', lines: [line] };
+  const level = PRISMA_RECORD.exec(line)?.[1].toUpperCase() ?? BETTER_AUTH_RECORD.exec(line)?.[1];
+  if (level === undefined) {
+    return undefined;
   }
 
-  const betterAuth = BETTER_AUTH_RECORD.exec(line);
-  return betterAuth ? { level: betterAuth[1], runsOn: 'any', lines: [line] } : undefined;
+  // Whatever an error takes in is reported with it, since the ledger read
+  // passes only alone. Anything else takes in only what is nested under it,
+  // or it would pass whatever followed it.
+  return { level, runsOn: ERROR_LEVELS.has(level) ? 'any' : 'nested', lines: [line] };
 }
 
 /** Splits a container's output into its log records. */
@@ -88,7 +98,7 @@ export function parseLogRecords(output: string): LogRecord[] {
 
     if (started) {
       records.push(started);
-    } else if (current && (current.runsOn === 'any' || INDENTED_LINE.test(line))) {
+    } else if (current && (current.runsOn === 'any' || NESTED_LINE.test(line))) {
       current.lines.push(line);
     } else if (line.trim() !== '') {
       // Output that is no record: it runs on until the next record, so a
@@ -110,10 +120,8 @@ export function recordFields(record: LogRecord): Record<string, unknown> | undef
 
   for (let start = line.indexOf('{'); start !== -1; start = line.indexOf('{', start + 1)) {
     try {
-      const fields: unknown = JSON.parse(line.slice(start));
-      if (typeof fields === 'object' && fields !== null && !Array.isArray(fields)) {
-        return fields as Record<string, unknown>;
-      }
+      // JSON that starts at a brace and parses is an object.
+      return JSON.parse(line.slice(start)) as Record<string, unknown>;
     } catch {
       // Not where the fields start; try the next brace.
     }
