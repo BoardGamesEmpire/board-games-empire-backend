@@ -2,6 +2,7 @@ import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
 import type {
+  LocalSearchScope,
   WsClientData,
   WsRateLimitedPayload,
   WsSearchDonePayload,
@@ -12,7 +13,7 @@ import type {
 } from '@bge/game-search';
 import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
 import { t } from '@bge/i18n';
-import { AbilityService, CheckPolicies } from '@bge/permissions';
+import { CheckPolicies } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
 import { BadRequestException, ConflictException, Logger, UsePipes } from '@nestjs/common';
 import {
@@ -53,7 +54,6 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     private readonly coordinator: GatewayCoordinatorClientService,
     override readonly authService: AuthService,
     private readonly gameSearch: GameSearchService,
-    private readonly abilityService: AbilityService,
     frameScope: WsFrameScope,
     translator: WsTranslator,
   ) {
@@ -103,6 +103,12 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
       throw new ConflictException(t('errors.game_search.already_active', { correlationId: dto.correlationId }));
     }
 
+    // Built beside the refusals above and before the search is registered,
+    // only when the local half is asked for. A frame whose actor cannot be
+    // scoped is refused on the socket like those two, with nothing
+    // registered, rather than sent as a local search that failed (#513).
+    const localScope = dto.includeLocal === false ? null : this.gameSearch.localSearchScope();
+
     // Registered before the first await and for the whole search, local half
     // included, so the check above refuses a second search with this id
     // however the first was asked for. The gateway half adds its stream to it.
@@ -113,7 +119,10 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
 
     // TODO: return observables and merge -- error killing one source shouldn't kill the whole search
     try {
-      await Promise.all([this.runLocalSearch(client, dto, search), this.runGatewaySearch(client, dto, search)]);
+      await Promise.all([
+        this.runLocalSearch(client, dto, search, localScope),
+        this.runGatewaySearch(client, dto, search),
+      ]);
     } finally {
       this.completeSearch(client, dto.correlationId, search);
     }
@@ -153,8 +162,14 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     this.logger.log(`Search cancelled: correlationId=${dto.correlationId}`);
   }
 
-  private async runLocalSearch(client: Socket, options: SearchStartDto, search: Subscription) {
-    if (options.includeLocal === false) {
+  /** `scope` is null when the frame skipped the local half. */
+  private async runLocalSearch(
+    client: Socket,
+    options: SearchStartDto,
+    search: Subscription,
+    scope: LocalSearchScope | null,
+  ) {
+    if (scope === null) {
       return Promise.resolve();
     }
 
@@ -170,13 +185,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     };
 
     try {
-      const readConditions = this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read);
-      const results = await this.gameSearch.queryLocalGames(
-        options.query,
-        readConditions,
-        options.pageSize,
-        options.offset,
-      );
+      const results = await this.gameSearch.queryLocalGames(options.query, scope, options.pageSize, options.offset);
 
       emit<WsSearchResultPayload>(SearchEvents.SearchResult, {
         correlationId: options.correlationId,

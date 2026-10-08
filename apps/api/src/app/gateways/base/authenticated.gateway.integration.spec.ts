@@ -2,7 +2,7 @@ import { type Actor, AuditContextModule, getActorSnapshotFromCls } from '@bge/ac
 import { injectActorContextMetadata, WsActorScope } from '@bge/actor-context-transport';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/database';
+import { Action, DatabaseModule, DatabaseService, ResourceType, Visibility } from '@bge/database';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import {
   FALLBACK_LOCALE,
@@ -88,8 +88,18 @@ function roleGraph(userId: string, canRead: boolean): UserWithRoles {
 
 const userActor = (userId: string): Actor => ({ kind: 'user', userId });
 
-/** The read conditions {@link roleGraph} gives `userId`, as CASL renders them for Prisma. */
-const readConditionsOf = (userId: string) => [{ OR: [{ createdById: userId }] }];
+/**
+ * The scope a local search by `userId` reads within: the live Public games and
+ * that user's own, clipped by the read conditions {@link roleGraph} gives them,
+ * as CASL renders them for Prisma. The user is named twice, once by the scope
+ * and once by the ceiling, so both halves are shown to come from the frame's
+ * actor.
+ */
+const scopeOf = (userId: string) => ({
+  deletedAt: null,
+  OR: [{ visibility: Visibility.Public }, { createdById: userId }],
+  AND: [{ OR: [{ createdById: userId }] }],
+});
 
 /**
  * A session lookup that can be held open, so a client's first frame reaches
@@ -245,10 +255,12 @@ describe('AuthenticatedGateway (over a real socket)', () => {
   const resolvedAbilityRules = async (userId: string) =>
     (await abilityService.resolveAbilitiesForActor(userActor(userId))).map((ability) => ability.rules);
 
-  const queryLocalGames = jest.fn<
-    Promise<never[]>,
-    [query: string, conditions: unknown[], limit: number, offset: number]
-  >(async () => []);
+  /**
+   * The real search service's local query, answering nothing. The service
+   * itself is real so the scope each frame reads within is the one it
+   * composes from that frame's actor.
+   */
+  let queryLocalGames: jest.SpiedFunction<GameSearchService['queryLocalGames']>;
 
   /** The actor each coordinator call would carry on its `x-bge-actor` header. */
   const coordinatorSaw: (Actor | null)[] = [];
@@ -325,7 +337,9 @@ describe('AuthenticatedGateway (over a real socket)', () => {
         MarkedGateway,
         { provide: LocaleResolutionService, useValue: { resolve: resolveLocale } },
         { provide: AuthService, useValue: auth },
-        { provide: GameSearchService, useValue: { queryLocalGames } },
+        GameSearchService,
+        // Never read: the search's one query is spied below.
+        { provide: DatabaseService, useValue: {} },
         { provide: GatewayCoordinatorClientService, useValue: { searchGames } },
       ],
     })
@@ -340,6 +354,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
     baseUrl = `http://127.0.0.1:${(app.getHttpServer().address() as AddressInfo).port}`;
     abilityService = app.get(AbilityService);
     i18n = app.get(I18nService);
+    queryLocalGames = jest.spyOn(app.get(GameSearchService), 'queryLocalGames').mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -472,7 +487,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       expect(await refusal).toMatchObject({ statusCode: 400, correlationId: refused.correlationId });
       expect(sessionGuardSaw).toEqual([userActor(USER_A), userActor(USER_A)]);
       expect(policiesGuardSaw.map(({ actor }) => actor)).toEqual([userActor(USER_A), userActor(USER_A)]);
-      expect(queryLocalGames.mock.calls.map(([, conditions]) => conditions)).toEqual([readConditionsOf(USER_A)]);
+      expect(queryLocalGames.mock.calls.map(([, scope]) => scope)).toEqual([scopeOf(USER_A)]);
       expect(coordinatorSaw).toEqual([userActor(USER_A)]);
       expect(filterSaw).toEqual([userActor(USER_A)]);
     });
@@ -488,11 +503,11 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       theirs.emit(SearchEvents.SearchStart, theirFrame);
       await Promise.all(outcomes);
 
-      const conditionsByQuery = new Map(queryLocalGames.mock.calls.map(([query, conditions]) => [query, conditions]));
-      expect(conditionsByQuery).toEqual(
+      const scopeByQuery = new Map(queryLocalGames.mock.calls.map(([query, scope]) => [query, scope]));
+      expect(scopeByQuery).toEqual(
         new Map([
-          ['mine', readConditionsOf(USER_A)],
-          ['theirs', readConditionsOf(USER_B)],
+          ['mine', scopeOf(USER_A)],
+          ['theirs', scopeOf(USER_B)],
         ]),
       );
 
@@ -517,7 +532,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       socket.emit(SearchEvents.SearchStart, frame);
 
       expect(await outcome).toEqual({ errors: [] });
-      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, readConditionsOf(USER_A), 20, 0);
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0);
     });
 
     it('stops reading with a grant revoked while it stays connected, from its next frame', async () => {
@@ -633,7 +648,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
 
       expect(await outcome).toEqual({ errors: [] });
       expect(policiesGuardSaw.map(({ actor }) => actor)).toEqual([userActor(USER_A)]);
-      expect(queryLocalGames.mock.calls.map(([, conditions]) => conditions)).toEqual([readConditionsOf(USER_A)]);
+      expect(queryLocalGames.mock.calls.map(([, scope]) => scope)).toEqual([scopeOf(USER_A)]);
       // The connection's lookup and the frame's each saw the token alone.
       expect(auth.lookups).toEqual([
         { authorization: `Bearer token-${USER_A}` },

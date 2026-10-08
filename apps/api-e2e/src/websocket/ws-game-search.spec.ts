@@ -3,6 +3,7 @@ import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io-client';
+import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { connect, openSocket } from '../support/socket';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -22,7 +23,7 @@ interface SearchFrame {
  *
  * Each frame runs as the actor its connection authenticated as, with that
  * actor's abilities primed, and the local half reads through them. These are
- * the WebSocket mirror of the REST search case in `game-authorization.spec.ts`:
+ * the WebSocket mirror of the REST search cases in `game-authorization.spec.ts`:
  * with the priming removed, the creator's frame is refused and the privacy
  * case fails.
  *
@@ -180,5 +181,21 @@ describe('game search over WebSocket', () => {
 
     // The control is the Public hit: the search ran and matched for this user.
     expect(await search(theirs, token)).toEqual([publicGame.id]);
+  });
+
+  it('finds an admin a stranger’s Public game and not their private one', async () => {
+    const creator = await actors.user();
+    const admin = await actors.admin();
+
+    const token = randomUUID().slice(0, 8);
+    const privateGame = await arrangeGame(creator.user.id, Visibility.Private, `WS staff ${token} private`);
+    const publicGame = await arrangeGame(creator.user.id, Visibility.Public, `WS staff ${token} public`);
+
+    // The admin reads the private game by id, so the search leaving it out is
+    // the search's scope (#513), not a missing grant.
+    await request(baseUrl).get(`/api/games/${privateGame.id}`).set(admin.headers).expect(200);
+
+    // The control is the Public hit: the search ran and matched for the admin.
+    expect(await search(await connectedAs(admin), token)).toEqual([publicGame.id]);
   });
 });

@@ -8,10 +8,11 @@ import {
   type Game,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { CreateGameDto, UpdateGameDto } from './dto';
+import { gameListScope } from './game-list-scope';
 
 @Injectable()
 export class GameService {
@@ -21,6 +22,7 @@ export class GameService {
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -29,11 +31,19 @@ export class GameService {
    * the database default each statement takes its own snapshot, so a concurrent
    * create between them makes `total` — and the `hasMore` derived from it —
    * describe a catalog the caller was never served.
+   *
+   * The scope is {@link gameListScope}, the live Public games and the caller's
+   * own, and the ceiling only clips it (#513). For an `apiKey` actor it carries
+   * the key ∩ owner floor.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * half the scope is the caller's own games, which has no meaning without a
+   * user, and the refusal must never soften into a page of Public games.
+   * PROVISIONAL — #395.
    */
   async getGames(pagination: PaginationQueryDto): Promise<PaginatedRows<Game>> {
-    const where: Prisma.GameWhereInput = {
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
-    };
+    const userId = resolveScopeSubjectId(this.abilityService);
+    const where = this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId));
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -60,6 +70,7 @@ export class GameService {
       return await this.db.game.findUniqueOrThrow({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.read),
         },
 
@@ -224,6 +235,7 @@ export class GameService {
     }
 
     const userId = this.abilityService.getActingUserId();
+    // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
     const updateConditions = this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.update);
 
     try {
@@ -300,6 +312,7 @@ export class GameService {
       return await this.db.game.delete({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Game, Action.delete),
         },
       });

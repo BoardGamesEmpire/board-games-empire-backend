@@ -1,6 +1,7 @@
 import type { Game } from '@bge/database';
 import { Action, Prisma, ResourceType, Visibility } from '@bge/database';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createMockAbilityService,
@@ -28,6 +29,7 @@ describe('GameService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
@@ -40,6 +42,9 @@ describe('GameService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         GameService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the list actually runs.
+        ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
       ],
@@ -47,47 +52,93 @@ describe('GameService', () => {
 
     db = ctx.db;
     service = ctx.module.get(GameService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
 
-  it('getGames → read', async () => {
-    db.game.findMany.mockResolvedValue([]);
-    db.game.count.mockResolvedValue(0);
+  /**
+   * #513. `GET /games` used to take the caller's ceiling as its answer set, so
+   * a plain user listed the Public games and their own, but staff listed
+   * every private game on the server through `read:public_content`, and the
+   * Owner through `manage:all`. It now declares that first set for everyone,
+   * and the ceiling only clips it. The by-id read is unchanged, so a game
+   * dropped from staff's list stays readable by id.
+   *
+   * `Game` has left `PENDING_SCOPE_SWEEP`, so a regression that stops this read
+   * composing answers 500 at the envelope rather than returning too much. That
+   * is why the first test pins the composer call itself.
+   */
+  describe('getGames, as a converted game list', () => {
+    const read = () => service.getGames(paginationQuery({ limit: 20 }));
 
-    await service.getGames(paginationQuery({ limit: 20 }));
+    beforeEach(() => {
+      db.game.findMany.mockResolvedValue([]);
+      db.game.count.mockResolvedValue(0);
+    });
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
-    expect(db.game.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ AND: [COND] }) }),
-    );
-  });
+    it('asks the composer for its where clause, declaring the live Public games and the caller’s own', async () => {
+      await read();
 
-  // #372: `total` is only trustworthy against the rows because both come from
-  // one snapshot, and nothing in the read itself enforces that — the mock
-  // resolves the operation array at any isolation level, so a regression to the
-  // Prisma default would be invisible without pinning it here.
-  it('reads the rows and the count in one REPEATABLE READ transaction', async () => {
-    db.game.findMany.mockResolvedValue([]);
-    db.game.count.mockResolvedValue(0);
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
+        deletedAt: null,
+        OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+      });
+    });
 
-    await service.getGames(paginationQuery({ limit: 20 }));
+    // Asking is not enough: the query has to use the answer. The ceiling stays
+    // ANDed in, because for an `apiKey` actor it carries the key ∩ owner floor.
+    it('queries with the composed clause, the ceiling clipping its scope rather than supplying it', async () => {
+      await read();
 
-    const { operations, options } = batchTransactionCall(db);
-    expect(operations).toHaveLength(2);
-    expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
-  });
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            deletedAt: null,
+            OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+            AND: [COND],
+          },
+        }),
+      );
+    });
 
-  // A count over a wider `where` than the rows were read with reports a total
-  // the caller can never page to — the ability conditions have to reach both.
-  it('counts through the same scoped where as the rows', async () => {
-    db.game.findMany.mockResolvedValue([]);
-    db.game.count.mockResolvedValue(7);
+    // #372: `total` is only trustworthy against the rows because both come
+    // from one snapshot, and nothing in the read itself enforces that — the
+    // mock resolves the operation array at any isolation level, so a
+    // regression to the Prisma default would be invisible without pinning it
+    // here. A count over a wider `where` reports a total the caller can never
+    // page to.
+    it('counts through the same where as the rows, in one REPEATABLE READ transaction', async () => {
+      db.game.count.mockResolvedValue(7);
 
-    const page = await service.getGames(paginationQuery({ limit: 20 }));
+      const page = await read();
 
-    expect(db.game.count).toHaveBeenCalledWith({ where: expect.objectContaining({ AND: [COND] }) });
-    expect(page).toEqual({ rows: [], total: 7 });
+      const [findManyArgs] = db.game.findMany.mock.calls[0] as [{ where: unknown }];
+      expect(db.game.count).toHaveBeenCalledWith({ where: findManyArgs.where });
+      expect(page).toEqual({ rows: [], total: 7 });
+
+      const { operations, options } = batchTransactionCall(db);
+      expect(operations).toHaveLength(2);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // PROVISIONAL (#395). Half of the scope is the caller's own games, which
+    // has no meaning for an actor with no user behind it. The refusal must
+    // stay one rather than soften into a page of Public games, which would
+    // settle #395's question by accident. The key is the read's own, not the
+    // write-flavoured one `getActingUserId` throws.
+    it('refuses an actor kind with no user behind it rather than answering a page of Public games', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await read().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.game.findMany).not.toHaveBeenCalled();
+    });
   });
 
   it('getGame → read (single round trip on the happy path)', async () => {

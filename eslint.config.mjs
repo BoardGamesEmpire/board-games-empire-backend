@@ -58,7 +58,9 @@ export const restrictedImportPaths = {
 // caller's ability ceiling. Calling `getCurrentResourceConditions` directly in
 // a service means the ceiling IS the answer set, so the same route returns a
 // different KIND of result to different callers — the defect #365 exists to
-// remove.
+// remove. `getResourceConditionsForAbilities`, its twin over an explicit
+// ability set, makes the ceiling the answer set the same way, so it is the
+// one other way around the composer and is matched too (#513).
 //
 // A required scope parameter on the composer only binds callers who already
 // use it; this is what stops a newly written list from reaching past it. The
@@ -99,6 +101,11 @@ export const unscopedListReadSelectors = [
     selector: "CallExpression[callee.property.name='getCurrentResourceConditions']",
     message:
       "Collection reads must compose their intrinsic scope: inject ScopeComposer and call compose(resourceType, action, scope) so the endpoint names its own row set and the ability only clips it. Direct getCurrentResourceConditions in a service makes the caller's ceiling the answer set (#365/#416). Single-resource fetches and writes are exempt — disable this line with a reason.",
+  },
+  {
+    selector: "CallExpression[callee.property.name='getResourceConditionsForAbilities']",
+    message:
+      'Collection reads must compose their intrinsic scope: inject ScopeComposer and call compose(resourceType, action, scope) so the endpoint names its own row set and the ability only clips it. getResourceConditionsForAbilities makes the ceiling of the abilities it is given the answer set, as getCurrentResourceConditions does (#365/#513). Single-resource fetches and writes are exempt — disable this line with a reason.',
   },
 ];
 

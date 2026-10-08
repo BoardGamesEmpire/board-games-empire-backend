@@ -1,7 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, ResourceType } from '@bge/database';
+import { Action, ResourceType, Visibility } from '@bge/database';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -16,13 +16,15 @@ import {
   type I18nTranslations,
   isI18nMessage,
   LocaleResolutionService,
+  t,
 } from '@bge/i18n';
-import { AbilityContextNotPrimedError, AbilityService, PoliciesGuard } from '@bge/permissions';
+import { AbilityContextNotPrimedError, AbilityService, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
   makeGame,
   makeGameWithSource,
+  MOCK_ACTING_USER_ID,
   type MockAbilityService,
   MockDatabaseService,
 } from '@bge/testing';
@@ -33,7 +35,7 @@ import {
   SearchGameResult,
   SearchGamesRequest,
 } from '@boardgamesempire/proto-gateway';
-import { BadRequestException, ConflictException, HttpException, Logger } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Logger } from '@nestjs/common';
 import { I18nModule, I18nService } from 'nestjs-i18n';
 import * as crypto from 'node:crypto';
 import type { Subscription } from 'rxjs';
@@ -91,6 +93,9 @@ describe('GameSearchGateway', () => {
         // mapping to it (bug #16). It shares the mock DatabaseService provided by
         // createTestingModuleWithDb, so `db.game.findMany` assertions still hold.
         GameSearchService,
+        // The REAL composer, over the mocked ability service, so the local
+        // query's where clause is the merge the search actually runs.
+        ScopeComposer,
         {
           provide: GatewayCoordinatorClientService,
           useValue: coordinator,
@@ -328,9 +333,10 @@ describe('GameSearchGateway', () => {
         expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10, skip: 5 }));
       });
 
-      it('reads only what the frame’s actor may read', async () => {
+      it('reads the live Public games and the frame actor’s own, clipped by what that actor may read', async () => {
         // Every frame runs with its actor's abilities primed, as a request
-        // does over HTTP (#498).
+        // does over HTTP (#498), so the scope is the one `GET /games` lists
+        // (#513).
         const client = makeSocket(gateway);
         db.game.findMany.mockResolvedValue([]);
 
@@ -338,19 +344,78 @@ describe('GameSearchGateway', () => {
 
         expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
         expect(db.game.findMany).toHaveBeenCalledWith(
-          expect.objectContaining({ where: expect.objectContaining({ AND: [FRAME_READ] }) }),
+          expect.objectContaining({
+            where: {
+              AND: [
+                {
+                  deletedAt: null,
+                  OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+                  AND: [FRAME_READ],
+                },
+                { title: { contains: 'Gloomhaven', mode: 'insensitive' } },
+              ],
+            },
+          }),
         );
       });
 
-      it('queries nothing and emits a local error when the frame’s abilities cannot be read', async () => {
+      // Refused as the frame's other refusals are, for WsErrorFilter to answer
+      // on the socket. Sent as a failed local search instead, the client would
+      // read an authorization failure as an outage.
+      it.each([
+        [
+          'its abilities cannot be read',
+          'getCurrentResourceConditions',
+          () => new AbilityContextNotPrimedError(),
+          AbilityContextNotPrimedError,
+        ],
+        [
+          'its actor has no user behind it',
+          'getActingUserId',
+          () => new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' })),
+          ForbiddenException,
+        ],
+      ] as const)(
+        'refuses the frame when %s, with nothing registered, joined or queried',
+        async (_, read, error, type) => {
+          const client = makeSocket(gateway);
+          abilityService[read].mockImplementation(() => {
+            throw error();
+          });
+
+          const refusal = gateway.handleSearchStart(
+            client,
+            makeStartDto({ includeLocal: true, includeExternal: true }),
+          );
+
+          await expect(refusal).rejects.toBeInstanceOf(type);
+          expect(clientData(gateway, client).activeSearches.has('corr-1')).toBe(false);
+          expect(client.join).not.toHaveBeenCalled();
+          expect(mockEmit).not.toHaveBeenCalled();
+          expect(db.game.findMany).not.toHaveBeenCalled();
+          expect(coordinator.searchGames).not.toHaveBeenCalled();
+        },
+      );
+
+      // An external-only frame reads no game row, so it is not refused for
+      // having no user behind it.
+      it('builds no scope for a frame that skips the local half', async () => {
         const client = makeSocket(gateway);
-        abilityService.getCurrentResourceConditions.mockImplementation(() => {
-          throw new AbilityContextNotPrimedError();
-        });
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+
+        await gateway.handleSearchStart(client, makeStartDto({ includeLocal: false, includeExternal: true }));
+
+        expect(abilityService.getActingUserId).not.toHaveBeenCalled();
+        expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalled();
+        expect(coordinator.searchGames).toHaveBeenCalled();
+      });
+
+      it('emits a local error, and still ends the local half, when the query fails', async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockRejectedValue(new Error('connection reset'));
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
-        expect(db.game.findMany).not.toHaveBeenCalled();
         assertEmitted<WsSearchErrorPayload>(room('corr-1'), SearchEvents.SearchError, {
           correlationId: 'corr-1',
           source: 'local',
@@ -362,9 +427,7 @@ describe('GameSearchGateway', () => {
       it("renders the copy it sends itself in the locale its socket's connection resolved", async () => {
         const translate = jest.spyOn(i18n, 'translate');
         const client = makeSocket(gateway, SOCKET_ID, 'fr');
-        abilityService.getCurrentResourceConditions.mockImplementation(() => {
-          throw new AbilityContextNotPrimedError();
-        });
+        db.game.findMany.mockRejectedValue(new Error('connection reset'));
 
         await gateway.handleSearchStart(client, makeStartDto({ includeLocal: true, includeExternal: false }));
 
