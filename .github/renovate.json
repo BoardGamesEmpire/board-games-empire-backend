@@ -1,0 +1,60 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Keeps the Dockerfile's images and the workflows' action pins current (#599). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
+    "Only the dockerfile and github-actions managers are enabled. npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
+    "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud."
+  ],
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver"],
+  "enabledManagers": ["dockerfile", "github-actions"],
+  "branchPrefix": "renovate/",
+  "semanticCommits": "enabled",
+  "packageRules": [
+    {
+      "description": "Actions change only CI. A new release waits five days before Renovate proposes it, after min-release-age in .npmrc. The wait is weaker than npm's: it counts from a date the publisher writes (the commit's for a lightweight tag, the tag's own for an annotated one), not from when the tag reached GitHub, so a backdated release passes at once.",
+      "matchManagers": ["github-actions"],
+      "semanticCommitType": "ci",
+      "minimumReleaseAge": "5 days"
+    },
+    {
+      "description": "Pinning moves no code: CI already runs the commit the tag names. Holding the pin back would only leave the action on a movable tag for longer.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["pinDigest"],
+      "minimumReleaseAge": null
+    },
+    {
+      "description": "The images ship in the BGE image. Unlike actions, they get no wait, because Renovate holds an update that has no release timestamp. GHCR's client digests carry none. Docker Hub dates node's tags only for a signed-in reader: it cuts an anonymous tag listing off at 1,000, and node has more. A wait would hold every client bump and every node rebuild.",
+      "matchManagers": ["dockerfile"],
+      "semanticCommitType": "build"
+    },
+    {
+      "description": "Minor and patch action releases share one PR a week; majors get their own. Every merge is a billed Nx Cloud execution. The window is all of Monday (UTC) because the Mend app reaches a repository only every few hours, and a narrower window can miss a week.",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "GitHub Actions",
+      "schedule": ["* * * * 1"]
+    },
+    {
+      "description": "Every pin names a full release, so a digest update means a release's tag now points at a different commit. That is how a compromised action reaches the repositories that use it. The five-day wait counts from a date whoever moved the tag wrote, so it can't be relied on to hold one. It arrives alone, never inside the weekly group.",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "matchUpdateTypes": ["digest"],
+      "prBodyNotes": [
+        "**This release's tag was moved to a different commit.** Releases don't normally move. Find out why, from the action's repository or its advisories, before merging."
+      ]
+    },
+    {
+      "description": "A Node major moves the base image and the version CI runs (setup-workspace's node-version) in one PR, as the Dockerfile's comment on its node stage says they must. The PR opens only once both halves are found, so a lookup that fails on one side can't open it with the other alone; until then the Dependency Dashboard lists it. Neither half waits: a Node major is adopted at LTS, months after its first release, so a wait adds nothing.",
+      "matchManagers": ["dockerfile", "github-actions"],
+      "matchDepNames": ["node"],
+      "matchUpdateTypes": ["major"],
+      "groupName": "Node.js",
+      "minimumGroupSize": 2,
+      "semanticCommitType": "build",
+      "minimumReleaseAge": null,
+      "prBodyNotes": [
+        "Before merging, update the Node major named in prose: the comment on the `node` stage in `Dockerfile`, the base-image line in `docs/DEPLOYMENT.md`, and the cache-key note in `.github/actions/setup-workspace/action.yml`."
+      ]
+    }
+  ]
+}
