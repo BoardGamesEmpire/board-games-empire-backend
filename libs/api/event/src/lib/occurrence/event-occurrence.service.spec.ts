@@ -290,7 +290,9 @@ describe('EventOccurrenceService', () => {
    * The writes answered with the votes and games embedded, so a caller who can
    * write an occurrence but not read its votes, an API key or a plugin granted
    * the write alone, got every voter. They answer through the same reads as
-   * the read routes, under the same ceilings.
+   * the read routes, under the same ceilings. The create reads for neither: a
+   * new occurrence has none, and a read after its commit could only fail a
+   * create that happened.
    */
   describe('the votes and games on the occurrence writes', () => {
     const writes = [
@@ -301,6 +303,8 @@ describe('EventOccurrenceService', () => {
       { name: 'cancelOccurrence', op: 'update', status: OccurrenceStatus.Confirmed },
       { name: 'removeOccurrence', op: 'delete', status: OccurrenceStatus.Proposed },
     ] as const;
+
+    const answeredThroughReads = writes.filter(({ name }) => name !== 'addOccurrence');
 
     const run = (name: (typeof writes)[number]['name']) => {
       switch (name) {
@@ -335,7 +339,7 @@ describe('EventOccurrenceService', () => {
       expect(db.eventOccurrence[op]).toHaveBeenCalledWith(expect.objectContaining({ include: { policy: true } }));
     });
 
-    it.each(writes)(
+    it.each(answeredThroughReads)(
       '$name answers with the votes and games read under their own ceilings',
       async ({ name, status }) => {
         db.eventOccurrence.findUnique.mockResolvedValue(
@@ -365,6 +369,14 @@ describe('EventOccurrenceService', () => {
         );
       },
     );
+
+    it('addOccurrence answers with no votes or games, and reads for neither', async () => {
+      const answer = await service.addOccurrence('event-1', { label: 'Day 1' });
+
+      expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
+      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+      expect(answer).toEqual(expect.objectContaining({ id: 'occ-1', availabilityVotes: [], games: [] }));
+    });
 
     it('removeOccurrence reads the votes and games before the delete takes them with it', async () => {
       db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);

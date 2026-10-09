@@ -117,7 +117,8 @@ export class EventOccurrenceService {
   /**
    * The occurrences, each with its availability votes and games, read under
    * the votes' and the games' own ceilings (#560). Every occurrence route
-   * answers through here, the writes as well as the reads.
+   * answers through here, the writes as well as the reads, but the create:
+   * a new occurrence has neither.
    *
    * Reading an occurrence, or writing one, is not reading its votes or its
    * games. A friend of the host, or a household guest, reads the event's
@@ -231,8 +232,11 @@ export class EventOccurrenceService {
       ),
     );
 
-    const [detail] = await this.withVotesAndGames([occurrence]);
-    return detail;
+    // A new occurrence has no votes or games yet, so it answers with none
+    // rather than reading for them. That read would run after the row has
+    // committed, and if it failed, a create that happened would be reported
+    // as one that didn't, inviting a retry that adds the occurrence twice.
+    return { ...occurrence, availabilityVotes: [], games: [] };
   }
 
   async updateOccurrence(
@@ -301,7 +305,11 @@ export class EventOccurrenceService {
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
     // The votes and games are deleted with the occurrence, so they are read
-    // first, to answer with what was removed.
+    // first, to answer with what was removed. One added between this read and
+    // the delete is removed without being listed. Closing that gap would take
+    // a lock on the occurrence row, held in an interactive transaction across
+    // both reads and the delete, and this answer is all it would protect: the
+    // delete emits no event, so nothing else reads the list.
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
