@@ -46,8 +46,8 @@ const OUTPUT_DRAIN_MS = 1_000;
 export function requireBundle(label: string, bundle: string, buildTarget: string): void {
   if (!fs.existsSync(bundle)) {
     throw new Error(
-      `${label} bundle not found at ${bundle}. The e2e target depends on '${buildTarget}' — ` +
-        `run the suite through its Nx e2e target (or run '${buildTarget}' first).`,
+      `${label} bundle not found at ${bundle}. The suite's Nx target depends on '${buildTarget}' — ` +
+        `run the suite through that target (or run '${buildTarget}' first).`,
     );
   }
 }
@@ -250,9 +250,10 @@ const PORT_ATTEMPTS = 3;
 /**
  * Grabs an OS-assigned free port, then releases it for a child to bind.
  * Inherently racy (probe-then-bind): another process can claim the port in
- * the gap. {@link launchOnFreePort} compensates for that.
+ * the gap. {@link launchOnFreePort} compensates for that; any other caller
+ * either retries on a lost port or accepts that it fails, rarely.
  */
-function getFreePort(): Promise<number> {
+export function getFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
     server.unref();

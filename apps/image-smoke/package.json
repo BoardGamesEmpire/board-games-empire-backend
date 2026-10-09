@@ -1,0 +1,23 @@
+{
+  "name": "@boardgamesempire/image-smoke",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "targets": {
+      "smoke": {
+        "executor": "@nx/jest:jest",
+        "cache": false,
+        "options": {
+          "jestConfig": "apps/image-smoke/jest.smoke.config.cts"
+        },
+        "dependsOn": [
+          "@boardgamesempire/stub-gateway:build"
+        ]
+      }
+    },
+    "tags": [
+      "test",
+      "e2e"
+    ]
+  }
+}

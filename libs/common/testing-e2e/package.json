@@ -21,6 +21,16 @@
       "import": "./src/lib/gateway.ts",
       "default": "./src/lib/gateway.ts"
     },
+    "./poll": {
+      "types": "./src/lib/poll.ts",
+      "import": "./src/lib/poll.ts",
+      "default": "./src/lib/poll.ts"
+    },
+    "./signup": {
+      "types": "./src/lib/signup.ts",
+      "import": "./src/lib/signup.ts",
+      "default": "./src/lib/signup.ts"
+    },
     "./package.json": "./package.json"
   },
   "nx": {

@@ -57,10 +57,15 @@ runs:
     # against a different ABI. Cost of that strictness is one full `npm ci` on
     # the first run after each 24.x bump.
     #
-    # Cross-job: both jobs compute the same key, and `e2e` needs `main`, so a
-    # cold key is installed once in `main`, saved by its post step, and hit by
-    # `e2e`. actions/cache skips its own save on an exact hit, so `e2e` never
-    # races to rewrite the entry.
+    # Cross-job: `main` and `e2e` compute the same key, and `e2e` needs `main`,
+    # so a cold key is installed once in `main`, saved by its post step, and
+    # hit by `e2e`. actions/cache skips its own save on an exact hit, so `e2e`
+    # never races to rewrite the entry. `image-smoke` doesn't wait for `main`,
+    # so on a cold key its amd64 leg installs too, and whichever of the two
+    # saves second is refused, which actions/cache logs as info and moves on
+    # from. One more install when the lockfile changes costs less than holding
+    # every smoke run behind `main`. Its arm64 leg has a key of its own, since
+    # the key carries the architecture.
     - name: Restore node_modules
       id: node-modules
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

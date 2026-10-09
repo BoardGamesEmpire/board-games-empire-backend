@@ -1,0 +1,6 @@
+# Used instead of the root .dockerignore when building ./Dockerfile. That one
+# leaves out every `dist`, and this build copies one in, so this lists what
+# the build reads and leaves out everything else.
+*
+!apps/stub-gateway/dist
+!libs/scripts/src

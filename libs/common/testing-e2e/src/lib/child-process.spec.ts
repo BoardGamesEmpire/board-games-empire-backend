@@ -1,8 +1,16 @@
 import * as fs from 'node:fs';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { launchChild, launchOnFreePort, stopChild, WORKSPACE_ROOT, type ChildLaunch } from './child-process.js';
+import {
+  getFreePort,
+  launchChild,
+  launchOnFreePort,
+  stopChild,
+  WORKSPACE_ROOT,
+  type ChildLaunch,
+} from './child-process.js';
 
 /**
  * `launchChild`'s failure paths, against real `node` children built from the
@@ -149,6 +157,24 @@ describe('launchChild', () => {
 
     expect(outcome.kind).toBe('failed');
     expect(outcome.child.signalCode).toBe('SIGKILL');
+  });
+});
+
+describe('getFreePort', () => {
+  it('hands back a loopback port that a server can then bind', async () => {
+    const port = await getFreePort();
+    const server = net.createServer();
+
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(port, '127.0.0.1', () => resolve());
+    });
+
+    try {
+      expect(server.address()).toMatchObject({ address: '127.0.0.1', port });
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });
 

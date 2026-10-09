@@ -1,0 +1,82 @@
+# The image smoke suite's additions to compose.yaml's split profile (#600).
+# The suite runs both files under a project of its own, and starts the
+# services it lists by name, so a service added here or to compose.yaml
+# starts only once the suite names it (`SMOKE_SERVICES` in
+# src/support/stack.ts).
+#
+# Nothing here needs a credential or the network. Every secret the stack
+# reads is generated for the run, and the suite passes the images to test
+# through the variables compose.yaml already reads (BGE_IMAGE and the gateway
+# images), plus the stub gateway's below.
+
+services:
+  # A game gateway that answers from fixtures and calls nothing upstream
+  # (apps/stub-gateway). Its image is the candidate BGE image with the stub's
+  # bundle added (apps/stub-gateway/Dockerfile), so it runs on the install
+  # under test. The suite registers it with the api, as an owner registers a
+  # real gateway, and searches and imports through it.
+  stub-gateway:
+    image: ${BGE_STUB_GATEWAY_IMAGE:?the suite builds the stub gateway image and names it here}
+    profiles: [split]
+    init: true
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:net').connect(50051, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Booted to check what its bundle loads at runtime, and never searched. It
+  # validates its key's presence, not the key, so any value boots it.
+  boardgamegeek-gateway:
+    environment:
+      BOARDGAMEGEEK_API_KEY: smoke-not-a-key
+
+  # Stands in for Twitch's token endpoint, which the IGDB gateway calls as it
+  # boots. The gateway takes a plain-http token URL only on loopback, since
+  # the request carries its secret, so the gateway joins this container's
+  # network namespace below and reaches it on 127.0.0.1. It runs on the BGE
+  # image because that image has Node.
+  igdb-token:
+    image: ${BGE_IMAGE:?the suite names the BGE image under test here}
+    profiles: [split]
+    init: true
+    command:
+      - node
+      - -e
+      - |
+        require('node:http')
+          .createServer((request, response) => {
+            if (request.method !== 'POST' || new URL(request.url, 'http://igdb-token').pathname !== '/oauth2/token') {
+              response.writeHead(404).end();
+              return;
+            }
+            response.writeHead(200, { 'content-type': 'application/json' });
+            response.end(JSON.stringify({ access_token: 'smoke-access-token', expires_in: 3600, token_type: 'bearer' }));
+          })
+          .listen(8080, '127.0.0.1');
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('node:net').connect(8080, '127.0.0.1').on('connect', () => process.exit(0)).on('error', () => process.exit(1))"
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  igdb-gateway:
+    network_mode: service:igdb-token
+    depends_on:
+      igdb-token:
+        condition: service_healthy
+    environment:
+      IGDB_CLIENT_ID: smoke-client-id
+      IGDB_CLIENT_SECRET: smoke-client-secret
+      IGDB_TOKEN_URL: http://127.0.0.1:8080/oauth2/token

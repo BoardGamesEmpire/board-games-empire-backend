@@ -1,0 +1,57 @@
+{
+  "name": "@boardgamesempire/stub-gateway",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "targets": {
+      "build": {
+        "executor": "nx:run-commands",
+        "// dependsOn": "^generate (#260): a cold build must produce the untracked Prisma client itself (the bundle imports it as a runtime value; i18n types are import-type and erased). Declare PER-PROJECT — a `build` key in nx.json targetDefaults creates a phantom build target on every source-only lib and fails them under @nx/enforce-module-boundaries. `^build` is repeated because a project-level dependsOn replaces a default rather than merging. Full reasoning: issue #260. `buf-export` writes the protos the bundle serves from, which webpack copies from libs/proto/gateway/proto-export: that directory is gitignored, nothing else in this graph writes it, and the copy skips a missing one without a word, leaving a bundle that exits as it boots.",
+        "dependsOn": [
+          "^build",
+          "^generate",
+          "@boardgamesempire/proto-gateway:buf-export"
+        ],
+        "options": {
+          "command": "webpack-cli build",
+          "args": [
+            "--node-env=production"
+          ],
+          "cwd": "apps/stub-gateway"
+        },
+        "configurations": {
+          "development": {
+            "args": [
+              "--node-env=development"
+            ]
+          }
+        }
+      },
+      "serve": {
+        "continuous": true,
+        "executor": "@nx/js:node",
+        "defaultConfiguration": "development",
+        "dependsOn": [
+          "build"
+        ],
+        "options": {
+          "buildTarget": "@boardgamesempire/stub-gateway:build",
+          "runBuildTargetDependencies": false
+        },
+        "configurations": {
+          "development": {
+            "buildTarget": "@boardgamesempire/stub-gateway:build:development"
+          },
+          "production": {
+            "buildTarget": "@boardgamesempire/stub-gateway:build:production"
+          }
+        }
+      }
+    },
+    "tags": [
+      "app",
+      "gateway",
+      "test"
+    ]
+  }
+}
