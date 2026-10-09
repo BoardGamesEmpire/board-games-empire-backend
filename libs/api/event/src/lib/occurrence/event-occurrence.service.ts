@@ -131,10 +131,13 @@ export class EventOccurrenceService {
    * top-level `where`, and is matched to its occurrence here. A caller with no
    * read on votes or games gets `[]` for them.
    *
-   * They are read after the occurrences, outside the page's snapshot and
-   * after a write's statement, since which occurrences to read them for is
-   * the answer to that read or write. A vote cast in between can appear; it
-   * is one on an occurrence the caller was served.
+   * A read route reads them after its occurrences, outside the page's
+   * snapshot, since which occurrences to read them for is that read's answer.
+   * A vote cast in between can appear; it is one on an occurrence the caller
+   * was served. A write reads them before its statement, since the id is in
+   * the path. Read after the commit, a failed read would report a write that
+   * happened as one that didn't, and a retried update would emit its event,
+   * and so write its audit row, a second time.
    *
    * Unbounded, as the embed was: every vote and game on every occurrence
    * given. The page size caps the occurrences, not their votes (#404).
@@ -254,6 +257,10 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
+    // Read before the write, which changes neither, so a failed read leaves
+    // the occurrence as it was.
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
+
     try {
       const updated = await this.db.eventOccurrence.update({
         where: {
@@ -283,8 +290,7 @@ export class EventOccurrenceService {
         ),
       );
 
-      const [detail] = await this.withVotesAndGames([updated]);
-      return detail;
+      return { ...updated, availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -378,6 +384,10 @@ export class EventOccurrenceService {
       );
     }
 
+    // Read before the write, which changes neither, so a failed read leaves
+    // the occurrence as it was.
+    const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
+
     try {
       const updated = await this.db.eventOccurrence.update({
         where: {
@@ -406,8 +416,7 @@ export class EventOccurrenceService {
         ),
       );
 
-      const [detail] = await this.withVotesAndGames([updated]);
-      return detail;
+      return { ...updated, availabilityVotes, games };
     } catch (error) {
       this.logger.error(`Error transitioning occurrence ${occurrenceId} to ${newStatus}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {

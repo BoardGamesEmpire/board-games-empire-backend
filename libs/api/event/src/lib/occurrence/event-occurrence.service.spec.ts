@@ -292,7 +292,8 @@ describe('EventOccurrenceService', () => {
    * the write alone, got every voter. They answer through the same reads as
    * the read routes, under the same ceilings. The create reads for neither: a
    * new occurrence has none, and a read after its commit could only fail a
-   * create that happened.
+   * create that happened. The rest read before they write, so a failed read
+   * leaves nothing written and emits nothing.
    */
   describe('the votes and games on the occurrence writes', () => {
     const writes = [
@@ -378,15 +379,30 @@ describe('EventOccurrenceService', () => {
       expect(answer).toEqual(expect.objectContaining({ id: 'occ-1', availabilityVotes: [], games: [] }));
     });
 
-    it('removeOccurrence reads the votes and games before the delete takes them with it', async () => {
-      db.eventOccurrence.findUnique.mockResolvedValue({ id: 'occ-1' } as EventOccurrence);
+    it.each(answeredThroughReads)('$name reads the votes and games before it writes', async ({ name, op, status }) => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
 
-      await service.removeOccurrence('event-1', 'occ-1');
+      await run(name);
 
-      const [deleted] = db.eventOccurrence.delete.mock.invocationCallOrder;
-      expect(db.eventAvailabilityVote.findMany.mock.invocationCallOrder[0]).toBeLessThan(deleted);
-      expect(db.eventGame.findMany.mock.invocationCallOrder[0]).toBeLessThan(deleted);
+      const [written] = db.eventOccurrence[op].mock.invocationCallOrder;
+      expect(db.eventAvailabilityVote.findMany.mock.invocationCallOrder[0]).toBeLessThan(written);
+      expect(db.eventGame.findMany.mock.invocationCallOrder[0]).toBeLessThan(written);
     });
+
+    it.each(answeredThroughReads)(
+      '$name writes nothing and emits nothing when a read fails',
+      async ({ name, op, status }) => {
+        db.eventOccurrence.findUnique.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+        );
+        db.eventGame.findMany.mockRejectedValue(new Error('connection lost'));
+
+        await expect(run(name)).rejects.toThrow('connection lost');
+
+        expect(db.eventOccurrence[op]).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('addOccurrence', () => {
