@@ -6,7 +6,7 @@ import { type Prisma, Visibility } from '@bge/database';
  * searches, REST and WebSocket, declare it through `ScopeComposer.compose`,
  * so the caller's ceiling clips it (#513).
  *
- * It is the same set for every caller. Before, those reads took the ceiling
+ * It is one rule for every role. Before, those reads took the ceiling
  * as their answer, so staff listed and found every private game on the server
  * through `read:public_content`, and the Owner through `manage:all`. A private
  * game staff can read stays readable by id. It is narrowed out of the lists,
