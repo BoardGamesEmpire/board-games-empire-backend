@@ -25,7 +25,7 @@ npx nx run @boardgamesempire/image-smoke:smoke
 
 The stack runs as the Compose project `bge-image-smoke`, with a database of its own and secrets generated for the run. Apart from the images above, nothing in your shell or your `.env` reaches it: the variables `compose.yaml` reads come from the run's settings alone. It publishes the api on a free loopback port, so it runs beside a stack of your own. Each run starts from an empty database.
 
-To run it twice at once, from two worktrees, say, name another project for one of the runs in `BGE_SMOKE_PROJECT`. The project names everything a run leaves: its containers and volumes, the stub gateway's image, and its files.
+To run it twice at once, from two worktrees, say, name another project for one of the runs in `BGE_SMOKE_PROJECT`: `bge-image-smoke-` and lowercase letters, digits and dashes, such as `bge-image-smoke-2`. The project names everything a run leaves: its containers and volumes, the stub gateway's image, and its files. A run starts by removing its project's containers and volumes, so the suite refuses any other name, such as `bge`, the project `compose.yaml` runs as.
 
 ## When it fails
 

@@ -6,6 +6,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 import { parseLogRecords, type LogRecord } from './logs';
+import { smokeProject } from './project';
 
 const execFileAsync = promisify(execFile);
 
@@ -251,7 +252,7 @@ export class Stack {
     // BGE_SMOKE_PROJECT names another project, to run beside a stack of this
     // name, such as another worktree's run. The project names everything a
     // run leaves: its containers and volumes, the stub's image and its files.
-    const project = process.env['BGE_SMOKE_PROJECT'] || 'bge-image-smoke';
+    const project = smokeProject(process.env['BGE_SMOKE_PROJECT']);
     const runDir = path.join(OUTPUT_DIR, project);
 
     const images = await candidateImages(project);
