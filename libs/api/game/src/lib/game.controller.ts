@@ -25,12 +25,22 @@ export class GameController {
   @ApiOperation({
     summary: 'List games',
     description:
-      'Alphabetical by title. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
-      'envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
+      'The live Public games and the caller’s own, whatever their visibility — the same set for every ' +
+      'caller, and the set the local half of `GET /games/search` searches. Soft-deleted games are excluded. ' +
+      '**Breaking change (#513).** Owner/Admin/Moderator previously also received every private game on the ' +
+      'server, with `pagination.total` counting them. A private game they can read is still readable at ' +
+      '`GET /games/:id`. An **API key** is additionally floored by its own permissions (effective access is ' +
+      'key ∩ owner). Alphabetical by title. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
+      'envelope carrying `total`, `totalPages` and `hasMore`; `total` counts the same set. See #230.',
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedGamesResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no games of its own (plugin, system, external) ' +
+      '— new with #513, and provisional: see #395',
+  })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
   getGames(@Query() paginationQuery: DefaultPaginationQueryDto) {

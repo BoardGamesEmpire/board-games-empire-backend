@@ -20,11 +20,21 @@ export class GameSearchController {
     summary: 'Search games across local DB and external gateways',
     description:
       'REST fallback for the WebSocket search:start flow. ' +
-      'Collects all results from local DB and coordinator unary gRPC into a single response.',
+      'Collects all results from local DB and coordinator unary gRPC into a single response. ' +
+      'The local half matches titles within the set `GET /games` lists: the live Public games and the ' +
+      'caller’s own, the same set for every caller. **Breaking change (#513).** Owner/Admin/Moderator ' +
+      'previously also found every private game on the server; one they can read is still readable at ' +
+      '`GET /games/:id`. An **API key** is additionally floored by its own permissions (effective access is ' +
+      'key ∩ owner).',
   })
   @ApiResponse({ status: 200, type: SearchResponseDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
-  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Insufficient permissions, or, when the local half is asked for, an actor kind with no games of its ' +
+      'own (plugin, system, external) — new with #513, and provisional: see #395',
+  })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Game))
   @Get()
   search(@Query() dto: SearchQueryDto) {
