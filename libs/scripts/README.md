@@ -51,6 +51,19 @@ that mentions `require` without being an external, and a bundle with no
 externals it can read, which it reports instead of passing. The header of
 `src/bundle-externals/check.js` explains why the image needs it (#593).
 
+`src/eslint-rules/no-nested-ceiling.spec.js` tests a rule that lives in the
+root `eslint.config.mjs`, not in this library. Every project's lint target
+already hashes the root config, so keeping the rule there means an edit to it
+re-lints the whole tree. A file here would be an input of no lint target. For
+the same reason, this project's `test` target lists the root config among its
+inputs, in `package.json`. The rule flags a permission ceiling under an
+`include`, a `select` or a nested write's `data`, or in a variable named for
+one, where it fails open (#559). The spec covers each ceiling call it knows,
+each of those keys and names, nesting, and the shapes it leaves alone: a scoped
+read that is itself the value of one of those keys, a `compose()` that isn't
+the scope composer's, a variable named for something else, and the rule's
+known gap, a ceiling that reaches the include through a variable or a call.
+
 `src/bgg` and `src/igdb` are **not** part of this library; those ad-hoc scripts
 still live in the top-level `scripts/` directory and are covered by no target
 (#345).

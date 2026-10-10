@@ -267,9 +267,11 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     EventSpectator: { 'read:event_game_vote': 'binds eventId' },
   },
   EventOccurrence: {
+    User: { 'read:event_occurrence:friends': 'binds user.id' },
     HouseholdOwner: { 'read:event_occurrence:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event_occurrence:household': 'binds householdId' },
     HouseholdMember: { 'read:event_occurrence:household': 'binds householdId' },
+    HouseholdGuest: { 'read:event_occurrence:household': 'binds householdId' },
     EventHost: { 'read:event_occurrence': 'binds eventId' },
     EventCoHost: { 'read:event_occurrence': 'binds eventId' },
     EventOrganizer: { 'read:event_occurrence': 'binds eventId' },
@@ -279,9 +281,11 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     EventSpectator: { 'read:event_occurrence': 'binds eventId' },
   },
   EventPolicy: {
+    User: { 'read:event_policy:friends': 'binds user.id' },
     HouseholdOwner: { 'read:event_policy:household': 'binds householdId' },
     HouseholdAdmin: { 'read:event_policy:household': 'binds householdId' },
     HouseholdMember: { 'read:event_policy:household': 'binds householdId' },
+    HouseholdGuest: { 'read:event_policy:household': 'binds householdId' },
     EventHost: { 'read:event_policy': 'binds eventId' },
     EventCoHost: { 'read:event_policy': 'binds eventId' },
     EventOrganizer: { 'read:event_policy': 'binds eventId' },

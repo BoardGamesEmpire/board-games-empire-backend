@@ -7,7 +7,28 @@
     "tags": [
       "scripts",
       "infra"
-    ]
+    ],
+    "targets": {
+      "test": {
+        "inputs": [
+          "default",
+          "^production",
+          "{workspaceRoot}/jest.preset.js",
+          "{workspaceRoot}/eslint.config.mjs",
+          {
+            "externalDependencies": [
+              "jest",
+              "@nx/jest",
+              "reflect-metadata",
+              "@swc/jest",
+              "eslint",
+              "typescript-eslint",
+              "@nx/eslint-plugin"
+            ]
+          }
+        ]
+      }
+    }
   },
   "dependencies": {}
 }

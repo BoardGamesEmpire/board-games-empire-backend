@@ -8,6 +8,7 @@ import {
   OccurrenceStatus,
   Prisma,
   ResourceType,
+  ScheduledGameRole,
 } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -32,6 +33,24 @@ import {
 } from './events/occurrence.events';
 
 const COND = { id: 'sentinel-condition' };
+
+/** A vote as the vote read selects it, with the occurrence it is matched back to. */
+const vote = (id: string, occurrenceId: string) => ({
+  id,
+  occurrenceId,
+  attendeeId: `att-${id}`,
+  response: AvailabilityResponse.Available,
+  attendee: { userId: `user-${id}` },
+});
+
+/** A game as the game read selects it, with the occurrence it is matched back to. */
+const game = (id: string, occurrenceId: string) => ({
+  id,
+  occurrenceId,
+  platformGameId: `pg-${id}`,
+  role: ScheduledGameRole.Primary,
+  platformGame: { id: `pg-${id}` },
+});
 
 describe('EventOccurrenceService', () => {
   let service: EventOccurrenceService;
@@ -59,6 +78,9 @@ describe('EventOccurrenceService', () => {
     db = ctx.db;
     service = ctx.module.get(EventOccurrenceService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
+
+    db.eventAvailabilityVote.findMany.mockResolvedValue([]);
+    db.eventGame.findMany.mockResolvedValue([]);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -151,6 +173,236 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.findUnique.mockResolvedValue(null);
       await expect(service.getOccurrence('event-1', 'occ-1')).rejects.toThrow(NotFoundException);
     });
+  });
+
+  /**
+   * #560. The occurrence reads embedded each occurrence's votes and games, so
+   * both went to whoever could read the occurrence, a friend of the host or a
+   * household guest included. Each vote names the attendee who cast it and
+   * their user. Each is now a read of its own, with its type's ceiling in that
+   * read's top-level `where`, the only place a deny-all ceiling is enforced
+   * (#559).
+   */
+  describe('the votes and games on the occurrence reads', () => {
+    beforeEach(() => {
+      db.event.count.mockResolvedValue(1);
+      db.eventOccurrence.findMany.mockResolvedValue([
+        makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }),
+        makeEventOccurrence({ id: 'occ-2', eventId: 'event-1' }),
+      ]);
+      db.eventOccurrence.count.mockResolvedValue(2);
+    });
+
+    it('takes the page and the occurrence by id with their policy alone embedded', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+      await service.getOccurrence('event-1', 'occ-1');
+
+      expect(db.eventOccurrence.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: { policy: true } }));
+      expect(db.eventOccurrence.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ include: { policy: true } }),
+      );
+    });
+
+    it("reads the page's votes as their own read, composed with the vote ceiling, in the order they were cast", async () => {
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      const occurrenceId = { in: ['occ-1', 'occ-2'] };
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAvailabilityVote, Action.read, { occurrenceId });
+      expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { occurrenceId, AND: [COND] },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        }),
+      );
+    });
+
+    it("reads the page's games as their own read, composed with the event-game ceiling, in the host's order", async () => {
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      const occurrenceId = { in: ['occ-1', 'occ-2'] };
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventGame, Action.read, { occurrenceId });
+      expect(db.eventGame.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { occurrenceId, AND: [COND] },
+          orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+        }),
+      );
+    });
+
+    it('reads the votes and games of the one occurrence asked for by id', async () => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' }));
+
+      await service.getOccurrence('event-1', 'occ-1');
+
+      const where = { occurrenceId: { in: ['occ-1'] }, AND: [COND] };
+      expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.eventGame.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+    });
+
+    it('serves each vote and game under its occurrence, in the shape the embed had', async () => {
+      db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1'), vote('v2', 'occ-1')] as never);
+      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-2')] as never);
+
+      const { rows } = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(rows.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
+        {
+          id: 'occ-1',
+          availabilityVotes: [
+            {
+              id: 'v1',
+              attendeeId: 'att-v1',
+              response: AvailabilityResponse.Available,
+              attendee: { userId: 'user-v1' },
+            },
+            {
+              id: 'v2',
+              attendeeId: 'att-v2',
+              response: AvailabilityResponse.Available,
+              attendee: { userId: 'user-v2' },
+            },
+          ],
+          games: [],
+        },
+        {
+          id: 'occ-2',
+          availabilityVotes: [],
+          games: [
+            { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
+          ],
+        },
+      ]);
+    });
+
+    it('reads no votes or games for an empty page', async () => {
+      db.eventOccurrence.findMany.mockResolvedValue([]);
+
+      await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
+      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The writes answered with the votes and games embedded, so a caller who can
+   * write an occurrence but not read its votes, an API key or a plugin granted
+   * the write alone, got every voter. They answer through the same reads as
+   * the read routes, under the same ceilings. The create reads for neither: a
+   * new occurrence has none, and a read after its commit could only fail a
+   * create that happened. The rest read before they write, so a failed read
+   * leaves nothing written and emits nothing.
+   */
+  describe('the votes and games on the occurrence writes', () => {
+    const writes = [
+      { name: 'addOccurrence', op: 'create', status: OccurrenceStatus.Proposed },
+      { name: 'updateOccurrence', op: 'update', status: OccurrenceStatus.Proposed },
+      { name: 'confirmOccurrence', op: 'update', status: OccurrenceStatus.Proposed },
+      { name: 'declineOccurrence', op: 'update', status: OccurrenceStatus.Proposed },
+      { name: 'cancelOccurrence', op: 'update', status: OccurrenceStatus.Confirmed },
+      { name: 'removeOccurrence', op: 'delete', status: OccurrenceStatus.Proposed },
+    ] as const;
+
+    const answeredThroughReads = writes.filter(({ name }) => name !== 'addOccurrence');
+
+    const run = (name: (typeof writes)[number]['name']) => {
+      switch (name) {
+        case 'addOccurrence':
+          return service.addOccurrence('event-1', { label: 'Day 1' });
+        case 'updateOccurrence':
+          return service.updateOccurrence('event-1', 'occ-1', { label: 'New' });
+        default:
+          return service[name]('event-1', 'occ-1');
+      }
+    };
+
+    beforeEach(() => {
+      const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        schedulingMode: EventSchedulingMode.MultiDay,
+        householdId: null,
+      } as never);
+      db.eventOccurrence.create.mockResolvedValue(row);
+      db.eventOccurrence.update.mockResolvedValue(row);
+      db.eventOccurrence.delete.mockResolvedValue(row);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1')] as never);
+      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-1')] as never);
+    });
+
+    it.each(writes)('$name embeds the policy alone in its write', async ({ name, op, status }) => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
+
+      await run(name);
+
+      expect(db.eventOccurrence[op]).toHaveBeenCalledWith(expect.objectContaining({ include: { policy: true } }));
+    });
+
+    it.each(answeredThroughReads)(
+      '$name answers with the votes and games read under their own ceilings',
+      async ({ name, status }) => {
+        db.eventOccurrence.findUnique.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+        );
+
+        const answer = await run(name);
+
+        const occurrenceId = { in: ['occ-1'] };
+        expect(compose).toHaveBeenCalledWith(ResourceType.EventAvailabilityVote, Action.read, { occurrenceId });
+        expect(compose).toHaveBeenCalledWith(ResourceType.EventGame, Action.read, { occurrenceId });
+        expect(answer).toEqual(
+          expect.objectContaining({
+            id: 'occ-1',
+            availabilityVotes: [
+              {
+                id: 'v1',
+                attendeeId: 'att-v1',
+                response: AvailabilityResponse.Available,
+                attendee: { userId: 'user-v1' },
+              },
+            ],
+            games: [
+              { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
+            ],
+          }),
+        );
+      },
+    );
+
+    it('addOccurrence answers with no votes or games, and reads for neither', async () => {
+      const answer = await service.addOccurrence('event-1', { label: 'Day 1' });
+
+      expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
+      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+      expect(answer).toEqual(expect.objectContaining({ id: 'occ-1', availabilityVotes: [], games: [] }));
+    });
+
+    it.each(answeredThroughReads)('$name reads the votes and games before it writes', async ({ name, op, status }) => {
+      db.eventOccurrence.findUnique.mockResolvedValue(makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }));
+
+      await run(name);
+
+      const [written] = db.eventOccurrence[op].mock.invocationCallOrder;
+      expect(db.eventAvailabilityVote.findMany.mock.invocationCallOrder[0]).toBeLessThan(written);
+      expect(db.eventGame.findMany.mock.invocationCallOrder[0]).toBeLessThan(written);
+    });
+
+    it.each(answeredThroughReads)(
+      '$name writes nothing and emits nothing when a read fails',
+      async ({ name, op, status }) => {
+        db.eventOccurrence.findUnique.mockResolvedValue(
+          makeEventOccurrence({ id: 'occ-1', eventId: 'event-1', status }),
+        );
+        db.eventGame.findMany.mockRejectedValue(new Error('connection lost'));
+
+        await expect(run(name)).rejects.toThrow('connection lost');
+
+        expect(db.eventOccurrence[op]).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      },
+    );
   });
 
   describe('addOccurrence', () => {

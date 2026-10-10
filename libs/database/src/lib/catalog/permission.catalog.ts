@@ -10,7 +10,7 @@ import { permission } from './permission-entry';
 // and evaluated live against the friendship table at query time. Typed as the
 // `User` where-clause it is spliced into (not `as const`: a readonly tuple is
 // not a `UserWhereInput[]`), so its paths are checked like any entry's — and
-// therefore module-private: that type is mutable, and the four entries below
+// therefore module-private: that type is mutable, and the six entries below
 // hold this one object by reference, so exporting it would hand a consumer a
 // writable alias into shipped conditions the catalog presents as readonly.
 const acceptedFriendOfActingUser = {
@@ -449,6 +449,17 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: "View the occurrences of your household's events",
   }),
+  // A friend who reads the event reads its dates too. Without them the event
+  // has no date. Bound to the event as `read:event:friends` binds it, in the
+  // operator form the matcher needs, and rated as it is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventOccurrence,
+    conditions: { event: { is: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } } } },
+    slug: 'read:event_occurrence:friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the occurrences of a friend's friends-visible events",
+  }),
   permission({
     action: Action.create,
     subject: ResourceType.EventOccurrence,
@@ -833,6 +844,16 @@ export const PERMISSION_CATALOG = [
     slug: 'read:event_policy:household',
     riskLevel: RiskLevel.Low,
     reason: "View the policy configuration of your household's events",
+  }),
+  // The event's own rules, for a friend who reads the event. Bound and rated
+  // as `read:event:friends` is.
+  permission({
+    action: Action.read,
+    subject: ResourceType.EventPolicy,
+    conditions: { event: { is: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } } } },
+    slug: 'read:event_policy:friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View the policy configuration of a friend's friends-visible events",
   }),
   permission({
     action: Action.update,
@@ -1254,12 +1275,12 @@ export const PERMISSION_CATALOG = [
   // because an event is not created with its author alone: `inviteUserIds`
   // writes each invitee onto it as an attendee in the same request. So the
   // reach this write sets covers the invitees' names and avatars in the
-  // attendee embed as well as the creator's, and `read:event:friends`
-  // (`Medium`) opens that to the creator's friends. Two decisions re-rate
-  // it. If invitees hold no role and don't appear until they accept (#546),
-  // the write covers the creator alone and goes back to `Low`. And the rule
-  // that makes public reach live for events (#495) is the point to rate it
-  // again, alongside the updates below (#533).
+  // attendee embed as well as the creator's, and every attendee reads that
+  // embed. The creator's friends read the event but not its attendees
+  // (#560). Two decisions re-rate it. If invitees hold no role and don't
+  // appear until they accept (#546), the write covers the creator alone and
+  // goes back to `Low`. And the rule that makes public reach live for events
+  // (#495) is the point to rate it again, alongside the updates below (#533).
   permission({
     action: Action.create,
     subject: ResourceType.Event,
@@ -1305,13 +1326,14 @@ export const PERMISSION_CATALOG = [
     reason: "View your household's events",
   }),
 
-  // `Medium`, both, on `update:household`'s reasoning. The PATCH takes
-  // `visibility` over an event whose attendees are already on it, so it
-  // decides who outside the event reads it and sees each of them in the
-  // attendee embed (`read:event:friends`, `Medium`). That reach covers other
-  // users' data, not only the actor's. The household variant is the same
-  // write on any of the household's events. The rule that makes public reach
-  // live for events (#495) is the point to re-rate them (#533).
+  // `Medium`, both. The PATCH sets `visibility`, which decides who outside
+  // the event reads it, with its dates and rules (`read:event:friends`,
+  // `Medium`). The rating was given, on `update:household`'s reasoning, when
+  // that reach also showed each attendee, which is other users' data. Since
+  // #560 a friend reads no attendees, so the reach is the event's own; the
+  // rating is unchanged here. The household variant is the same write on any
+  // of the household's events. The rule that makes public reach live for
+  // events (#495) is the point to re-rate them (#533).
   permission({
     action: Action.update,
     subject: ResourceType.Event,
@@ -1464,11 +1486,11 @@ export const PERMISSION_CATALOG = [
   //
   // The pair rates apart, by the decision at #544's reconcile (#533). The
   // add stays `Low`, though the user it adds then appears in the attendee
-  // embed to every reader of the event, `read:event:participant` and
-  // `read:event:friends` among them (see the invite grants above). The
-  // removal is `Medium`: it deletes another user's attendee row, and their
-  // role and game list for the event go with it. The rule that makes public
-  // reach live for events (#495) is the point to rate the add again.
+  // embed to every reader of the event's attendees, the event's other
+  // attendees among them (see the invite grants above). The removal is
+  // `Medium`: it deletes another user's attendee row, and their role and
+  // game list for the event go with it. The rule that makes public reach live
+  // for events (#495) is the point to rate the add again.
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendee,

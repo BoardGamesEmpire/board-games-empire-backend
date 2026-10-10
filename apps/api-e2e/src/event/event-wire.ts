@@ -1,4 +1,13 @@
-import type { Event, EventAttendee, EventGame, EventOccurrence, Game, Platform } from '@bge/database';
+import type {
+  Event,
+  EventAttendee,
+  EventAvailabilityVote,
+  EventGame,
+  EventOccurrence,
+  EventPolicy,
+  Game,
+  Platform,
+} from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -31,8 +40,27 @@ export type OccurrenceGameWire = Pick<EventGameWire, 'id' | 'platformGameId' | '
   };
 };
 
-/** An occurrence as its routes serve it, with its games. */
-export type EventOccurrenceWire = Wire<EventOccurrence> & { readonly games: readonly OccurrenceGameWire[] };
+/** One availability vote on an occurrence, as the occurrence routes embed it, with the voter's user. */
+export type OccurrenceVoteWire = Pick<Wire<EventAvailabilityVote>, 'id' | 'attendeeId' | 'response'> & {
+  readonly attendee: { readonly userId: string | null };
+};
+
+/** An occurrence as its routes serve it, with its votes and games. */
+export type EventOccurrenceWire = Wire<EventOccurrence> & {
+  readonly availabilityVotes: readonly OccurrenceVoteWire[];
+  readonly games: readonly OccurrenceGameWire[];
+};
+
+/**
+ * `GET /api/events/:id`'s event, with its occurrences, attendees and policy.
+ * Each comes from a read under its own type's ceiling (#560), so a caller
+ * without a read on one gets `[]` for it, or `null` for the policy.
+ */
+export type EventDetailWire = EventWire & {
+  readonly occurrences: readonly Wire<EventOccurrence>[];
+  readonly attendees: readonly EventAttendeeWire[];
+  readonly policy: Wire<EventPolicy> | null;
+};
 
 export interface ListOccurrencesEnvelope {
   readonly occurrences: readonly EventOccurrenceWire[];
@@ -98,11 +126,33 @@ export function eventEnvelope(response: HttpResponseLike, request: RequestDescri
   return event ?? fail("it carried no 'event' object with a string id", request, response);
 }
 
+/**
+ * `GET /api/events/:id`: `{ event }`, with the event's `occurrences` and
+ * `attendees` arrays and its `policy`, an object or `null`. A missing key
+ * means the response's shape changed, not that the caller was refused one.
+ */
+export function eventDetailEnvelope(response: HttpResponseLike, request: RequestDescription): EventDetailWire {
+  const event = isRecord(response.body) ? withId<EventDetailWire>(response.body['event']) : undefined;
+  const complete =
+    event !== undefined &&
+    Array.isArray(event.occurrences) &&
+    Array.isArray(event.attendees) &&
+    (event.policy === null || isRecord(event.policy));
+
+  return complete
+    ? event
+    : fail(
+        "it carried no 'event' with a string id, 'occurrences' and 'attendees' arrays, and a 'policy' object or null",
+        request,
+        response,
+      );
+}
+
 /** What a row must be for {@link withId}. */
 const ROW_WITH_ID = 'an object with a string id';
 
 /** What a row must be for {@link occurrenceRow}. */
-const OCCURRENCE_ROW = "an object with a string id and a 'games' array";
+const OCCURRENCE_ROW = "an object with a string id, an 'availabilityVotes' array and a 'games' array";
 
 /**
  * A paginated list's rows under `key`, and its `pagination.total`. The total
@@ -153,14 +203,15 @@ export function listEventsEnvelope(response: HttpResponseLike, request: RequestD
 }
 
 /**
- * An occurrence row: an id, and a `games` array, since the embed is what a
- * renamed include breaks. The games themselves are compared against definite
- * values by the specs.
+ * An occurrence row: an id, and `availabilityVotes` and `games` arrays, since
+ * the embeds are what a renamed include, or a read of its own that stopped
+ * serving its key, breaks. The votes and games themselves are compared
+ * against definite values by the specs.
  */
 function occurrenceRow(value: unknown): EventOccurrenceWire | undefined {
   const row = withId<EventOccurrenceWire>(value);
 
-  return row !== undefined && Array.isArray(row.games) ? row : undefined;
+  return row !== undefined && Array.isArray(row.availabilityVotes) && Array.isArray(row.games) ? row : undefined;
 }
 
 /**

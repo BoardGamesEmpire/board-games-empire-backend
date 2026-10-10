@@ -22,6 +22,8 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { ATTENDEE_ORDER } from '../constants/attendee-order.constant';
+import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import { assertEventExists, requireEvent } from '../event-access.helpers';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
@@ -57,7 +59,7 @@ export class EventAttendeeService {
     return this.db.eventAttendee.findMany({
       where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId }),
       include: ATTENDEE_INCLUDE,
-      orderBy: { createdAt: 'asc' },
+      orderBy: ATTENDEE_ORDER,
     });
   }
 
@@ -470,25 +472,7 @@ export class EventAttendeeService {
 
 // Include object for attendee queries, to ensure consistent user and role data is always fetched
 const ATTENDEE_INCLUDE = {
-  user: {
-    select: {
-      id: true,
-      username: true,
-      profile: {
-        select: {
-          avatarUrl: true,
-          displayName: true,
-        },
-      },
-    },
-  },
-  role: {
-    include: {
-      role: {
-        select: { id: true, name: true },
-      },
-    },
-  },
+  ...ATTENDEE_USER_AND_ROLE_INCLUDE,
   availableGames: {
     include: {
       collection: {

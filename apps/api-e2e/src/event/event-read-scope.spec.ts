@@ -6,15 +6,20 @@ import {
   Visibility,
 } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
+  eventDetailEnvelope,
   eventEnvelope,
+  eventGameEnvelope,
   listEventsEnvelope,
+  listOccurrencesEnvelope,
   occurrenceEnvelope,
   type ListEventsEnvelope,
 } from './event-wire';
@@ -63,6 +68,12 @@ describe('event read scope', () => {
 
   const readSummary = (actor: AuthenticatedActor, eventId: string) =>
     request(baseUrl).get(`${EVENTS_PATH}/${eventId}/occurrences/summary/availability`).set(actor.headers);
+
+  const listOccurrences = (actor: AuthenticatedActor, eventId: string) =>
+    request(baseUrl).get(`${EVENTS_PATH}/${eventId}/occurrences`).set(actor.headers);
+
+  const readOccurrence = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+    request(baseUrl).get(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`).set(actor.headers);
 
   /** Sorted, since the assertions are about which events, not their order. */
   const idsOf = (page: ListEventsEnvelope) => page.events.map((event) => event.id).sort();
@@ -268,6 +279,164 @@ describe('event read scope', () => {
       });
       expect(other.eligibleVoters).toBe(0);
       expect(other.occurrences).toEqual([]);
+    });
+  });
+
+  /**
+   * #560. The event read embedded the event's occurrences, attendees and
+   * policy, and the occurrence reads embedded each occurrence's votes and
+   * games, so each went to whoever could read the parent. A friend of the
+   * host, or a household guest, was served every attendee, with the email
+   * address of each guest who has no account. Each part is now a read of its
+   * own, under its own type's ceiling. A friend and a household guest are
+   * served an event's dates and rules, and nothing that says who attends it.
+   *
+   * Each test reads only after the writes it depends on, since the reads are
+   * response-cached per caller and URL.
+   */
+  describe('the parts of an event each reader is served (#560)', () => {
+    /**
+     * An event with one Proposed occurrence, an account-less guest whose email
+     * is on their attendee row, the host's availability vote, and a game on
+     * the occurrence: one row of every part a reader may or may not get.
+     */
+    async function arrangeEvent(host: AuthenticatedActor, body: Record<string, unknown> = {}) {
+      const eventId = await createdEventId(host, body);
+      const occurrenceId = occurrenceEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+          .set(host.headers)
+          .send({ label: 'Saturday', status: OccurrenceStatus.Proposed })
+          .expect(201),
+        'POST /api/events/:eventId/occurrences as the host',
+      ).id;
+
+      const guestEmail = `e2e-guest-${randomUUID().slice(0, 8)}@example.com`;
+      await addAttendee(host, eventId, { guestName: 'A guest without an account', guestEmail }).expect(201);
+
+      await request(baseUrl)
+        .post(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}/availability`)
+        .set(host.headers)
+        .send({ response: AvailabilityResponse.Available })
+        .expect(201);
+
+      eventGameEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+          .set(host.headers)
+          .send({ ...(await arrangeListEntry(db.client, eventId, host.user.id)), occurrenceId })
+          .expect(201),
+        'POST /api/events/:eventId/nominations/direct-add as the host',
+      );
+
+      return { eventId, occurrenceId, guestEmail };
+    }
+
+    it("serves a friend of the host the event's occurrences and policy, and none of its attendees", async () => {
+      const host = await actors.user();
+      const friend = await actors.user();
+      await befriend(db.client, friend, host);
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { visibility: Visibility.Friends });
+
+      // Control: the host is served every attendee, the guest's email with
+      // them, so the friend's empty list below is the friend's ceiling.
+      const own = eventDetailEnvelope(await readEvent(host, eventId).expect(200), 'GET /api/events/:id as the host');
+      expect(own.attendees).toHaveLength(2);
+      expect(own.attendees.map((attendee) => attendee.guestEmail)).toContain(guestEmail);
+
+      const response = await readEvent(friend, eventId).expect(200);
+      const read = eventDetailEnvelope(response, 'GET /api/events/:id as a friend of the host');
+      expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+      expect(read.policy?.eventId).toBe(eventId);
+      expect(read.attendees).toEqual([]);
+      expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+    });
+
+    it("serves a household guest the household event's occurrences and policy, and none of its attendees", async () => {
+      const owner = await actors.user();
+      const member = await actors.user();
+      const guest = await actors.user();
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [
+          { actor: member, role: SystemRole.HouseholdMember },
+          { actor: guest, role: SystemRole.HouseholdGuest },
+        ],
+      });
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(owner, { householdId: household.id });
+
+      // Control: a member is served the attendees through the household
+      // grant, so the guest's empty list is the guest's ceiling.
+      const asMember = eventDetailEnvelope(
+        await readEvent(member, eventId).expect(200),
+        'GET /api/events/:id as a household member',
+      );
+      expect(asMember.attendees).toHaveLength(2);
+
+      const response = await readEvent(guest, eventId).expect(200);
+      const read = eventDetailEnvelope(response, 'GET /api/events/:id as a household guest');
+      expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+      expect(read.policy?.eventId).toBe(eventId);
+      expect(read.attendees).toEqual([]);
+      expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+      // The occurrence routes, which the guest's new grant opens, serve the
+      // occurrence without its vote or game.
+      const page = listOccurrencesEnvelope(
+        await listOccurrences(guest, eventId).expect(200),
+        'GET /api/events/:eventId/occurrences as a household guest',
+      );
+      expect(page.occurrences.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
+        { id: occurrenceId, availabilityVotes: [], games: [] },
+      ]);
+    });
+
+    it("serves an attendee the event's occurrences, attendees and policy", async () => {
+      const host = await actors.user();
+      const invitee = await actors.user();
+      const { eventId, occurrenceId } = await arrangeEvent(host);
+      await addAttendee(host, eventId, { userId: invitee.user.id }).expect(201);
+
+      const read = eventDetailEnvelope(
+        await readEvent(invitee, eventId).expect(200),
+        'GET /api/events/:id as an invitee',
+      );
+      expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+      expect(read.policy?.eventId).toBe(eventId);
+      expect(read.attendees.map((attendee) => attendee.userId).sort()).toEqual(
+        [host.user.id, invitee.user.id, null].sort(),
+      );
+    });
+
+    it("serves a friend of the host the event's occurrences without their votes or games", async () => {
+      const host = await actors.user();
+      const friend = await actors.user();
+      await befriend(db.client, friend, host);
+      const { eventId, occurrenceId } = await arrangeEvent(host, { visibility: Visibility.Friends });
+
+      // Control: the host is served the vote and the game.
+      const own = listOccurrencesEnvelope(
+        await listOccurrences(host, eventId).expect(200),
+        'GET /api/events/:eventId/occurrences as the host',
+      );
+      expect(
+        own.occurrences.map(({ id, availabilityVotes, games }) => [id, availabilityVotes.length, games.length]),
+      ).toEqual([[occurrenceId, 1, 1]]);
+      expect(own.occurrences[0]?.availabilityVotes[0]?.attendee.userId).toBe(host.user.id);
+
+      const page = listOccurrencesEnvelope(
+        await listOccurrences(friend, eventId).expect(200),
+        'GET /api/events/:eventId/occurrences as a friend of the host',
+      );
+      expect(page.occurrences.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
+        { id: occurrenceId, availabilityVotes: [], games: [] },
+      ]);
+
+      const read = occurrenceEnvelope(
+        await readOccurrence(friend, eventId, occurrenceId).expect(200),
+        'GET /api/events/:eventId/occurrences/:occurrenceId as a friend of the host',
+      );
+      expect(read).toEqual(expect.objectContaining({ id: occurrenceId, availabilityVotes: [], games: [] }));
     });
   });
 });

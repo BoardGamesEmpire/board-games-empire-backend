@@ -13,7 +13,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventOccurrenceController } from './event-occurrence.controller';
-import { EventOccurrenceService } from './event-occurrence.service';
+import { EventOccurrenceService, type OccurrenceDetail } from './event-occurrence.service';
 import { AvailabilitySummary } from './interfaces';
 
 describe('EventOccurrenceController', () => {
@@ -64,7 +64,7 @@ describe('EventOccurrenceController', () => {
 
   describe('getOccurrences', () => {
     it('delegates with the paging and wraps the rows in the envelope', async () => {
-      const occurrences = [stubOcc(), stubOcc()];
+      const occurrences = [stubOccDetail(), stubOccDetail()];
       service.getOccurrences.mockResolvedValue({ rows: occurrences, total: 2 });
 
       const pagination = paginationQuery({ limit: 10 });
@@ -80,7 +80,7 @@ describe('EventOccurrenceController', () => {
     // #372: a nested list is still a list. `total` is what tells a client there
     // are more dates than the page it received.
     it('reports more pages when the event has more occurrences than one page', async () => {
-      service.getOccurrences.mockResolvedValue({ rows: [stubOcc()], total: 12 });
+      service.getOccurrences.mockResolvedValue({ rows: [stubOccDetail()], total: 12 });
 
       const result = await firstValueFrom(controller.getOccurrences('event-1', paginationQuery({ limit: 5 })));
 
@@ -114,7 +114,7 @@ describe('EventOccurrenceController', () => {
 
   describe('getOccurrence', () => {
     it('delegates and wraps in { occurrence }', async () => {
-      const occ = stubOcc({ id: 'occ-42' });
+      const occ = stubOccDetail({ id: 'occ-42' });
       service.getOccurrence.mockResolvedValue(occ);
 
       const result = await firstValueFrom(controller.getOccurrence('event-1', 'occ-42'));
@@ -126,7 +126,7 @@ describe('EventOccurrenceController', () => {
 
   describe('addOccurrence', () => {
     it('delegates and returns { message, occurrence }', async () => {
-      const created = stubOcc({ id: 'occ-new' });
+      const created = stubOccDetail({ id: 'occ-new' });
       service.addOccurrence.mockResolvedValue(created);
 
       const dto = { startDate: new Date() };
@@ -142,7 +142,7 @@ describe('EventOccurrenceController', () => {
 
   describe('updateOccurrence', () => {
     it('delegates and returns updated occurrence', async () => {
-      const updated = stubOcc({ label: 'Updated' });
+      const updated = stubOccDetail({ label: 'Updated' });
       service.updateOccurrence.mockResolvedValue(updated);
 
       const result = await firstValueFrom(controller.updateOccurrence('event-1', 'occ-1', { label: 'Updated' }));
@@ -157,7 +157,7 @@ describe('EventOccurrenceController', () => {
 
   describe('removeOccurrence', () => {
     it('delegates and returns removed occurrence', async () => {
-      const removed = stubOcc({ id: 'occ-del' });
+      const removed = stubOccDetail({ id: 'occ-del' });
       service.removeOccurrence.mockResolvedValue(removed);
 
       const result = await firstValueFrom(controller.removeOccurrence('event-1', 'occ-del'));
@@ -172,7 +172,7 @@ describe('EventOccurrenceController', () => {
 
   describe('confirm', () => {
     it('delegates to confirmOccurrence', async () => {
-      const confirmed = stubOcc({ status: OccurrenceStatus.Confirmed });
+      const confirmed = stubOccDetail({ status: OccurrenceStatus.Confirmed });
       service.confirmOccurrence.mockResolvedValue(confirmed);
 
       const result = await firstValueFrom(controller.confirm('event-1', 'occ-1'));
@@ -187,7 +187,7 @@ describe('EventOccurrenceController', () => {
 
   describe('decline', () => {
     it('delegates to declineOccurrence', async () => {
-      const declined = stubOcc({ status: OccurrenceStatus.Declined });
+      const declined = stubOccDetail({ status: OccurrenceStatus.Declined });
       service.declineOccurrence.mockResolvedValue(declined);
 
       const result = await firstValueFrom(controller.decline('event-1', 'occ-1'));
@@ -202,7 +202,7 @@ describe('EventOccurrenceController', () => {
 
   describe('cancel', () => {
     it('delegates to cancelOccurrence', async () => {
-      const cancelled = stubOcc({ status: OccurrenceStatus.Cancelled });
+      const cancelled = stubOccDetail({ status: OccurrenceStatus.Cancelled });
       service.cancelOccurrence.mockResolvedValue(cancelled);
 
       const result = await firstValueFrom(controller.cancel('event-1', 'occ-1'));
@@ -276,9 +276,12 @@ describe('EventOccurrenceController', () => {
   });
 });
 
-function stubOcc(overrides: Partial<EventOccurrence> = {}): EventOccurrence {
-  return makeEventOccurrence({
-    eventId: 'event-1',
-    ...overrides,
-  });
+/** An occurrence as every occurrence route serves it, with its policy, votes and games. */
+function stubOccDetail(overrides: Partial<EventOccurrence> = {}): OccurrenceDetail {
+  return {
+    ...makeEventOccurrence({ eventId: 'event-1', ...overrides }),
+    policy: null,
+    availabilityVotes: [],
+    games: [],
+  };
 }

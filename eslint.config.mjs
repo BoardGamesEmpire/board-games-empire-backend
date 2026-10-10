@@ -109,6 +109,125 @@ export const unscopedListReadSelectors = [
   },
 ];
 
+// #559: a permission ceiling must sit in its operation's top-level `where`.
+// Anywhere else in the query it fails open. For a caller with no rule on a
+// type, CASL renders the ceiling as `{ OR: [] }`. Prisma 7.8 drops that from
+// the SQL when it sits inside `AND` (prisma/prisma#21856). The CASL extension
+// on `DatabaseService` catches it only in the operation's own `where`. So a
+// ceiling in an `include` or `select` relation filter, or in a nested write's
+// filter under `data`, lets a caller with no rule on that type reach every row
+// the filter was meant to clip. #512's first draft of the availability summary
+// did exactly this. The fix is a query of its own, with the ceiling in its
+// top-level `where`.
+//
+// A named rule, not a `no-restricted-syntax` selector. In flat config a lib's
+// own `no-restricted-syntax` replaces the root's, and most libs set one, so a
+// selector here would reach almost none of them. A rule under its own name is
+// replaced by nothing, so it covers every project from the start.
+//
+// It flags the CALL and searches up from it. The search ends at the nearest
+// call the ceiling is passed into, which is its own query, so a scoped read
+// that is itself the value of a `data` or `select` key (a response payload,
+// say) is left alone. It also ends at a function, whose body is a query of its
+// own. An include held in a variable counts when the variable is named for
+// one: `include`, `ATTENDEE_INCLUDE`, `attendeeSelect`, `updateData`.
+//
+// What it cannot see is a ceiling that reaches the include through a variable
+// or a call: stored first and used by name, passed through a helper such as
+// `and(ceiling, filter)`, or returned by one that builds the include. Nothing
+// short of type information could follow those. `compose` counts only on a
+// receiver named for the scope composer, so a functional `R.compose()` is left
+// alone. The spec is `libs/scripts/src/eslint-rules/`.
+const CEILING_CALLS = new Set(['getCurrentResourceConditions', 'getResourceConditionsForAbilities', 'accessibleBy']);
+const RELATION_KEYS = new Set(['include', 'select', 'data']);
+// `include`, `INCLUDE`, `ATTENDEE_INCLUDE`, `attendeeInclude`; not `metadata`.
+const RELATION_BINDING = /(?:^|_)(?:include|select|data|INCLUDE|SELECT|DATA)$|[a-z\d](?:Include|Select|Data)$/;
+const FUNCTION_NODES = new Set(['ArrowFunctionExpression', 'FunctionDeclaration', 'FunctionExpression']);
+
+/** The name a call's receiver goes by: `scopeComposer` for both `scopeComposer.x()` and `this.scopeComposer.x()`. */
+function receiverName(object) {
+  if (object.type === 'Identifier') return object.name;
+  if (object.type === 'MemberExpression' && !object.computed && object.property.type === 'Identifier') {
+    return object.property.name;
+  }
+  return undefined;
+}
+
+/** The ceiling a call computes, or undefined. */
+function ceilingCallName(callee) {
+  if (callee.type === 'Identifier') {
+    return CEILING_CALLS.has(callee.name) ? callee.name : undefined;
+  }
+  if (callee.type !== 'MemberExpression' || callee.computed || callee.property.type !== 'Identifier') {
+    return undefined;
+  }
+
+  const name = callee.property.name;
+  if (CEILING_CALLS.has(name)) return name;
+  if (name === 'compose' && /composer$/i.test(receiverName(callee.object) ?? '')) return name;
+  return undefined;
+}
+
+function propertyKeyName(property) {
+  if (property.key.type === 'Identifier' && !property.computed) return property.key.name;
+  if (property.key.type === 'Literal' && typeof property.key.value === 'string') return property.key.value;
+  return undefined;
+}
+
+/** The name a value is bound to: `include` in `const include = ...`, or in `args.include = ...`. */
+function bindingName(node) {
+  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier') return node.id.name;
+  if (node.type === 'AssignmentExpression') return receiverName(node.left);
+  return undefined;
+}
+
+/** The relation key or include-named binding that `ancestor` puts the ceiling under, or undefined. */
+function relationKey(ancestor) {
+  if (ancestor.type === 'Property') {
+    const key = propertyKeyName(ancestor);
+    return RELATION_KEYS.has(key) ? key : undefined;
+  }
+
+  const name = bindingName(ancestor);
+  return name && RELATION_BINDING.test(name) ? name : undefined;
+}
+
+const noNestedCeiling = {
+  meta: {
+    type: 'problem',
+    docs: { description: "Keep permission ceilings in their operation's top-level where (#559)." },
+    schema: [],
+    messages: {
+      nestedCeiling:
+        "`{{ name }}` under `{{ key }}`: a ceiling outside its operation's top-level where fails open. Prisma drops its deny-all inside AND (prisma/prisma#21856) and the CASL extension rewrites only the top-level where, so a caller with no rule on that type reaches every row the filter was meant to clip. Give it a query of its own, with the ceiling in that query's top-level where (#559). Not caught: a ceiling that reaches the include through a variable or a call.",
+    },
+  },
+  create(context) {
+    return {
+      CallExpression(node) {
+        const name = ceilingCallName(node.callee);
+        if (!name) return;
+
+        for (let child = node, ancestor = node.parent; ancestor; child = ancestor, ancestor = ancestor.parent) {
+          if (FUNCTION_NODES.has(ancestor.type)) return;
+          if (ancestor.type === 'CallExpression' && ancestor.arguments.includes(child)) return;
+
+          const key = relationKey(ancestor);
+          if (key) {
+            context.report({ node, messageId: 'nestedCeiling', data: { name, key } });
+            return;
+          }
+        }
+      },
+    };
+  },
+};
+
+export const bgePlugin = {
+  meta: { name: 'bge' },
+  rules: { 'no-nested-ceiling': noNestedCeiling },
+};
+
 // #145: CI guardrail against NEW hardcoded user-facing strings in libs already
 // migrated by #144. These `no-restricted-syntax` selectors flag string/template
 // literals passed to a `*Exception(...)` constructor or used as a `message:`
@@ -197,6 +316,13 @@ export default [
     // Override or add rules here
     rules: {
       'no-restricted-imports': ['error', { paths: Object.values(restrictedImportPaths) }],
+    },
+  },
+  {
+    files: ['**/*.ts', '**/*.tsx', '**/*.cts', '**/*.mts', '**/*.js', '**/*.jsx', '**/*.cjs', '**/*.mjs'],
+    plugins: { bge: bgePlugin },
+    rules: {
+      'bge/no-nested-ceiling': 'error',
     },
   },
 ];
