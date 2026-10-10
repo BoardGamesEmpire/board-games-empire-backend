@@ -1,6 +1,7 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DatabaseService, type Prisma, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { gameListScope } from '@bge/game';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { ResultStatus, type SearchGameResult } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -11,6 +12,18 @@ import type { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import type { SearchGamesResponse } from './interfaces';
 
+/**
+ * Marks a `where` as {@link GameSearchService.localSearchScope}'s. Declared and
+ * never present at runtime, like the catalog's `checkedAgainstSubject`: its one
+ * job is that {@link GameSearchService.queryLocalGames} cannot be handed a
+ * `where` built anywhere else. Neither the lint rule nor the list guard sees
+ * that call, and `{}` would read every game, private and deleted alike (#472).
+ */
+declare const composedForLocalSearch: unique symbol;
+
+/** The `where` a local title search reads within. Only {@link GameSearchService.localSearchScope} makes one. */
+export type LocalSearchScope = Prisma.GameWhereInput & { readonly [composedForLocalSearch]: true };
+
 @Injectable()
 export class GameSearchService {
   private readonly logger = new Logger(GameSearchService.name);
@@ -19,17 +32,15 @@ export class GameSearchService {
     private readonly db: DatabaseService,
     private readonly coordinator: GatewayCoordinatorClientService,
     private readonly ability: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   search(dto: SearchQueryDto): Observable<SearchResponseDto> {
     const correlationId = crypto.randomUUID();
 
-    // Built here, outside the local half's catchError: a failure to build them
+    // Built here, outside the local half's catchError: a failure to build it
     // is an authorization failure and must not come back as "no games found".
-    const local$ =
-      dto.includeLocal !== false
-        ? this.searchLocal(dto, this.ability.getCurrentResourceConditions(ResourceType.Game, Action.read))
-        : of([]);
+    const local$ = dto.includeLocal !== false ? this.searchLocal(dto, this.localSearchScope()) : of([]);
     const external$ = dto.includeExternal !== false ? this.searchExternal(correlationId, dto) : of(null);
 
     return forkJoin({ local: local$, external: external$ }).pipe(
@@ -37,8 +48,28 @@ export class GameSearchService {
     );
   }
 
-  private searchLocal(dto: SearchQueryDto, readConditions: Prisma.GameWhereInput[]): Observable<WsGameSearchResult[]> {
-    return from(this.queryLocalGames(dto.query, readConditions, dto.pageSize, dto.offset)).pipe(
+  /**
+   * The `where` a local title search reads within: {@link gameListScope}, the
+   * live Public games and the caller's own, clipped by the caller's ceiling.
+   * It is the set `GET /games` lists (#513).
+   *
+   * Synchronous, and each transport calls it before its search begins, for
+   * the same reason: a refusal here is an authorization failure. Built inside
+   * the search, it would come back as "no games found" over REST, and as a
+   * failed local search over WebSocket.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * half the scope is the caller's own games, which has no meaning without a
+   * user. PROVISIONAL — #395.
+   */
+  localSearchScope(): LocalSearchScope {
+    const userId = resolveScopeSubjectId(this.ability);
+
+    return this.scopeComposer.compose(ResourceType.Game, Action.read, gameListScope(userId)) as LocalSearchScope;
+  }
+
+  private searchLocal(dto: SearchQueryDto, scope: LocalSearchScope): Observable<WsGameSearchResult[]> {
+    return from(this.queryLocalGames(dto.query, scope, dto.pageSize, dto.offset)).pipe(
       catchError((err) => {
         this.logger.error('Local search failed', err);
         return of([]);
@@ -53,10 +84,11 @@ export class GameSearchService {
    * Rejects on DB error; callers decide how to surface it (REST swallows to `[]`,
    * WS emits a SearchError frame).
    *
-   * `readConditions` is the caller's Game read clause, and it is required
-   * rather than defaulted because the two callers get it differently: REST from
-   * the request's primed ability context, WS by resolving the socket's actor.
-   * Without it a title search reads every private game (#472).
+   * `scope` is the caller's {@link localSearchScope}, and it is required
+   * rather than built here so that a refusal to build it never reaches the
+   * callers' failure handling. Its type admits nothing else
+   * ({@link LocalSearchScope}): without it a title search reads every private
+   * game (#472).
    *
    * `limit` and `offset` are required too: each caller passes its DTO's
    * resolved `pageSize` and `offset`, so the default page size is the DTO's,
@@ -64,18 +96,14 @@ export class GameSearchService {
    */
   async queryLocalGames(
     query: string,
-    readConditions: Prisma.GameWhereInput[],
+    scope: LocalSearchScope,
     limit: number,
     offset: number,
   ): Promise<WsGameSearchResult[]> {
     this.logger.debug(`Performing local search for query="${query}" with limit=${limit} and offset=${offset}`);
 
     const games = await this.db.game.findMany({
-      where: {
-        deletedAt: null,
-        title: { contains: query, mode: 'insensitive' },
-        AND: readConditions,
-      },
+      where: { AND: [scope, { title: { contains: query, mode: 'insensitive' } }] },
 
       take: limit,
       skip: offset,

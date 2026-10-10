@@ -11,8 +11,10 @@ import { gameEnvelope, listGamesEnvelope, localSearchGameIds } from './game-wire
  * Who may read and change a game (#472, #491), against real rows.
  *
  * A game carries a visibility its creator chooses. A Public game is everyone's
- * to read; a Private one is its creator's, plus staff through
- * `read:public_content`. Before #472 `read:game` carried no condition, so every
+ * to read; a Private one is its creator's, plus staff by id through
+ * `read:public_content` and the Owner through `manage:all`. The list and the
+ * search show every caller the same set, the Public games and their own
+ * (#513). Before #472 `read:game` carried no condition, so every
  * signed-in user read every private game; before #491 the create and update
  * DTOs declared the field under the wrong name, so no private game could be
  * made through the API at all.
@@ -96,15 +98,41 @@ describe('game authorization', () => {
       await readGame(other, privateGame.id).expect(403);
     });
 
-    it('serves a private game to staff through read:public_content', async () => {
-      const creator = await actors.user();
-      const admin = await actors.admin();
+    it('lists staff no stranger’s private game, while each still reads it by id', async () => {
+      const [serverOwner, admin, moderator, creator, plainUser] = await Promise.all([
+        actors.owner(),
+        actors.admin(),
+        actors.moderator(),
+        actors.user(),
+        actors.user(),
+      ]);
 
       const privateGame = await arrangeGame(creator.user.id, Visibility.Private);
+      const publicGame = await arrangeGame(creator.user.id, Visibility.Public);
 
-      expect(await listedIds(admin, 'an admin')).toEqual([privateGame.id]);
-      const read = await readGame(admin, privateGame.id).expect(200);
-      expect(gameEnvelope(read, 'GET /api/games/:id as an admin').game.id).toBe(privateGame.id);
+      const staff = [
+        ['an admin', admin],
+        ['a moderator', moderator],
+        ["the server's Owner", serverOwner],
+      ] as const;
+
+      // The control. Admin and Moderator read the stranger's private game
+      // through `read:public_content`, and the Owner through `manage:all`. A
+      // plain user is refused the same game, so the reads come from the staff
+      // grants and not from the game being open to everyone.
+      for (const [who, actor] of staff) {
+        const read = await readGame(actor, privateGame.id).expect(200);
+        expect(gameEnvelope(read, `GET /api/games/:id as ${who}`).game.id).toBe(privateGame.id);
+      }
+      await readGame(plainUser, privateGame.id).expect(403);
+
+      // The list is the Public games and the caller's own, whoever asks
+      // (#513). Before, it was everything the caller could read by id.
+      for (const [who, actor] of staff) {
+        const page = listGamesEnvelope(await listGames(actor).expect(200), `GET /api/games as ${who}`);
+        expect(page.games.map((game) => game.id)).toEqual([publicGame.id]);
+        expect(page.total).toBe(1);
+      }
     });
 
     it('refuses an anonymous guest both routes, Public games included', async () => {
@@ -258,6 +286,22 @@ describe('game authorization', () => {
 
       // The control is the Public hit: the search ran and matched for this user.
       expect(await searchedIds(other, token, 'another user')).toEqual([publicGame.id]);
+    });
+
+    it('finds an admin a stranger’s Public game and not their private one', async () => {
+      const creator = await actors.user();
+      const admin = await actors.admin();
+
+      const token = randomUUID().slice(0, 8);
+      const privateGame = await arrangeGame(creator.user.id, Visibility.Private, `Search ${token} private`);
+      const publicGame = await arrangeGame(creator.user.id, Visibility.Public, `Search ${token} public`);
+
+      // The admin reads the private game by id, so the search leaving it out
+      // is the search's scope (#513), not a missing grant.
+      await readGame(admin, privateGame.id).expect(200);
+
+      // The control is the Public hit: the search ran and matched for the admin.
+      expect(await searchedIds(admin, token, 'an admin')).toEqual([publicGame.id]);
     });
   });
 });

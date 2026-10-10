@@ -1,5 +1,7 @@
-import type { PaginationQueryDto } from '@bge/shared';
+import { ResourceType } from '@bge/database';
+import { ListScopeNotComposedError, type PaginationQueryDto } from '@bge/shared';
 import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import type { CreateGameDto, UpdateGameDto } from './dto';
 import { GameController } from './game.controller';
@@ -51,6 +53,21 @@ describe('GameController', () => {
       games: [{ id: 'game-1' }],
       pagination: { page: 2, limit: 10, total: 31, totalPages: 4, hasMore: true },
     });
+  });
+
+  // The service composes the `Game` scope; the envelope is where the guard
+  // checks for it. Built inside a request with nothing composed, this envelope
+  // must fail. An `Unscoped` envelope, or a type still in
+  // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+  // The name is asserted too: an envelope naming another swept type would also
+  // fail, for the wrong reason.
+  it('builds its envelope under the Game scope guard', async () => {
+    const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+      firstValueFrom(controller.getGames(PAGINATION)),
+    );
+
+    await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+    await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Game}'`);
   });
 
   it('getGame forwards only the id', async () => {
