@@ -206,8 +206,8 @@ function namedCommit(published) {
 
 /**
  * Why an index can't be published as this commit's, or [] when it can. It must
- * list exactly the digests the smoke tested, each under its own platform and
- * naming this commit, and nothing else: a provenance attestation, for one,
+ * list exactly the digests the smoke tested, each once, under its own platform
+ * and naming this commit, and nothing else: a provenance attestation, for one,
  * would ride in the index as an `unknown/unknown` entry.
  *
  * @param {{
@@ -239,7 +239,9 @@ function publishProblems({ commit, manifest, tested, labels }) {
     }
   }
   for (const platform of Object.keys(tested)) {
-    if (!listed.some((image) => image.platform === platform)) problems.push(`it lists no ${platform} image`);
+    const entries = listed.filter((image) => image.platform === platform).length;
+    if (entries === 0) problems.push(`it lists no ${platform} image`);
+    if (entries > 1) problems.push(`it lists ${entries} entries for ${platform}, not one`);
   }
 
   return problems;

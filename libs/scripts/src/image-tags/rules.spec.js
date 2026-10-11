@@ -374,6 +374,15 @@ describe('publishProblems', () => {
 
     expect(publishProblems({ commit: COMMIT, manifest, tested, labels: testedLabels })).toEqual([
       `it lists ${UNTESTED} for linux/arm64, where the smoke tested ${ARM64}`,
+      'it lists 2 entries for linux/arm64, not one',
+    ]);
+  });
+
+  it('names a tested platform the index lists twice, even when both entries are the tested image', () => {
+    const manifest = index(['linux/amd64', AMD64], ['linux/arm64', ARM64], ['linux/arm64', ARM64]);
+
+    expect(publishProblems({ commit: COMMIT, manifest, tested, labels: testedLabels })).toEqual([
+      'it lists 2 entries for linux/arm64, not one',
     ]);
   });
 });
