@@ -38,6 +38,9 @@ concurrency:
 # every other run is unchanged.
 env:
   NX_NO_CLOUD: ${{ github.event_name == 'pull_request' && (startsWith(github.head_ref, 'renovate/') || github.event.pull_request.user.login == 'renovate[bot]') }}
+  # Where the images publish (#600): `bge`, `bge-boardgamegeek-gateway` and
+  # `bge-igdb-gateway` under it, Compose's local names for the three images.
+  IMAGE_NAMESPACE: ghcr.io/boardgamesempire
 
 jobs:
   main:
@@ -270,16 +273,165 @@ jobs:
           BGE_E2E_VERBOSE: 'true'
         run: npx nx affected -t e2e --parallel=1
 
-  # The image smoke suite (#600). It builds the BGE image and both gateway
-  # images, then runs them as the split profile and drives them from outside:
-  # a first boot on an empty database, an account, a search and an import
-  # through a stub gateway, the bundled web client in Chromium, and a clean
-  # shutdown (apps/image-smoke). No other test runs the images, and none
-  # boots the worker, gateway-fetch and coordinator roles.
+  # Builds the three images on master and pushes each by digest, untagged, for
+  # the image smoke suite to test and publish to tag (#600). Nothing points at
+  # them until publish does, so a run that fails after this step leaves every
+  # tag where it was. A pull request's image smoke job builds its own instead.
   #
-  # Each platform builds and runs on a runner of its own, natively: the
-  # arm64 image migrates with its own Prisma engine, which no amd64 run
-  # loads. Nothing is pushed, and the job writes nothing outside the runner.
+  # This job and publish hold a token that writes the packages, so they run
+  # only this commit's own scripts, Docker's pinned actions and the BuildKit
+  # image pinned below: no install, and a checkout that leaves no token on
+  # disk. No build cache either, so the pushed bytes build clean, as the
+  # pull-request build's do.
+  #
+  # A repeat of a run finds this commit's `sha-<short>` from an earlier attempt
+  # and hands on that image's digest instead of building another, image by
+  # image: a `sha-<short>` never moves (libs/scripts/src/image-tags).
+  build-push:
+    name: build and push (${{ matrix.arch }})
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    # One output per platform, so the two legs' outputs combine: the digest of
+    # each package's image, as JSON keyed by package. The image smoke jobs
+    # pull and test them, and publish tags them.
+    outputs:
+      amd64: ${{ steps.digests.outputs.amd64 }}
+      arm64: ${{ steps.digests.outputs.arm64 }}
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # The labels the pull-request build passes: the commit, the version the
+      # build stamps, and the commit's date, in UTC.
+      - name: Read the labels
+        id: labels
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          created="$(TZ=UTC0 git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd HEAD)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "created=$created" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Look for this commit's images from an earlier attempt
+        id: published
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: >-
+          node libs/scripts/src/bin/find-published-images.js --platform "linux/$ARCH"
+          "$IMAGE_NAMESPACE/bge" "$IMAGE_NAMESPACE/bge-boardgamegeek-gateway" "$IMAGE_NAMESPACE/bge-igdb-gateway"
+
+      # The builder runs BuildKit's own image, which holds this job's token
+      # while it pushes. Left to the action, it would be Docker Hub's moving
+      # `buildx-stable-1` tag, so it is pinned by digest, as the actions are.
+      # Renovate moves it as it moves them: a release waits five days, and a
+      # moved tag is flagged (.github/renovate.json).
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
+      # Each image is one plain manifest. Provenance and SBOM attestations stay
+      # off: they would ride in the published index beside the tested images.
+      - name: Push the BGE image by digest
+        id: bge
+        if: steps.published.outputs.bge == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: bge
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/bge,push-by-digest=true,push=true
+          build-args: |
+            REVISION=${{ github.sha }}
+            VERSION=${{ steps.labels.outputs.version }}
+            CREATED=${{ steps.labels.outputs.created }}
+
+      - name: Push the BoardGameGeek gateway image by digest
+        id: boardgamegeek-gateway
+        if: steps.published.outputs.bge-boardgamegeek-gateway == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: boardgamegeek-gateway
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/bge-boardgamegeek-gateway,push-by-digest=true,push=true
+          build-args: |
+            REVISION=${{ github.sha }}
+            VERSION=${{ steps.labels.outputs.version }}
+            CREATED=${{ steps.labels.outputs.created }}
+
+      - name: Push the IGDB gateway image by digest
+        id: igdb-gateway
+        if: steps.published.outputs.bge-igdb-gateway == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: igdb-gateway
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          sbom: false
+          outputs: type=image,name=${{ env.IMAGE_NAMESPACE }}/bge-igdb-gateway,push-by-digest=true,push=true
+          build-args: |
+            REVISION=${{ github.sha }}
+            VERSION=${{ steps.labels.outputs.version }}
+            CREATED=${{ steps.labels.outputs.created }}
+
+      - name: Hand on the digests
+        id: digests
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          BGE: ${{ steps.published.outputs.bge || steps.bge.outputs.digest }}
+          BOARDGAMEGEEK_GATEWAY: ${{ steps.published.outputs.bge-boardgamegeek-gateway || steps.boardgamegeek-gateway.outputs.digest }}
+          IGDB_GATEWAY: ${{ steps.published.outputs.bge-igdb-gateway || steps.igdb-gateway.outputs.digest }}
+        run: |
+          set -euo pipefail
+          digests="$(jq -cn --arg bge "$BGE" --arg bgg "$BOARDGAMEGEEK_GATEWAY" --arg igdb "$IGDB_GATEWAY" \
+            '{"bge": $bge, "bge-boardgamegeek-gateway": $bgg, "bge-igdb-gateway": $igdb}')"
+          if ! jq -e 'all(.[]; test("^sha256:[0-9a-f]{64}$"))' <<<"$digests" > /dev/null; then
+            echo "::error::Not every image has a digest: $digests"
+            exit 1
+          fi
+          echo "linux/$ARCH: $digests"
+          echo "$ARCH=$digests" >> "$GITHUB_OUTPUT"
+
+  # The image smoke suite (#600). It runs the BGE image and both gateway
+  # images as the split profile and drives them from outside: a first boot on
+  # an empty database, an account, a search and an import through a stub
+  # gateway, the bundled web client in Chromium, and a clean shutdown
+  # (apps/image-smoke). No other test runs the images, and none boots the
+  # worker, gateway-fetch and coordinator roles.
+  #
+  # Each platform runs on a runner of its own, natively: the arm64 image
+  # migrates with its own Prisma engine, which no amd64 run loads. On a pull
+  # request the job builds the images itself, and writes nothing outside the
+  # runner. On master it tests the digests build-push pushed, pulled back from
+  # the registry, and publish tags those digests only once both platforms'
+  # runs have passed: what publishes is what passed.
   #
   # Not gated on `main`: the images build from the Dockerfile, not from Nx's
   # cache, so nothing here waits on main's builds. And not `affected`: every
@@ -287,6 +439,12 @@ jobs:
   # the Dockerfile.
   image-smoke:
     name: image smoke (${{ matrix.arch }})
+    needs: build-push
+    # build-push runs only on master. A pull request's run skips it, and this
+    # job runs anyway. A master run's needs it to have pushed the images on
+    # both platforms: if either leg fails, neither platform's smoke runs, since
+    # neither could publish without the other.
+    if: ${{ !cancelled() && (needs.build-push.result == 'success' || (github.event_name == 'pull_request' && needs.build-push.result == 'skipped')) }}
     strategy:
       fail-fast: false
       matrix:
@@ -297,6 +455,11 @@ jobs:
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+      # Reads the images build-push pushed, while the packages are private.
+      packages: read
     env:
       # The suite runs the images these name. compose.yaml reads the same
       # variables.
@@ -312,12 +475,41 @@ jobs:
           # Nothing after the checkout needs the token.
           persist-credentials: false
 
+      # On master, the images under test are the digests build-push pushed,
+      # named as the suite expects. The login comes off again before the
+      # install, so no token sits on disk while npm and the suite run.
+      - name: Pull the images build-push pushed
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          ARCH: ${{ matrix.arch }}
+          DIGESTS: ${{ needs.build-push.outputs[matrix.arch] }}
+          REGISTRY_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io' EXIT
+          docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$REGISTRY_TOKEN"
+          pull() {
+            local image digest
+            image="$IMAGE_NAMESPACE/$1"
+            digest="$(jq -er --arg package "$1" '.[$package]' <<<"$DIGESTS")"
+            docker pull --platform "linux/$ARCH" "$image@$digest"
+            docker tag "$image@$digest" "$2"
+            echo "$2 is $image@$digest"
+          }
+          pull bge "$BGE_IMAGE"
+          pull bge-boardgamegeek-gateway "$BGE_BOARDGAMEGEEK_GATEWAY_IMAGE"
+          pull bge-igdb-gateway "$BGE_IGDB_GATEWAY_IMAGE"
+          docker image inspect --format 'web client: {{index .Config.Labels "io.github.boardgamesempire.web.image"}}' "$BGE_IMAGE"
+
       - uses: ./.github/actions/setup-workspace
 
-      # Built by the runner's own Docker, so each image lands where Compose
-      # finds it. The labels are those a published image carries: the
-      # commit, the version the build stamps, and the commit's date, in UTC.
+      # On a pull request, built by the runner's own Docker, so each image
+      # lands where Compose finds it. The labels are those a published image
+      # carries: the commit, the version the build stamps, and the commit's
+      # date, in UTC.
       - name: Build the images
+        if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
@@ -349,3 +541,59 @@ jobs:
       - name: Print the stack's logs
         if: failure() && hashFiles('apps/image-smoke/test-output/*/logs/*.log') != ''
         run: tail -n +1 apps/image-smoke/test-output/*/logs/*.log
+
+  # Tags what the image smoke suite tested (#600). For each package it writes
+  # `sha-<short>`, an index of the digests the suite tested on each platform,
+  # and moves `edge` there if it should. It needs every gate, so a tag only
+  # ever names a commit that passed them all. `needs:` lists the gates by
+  # hand: a new gate job has to be added there, or it won't hold publishing
+  # back.
+  #
+  # `sha-<short>` names one commit and never moves. `edge` moves only forward
+  # along master, decided by the commit the BGE image's `edge` names, for all
+  # three packages. The script checks each `sha-<short>` before it writes
+  # one, and explains each rule (libs/scripts/src/image-tags). The job's log
+  # records each tag as it is written, and its summary what was published and
+  # the tested digests each index lists.
+  #
+  # GHCR creates a package private. An org owner makes the three public after
+  # their first publish, which can't be undone.
+  publish:
+    name: publish images
+    needs: [main, e2e, build-push, image-smoke]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    # One publish at a time, across every master run. The script reads the
+    # tags, then writes them, which is safe only while no other run can write
+    # in between. `queue: max` keeps up to 100 waiting runs: by default a
+    # group keeps one, and the next cancels it, which would leave that commit
+    # without the `sha-<short>` a release promotes (#601).
+    concurrency:
+      group: bge-images
+      queue: max
+    # Without it, a stuck run would hold the queue for six hours.
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # TESTED is build-push's digests: each image smoke job pulled exactly
+      # its platform's, and this job runs only once both have passed.
+      - name: Tag the tested images, and move edge if it should
+        env:
+          TESTED: ${{ toJSON(needs.build-push.outputs) }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          node libs/scripts/src/bin/publish-images.js --platform linux/amd64 --platform linux/arm64
+          "$IMAGE_NAMESPACE/bge" "$IMAGE_NAMESPACE/bge-boardgamegeek-gateway" "$IMAGE_NAMESPACE/bge-igdb-gateway"

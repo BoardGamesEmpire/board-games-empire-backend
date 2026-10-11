@@ -19,7 +19,7 @@ Each image:
 - is `node:24-alpine`, pinned by digest, the Node major CI runs. Renovate moves the digest (#599).
 - runs as the `node` user (uid and gid 1000), with `NODE_ENV=production` on every channel: an `edge` image is a release channel, not a development build.
 - keeps the workspace's layout under `/app`: one production install of every workspace's dependencies, and each bundle at `apps/<app>/dist/main.js`. A bundle runs exactly as it does from a checkout. The three images share that install, so the gateway images are about as large as the BGE image, but pulling all three downloads it once.
-- carries the OCI labels `org.opencontainers.image.source`, `.revision`, `.version` and `.created`, from the build arguments `REVISION`, `VERSION` and `CREATED`. They are empty unless passed. Publishing and tags are #600.
+- carries the OCI labels `org.opencontainers.image.source`, `.revision`, `.version` and `.created`, from the build arguments `REVISION`, `VERSION` and `CREATED`. They are empty unless passed; CI passes all three (see [Published images](#published-images)).
 
 Building needs network access:
 
@@ -28,7 +28,7 @@ Building needs network access:
 - to `buf.build` for the gateway protos' dependencies;
 - to `ghcr.io` for the web client's image, which is public.
 
-The bundles load their npm dependencies at runtime instead of inlining them, so a package the code imports but `package.json` lists under `devDependencies` would be missing from the image. The build checks for that: every package a bundle requires directly must resolve from the production install, or the build fails naming the bundle and the package (`libs/scripts/src/bundle-externals`). What those packages load in turn, and what the code loads by name at runtime, only a boot from the image shows (#600).
+The bundles load their npm dependencies at runtime instead of inlining them, so a package the code imports but `package.json` lists under `devDependencies` would be missing from the image. The build checks for that: every package a bundle requires directly must resolve from the production install, or the build fails naming the bundle and the package (`libs/scripts/src/bundle-externals`). What those packages load in turn, and what the code loads by name at runtime, only a boot from the image shows: CI's image smoke suite boots every role from the images, on every pull request and before every publish (#600).
 
 ## The web client
 
@@ -46,6 +46,25 @@ The api serves the client from its own origin. A browser pointed at the api's UR
   - no `upgrade-insecure-requests`, so a deployment on plain HTTP works.
 
 When `apps/api/dist/web` has no `index.html`, the api serves only the API. It logs which case it is at boot. Working on the client locally needs no bundled client: the client repository's dev proxy gives the browser one origin (`docs/dev/web-proxy.md` there).
+
+## Published images
+
+CI publishes the three images to GitHub's container registry from each commit on `master` that passes every check (#600):
+
+| Image                 | Package                                              |
+| --------------------- | ---------------------------------------------------- |
+| BGE                   | `ghcr.io/boardgamesempire/bge`                       |
+| BoardGameGeek gateway | `ghcr.io/boardgamesempire/bge-boardgamegeek-gateway` |
+| IGDB gateway          | `ghcr.io/boardgamesempire/bge-igdb-gateway`          |
+
+- **Tags:**
+  - `edge` follows `master`: each publish moves it forward to its commit, and never back. The three packages' `edge` move in the same run, the BGE image's first. A run that fails partway leaves the rest where they were until it is re-run or a newer commit publishes, so for images that were tested together, pull one `sha-<short>`.
+  - `sha-<short>`, the first seven characters of a commit, names that commit's images and never moves.
+  - Version tags come with releases (#601).
+- **Platforms:** each tag holds a `linux/amd64` and a `linux/arm64` image, and a pull takes the host's. Each was tested on a runner of its own platform, and a tag lists exactly the images that passed.
+- **Labels:** `org.opencontainers.image.revision` names the commit, `.version` the version the build stamps, and `.created` the commit's date.
+
+GHCR creates a package private. Once an org owner has made these public, after their first publish, pulling them needs no credentials.
 
 ## Roles
 
@@ -109,7 +128,7 @@ docker compose --profile split up --build
 - **The roles start together.** The api migrates and seeds an empty database while the others log that they are waiting, then they boot ([BOOTSTRAP.md](BOOTSTRAP.md)).
 - **The api** is on `http://localhost:33333`, and so is the web client: open that address in a browser. It is published on the host's loopback interface only: the first account to sign up becomes the owner, so a new deployment starts out unreachable from other machines. Once the owner has signed up, `BGE_BIND_ADDRESS` opens it, as `0.0.0.0` for every IPv4 interface or one interface's address. `BGE_PORT` changes the port. `BGE_PUBLIC_URL` sets the URL the api trusts for sign-in and the base of the media links it signs, which defaults to the one above; set it, without a trailing slash, whenever clients reach the api at another URL, including after changing `BGE_PORT`.
 - **Postgres and Redis** keep their data in the `postgres` and `redis` volumes, which `docker compose down` leaves in place and `down --volumes` deletes. Redis holds the job queues and the sign-in sessions, so it logs each write and flushes the log every second (append-only persistence), as BullMQ advises.
-- **Published images** replace the local builds through `BGE_IMAGE`, `BGE_BOARDGAMEGEEK_GATEWAY_IMAGE` and `BGE_IGDB_GATEWAY_IMAGE`.
+- **Published images** replace the local builds through `BGE_IMAGE`, `BGE_BOARDGAMEGEEK_GATEWAY_IMAGE` and `BGE_IGDB_GATEWAY_IMAGE`, such as `ghcr.io/boardgamesempire/bge:edge` (see [Published images](#published-images)). Fetch them with `docker compose --profile split pull`, then start them with `up` and no `--build`, which would build the checkout under their names instead.
 
 Search goes through the coordinator to the gateways registered with the api, and a new deployment has none: it adds the data sources it wants (#194). The first account to sign up becomes the owner. Sign up, then register each gateway once as that account:
 

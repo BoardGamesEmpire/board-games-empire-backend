@@ -2,11 +2,22 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Keeps the Dockerfile's images and the workflows' action pins current (#599). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
-    "Only the dockerfile and github-actions managers are enabled. npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
+    "Only the dockerfile and github-actions managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
     "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud."
   ],
   "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver"],
-  "enabledManagers": ["dockerfile", "github-actions"],
+  "enabledManagers": ["dockerfile", "github-actions", "custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The BuildKit image ci.yml's build-push job builds with. It holds the token that writes the images' packages, so it is pinned by digest, as the actions are, and no built-in manager reads it from setup-buildx-action's driver-opts.",
+      "managerFilePatterns": ["/^\\.github/workflows/ci\\.yml$/"],
+      "matchStrings": [
+        "image=(?<depName>moby/buildkit):(?<currentValue>v\\d+\\.\\d+\\.\\d+)@(?<currentDigest>sha256:[0-9a-f]{64})"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ],
   "branchPrefix": "renovate/",
   "semanticCommits": "enabled",
   "packageRules": [
@@ -54,6 +65,22 @@
       "minimumReleaseAge": null,
       "prBodyNotes": [
         "Before merging, update the Node major named in prose: the comment on the `node` stage in `Dockerfile`, the base-image line in `docs/DEPLOYMENT.md`, and the cache-key note in `.github/actions/setup-workspace/action.yml`."
+      ]
+    },
+    {
+      "description": "BuildKit, like an action, changes only CI, and it holds the token that writes the packages, so a release waits five days, as an action's does. Here the wait can work, unlike for the Dockerfile's images: moby/buildkit has a few hundred tags, under the 1,000 Docker Hub lists to an anonymous reader, and Docker Hub dates each from its last push, so a moved tag waits too.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["moby/buildkit"],
+      "semanticCommitType": "ci",
+      "minimumReleaseAge": "5 days"
+    },
+    {
+      "description": "The pin names a full BuildKit release, so a digest update means that release's tag now points at a different image, one that would hold the token that writes the packages.",
+      "matchManagers": ["custom.regex"],
+      "matchDepNames": ["moby/buildkit"],
+      "matchUpdateTypes": ["digest"],
+      "prBodyNotes": [
+        "**This release's tag was moved to a different image.** BuildKit's release tags don't normally move, and this image holds the token that writes the packages. Find out why, from moby/buildkit's releases or advisories, before merging."
       ]
     }
   ]
