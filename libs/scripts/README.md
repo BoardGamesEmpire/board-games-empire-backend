@@ -10,11 +10,18 @@ Nothing imports this library. Its entrypoints are invoked by path, from Nx targe
 | `src/bin/generate-bge-version.js`   | `@boardgamesempire/api:generate`                                 |
 | `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
 | `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
+| `src/bin/find-published-images.js`  | `ci.yml`'s `build-push` job, on `master`                         |
+| `src/bin/publish-images.js`         | `ci.yml`'s `publish` job, on `master`                            |
 
 Because the call sites are command strings rather than imports, Nx cannot infer
 the dependency. Each consuming target declares these files in its own `inputs`.
-The CI step needs no inputs, because it runs uncached. The image build mounts
+The CI steps need no inputs, because they run uncached. The image build mounts
 `src/` from its build context, so Docker's own layer cache tracks the file.
+
+The two image entrypoints run on the runner's own Node, with no install, in jobs
+that hold a token that writes the images' packages. So they use nothing but
+Node's own modules, and nothing Node 20 lacks: the arm64 runner ships Node 20,
+and the amd64 runner Node 22 (#600).
 
 ## Why it is unbuilt
 
@@ -63,6 +70,15 @@ each of those keys and names, nesting, and the shapes it leaves alone: a scoped
 read that is itself the value of one of those keys, a `compose()` that isn't
 the scope composer's, a variable named for something else, and the rule's
 known gap, a ceiling that reaches the include through a variable or a call.
+
+`src/image-tags/rules.spec.js` covers the rules the image jobs publish by
+(#600): whether build-push builds an image or tests an earlier attempt's again,
+whether `edge` moves, and whether an index lists exactly the digests the smoke
+suite tested. It drives them with the registry's answers as data, and with a
+stand-in for GitHub's compare over a line of commits, so a comparison asked the
+wrong way round, which would move `edge` back, fails a test. The calls that
+fetch those answers, in `registry.js` and `github.js`, have no unit tests. The
+header of `src/image-tags/rules.js` explains the rules.
 
 `src/bgg` and `src/igdb` are **not** part of this library; those ad-hoc scripts
 still live in the top-level `scripts/` directory and are covered by no target
