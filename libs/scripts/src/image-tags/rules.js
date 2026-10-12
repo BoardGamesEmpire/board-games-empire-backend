@@ -88,8 +88,11 @@ function reuseDecision({ commit, platform, published }) {
  * Whether `edge` moves to this commit. It moves when both hold:
  *
  *   - The commit is on master: master's tip is the commit, or descends from it.
- *   - The commit descends from the commit `edge` names, or is that commit. With
- *     no `edge` yet, only the first condition applies.
+ *   - The commit descends from the commit `edge` names, or is that commit.
+ *     With no `edge` on any package, it must be master's tip itself: that is
+ *     the first publish, or every `edge` was removed, and nothing then says
+ *     which commits were published. Master's ruleset keeps master from moving
+ *     back, so its tip descends from every one of them.
  *
  * Anything else leaves `edge` where it is, such as a re-run or a late run of an
  * older commit, so `edge` never moves back.
@@ -107,8 +110,9 @@ function reuseDecision({ commit, platform, published }) {
  *     one line, and GitHub reports such a commit as diverged, or as missing once
  *     it no longer has it.
  *   - The BGE image has none while another package has one. Its `edge` is
- *     written first, so that means it was removed, and which commit it named
- *     isn't known. Moving all three as if none existed could move them back.
+ *     written first, so that means someone removed it, and publish leaves a
+ *     removal it can see to whoever made it. Every `edge` removed looks like
+ *     no publish yet, so only master's tip writes them again, as above.
  *
  * Where two commits stand is `compare`'s answer for `<base>...<head>`, as
  * GitHub's compare gives it: 'identical', 'ahead' when head descends from base,
@@ -141,6 +145,12 @@ async function edgeDecision({ commit, tip, edge, otherEdges, compare }) {
       warning: true,
       reason:
         "the BGE image has no `edge`, though another package has one, so which commit `edge` named isn't known. Move `edge` by hand.",
+    };
+  }
+  if (edge === null && tip !== commit) {
+    return {
+      move: false,
+      reason: `no package has an \`edge\`, and only master's tip, now \`${tip}\`, writes the first, since no commit published can be newer than the tip.`,
     };
   }
   if (edge === null) return { move: true, reason: 'there was no `edge` yet.' };

@@ -163,6 +163,17 @@ describe('edgeDecision', () => {
     });
   });
 
+  it("leaves edge where it is when no package has one and master's tip has moved past the commit", async () => {
+    const compare = repository({ line: [COMMIT, TIP] });
+
+    await expect(
+      edgeDecision({ commit: COMMIT, tip: TIP, edge: null, otherEdges: NO_OTHER_EDGES, compare }),
+    ).resolves.toEqual({
+      move: false,
+      reason: `no package has an \`edge\`, and only master's tip, now \`${TIP}\`, writes the first, since no commit published can be newer than the tip.`,
+    });
+  });
+
   it('leaves edge where it is, with a warning, when the BGE image has none but another package has one', async () => {
     const compare = repository({ line: [COMMIT] });
 
