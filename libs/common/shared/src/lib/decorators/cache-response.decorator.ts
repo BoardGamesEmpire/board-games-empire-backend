@@ -12,6 +12,11 @@ export const CACHE_RESPONSE_KEY = 'CACHE_RESPONSE';
  * the service makes behind a type-level guard. Mark only a route whose
  * response may be that old for the caller it was cached for.
  *
+ * Every request with neither a session nor an API key is the same caller, so
+ * on a route that allows anonymous requests, one anonymous request is served
+ * what another cached. The response it gives them must depend on the URL and
+ * the locale alone.
+ *
  * It decorates a method, never a controller, so a GET added to a controller
  * later is not cached until someone decides it should be.
  */
