@@ -311,6 +311,30 @@ describe('InviteService', () => {
       );
     });
 
+    it('looks for rivals by the address alone on an email-only invite', async () => {
+      // No invitee id means no id clause at all. `{ inviteeId: null }` would
+      // match every email-only invite in the household, not this person's.
+      await service.createWithin(asTx(tx), { ...params, inviteeId: null, inviteeEmail: 'sam@example.test' });
+
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ OR: [{ inviteeEmail: 'sam@example.test' }] }) }),
+      );
+    });
+
+    it('stores the invitee name it is given, and no role when none is named', async () => {
+      await service.createWithin(asTx(tx), {
+        type: InviteType.Household,
+        inviterId: INVITER_ID,
+        inviteeId: INVITEE_ID,
+        householdId: 'hh-1',
+        inviteeName: 'Sam',
+      });
+
+      expect(tx.invite.create).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ inviteeName: 'Sam', roleId: null }) }),
+      );
+    });
+
     it('scopes the rival search to the event for an event invite', async () => {
       await service.createWithin(asTx(tx), { ...params, type: InviteType.Event, householdId: null, eventId: 'ev-1' });
 
@@ -864,6 +888,16 @@ describe('InviteService', () => {
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1' })).rejects.toThrow(GoneException);
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('404s an unknown id: a context transition reads unbound to a party, and still finds nothing', async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-missing' })).rejects.toMatchObject({
+        status: 404,
+        response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-missing' } }),
+      });
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
   });

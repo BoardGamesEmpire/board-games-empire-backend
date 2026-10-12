@@ -85,7 +85,9 @@ describe('outstanding invite uniqueness (#161)', () => {
 
   interface InviteArrangement {
     readonly inviter: SessionActor;
-    readonly householdId: string;
+    /** One context or the other; the invite's type follows from which is given. */
+    readonly householdId?: string | null;
+    readonly eventId?: string | null;
     readonly inviteeId?: string | null;
     readonly inviteeEmail?: string | null;
     readonly status?: InviteStatus;
@@ -98,17 +100,19 @@ describe('outstanding invite uniqueness (#161)', () => {
    */
   const arrangeInvite = ({
     inviter,
-    householdId,
+    householdId = null,
+    eventId = null,
     inviteeId = null,
     inviteeEmail = null,
     status = InviteStatus.Pending,
   }: InviteArrangement) =>
     db.client.invite.create({
       data: {
-        type: InviteType.Household,
+        type: eventId === null ? InviteType.Household : InviteType.Event,
         status,
         inviterId: inviter.user.id,
         householdId,
+        eventId,
         inviteeId,
         inviteeEmail,
         token: randomUUID(),
@@ -126,6 +130,17 @@ describe('outstanding invite uniqueness (#161)', () => {
     const fixture = await actors.householdWithMembers({ owner: inviter, name: 'Uniqueness probe household' });
 
     return { inviter, inviteeId: invitee.user.id, householdId: fixture.household.id };
+  };
+
+  /** An event of the inviter's, for the pair of indexes keyed on `event_id`. */
+  const arrangeEvent = async () => {
+    const { inviter, inviteeId, householdId } = await arrange();
+    const event = await db.client.event.create({
+      data: { title: 'Uniqueness probe event', createdById: inviter.user.id, householdId },
+      select: { id: true },
+    });
+
+    return { inviter, inviteeId, eventId: event.id };
   };
 
   describe('a user-bound invite', () => {
@@ -235,6 +250,47 @@ describe('outstanding invite uniqueness (#161)', () => {
       await expect(
         arrangeInvite({ inviter, householdId, inviteeEmail: `invitee-${randomUUID()}@e2e.invalid` }),
       ).resolves.toEqual({ id: expect.any(String) });
+    });
+  });
+
+  describe('an event-bound invite', () => {
+    // The event pair of indexes is hand-written like the household pair, and
+    // the service maps their P2002 the same way. The catalog assertion below
+    // sees names and predicates only, so the columns each one holds and the
+    // identity each one reports are pinned here, by a real collision.
+    it('refuses a second outstanding invite to the same user, naming the event and invitee columns', async () => {
+      const { inviter, inviteeId, eventId } = await arrangeEvent();
+
+      await arrangeInvite({ inviter, eventId, inviteeId });
+
+      const error = await captureUniqueViolation(
+        () => arrangeInvite({ inviter, eventId, inviteeId }),
+        'a second Pending invite to the same user for the same event',
+      );
+
+      expect(constraintIdentity(error)).toEqual({
+        source: 'driverAdapterError.fields',
+        names: ['event_id', 'invitee_id'],
+        sqlState: SQLSTATE_UNIQUE_VIOLATION,
+      });
+    });
+
+    it('refuses a second outstanding invite to the same address, naming the event and email columns', async () => {
+      const { inviter, eventId } = await arrangeEvent();
+      const inviteeEmail = `invitee-${randomUUID()}@e2e.invalid`;
+
+      await arrangeInvite({ inviter, eventId, inviteeEmail });
+
+      const error = await captureUniqueViolation(
+        () => arrangeInvite({ inviter, eventId, inviteeEmail }),
+        'a second Pending invite to the same address for the same event',
+      );
+
+      expect(constraintIdentity(error)).toEqual({
+        source: 'driverAdapterError.fields',
+        names: ['event_id', 'invitee_email'],
+        sqlState: SQLSTATE_UNIQUE_VIOLATION,
+      });
     });
   });
 

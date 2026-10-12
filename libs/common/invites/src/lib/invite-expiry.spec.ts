@@ -1,5 +1,10 @@
 import { InviteStatus } from '@bge/database';
-import { effectiveInviteStatus, isOutstandingInviteStatus, withEffectiveInviteStatus } from './invite-expiry';
+import {
+  effectiveInviteStatus,
+  isOutstandingInviteStatus,
+  unexpiredInviteWhere,
+  withEffectiveInviteStatus,
+} from './invite-expiry';
 
 const NOW = new Date('2026-10-12T12:00:00Z');
 const PAST = new Date('2026-10-12T11:59:59Z');
@@ -69,6 +74,27 @@ describe('invite expiry', () => {
 
       expect(effective).toEqual({ ...invite, status: InviteStatus.Expired });
       expect(invite.status).toBe(InviteStatus.Pending);
+    });
+  });
+
+  describe('unexpiredInviteWhere', () => {
+    it('keeps the rows whose window is still open, excluding one that closes exactly now', () => {
+      // `gt`, not `gte`: effectiveInviteStatus calls a row at exactly
+      // `expiresAt` Expired, so a listing filtered by this fragment has to drop
+      // it too, or a list and a read of the same row would disagree.
+      expect(unexpiredInviteWhere(NOW)).toEqual({ expiresAt: { gt: NOW } });
+      expect(effectiveInviteStatus({ status: InviteStatus.Pending, expiresAt: NOW }, NOW)).toBe(InviteStatus.Expired);
+    });
+
+    it('measures from the clock when no instant is given, as effectiveInviteStatus does', () => {
+      jest.useFakeTimers({ now: NOW });
+
+      try {
+        expect(unexpiredInviteWhere()).toEqual({ expiresAt: { gt: NOW } });
+        expect(effectiveInviteStatus({ status: InviteStatus.Pending, expiresAt: PAST })).toBe(InviteStatus.Expired);
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });

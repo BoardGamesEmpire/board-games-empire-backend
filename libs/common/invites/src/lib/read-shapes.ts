@@ -119,8 +119,12 @@ export const INVITE_SCALARS_PARTY_ONLY = {
     'An address belonging to someone who may not be a registered user. Harvestable by every co-member under the old shape, and withheld from the context shape by #297. The inviter typed it and the invitee owns it, so each sees it on their own rows and nobody else does.',
   // Not a response body: this key is the NAME of the `Invite.message` column,
   // and the string beside it is the reason the column is party-only. The i18n
-  // rule (#144/#145) guards user-facing exception payloads; a ledger keyed by
-  // column name is not one.
+  // rule (#144/#145) flags every `message:` key that holds a literal, because
+  // a response body or a validator spells its copy that way; a ledger keyed by
+  // column name is neither. This lib's own eslint config applies that rule, so
+  // lint it through the Nx target; a bare `eslint` run from the workspace root
+  // sees only the root config and reports the directive below as unused.
+  // eslint-disable-next-line no-restricted-syntax -- a column name, not user-facing copy
   message: 'Free text addressed to the invitee, not to the household at large.',
 } as const satisfies Partial<Record<Prisma.InviteScalarFieldEnum, string>>;
 
