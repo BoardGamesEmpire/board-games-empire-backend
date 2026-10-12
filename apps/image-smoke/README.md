@@ -9,7 +9,7 @@ Tests the images, not a checkout (#600). It runs the BGE image and both game gat
 - the bundled web client in headless Chromium;
 - a shutdown in which every role and gateway exits 0, with no error logged on the way.
 
-CI runs it on every pull request and on `master`, once per platform, against images it has just built (`.github/workflows/ci.yml`, the `image-smoke` job).
+CI runs it once per platform (`.github/workflows/ci.yml`, the `image-smoke` job). On a pull request it tests images the job builds itself. On `master` it tests the digests the `build-push` job pushed, pulled back from the registry, and the `publish` job tags exactly those, so what is published is what was tested.
 
 ## Running it
 
