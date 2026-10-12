@@ -11,7 +11,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { CONTEXT_INVITE_SELECT } from '@bge/invites';
+import { CONTEXT_INVITE_SELECT, InviteService, unexpiredInviteWhere } from '@bge/invites';
 import { canonicalizeTag } from '@bge/locale';
 import {
   AbilityService,
@@ -91,9 +91,11 @@ export class HouseholdService {
     private readonly abilityService: AbilityService,
     private readonly permissions: PermissionsService,
     private readonly scopeComposer: ScopeComposer,
+    private readonly invites: InviteService,
   ) {}
 
   async getHouseholdById(id: string) {
+    const now = new Date();
     const household = await this.db.household.findUnique({
       where: {
         id,
@@ -102,8 +104,11 @@ export class HouseholdService {
       },
       include: {
         invites: {
+          // Pending AND still inside its window. Expiry is lazy (#161): a
+          // Pending row past its date reads Expired everywhere else, so it is
+          // not listed as pending here either.
           where: {
-            AND: [{ status: InviteStatus.Pending }],
+            AND: [{ status: InviteStatus.Pending }, unexpiredInviteWhere(now)],
           },
           select: CONTEXT_INVITE_SELECT,
         },
@@ -620,7 +625,7 @@ export class HouseholdService {
       // concurrent delete landed in between (`scopedWriteRefusal`).
       await assertHouseholdExists(this.db, id);
 
-      const { household, memberUserIds, restorableUntil } = await this.db.$transaction(async (tx) => {
+      const { household, memberUserIds, restorableUntil, revocation } = await this.db.$transaction(async (tx) => {
         const household = await tx.household.update({
           where: {
             id,
@@ -630,14 +635,10 @@ export class HouseholdService {
           data: { deletedAt: new Date() },
         });
 
-        // Outstanding invites to a dead household can never be accepted.
-        await tx.invite.updateMany({
-          where: {
-            householdId: id,
-            status: { in: [InviteStatus.Pending, InviteStatus.AwaitingApproval] },
-          },
-          data: { status: InviteStatus.Revoked },
-        });
+        // Outstanding invites to a dead household can never be accepted. The
+        // lib is the only writer of an invite's status (#161); its events
+        // ride back here and go out once the delete is committed.
+        const revocation = await this.invites.revokeOutstandingWithin(tx, { householdId: id });
 
         // Member rows survive the soft delete; capture them so their cached
         // ability graphs can be evicted (the household just left their surface).
@@ -657,7 +658,7 @@ export class HouseholdService {
             ? await this.grantRecovery(tx, id, ownerUserIds, actorUserId)
             : null;
 
-        return { household, memberUserIds: members.map((member) => member.userId), restorableUntil };
+        return { household, memberUserIds: members.map((member) => member.userId), restorableUntil, revocation };
       });
 
       // Evict every member's graph so stale Household* abilities don't linger for
@@ -665,6 +666,10 @@ export class HouseholdService {
       // the rebuild omits this household even before the eviction lands. The
       // owners are members, so the same eviction picks up their recovery grants.
       await this.permissions.invalidateUsers(memberUserIds);
+
+      // Committed, so the revoked invites can be announced. `emit` logs a
+      // failing listener rather than throwing it into this request.
+      this.invites.emit(revocation.events);
 
       return { household, restorableUntil };
     } catch (error) {

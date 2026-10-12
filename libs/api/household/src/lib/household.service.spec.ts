@@ -2,7 +2,7 @@ import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
-import { CONTEXT_INVITE_SELECT } from '@bge/invites';
+import { CONTEXT_INVITE_SELECT, InviteService, type InviteRevokedEvent } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -29,6 +29,7 @@ describe('HouseholdService', () => {
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
+  let invites: jest.Mocked<Pick<InviteService, 'revokeOutstandingWithin' | 'emit'>>;
   let compose: jest.SpyInstance;
 
   beforeEach(async () => {
@@ -40,6 +41,10 @@ describe('HouseholdService', () => {
       invalidateUser: jest.fn().mockResolvedValue(undefined),
       invalidateUsers: jest.fn().mockResolvedValue(undefined),
     };
+    invites = {
+      revokeOutstandingWithin: jest.fn().mockResolvedValue({ count: 0, events: [] }),
+      emit: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -50,6 +55,7 @@ describe('HouseholdService', () => {
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
+        { provide: InviteService, useValue: invites },
       ],
     });
 
@@ -75,15 +81,18 @@ describe('HouseholdService', () => {
   // these pin that the reads actually USE them. Without this, the service could
   // regress to an inline `include:` — republishing `Invite.token` and the
   // membership provenance columns — while every shape spec still passed.
-  it('shapes pending invites with CONTEXT_INVITE_SELECT, never the raw row', async () => {
+  it('shapes the pending-invite embed with CONTEXT_INVITE_SELECT, never the raw row', async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
     await service.getHouseholdById('hh-1');
 
     const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
 
+    // Pending and still inside its window: expiry is lazy, so a Pending row
+    // past its date is not a pending invite and is left out here as it is
+    // everywhere else (#161).
     expect(include.invites).toEqual({
-      where: { AND: [{ status: InviteStatus.Pending }] },
+      where: { AND: [{ status: InviteStatus.Pending }, { expiresAt: { gt: expect.any(Date) } }] },
       select: CONTEXT_INVITE_SELECT,
     });
   });
@@ -494,11 +503,12 @@ describe('HouseholdService', () => {
     });
   });
 
-  it('deleteHousehold soft-deletes under the delete policy, revokes pending invites, and evicts member caches', async () => {
+  it('deleteHousehold soft-deletes under the delete policy, revokes outstanding invites, and evicts member caches', async () => {
     db.household.count.mockResolvedValue(1);
     unwrapTransaction(db);
     db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
-    db.invite.updateMany.mockResolvedValue({ count: 2 } as never);
+    const revoked = [{ subjectId: 'inv-1' }, { subjectId: 'inv-2' }] as unknown as InviteRevokedEvent[];
+    invites.revokeOutstandingWithin.mockResolvedValue({ count: 2, events: revoked });
     db.householdMember.findMany.mockResolvedValue([{ userId: 'user-1' }, { userId: 'user-2' }] as never);
 
     await service.deleteHousehold('hh-1');
@@ -514,18 +524,19 @@ describe('HouseholdService', () => {
         data: expect.objectContaining({ deletedAt: expect.any(Date) }),
       }),
     );
-    // Outstanding invites to the dead household are revoked.
-    expect(db.invite.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          householdId: 'hh-1',
-          status: { in: [InviteStatus.Pending, InviteStatus.AwaitingApproval] },
-        }),
-        data: { status: InviteStatus.Revoked },
-      }),
-    );
+    // Outstanding invites to the dead household are revoked through the lib,
+    // inside the same transaction. `unwrapTransaction` hands the
+    // service `db` as its transaction client, so that is what the lib must see.
+    expect(invites.revokeOutstandingWithin).toHaveBeenCalledWith(db, { householdId: 'hh-1' });
+    expect(db.invite.updateMany).not.toHaveBeenCalled();
     // Every member's cached ability graph is evicted (household left their surface).
     expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2']);
+    // The revocations are announced after the commit and the eviction, never
+    // from inside the transaction.
+    expect(invites.emit).toHaveBeenCalledWith(revoked);
+    expect(invites.emit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      permissions.invalidateUsers.mock.invocationCallOrder[0],
+    );
   });
 
   it('deleteHousehold 404s when the household does not exist (probe finds nothing)', async () => {
@@ -548,8 +559,10 @@ describe('HouseholdService', () => {
     );
 
     await expect(service.deleteHousehold('hh-1')).rejects.toThrow(ForbiddenException);
-    // The failed update rolls the transaction back — no invalidation runs.
+    // The failed update rolls the transaction back — no invalidation runs, and
+    // no invite revocation is announced for a delete that did not happen.
     expect(permissions.invalidateUsers).not.toHaveBeenCalled();
+    expect(invites.emit).not.toHaveBeenCalled();
   });
 
   describe('recovery grants on delete (#175)', () => {
@@ -564,7 +577,6 @@ describe('HouseholdService', () => {
       db.household.count.mockResolvedValue(1);
       unwrapTransaction(db);
       db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
-      db.invite.updateMany.mockResolvedValue({ count: 0 } as never);
       db.permission.findFirst.mockResolvedValue({ id: 'perm-restore' } as never);
       db.householdMember.findMany.mockResolvedValue([owner('user-1'), owner('user-2'), member('user-3')] as never);
       // Every owner's key is free unless a case says otherwise, and no
