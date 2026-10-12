@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -19,7 +19,6 @@ const PaginatedAuditLogsResponse = PaginatedResponseDto(AuditLogEntryDto, 'audit
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('audit-logs')
-@NoCache()
 @UseGuards(PoliciesGuard)
 @Controller('audit-logs')
 export class AuditLogController {

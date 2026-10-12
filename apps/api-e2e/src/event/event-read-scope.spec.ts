@@ -37,9 +37,10 @@ import {
  * pass too.
  *
  * Events are created through `POST /api/events`, so the host's attendee row
- * is the one the create path writes. The list is response-cached per caller
- * and URL, so no test lists for an actor before the writes that list must
- * reflect.
+ * is the one the create path writes. The event reads are not response-cached
+ * (#530), and the reads after a write are pinned in
+ * `event-read-after-write.spec.ts`; no test here lists for an actor before
+ * the writes that list must reflect all the same.
  */
 describe('event read scope', () => {
   const baseUrl = requireBaseUrl(process.env);
@@ -291,8 +292,8 @@ describe('event read scope', () => {
    * own, under its own type's ceiling. A friend and a household guest are
    * served an event's dates and rules, and nothing that says who attends it.
    *
-   * Each test reads only after the writes it depends on, since the reads are
-   * response-cached per caller and URL.
+   * Each test reads only after the writes it depends on, so a read served
+   * from the response cache could not pass one.
    */
   describe('the parts of an event each reader is served (#560)', () => {
     /**

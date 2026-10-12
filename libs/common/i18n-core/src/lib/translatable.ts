@@ -4,9 +4,9 @@ import type { I18nPath } from './generated/i18n.generated';
  * Serializable discriminator marking an object as a deferred translation. A
  * plain string-keyed property (never a `Symbol`, which `JSON.stringify` drops)
  * so the mark survives a JSON round-trip: on the success path a marker embedded
- * in a response body is stored in the Valkey response cache and later rehydrated
- * as a prototype-less object, so {@link isI18nMessage} must recognize it
- * structurally rather than via `instanceof`.
+ * in the body of a route that opts into the response cache is stored in Valkey
+ * and later rehydrated as a prototype-less object, so {@link isI18nMessage}
+ * must recognize it structurally rather than via `instanceof`.
  */
 const I18N_MESSAGE_BRAND = '__i18nMessage';
 

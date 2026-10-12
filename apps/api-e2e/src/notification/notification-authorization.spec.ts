@@ -18,9 +18,9 @@ import { unreadNotifications } from './notification-wire';
  * through the grant's condition instead is #517's.
  *
  * The mark cases read the list before they write, as a client polling it
- * does. The api response-caches GETs per caller unless a route opts out, and
- * a cached list repeats the rows it held before the write. Without that
- * first read, both cases would pass with the cache on.
+ * does. A cached list would repeat the rows it held before the write, so
+ * without that first read both cases would pass if the route opted into the
+ * response cache.
  */
 describe('notification authorization', () => {
   const baseUrl = requireBaseUrl(process.env);

@@ -10,6 +10,16 @@ import { connectToHarnessRedis } from './redis-reset';
 export const API_CACHE_NAMESPACE = 'api:cache';
 
 /**
+ * The logical key the api's response cache writes for a request, laid out as
+ * `UserAwareCacheInterceptor` lays it out: the caller's namespace (`anon`,
+ * `user:<id>` or `apikey:<id>`), the request locale, then the URL. Spelled out
+ * for the reason {@link API_CACHE_NAMESPACE} is.
+ */
+export function responseCacheKey(namespace: string, url: string, locale = 'en'): string {
+  return `${namespace}:${locale}:${url}`;
+}
+
+/**
  * Whether the api's cache holds `logicalKey` right now, read from the Redis
  * the harness pointed the api at.
  *

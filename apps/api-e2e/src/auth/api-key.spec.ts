@@ -1,7 +1,7 @@
 import { ResourceType } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
-import { apiCacheHas } from '../support/api-cache';
+import { apiCacheHas, responseCacheKey } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
@@ -12,8 +12,11 @@ const CREATE_KEY_PATH = '/api/auth/api-key/create';
 const UNREAD_PATH = '/api/notifications/unread';
 const UNREAD_PERMISSION_SLUG = 'read:notification:own';
 
-/** An authenticated route with no policy, and one the response cache serves. */
+/** An authenticated route with no policy. */
 const ME_PATH = '/api/users/me';
+
+/** A route that opts into the response cache (#530), and one any caller reaches. */
+const LANGUAGES_PATH = '/api/languages';
 
 interface MintedKey {
   readonly id: string;
@@ -168,36 +171,36 @@ describe('API key requests', () => {
     });
   });
 
+  /**
+   * The languages body is the same for every caller, so `X-Cache` is what
+   * shows whose entry a request was served from. A request that found another
+   * caller's entry would report a HIT where these expect a MISS.
+   */
   describe('the response cache', () => {
+    const cacheStatus = async (headers: Record<string, string>) =>
+      (await request(baseUrl).get(LANGUAGES_PATH).set(headers).expect(200)).headers['x-cache'];
+
     it("keeps two owners' keys apart", async () => {
       const [alice, bob] = [await actors.user(), await actors.user()];
       const [aliceKey, bobKey] = [await mintKey(alice), await mintKey(bob)];
 
-      const forAlice = await request(baseUrl).get(ME_PATH).set(aliceKey.headers).expect(200);
-      const forBob = await request(baseUrl).get(ME_PATH).set(bobKey.headers).expect(200);
+      await expect(cacheStatus(aliceKey.headers)).resolves.toBe('MISS');
+      await expect(cacheStatus(bobKey.headers)).resolves.toBe('MISS');
 
-      expect(forAlice.body.user.id).toBe(alice.user.id);
-      expect(forBob.body.user.id).toBe(bob.user.id);
-      // Not vacuous: the first answer was cached, under its key's own entry.
-      await expect(apiCacheHas(`apikey:${aliceKey.id}:en:${ME_PATH}`)).resolves.toBe(true);
+      // Not vacuous: each key's own entry was written, and serves its repeat.
+      await expect(cacheStatus(bobKey.headers)).resolves.toBe('HIT');
+      await expect(apiCacheHas(responseCacheKey(`apikey:${aliceKey.id}`, LANGUAGES_PATH))).resolves.toBe(true);
     });
 
     it("keeps a key apart from its owner's session", async () => {
       const owner = await actors.user();
       const key = await mintKey(owner);
 
-      const before = await request(baseUrl).get(ME_PATH).set(owner.headers).expect(200);
-      await db.client.user.update({ where: { id: owner.user.id }, data: { firstName: 'Renamed' } });
+      await expect(cacheStatus(owner.headers)).resolves.toBe('MISS');
+      await expect(cacheStatus(key.headers)).resolves.toBe('MISS');
 
-      const viaKey = await request(baseUrl).get(ME_PATH).set(key.headers).expect(200);
-      const viaSessionAgain = await request(baseUrl).get(ME_PATH).set(owner.headers).expect(200);
-
-      // The key's request missed the session's entry and read the change...
-      expect(viaKey.body.user.firstName).toBe('Renamed');
-      // ...while the session's entry still holds the body from before it,
-      // which is what shows the cache was in play at all.
-      expect(viaSessionAgain.body).toEqual(before.body);
-      expect(viaSessionAgain.body.user.firstName).not.toBe('Renamed');
+      await expect(cacheStatus(key.headers)).resolves.toBe('HIT');
+      await expect(apiCacheHas(responseCacheKey(`apikey:${key.id}`, LANGUAGES_PATH))).resolves.toBe(true);
     });
   });
 });

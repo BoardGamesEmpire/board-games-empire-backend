@@ -21,7 +21,7 @@ import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collecti
  * Its rows are the path user's for every caller; its visibility tests are in
  * `game-collection-authorization.spec.ts`.
  *
- * Collection reads are never response-cached, but no test lists before the
+ * Collection reads are not response-cached, but no test lists before the
  * writes the list must reflect all the same.
  */
 describe('game collection read scope', () => {

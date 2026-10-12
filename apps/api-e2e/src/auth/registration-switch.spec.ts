@@ -100,9 +100,9 @@ describe('the registration switch', () => {
   });
 
   /**
-   * Read once before the change on purpose. The api response-caches GETs per
-   * caller unless a route opts out, and without the first read the last one
-   * would pass with the cache still on.
+   * Read once before the change on purpose. A route that opts into the api's
+   * response cache repeats its first answer for the TTL, and without the
+   * first read the last one would pass with discovery cached.
    */
   it('shows in discovery on the next read', async () => {
     const readDiscovery = async () => (await request(baseUrl).get(DISCOVERY_PATH).expect(200)).body;

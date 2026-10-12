@@ -1,6 +1,6 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
 import { FALLBACK_LOCALE } from '@bge/i18n';
-import { NO_CACHE_KEY } from '@bge/shared';
+import { CACHE_RESPONSE_KEY } from '@bge/shared';
 import { CACHE_MANAGER, CacheInterceptor } from '@nestjs/cache-manager';
 import { ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -19,16 +19,17 @@ import { Reflector } from '@nestjs/core';
  * may read less than its owner. A shared entry would serve the owner's body
  * to the key, or the key's narrower body to the owner.
  *
- * The locale is in the key too (#358). Bodies cached today carry translation
- * markers that `I18nResponseInterceptor` renders after a hit, so none of them
- * differ by locale — but a cached route whose service renders in the request
- * locale itself would otherwise replay one caller's language to the same
- * caller asking in another. An unresolved locale is keyed as
- * {@link FALLBACK_LOCALE}, the locale such a body renders in.
+ * The locale is in the key too (#358). A body that carries translation markers
+ * would be safe without it, since `I18nResponseInterceptor` renders them after
+ * a hit, but a cached route whose service renders in the request locale itself
+ * would otherwise replay one caller's language to the same caller asking in
+ * another. An unresolved locale is keyed as {@link FALLBACK_LOCALE}, the locale
+ * such a body renders in.
  *
- * Routes marked with `@NoCache()` are never cached — for user-scoped,
- * mutation-adjacent surfaces where a stale read within the cache TTL is a
- * correctness bug (e.g. offline-first clients that write then re-read).
+ * Only a route marked `@CacheResponse()` is cached, and every other route
+ * reaches its handler (#530). A hit skips the service, and with it the row
+ * checks behind each type-level guard, so caching by default made each new
+ * GET a decision someone had to remember.
  */
 @Injectable()
 export class UserAwareCacheInterceptor extends CacheInterceptor {
@@ -41,8 +42,7 @@ export class UserAwareCacheInterceptor extends CacheInterceptor {
   }
 
   protected override trackBy(context: ExecutionContext): string | undefined {
-    const noCache = this.reflector.getAllAndOverride<boolean>(NO_CACHE_KEY, [context.getHandler(), context.getClass()]);
-    if (noCache) {
+    if (!this.reflector.get<boolean | undefined>(CACHE_RESPONSE_KEY, context.getHandler())) {
       return undefined;
     }
 

@@ -1,19 +1,28 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
 import { FALLBACK_LOCALE } from '@bge/i18n';
-import { NO_CACHE_KEY } from '@bge/shared';
+import { CACHE_RESPONSE_KEY, CacheResponse } from '@bge/shared';
 import type { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { UserAwareCacheInterceptor } from './user-aware-cache.interceptor';
 
-// Real function/class targets — Reflect.getMetadata rejects primitives.
-const handlerFn = () => undefined;
-class HandlerHost {}
+// A controller with one route that opts in and one that doesn't. The marker
+// is real metadata, read the way the interceptor reads it in the app.
+class HandlerHost {
+  @CacheResponse()
+  cached() {
+    return undefined;
+  }
 
-const httpContext = (method: string, url: string): ExecutionContext => {
+  uncached() {
+    return undefined;
+  }
+}
+
+const httpContext = (method: string, url: string, handler = HandlerHost.prototype.cached): ExecutionContext => {
   const request = { method, url };
 
   return {
-    getHandler: () => handlerFn,
+    getHandler: () => handler,
     getClass: () => HandlerHost,
     getType: () => 'http',
     getArgByIndex: () => request,
@@ -60,7 +69,7 @@ describe('UserAwareCacheInterceptor', () => {
   it('namespaces the cache key by the authenticated user and the request locale', () => {
     actor = user('user-1');
 
-    expect(trackBy(httpContext('GET', '/api/game-collections'))).toBe('user:user-1:en:/api/game-collections');
+    expect(trackBy(httpContext('GET', '/api/foo'))).toBe('user:user-1:en:/api/foo');
   });
 
   it('gives distinct users distinct keys for the same URL', () => {
@@ -143,10 +152,32 @@ describe('UserAwareCacheInterceptor', () => {
     expect(trackBy(httpContext('POST', '/api/game-collections'))).toBeUndefined();
   });
 
-  it('skips caching entirely for @NoCache() routes', () => {
-    jest.spyOn(reflector, 'getAllAndOverride').mockImplementation((key) => key === NO_CACHE_KEY);
+  // #530: a hit skips the service's row checks, so a route is cached only
+  // when it says so.
+  it('does not cache a route that has not opted in', () => {
     actor = user('user-1');
 
-    expect(trackBy(httpContext('GET', '/api/game-collections'))).toBeUndefined();
+    expect(trackBy(httpContext('GET', '/api/game-collections', HandlerHost.prototype.uncached))).toBeUndefined();
+  });
+
+  it('does not cache an anonymous request to a route that has not opted in', () => {
+    expect(trackBy(httpContext('GET', '/api/foo', HandlerHost.prototype.uncached))).toBeUndefined();
+  });
+
+  it("ignores the marker on a controller, so a GET added to it later isn't cached", () => {
+    class MarkedHost {
+      uncached() {
+        return undefined;
+      }
+    }
+    Reflect.defineMetadata(CACHE_RESPONSE_KEY, true, MarkedHost);
+    actor = user('user-1');
+
+    const context = {
+      ...httpContext('GET', '/api/foo', MarkedHost.prototype.uncached),
+      getClass: () => MarkedHost,
+    } as ExecutionContext;
+
+    expect(trackBy(context)).toBeUndefined();
   });
 });

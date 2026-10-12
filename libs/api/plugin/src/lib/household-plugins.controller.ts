@@ -9,7 +9,7 @@ import {
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
-import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -79,9 +79,8 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // The writes on this controller change these rows, and must be visible on
-  // the re-read.
-  @NoCache()
+  // Must stay out of the response cache: the writes on this controller change
+  // these rows, and must be visible on the re-read.
   @Get()
   list(@Param('householdId') householdId: string, @Query() query: DefaultPaginationQueryDto) {
     // The instance half of the D-AZ gate. This read has no service seam to
@@ -157,9 +156,8 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Mutation-adjacent: read right before a decide POST, which must be
-  // visible on the re-read.
-  @NoCache()
+  // Must stay out of the response cache: read right before a decide POST,
+  // which must be visible on the re-read.
   @Get(':slug/consent')
   consentPresentation(@Param('householdId') householdId: string, @Param('slug') slug: string) {
     this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
@@ -304,9 +302,8 @@ export class HouseholdPluginsController {
     description: 'The plugin is server-scoped: this household has no enablement surface to report on',
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
-  // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached).
-  @NoCache()
+  // Must stay out of the response cache: consent decisions must be visible on
+  // the next read (#60).
   @Get(':slug/features')
   featureStates(@Param('householdId') householdId: string, @Param('slug') slug: string) {
     this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });

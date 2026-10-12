@@ -1,6 +1,6 @@
 import { GameMedium, GameRemovalReason, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { ListScopeNotComposedError, NO_CACHE_KEY } from '@bge/shared';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
@@ -73,11 +73,5 @@ describe('GameCollectionController (delegation)', () => {
   it('removeFromCollection forwards id and reason query', async () => {
     await firstValueFrom(controller.removeFromCollection('gc-1', { reason: GameRemovalReason.Sold }));
     expect(service.remove).toHaveBeenCalledWith('gc-1', { reason: GameRemovalReason.Sold });
-  });
-
-  // The offline-first client writes and then re-reads to reconcile, so a read
-  // served from the response cache within its TTL is a wrong answer.
-  it('is exempt from the response cache', () => {
-    expect(Reflect.getMetadata(NO_CACHE_KEY, GameCollectionController)).toBe(true);
   });
 });

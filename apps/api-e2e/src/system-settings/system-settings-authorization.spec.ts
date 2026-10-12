@@ -10,9 +10,9 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
  * subject through their `read` on `all`.
  *
  * The admin does read the settings before and after their write, as a
- * settings screen does. The api response-caches GETs per caller unless a
- * route opts out, and a cached read repeats the value from before the write.
- * Without the first read, the last assertion would pass with the cache on.
+ * settings screen does. A cached read would repeat the value from before the
+ * write, so without the first read the last assertion would pass if the route
+ * opted into the response cache.
  *
  * The settings row is on the isolation sweep's preserved list, so a write
  * here would outlive the test. Each test restores the row it changed.

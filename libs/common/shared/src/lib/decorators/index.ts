@@ -1,1 +1,1 @@
-export * from './no-cache.decorator';
+export * from './cache-response.decorator';

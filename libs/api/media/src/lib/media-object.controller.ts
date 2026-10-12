@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import {
   BadRequestException,
   Body,
@@ -40,11 +40,10 @@ const PaginatedMediaResponse = PaginatedResponseDto(MediaObjectResponseDto, 'med
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-// Never response-cached (#530). `GET /media` is the caller's own media, so an
-// upload, publish or delete followed by a list would be served the old page
-// for the cache TTL, and `GET /media/:id` would keep serving an unpublished
-// item's metadata to other callers for the same window.
-@NoCache()
+// Must stay out of the response cache (#530). `GET /media` is the caller's own
+// media, so an upload, publish or delete followed by a list would be served
+// the old page for the cache TTL, and `GET /media/:id` would keep serving an
+// unpublished item's metadata to other callers for the same window.
 @UseGuards(PoliciesGuard)
 @UseFilters(StorageExceptionFilter, MulterExceptionFilter)
 @ApiTags('media')
@@ -120,12 +119,9 @@ export class MediaObjectController {
     return from(this.media.findById(id)).pipe(map((media) => ({ media: toMediaObjectResponse(media) })));
   }
 
-  // Never response-cached: a signed URL lives as long as the cache TTL by
-  // default, so a cached body hands out URLs that are already expiring (#528).
-  // Deliberately kept beside the class-level opt-out, which covers this route
-  // too: that one rests on the list and by-id reads, and this reason holds
-  // whatever is decided for them.
-  @NoCache()
+  // Must stay out of the response cache: a signed URL lives as long as the
+  // cache TTL by default, so a cached body hands out URLs that are already
+  // expiring (#528).
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.MediaObject))
   @Get(':id/url')
   signedUrl(@Param('id') id: string) {

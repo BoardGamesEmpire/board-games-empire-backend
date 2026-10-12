@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, NoCache, paginated } from '@bge/shared';
+import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
 import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -12,14 +12,13 @@ import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { AllowsDeletedHousehold, HouseholdLivenessGuard, HouseholdPathParam } from './guards/household-liveness.guard';
 import { HouseholdService } from './household.service';
 
+// Must stay out of the response cache: the offline-first client writes then
+// re-reads to reconcile local state, and the list's contract lets it treat a
+// household missing from a complete read as one it was removed from. A cache
+// hit also skips the service, which is where a removed member is refused — the
+// route guards here are type-level (#528).
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-// Never response-cached: the offline-first client writes then re-reads to
-// reconcile local state, and the list's contract lets it treat a household
-// missing from a complete read as one it was removed from. A cache hit also
-// skips the service, which is where a removed member is refused — the route
-// guards here are type-level (#528).
-@NoCache()
 // Liveness first: a missing or deleted household is 404 whatever the actor
 // holds elsewhere, which the type-level policy check cannot tell (#299).
 @HouseholdPathParam('id')

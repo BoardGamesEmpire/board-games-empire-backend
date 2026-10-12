@@ -1,7 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { JobStatus } from '@bge/database';
 import { AbilityService, PoliciesGuard } from '@bge/permissions';
-import { NO_CACHE_KEY } from '@bge/shared';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
@@ -70,14 +69,6 @@ describe('GameImportController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
-  });
-
-  it('is exempt from the response cache', () => {
-    // Both reads report job progress, which the workers advance without any
-    // write from the caller: `getImportStatus` is the documented polling
-    // route, and a cached body would report the same stage for the whole
-    // cache TTL (#528).
-    expect(Reflect.getMetadata(NO_CACHE_KEY, GameImportController)).toBe(true);
   });
 
   describe('getImportStatus', () => {

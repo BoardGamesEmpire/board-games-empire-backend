@@ -24,7 +24,8 @@ map((game) => ({ game, message: t('success.game.created') })),
   active — identical to the exception filter.
 
 The interceptor is the **outermost** global interceptor, so its transform runs
-after the response cache. The cache therefore stores locale-independent markers
+after the response cache, which holds the routes marked `@CacheResponse()`
+(#530). The cache therefore stores locale-independent markers
 and this interceptor renders them per request — a cache hit is never pinned to
 the locale that first populated it. The cache key carries the resolved locale as
 well (`user:{id}:{locale}:{url}`, #358), for a body that is rendered in the

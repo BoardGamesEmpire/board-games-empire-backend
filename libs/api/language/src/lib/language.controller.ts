@@ -1,5 +1,5 @@
 import { PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, paginated, Unscoped } from '@bge/shared';
+import { ApiPaginatedEnvelope, CacheResponse, paginated, Unscoped } from '@bge/shared';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -9,6 +9,10 @@ import { map } from 'rxjs/operators';
 import { LanguageQueryDto } from './dto/language-query.dto';
 import { LanguageService } from './language.service';
 
+// Both reads opt into the response cache (#530). The catalogue is the same
+// for every caller and seldom changes: an import or a gateway sync may add a
+// language or tag, and the seed at each boot rewrites the curated rows, which
+// a release may change. A read up to the TTL behind either is harmless.
 @ApiTags('languages')
 @UseGuards(PoliciesGuard)
 @Controller('languages')
@@ -25,6 +29,7 @@ export class LanguageController {
   })
   @ApiPaginatedEnvelope('languages')
   @AllowAnonymous()
+  @CacheResponse()
   @Get()
   getLanguages(@Query() languageDto: LanguageQueryDto) {
     return from(this.languageService.getLanguages(languageDto)).pipe(
@@ -40,6 +45,7 @@ export class LanguageController {
   }
 
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @CacheResponse()
   @Get(':id')
   getLanguageById(@Param('id') id: string) {
     return from(this.languageService.getLanguageById(id)).pipe(map((language) => ({ language })));

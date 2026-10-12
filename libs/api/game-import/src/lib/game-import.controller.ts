@@ -2,7 +2,7 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, Logger, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -17,10 +17,10 @@ const PaginatedBatchesResponse = PaginatedResponseDto(ImportBatchStatusResponseD
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('games/import')
-// Never response-cached: both reads report job progress, which the workers
-// advance with no write from the caller, and `GET :batchId` is the route a
-// client polls — a cached body would report one stage for the whole TTL (#528).
-@NoCache()
+// Must stay out of the response cache: both reads report job progress, which
+// the workers advance with no write from the caller, and `GET :batchId` is the
+// route a client polls — a cached body would report one stage for the whole
+// TTL (#528).
 @UseGuards(PoliciesGuard)
 @Controller('games/import')
 export class GameImportController {

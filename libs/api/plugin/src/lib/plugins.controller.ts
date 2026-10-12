@@ -11,7 +11,7 @@ import {
   PluginUpdateNoPendingError,
   PluginUpdateService,
 } from '@bge/plugin';
-import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -77,9 +77,8 @@ export class PluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  // Read immediately after the lifecycle writes that change it, which must be
-  // visible on the re-read.
-  @NoCache()
+  // Must stay out of the response cache: read immediately after the lifecycle
+  // writes that change it, which must be visible on the re-read.
   @Get()
   list(@Query() query: ListPluginsQueryDto) {
     return from(
@@ -148,9 +147,8 @@ export class PluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  // Mutation-adjacent by definition: it exists to be read right before a
+  // Must stay out of the response cache: it exists to be read right before a
   // decide POST, and the decide's write must be visible on the re-read.
-  @NoCache()
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
     return from(
@@ -327,11 +325,10 @@ export class PluginsController {
     description: 'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design)',
   })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  // The approval screen is mutation-adjacent by definition — it exists to be
+  // The approval screen must stay out of the response cache — it exists to be
   // read right before approve/reject, and the comparison is recomputed
   // against TODAY's decisions. Serving it from the response cache would hand
   // the admin the very staleness the recompute exists to prevent.
-  @NoCache()
   @Get(':slug/update/pending')
   pendingUpdate(@Param('slug') slug: string) {
     return from(this.loadPendingPresentation(slug));
@@ -352,9 +349,8 @@ export class PluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached).
-  @NoCache()
+  // Must stay out of the response cache: consent decisions must be visible on
+  // the next read (#60).
   @Get(':slug/features')
   featureStates(@Param('slug') slug: string) {
     // No scope refusal to make here, unlike the household axis: the
@@ -391,7 +387,6 @@ export class PluginsController {
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
-  @NoCache()
   @Get(':slug')
   getBySlug(@Param('slug') slug: string) {
     return from(this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined)).pipe(
