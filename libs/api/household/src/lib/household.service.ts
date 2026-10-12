@@ -11,6 +11,7 @@ import {
   SystemRole,
 } from '@bge/database';
 import { t } from '@bge/i18n';
+import { CONTEXT_INVITE_SELECT } from '@bge/invites';
 import { canonicalizeTag } from '@bge/locale';
 import {
   AbilityService,
@@ -33,7 +34,7 @@ import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
-import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
+import { MEMBER_SELECT } from './read-shapes';
 
 /**
  * Relations returned with every household in the list read. Extracted so the
@@ -104,7 +105,7 @@ export class HouseholdService {
           where: {
             AND: [{ status: InviteStatus.Pending }],
           },
-          select: PENDING_INVITE_SELECT,
+          select: CONTEXT_INVITE_SELECT,
         },
 
         languageTag: {

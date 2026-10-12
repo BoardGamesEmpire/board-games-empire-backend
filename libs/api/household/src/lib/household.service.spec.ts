@@ -2,6 +2,7 @@ import type { Household } from '@bge/database';
 import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
+import { CONTEXT_INVITE_SELECT } from '@bge/invites';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -19,7 +20,7 @@ import {
 import { Http, PrismaError } from '@status/codes';
 import { HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT } from './constants/household.constants';
 import { HouseholdService } from './household.service';
-import { MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
+import { MEMBER_SELECT } from './read-shapes';
 
 const COND = { id: 'sentinel-condition' };
 
@@ -74,7 +75,7 @@ describe('HouseholdService', () => {
   // these pin that the reads actually USE them. Without this, the service could
   // regress to an inline `include:` — republishing `Invite.token` and the
   // membership provenance columns — while every shape spec still passed.
-  it('shapes pending invites with PENDING_INVITE_SELECT, never the raw row', async () => {
+  it('shapes pending invites with CONTEXT_INVITE_SELECT, never the raw row', async () => {
     db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
 
     await service.getHouseholdById('hh-1');
@@ -83,7 +84,7 @@ describe('HouseholdService', () => {
 
     expect(include.invites).toEqual({
       where: { AND: [{ status: InviteStatus.Pending }] },
-      select: PENDING_INVITE_SELECT,
+      select: CONTEXT_INVITE_SELECT,
     });
   });
 
