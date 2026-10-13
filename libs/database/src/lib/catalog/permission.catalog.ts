@@ -1248,6 +1248,24 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'Invite to household',
   }),
+  // The audience that may invite is the audience that lists the invites, so
+  // the condition is `create:household_invite`'s. Without a `read` grant the
+  // list's ceiling is empty for everyone below staff: the composer ANDs it in,
+  // and an Owner would page through nothing (#162).
+  //
+  // Not the household detail's embed, which reads through the household and
+  // is #665's question, for members, guests and friends.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Invite,
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'read:household_invite',
+    riskLevel: RiskLevel.Low,
+    reason: "View a household's invites",
+  }),
 
   // No grant here is a JOIN grant, and joining must not be gated on
   // `can(create, HouseholdMember)`: `manage` implies `create`, so the
