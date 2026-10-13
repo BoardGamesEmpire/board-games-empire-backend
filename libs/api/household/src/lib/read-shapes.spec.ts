@@ -1,5 +1,6 @@
 import { Prisma } from '@bge/database';
-import { INVITE_SCALARS_OMITTED, MEMBER_SCALARS_OMITTED, MEMBER_SELECT, PENDING_INVITE_SELECT } from './read-shapes';
+import { CONTEXT_INVITE_SELECT } from '@bge/invites';
+import { MEMBER_SCALARS_OMITTED, MEMBER_SELECT } from './read-shapes';
 
 /**
  * The scalar keys of a select object: the ones written `field: true`, as
@@ -24,6 +25,8 @@ const scalarKeysOf = (select: Record<string, unknown>): string[] =>
  * adding a column to `prisma/models` fails them until someone classifies it as
  * published or deliberately withheld. A fixture-based test would pass instead,
  * which is exactly the failure being fixed.
+ *
+ * The invite shapes are guarded the same way in `@bge/invites` (#161).
  */
 describe('household read shapes', () => {
   describe('MEMBER_SELECT', () => {
@@ -49,40 +52,14 @@ describe('household read shapes', () => {
         ['createdAt', 'householdId', 'id', 'showAllGames', 'updatedAt', 'userId'].sort(),
       );
     });
-  });
 
-  describe('PENDING_INVITE_SELECT', () => {
-    it('classifies every Invite scalar as either selected or deliberately omitted', () => {
-      const declared = Object.values(Prisma.InviteScalarFieldEnum).sort();
-      const classified = [...scalarKeysOf(PENDING_INVITE_SELECT), ...Object.keys(INVITE_SCALARS_OMITTED)].sort();
-
-      expect(classified).toEqual(declared);
-    });
-
-    it('never publishes the accept token', () => {
-      // The whole of #297. `Invite.token` is a live accept credential, and this
-      // shape is reached by every holder of `read:household` — every member of
-      // the household, plus any member's friend on a `Friends`-visible one.
-      expect(scalarKeysOf(PENDING_INVITE_SELECT)).not.toContain('token');
-      expect(INVITE_SCALARS_OMITTED).toHaveProperty('token');
-    });
-
-    it('never publishes the invitee email (D-297-2; the inviter-only question is #459)', () => {
-      expect(scalarKeysOf(PENDING_INVITE_SELECT)).not.toContain('inviteeEmail');
-      expect(INVITE_SCALARS_OMITTED).toHaveProperty('inviteeEmail');
-    });
-
-    it('publishes the invite scalars named by D-297-1', () => {
-      expect(scalarKeysOf(PENDING_INVITE_SELECT).sort()).toEqual(
-        ['createdAt', 'expiresAt', 'id', 'inviteeName', 'status', 'type'].sort(),
-      );
-    });
-
-    it('renders the invited role as an object rather than a bare id (D-297-6)', () => {
-      // A bare `roleId` would answer "which role" with an opaque identifier the
-      // client must resolve, while the roster beside it renders `{ id, name }`.
-      expect(scalarKeysOf(PENDING_INVITE_SELECT)).not.toContain('roleId');
-      expect(PENDING_INVITE_SELECT.role).toEqual({ select: { id: true, name: true } });
+    it('renders a member and an invite inviter as the same user shape', () => {
+      // Agreement by test rather than by a shared constant: the roster's `user`
+      // belongs to this lib and the inviter to `@bge/invites`, and neither
+      // should import the other's notion of a user. What matters is that a
+      // client sees one spelling of a user on the detail view, so that is
+      // what is pinned.
+      expect(CONTEXT_INVITE_SELECT.inviter.select).toEqual(MEMBER_SELECT.user.select);
     });
   });
 });

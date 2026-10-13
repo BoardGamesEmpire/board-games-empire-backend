@@ -152,6 +152,25 @@
     "not_deleted": "Household {id} is not deleted, so there is nothing to restore",
     "permission_not_provisioned": "Permission '{slug}' is not provisioned on this server"
   },
+  "invite": {
+    "not_found": "Invite with ID {id} not found",
+    "link_not_found": "No invite matches this link",
+    "invitee_required": "An invite needs an invitee: a user or an email address",
+    "self_invite": "You cannot invite yourself",
+    "household_required": "A household invite must name a household",
+    "event_required": "An event invite must name an event",
+    "context_mismatch": "A {type} invite cannot name a different context",
+    "expires_in_past": "An invite must expire after it is sent",
+    "already_outstanding": "An invite for this invitee is already outstanding",
+    "token_unavailable": "Could not mint a unique invite token",
+    "only_invitee_responds": "Only the invitee can accept or decline an invite",
+    "only_inviter_withdraws": "Only the inviter can withdraw an invite",
+    "awaiting_approval": "Invite {id} is awaiting approval and cannot be accepted yet",
+    "not_awaiting_approval": "Invite {id} is not awaiting approval",
+    "not_outstanding": "Invite {id} is {status} and can no longer be changed",
+    "expired": "Invite {id} has expired",
+    "changed_concurrently": "Invite {id} changed while it was being updated; try again"
+  },
   "quota": {
     "exceeded": "Quota for \"{resource}\" exceeded at {scope} scope",
     "check_amount_negative": "check amount must be non-negative",

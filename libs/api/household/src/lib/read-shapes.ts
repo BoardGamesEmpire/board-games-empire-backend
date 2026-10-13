@@ -30,10 +30,13 @@ import { Prisma } from '@bge/database';
  *
  * ## What this does NOT cover
  *
- * Exactly two models: `HouseholdMember` and `Invite`. The `Household` row that
- * carries them is still `include:`-shaped in `household.service.ts` — both the
- * detail read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to `Household`
- * still reaches clients with this suite green. Nothing sensitive ships today
+ * Exactly one model: `HouseholdMember`. The invite shapes this file used to
+ * carry live in `@bge/invites`, which owns every invite read so the
+ * household detail, the invite routes and the lib's own transitions cannot
+ * drift into three spellings of an invite. The `Household` row that carries
+ * both is still `include:`-shaped in `household.service.ts` — both the detail
+ * read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to `Household` still
+ * reaches clients with this suite green. Nothing sensitive ships today
  * (`clientRequestId` is a per-creator idempotency key; `deletedAt` is filtered
  * to null on the read path), which is why it was left rather than folded in:
  * converting it changes the exported `HouseholdWithRelations` payload type and
@@ -45,8 +48,9 @@ import { Prisma } from '@bge/database';
 /**
  * How a person is rendered wherever a household read names one.
  *
- * Shared so the roster's `user` and an invite's `inviter` cannot drift into two
- * spellings of the same thing.
+ * `@bge/invites` renders an invite's `inviter` the same way, and
+ * `read-shapes.spec.ts` pins that the two cannot drift into two spellings of
+ * the same thing.
  */
 const ACTOR_SELECT = {
   id: true,
@@ -105,54 +109,3 @@ export const MEMBER_SCALARS_OMITTED = {
   addedById:
     'Audit surface (#276). Who-invited-whom is social information nobody decided to publish; it also undercuts the separation #278 is built to keep. Stripped by D-296-1.',
 } as const satisfies Partial<Record<Prisma.HouseholdMemberScalarFieldEnum, string>>;
-
-/**
- * Pending invites as they appear on the household detail view (`D-297-1`,
- * `D-297-6`).
- *
- * `role` is rendered as an object rather than the bare `roleId` the model
- * carries, so "invited as Admin" reads the same way the roster beside it
- * renders a member's role.
- */
-export const PENDING_INVITE_SELECT = {
-  id: true,
-  status: true,
-  type: true,
-  inviteeName: true,
-  expiresAt: true,
-  createdAt: true,
-
-  role: { select: { id: true, name: true } },
-
-  inviter: { select: ACTOR_SELECT },
-} as const satisfies Prisma.InviteSelect;
-
-/**
- * `Invite` scalars deliberately withheld from clients, and why.
- *
- * The first two are the reason #297 exists; the rest are internal bookkeeping
- * that was only ever public because `include:` published it.
- */
-export const INVITE_SCALARS_OMITTED = {
-  token:
-    'THE accept credential (`@unique`, "email confirmation token"). This shape is reached by every holder of read:household — which includes non-members, via read:households:friends. Publishing it is an authorization bypass once accept is token-reachable (#163). Never select this.',
-  inviteeEmail:
-    'An address belonging to someone who may have no account. Harvestable by every co-member under the old shape. Withheld outright by D-297-2; whether the INVITER alone should see it is #459.',
-  inviterId: 'Superseded by the `inviter` relation above, which renders the person rather than an opaque id.',
-  roleId: 'Superseded by the `role` relation above (D-297-6).',
-  inviteeId: 'Internal linkage. The invitee is identified to clients by `inviteeName`.',
-  eventId: 'Not meaningful on a household read; an event invite reaches clients through the event routes.',
-  householdId: 'Redundant — this shape is only ever nested under the household it belongs to.',
-  // Not a response body: this key is the NAME of the `Invite.message` column,
-  // and the string beside it is the reason the column is withheld. The i18n
-  // rule (#144/#145) guards user-facing `message:` payloads; a ledger keyed by
-  // column name is not one.
-  // eslint-disable-next-line no-restricted-syntax
-  message: 'Free text addressed to the invitee, not to the household at large.',
-  metadata: 'Untyped internal payload for system invites (#161). Never a client contract.',
-  needsApproval: 'Approval bookkeeping for #231; internal to the join-policy flow.',
-  approvedById: 'Approval bookkeeping (#231). Same social-inference concern as `HouseholdMember.addedById`.',
-  approvedAt: 'Approval bookkeeping (#231).',
-  respondedAt: 'Lifecycle bookkeeping; `status` is the client-facing answer.',
-  updatedAt: 'Row bookkeeping. `expiresAt` and `createdAt` are what a pending invite is judged by.',
-} as const satisfies Partial<Record<Prisma.InviteScalarFieldEnum, string>>;

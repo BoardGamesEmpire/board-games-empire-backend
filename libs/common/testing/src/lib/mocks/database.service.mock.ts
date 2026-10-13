@@ -53,6 +53,7 @@ function mockDelegate() {
     createManyAndReturn: jest.fn(),
     update: jest.fn(),
     updateMany: jest.fn(),
+    updateManyAndReturn: jest.fn(),
     upsert: jest.fn(),
     delete: jest.fn(),
     deleteMany: jest.fn(),

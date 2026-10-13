@@ -30,6 +30,9 @@
       "path": "../../common/quota/tsconfig.lib.json"
     },
     {
+      "path": "../../common/invites/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/shared/tsconfig.lib.json"
     },
     {
