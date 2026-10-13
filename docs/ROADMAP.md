@@ -1,4 +1,4 @@
-# Proposed ordering
+# Roadmap: proposed ordering
 
 ## Phase 0 — preparatory (weeks, in parallel with current work)
 
@@ -18,17 +18,17 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 ## Phase 2 — feedback module completes
 
-9. ~~Feedback module (#77) — finish, defining FeedbackSink interface inline. Local sink ships as the bundled implementation.~~ Completed in #77: `@bge/feedback` (`POST /feedback/reports`, persistence, server-side redaction, retention sweep, permission-based feedback bans, `feedback.report.submitted` event, and the `FeedbackSubmission` audit model). The report shape generalized beyond bugs to `Bug | Crash | FeatureRequest`.
-10. ~~#70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.~~ Completed: new `@bge/queue-feedback` lib — `FeedbackSink` contract (`submit`, optional category filter, deferred `syncStatus`), `FeedbackSinkRegistry` (index-by-slug, fail-loud), bundled `LocalDatabaseSink`, and BullMQ fan-out (producer in the API — which gained a `BullModule` root — consumer on `ActorAwareWorkerHost` in the worker) with one `FeedbackSubmission` per (report, sink), per-sink failure isolation, and a `@@unique([feedbackReportId, sinkSlug])` backstop. See [docs/FEEDBACK.md](FEEDBACK.md). Deferred to follow-up issues: per-household sink selection + `HouseholdFeedbackSinkConfig` (blocked on #59), sink auto-disable, `syncStatus()` implementation, and a reaper for stalled-`Pending` submissions.
+9. ~~Feedback module (#77) — finish, defining FeedbackSink interface inline. Local sink ships as the built-in implementation.~~ Completed in #77: `@bge/feedback` (`POST /feedback/reports`, persistence, server-side redaction, retention sweep, permission-based feedback bans, `feedback.report.submitted` event, and the `FeedbackSubmission` audit model). The report shape generalized beyond bugs to `Bug | Crash | FeatureRequest`.
+10. ~~#70 FeedbackSink — formalize the interface that already exists from step 9. Mostly documentation + the eventual plugin-category wiring.~~ Completed: new `@bge/queue-feedback` lib — `FeedbackSink` contract (`submit`, optional category filter, deferred `syncStatus`), `FeedbackSinkRegistry` (index-by-slug, fail-loud), built-in `LocalDatabaseSink`, and BullMQ fan-out (producer in the API — which gained a `BullModule` root — consumer on `ActorAwareWorkerHost` in the worker) with one `FeedbackSubmission` per (report, sink), per-sink failure isolation, and a `@@unique([feedbackReportId, sinkSlug])` backstop. See [docs/FEEDBACK.md](FEEDBACK.md). Deferred to follow-up issues: per-household sink selection + `HouseholdFeedbackSinkConfig` (blocked on #59), sink auto-disable, `syncStatus()` implementation, and a reaper for stalled-`Pending` submissions.
 
 ## Phase 3 — plugin loader (extraction, not invention)
 
 11. #62 Streaming + tus. Doesn't depend on plugins; can slot earlier if media uploads are user-pressing.
-12. #59 Plugin loader. Extracts what now exists in three concrete shapes: gateways (#59 retrofits them), storage drivers, feedback sinks. Each becomes bundled: true plugin rows; the loader generalizes lifecycle.
+12. #59 Plugin loader. Generalizes lifecycle over the three shapes that now exist: DataGateways, storage drivers, feedback sinks. No plugin ships inside the server: DataGateways become official plugins installed from the official registry (#194; the registry is #84, seeded on every server), while local disk storage and the local feedback sink stay built-in drivers, which plugins can add to.
 13. #60 Permission risk + selective grants. Tightly coupled to #59; lands immediately after.
 14. #68 plugin dispatch — add the plugin actor kind to AbilityService now that PluginAbilityFactory exists.
 
-## Phase 4 — first non-bundled plugin
+## Phase 4 — first new plugin
 
 15. #61 S3 storage driver plugin. Validates the abstraction with one real out-of-tree consumer. Expect this to surface design flaws in #59; fix them here before the next plugin.
 
@@ -47,7 +47,7 @@ These two can land alongside whatever else is in flight; they're cross-cutting p
 
 21. #73 Sentry plugin. Layered on OTel; lower priority since OTel already gives most teams what they need.
 22. #63 Storage migration service. Defer until a real user actually wants to migrate from local-disk to S3.
-23. #71 BackupSink + bundled local backup. Critical for production self-hosters, but most early users can lean on Postgres dumps + filesystem backup of the storage dir until then.
+23. #71 BackupSink + built-in local backup. Critical for production self-hosters, but most early users can lean on Postgres dumps + filesystem backup of the storage dir until then.
 
 ## Phase 8 — speculative / opportunistic
 

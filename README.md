@@ -14,7 +14,10 @@ as intended.
 ```
 apps/
   api/                     — Main NestJS API (REST, WebSocket)
+  worker/                  — Background job worker (queue consumer)
+  gateway-worker/          — Gateway worker: fetches games from DataGateways for imports
   gateway-coordinator/     — gRPC microservice coordinating gateway fan-out
+  launcher/                — Image entry point: runs the process role named by BGE_ROLES
   igdb-gateway/            — IGDB data adapter (gRPC) - (search and import)
   boardgamegeek-gateway/   — BoardGameGeek data adapter (gRPC) - (WIP)
 
@@ -25,7 +28,7 @@ libs/
   common/*/                — Cross-cutting concerns (permissions, utilities, …)
 ```
 
-The main application, the coordinator and at least one game gateway must be running for the full import and search pipeline to work. The gateways communicate with the coordinator over gRPC; the API communicates with the coordinator over gRPC and exposes results to clients over HTTP and WebSocket.
+The main application, the coordinator and at least one DataGateway must be running for search to work; imports also need the worker and the gateway worker. The coordinator and the gateway worker call the DataGateways over gRPC; the API communicates with the coordinator over gRPC and exposes results to clients over HTTP and WebSocket.
 
 ---
 
@@ -103,19 +106,21 @@ npm start
 
 This runs `nf start`, which launches all processes defined in `Procfile` concurrently:
 
-| Process        | Default port | Description                       |
-| -------------- | ------------ | --------------------------------- |
-| `api`          | 33333        | Main REST + WebSocket API         |
-| `coordinator`  | 50052        | Gateway coordinator (gRPC)        |
-| `worker`       |              | Worker service (Queue consumer)   |
-| `bgg-gateway`  | 50053        | BoardGameGeek data gateway (gRPC) |
-| `igdb-gateway` | 50054        | IGDB data gateway (gRPC)          |
+| Process          | Default port | Description                                      |
+| ---------------- | ------------ | ------------------------------------------------ |
+| `api`            | 33333        | Main REST + WebSocket API                        |
+| `coordinator`    | 50052        | Gateway coordinator (gRPC)                       |
+| `worker`         |              | Worker service (Queue consumer)                  |
+| `gateway-worker` |              | Gateway worker (DataGateway fetches for imports) |
+| `bgg-gateway`    | 50053        | BoardGameGeek data gateway (gRPC)                |
+| `igdb-gateway`   | 50054        | IGDB data gateway (gRPC)                         |
 
 To run a single service in isolation:
 
 ```bash
 npm start api
 npm start worker
+npm start gateway-worker
 npm start coordinator
 npm start igdb-gateway
 npm start bgg-gateway
@@ -124,7 +129,7 @@ npm start bgg-gateway
 or several using comma separated values
 
 ```bash
-npm start api,coordinator,worker
+npm start api,coordinator,worker,gateway-worker
 npm start bgg-gateway,igdb-gateway
 ```
 

@@ -82,7 +82,7 @@ The game gateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, a
 What "ready" means here, role by role:
 
 - **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
-- **The coordinator and the gateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its boot sequence is done; the gateways have no database and open theirs at start.
+- **The coordinator and the gateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the gateways have no database and open theirs at start.
 - **`worker` and `gateway-fetch`** listen on nothing, so there is nothing to probe. Their `Bootstrap complete` log line is the evidence they came up. A role that fails exits, and the restart policy brings it back.
 
 Real health checks for every role are #612.
@@ -143,7 +143,7 @@ The IGDB gateway is `igdb-gateway` on port 50054.
 
 ## Shutdown
 
-On `SIGTERM` each role closes its application, flushes its telemetry, and exits. A role registers those handlers once its boot sequence is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
+On `SIGTERM` each role closes its application, flushes its telemetry, and exits. A role registers those handlers once its bootstrap is done. The role's process is PID 1 in its container, and PID 1 ignores a signal it has no handler for, so a container stopped before then stops only at the kill timeout. The split profile sets `init: true`, which puts an init process in front of the role and lets the signal end it at once. In Kubernetes, the pod's grace period applies.
 
 ## Upgrades and rollback
 
