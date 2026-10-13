@@ -58,7 +58,7 @@ The baseline is the whole job, so it includes checkout, `setup-workspace`, and `
 
 The budget covers the current single-boot shape and a suite that is still only the harness, actor fixtures, and support specs. Real domain coverage (#257) is what will move it. The worker child adds one boot for each file that opts in (see [Queues and the worker child](#queues-and-the-worker-child)). Re-measuring this table against the suite as it now stands is #301.
 
-The suite is already split across parallel CI jobs. If a shard's job outgrows the budget (#301 re-measures it per shard), the levers in rough order of preference: prune or merge slow specs; balance the shards by duration rather than file count; add a shard, which the Nx Cloud connection limit noted in `ci.yml` holds back. Measure first.
+The suite is already split across parallel CI jobs. If a shard's job outgrows the budget (#301 re-measures it per shard), the levers in rough order of preference: prune or merge slow specs; balance the shards by duration rather than file count; add a shard, which costs every run another runner's setup, uncached build and Docker Hub pulls (#683). Measure first.
 
 ## Flake policy (D-259-4 on #259)
 
