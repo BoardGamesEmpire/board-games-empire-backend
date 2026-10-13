@@ -45,3 +45,26 @@ export function withEffectiveInviteStatus<T extends InviteExpiryFacts>(invite: T
 export function unexpiredInviteWhere(now: Date = new Date()): Prisma.InviteWhereInput {
   return { expiresAt: { gt: now } };
 }
+
+/**
+ * The query-side twin of {@link effectiveInviteStatus}: a `where` fragment
+ * matching the rows whose status, as that function would compute it at `now`,
+ * is `status`. Kept beside it so a listing filtered by status and a read of the
+ * same row agree on the boundary.
+ *
+ * `Expired` matches the rows stamped so and the outstanding rows whose window
+ * has closed. An outstanding status matches only the rows still inside their
+ * window. A settled status matches its rows whatever the clock says.
+ */
+export function effectiveInviteStatusWhere(status: InviteStatus, now: Date = new Date()): Prisma.InviteWhereInput {
+  if (status === InviteStatus.Expired) {
+    return {
+      OR: [
+        { status: InviteStatus.Expired },
+        { status: { in: [...OUTSTANDING_INVITE_STATUSES] }, expiresAt: { lte: now } },
+      ],
+    };
+  }
+
+  return isOutstandingInviteStatus(status) ? { status, ...unexpiredInviteWhere(now) } : { status };
+}
