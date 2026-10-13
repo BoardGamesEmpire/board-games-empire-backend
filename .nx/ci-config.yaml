@@ -1,0 +1,13 @@
+# Nx Cloud reads this file for CI settings, and for the keys it sets it takes
+# precedence over the workspace's settings in the Nx Cloud UI.
+ai:
+  # Self-Healing CI (`nx fix-ci` at the end of ci.yml's `main` job) never acts
+  # on an e2e failure: the suites run against real containers, and their flake
+  # profile is still uncharacterised (#259). The e2e shards run beside `main`
+  # in the same CI pipeline execution (#684), so their failures would
+  # otherwise be eligible. `*e2e*` also matches the e2e apps' own lint and
+  # typecheck tasks, which is the safe way for it to be wrong. An exclusion
+  # alone leaves every other task eligible: the nx-cloud CLI reference reads
+  # `--fix-tasks="!*deploy*,!*test*"` as all tasks except deploy and test.
+  fix-tasks-patterns:
+    - '!*e2e*'

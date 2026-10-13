@@ -1,5 +1,5 @@
 import type { Queue } from 'bullmq';
-import { createTestQueue, obliterateQueue, waitForStableJobCount, type TestQueue } from './queues';
+import { countPendingJobs, createTestQueue, obliterateQueue, waitForStableJobCount, type TestQueue } from './queues';
 import { requireDisposableRedis } from './redis-reset';
 
 /** Rounds of obliterate-then-hold before giving up on a queue that keeps filling. */
@@ -55,6 +55,106 @@ export function openIsolatedQueue(name: string, env: NodeJS.ProcessEnv = process
 }
 
 /**
+ * Per queue, how many of the drains this spec file registered are still to
+ * run. `isolateQueue` and `useWorker` register theirs as they register their
+ * hooks, and record each one as run at the end of its `afterAll`.
+ * `checkLeftoverJobs` leaves a queue to a drain still to come. Module state, and
+ * so one registry per file: Jest gives each spec file a module registry of its
+ * own, and loads the setup files into it.
+ *
+ * Why `checkLeftoverJobs` can't simply count after the drain: jest-circus runs
+ * a block's `afterAll` hooks in the order they were declared, and the setup file
+ * registers the check first. In a spec that installs one of these helpers at its
+ * top level, the drain therefore runs after the check, which would fail the file
+ * for a late job the drain was about to remove.
+ *
+ * Why only while the drain is still to come: a helper installed inside a
+ * describe has drained by the time the check runs, since a describe's
+ * `afterAll` hooks finish before the root's start. The check then counts what
+ * the file left after the drain, such as jobs a later describe added without
+ * isolating the queue.
+ */
+const drainsToRun = new Map<string, number>();
+
+/**
+ * Registers a drain this spec file will run in an `afterAll`, emptying the
+ * named queues, and returns the call that records it as run.
+ */
+export function registerDrain(...names: readonly string[]): () => void {
+  for (const name of names) {
+    drainsToRun.set(name, (drainsToRun.get(name) ?? 0) + 1);
+  }
+
+  return () => {
+    for (const name of names) {
+      drainsToRun.set(name, (drainsToRun.get(name) ?? 0) - 1);
+    }
+  };
+}
+
+/** Whether a drain this spec file registered for the queue is still to run. */
+export function hasDrainToRun(name: string): boolean {
+  return (drainsToRun.get(name) ?? 0) > 0;
+}
+
+/**
+ * The verdict {@link checkLeftoverJobs} reaches when a file finishes: throws
+ * when the file left more jobs pending on the queue than it found. Exported so
+ * the verdict can be unit-tested without registering hooks.
+ */
+export function requireNoLeftoverJobs(name: string, pendingAtStart: number, pendingAtEnd: number): void {
+  if (pendingAtEnd <= pendingAtStart) {
+    return;
+  }
+
+  throw new Error(
+    `This file left ${pendingAtEnd - pendingAtStart} job(s) pending on the '${name}' queue ` +
+      `(${pendingAtStart} when it started, ${pendingAtEnd} when it finished). Nothing consumes the queue, ` +
+      `so they outlive the file. A file that fills a queue installs isolateQueue('${name}'), even if it ` +
+      `never looks at the queue.`,
+  );
+}
+
+/**
+ * Registers, for one spec file, the check that it leaves the queue no fuller
+ * than it found it (#684). A file that fills the queue without `isolateQueue`
+ * then fails itself, whatever its order or shard. The count runs from the
+ * file's own start rather than from zero, so the files after a leak don't
+ * fail with it. While a drain the file registered for the queue is still to
+ * run, the queue is left to that drain (see {@link drainsToRun}).
+ *
+ * One read at the end, with no settle window: the drain must clear every late
+ * job, but the check only has to see one. Fan-out starts a submission's first
+ * `queue.add` while the API is still handling the request, a response and the
+ * file's teardown ahead of this read. Jobs for further sinks can still be in
+ * flight, but one is enough to fail the file.
+ *
+ * `test-isolation.ts` calls it, so every spec file runs it. It only reads the
+ * queue, so unlike `isolateQueue` it needs no Redis ownership guard.
+ */
+export function checkLeftoverJobs(name: string): void {
+  let handle: TestQueue | undefined;
+  let pendingAtStart: number | undefined;
+
+  beforeAll(async () => {
+    handle = createTestQueue(name);
+    pendingAtStart = await countPendingJobs(handle.queue);
+  });
+
+  afterAll(async () => {
+    try {
+      if (handle !== undefined && pendingAtStart !== undefined && !hasDrainToRun(name)) {
+        requireNoLeftoverJobs(name, pendingAtStart, await countPendingJobs(handle.queue));
+      }
+    } finally {
+      await handle?.close();
+      handle = undefined;
+      pendingAtStart = undefined;
+    }
+  });
+}
+
+/**
  * Registers between-test cleanup of one queue for one spec file, and hands back
  * an accessor for the queue itself. A file that fills several queues calls it
  * once per queue.
@@ -65,19 +165,18 @@ export function openIsolatedQueue(name: string, env: NodeJS.ProcessEnv = process
  * a delivery job, which means the idempotency, authorization, and throttle specs
  * leak jobs just as readily as the file that asserts on them.
  *
- * The failure that follows is not local. `harness.spec.ts` asserts the feedback
- * queue is empty (the no-consumer baseline), so leaked jobs surface as a failure
- * in an UNRELATED file, with a count that depends on Jest's file ordering. This
- * cost a red run while the feedback suite (#262) was written, at 16 leaked jobs;
- * centralizing the cleanup is what keeps the next spec author from rediscovering
- * it.
+ * For the feedback queue that is enforced: `checkLeftoverJobs` fails a file
+ * that leaves jobs there without this. Other queues have no such check, and
+ * their leftovers stay for every file that follows. Centralizing the cleanup
+ * keeps each spec author from rediscovering this; it cost a red run while the
+ * feedback suite (#262) was written, at 16 leaked jobs.
  *
  * WHY THE FILE-LEVEL DRAIN SETTLES AND THE PER-TEST ONE DOES NOT. Fan-out is
  * fire-and-forget: the listener's `queue.add` is only STARTED while the request
  * is being handled, so its Redis round-trip can finish after the response has
  * reached the test process — and therefore after a bare `afterEach` obliterate
- * has already run. A job landing in that window survives to the end of the run
- * and fails `harness.spec.ts` rather than anything here.
+ * has already run. A job landing in that window survives the test, and after
+ * the file's last test only the drain below removes it.
  *
  * The per-test obliterate stays cheap because a stray leaking from test to test
  * within this file is harmless (the next `beforeEach` clears it anyway). What
@@ -96,6 +195,8 @@ export function openIsolatedQueue(name: string, env: NodeJS.ProcessEnv = process
  * and `useWorker` empties its queues itself before launch and after stop.
  */
 export function isolateQueue(name: string): () => Queue {
+  const drainRan = registerDrain(name);
+
   let handle: TestQueue | undefined;
 
   function requireHandle(): TestQueue {
@@ -127,6 +228,8 @@ export function isolateQueue(name: string): () => Queue {
         await emptyQueue(handle.queue);
       }
     } finally {
+      drainRan();
+
       // The drain throws by design when jobs keep arriving. Closing in
       // `finally` keeps that diagnostic: an unclosed ioredis socket makes Jest
       // hang or complain that a worker would not exit gracefully, which buries

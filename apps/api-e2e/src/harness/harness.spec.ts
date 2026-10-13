@@ -2,8 +2,9 @@ import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import request from 'supertest';
 import { resetDatabase } from '../support/database-reset';
 import { requireBaseUrl } from '../support/e2e-env';
-import { countPendingJobs, createTestQueue, type TestQueue } from '../support/queues';
+import { createTestQueue, type TestQueue } from '../support/queues';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { consumersOf } from '../support/worker';
 
 const ISOLATION_USERNAME = 'e2e-harness-isolation';
 
@@ -129,10 +130,9 @@ describe('e2e harness', () => {
   describe('queues', () => {
     it('reaches registered queues with nothing consuming them', async () => {
       // No @Processor runs in the API server — enqueued jobs would sit in
-      // 'waiting'. An empty count here pins the no-consumer baseline the #262
-      // suite builds on, and that every file leaves the queue empty, worker
-      // files included.
-      await expect(countPendingJobs(feedbackQueue.queue)).resolves.toBe(0);
+      // 'waiting', the no-consumer baseline the #262 suite builds on. Counted
+      // as attached consumers: an empty queue reads the same with one attached.
+      await expect(consumersOf(feedbackQueue.queue)).resolves.toBe(0);
     });
   });
 });
