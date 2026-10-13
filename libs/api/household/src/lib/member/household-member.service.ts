@@ -39,27 +39,11 @@ import {
   assertHouseholdExists,
   lockExistingHousehold,
   lockHouseholdForRoleTransition,
+  resolveHouseholdRoleId,
 } from '../household-access.helpers';
 import { MEMBER_SELECT } from '../read-shapes';
 
 export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ select: typeof MEMBER_SELECT }>;
-
-/**
- * A client for reads that take NO locks and whose result cannot vary with
- * transaction state. Today that is exactly one lookup — {@link resolveRoleId},
- * which reads static seed data — so either client is correct there and the
- * caller may pick whichever avoids extending a lock window.
- *
- * This is NOT a general-purpose "any client will do". It is the exception, and
- * it is named for the property that makes it safe rather than for the clients
- * it admits. Anything that takes a row lock, takes an advisory lock, or must be
- * atomic with the caller's other writes — {@link addMemberWithin},
- * `QuotaService.consume` — types its parameter `Prisma.TransactionClient`
- * exactly. A base client there would compile, pass its tests, and serialize
- * nothing. Do not widen a locking parameter to this union on the strength of
- * its neighbors.
- */
-type LockFreeReadClient = DatabaseService | Prisma.TransactionClient;
 
 /**
  * Both sides of a completed ownership transfer. The client needs both rows to
@@ -339,7 +323,7 @@ export class HouseholdMemberService {
           throw new BadRequestException(t('errors.household.member_role_owner'));
         }
 
-        const roleId = await this.resolveRoleId(tx, updateMemberRoleDto.role);
+        const roleId = await resolveHouseholdRoleId(tx, updateMemberRoleDto.role);
 
         await tx.householdRole.upsert({
           where: { householdMemberId: member.id },
@@ -408,8 +392,8 @@ export class HouseholdMemberService {
     // household state, so holding the owner-row lock across two lookups that
     // cannot change the outcome only extends the window in which concurrent
     // departures block. A seed change mid-flight would fail the FK regardless.
-    const ownerRoleId = await this.resolveRoleId(this.db, SystemRole.HouseholdOwner);
-    const adminRoleId = await this.resolveRoleId(this.db, SystemRole.HouseholdAdmin);
+    const ownerRoleId = await resolveHouseholdRoleId(this.db, SystemRole.HouseholdOwner);
+    const adminRoleId = await resolveHouseholdRoleId(this.db, SystemRole.HouseholdAdmin);
 
     const conditions = this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage);
     const actorWhere = {
@@ -568,8 +552,8 @@ export class HouseholdMemberService {
    *
    * ## The `tx` is load-bearing — do not hand this `this.db`
    *
-   * Typed `Prisma.TransactionClient` exactly, not the {@link LockFreeReadClient}
-   * union its neighbors use, and for the same reason `QuotaService.consume` is:
+   * Typed `Prisma.TransactionClient` exactly, not the `LockFreeReadClient`
+   * union the role lookup takes, and for the same reason `QuotaService.consume` is:
    * the guarantees here are row locks, and they only hold for the life of a
    * transaction. A base client would compile, pass its tests, and serialize
    * nothing.
@@ -660,7 +644,7 @@ export class HouseholdMemberService {
       return { member: existing, softOverages: [] };
     }
 
-    const roleId = await this.resolveRoleId(tx, role);
+    const roleId = await resolveHouseholdRoleId(tx, role);
 
     // Takes `pg_advisory_xact_lock` on the caller's transaction, so concurrent
     // admissions to the same household serialize on the cap rather than both
@@ -1067,27 +1051,6 @@ export class HouseholdMemberService {
     `);
 
     return owners.map((owner) => owner.household_member_id);
-  }
-
-  /**
-   * Resolves a `SystemRole` to its `roles` row id, failing loud when the row is
-   * absent.
-   *
-   * Explicit resolution rather than a nested `role: { connect: { name } }`: a
-   * missing row (seed drift — a new `SystemRole` shipped before the seed
-   * reseeds) raises the same `P2025` from the connect target as a vanished
-   * member row raises from the write, and {@link rethrowMutationFailure} would
-   * report a server misconfiguration to the caller as their own lack of
-   * permission. Repo-wide generalization is #242.
-   */
-  private async resolveRoleId(client: LockFreeReadClient, name: SystemRole): Promise<string> {
-    const role = await client.role.findUnique({ where: { name }, select: { id: true } });
-
-    if (!role) {
-      throw new InternalServerErrorException(t('errors.household.role_not_provisioned', { role: name }));
-    }
-
-    return role.id;
   }
 
   /**

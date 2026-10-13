@@ -1,6 +1,6 @@
-import { Prisma, type DatabaseService } from '@bge/database';
+import { Prisma, type DatabaseService, type SystemRole } from '@bge/database';
 import { t } from '@bge/i18n';
-import { NotFoundException } from '@nestjs/common';
+import { InternalServerErrorException, NotFoundException } from '@nestjs/common';
 
 /**
  * Cheap existence probe (excludes soft-deleted). Lets a caller distinguish a
@@ -162,4 +162,42 @@ export async function lockHouseholdForRoleTransition(tx: Prisma.TransactionClien
   if (rows.length === 0) {
     throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
   }
+}
+
+/**
+ * A client for reads that take NO locks and whose result cannot vary with
+ * transaction state. Today that is exactly one lookup, {@link resolveHouseholdRoleId},
+ * which reads static seed data, so either client is correct there and the
+ * caller may pick whichever avoids extending a lock window.
+ *
+ * This is NOT a general-purpose "any client will do". It is the exception, and
+ * it is named for the property that makes it safe rather than for the clients
+ * it admits. Anything that takes a row lock, takes an advisory lock, or must be
+ * atomic with the caller's other writes (`HouseholdMemberService.addMemberWithin`,
+ * `QuotaService.consume`) types its parameter `Prisma.TransactionClient`
+ * exactly. A base client there would compile, pass its tests, and serialize
+ * nothing. Do not widen a locking parameter to this union on the strength of
+ * its neighbors.
+ */
+export type LockFreeReadClient = DatabaseService | Prisma.TransactionClient;
+
+/**
+ * Resolves a `SystemRole` to its `roles` row id, failing loud when the row is
+ * absent. The member and invite services both write a role by id.
+ *
+ * Explicit resolution rather than a nested `role: { connect: { name } }`: a
+ * missing row (seed drift: a new `SystemRole` shipped before the seed
+ * reseeds) raises the same `P2025` from the connect target as a vanished
+ * member row raises from the write, and the member service's
+ * `rethrowMutationFailure` would report a server misconfiguration to the
+ * caller as their own lack of permission. Repo-wide generalization is #242.
+ */
+export async function resolveHouseholdRoleId(client: LockFreeReadClient, name: SystemRole): Promise<string> {
+  const role = await client.role.findUnique({ where: { name }, select: { id: true } });
+
+  if (!role) {
+    throw new InternalServerErrorException(t('errors.household.role_not_provisioned', { role: name }));
+  }
+
+  return role.id;
 }
