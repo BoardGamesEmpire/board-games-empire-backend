@@ -376,7 +376,7 @@ describe('WebhookSubscriptionService', () => {
   });
 
   describe('reactivate', () => {
-    it('resets the failure counter, re-checks the read grant, and redacts', async () => {
+    it("resets the failure counter, re-checks each type's action, and redacts", async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(
         makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
       );
@@ -396,7 +396,7 @@ describe('WebhookSubscriptionService', () => {
       expect(result.secret).toBe(WEBHOOK_SECRET_REDACTED);
     });
 
-    it('refuses to reactivate when the read grant is gone', async () => {
+    it("refuses to reactivate when a type's action is no longer granted", async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(
         makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
       );

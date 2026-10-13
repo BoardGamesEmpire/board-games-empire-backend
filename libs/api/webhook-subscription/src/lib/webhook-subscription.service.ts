@@ -46,7 +46,7 @@ export class WebhookSubscriptionService {
    * and that they can read the named household. This is the coarse gate;
    * per-event instance authorization still runs at dispatch, so this rejects
    * only subscriptions the creator could never legitimately receive (including
-   * users denied via inverse permission once #87 lands).
+   * a user a direct permission denies, #87).
    *
    * The signing secret is stored encrypted (`EncryptionService`) and returned
    * in plaintext exactly once, here — the caller cannot retrieve it again.

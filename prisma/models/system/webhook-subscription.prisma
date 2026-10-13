@@ -11,7 +11,7 @@
 //   Pending  reserved for the future URL-verification handshake; v1 never sets it
 //   Disabled user turned it off
 //   Failed   auto-disabled after consecutive delivery failures
-//   Revoked  (future) creator lost the underlying read grant — pairs with #87
+//   Revoked  (future) creator lost the action an event type requires (#727)
 enum WebhookSubscriptionStatus {
   Active
   Pending
