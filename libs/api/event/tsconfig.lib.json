@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/webhooks/tsconfig.lib.json"
+    },
+    {
       "path": "../household/tsconfig.lib.json"
     },
     {

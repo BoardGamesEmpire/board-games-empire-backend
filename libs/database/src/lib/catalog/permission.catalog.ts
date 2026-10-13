@@ -304,12 +304,18 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'View public games',
   }),
+  // Import jobs only (#479). An import job describes public content, so every
+  // user may watch every import, as the import status route and the import
+  // webhooks already let them. Other job types are unreadable until the
+  // catalog says otherwise, so a type whose payload is private cannot reach a
+  // reader by being added to the enum.
   permission({
     action: Action.read,
     subject: ResourceType.Job,
+    conditions: { type: 'GameImport' },
     slug: 'read:job',
     riskLevel: RiskLevel.Medium,
-    reason: 'View import/system job status',
+    reason: 'View import job status',
   }),
   permission({
     action: Action.create,

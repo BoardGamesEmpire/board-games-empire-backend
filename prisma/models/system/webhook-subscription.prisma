@@ -1,9 +1,10 @@
 // Outbound webhook delivery. A subscription is a standing grant tied to its
 // creating user (`createdById`): events are delivered only when that user can
-// still `read` the subject at dispatch time (CASL intersection). Scoped to one
-// `resourceType`, optionally narrowed by a specific `resourceId` (an instance
-// of that type) and/or a `householdId` container. Both filters null ⇒ all
-// instances of `resourceType` the creator can read.
+// still take the event type's required action on the subject at dispatch time
+// (CASL intersection). Scoped to one `resourceType`, optionally narrowed by a
+// specific `resourceId` (an instance of that type) and/or a `householdId`
+// container. Both filters null ⇒ every instance of `resourceType` that passes
+// that check.
 //
 // Status is reason-encoded — no separate `disabledReason`:
 //   Active   delivering

@@ -1,4 +1,4 @@
-import { DatabaseService, ResourceType } from '@bge/database';
+import { Action, DatabaseService, JobType, PERMISSION_CATALOG, ResourceType } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { createPrismaAbility } from '@casl/prisma';
@@ -60,6 +60,89 @@ describe('WebhookVisibilityService', () => {
     await expect(service.isVisibleTo(ResourceType.Household, 'hh-1', ability)).resolves.toBe(true);
     expect(db.household.count).toHaveBeenCalledWith({
       where: expect.objectContaining({ id: 'hh-1', deletedAt: null, AND: [expect.anything()] }),
+    });
+  });
+
+  describe('the action it checks', () => {
+    // Read and update reach different rows, so the clause in the count names
+    // which action was checked.
+    const readOrUpdate = createPrismaAbility([
+      { action: Action.read, subject: ResourceType.Event, conditions: { householdId: 'hh-read' } },
+      { action: Action.update, subject: ResourceType.Event, conditions: { householdId: 'hh-update' } },
+    ]) as AppAbility;
+
+    const clauseChecked = () => (db.event.count.mock.calls[0][0]?.where as { AND: unknown[] }).AND;
+
+    it('checks read when no action is given', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Event, 'event-1', readOrUpdate);
+
+      expect(clauseChecked()).toEqual([{ OR: [{ householdId: 'hh-read' }] }]);
+    });
+
+    it('checks the action it is given', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Event, 'event-1', readOrUpdate, { action: Action.update });
+
+      expect(clauseChecked()).toEqual([{ OR: [{ householdId: 'hh-update' }] }]);
+    });
+  });
+
+  describe('a subject already soft-deleted when its event fires', () => {
+    it('reads the deleted Event row instead of refusing it', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await expect(service.isVisibleTo(ResourceType.Event, 'event-1', ability, { subjectDeleted: true })).resolves.toBe(
+        true,
+      );
+
+      const where = db.event.count.mock.calls[0][0]?.where as Record<string, unknown>;
+      expect(where).toMatchObject({ id: 'event-1', AND: [expect.anything()] });
+      expect('deletedAt' in where).toBe(false);
+    });
+
+    it('still checks the action it is given', async () => {
+      const updateOnly = createPrismaAbility([
+        { action: Action.update, subject: ResourceType.Event, conditions: { householdId: 'hh-1' } },
+      ]) as AppAbility;
+      db.event.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Event, 'event-1', updateOnly, {
+        action: Action.update,
+        subjectDeleted: true,
+      });
+
+      expect(db.event.count.mock.calls[0][0]?.where).toMatchObject({ AND: [{ OR: [{ householdId: 'hh-1' }] }] });
+    });
+
+    it('keeps the deletedAt guard for every other event', async () => {
+      db.event.count.mockResolvedValue(1);
+
+      await service.isVisibleTo(ResourceType.Event, 'event-1', ability, { subjectDeleted: false });
+
+      expect(db.event.count).toHaveBeenCalledWith({ where: expect.objectContaining({ deletedAt: null }) });
+    });
+  });
+
+  it("carries read:job's condition into the Job check, so a job of another type cannot match (#479)", async () => {
+    // The User role's own rule, taken from the catalog rather than restated, so
+    // the check is the one a subscriber's ability really builds. The Job
+    // subject has no soft delete, so this clause is all that limits the count.
+    const readJob = PERMISSION_CATALOG.find((entry) => entry.slug === 'read:job');
+    if (readJob === undefined) {
+      throw new Error("The catalog has no 'read:job' entry");
+    }
+    const userAbility = createPrismaAbility([
+      { action: readJob.action, subject: readJob.subject, conditions: readJob.conditions },
+    ]) as AppAbility;
+    db.job.count.mockResolvedValue(0);
+
+    await service.isVisibleTo(ResourceType.Job, 'job-1', userAbility);
+
+    expect(db.job.count.mock.calls[0][0]?.where).toMatchObject({
+      AND: [{ OR: [{ type: JobType.GameImport }] }],
     });
   });
 

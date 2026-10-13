@@ -55,6 +55,7 @@ function makeWebhookSub(overrides: Partial<WebhookWithEvents> = {}): WebhookWith
 
 describe('WebhookSubscriptionService', () => {
   let service: WebhookSubscriptionService;
+  let registry: WebhookEventRegistry;
   let db: MockDatabaseService;
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
@@ -92,8 +93,24 @@ describe('WebhookSubscriptionService', () => {
     });
 
     service = module.get(WebhookSubscriptionService);
+    registry = module.get(WebhookEventRegistry);
     db = mockDb;
   });
+
+  /**
+   * Every registered descriptor requires `read`, so a stricter one is stood in:
+   * `EventUpdated` requires `update`, and every other type keeps its own.
+   */
+  const requireUpdateForEventUpdated = () => {
+    const descriptorOf = registry.require.bind(registry);
+    jest
+      .spyOn(registry, 'require')
+      .mockImplementation((type) =>
+        type === WebhookEventType.EventUpdated
+          ? { ...descriptorOf(type), requiredAction: Action.update }
+          : descriptorOf(type),
+      );
+  };
 
   afterEach(() => jest.clearAllMocks());
 
@@ -173,7 +190,51 @@ describe('WebhookSubscriptionService', () => {
     it('checks instance visibility when resourceId is scoped', async () => {
       db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
       await service.create(baseDto({ resourceId: 'event-9' }));
-      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll);
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+        action: Action.read,
+      });
+    });
+
+    it("checks the scoped instance with each requested type's action (#247)", async () => {
+      requireUpdateForEventUpdated();
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto({ resourceId: 'event-9' }));
+
+      // One check per distinct action, not per type.
+      expect(visibility.isVisibleTo.mock.calls).toEqual([
+        [ResourceType.Event, 'event-9', allowAll, { action: Action.read }],
+        [ResourceType.Event, 'event-9', allowAll, { action: Action.update }],
+      ]);
+    });
+
+    it('refuses an instance the caller can read but not take the stricter action on', async () => {
+      requireUpdateForEventUpdated();
+      visibility.isVisibleTo.mockImplementation(
+        async (_subject, _id, _ability, options) => options?.action !== Action.update,
+      );
+
+      await expect(service.create(baseDto({ resourceId: 'event-9' }))).rejects.toThrow(ForbiddenException);
+      expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+    });
+
+    it('checks the household for read whatever the types require', async () => {
+      // The household is the subscription's container, not its subject: the
+      // check asks whether the caller can see it at all.
+      requireUpdateForEventUpdated();
+      const eventsAndReadHousehold = createPrismaAbility([
+        { action: Action.manage, subject: ResourceType.Event },
+        { action: Action.read, subject: ResourceType.Household },
+      ]) as AppAbility;
+      primeAbilities(eventsAndReadHousehold);
+      db.household.count.mockResolvedValue(1);
+      db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+      await service.create(baseDto({ householdId: 'hh-1' }));
+
+      // `{}` is the clause for an unconditioned rule. Checked for `update`, the
+      // clause would be the deny-all `{ OR: [] }`.
+      expect(db.household.count).toHaveBeenCalledWith({ where: { id: 'hh-1', deletedAt: null, AND: [{}] } });
     });
 
     it('rejects when the scoped instance is not visible', async () => {
@@ -262,6 +323,31 @@ describe('WebhookSubscriptionService', () => {
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });
 
+    it("re-checks a scoped instance with the new types' actions (#247)", async () => {
+      // A type that requires more than the subscription's current ones must not
+      // be added by PATCH past the check creation would have run.
+      requireUpdateForEventUpdated();
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub({ resourceId: 'event-9' }));
+      visibility.isVisibleTo.mockResolvedValue(false);
+
+      await expect(service.update('sub-1', { eventTypes: [WebhookEventType.EventUpdated] })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+        action: Action.update,
+      });
+      expect(db.webhookSubscription.update).not.toHaveBeenCalled();
+    });
+
+    it('leaves an unscoped subscription to the subject check on an eventTypes change', async () => {
+      db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
+      db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+
+      await service.update('sub-1', { eventTypes: [WebhookEventType.EventUpdated] });
+
+      expect(visibility.isVisibleTo).not.toHaveBeenCalled();
+    });
+
     it('refuses an eventTypes change the caller cannot read', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(makeWebhookSub());
       primeAbilities(denyAll);
@@ -332,7 +418,9 @@ describe('WebhookSubscriptionService', () => {
       visibility.isVisibleTo.mockResolvedValue(false);
 
       await expect(service.reactivate('sub-1')).rejects.toThrow(ForbiddenException);
-      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll);
+      expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-9', allowAll, {
+        action: Action.read,
+      });
       expect(db.webhookSubscription.update).not.toHaveBeenCalled();
     });
 

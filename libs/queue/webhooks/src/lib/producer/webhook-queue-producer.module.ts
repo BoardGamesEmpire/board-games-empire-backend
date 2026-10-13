@@ -9,8 +9,9 @@ import { WebhookDispatcherService } from './webhook-dispatcher.service';
 
 /**
  * Producer end: the onAny dispatcher that turns locally-emitted domain events
- * into queued deliveries. Registers the queue for enqueue only. Import in any
- * process that emits eligible events (API today; worker for game events later).
+ * into queued deliveries. Registers the queue for enqueue only. Imported by
+ * every process that emits eligible events: apps/api, apps/worker and
+ * apps/gateway-worker.
  */
 @Module({
   imports: [

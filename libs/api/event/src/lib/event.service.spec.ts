@@ -14,6 +14,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
+import { WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { CreateEventDto } from './dto/create-event.dto';
@@ -268,6 +269,51 @@ describe('EventService', () => {
     expect(emitted.after).toEqual({ id: 'event-1', title: 'New' });
   });
 
+  // #538. Names only: `data` is copied verbatim to a URL the subscriber
+  // controls, and Event carries a `location` that may be a home address. A
+  // receiver reads the values with its own credentials.
+  it('updateEvent sends event.event.updated.v1 naming the changed columns, never their values', async () => {
+    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', householdId: 'hh-1' }));
+    db.event.update.mockResolvedValue(
+      makeEvent({ id: 'event-1', title: 'New', location: '12 Home Street', householdId: 'hh-1' }),
+    );
+
+    await service.updateEvent('event-1', { title: 'New', location: '12 Home Street' } as never);
+
+    // No occurrenceId: two updates to one event are different occurrences,
+    // and nothing here names one stably (#127).
+    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventUpdated, {
+      subjectId: 'event-1',
+      householdId: 'hh-1',
+      data: { eventId: 'event-1', householdId: 'hh-1', changedFields: ['title', 'location'] },
+    });
+    expect(emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated)?.[1]).not.toHaveProperty(
+      'occurrenceId',
+      expect.anything(),
+    );
+  });
+
+  it('updateEvent names only the columns whose values changed, not every key the patch sent', async () => {
+    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Old', location: 'Same Hall' }));
+    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'New', location: 'Same Hall' }));
+
+    await service.updateEvent('event-1', { title: 'New', location: 'Same Hall' } as never);
+
+    const [, sent] = emitter.emit.mock.calls.find(([name]) => name === WebhookEventType.EventUpdated) ?? [];
+    expect(sent?.data.changedFields).toEqual(['title']);
+  });
+
+  it('updateEvent sends no webhook when the patch changes no value', async () => {
+    // A form that re-sends what it loaded would otherwise post "updated" to
+    // every subscriber for a change that never happened.
+    db.event.findUnique.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Same' }));
+    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Same' }));
+
+    await service.updateEvent('event-1', { title: 'Same' } as never);
+
+    expect(emitter.emit).not.toHaveBeenCalledWith(WebhookEventType.EventUpdated, expect.anything());
+  });
+
   it('rejects an empty update patch', async () => {
     await expect(service.updateEvent('event-1', {} as never)).rejects.toThrow(BadRequestException);
   });
@@ -297,6 +343,23 @@ describe('EventService', () => {
     expect(emitted.subjectId).toBe('event-1');
     expect(emitted.before).toEqual(expect.objectContaining({ id: 'event-1', title: 'Doomed' }));
     expect(emitted.after).toBeNull();
+  });
+
+  it('deleteEvent sends event.event.deleted.v1 with ids only, keyed on the event', async () => {
+    db.event.count.mockResolvedValue(1);
+    db.event.update.mockResolvedValue(makeEvent({ id: 'event-1', title: 'Doomed', householdId: null }));
+
+    await service.deleteEvent('event-1');
+
+    // An event is deleted once (nothing restores one), so its id names the
+    // occurrence and a re-emit dedups to one delivery while the first is still
+    // queued.
+    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventDeleted, {
+      subjectId: 'event-1',
+      householdId: null,
+      occurrenceId: 'event-1',
+      data: { eventId: 'event-1', householdId: null },
+    });
   });
 
   it('createEvent does not filter by abilities', async () => {
@@ -374,6 +437,42 @@ describe('EventService', () => {
     await service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'user-3', 'user-1'] } as CreateEventDto);
 
     expect(permissions.invalidateUsers).toHaveBeenCalledWith(['user-1', 'user-2', 'user-3']);
+  });
+
+  it('createEvent sends event.event.created.v1 with ids only, keyed on the event', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', title: 'X', householdId: 'hh-1' }));
+
+    await service.createEvent({ title: 'X', householdId: 'hh-1' } as CreateEventDto);
+
+    // An event is created once, so its id names the occurrence.
+    expect(emitter.emit).toHaveBeenCalledWith(WebhookEventType.EventCreated, {
+      subjectId: 'event-1',
+      householdId: 'hh-1',
+      occurrenceId: 'event-1',
+      data: { eventId: 'event-1', householdId: 'hh-1' },
+    });
+  });
+
+  // #538. The webhook dispatcher reads each subscriber's graph after the emit
+  // returns. Until the eviction, the creator's graph and each invitee's predate
+  // their role on the event, which is their only read on an event outside a
+  // household, so the dispatcher would refuse them their own event.
+  it('createEvent emits only after evicting the graphs it changed', async () => {
+    db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+    db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
+    abilityService.getActingUserId.mockReturnValue('user-1');
+
+    await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+    const [evicted] = permissions.invalidateUsers.mock.invocationCallOrder;
+    const emitted = emitter.emit.mock.invocationCallOrder;
+
+    expect(emitted).toHaveLength(2);
+    for (const order of emitted) {
+      expect(order).toBeGreaterThan(evicted);
+    }
   });
 
   it('createEvent emits an EventCreatedEvent with the created row snapshot', async () => {

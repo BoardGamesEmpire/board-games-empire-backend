@@ -30,10 +30,24 @@ describe('WebhookEventRegistry', () => {
       });
     });
 
-    it('defaults every v1 descriptor to the read action (visibility is the gate)', () => {
+    it('requires read for every descriptor except those listed as stricter (#247)', () => {
+      // The descriptors whose audience is narrower than the subject's readers.
+      // Empty: every event goes to whoever can read its subject. Dispatch checks
+      // each descriptor's action live, so a stricter one is a deliberate edit
+      // here, made beside the descriptor.
+      const STRICTER_THAN_READ: Partial<Record<WebhookEventType, Action>> = {};
+
       for (const type of registry.types()) {
-        expect(registry.require(type).requiredAction).toBe(Action.read);
+        expect(registry.require(type).requiredAction).toBe(STRICTER_THAN_READ[type] ?? Action.read);
       }
+    });
+
+    it('marks only the event delete as firing after its subject is soft-deleted (#538)', () => {
+      // Visibility skips the deleted-row guard for a marked event, so a mark on
+      // any other event would deliver it about a subject that is gone.
+      const firesAfterDelete = registry.types().filter((type) => registry.require(type).subjectDeleted === true);
+
+      expect(firesAfterDelete).toEqual([WebhookEventType.EventDeleted]);
     });
 
     it('require throws for an unknown type (fail loudly)', () => {

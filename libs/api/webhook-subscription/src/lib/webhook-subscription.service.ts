@@ -40,13 +40,13 @@ export class WebhookSubscriptionService {
 
   /**
    * Creates a subscription owned by the acting user. The subscription is a
-   * standing grant: we verify at create that the creator can currently `read`
-   * (or the descriptor's stricter action) the subject of every requested event
-   * type, and — when scoped — that they can read the named instance/household.
-   * This is the coarse gate; per-event instance authorization still runs at
-   * dispatch, so this rejects only subscriptions the creator could never
-   * legitimately receive (including users denied via inverse permission once
-   * #87 lands).
+   * standing grant: we verify at create that the creator can currently take
+   * each requested event type's `requiredAction` (`read` unless the descriptor
+   * says otherwise) on its subject, and — when scoped — on the named instance,
+   * and that they can read the named household. This is the coarse gate;
+   * per-event instance authorization still runs at dispatch, so this rejects
+   * only subscriptions the creator could never legitimately receive (including
+   * users denied via inverse permission once #87 lands).
    *
    * The signing secret is stored encrypted (`EncryptionService`) and returned
    * in plaintext exactly once, here — the caller cannot retrieve it again.
@@ -56,14 +56,14 @@ export class WebhookSubscriptionService {
     const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_create'));
 
     this.assertTypesMatchResource(dto.eventTypes, dto.resourceType);
-    this.assertCanReadSubjects(dto.eventTypes, abilities);
+    this.assertCanReceiveTypes(dto.eventTypes, abilities);
 
     if (dto.householdId) {
       await this.assertCanReadHousehold(dto.householdId, abilities);
     }
 
     if (dto.resourceId) {
-      await this.assertCanReadInstance(dto.resourceType, dto.resourceId, abilities);
+      await this.assertCanReceiveFromInstance(dto.eventTypes, dto.resourceType, dto.resourceId, abilities);
     }
 
     const plaintextSecret = dto.secret ?? this.generateSecret();
@@ -115,10 +115,11 @@ export class WebhookSubscriptionService {
 
   /**
    * Updates the mutable subset. Scope (`resourceType`/`resourceId`/
-   * `householdId`) is immutable; changing `eventTypes` re-runs the read check
-   * because it could widen the subject set. Rotating the secret re-encrypts and
-   * reveals the new plaintext once (same contract as create); otherwise the
-   * secret is redacted on the way out.
+   * `householdId`) is immutable; changing `eventTypes` re-runs the subject
+   * check, and the instance check on a scoped subscription, because a new type
+   * can require a stricter action than the ones it replaces. Rotating the
+   * secret re-encrypts and reveals the new plaintext once (same contract as
+   * create); otherwise the secret is redacted on the way out.
    */
   async update(id: string, dto: UpdateWebhookSubscriptionDto): Promise<WebhookSubscriptionWithEventTypes> {
     if (Object.keys(dto).length === 0) {
@@ -131,7 +132,11 @@ export class WebhookSubscriptionService {
       const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_change_events'));
 
       this.assertTypesMatchResource(dto.eventTypes, existing.resourceType);
-      this.assertCanReadSubjects(dto.eventTypes, abilities);
+      this.assertCanReceiveTypes(dto.eventTypes, abilities);
+
+      if (existing.resourceId) {
+        await this.assertCanReceiveFromInstance(dto.eventTypes, existing.resourceType, existing.resourceId, abilities);
+      }
     }
 
     const rotatedSecret = dto.secret;
@@ -169,7 +174,7 @@ export class WebhookSubscriptionService {
    * Re-activates a Disabled/Failed subscription: resets the failure counter and
    * re-runs the *full* create-time authorization — subject grant plus the
    * instance/household scope checks — since the creator's access may have
-   * narrowed while the subscription was down. (Dispatch re-gates Event subjects
+   * narrowed while the subscription was down. (Dispatch re-gates every subject
    * regardless, but re-activation should not silently restore a scope the
    * creator can no longer reach.)
    */
@@ -177,18 +182,16 @@ export class WebhookSubscriptionService {
     const abilities = this.requireAbilities(t('errors.webhook_subscription.forbidden_reactivate'));
 
     const existing = await this.getById(id);
+    const types = existing.eventTypes.map((row) => row.eventType as WebhookEventType);
 
-    this.assertCanReadSubjects(
-      existing.eventTypes.map((row) => row.eventType as WebhookEventType),
-      abilities,
-    );
+    this.assertCanReceiveTypes(types, abilities);
 
     if (existing.householdId) {
       await this.assertCanReadHousehold(existing.householdId, abilities);
     }
 
     if (existing.resourceId) {
-      await this.assertCanReadInstance(existing.resourceType, existing.resourceId, abilities);
+      await this.assertCanReceiveFromInstance(types, existing.resourceType, existing.resourceId, abilities);
     }
 
     const updated = await this.db.webhookSubscription.update({
@@ -241,7 +244,12 @@ export class WebhookSubscriptionService {
     }
   }
 
-  private assertCanReadSubjects(types: readonly WebhookEventType[], abilities: AppAbility[]): void {
+  /**
+   * Whether the caller holds each type's `requiredAction` on its subject at
+   * all, before any instance is named. Not a read check: a type stricter than
+   * `read` is checked for its own action.
+   */
+  private assertCanReceiveTypes(types: readonly WebhookEventType[], abilities: AppAbility[]): void {
     for (const type of types) {
       const descriptor = this.registry.require(type);
 
@@ -257,6 +265,11 @@ export class WebhookSubscriptionService {
     }
   }
 
+  /**
+   * Read only, whatever the types require: the household is the
+   * subscription's container, not its subject, and this asks whether the
+   * caller can see it at all.
+   */
   private async assertCanReadHousehold(householdId: string, abilities: AppAbility[]): Promise<void> {
     for (const ability of abilities) {
       const count = await this.db.household.count({
@@ -269,15 +282,29 @@ export class WebhookSubscriptionService {
     }
   }
 
-  private async assertCanReadInstance(
+  /**
+   * The instance check dispatch runs, once per distinct action the types
+   * require, so a type stricter than `read` is checked for its own action.
+   * Always against the live row, even for a type whose dispatch reads the
+   * deleted one: a subscription scoped to a deleted subject has nothing left
+   * to receive.
+   */
+  private async assertCanReceiveFromInstance(
+    types: readonly WebhookEventType[],
     resourceType: ResourceType,
     resourceId: string,
     abilities: AppAbility[],
   ): Promise<void> {
-    for (const ability of abilities) {
-      const visible = await this.visibility.isVisibleTo(resourceType, resourceId, ability);
-      if (!visible) {
-        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }));
+    const actions = new Set(types.map((type) => this.registry.require(type).requiredAction));
+
+    for (const action of actions) {
+      for (const ability of abilities) {
+        const visible = await this.visibility.isVisibleTo(resourceType, resourceId, ability, { action });
+        if (!visible) {
+          throw new ForbiddenException(
+            t('errors.webhook_subscription.forbidden_instance', { resourceType, resourceId }),
+          );
+        }
       }
     }
   }

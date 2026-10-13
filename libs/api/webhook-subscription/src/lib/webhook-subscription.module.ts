@@ -9,7 +9,7 @@ import { WebhookSubscriptionService } from './webhook-subscription.service';
 /**
  * HTTP/CRUD surface only. No queue dependency — CRUD never enqueues; only the
  * dispatcher (in @bge/queue-webhooks) does. The visibility check used at create
- * time comes from the global `WebhooksModule`; `ServicesModule` supplies
+ * time comes from `WebhooksModule`; `ServicesModule` supplies
  * `EncryptionService` for at-rest secret encryption.
  */
 @Module({

@@ -11,6 +11,9 @@
       "path": "../../libs/common/shared"
     },
     {
+      "path": "../../libs/common/webhooks"
+    },
+    {
       "path": "../../libs/queue/webhooks"
     },
     {
