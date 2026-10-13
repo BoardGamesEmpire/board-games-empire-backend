@@ -209,11 +209,11 @@ jobs:
       - run: npx nx affected -t lint build --parallel --maxParallel=3
 
       # Nx Cloud self-healing. It acts on failures anywhere in the CI pipeline
-      # execution, which the e2e shards share while running beside this job,
-      # so `.nx/ci-config.yaml` keeps e2e tasks out of it: letting it act on
-      # e2e failures against real containers is not something to invite while
-      # the suite's flake profile is uncharacterised (#259). It needs Nx
-      # Cloud, so it is skipped on the runs that `NX_NO_CLOUD` keeps off it.
+      # execution, which is why the e2e shards running beside this job stay
+      # off Nx Cloud: letting it act on e2e failures against real containers
+      # is not something to invite while the suite's flake profile is
+      # uncharacterised (#259). It needs Nx Cloud, so it is skipped on the
+      # runs that `NX_NO_CLOUD` keeps off it.
       - run: npx nx fix-ci
         if: always() && env.NX_NO_CLOUD != 'true'
 
@@ -227,18 +227,15 @@ jobs:
   # the unit verdict instead of minutes later. What that gives up: a lint or
   # unit failure doesn't spare the suite, and since the api bundle
   # externalizes its workspace libraries, each shard builds the affected graph
-  # `main` does. Those builds are Nx Cloud hits once any job has built them.
-  # When none has, they land on the shard's own critical path, as they always
-  # do on Renovate's runs, which skip Nx Cloud (NX_NO_CLOUD above). Runner
-  # minutes cost a public repository nothing, so wall time is the cost here.
+  # `main` does, uncached, on its own critical path: the job stays off Nx
+  # Cloud (see its env). Runner minutes cost a public repository nothing, so
+  # wall time is the cost here.
   #
   # Split into shards (#684), each a runner with its own containers, API child
   # and single Jest worker, so the suite's isolation model holds inside each.
   # Jest gives each spec file to a shard by a hash of its path, which balances
-  # the shards by file count, not by duration. Two shards and no more: each is
-  # another job connected to Nx Cloud, and its free plan allows 10 concurrent
-  # CI connections. A run connects `main`, the shards and both image smoke
-  # legs, so two overlapping runs fit at two shards and wouldn't at three.
+  # the shards by file count, not by duration. Off Nx Cloud, the shards don't
+  # count against its free plan's 10 concurrent CI connections.
   e2e:
     name: e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
@@ -246,13 +243,22 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2]
-    # Hard stop for the whole job, setup included: npm ci, generation, and
-    # (on an Nx Cloud miss) the affected build all land before the suites
-    # start. Those take a few minutes even cold, so a suite step that runs
-    # into its own 20-minute cap still leaves the gateway step, which takes
-    # seconds, room to run.
+    # Hard stop for the whole job, setup included: npm ci, generation and the
+    # affected build all land before the suites start. Those take a few
+    # minutes even cold, so a suite step that runs into its own 20-minute cap
+    # still leaves the gateway step, which takes seconds, room to run.
     timeout-minutes: 30
     env:
+      # Off Nx Cloud, so `main`'s self-healing never sees an e2e task (#259).
+      # Connected, the shards would share `main`'s CI pipeline execution while
+      # running beside it, and self-healing acts on failures anywhere in it.
+      # Excluding e2e with `ai.fix-tasks-patterns` in `.nx/ci-config.yaml`
+      # instead failed quietly (#684): Nx Cloud answered a file without
+      # `dte.distribute-on` with a 400 on every request, so the run stored
+      # nothing in the remote cache and self-healing found no pipeline
+      # execution, and no step failed. The cost is that remote cache: each
+      # shard builds uncached, about 20 s more than a hit.
+      NX_NO_CLOUD: 'true'
       # Same value and reasoning as the `main` job. Covers the Jest process,
       # prisma migrate, and prisma db seed — NOT the API, worker and gateway
       # children, which the harness pins separately (apiEnvOverrides,
