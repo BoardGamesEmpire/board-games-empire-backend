@@ -107,12 +107,13 @@ export class UserProvisioningService {
     });
 
     // Provisioning assigns roles, and every role assignment evicts the user's
-    // graph (`PermissionsService.invalidateUser`). Today this removes nothing:
+    // graph (`PermissionsService.invalidateUser`). Today this deletes nothing:
     // a graph read before the commit above held no global role, and a user
-    // graph without one is never cached (#490). That rule, not this eviction,
-    // is what stops a pre-commit read outliving provisioning, since such a
-    // read can write the cache after the eviction. This covers a provisioning
-    // that writes roles in more than one transaction, as a setup wizard might:
+    // graph without one is never cached (#490). That rule and this eviction
+    // each stop a pre-commit read outliving provisioning. The eviction writes
+    // a fresh version token, so such a read that caches its graph after the
+    // eviction is never served from it (#588). This covers a provisioning that
+    // writes roles in more than one transaction, as a setup wizard might:
     // after its first commit the graph holds a role and is cached.
     await this.permissions.invalidateUser(user.id);
 

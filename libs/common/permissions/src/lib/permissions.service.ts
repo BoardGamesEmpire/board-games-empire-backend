@@ -13,8 +13,18 @@ import { isPluginPermissionSlug, parsePluginPermissionSlug } from '@boardgamesem
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
+import { randomUUID } from 'node:crypto';
 import { PluginAbilityRenderRejectionError } from './errors/plugin-ability-render-rejection.error';
 import type { ApikeyWithScopes, PluginGrantSnapshot, UserWithRoles } from './interfaces';
+
+/**
+ * What {@link PermissionsService.getOrLoad} caches: the loaded value, tagged
+ * with the version token its key held before the load began.
+ */
+interface VersionedEntry<T> {
+  version: string;
+  value: T;
+}
 
 @Injectable()
 export class PermissionsService {
@@ -35,6 +45,13 @@ export class PermissionsService {
    * the burst of cache calls when a mutation touches many users at once.
    */
   static readonly EVICTION_BATCH_SIZE = 50;
+
+  /**
+   * How long a version token lives. A token that expires, or that the cache
+   * drops sooner, costs one reload: the next read writes a fresh token, and
+   * nothing cached under the old one matches it.
+   */
+  static readonly CACHE_VERSION_TTL_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 
   constructor(
     private readonly db: DatabaseService,
@@ -59,6 +76,15 @@ export class PermissionsService {
     return `bge:apikey:scopes:${apiKeyId}`;
   }
 
+  /**
+   * Key of the version token that guards `cacheKey`'s entry: an eviction
+   * writes a fresh token here, and a cached entry counts as a hit only while
+   * it carries the current one.
+   */
+  static cacheVersionKey(cacheKey: string): string {
+    return `bge:cache-version:${cacheKey}`;
+  }
+
   async getUserRoleGraph(userId: string): Promise<UserWithRoles | null> {
     const userGraph = await this.getOrLoad(
       PermissionsService.userGraphCacheKey(userId),
@@ -70,8 +96,9 @@ export class PermissionsService {
       // writes them all in one transaction. Caching it would refuse that user
       // for the whole TTL after their roles exist, and nothing would say why.
       // Served, not cached: the request is refused, and the next one reloads.
-      // Provisioning's eviction after its commit does not cover this: a
-      // request that read before the commit can write the cache after it.
+      // Provisioning's eviction after its commit covers this too, since the
+      // graph would carry the token that eviction replaced. This check doesn't
+      // depend on the eviction running at all.
       (graph) => graph.roles.length > 0,
     );
 
@@ -130,17 +157,67 @@ export class PermissionsService {
    * graph TTL are the correctness backstop, so a transient cache outage degrades
    * to "stale until TTL" instead of turning into an unhandled rejection that
    * leaves the already-committed mutation reported as a failure. The debug line
-   * is logged only when the `del` call resolves without error — the cache API
+   * is logged only when both cache calls resolve without error — the cache API
    * doesn't report whether a key was present, so it reflects a completed
    * invalidation (the graph is now absent), not a confirmed prior cache hit.
    */
   private async evictUserGraph(userId: string): Promise<void> {
-    try {
-      await this.cache.del(PermissionsService.userGraphCacheKey(userId));
-      this.logger.debug(`Invalidated permission graph for user ${userId}`);
-    } catch (error) {
-      this.logger.error(`Failed to invalidate permission graph for user ${userId}`, error);
+    const label = `permission graph for user ${userId}`;
+
+    if (await this.evict(PermissionsService.userGraphCacheKey(userId), label)) {
+      this.logger.debug(`Invalidated ${label}`);
     }
+  }
+
+  /**
+   * Deletes `cacheKey`'s entry and writes a fresh version token for it.
+   * Resolves whether both succeeded, logging each failure on its own line,
+   * since each leaves a different gap.
+   *
+   * The delete alone loses a race. A load that read the database before the
+   * change committed can write its result after this delete, and that result
+   * would be served until the TTL. The token closes it: the load is tagged
+   * with the token its key held before the load began, which this call
+   * replaces, so its late write never counts as a hit (#588).
+   */
+  private async evict(cacheKey: string, label: string): Promise<boolean> {
+    const [versionWrite, deletion] = await Promise.allSettled([
+      this.writeVersionToken(cacheKey),
+      this.cache.del(cacheKey),
+    ]);
+
+    if (deletion.status === 'rejected') {
+      this.logger.error(`Failed to delete the cached ${label}`, deletion.reason);
+    }
+
+    if (versionWrite.status === 'rejected') {
+      this.logger.error(
+        `Failed to replace the version token of the ${label}: a load that began before this change can still cache what it read`,
+        versionWrite.reason,
+      );
+    }
+
+    return deletion.status === 'fulfilled' && versionWrite.status === 'fulfilled';
+  }
+
+  /**
+   * Writes a fresh version token for `cacheKey` and resolves it.
+   *
+   * The token is random, not a counter. Through the cache API an increment is
+   * a read then a write, so a slow eviction could set the count back to one a
+   * stale load is tagged with. A fresh random token never matches an earlier
+   * tag.
+   */
+  private async writeVersionToken(cacheKey: string): Promise<string> {
+    const token = randomUUID();
+
+    await this.cache.set(
+      PermissionsService.cacheVersionKey(cacheKey),
+      token,
+      PermissionsService.CACHE_VERSION_TTL_IN_MILLISECONDS,
+    );
+
+    return token;
   }
 
   /**
@@ -168,6 +245,19 @@ export class PermissionsService {
    * otherwise run `loader` and cache only a non-null result. A missing row is
    * never negatively cached and surfaces as `null` for the caller to handle.
    *
+   * A cached entry is a hit only while it carries its key's current version
+   * token ({@link cacheVersionKey}). The entry and the token are read in one
+   * round trip, before the loader runs, and a miss caches the result tagged
+   * with the token read then. An eviction that lands while the loader runs
+   * replaces that token, so what the loader read is never served from the
+   * cache afterwards (#588).
+   *
+   * A miss on a key that holds no token writes one before the loader runs and
+   * tags the result with it, so nothing is cached as "no token". The key holds
+   * none until something evicts it, and again once its token expires or the
+   * cache drops it. Were "no token" a tag, a token lost after an eviction
+   * would make a load that eviction overtook a hit again.
+   *
    * `ttlFor` lets a caller derive a per-entry TTL from the loaded value (used to
    * clamp the user graph to a soon-to-expire permission); it defaults to the
    * static TTL. `cacheable` lets a caller serve a value without caching it
@@ -181,12 +271,21 @@ export class PermissionsService {
     ttlFor: (value: T) => number = () => PermissionsService.CACHE_TTL_IN_MILLISECONDS,
     cacheable: (value: T) => boolean = () => true,
   ): Promise<T | null> {
-    const cached = await this.cache.get<T>(cacheKey);
-    if (cached) {
+    const [cached, currentVersion] = (await this.cache.mget([
+      cacheKey,
+      PermissionsService.cacheVersionKey(cacheKey),
+    ])) as [VersionedEntry<T> | undefined, string | undefined];
+
+    if (currentVersion !== undefined && cached?.version === currentVersion) {
       this.logger.debug(`Cache hit for ${label}`);
-      return cached;
+      return cached.value;
     }
 
+    if (cached) {
+      this.logger.debug(`Cached ${label} doesn't carry its current version token, reloading`);
+    }
+
+    const version = currentVersion ?? (await this.writeVersionToken(cacheKey));
     const fresh = await loader();
     if (!fresh) {
       this.logger.warn(`Not found while loading ${label}`);
@@ -200,7 +299,7 @@ export class PermissionsService {
 
     const ttl = ttlFor(fresh);
     this.logger.debug(`Loaded ${label} from database, caching result (ttl=${ttl}ms)`);
-    await this.cache.set(cacheKey, fresh, ttl);
+    await this.cache.set<VersionedEntry<T>>(cacheKey, { version, value: fresh }, ttl);
 
     return fresh;
   }

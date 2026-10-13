@@ -79,9 +79,14 @@ describe('a request sent before signup provisioning commits', () => {
 });
 
 /**
- * Whether the api holds the user's graph cached once provisioning's eviction
- * has run, sending one more request if the eviction removed what the last one
- * wrote.
+ * Whether the api has written the user's graph key once provisioning's
+ * eviction has run, sending one more request if the eviction removed what the
+ * last one wrote.
+ *
+ * It answers whether the key is written, which is all the spelling check
+ * needs, not whether the entry under it would be served. A request that began
+ * before the eviction can write its entry after it, tagged with the version
+ * token the eviction replaced, and the api never serves that entry (#588).
  *
  * The eviction runs after provisioning's commit, and the role rows a spec
  * waits for show the commit, not the eviction, so it can land just after a
