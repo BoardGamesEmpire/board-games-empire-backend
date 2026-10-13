@@ -140,7 +140,7 @@ A settled invite sits outside those indexes, so a re-invite after a decline, a w
 
 The email column is compared as stored; the lib trims and lower-cases it before every insert.
 
-The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user; a route that accepts an address should resolve a registered one to its user first and open a user-bound invite (#164).
+The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user; a route that accepts an address should resolve a registered one to its user first and open a user-bound invite (#162).
 
 ---
 

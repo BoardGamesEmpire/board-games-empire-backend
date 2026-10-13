@@ -160,7 +160,7 @@
     "household_required": "A household invite must name a household",
     "event_required": "An event invite must name an event",
     "context_mismatch": "A {type} invite cannot name a different context",
-    "expires_in_past": "An invite cannot expire before it is sent",
+    "expires_in_past": "An invite must expire after it is sent",
     "already_outstanding": "An invite for this invitee is already outstanding",
     "token_unavailable": "Could not mint a unique invite token",
     "only_invitee_responds": "Only the invitee can accept or decline an invite",
