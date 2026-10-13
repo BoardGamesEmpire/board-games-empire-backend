@@ -124,10 +124,18 @@ export function requireNoLeftoverJobs(name: string, pendingAtStart: number, pend
  * run, the queue is left to that drain (see {@link drainsToRun}).
  *
  * One read at the end, with no settle window: the drain must clear every late
- * job, but the check only has to see one. Fan-out starts a submission's first
- * `queue.add` while the API is still handling the request, a response and the
- * file's teardown ahead of this read. Jobs for further sinks can still be in
- * flight, but one is enough to fail the file.
+ * job, but the check only has to see one. The API writes a submission's first
+ * job to Redis before it writes the response, since `emit` runs the fan-out
+ * listener in place and, on a live connection, `queue.add` waits on no I/O
+ * before its write. Jobs for further sinks can still be in flight, but one is
+ * enough to fail the file.
+ *
+ * That order is a margin, not a proof: this read uses a connection of its own,
+ * and Redis runs commands in the order they arrive, whatever connection
+ * carries them. To be missed, the job's command would have to stay in transit
+ * longer than the response's trip, the rest of the test and the hooks before
+ * this read. A settle window would only widen that margin, at a cost to every
+ * file the check runs in.
  *
  * `test-isolation.ts` calls it, so every spec file runs it. It only reads the
  * queue, so unlike `isolateQueue` it needs no Redis ownership guard.
