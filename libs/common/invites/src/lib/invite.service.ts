@@ -49,6 +49,7 @@ import type {
   CreateInviteParams,
   InviteAcceptance,
   InviteApproval,
+  InviteContextScope,
   InviteCreation,
   InviteDeclination,
   InviteOutcome,
@@ -59,7 +60,6 @@ import type {
   OutstandingInviteRevocation,
   RespondToInviteParams,
   RevokeInviteParams,
-  RevokeOutstandingScope,
   WithdrawInviteParams,
 } from './interfaces';
 import { isOutstandingInviteStatus, withEffectiveInviteStatus } from './invite-expiry';
@@ -118,11 +118,14 @@ function project<Select extends Prisma.InviteSelect>(
 /**
  * One status transition, as each of the five public transitions describes
  * itself to {@link InviteService.transitionWithin}.
+ *
+ * Every transition binds its read to something: a party's to the acting user,
+ * a context authority's to the context the caller's authority covers. The
+ * union makes an unbound read unwritable, since such a read would move
+ * whatever row the id named, whoever was authorized over it.
  */
-interface TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent> {
+type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent> = {
   readonly target: InviteTarget;
-  /** The acting user when the transition is a party's. Scopes the read: a stranger gets a miss. */
-  readonly partyOf?: string;
   /** The role the transition needs once the row is known to be the actor's. Throws 403. */
   readonly assertRole?: (row: InviteTransitionRow) => void;
   /** The statuses the transition may start from. Throws 409 otherwise; runs again on a guard miss. */
@@ -130,7 +133,16 @@ interface TransitionSpec<Select extends Prisma.InviteSelect, Event extends Invit
   readonly data: (now: Date) => Prisma.InviteUncheckedUpdateManyInput;
   readonly view: Select;
   readonly event: InviteTransitionEventClass<Event>;
-}
+} & (
+  | {
+      /** The acting user when the transition is a party's. Scopes the read: a stranger gets a miss. */
+      readonly partyOf: string;
+    }
+  | {
+      /** The context the caller's authority covers when the transition is a context authority's. Scopes the read: an id from another context gets a miss. */
+      readonly scope: InviteContextScope;
+    }
+);
 
 /**
  * The polymorphic invite lifecycle (#161), as primitives a context owner
@@ -155,7 +167,10 @@ interface TransitionSpec<Select extends Prisma.InviteSelect, Event extends Invit
  * carries instead. Context authority is the consumer's to assert before
  * calling: an owner or admin revoking, an approver approving. The lib never
  * checks a household or event role, and needs no `read` grant on `Invite` to
- * do its work.
+ * do its work. What it does bind is the context that assertion was about: a
+ * context transition takes the `scope` the caller's authority covers and
+ * carries it into the read, so an invite id from another context meets the
+ * same miss a stranger does.
  *
  * ## How a transition is made safe
  *
@@ -343,13 +358,15 @@ export class InviteService {
 
   /**
    * A context authority cancels the invite, from either outstanding status.
-   * The caller has asserted that authority; nothing here binds to an actor.
-   * Returns the context shape: a revoker is not a party and does not see the
-   * address or the message.
+   * The caller has asserted that authority over `scope`; nothing here binds
+   * to an actor, and the read binds to the scope instead, so an id from
+   * another context is a miss. Returns the context shape: a revoker is not a
+   * party and does not see the address or the message.
    */
-  revokeWithin(tx: Prisma.TransactionClient, { inviteId }: RevokeInviteParams): Promise<InviteRevocation> {
+  revokeWithin(tx: Prisma.TransactionClient, { inviteId, scope }: RevokeInviteParams): Promise<InviteRevocation> {
     return this.transitionWithin(tx, {
       target: { inviteId },
+      scope,
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({ status: InviteStatus.Revoked, respondedAt: now }),
       view: CONTEXT_INVITE_SELECT,
@@ -360,11 +377,15 @@ export class InviteService {
   /**
    * An approver opens an `AwaitingApproval` invite to its invitee, stamping
    * who approved and when (#166). The caller has asserted the approver's
-   * authority.
+   * authority over `scope`, and the read binds to it as a revoke's does.
    */
-  approveWithin(tx: Prisma.TransactionClient, { inviteId, approverId }: ApproveInviteParams): Promise<InviteApproval> {
+  approveWithin(
+    tx: Prisma.TransactionClient,
+    { inviteId, approverId, scope }: ApproveInviteParams,
+  ): Promise<InviteApproval> {
     return this.transitionWithin(tx, {
       target: { inviteId },
+      scope,
       assertStatus: (row) => {
         if (row.status !== InviteStatus.AwaitingApproval) {
           throw new ConflictException(t('errors.invite.not_awaiting_approval', { id: row.id }));
@@ -388,7 +409,7 @@ export class InviteService {
    */
   async revokeOutstandingWithin(
     tx: Prisma.TransactionClient,
-    scope: RevokeOutstandingScope,
+    scope: InviteContextScope,
   ): Promise<OutstandingInviteRevocation> {
     const now = new Date();
     const events = await this.settleOutstandingWithin(
@@ -428,10 +449,10 @@ export class InviteService {
   }
 
   /**
-   * The shape every transition shares: read the row (scoped to the party when
-   * there is one), refuse it for the right reason if it cannot move, update it
-   * with the status it was read in as the guard, and hand back the view and
-   * the domain event.
+   * The shape every transition shares: read the row, bound to the party or to
+   * the context the caller's authority covers, refuse it for the right reason
+   * if it cannot move, update it with the status it was read in as the guard,
+   * and hand back the view and the domain event.
    */
   private async transitionWithin<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent>(
     tx: Prisma.TransactionClient,
@@ -439,9 +460,9 @@ export class InviteService {
   ): Promise<InviteOutcome<Prisma.InviteGetPayload<{ select: Select }>, Event>> {
     const now = new Date();
     const current =
-      spec.partyOf === undefined
-        ? await this.loadForTransition(tx, spec.target)
-        : await this.loadForParty(tx, spec.target, spec.partyOf);
+      'partyOf' in spec
+        ? await this.loadForParty(tx, spec.target, spec.partyOf)
+        : await this.loadForContext(tx, spec.target, spec.scope);
 
     spec.assertRole?.(current);
     this.refuseIfExpired(current, now);
@@ -698,13 +719,32 @@ export class InviteService {
   /**
    * The row as a CONTEXT AUTHORITY reaches it, or 404. No party binding: the
    * caller asserted the authority before calling, which is the one check the
-   * lib never makes. Also the re-read behind a guard miss, where the party was
-   * already established.
+   * lib never makes. The `where` binds to the context that assertion covered
+   * instead, so an invite id from another context, handed to a route that
+   * authorized its caller on this one, meets the same miss a stranger does
+   * and confirms nothing about the other context's invite.
    */
-  private async loadForTransition(tx: Prisma.TransactionClient, target: InviteTarget): Promise<InviteTransitionRow> {
-    const row = await tx.invite.findFirst({ where: this.whereTarget(target), select: TRANSITION_SELECT });
+  private async loadForContext(
+    tx: Prisma.TransactionClient,
+    target: InviteTarget,
+    scope: InviteContextScope,
+  ): Promise<InviteTransitionRow> {
+    const row = await tx.invite.findFirst({
+      where: { ...this.whereTarget(target), ...scope },
+      select: TRANSITION_SELECT,
+    });
 
     return row ?? this.refuseMissing(target);
+  }
+
+  /**
+   * The re-read behind a guard miss. By id alone: the read that preceded it
+   * established the party or the context, and a row's context never changes.
+   */
+  private async reloadWithin(tx: Prisma.TransactionClient, id: string): Promise<InviteTransitionRow> {
+    const row = await tx.invite.findFirst({ where: { id }, select: TRANSITION_SELECT });
+
+    return row ?? this.refuseMissing({ inviteId: id });
   }
 
   private whereTarget(target: InviteTarget): Prisma.InviteWhereInput {
@@ -830,7 +870,7 @@ export class InviteService {
     });
 
     if (!after) {
-      const latest = await this.loadForTransition(tx, { inviteId: current.id });
+      const latest = await this.reloadWithin(tx, current.id);
 
       reclassify(latest);
 

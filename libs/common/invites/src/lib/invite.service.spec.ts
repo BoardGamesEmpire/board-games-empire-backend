@@ -849,18 +849,24 @@ describe('InviteService', () => {
   });
 
   describe('revokeWithin', () => {
+    const scope = { householdId: 'hh-1' };
+
     it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval])(
-      'revokes from %s with no party binding and returns the context view',
+      'revokes from %s, bound to the authorized household and to no party, and returns the context view',
       async (status) => {
         tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
         tx.invite.updateManyAndReturn.mockResolvedValue([
           { ...rowWithToken(), status: InviteStatus.Revoked, respondedAt: FUTURE },
         ] as never);
 
-        const { invite, event } = await service.revokeWithin(asTx(tx), { inviteId: 'inv-1' });
+        const { invite, event } = await service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope });
 
-        // The caller asserted the context authority; the read is by id alone.
-        expect(tx.invite.findFirst).toHaveBeenCalledWith({ where: { id: 'inv-1' }, select: TRANSITION_SELECT });
+        // The caller asserted the context authority; the read carries the
+        // context that assertion covered, and binds to no party.
+        expect(tx.invite.findFirst).toHaveBeenCalledWith({
+          where: { id: 'inv-1', householdId: 'hh-1' },
+          select: TRANSITION_SELECT,
+        });
         expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
           expect.objectContaining({
             where: { id: 'inv-1', status },
@@ -880,35 +886,53 @@ describe('InviteService', () => {
     it.each(TERMINAL)('409s a settled invite (%s)', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1' })).rejects.toThrow(ConflictException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(ConflictException);
     });
 
     it('410s an expired invite rather than revoking it', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1' })).rejects.toThrow(GoneException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(GoneException);
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
-    it('404s an unknown id: a context transition reads unbound to a party, and still finds nothing', async () => {
+    it('404s an id outside the authorized household: the scope is in the query, so the row is never found', async () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-missing' })).rejects.toMatchObject({
+      await expect(
+        service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope: { householdId: 'hh-other' } }),
+      ).rejects.toMatchObject({
         status: 404,
-        response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-missing' } }),
+        response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-1' } }),
+      });
+      // The same miss an unknown id meets: nothing confirms the other household's invite exists.
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: { id: 'inv-1', householdId: 'hh-other' },
+        select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
   });
 
   describe('approveWithin', () => {
+    const scope = { householdId: 'hh-1' };
+
     it('opens an AwaitingApproval invite to its invitee, stamping the approver', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.AwaitingApproval }) as never);
       tx.invite.updateManyAndReturn.mockResolvedValue([{ ...rowWithToken(), status: InviteStatus.Pending }] as never);
 
-      const { invite, event } = await service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin' });
+      const { invite, event } = await service.approveWithin(asTx(tx), {
+        inviteId: 'inv-1',
+        approverId: 'user-admin',
+        scope,
+      });
 
+      // Bound to the context the approver's authority covers, as a revoke is.
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: { id: 'inv-1', householdId: 'hh-1' },
+        select: TRANSITION_SELECT,
+      });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'inv-1', status: InviteStatus.AwaitingApproval },
@@ -926,7 +950,7 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
       await expect(
-        service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin' }),
+        service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope }),
       ).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({ key: 'errors.invite.not_awaiting_approval' }),
@@ -939,12 +963,28 @@ describe('InviteService', () => {
       );
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin' })).rejects.toThrow(
-        GoneException,
-      );
+      await expect(
+        service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope }),
+      ).rejects.toThrow(GoneException);
       expect(db.invite.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ status: InviteStatus.AwaitingApproval }) }),
       );
+    });
+
+    it('binds the read to an event scope as well, and 404s an id outside it', async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope: { eventId: 'ev-1' } }),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-1' } }),
+      });
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: { id: 'inv-1', eventId: 'ev-1' },
+        select: TRANSITION_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
   });
 

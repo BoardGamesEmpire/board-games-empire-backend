@@ -68,22 +68,38 @@ export interface WithdrawInviteParams {
 }
 
 /**
+ * The context a consumer's authority covers: the household or event it
+ * asserted the caller's role in. A context transition binds its read to it,
+ * so an invite id from another context is a miss, and a bulk revoke closes
+ * everything outstanding into it. A `System` or `Campaign` invite names
+ * neither; that variant arrives with the first route that needs it.
+ */
+export type InviteContextScope = { readonly householdId: string } | { readonly eventId: string };
+
+/**
  * Revoke: a context authority acts. The lib binds nothing to the actor here;
  * the consumer has asserted the owner or admin role before calling, which is
- * the one authority check the lib never makes (#161).
+ * the one authority check the lib never makes (#161). What the lib does bind
+ * is the context: `scope` names the household or event that assertion was
+ * about, and the read carries it, so an invite id from another context meets
+ * a 404 as a stranger's does, not a transition the caller was never
+ * authorized to make.
  */
 export interface RevokeInviteParams {
   readonly inviteId: string;
+  readonly scope: InviteContextScope;
 }
 
-/** Approve: an approver moves an `AwaitingApproval` invite to `Pending`. */
+/**
+ * Approve: an approver moves an `AwaitingApproval` invite to `Pending`. Bound
+ * to `scope` as a revoke is: the consumer asserted the approver's authority
+ * over that context, and the lib confirms the invite is in it.
+ */
 export interface ApproveInviteParams {
   readonly inviteId: string;
   readonly approverId: string;
+  readonly scope: InviteContextScope;
 }
-
-/** The context whose outstanding invites a bulk revoke closes. */
-export type RevokeOutstandingScope = { readonly householdId: string } | { readonly eventId: string };
 
 /**
  * What every primitive hands back: the row as the caller may show it, and the
