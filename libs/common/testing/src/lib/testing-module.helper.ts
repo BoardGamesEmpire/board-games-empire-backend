@@ -35,11 +35,13 @@ export function createMockClsService(): jest.Mocked<ClsService> {
   } as unknown as jest.Mocked<ClsService>;
 }
 
-export type CacheMock = jest.Mocked<Pick<Cache, 'get' | 'set' | 'del' | 'wrap'>>;
+export type CacheMock = jest.Mocked<Pick<Cache, 'get' | 'mget' | 'set' | 'del' | 'wrap'>>;
 
 export function createMockCacheManager() {
   return {
     get: jest.fn(),
+    // A miss for every key, as `get`'s `undefined` is for one.
+    mget: jest.fn(async (keys: string[]) => keys.map(() => undefined)),
     set: jest.fn(),
     del: jest.fn(),
     wrap: jest.fn(),

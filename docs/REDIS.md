@@ -257,6 +257,13 @@ Dragonfly's own documentation, never measured here (#462).
 > cluster nobody supports from a server that is down. Bracketing the variable
 > part of both keys fixes it, and is deliberately not done while clustered mode
 > is untested — it changes the key format for a topology nothing here runs.
+>
+> The permission-graph cache is a third. It reads a graph and that graph's
+> version token in one `MGET` (`PermissionsService.getOrLoad`), and the two
+> keys share no hash tag. Under a cluster the read raises `CROSSSLOT`, the cache
+> library reports it as a miss without logging anything, and every request
+> loads its caller's graph from Postgres. Nothing stale is served; the cache is
+> simply off. The same fix applies, held back for the same reason.
 
 ### Dragonfly — Streams edge cases
 

@@ -1,4 +1,4 @@
-import { connectToHarnessRedis } from './redis-reset';
+import { connectToHarnessRedis, requireDisposableRedis } from './redis-reset';
 
 /**
  * The api's `API_CACHE_NAMESPACE` (`apps/api/src/app/configuration/cache.config.ts`).
@@ -36,6 +36,54 @@ export async function apiCacheHas(logicalKey: string, env: NodeJS.ProcessEnv = p
 
   try {
     return (await client.exists(`${API_CACHE_NAMESPACE}:${logicalKey}`)) === 1;
+  } finally {
+    await client.quit();
+  }
+}
+
+/**
+ * The value the api's cache holds for `logicalKey`, exactly as stored, or
+ * `null` when it holds none. {@link apiCacheWriteRaw} puts it back.
+ */
+export async function apiCacheReadRaw(
+  logicalKey: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string | null> {
+  const client = connectToHarnessRedis(env);
+
+  try {
+    return await client.get(`${API_CACHE_NAMESPACE}:${logicalKey}`);
+  } finally {
+    await client.quit();
+  }
+}
+
+/**
+ * Writes `raw` under `logicalKey` in the api's cache, exactly as given, to
+ * expire in `ttlMs`.
+ *
+ * The suite's only write to the api's cache, and an exception to the
+ * black-box rule for the reason {@link apiCacheHas} is. Some writes the api
+ * makes can't be timed over HTTP: a request that loaded something before a
+ * change and writes it to the cache after the change's eviction. Writing back
+ * a value read earlier with {@link apiCacheReadRaw} stands in for that late
+ * write: the same bytes, landing after the eviction.
+ *
+ * Refused on a Redis the harness didn't provision, since an api sharing it
+ * would serve what this plants.
+ */
+export async function apiCacheWriteRaw(
+  logicalKey: string,
+  raw: string,
+  ttlMs: number,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  requireDisposableRedis('write to the api cache', env);
+
+  const client = connectToHarnessRedis(env);
+
+  try {
+    await client.set(`${API_CACHE_NAMESPACE}:${logicalKey}`, raw, 'PX', ttlMs);
   } finally {
     await client.quit();
   }

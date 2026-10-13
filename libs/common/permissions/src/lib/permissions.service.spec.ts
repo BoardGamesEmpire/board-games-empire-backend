@@ -9,44 +9,50 @@ import {
   User,
 } from '@bge/database';
 import { createTestingModuleWithDb, makePermission, type MockDatabaseService } from '@bge/testing';
-import type { Cache } from 'cache-manager';
+import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { Logger } from '@nestjs/common';
+import { createCache, type Cache } from 'cache-manager';
 import type { ApikeyWithScopes, UserPermissionWithPermission, UserWithRoles } from './interfaces';
 import { PermissionsService } from './permissions.service';
 
 describe('PermissionsService', () => {
   let service: PermissionsService;
   let db: MockDatabaseService;
-  let cache: jest.Mocked<Pick<Cache, 'get' | 'set' | 'del'>>;
+  let cache: Cache;
 
   beforeEach(async () => {
-    const {
-      module,
-      db: mockDb,
-      cache: mockCache,
-    } = await createTestingModuleWithDb({
+    // A real in-memory cache, not a stub: whether a cached graph still counts
+    // as a hit depends on what an eviction wrote since it was cached.
+    cache = createCache();
+
+    const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [PermissionsService],
+      overrideProviders: [{ provide: CACHE_MANAGER, useValue: cache }],
     });
 
     service = module.get(PermissionsService);
     db = mockDb;
-    cache = mockCache;
   });
 
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
 
   describe('getApiKeyScopeGraph', () => {
     it('returns the cached graph without hitting the database on a cache hit', async () => {
-      const cached = makeApiKeyGraph();
-      cache.get.mockResolvedValue(cached);
+      const apiKey = makeApiKeyGraph();
+      db.apikey.findUnique.mockResolvedValue(apiKey);
+      await service.getApiKeyScopeGraph('key-1');
 
       const result = await service.getApiKeyScopeGraph('key-1');
 
-      expect(result).toBe(cached);
-      expect(db.apikey.findUnique).not.toHaveBeenCalled();
+      expect(result).toBe(apiKey);
+      expect(db.apikey.findUnique).toHaveBeenCalledTimes(1);
     });
 
     it('loads the key with scopes + permission triple and caches it on a miss', async () => {
-      cache.get.mockResolvedValue(undefined);
+      const set = jest.spyOn(cache, 'set');
       const apiKey = makeApiKeyGraph();
       db.apikey.findUnique.mockResolvedValue(apiKey);
 
@@ -64,34 +70,34 @@ describe('PermissionsService', () => {
           }),
         }),
       );
-      expect(cache.set).toHaveBeenCalledWith('bge:apikey:scopes:key-1', apiKey, expect.any(Number));
+      expect(set).toHaveBeenCalledWith('bge:apikey:scopes:key-1', expect.anything(), expect.any(Number));
       expect(result).toBe(apiKey);
     });
 
     it('returns null and does not cache when the key is missing (revoked)', async () => {
-      cache.get.mockResolvedValue(undefined);
       db.apikey.findUnique.mockResolvedValue(null);
 
       const result = await service.getApiKeyScopeGraph('gone');
 
       expect(result).toBeNull();
-      expect(cache.set).not.toHaveBeenCalled();
+      expect(await cache.get('bge:apikey:scopes:gone')).toBeUndefined();
     });
   });
 
   describe('getUserRoleGraph', () => {
     it('returns the cached graph without hitting the database on a cache hit', async () => {
-      const cached = makeUserGraph();
-      cache.get.mockResolvedValue(cached);
+      const graph = makeUserGraph();
+      db.user.findUnique.mockResolvedValue(graph as unknown as User);
+      await service.getUserRoleGraph('user-1');
 
       const result = await service.getUserRoleGraph('user-1');
 
-      expect(result).toBe(cached);
-      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(result).toBe(graph);
+      expect(db.user.findUnique).toHaveBeenCalledTimes(1);
     });
 
     it('loads role, household, event, and direct-permission sources (expired excluded) and caches it', async () => {
-      cache.get.mockResolvedValue(undefined);
+      const set = jest.spyOn(cache, 'set');
       const graph = makeUserGraph();
       db.user.findUnique.mockResolvedValue(graph as unknown as User);
 
@@ -140,18 +146,17 @@ describe('PermissionsService', () => {
           }),
         }),
       );
-      expect(cache.set).toHaveBeenCalledWith('bge:user:permissions:user-1', graph, expect.any(Number));
+      expect(set).toHaveBeenCalledWith('bge:user:permissions:user-1', expect.anything(), expect.any(Number));
       expect(result).toBe(graph);
     });
 
     it('returns null and does not cache when the user is missing', async () => {
-      cache.get.mockResolvedValue(undefined);
       db.user.findUnique.mockResolvedValue(null);
 
       const result = await service.getUserRoleGraph('gone');
 
       expect(result).toBeNull();
-      expect(cache.set).not.toHaveBeenCalled();
+      expect(await cache.get('bge:user:permissions:gone')).toBeUndefined();
     });
 
     it('serves but does not cache a graph holding no global role', async () => {
@@ -159,20 +164,18 @@ describe('PermissionsService', () => {
       // one transaction, so a graph with none was read before that commit
       // (#490). Caching it would refuse the user for the whole TTL after their
       // roles exist. This request is still refused; the next one reloads.
-      cache.get.mockResolvedValue(undefined);
       const graph = makeUserGraph({ roles: [] });
       db.user.findUnique.mockResolvedValue(graph as unknown as User);
 
       const result = await service.getUserRoleGraph('user-1');
 
       expect(result).toBe(graph);
-      expect(cache.set).not.toHaveBeenCalled();
+      expect(await cache.get('bge:user:permissions:user-1')).toBeUndefined();
     });
 
     it('reads provisioning off the global roles alone, not off whatever else the graph grants', async () => {
       // A membership is not the mark provisioning leaves; a global role is. A
       // graph with one and not the other is not a provisioned user's graph.
-      cache.get.mockResolvedValue(undefined);
       const graph = makeUserGraph({
         roles: [],
         householdMember: [{ householdId: 'hh-1', role: null }],
@@ -181,17 +184,17 @@ describe('PermissionsService', () => {
 
       await service.getUserRoleGraph('user-1');
 
-      expect(cache.set).not.toHaveBeenCalled();
+      expect(await cache.get('bge:user:permissions:user-1')).toBeUndefined();
     });
 
     describe('cache TTL', () => {
       it('uses the default TTL when no permission expires within the window', async () => {
-        cache.get.mockResolvedValue(undefined);
+        const set = jest.spyOn(cache, 'set');
         db.user.findUnique.mockResolvedValue(makeUserGraph() as unknown as User);
 
         await service.getUserRoleGraph('user-1');
 
-        expect(cache.set).toHaveBeenCalledWith(
+        expect(set).toHaveBeenCalledWith(
           'bge:user:permissions:user-1',
           expect.anything(),
           PermissionsService.CACHE_TTL_IN_MILLISECONDS,
@@ -199,7 +202,7 @@ describe('PermissionsService', () => {
       });
 
       it('clamps the TTL to a soon-to-expire permission', async () => {
-        cache.get.mockResolvedValue(undefined);
+        const set = jest.spyOn(cache, 'set');
         const expiresInMs = 30_000;
         const graph = makeUserGraph({
           permissions: [makeGraphPermission(new Date(Date.now() + expiresInMs))],
@@ -208,13 +211,13 @@ describe('PermissionsService', () => {
 
         await service.getUserRoleGraph('user-1');
 
-        const ttl = cache.set.mock.calls[0]?.[2] as number;
+        const ttl = cachedTtl(set, 'bge:user:permissions:user-1');
         expect(ttl).toBeGreaterThan(0);
         expect(ttl).toBeLessThanOrEqual(expiresInMs);
       });
 
       it('floors the TTL when a permission expires sub-floor', async () => {
-        cache.get.mockResolvedValue(undefined);
+        const set = jest.spyOn(cache, 'set');
         const graph = makeUserGraph({
           permissions: [makeGraphPermission(new Date(Date.now() + 500))],
         });
@@ -222,12 +225,12 @@ describe('PermissionsService', () => {
 
         await service.getUserRoleGraph('user-1');
 
-        const ttl = cache.set.mock.calls[0]?.[2] as number;
+        const ttl = cachedTtl(set, 'bge:user:permissions:user-1');
         expect(ttl).toBe(PermissionsService.MIN_CACHE_TTL_IN_MILLISECONDS);
       });
 
       it('ignores already-expired permissions when computing the TTL', async () => {
-        cache.get.mockResolvedValue(undefined);
+        const set = jest.spyOn(cache, 'set');
         const graph = makeUserGraph({
           permissions: [makeGraphPermission(new Date(Date.now() - 60_000))],
         });
@@ -235,12 +238,20 @@ describe('PermissionsService', () => {
 
         await service.getUserRoleGraph('user-1');
 
-        expect(cache.set).toHaveBeenCalledWith(
+        expect(set).toHaveBeenCalledWith(
           'bge:user:permissions:user-1',
           expect.anything(),
           PermissionsService.CACHE_TTL_IN_MILLISECONDS,
         );
       });
+
+      /**
+       * The TTL `cacheKey`'s entry was cached with. A load's first `set` can be
+       * its key's version token, not the entry.
+       */
+      function cachedTtl(set: jest.SpiedFunction<Cache['set']>, cacheKey: string): number {
+        return set.mock.calls.find(([key]) => key === cacheKey)?.[2] as number;
+      }
     });
   });
 
@@ -253,54 +264,219 @@ describe('PermissionsService', () => {
       expect(PermissionsService.userGraphCacheKey('user-1')).toBe('bge:user:permissions:user-1');
     });
 
-    it('invalidateUser deletes exactly that user graph key', async () => {
+    it('cacheVersionKey is the single source of truth for the version-key format', () => {
+      expect(PermissionsService.cacheVersionKey('bge:user:permissions:user-1')).toBe(
+        'bge:cache-version:bge:user:permissions:user-1',
+      );
+    });
+
+    it('invalidateUser deletes exactly that user graph key and writes it a version token', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
       await service.invalidateUser('user-1');
 
-      expect(cache.del).toHaveBeenCalledTimes(1);
-      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+      expect(set).toHaveBeenCalledTimes(1);
+      expect(set).toHaveBeenCalledWith(
+        'bge:cache-version:bge:user:permissions:user-1',
+        expect.any(String),
+        PermissionsService.CACHE_VERSION_TTL_IN_MILLISECONDS,
+      );
+    });
+
+    it('invalidateUser writes a different token each time', async () => {
+      // A repeat would let a load tagged after one eviction count as a hit
+      // after the next.
+      const versionKey = PermissionsService.cacheVersionKey('bge:user:permissions:user-1');
+
+      await service.invalidateUser('user-1');
+      const first = await cache.get(versionKey);
+      await service.invalidateUser('user-1');
+
+      expect(await cache.get(versionKey)).not.toBe(first);
     });
 
     it('invalidateUsers de-dupes and deletes one key per distinct user', async () => {
+      const del = jest.spyOn(cache, 'del');
+
       await service.invalidateUsers(['user-1', 'user-2', 'user-1']);
 
-      expect(cache.del).toHaveBeenCalledTimes(2);
-      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
-      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-2');
+      expect(del).toHaveBeenCalledTimes(2);
+      expect(del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+      expect(del).toHaveBeenCalledWith('bge:user:permissions:user-2');
+    });
+
+    it('invalidateUsers writes each distinct user a version token', async () => {
+      const set = jest.spyOn(cache, 'set');
+
+      await service.invalidateUsers(['user-1', 'user-2', 'user-1']);
+
+      expect(set).toHaveBeenCalledTimes(2);
+      for (const userId of ['user-1', 'user-2']) {
+        expect(set).toHaveBeenCalledWith(
+          PermissionsService.cacheVersionKey(PermissionsService.userGraphCacheKey(userId)),
+          expect.any(String),
+          PermissionsService.CACHE_VERSION_TTL_IN_MILLISECONDS,
+        );
+      }
     });
 
     it('invalidateUsers no-ops on an empty set', async () => {
+      const del = jest.spyOn(cache, 'del');
+      const set = jest.spyOn(cache, 'set');
+
       await service.invalidateUsers([]);
 
-      expect(cache.del).not.toHaveBeenCalled();
+      expect(del).not.toHaveBeenCalled();
+      expect(set).not.toHaveBeenCalled();
     });
 
     it('invalidateUsers drops nullish ids before evicting', async () => {
+      const del = jest.spyOn(cache, 'del');
+
       await service.invalidateUsers(['user-1', null, undefined, 'user-1']);
 
-      expect(cache.del).toHaveBeenCalledTimes(1);
-      expect(cache.del).toHaveBeenCalledWith('bge:user:permissions:user-1');
+      expect(del).toHaveBeenCalledTimes(1);
+      expect(del).toHaveBeenCalledWith('bge:user:permissions:user-1');
     });
 
     it('invalidateUser swallows a cache failure (best-effort; TTL is the backstop)', async () => {
-      cache.del.mockRejectedValueOnce(new Error('redis unreachable'));
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      jest.spyOn(cache, 'del').mockRejectedValueOnce(new Error('redis unreachable'));
 
       await expect(service.invalidateUser('user-1')).resolves.toBeUndefined();
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledWith(expect.stringContaining('Failed to delete'), expect.any(Error));
+    });
+
+    it('invalidateUser swallows a failed token write, and logs it apart from a failed delete', async () => {
+      // The graph is gone, but a load the eviction overtook can still cache
+      // what it read, so the log has to say which of the two failed.
+      const logError = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      jest.spyOn(cache, 'set').mockRejectedValueOnce(new Error('OOM command not allowed'));
+
+      await expect(service.invalidateUser('user-1')).resolves.toBeUndefined();
+      expect(logError).toHaveBeenCalledTimes(1);
+      expect(logError).toHaveBeenCalledWith(expect.stringContaining('version token'), expect.any(Error));
     });
 
     it('invalidateUsers evicts the rest when one eviction fails', async () => {
-      cache.del.mockRejectedValueOnce(new Error('redis unreachable'));
+      const del = jest.spyOn(cache, 'del').mockRejectedValueOnce(new Error('redis unreachable'));
 
       await expect(service.invalidateUsers(['user-1', 'user-2'])).resolves.toBeUndefined();
-      expect(cache.del).toHaveBeenCalledTimes(2);
+      expect(del).toHaveBeenCalledTimes(2);
     });
 
     it('invalidateUsers evicts every user across multiple bounded batches', async () => {
+      const del = jest.spyOn(cache, 'del');
       const ids = Array.from({ length: PermissionsService.EVICTION_BATCH_SIZE + 5 }, (_, i) => `user-${i}`);
 
       await service.invalidateUsers(ids);
 
-      expect(cache.del).toHaveBeenCalledTimes(ids.length);
+      expect(del).toHaveBeenCalledTimes(ids.length);
     });
+  });
+
+  describe('an eviction and a load of the same graph', () => {
+    it('reloads a graph evicted since it was cached', async () => {
+      const before = makeUserGraph({ householdMember: [{ householdId: 'hh-1', role: null }] });
+      const after = makeUserGraph();
+      db.user.findUnique
+        .mockResolvedValueOnce(before as unknown as User)
+        .mockResolvedValueOnce(after as unknown as User);
+      await service.getUserRoleGraph('user-1');
+
+      await service.invalidateUser('user-1');
+
+      await expect(service.getUserRoleGraph('user-1')).resolves.toBe(after);
+    });
+
+    it('reloads after an eviction that lands while the graph is loading (#588)', async () => {
+      // The load reads a membership, the removal commits and evicts, and only
+      // then does the load write what it read. Deleting the key alone left
+      // that write served until the TTL.
+      const stale = makeUserGraph({ householdMember: [{ householdId: 'hh-1', role: null }] });
+      const current = makeUserGraph();
+      const load = pauseNextUserLoad(stale);
+      db.user.findUnique.mockResolvedValueOnce(current as unknown as User);
+
+      const inFlight = service.getUserRoleGraph('user-1');
+      await load.started;
+      await service.invalidateUser('user-1');
+      load.release();
+
+      // The request that read before the eviction still gets what it read.
+      await expect(inFlight).resolves.toBe(stale);
+      await expect(service.getUserRoleGraph('user-1')).resolves.toBe(current);
+    });
+
+    it('reloads after a bulk eviction that lands while the graph is loading', async () => {
+      // Ownership transfers and household deletes evict through invalidateUsers.
+      const stale = makeUserGraph({ householdMember: [{ householdId: 'hh-1', role: null }] });
+      const current = makeUserGraph();
+      const load = pauseNextUserLoad(stale);
+      db.user.findUnique.mockResolvedValueOnce(current as unknown as User);
+
+      const inFlight = service.getUserRoleGraph('user-1');
+      await load.started;
+      await service.invalidateUsers(['user-1', 'user-2']);
+      load.release();
+      await inFlight;
+
+      await expect(service.getUserRoleGraph('user-1')).resolves.toBe(current);
+    });
+
+    it('reloads when the token an eviction wrote is gone by the next read', async () => {
+      // The cache can drop the token before the entry it guards: it expires,
+      // or a store under memory pressure evicts it. The key then holds no
+      // token, which a load the eviction overtook mustn't match.
+      const stale = makeUserGraph({ householdMember: [{ householdId: 'hh-1', role: null }] });
+      const current = makeUserGraph();
+      const load = pauseNextUserLoad(stale);
+      db.user.findUnique.mockResolvedValueOnce(current as unknown as User);
+
+      const inFlight = service.getUserRoleGraph('user-1');
+      await load.started;
+      await service.invalidateUser('user-1');
+      load.release();
+      await inFlight;
+      await cache.del(PermissionsService.cacheVersionKey('bge:user:permissions:user-1'));
+
+      await expect(service.getUserRoleGraph('user-1')).resolves.toBe(current);
+    });
+
+    it('caches the graph loaded after an eviction', async () => {
+      // The token rejects only what was read before it was written; it mustn't
+      // turn every later read into a miss.
+      db.user.findUnique.mockResolvedValue(makeUserGraph() as unknown as User);
+      await service.invalidateUser('user-1');
+
+      await service.getUserRoleGraph('user-1');
+      await service.getUserRoleGraph('user-1');
+
+      expect(db.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * Makes the next user-graph load wait for the test before it returns
+     * `read`. `started` settles once the load has begun, so the version token
+     * it is tagged with has already been read or written.
+     */
+    function pauseNextUserLoad(read: UserWithRoles): { started: Promise<void>; release: () => void } {
+      let begin!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => (begin = resolve));
+      const released = new Promise<void>((resolve) => (release = resolve));
+
+      db.user.findUnique.mockImplementationOnce((() => {
+        begin();
+        return released.then(() => read);
+      }) as never);
+
+      return { started, release };
+    }
   });
 
   describe('getPluginGrantSnapshot (#60)', () => {

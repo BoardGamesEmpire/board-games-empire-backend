@@ -17,19 +17,24 @@ const globToRegExp = (glob: string) =>
   );
 
 describe('bootstrapCacheFlushPatterns', () => {
-  it('names the physical keys Keyv writes under the api cache namespace, for both permission graphs and nothing else', async () => {
+  it('names the physical keys Keyv writes under the api cache namespace, for both permission graphs, their version tokens and nothing else', async () => {
     const store = new Map<string, string>();
     const keyv = new Keyv({ store, namespace: API_CACHE_NAMESPACE });
     const patterns = bootstrapCacheFlushPatterns().map(globToRegExp);
     const matched = (key: string) => patterns.some((pattern) => pattern.test(key));
 
-    await keyv.set(PermissionsService.userGraphCacheKey('user-1'), {});
-    await keyv.set(PermissionsService.apiKeyScopeCacheKey('key-1'), {});
+    for (const key of [
+      PermissionsService.userGraphCacheKey('user-1'),
+      PermissionsService.apiKeyScopeCacheKey('key-1'),
+    ]) {
+      await keyv.set(key, {});
+      await keyv.set(PermissionsService.cacheVersionKey(key), 'token');
+    }
     const graphs = [...store.keys()];
     await keyv.set('bge:session:other', {});
     const bystander = [...store.keys()].find((key) => !graphs.includes(key));
 
-    expect(graphs).toHaveLength(2);
+    expect(graphs).toHaveLength(4);
     expect(graphs.every(matched)).toBe(true);
     expect(bystander).toBeDefined();
     expect(matched(bystander as string)).toBe(false);

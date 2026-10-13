@@ -27,10 +27,11 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
 
 /**
  * The cache flush through the real DML phases (#236). A catalog reconcile
- * that wrote rows removes every cached ability graph and API-key scope graph
- * from a real Valkey, and so does a data migration that applied, whether the
- * boot then went on or refused over a later entry; a boot that wrote neither
- * leaves them, and keys outside the patterns are never touched.
+ * that wrote rows removes every cached ability graph and API-key scope graph,
+ * and the version token that guards each, from a real Valkey, and so does a
+ * data migration that applied, whether the boot then went on or refused over a
+ * later entry; a boot that wrote neither leaves them, and keys outside the
+ * patterns are never touched.
  * The graphs are written the way the api's CacheModule writes them, through
  * Keyv and the Valkey adapter under the api's namespace, so the physical keys
  * here are the ones production has (the api's own spec pins its namespace
@@ -56,16 +57,18 @@ const neverMigrates: Migrator = {
 };
 
 /** The api composes its flush patterns from `API_CACHE_NAMESPACE` exactly as below. */
-const PATTERNS = [PermissionsService.userGraphCacheKey('*'), PermissionsService.apiKeyScopeCacheKey('*')].map(
-  (key) => `${API_CACHE_NAMESPACE}:${key}`,
-);
+const PATTERNS = [PermissionsService.userGraphCacheKey('*'), PermissionsService.apiKeyScopeCacheKey('*')]
+  .flatMap((key) => [key, PermissionsService.cacheVersionKey(key)])
+  .map((key) => `${API_CACHE_NAMESPACE}:${key}`);
 /** Logical keys, as the CacheModule's callers pass them; Keyv puts the namespace in front. */
 const GRAPHS = [
   PermissionsService.userGraphCacheKey('u1'),
   PermissionsService.userGraphCacheKey('u2'),
   PermissionsService.apiKeyScopeCacheKey('k1'),
 ];
-const CACHED = GRAPHS.map((key) => `${API_CACHE_NAMESPACE}:${key}`);
+/** Each graph's version token: a load writes one beside its graph when the key holds none. */
+const TOKENS = GRAPHS.map((key) => PermissionsService.cacheVersionKey(key));
+const CACHED = [...GRAPHS, ...TOKENS].map((key) => `${API_CACHE_NAMESPACE}:${key}`);
 const BYSTANDERS = [`${API_CACHE_NAMESPACE}:bge:session:other`, 'bge:user:permissions:no-namespace'];
 /** A data migration this spec registers and applies; its ledger row is removed after each test. */
 const ENTRY = '20260901000000_e2e_flush_probe';
@@ -119,13 +122,14 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
   async function prime(): Promise<void> {
     const keyv = new Keyv({ store: new KeyvValkey(redis), namespace: API_CACHE_NAMESPACE });
     await Promise.all([...GRAPHS, 'bge:session:other'].map((key) => keyv.set(key, { primed: true })));
+    await Promise.all(TOKENS.map((key) => keyv.set(key, 'token')));
     await redis.set('bge:user:permissions:no-namespace', '{}');
-    expect(await present(CACHED)).toEqual([1, 1, 1]);
+    expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
   }
 
   const present = (keys: readonly string[]) => Promise.all(keys.map((key) => redis.exists(key)));
 
-  it('removes every graph under the patterns once the reconcile has written, and nothing beside them', async () => {
+  it('removes every graph and version token under the patterns once the reconcile has written, and nothing beside them', async () => {
     await prime();
     await db.client.rolePermission.deleteMany({
       where: { role: { name: SystemRole.User }, permission: { slug: 'read:game' } },
@@ -135,7 +139,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
     expect(summary.seedsRun).toBe(true);
     expect(summary.reconcile).toEqual(expect.objectContaining({ grantsCreated: 1, mutations: 1, cachesFlushed: true }));
-    expect(await present(CACHED)).toEqual([0, 0, 0]);
+    expect(await present(CACHED)).toEqual([0, 0, 0, 0, 0, 0]);
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });
 
@@ -146,7 +150,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
     expect(summary.dataMigrations).toEqual({ applied: [ENTRY], unknown: [], cachesFlushed: true });
-    expect(await present(CACHED)).toEqual([0, 0, 0]);
+    expect(await present(CACHED)).toEqual([0, 0, 0, 0, 0, 0]);
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });
 
@@ -166,7 +170,7 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
     await expect(boot(entries)).rejects.toThrow('second failed');
 
     expect(await db.client.dataMigration.count({ where: { name: ENTRY } })).toBe(1);
-    expect(await present(CACHED)).toEqual([0, 0, 0]);
+    expect(await present(CACHED)).toEqual([0, 0, 0, 0, 0, 0]);
     expect(await present(BYSTANDERS)).toEqual([1, 1]);
   });
 
@@ -177,6 +181,6 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
     expect(summary.reconcile).toEqual(expect.objectContaining({ mutations: 0, cachesFlushed: false }));
     expect(summary.dataMigrations).toEqual({ applied: [], unknown: [], cachesFlushed: false });
-    expect(await present(CACHED)).toEqual([1, 1, 1]);
+    expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
   });
 });
