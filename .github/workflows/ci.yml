@@ -299,12 +299,19 @@ jobs:
       # first shard, in the next step, which leaves the shard count free to
       # change. Both steps pick projects by exclusion, since `nx affected` has
       # no `--projects`, so a new e2e app runs in both until it joins a list.
+      #
+      # `--outputStyle=stream-without-prefixes` prints the suite's output as it
+      # comes. Otherwise Nx holds a task's output until the task ends, then
+      # prints it in one write that its exit can cut short: off Nx Cloud, only
+      # about the first 64 KB reached the log, so the tests' results and Jest's
+      # summary were lost while the step stayed green.
       - name: Run e2e suite
         timeout-minutes: 20
         run: >-
           npx nx affected -t e2e --parallel=1
           --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/igdb-gateway-e2e
           --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --outputStyle=stream-without-prefixes
 
       # Runs after a failed suite step too, so an API failure still comes with
       # the gateways' verdict.
