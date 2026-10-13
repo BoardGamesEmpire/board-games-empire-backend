@@ -45,6 +45,8 @@ export class HouseholdService {
 
 `emit` never throws into the caller: the app's `EventEmitterModule` runs without `ignoreErrors`, so a synchronous listener that throws would otherwise turn a committed transition into a failed request. A failing listener is logged and the remaining domain events still go out.
 
+**Lock order: the context row, then the invite.** A context's delete locks its own row and then, through `revokeOutstandingWithin`, the invites into it. A consumer that holds its context row and transitions an invite in the same transaction takes them in that order too: lock the context row (`lockExistingHousehold` for a household) before the `*Within` call. The accept that admits a member is the case to get right, because `HouseholdMemberService.addMemberWithin` takes the household row `FOR SHARE`: an accept that transitioned the invite first and admitted second would hold the invite while waiting for the row a concurrent delete holds while waiting for the invite, and Postgres would abort one of them. Lock the household, then accept, then admit (#163). `TransactionDeadlockInterceptor` turns a victim into a retryable 409 either way; that is the backstop, not the design.
+
 ---
 
 ## Who may do what
@@ -146,7 +148,7 @@ The id pair and the email pair are separate indexes, so the same person can hold
 
 ## The token
 
-`Invite.token` is 32 random bytes as base64url, minted on create and stored as minted. It is the accept credential for an email-only invite, and it is **never** selected into a response shape, never logged, and never on a domain event payload. `read-shapes.spec.ts` and the domain event specs pin each of those.
+`Invite.token` is 32 random bytes as base64url, minted on create and stored as minted. It is the accept credential for an email-only invite, and it is **never** selected into a response shape, never on a log line of the lib's own, and never on a domain event payload. `read-shapes.spec.ts` and the domain event specs pin each of those. The development query log (`DATABASE_LOG_QUERIES`, off by default and only wired when the client logs queries at all, which is development) prints every statement's parameters, so it prints the token with every other column and credential the app stores; hashing at rest (#173) is what takes the plaintext off the wire.
 
 The token is probed free before the insert rather than retried after a collision, because a P2002 aborts the caller's transaction and Prisma opens no savepoint: the next statement on that transaction fails whatever it is. On 256 random bits the probe is a formality, bounded so a broken random source surfaces as an error rather than a spin.
 

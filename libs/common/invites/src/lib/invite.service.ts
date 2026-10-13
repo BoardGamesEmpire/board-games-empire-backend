@@ -380,6 +380,11 @@ export class InviteService {
    * Closes every outstanding invite into a context, as a household's soft
    * delete does. Expired-but-unstamped rows are revoked with the rest: the
    * context is gone, and there is nobody left to tell "expired" instead.
+   *
+   * The caller has locked its context row by the time this runs, so the lock
+   * order it sets is context row, then invites. A consumer that holds its
+   * context row and transitions a single invite in one transaction takes them
+   * in the same order (README, "The seam").
    */
   async revokeOutstandingWithin(
     tx: Prisma.TransactionClient,
