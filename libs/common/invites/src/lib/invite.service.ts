@@ -404,13 +404,18 @@ export class InviteService {
 
   /**
    * Announces the domain events a primitive handed back. A consumer calls this
-   * only AFTER its transaction commits.
+   * only AFTER its transaction commits, and nothing waits for the listeners:
+   * by then the transition is committed, and surfacing a listener's failure as
+   * the request's failure would report a 500 for an operation that succeeded.
    *
-   * `EventEmitterModule` runs without `ignoreErrors`, so a synchronous listener
-   * that throws propagates out of `emit()`. By the time a consumer calls this
-   * the transition is committed, and surfacing a listener's failure as the
-   * request's failure would report a 500 for an operation that succeeded. Each
-   * failure is logged and the remaining domain events still go out.
+   * A listener declared with `@OnEvent` is wrapped by Nest's loader, which
+   * awaits it and logs a throw or a rejection (`suppressErrors` defaults to
+   * true), so its failure never reaches the catch below. The catch is for a
+   * listener registered on the emitter directly (`onAny`, as the audit
+   * persistence listener is): `EventEmitterModule` runs without
+   * `ignoreErrors`, so its synchronous throw propagates out of `emit()`. It is
+   * logged and the remaining domain events still go out. Such a listener's
+   * rejected promise is its own to catch, as both in the app do.
    */
   emit(events: readonly InviteDomainEvent[]): void {
     for (const event of events) {
