@@ -1,6 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -19,14 +19,14 @@ const PaginatedGameCollectionResponse = PaginatedResponseDto(GameCollectionDto, 
  * Its own class rather than a handler on `UserController`: that would make the
  * user lib import this one, and feature libs don't import each other.
  *
- * Never response-cached. The rows are someone else's and the viewer's access to
- * them can change without the viewer doing anything: an unfriending, or the
- * owner making an entry Private, would otherwise go unseen for the cache TTL.
+ * Must stay out of the response cache. The rows are someone else's and the
+ * viewer's access to them can change without the viewer doing anything: an
+ * unfriending, or the owner making an entry Private, would otherwise go unseen
+ * for the cache TTL.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('game-collections')
-@NoCache()
 @UseGuards(PoliciesGuard)
 @Controller('users/:userId/game-collections')
 export class UserGameCollectionsController {

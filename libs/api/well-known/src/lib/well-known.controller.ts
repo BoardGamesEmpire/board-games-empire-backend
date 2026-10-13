@@ -1,5 +1,4 @@
 import { t } from '@bge/i18n';
-import { NoCache } from '@bge/shared';
 import { Controller, Get, Header, HttpCode, NotFoundException, Options, UseInterceptors } from '@nestjs/common';
 import { ApiNoContentResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -47,14 +46,13 @@ export class WellKnownController {
    * Never served stale, by the api or by an HTTP cache (#585). The document
    * advertises the settings row's registration switch, and a cached body
    * would keep offering sign-up after an admin closed it, while the server
-   * refuses every attempt. The api's response cache is skipped: its keys are
-   * per caller and locale, so a PATCH has no one entry it could evict
-   * instead. `no-cache` lets an HTTP cache keep a copy but makes it
+   * refuses every attempt. The route stays out of the api's response cache:
+   * its keys are per caller and locale, so a PATCH has no one entry it could
+   * evict instead. `no-cache` lets an HTTP cache keep a copy but makes it
    * revalidate on every use, and the ETag Express sets lets an unchanged
    * document answer 304 without its body.
    */
   @Get('bge-identity')
-  @NoCache()
   @UseInterceptors(SnakeCaseInterceptor)
   @Header('Cache-Control', 'no-cache')
   @ApiOkResponse({ type: BgeDiscoveryDto, description: 'BGE server identity and available auth strategies' })

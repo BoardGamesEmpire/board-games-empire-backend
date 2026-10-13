@@ -288,6 +288,7 @@ import { createThrottlers } from './lib/throttlers';
     // deadlock raised by any service on any route is converted exactly once.
     { provide: APP_INTERCEPTOR, useClass: TransactionDeadlockInterceptor },
 
+    // Caches only the routes marked `@CacheResponse()` (#530).
     {
       provide: APP_INTERCEPTOR,
       useClass: UserAwareCacheInterceptor,

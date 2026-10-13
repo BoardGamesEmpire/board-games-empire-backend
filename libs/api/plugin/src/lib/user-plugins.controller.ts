@@ -8,7 +8,7 @@ import {
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
-import { DefaultPaginationQueryDto, NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -63,9 +63,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Ok, type: PaginatedUserPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'API keys cannot read a user consent surface' })
-  // The grant, enable and disable writes on this controller change these rows,
-  // and must be visible on the re-read.
-  @NoCache()
+  // Must stay out of the response cache: the grant, enable and disable writes
+  // on this controller change these rows, and must be visible on the re-read.
   @Get()
   list(@Query() query: DefaultPaginationQueryDto) {
     return from(
@@ -124,9 +123,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  // Mutation-adjacent: read right before a decide POST, which must be
-  // visible on the re-read.
-  @NoCache()
+  // Must stay out of the response cache: read right before a decide POST,
+  // which must be visible on the re-read.
   @Get(':slug/consent')
   consentPresentation(@Param('slug') slug: string) {
     const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };
@@ -185,9 +183,8 @@ export class UserPluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Not a session user (API keys cannot exercise this axis)' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  // Consent decisions must be visible on the next read (#60 keeps this
-  // surface uncached).
-  @NoCache()
+  // Must stay out of the response cache: consent decisions must be visible on
+  // the next read (#60).
   @Get(':slug/features')
   featureStates(@Param('slug') slug: string) {
     const unit: UserPluginUnit = { scopeType: 'User', userId: this.selfUserId() };

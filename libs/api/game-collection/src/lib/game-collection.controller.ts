@@ -1,7 +1,7 @@
 import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { NoCache, paginated, PaginatedResponseDto } from '@bge/shared';
+import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
@@ -24,10 +24,9 @@ const PaginatedGameCollectionResponse = PaginatedResponseDto(GameCollectionDto, 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
 @ApiTags('game-collections')
-// Never response-cached: the offline-first client writes then re-reads to
-// reconcile local state, so a stale read within the cache TTL is a
+// Must stay out of the response cache: the offline-first client writes then
+// re-reads to reconcile local state, so a stale read within the cache TTL is a
 // correctness bug — not an optimization trade-off.
-@NoCache()
 @UseGuards(PoliciesGuard)
 @Controller('game-collections')
 export class GameCollectionController {

@@ -24,8 +24,7 @@ export class UserController {
   /**
    * The caller's own user: for a session, the user it belongs to, and for an
    * API key, the key's owner (#529). Read from the user's row, not the
-   * session's copy of it, which is the row as it stood at sign-in. The
-   * response cache still answers a repeat request within its TTL.
+   * session's copy of it, which is the row as it stood at sign-in.
    */
   @Get('me')
   me() {

@@ -1,5 +1,5 @@
 import { GameMedium, ResourceType } from '@bge/database';
-import { ListScopeNotComposedError, NO_CACHE_KEY } from '@bge/shared';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
@@ -44,13 +44,5 @@ describe('UserGameCollectionsController', () => {
 
     await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
     await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.GameCollection}'`);
-  });
-
-  // The route moved here from `GameCollectionController`, whose class-level
-  // opt-out it used to inherit. Cached, a viewer unfriended within the TTL, or
-  // an owner who has just made an entry Private, would be served the old page
-  // (#530).
-  it('is exempt from the response cache', () => {
-    expect(Reflect.getMetadata(NO_CACHE_KEY, UserGameCollectionsController)).toBe(true);
   });
 });

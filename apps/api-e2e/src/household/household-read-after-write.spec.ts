@@ -9,9 +9,11 @@ import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
  * Every household read here follows a write to what it reads, and must
  * reflect it (#528).
  *
- * The api response-caches GETs by default, per caller, for `CACHE_TTL` (five
- * minutes unless configured, and nothing in this suite configures it). A household read served from that cache repeats the body it
- * returned BEFORE the write: the offline-first client re-reads after every
+ * The api response-caches a GET whose route opts in, per caller, for
+ * `CACHE_TTL` (five minutes unless configured, and nothing in this suite
+ * configures it). Until #530 every GET was cached unless its route opted out,
+ * and these guard against a household route opting in. A household read
+ * served from that cache repeats the body it returned BEFORE the write: the offline-first client re-reads after every
  * write to reconcile its local state, and the list route's own contract lets
  * it treat a household missing from a complete list as one it was removed
  * from — so a stale read is a wrong answer, not a slow one.
@@ -125,7 +127,7 @@ describe('household reads after a write', () => {
   });
 
   it('stops serving a member row its caller has just removed', async () => {
-    // The member routes carry their own opt-out, so they get their own case:
+    // The member routes are their own controller, so they get their own case:
     // everything above reads through the household controller.
     const owner = await actors.user();
     const member = await actors.user();
