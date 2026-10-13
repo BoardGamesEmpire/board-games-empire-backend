@@ -4,6 +4,8 @@ import { QuotaModule } from '@bge/quota';
 import { Module } from '@nestjs/common';
 import { HouseholdController } from './household.controller';
 import { HouseholdService } from './household.service';
+import { HouseholdInviteController } from './invite/household-invite.controller';
+import { HouseholdInviteService } from './invite/household-invite.service';
 import { HouseholdMemberController } from './member/household-member.controller';
 import { HouseholdMemberService } from './member/household-member.service';
 
@@ -12,10 +14,10 @@ import { HouseholdMemberService } from './member/household-member.service';
   // `household_member_count` inside the caller's transaction (#159).
   // InvitesModule supplies InviteService, the only writer of an invite's
   // status; the soft delete revokes a household's outstanding invites through
-  // it (#161).
+  // it (#161), and the invite routes create through it (#162).
   imports: [DatabaseModule, QuotaModule, InvitesModule],
-  controllers: [HouseholdController, HouseholdMemberController],
-  providers: [HouseholdService, HouseholdMemberService],
+  controllers: [HouseholdController, HouseholdMemberController, HouseholdInviteController],
+  providers: [HouseholdService, HouseholdMemberService, HouseholdInviteService],
   exports: [HouseholdService, HouseholdMemberService],
 })
 export class HouseholdModule {}
