@@ -79,7 +79,8 @@ export class PermissionsService {
   /**
    * Key of the version token that guards `cacheKey`'s entry: an eviction
    * writes a fresh token here, and a cached entry counts as a hit only while
-   * it carries the current one.
+   * it carries the current one. The boot sequence's flush (#236) removes these
+   * with the entries they guard.
    */
   static cacheVersionKey(cacheKey: string): string {
     return `bge:cache-version:${cacheKey}`;
