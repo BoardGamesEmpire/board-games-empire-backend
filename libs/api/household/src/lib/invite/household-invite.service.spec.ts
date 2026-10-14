@@ -1,4 +1,13 @@
-import { Action, InviteStatus, InviteType, Prisma, ResourceType, SystemRole } from '@bge/database';
+import {
+  Action,
+  FriendshipStatus,
+  InviteStatus,
+  InviteType,
+  Prisma,
+  ResourceType,
+  SystemRole,
+  Visibility,
+} from '@bge/database';
 import {
   CONTEXT_INVITE_SELECT,
   InviteService,
@@ -125,7 +134,10 @@ describe('HouseholdInviteService', () => {
     const userById = (profile: { displayName: string | null } | null = { displayName: 'Sam Doe' }) =>
       db.user.findUnique.mockResolvedValue(resolves({ id: 'user-2', username: 'sam', profile }));
 
-    const inviterAddress = (email: string) => db.user.findUnique.mockResolvedValue(resolves({ email }));
+    /** The inviter's own address, read for the self-invite check; any other lookup finds nobody. */
+    const inviterAddress = (email: string) =>
+      db.user.findUnique.mockImplementation(((args: { where: { id?: string } }) =>
+        Promise.resolve(args.where.id === 'owner-1' ? { email } : null)) as never);
 
     const createdWith = () => invites.createWithin.mock.calls[0]?.[1];
 
@@ -250,6 +262,7 @@ describe('HouseholdInviteService', () => {
           inviteeName: 'Sam Doe',
           roleId: `role-${SystemRole.HouseholdMember}`,
           message: 'Join us',
+          withheld: false,
         });
       });
 
@@ -318,14 +331,12 @@ describe('HouseholdInviteService', () => {
     });
 
     describe('by address', () => {
-      it('stores the address alone with the name as typed, and looks no account up', async () => {
+      it('stores the address alone with the name as typed, binding no account', async () => {
         inviterAddress('owner@example.test');
 
         await service.createInvite('hh-1', byAddress({ inviteeName: 'Sam' }));
 
-        // The one read is the inviter's own address. Nothing asks who holds
-        // the invitee's, so no answer can depend on it.
-        expect(db.user.findUnique.mock.calls).toEqual([[{ where: { id: 'owner-1' }, select: { email: true } }]]);
+        // The accept (#163) binds whoever answers the invite.
         expect(createdWith()).toMatchObject({
           inviteeId: null,
           inviteeEmail: 'Sam@Example.test',
@@ -347,6 +358,249 @@ describe('HouseholdInviteService', () => {
         await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(BadRequestException);
 
         expect(invites.createWithin).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('who may be invited (#278)', () => {
+      const serverPolicy = (householdInviteePolicy: Visibility) =>
+        db.systemSetting.findUnique.mockResolvedValue(resolves({ householdInviteePolicy }));
+
+      /** Whether a user filter names the invitee: `user-2` by id, or as the holder of `sam@example.test`. */
+      const namesInvitee = (filter: unknown) => {
+        const { id, email } = filter as { id?: string; email?: string };
+
+        return id === 'user-2' || email === 'sam@example.test';
+      };
+
+      /** The invitee's friendship with the inviter has this status, or there is none. */
+      const friendship = (status: FriendshipStatus | null) =>
+        db.friendship.findFirst.mockImplementation(((args: {
+          where: { OR: [{ addressee: unknown }, { requester: unknown }] };
+        }) =>
+          Promise.resolve(
+            status !== null && namesInvitee(args.where.OR[0].addressee) && namesInvitee(args.where.OR[1].requester)
+              ? { status }
+              : null,
+          )) as never);
+
+      /** The invitee's preference row says this. */
+      const preference = (allowHouseholdInvitesFrom: Visibility) =>
+        db.userPreferences.findFirst.mockImplementation(((args: { where: { user: unknown } }) =>
+          Promise.resolve(namesInvitee(args.where.user) ? { allowHouseholdInvitesFrom } : null)) as never);
+
+      describe('the server policy', () => {
+        it('refuses a non-friend by id under Friends with 403, and writes nothing', async () => {
+          serverPolicy(Visibility.Friends);
+          friendship(null);
+          userById();
+
+          await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it.each([FriendshipStatus.Pending, FriendshipStatus.Declined, FriendshipStatus.Withdrawn])(
+          'counts a %s friendship as no friendship under Friends',
+          async (status) => {
+            serverPolicy(Visibility.Friends);
+            friendship(status);
+            userById();
+
+            await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+          },
+        );
+
+        it('lets a friend be invited by id under Friends', async () => {
+          serverPolicy(Visibility.Friends);
+          friendship(FriendshipStatus.Accepted);
+          userById();
+
+          await service.createInvite('hh-1', byId());
+
+          expect(createdWith()).toMatchObject({ inviteeId: 'user-2', withheld: false });
+        });
+
+        it('refuses every invite by address under Friends, before reading anything about it', async () => {
+          serverPolicy(Visibility.Friends);
+          inviterAddress('owner@example.test');
+
+          await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
+
+          // A friend's address passing where any other failed would let the
+          // inviter test which addresses belong to their friends.
+          expect(db.user.findUnique.mock.calls).toEqual([[{ where: { id: 'owner-1' }, select: { email: true } }]]);
+          expect(db.friendship.findFirst).not.toHaveBeenCalled();
+          expect(db.userPreferences.findFirst).not.toHaveBeenCalled();
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it('lets anyone be invited under Public, by id or by address', async () => {
+          serverPolicy(Visibility.Public);
+          friendship(null);
+          userById();
+
+          await service.createInvite('hh-1', byId());
+
+          inviterAddress('owner@example.test');
+          await service.createInvite('hh-1', byAddress());
+
+          expect(invites.createWithin).toHaveBeenCalledTimes(2);
+        });
+
+        it('reads no settings row as Public', async () => {
+          db.systemSetting.findUnique.mockResolvedValue(null);
+          friendship(null);
+          userById();
+
+          await service.createInvite('hh-1', byId());
+
+          expect(invites.createWithin).toHaveBeenCalledTimes(1);
+        });
+
+        // FriendsOfFriends reads as Friends until #496 defines the second
+        // degree; Household, which names no group here, and Private as nobody.
+        it.each([Visibility.FriendsOfFriends, Visibility.Household, Visibility.Private])(
+          'fails closed on %s, a level the PATCH refuses',
+          async (level) => {
+            serverPolicy(level);
+            friendship(null);
+            userById();
+
+            await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+
+            inviterAddress('owner@example.test');
+            await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
+          },
+        );
+      });
+
+      describe('by id, a block and the invitee’s preference', () => {
+        /** The error `createInvite` rejects with. */
+        const refusal = async (dto: CreateHouseholdInviteDto) => {
+          const error = await service.createInvite('hh-1', dto).then(
+            () => undefined,
+            (reason: unknown) => reason,
+          );
+          expect(error).toBeInstanceOf(ForbiddenException);
+
+          return (error as ForbiddenException).message;
+        };
+
+        beforeEach(() => {
+          serverPolicy(Visibility.Public);
+          userById();
+        });
+
+        it('refuses a blocked pair with 403 even under Public, and writes nothing', async () => {
+          friendship(FriendshipStatus.Blocked);
+
+          await refusal(byId());
+
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it('honours a preference stricter than the server’s', async () => {
+          friendship(null);
+          preference(Visibility.Friends);
+          await refusal(byId());
+
+          friendship(FriendshipStatus.Accepted);
+          preference(Visibility.Private);
+          await refusal(byId());
+
+          expect(invites.createWithin).not.toHaveBeenCalled();
+        });
+
+        it('lets a friend through a Friends preference, and anyone through no preference row', async () => {
+          friendship(FriendshipStatus.Accepted);
+          preference(Visibility.Friends);
+          await service.createInvite('hh-1', byId());
+
+          friendship(null);
+          db.userPreferences.findFirst.mockResolvedValue(null);
+          await service.createInvite('hh-1', byId());
+
+          expect(invites.createWithin).toHaveBeenCalledTimes(2);
+        });
+
+        it('answers a block and a preference alike, so the inviter cannot tell which applied', async () => {
+          friendship(FriendshipStatus.Blocked);
+          const blocked = await refusal(byId());
+
+          friendship(null);
+          preference(Visibility.Private);
+          const declined = await refusal(byId());
+
+          expect(blocked).toBe(declined);
+        });
+
+        it('does not let a looser preference widen the server’s policy, which refuses in its own words', async () => {
+          friendship(FriendshipStatus.Blocked);
+          const blocked = await refusal(byId());
+
+          serverPolicy(Visibility.Friends);
+          friendship(null);
+          preference(Visibility.Public);
+          const byPolicy = await refusal(byId());
+
+          expect(byPolicy).not.toBe(blocked);
+        });
+      });
+
+      describe('by address, a block and the invitee’s preference', () => {
+        beforeEach(() => {
+          serverPolicy(Visibility.Public);
+          inviterAddress('owner@example.test');
+        });
+
+        it('finds the holder of an address typed in any case or with spaces', async () => {
+          friendship(FriendshipStatus.Blocked);
+
+          await service.createInvite('hh-1', byAddress({ inviteeEmail: '  Sam@Example.TEST ' }));
+
+          expect(createdWith()?.withheld).toBe(true);
+        });
+
+        it.each([
+          ['a block between the pair', () => friendship(FriendshipStatus.Blocked)],
+          ['a Friends preference, to a non-friend', () => preference(Visibility.Friends)],
+          ['a Private preference', () => preference(Visibility.Private)],
+        ])('stores the invite withheld for %s, and answers as it answers any other', async (_label, arrange) => {
+          arrange();
+
+          await expect(service.createInvite('hh-1', byAddress())).resolves.toBe(creation.invite);
+
+          expect(createdWith()).toMatchObject({ inviteeId: null, inviteeEmail: 'Sam@Example.test', withheld: true });
+          expect(invites.emit).toHaveBeenCalledWith([...creation.expired, creation.event]);
+        });
+
+        it('withholds nothing when no account holds the address, or its holder lets the inviter in', async () => {
+          friendship(FriendshipStatus.Blocked);
+          preference(Visibility.Private);
+          await service.createInvite('hh-1', byAddress({ inviteeEmail: 'nobody@example.test' }));
+
+          friendship(FriendshipStatus.Accepted);
+          preference(Visibility.Friends);
+          await service.createInvite('hh-1', byAddress());
+
+          expect(invites.createWithin.mock.calls.map(([, params]) => params.withheld)).toEqual([false, false]);
+        });
+
+        // How long the create takes must say no more than its answer does.
+        it.each([
+          ['no account holds the address', 'nobody@example.test', () => undefined],
+          ['its holder lets the inviter in', 'sam@example.test', () => undefined],
+          ['its holder blocks the inviter', 'sam@example.test', () => friendship(FriendshipStatus.Blocked)],
+        ])('makes the same reads when %s', async (_label, inviteeEmail, arrange) => {
+          arrange();
+
+          await service.createInvite('hh-1', byAddress({ inviteeEmail }));
+
+          // The one account read is the inviter's own, for the self-invite check.
+          expect(db.user.findUnique).toHaveBeenCalledTimes(1);
+          expect(db.friendship.findFirst).toHaveBeenCalledTimes(1);
+          expect(db.userPreferences.findFirst).toHaveBeenCalledTimes(1);
+        });
       });
     });
 

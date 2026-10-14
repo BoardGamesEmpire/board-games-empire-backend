@@ -25,6 +25,7 @@ const NOT_NULLABLE = [
   'requireContributionApproval',
   'contributionReclaimDays',
   'reviewGatewayLanguages',
+  'householdInviteePolicy',
 ];
 
 const DAY_COUNTS = ['feedbackReportRetentionDays', 'contributionReclaimDays', 'auditLogRetentionDays'];
@@ -46,6 +47,7 @@ describe('UpdateSystemSettingsDto', () => {
       contributionReclaimDays: 7,
       auditLogRetentionDays: 365,
       reviewGatewayLanguages: true,
+      householdInviteePolicy: 'Friends',
     };
 
     expect(await keysFor(payload)).toEqual({});
@@ -89,6 +91,21 @@ describe('UpdateSystemSettingsDto', () => {
     ])('refuses %p with %s', async (days, constraint) => {
       expect(await keysFor({ [property]: days })).toEqual({
         [`${property}.${constraint}`]: `validation.${constraint}`,
+      });
+    });
+  });
+
+  describe('householdInviteePolicy', () => {
+    it.each(['Public', 'Friends'])('accepts %s', async (level) => {
+      expect(await keysFor({ householdInviteePolicy: level })).toEqual({});
+    });
+
+    // FriendsOfFriends waits for the second-degree rule (#496), Household
+    // never names a group an invitee belongs to, and Private would turn every
+    // household invite off: none is a policy the server offers yet.
+    it.each(['FriendsOfFriends', 'Household', 'Private', 'Anyone'])('refuses %s', async (level) => {
+      expect(await keysFor({ householdInviteePolicy: level })).toEqual({
+        'householdInviteePolicy.isIn': 'validation.isIn',
       });
     });
   });

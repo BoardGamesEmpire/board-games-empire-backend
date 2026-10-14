@@ -28,6 +28,7 @@ export function makeInvite(inviterId: string, overrides: Partial<Invite> = {}): 
     approvedById: null,
     approvedAt: null,
     respondedAt: null,
+    withheld: false,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,

@@ -111,6 +111,14 @@ describe('invite read shapes', () => {
     it('never selects the token', () => {
       expect(scalarKeysOf(INVITE_SNAPSHOT_SELECT)).not.toContain('token');
     });
+
+    it('never carries the withheld mark, to a listener or an audit row (#278)', () => {
+      // An invite withheld by a block answers as if sent. An event or audit
+      // row carrying the mark would tell whoever reads it otherwise.
+      expect(INVITE_SNAPSHOT_FIELDS).not.toContain('withheld');
+      expect(scalarKeysOf(TRANSITION_SELECT)).not.toContain('withheld');
+      expect(INVITE_SCALARS_OMITTED).toHaveProperty('withheld');
+    });
   });
 
   describe('TRANSITION_SELECT (what a transition reads)', () => {

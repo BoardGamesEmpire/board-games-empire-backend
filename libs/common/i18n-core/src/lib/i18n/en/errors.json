@@ -152,7 +152,9 @@
     "not_deleted": "Household {id} is not deleted, so there is nothing to restore",
     "permission_not_provisioned": "Permission '{slug}' is not provisioned on this server",
     "invitee_exactly_one": "Name exactly one invitee: a user id or an email address",
-    "invitee_already_member": "The invitee is already a member of household {householdId}"
+    "invitee_already_member": "The invitee is already a member of household {householdId}",
+    "invitee_friends_only": "This server only allows household invites to your friends, invited from their account rather than by email address",
+    "invitee_refused": "You cannot invite this user to a household"
   },
   "invite": {
     "not_found": "Invite with ID {id} not found",

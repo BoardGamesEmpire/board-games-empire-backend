@@ -85,8 +85,11 @@ type ReadClient = DatabaseService | Prisma.TransactionClient;
  * partial unique index on `(household_id, invitee_email)` compares the column
  * as stored, so this is what makes `Sam@Example.test` and `sam@example.test`
  * the same outstanding invite.
+ *
+ * Exported so a caller comparing an invite's address with an account's
+ * compares it as the lib stores it (#278's gate).
  */
-function normalizeEmail(value: string | null | undefined): string | null {
+export function normalizeInviteeEmail(value: string | null | undefined): string | null {
   const normalized = value?.trim().toLowerCase();
 
   return normalized ? normalized : null;
@@ -230,7 +233,7 @@ export class InviteService {
   async createWithin(tx: Prisma.TransactionClient, params: CreateInviteParams): Promise<InviteCreation> {
     const initiatedAt = new Date();
     const inviteeId = params.inviteeId ?? null;
-    const inviteeEmail = normalizeEmail(params.inviteeEmail);
+    const inviteeEmail = normalizeInviteeEmail(params.inviteeEmail);
 
     if (inviteeId === null && inviteeEmail === null) {
       throw new BadRequestException(t('errors.invite.invitee_required'));
@@ -238,6 +241,14 @@ export class InviteService {
 
     if (inviteeId === params.inviterId) {
       throw new BadRequestException(t('errors.invite.self_invite'));
+    }
+
+    // The mark hides an invite from whoever holds its address. An invitee
+    // named by id reaches it through the party read whatever the mark says.
+    // A consumer's mistake rather than the user's, so a bare 500 that names
+    // nothing.
+    if (params.withheld && inviteeId !== null) {
+      throw new Error('An invite can be withheld only when it names no invitee, who would otherwise reach it by id');
     }
 
     const context = this.contextOf(params);
@@ -265,6 +276,7 @@ export class InviteService {
           message: params.message ?? null,
           metadata: params.metadata,
           needsApproval: params.needsApproval ?? false,
+          withheld: params.withheld ?? false,
           token,
           expiresAt,
         },
@@ -695,7 +707,9 @@ export class InviteService {
    * user as inviter or invitee, so a stranger addressing an invite by id or
    * by a link that is not theirs meets a miss rather than a refusal that
    * confirms the invite exists. By token, an email-only row (no invitee yet)
-   * is reachable too: the link is how its invitee arrives.
+   * is reachable too: the link is how its invitee arrives. A withheld one is
+   * not (#278). Its link was never sent, so one that reaches the server anyway
+   * meets the miss a stranger meets, whatever delivered it.
    */
   private async loadForParty(
     client: ReadClient,
@@ -705,7 +719,7 @@ export class InviteService {
     const parties: Prisma.InviteWhereInput[] = [{ inviterId: actingUserId }, { inviteeId: actingUserId }];
 
     if ('token' in target) {
-      parties.push({ inviteeId: null });
+      parties.push({ inviteeId: null, withheld: false });
     }
 
     const row = await client.invite.findFirst({

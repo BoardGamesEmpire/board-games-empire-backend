@@ -34,12 +34,19 @@ export class HouseholdInviteController {
       'Name the invitee by `inviteeId` or by `inviteeEmail`, exactly one. An address opens an email-only ' +
       'invite whether or not an account holds it, and nothing in the answer says which. No email is sent yet. ' +
       'The invite expires after seven days. A second outstanding invite to the same id or address is refused, ' +
-      'as is an invite by id to a current member, or an invite to yourself.',
+      'as is an invite by id to a current member, or an invite to yourself. Who may be invited is decided by ' +
+      "the server's invitee policy, a block between the two, and the invitee's own preference. By id, any of " +
+      "them refuses. By address, only the server's policy does: under `Friends`, every address is refused.",
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Created, description: 'Invite created' })
   @ApiResponse({ status: Http.BadRequest, description: 'Not exactly one invitee, an invalid field, or yourself' })
-  @ApiResponse({ status: Http.Forbidden, description: 'Not an owner or admin of this household' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      "Not an owner or admin of this household; or the server's invitee policy refuses this invitee, or, " +
+      "named by id, a block between the two or the invitee's preference does",
+  })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no user with that id' })
   @ApiResponse({
     status: Http.Conflict,
