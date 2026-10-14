@@ -259,7 +259,7 @@ Access actually conferred: a permission a role holds, a direct permission, or a 
 _Avoid_: grant for a consent decision that refuses
 
 **Denial**:
-A permission that forbids instead of allowing; when a denial and an allowance conflict, the denial wins.
+A permission that forbids instead of allowing. Among one user's direct permissions, a denial beats a conflicting allowance; a direct permission, allowance or denial, beats what the user's roles say.
 _Avoid_: inverted permission, inverse denial, cannot rule; denial for a unit refusing a plugin's permission (that is a durable denial)
 
 **Direct permission**:
@@ -1083,7 +1083,7 @@ Everything a consent unit is shown about a plugin's requested permissions: group
 _Avoid_: consent presentation, consent screen
 
 **Critical confirmation**:
-Retyping each Critical-risk permission a plugin requests, to approve its install or update.
+Retyping each Critical-risk permission that an install or update gives server consent to, or gives it again after its risk rose, to approve that install or update. Permissions households or users decide, and those already granted at their current risk, are not retyped.
 _Avoid_: second factor, typed confirmation
 
 **Unit enablement**:
