@@ -243,6 +243,14 @@ export class InviteService {
       throw new BadRequestException(t('errors.invite.self_invite'));
     }
 
+    // The mark hides an invite from whoever holds its address. An invitee
+    // named by id reaches it through the party read whatever the mark says.
+    // A consumer's mistake rather than the user's, so a bare 500 that names
+    // nothing.
+    if (params.withheld && inviteeId !== null) {
+      throw new Error('An invite can be withheld only when it names no invitee, who would otherwise reach it by id');
+    }
+
     const context = this.contextOf(params);
     const expiresAt = params.expiresAt ?? new Date(initiatedAt.getTime() + DEFAULT_INVITE_TTL_MS);
 

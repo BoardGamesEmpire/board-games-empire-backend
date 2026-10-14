@@ -181,6 +181,18 @@ describe('InviteService', () => {
       expect(where.OR).not.toContainEqual({ inviteeId: null });
     });
 
+    it('lets the inviter reach a withheld invite by its link as by id, so no read tells them it was withheld (#278)', async () => {
+      db.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+
+      await service.findForParty({ target: { token: TOKEN }, actingUserId: INVITER_ID });
+
+      const { where } = db.invite.findFirst.mock.calls[0]?.[0] as { where: Prisma.InviteWhereInput };
+      // Unfiltered. A 404 here, where every other invite of theirs answers,
+      // would be the tell the mark exists to hide.
+      expect(where.OR).toContainEqual({ inviterId: INVITER_ID });
+      expect(where).not.toHaveProperty('withheld');
+    });
+
     it('404s a stranger rather than confirming the invite exists', async () => {
       db.invite.findFirst.mockResolvedValue(null);
 
@@ -409,14 +421,23 @@ describe('InviteService', () => {
     });
 
     it('stores an invite as withheld only when the caller says so, and answers it like any other', async () => {
-      await service.createWithin(asTx(tx), params);
-      await service.createWithin(asTx(tx), { ...params, withheld: true });
+      const byAddress = { ...params, inviteeId: null, inviteeEmail: 'sam@example.test' };
+
+      await service.createWithin(asTx(tx), byAddress);
+      await service.createWithin(asTx(tx), { ...byAddress, withheld: true });
 
       const [[first], [second]] = tx.invite.create.mock.calls as [{ data: Prisma.InviteUncheckedCreateInput }][];
       expect(first.data.withheld).toBe(false);
       expect(second.data.withheld).toBe(true);
       // Same status and shape: a withheld invite is told apart by the row alone.
       expect(second.data.status).toBe(InviteStatus.Pending);
+    });
+
+    it('refuses to withhold an invite that names its invitee, who would reach it by id', async () => {
+      await expect(service.createWithin(asTx(tx), { ...params, withheld: true })).rejects.toThrow('names no invitee');
+
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+      expect(tx.invite.create).not.toHaveBeenCalled();
     });
 
     it('remints on a collision and never inserts a token the probe found taken', async () => {
