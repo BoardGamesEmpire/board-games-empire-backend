@@ -15,6 +15,11 @@ model UserPreferences {
   showCollectionToFriends Boolean @default(true) @map("show_collection_to_friends")
   showGamePlayHistory     Boolean @default(true) @map("show_game_play_history")
 
+  // Who may invite this user to a household (#278): `Public`, `Friends`, or
+  // `Private` for nobody. The server's policy still applies, so this can only
+  // narrow it.
+  allowHouseholdInvitesFrom Visibility @default(Public) @map("allow_household_invites_from")
+
   // Notification preferences
   emailNotifications Json? @map("email_notifications") // Structured notification preferences
   pushNotifications  Json? @map("push_notifications")

@@ -16,6 +16,7 @@ import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
+import { gateInvitee, type StoredInvitee } from './invitee-gate';
 
 /**
  * Each member's user id and household role: what the invite grants' role
@@ -53,11 +54,7 @@ export type HouseholdInviteView = InvitePartyView | InviteContextView;
 type InviteeRequest = { readonly inviteeId: string } | { readonly inviteeEmail: string };
 
 /** The invitee as `createWithin` stores it. */
-interface ResolvedInvitee {
-  readonly inviteeId: string | null;
-  readonly inviteeEmail: string | null;
-  readonly inviteeName: string | null;
-}
+type ResolvedInvitee = StoredInvitee & { readonly inviteeName: string | null };
 
 /**
  * Creates and lists a household's invites (#162). The lifecycle itself is
@@ -90,9 +87,13 @@ export class HouseholdInviteService {
    *    answer decides: a role change can land between the first read and the
    *    lock, and none can land after it.
    * 4. The invitee is resolved: an id must be a person's, and an address is
-   *    stored as it is, with no account looked up. The inviter is refused, and
-   *    so is a current member named by id.
-   * 5. The lib inserts. A second outstanding invite to the same id, or to the
+   *    stored as it is, bound to no account. The inviter is refused, and so is
+   *    a current member named by id.
+   * 5. The server's policy, a block between the two and the invitee's own
+   *    preference decide whether they may be invited (#278). By id, each
+   *    refuses with 403. By address, only the policy refuses; the other two
+   *    store the invite withheld, and it answers like any other.
+   * 6. The lib inserts. A second outstanding invite to the same id, or to the
    *    same address, is the database's 409, through the lib.
    *
    * The domain events go out after commit, in the order the writes happened:
@@ -122,8 +123,10 @@ export class HouseholdInviteService {
 
       const roleId = await resolveHouseholdRoleId(tx, role);
 
-      // Who may be invited (#278) and how many invites a day (#279) are
-      // checked here: the invitee is known, and nothing is written yet.
+      const { withheld } = await gateInvitee(tx, inviterId, invitee);
+
+      // How many invites a day (#279) is checked here: the invitee is known,
+      // and nothing is written yet.
 
       return this.invites.createWithin(tx, {
         type: InviteType.Household,
@@ -132,6 +135,7 @@ export class HouseholdInviteService {
         ...invitee,
         roleId,
         message: dto.message ?? null,
+        withheld,
       });
     });
 
@@ -259,11 +263,12 @@ export class HouseholdInviteService {
    * who the account is.
    *
    * By address: the address is stored alone (the lib trims and lower-cases
-   * it), with the name as typed, and no account is looked up. Whatever the
-   * create did with the account holding the address would show in how it
-   * answers: a bound id meets the duplicate index, and a member is refused.
-   * Either would tell the inviter whose address it is. The accept (#163) binds
-   * the account that answers the invite.
+   * it), with the name as typed, and no account is bound. Whatever the create
+   * did with the account holding the address would show in how it answers: a
+   * bound id meets the duplicate index, and a member is refused. Either would
+   * tell the inviter whose address it is. The gate (#278) does read that
+   * account's block and preference, but only to withhold the invite, which no
+   * answer shows. The accept (#163) binds the account that answers the invite.
    *
    * The inviter is refused by either route: by id, or by their own address,
    * which tells them nothing. Addresses are compared lower-cased.
