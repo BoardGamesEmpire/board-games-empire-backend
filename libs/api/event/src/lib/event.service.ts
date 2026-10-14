@@ -15,9 +15,11 @@ import { lockExistingHousehold } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
+import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { isDeepStrictEqual } from 'node:util';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
@@ -298,6 +300,15 @@ export class EventService {
       return created;
     });
 
+    // The creator's graph was cached by this request, before the host row
+    // existed, and each invitee's predates their participant row. Without the
+    // eviction none of them holds a role on the event until the cache expires.
+    //
+    // Evicted before the emits: the webhook dispatcher reads each subscriber's
+    // graph once the emit returns, and outside a household that role is the
+    // creator's and invitees' only read on the event (#538).
+    await this.permissions.invalidateUsers([userId, ...uniqueInviteIds]);
+
     this.eventEmitter.emit(
       EventCreatedEvent.eventName,
       new EventCreatedEvent(
@@ -314,10 +325,16 @@ export class EventService {
       ),
     );
 
-    // The creator's graph was cached by this request, before the host row
-    // existed, and each invitee's predates their participant row. Without the
-    // eviction none of them holds a role on the event until the cache expires.
-    await this.permissions.invalidateUsers([userId, ...uniqueInviteIds]);
+    this.eventEmitter.emit(
+      WebhookEventType.EventCreated,
+      webhookEnvelope({
+        subjectId: event.id,
+        householdId: event.householdId,
+        // An event is created once, so its id names this occurrence.
+        occurrenceId: event.id,
+        data: this.webhookIds(event),
+      }),
+    );
 
     return event;
   }
@@ -350,14 +367,33 @@ export class EventService {
       });
 
       const changedKeys = Object.keys(fields) as (keyof Event)[];
-      // A PATCH touching only relation-managed inputs (occurrences / policy /
-      // inviteUserIds) changes no Event columns — an empty-diff "update" audit
-      // row would be noise, so emit only when a column actually changed.
+      // The audit row records the columns the patch named, before and after,
+      // even a value re-sent unchanged, as every update in this lib does
+      // (`pickSnapshot`). A PATCH touching only relation-managed inputs
+      // (occurrences / policy / inviteUserIds) names no Event column, so it
+      // writes none.
       if (changedKeys.length > 0) {
         this.eventEmitter.emit(
           EventUpdatedEvent.eventName,
           new EventUpdatedEvent(pickSnapshot(existing, changedKeys), pickSnapshot(updated, changedKeys), initiatedAt),
         );
+
+        // The columns whose values changed, not every key the patch sent, so
+        // a form that re-sends what it loaded tells no subscriber anything.
+        // Their names, never their values: a receiver reads the values with
+        // its own credentials. No occurrenceId, since nothing here names one
+        // update stably (#127), so each emit is its own delivery.
+        const changedFields = changedKeys.filter((key) => !isDeepStrictEqual(existing[key], updated[key]));
+        if (changedFields.length > 0) {
+          this.eventEmitter.emit(
+            WebhookEventType.EventUpdated,
+            webhookEnvelope({
+              subjectId: updated.id,
+              householdId: updated.householdId,
+              data: { ...this.webhookIds(updated), changedFields },
+            }),
+          );
+        }
       }
 
       return updated;
@@ -400,6 +436,19 @@ export class EventService {
         ),
       );
 
+      // Emitted after the delete commits, so the descriptor marks the subject
+      // deleted and dispatch reads the deleted row. Nothing restores an event,
+      // so its id names this occurrence.
+      this.eventEmitter.emit(
+        WebhookEventType.EventDeleted,
+        webhookEnvelope({
+          subjectId: event.id,
+          householdId: event.householdId,
+          occurrenceId: event.id,
+          data: this.webhookIds(event),
+        }),
+      );
+
       return event;
     } catch (error) {
       this.logger.error(`Error deleting event with ID ${id}`, error);
@@ -409,6 +458,17 @@ export class EventService {
 
       throw error;
     }
+  }
+
+  /**
+   * What every Event webhook carries: ids only. `data` is copied verbatim to a
+   * URL the subscriber controls, and an event's title, description and
+   * `location` (which may be a home address) are not the subscriber's to
+   * forward. A receiver that wants them reads the event with its own
+   * credentials and gets what that read allows.
+   */
+  private webhookIds(event: Pick<Event, 'id' | 'householdId'>): { eventId: string; householdId: string | null } {
+    return { eventId: event.id, householdId: event.householdId };
   }
 
   private validateOccurrencesForMode(mode: EventSchedulingMode, occurrences?: CreateEventDto['occurrences']): void {

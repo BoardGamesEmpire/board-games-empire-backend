@@ -1,5 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
-import { ResourceType, WebhookSubscription, WebhookSubscriptionStatus } from '@bge/database';
+import { Action, ResourceType, WebhookSubscription, WebhookSubscriptionStatus } from '@bge/database';
 import { AbilityFactory, PermissionsService, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb, MockDatabaseService } from '@bge/testing';
 import type { WebhookEmittableEvent } from '@bge/webhooks';
@@ -12,6 +12,7 @@ import { WebhookDispatcherService } from './webhook-dispatcher.service';
 
 describe('WebhookDispatcherService', () => {
   let service: WebhookDispatcherService;
+  let registry: WebhookEventRegistry;
   let db: MockDatabaseService;
   let queue: { add: jest.Mock };
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
@@ -45,6 +46,7 @@ describe('WebhookDispatcherService', () => {
     });
 
     service = module.get(WebhookDispatcherService);
+    registry = module.get(WebhookEventRegistry);
     db = mockDb;
   });
 
@@ -154,6 +156,46 @@ describe('WebhookDispatcherService', () => {
     await dispatch(WebhookEventType.EventCreated, event());
 
     expect(queue.add).not.toHaveBeenCalled();
+  });
+
+  it("checks the subject with the descriptor's action (#247)", async () => {
+    // Every registered descriptor is `read`, so a stricter one is stood in.
+    jest.spyOn(registry, 'require').mockReturnValue({
+      type: WebhookEventType.EventUpdated,
+      subject: ResourceType.Event,
+      requiredAction: Action.update,
+    });
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+
+    await dispatch(WebhookEventType.EventUpdated, event());
+
+    expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-1', ability, {
+      action: Action.update,
+      subjectDeleted: false,
+    });
+  });
+
+  it('checks a delete against the deleted row, still for read (#538)', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+
+    await dispatch(WebhookEventType.EventDeleted, event());
+
+    expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-1', ability, {
+      action: Action.read,
+      subjectDeleted: true,
+    });
+    expect(queue.add).toHaveBeenCalledTimes(1);
+  });
+
+  it('checks every other event against the live row', async () => {
+    db.webhookSubscription.findMany.mockResolvedValue([{ id: 'sub-1', createdById: 'owner-1' } as WebhookSubscription]);
+
+    await dispatch(WebhookEventType.EventCreated, event());
+
+    expect(visibility.isVisibleTo).toHaveBeenCalledWith(ResourceType.Event, 'event-1', ability, {
+      action: Action.read,
+      subjectDeleted: false,
+    });
   });
 
   it('carries the CLS actor when present', async () => {

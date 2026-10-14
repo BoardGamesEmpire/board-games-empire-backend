@@ -240,6 +240,16 @@ describe('the shipped catalogs', () => {
       );
     });
 
+    it('let User read import jobs, and no other job type (#479)', () => {
+      const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+
+      // An import job describes public content, so every user reads every
+      // import. Pinned exactly: a lost `type` clause would hand every user every
+      // job of every type, whatever its payload holds.
+      expect(conditionsOf('read:job')).toStrictEqual({ type: 'GameImport' });
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:job');
+    });
+
     it.each(
       Object.entries(ROLE_SCOPE)
         .filter(([, scope]) => scope !== 'global')

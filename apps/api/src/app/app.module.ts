@@ -31,6 +31,7 @@ import { AbilityContextMiddleware, PermissionsModule } from '@bge/permissions';
 import { PluginModule } from '@bge/plugin';
 import { PluginsApiModule } from '@bge/plugins';
 import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
+import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { QuotasModule } from '@bge/quotas';
 import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
@@ -145,9 +146,10 @@ import { createThrottlers } from './lib/throttlers';
 
     // BullMQ root so this process can PRODUCE jobs. The feedback dispatcher
     // (FeedbackQueueProducerModule) enqueues delivery jobs when a report is
-    // submitted here; the worker consumes them. Telemetry attaches at the root
-    // so producer spans participate in the queue-boundary trace. Depends on the
-    // QUEUE_REDIS_CLIENT provided by RedisModule above.
+    // submitted here, and the webhook dispatcher (WebhookQueueProducerModule)
+    // when a subscribed event fires; the worker consumes both. Telemetry
+    // attaches at the root so producer spans participate in the queue-boundary
+    // trace. Depends on the QUEUE_REDIS_CLIENT provided by RedisModule above.
     BullModule.forRootAsync({
       inject: [QUEUE_REDIS_CLIENT],
       useFactory: (queueClient: RedisClient) => ({
@@ -255,6 +257,10 @@ import { createThrottlers } from './lib/throttlers';
     SystemSettingsModule,
     UserModule,
     WebhookSubscriptionModule,
+    // Webhook delivery PRODUCER: the onAny dispatcher that turns the Event
+    // domain's and the household ownership transfer's webhook types, emitted in
+    // this process, into queued deliveries. The worker runs the consumer.
+    WebhookQueueProducerModule,
     WellKnownModule,
   ],
   controllers: [],

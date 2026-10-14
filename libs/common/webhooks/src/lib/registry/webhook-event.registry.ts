@@ -9,9 +9,8 @@ import type { WebhookEventDescriptor } from '../interfaces/webhook-event-descrip
  * subject for the create-time CASL check, and (via `requiredAction`) sets the
  * grant a subscriber must hold.
  *
- * Stateless and constant — no DB. Registered global so both the API-side
- * dispatcher/subscription service and (when wired) the worker-side dispatcher
- * resolve against the same table.
+ * Stateless and constant — no DB. The subscription service and the
+ * dispatcher, in every process that runs one, resolve against the same table.
  *
  * The descriptors are NOT hand-maintained here anymore: they are derived from
  * the compiler-enforced `WEBHOOK_EVENT_DESCRIPTORS` (a `Record` over

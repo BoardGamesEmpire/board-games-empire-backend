@@ -68,6 +68,9 @@
       "path": "../../libs/api/quota/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/queue/webhooks/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/queue/feedback/tsconfig.lib.json"
     },
     {

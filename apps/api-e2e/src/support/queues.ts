@@ -9,11 +9,11 @@ import { redisTlsOptions } from './redis-reset';
  * pointed the API at — never by reaching into the server process.
  *
  * The baseline is NO CONSUMER BY DEFAULT, and it holds structurally:
- * `apps/api` registers PRODUCERS only (feedback delivery, game import) — no
- * `@Processor` runs in the server, so enqueued jobs sit in `waiting` where
- * specs can assert on them deterministically. Nothing pauses a queue to get
- * there, and nothing should: `obliterate` deletes the key a pause is stored in
- * (#268).
+ * `apps/api` registers PRODUCERS only (feedback delivery, game import, webhook
+ * delivery) — no `@Processor` runs in the server, so enqueued jobs sit in
+ * `waiting` where specs can assert on them deterministically. Nothing pauses a
+ * queue to get there, and nothing should: `obliterate` deletes the key a pause
+ * is stored in (#268).
  *
  * A spec that needs the REAL processors installs `useWorker()`, which runs
  * `apps/worker` beside the API for that file, and waits with `drainQueue`.

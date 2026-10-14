@@ -89,7 +89,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     },
   },
   Job: {
-    User: { 'read:job': 'every row' },
+    User: { 'read:job': 'fixed filter' },
   },
   Plugin: {
     Admin: { 'manage:plugin': 'every row', 'read:plugin': 'every row' },

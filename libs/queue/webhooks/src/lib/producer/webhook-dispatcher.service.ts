@@ -6,6 +6,7 @@ import {
   WebhookVisibilityService,
   isWebhookEmittableEvent,
   type WebhookEmittableEvent,
+  type WebhookEventDescriptor,
   type WebhookEventType,
 } from '@bge/webhooks';
 import { InjectQueue } from '@nestjs/bullmq';
@@ -24,17 +25,18 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
 
 /**
  * Bridges domain events to webhook deliveries — the queue *producer*. Runs in
- * any process that emits eligible events (API for the Event domain today; the
- * worker too, once game-domain events are eligible). It listens to every
- * emitted event via `onAny` (the emitter is configured `wildcard: false`, so
- * `@OnEvent('**')` would never fire), filters to registered types, then for
- * each matching subscription re-checks the owner's live read ability before
- * enqueuing a delivery job.
+ * every process that emits eligible events: the API (the Event domain and the
+ * household ownership transfer), the worker (import completion, failure and
+ * batch completion) and the gateway-worker (import start and fetch failure).
+ * It listens to every emitted event via `onAny` (the emitter is configured
+ * `wildcard: false`, so `@OnEvent('**')` would never fire), filters to
+ * registered types, then for each matching subscription re-checks the owner's
+ * live ability before enqueuing a delivery job.
  *
  * Authorization is CASL-at-dispatch: a subscription receives an event only if
- * its creator can currently read the subject instance. The owner's ability is
- * built per dispatch and memoized for the burst, since `getUserRoleGraph` is
- * cached but `createForUser` is not.
+ * its creator can currently take the descriptor's `requiredAction` on the
+ * subject instance. The owner's ability is built per dispatch and memoized for
+ * the burst, since `getUserRoleGraph` is cached but `createForUser` is not.
  *
  * The handler never throws into the emitter — a webhook failure must not break
  * the domain transaction that produced the event.
@@ -97,9 +99,10 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     }
 
     const actor = this.auditContext.getActor() ?? this.unattributedActor();
-    // subject + subjectId are loop-invariant, so visibility is a pure function of
-    // the owner — memoize per createdById so an owner with multiple matching
-    // subscriptions costs one ability build + one visibility query, not one each.
+    // The descriptor and subjectId are loop-invariant, so visibility is a pure
+    // function of the owner — memoize per createdById so an owner with multiple
+    // matching subscriptions costs one ability build + one visibility query, not
+    // one each.
     const visibilityCache = new Map<string, boolean>();
     let failures = 0;
 
@@ -109,12 +112,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
       // and silently strip the event from every subscriber later in the list.
       // Log the one that failed and carry on so deliveries are independent.
       try {
-        const visible = await this.visibleTo(
-          subscription.createdById,
-          descriptor.subject,
-          event.subjectId,
-          visibilityCache,
-        );
+        const visible = await this.visibleTo(subscription.createdById, descriptor, event.subjectId, visibilityCache);
 
         if (!visible) {
           continue;
@@ -159,7 +157,7 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
 
   private async visibleTo(
     userId: string,
-    subject: ResourceType,
+    descriptor: WebhookEventDescriptor,
     subjectId: string,
     cache: Map<string, boolean>,
   ): Promise<boolean> {
@@ -169,10 +167,14 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     }
     const graph = await this.permissions.getUserRoleGraph(userId);
     const ability = this.abilityFactory.createForUser(graph);
-    const visible = await this.visibility.isVisibleTo(subject, subjectId, ability);
+    const visible = await this.visibility.isVisibleTo(descriptor.subject, subjectId, ability, {
+      action: descriptor.requiredAction,
+      subjectDeleted: descriptor.subjectDeleted ?? false,
+    });
     cache.set(userId, visible);
     return visible;
   }
+
   private async enqueue(
     subscriptionId: string,
     eventType: WebhookEventType,
