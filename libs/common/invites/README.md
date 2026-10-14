@@ -67,7 +67,7 @@ A stranger addressing an invite that is not theirs, by id or by a link that is n
 
 **Context authority is the consumer's to assert before calling.** An owner or admin revoking, an approver approving: the lib never checks a household or event role, and needs no `read` grant on `Invite` to do its work. That is also why an email-only invite, whose invitee is not a registered user and so can hold no grant, is reachable at all. What the lib does bind is the context that assertion was about: `revokeWithin` and `approveWithin` take the `scope` the caller's authority covers, a `householdId` or an `eventId`, and carry it into the read. A route that authorized an admin on one household and was handed an invite id from another transitions nothing, because the consumer's role check and the lib's query name the same context and neither is satisfied by the other's.
 
-An email-only invite (no `inviteeId`) answers only to the token its link carries. Addressed by id it answers to nobody, not even its inviter: the id is public to every context reader through the household detail, the token is not. Accepting or declining by token binds the invite to the user who responded. The inviter never answers by either route: `createWithin` refuses a self-invite by id, but cannot tell that an address is the inviter's own, so the link such an invite mails them is refused at accept and decline instead.
+An email-only invite (no `inviteeId`) answers only to the token its link carries. Addressed by id it answers to nobody, not even its inviter: the id is public to every context reader through the household detail, the token is not. Accepting or declining by token binds the invite to the user who responded. The inviter never answers by either route: `createWithin` refuses a self-invite by id, but cannot tell that an address is the inviter's own, so the link such an invite mails them is refused at accept and decline instead. A withheld invite (below) answers to nobody by its token either.
 
 An invite names exactly the context its type allows: a household invite a `householdId` and no `eventId`, an event invite the reverse, a system or campaign invite neither. A row carrying both would sit inside both context indexes and be revoked when either context closed.
 
@@ -184,6 +184,8 @@ Two shapes, both `select`-based so a new column is invisible until someone names
 - `PARTY_INVITE_SELECT` — that plus `inviteeEmail` and `message`, for the inviter and the invitee on their own rows only.
 
 `read-shapes.spec.ts` reads the model's scalars out of the generated client and fails until every one is classified as published, party-only, or withheld with a reason. A consumer listing invites for a context must not widen to the party shape: that re-opens the address to every co-member, which is the leak #297 closed.
+
+`withheld` is on no shape and in no domain event (#278). The household route sets it through `createWithin` when a block or the invitee's preference refuses an invite by address: the invite is stored and answered like any other, so the inviter cannot tell. Anything that delivers invites reads the mark from the row and skips the invite: #173's mail, and #163's inbox, which matches invites to an account by address. The token, which the mail needs, is on no event either, so a mailer reads the row anyway. If a withheld invite's link is sent all the same, it reaches nothing: `findForParty`, `acceptWithin` and `declineWithin` meet the miss a stranger meets, so the invitee cannot answer it.
 
 ---
 

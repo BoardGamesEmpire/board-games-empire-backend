@@ -59,6 +59,12 @@ model Invite {
 
   respondedAt DateTime? @map("responded_at") @db.Timestamptz(3)
 
+  // Set when a block or the invitee's preference refused an invite by address
+  // (#278). It is stored and answered like any other invite, so the inviter
+  // cannot tell, and nothing that delivers invites may deliver it: #173's mail
+  // and #163's inbox skip it. No client shape, event or audit row carries it.
+  withheld Boolean @default(false)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

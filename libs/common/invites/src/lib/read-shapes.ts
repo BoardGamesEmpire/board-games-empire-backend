@@ -108,6 +108,8 @@ export const INVITE_SCALARS_OMITTED = {
   approvedAt: 'Approval bookkeeping (#231).',
   respondedAt: 'Lifecycle bookkeeping; `status` is the client-facing answer.',
   updatedAt: 'Row bookkeeping. `expiresAt` and `createdAt` are what a pending invite is judged by.',
+  withheld:
+    "Set when a block or the invitee's preference refused an invite by address (#278). The invite answers like any other so the inviter cannot tell, and any shape carrying this column would tell them. Only what delivers invites reads it, from the row.",
 } as const satisfies Partial<Record<Prisma.InviteScalarFieldEnum, string>>;
 
 /**

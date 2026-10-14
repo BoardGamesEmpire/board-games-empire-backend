@@ -89,11 +89,12 @@ export interface ActorProjection {
  * The pending-invite row as the API RETURNS it, which is far narrower than the
  * model.
  *
- * `Invite` declares eighteen scalars and this read publishes six. Two of the
- * twelve withheld are the whole of #297: `token` is a live accept credential,
- * and `inviteeEmail` is an address belonging to someone who may have no
- * account. Declaring either here would let an assertion on it typecheck and
- * then pass vacuously against `undefined`.
+ * This read publishes six of `Invite`'s scalars. The ledgers in the invites
+ * lib's `read-shapes.ts` give the reason each other one is withheld, and two
+ * of them are the whole of #297: `token` is a live accept credential, and
+ * `inviteeEmail` is an address belonging to someone who may have no account.
+ * Declaring either here would let an assertion on it typecheck and then pass
+ * vacuously against `undefined`.
  *
  * `Pick` rather than `Omit`, for the reason on {@link HouseholdMemberWire}:
  * dropping or renaming a published column is a compile error at this

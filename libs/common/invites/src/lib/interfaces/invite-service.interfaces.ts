@@ -38,6 +38,12 @@ export interface CreateInviteParams {
   readonly metadata?: Prisma.InputJsonValue;
   /** Opens the invite as `AwaitingApproval` instead of `Pending` (#166). */
   readonly needsApproval?: boolean;
+  /**
+   * Marks an invite that a block or the invitee's preference refused, where
+   * refusing it outright would tell the inviter so (#278). It is stored and
+   * answered like any other; only what delivers invites reads the mark.
+   */
+  readonly withheld?: boolean;
   /** Defaults to `DEFAULT_INVITE_TTL_MS` after now. Must be in the future. */
   readonly expiresAt?: Date;
 }

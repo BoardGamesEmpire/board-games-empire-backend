@@ -90,7 +90,7 @@ const scalarKeysOf = (select: Record<string, unknown>) => Object.keys(select).so
 const partyWhereById = (id: string, actor: string) => ({ id, OR: [{ inviterId: actor }, { inviteeId: actor }] });
 const partyWhereByToken = (token: string, actor: string) => ({
   token,
-  OR: [{ inviterId: actor }, { inviteeId: actor }, { inviteeId: null }],
+  OR: [{ inviterId: actor }, { inviteeId: actor }, { inviteeId: null, withheld: false }],
 });
 
 function expectNoToken(event: InviteDomainEvent): void {
@@ -167,6 +167,18 @@ describe('InviteService', () => {
         where: partyWhereByToken(TOKEN, STRANGER_ID),
         select: TRANSITION_SELECT,
       });
+    });
+
+    it('reaches no withheld invite by its link, which nobody was sent (#278)', async () => {
+      db.invite.findFirst.mockResolvedValue(null);
+
+      await expect(service.findForParty({ target: { token: TOKEN }, actingUserId: STRANGER_ID })).rejects.toThrow(
+        NotFoundException,
+      );
+
+      const { where } = db.invite.findFirst.mock.calls[0]?.[0] as { where: Prisma.InviteWhereInput };
+      expect(where.OR).toContainEqual({ inviteeId: null, withheld: false });
+      expect(where.OR).not.toContainEqual({ inviteeId: null });
     });
 
     it('404s a stranger rather than confirming the invite exists', async () => {
@@ -394,6 +406,17 @@ describe('InviteService', () => {
       const [{ data }] = tx.invite.create.mock.calls[0] as [{ data: Prisma.InviteUncheckedCreateInput }];
       expect(data.status).toBe(InviteStatus.AwaitingApproval);
       expect(data.needsApproval).toBe(true);
+    });
+
+    it('stores an invite as withheld only when the caller says so, and answers it like any other', async () => {
+      await service.createWithin(asTx(tx), params);
+      await service.createWithin(asTx(tx), { ...params, withheld: true });
+
+      const [[first], [second]] = tx.invite.create.mock.calls as [{ data: Prisma.InviteUncheckedCreateInput }][];
+      expect(first.data.withheld).toBe(false);
+      expect(second.data.withheld).toBe(true);
+      // Same status and shape: a withheld invite is told apart by the row alone.
+      expect(second.data.status).toBe(InviteStatus.Pending);
     });
 
     it('remints on a collision and never inserts a token the probe found taken', async () => {
