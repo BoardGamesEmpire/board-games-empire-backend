@@ -30,6 +30,8 @@ export const SYSTEM_SETTINGS_SELECT = {
 
   auditLogRetentionDays: true,
   reviewGatewayLanguages: true,
+
+  householdInviteePolicy: true,
 } as const satisfies Prisma.SystemSettingSelect;
 
 /**

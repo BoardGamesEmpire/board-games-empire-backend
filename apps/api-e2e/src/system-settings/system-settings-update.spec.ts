@@ -1,3 +1,4 @@
+import { Visibility } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -38,6 +39,7 @@ describe('system settings update', () => {
     contributionReclaimDays: true,
     auditLogRetentionDays: true,
     reviewGatewayLanguages: true,
+    householdInviteePolicy: true,
   } as const;
 
   const NOT_NULLABLE = Object.keys(WRITABLE).filter((key) => key !== 'auditLogRetentionDays');
@@ -121,6 +123,7 @@ describe('system settings update', () => {
         contributionReclaimDays: differentFrom(original.contributionReclaimDays, 7, 8),
         auditLogRetentionDays: differentFrom(original.auditLogRetentionDays, 7, 8),
         reviewGatewayLanguages: !original.reviewGatewayLanguages,
+        householdInviteePolicy: differentFrom(original.householdInviteePolicy, Visibility.Friends, Visibility.Public),
       };
 
       const { body } = await patch(admin, changed).expect(200);
@@ -200,6 +203,10 @@ describe('system settings update', () => {
       ['a blank name', { name: '   ' }],
       ['a name past the length limit', { name: 'x'.repeat(MAX_NAME_LENGTH + 1) }],
       ['the retention under its old name', { feedbackRetentionDays: 30 }],
+      // #496 has not defined the second degree, and the others are no policy.
+      ['an invitee policy of FriendsOfFriends', { householdInviteePolicy: Visibility.FriendsOfFriends }],
+      ['an invitee policy of Household', { householdInviteePolicy: Visibility.Household }],
+      ['an invitee policy of Private', { householdInviteePolicy: Visibility.Private }],
     ])('answers 400 to %s and writes nothing', async (_, body) => {
       await expectRefused(await actors.admin(), body);
     });

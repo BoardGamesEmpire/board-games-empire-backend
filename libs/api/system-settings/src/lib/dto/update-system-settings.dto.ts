@@ -1,7 +1,8 @@
+import { Visibility } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsBoolean, IsInt, IsNotEmpty, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 
 /**
  * A century. Each reader turns a day count into a date, `now` minus a
@@ -24,6 +25,14 @@ const MAX_DAYS = 36_500;
  * label's length.
  */
 const MAX_NAME_LENGTH = 100;
+
+/**
+ * The levels the server's household invitee policy takes (#278).
+ * `FriendsOfFriends` waits for the second-degree rule (#496). `Household`
+ * names no group an invitee could belong to, and `Private` would turn every
+ * household invite off.
+ */
+const HOUSEHOLD_INVITEE_POLICIES = [Visibility.Public, Visibility.Friends] as const;
 
 /**
  * Partial update for the `SystemSetting` singleton row. A property the body
@@ -128,4 +137,13 @@ export class UpdateSystemSettingsDto {
   @ValidateIf((_, value) => value !== undefined)
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   reviewGatewayLanguages?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      "Who may be invited to a household. Public: anyone. Friends: only the inviter's friends, invited from their account; every invite by email address is refused. A user's own preference can narrow this, never widen it.",
+    enum: HOUSEHOLD_INVITEE_POLICIES,
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsIn(HOUSEHOLD_INVITEE_POLICIES, { message: i18nValidationMessage('validation.isIn') })
+  householdInviteePolicy?: (typeof HOUSEHOLD_INVITEE_POLICIES)[number];
 }

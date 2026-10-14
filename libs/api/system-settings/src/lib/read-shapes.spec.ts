@@ -27,7 +27,7 @@ describe('system settings read shape', () => {
     );
   });
 
-  it('publishes the row id and the ten settings', () => {
+  it('publishes the row id and the eleven settings', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SELECT).sort()).toEqual(
       [
         'id',
@@ -41,6 +41,7 @@ describe('system settings read shape', () => {
         'contributionReclaimDays',
         'auditLogRetentionDays',
         'reviewGatewayLanguages',
+        'householdInviteePolicy',
       ].sort(),
     );
   });
