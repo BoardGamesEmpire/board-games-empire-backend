@@ -18,7 +18,8 @@ export default {
   setupFilesAfterEnv: ['<rootDir>/src/support/test-isolation.ts'],
   testEnvironment: 'node',
   // Isolation model (#255): one database, one worker, truncate sweep between
-  // tests. Template-database-per-worker is the documented upgrade path (#275).
+  // tests. CI goes faster by splitting the files across jobs instead (`--shard`,
+  // #684), each with its own containers and API child, so this model holds.
   maxWorkers: 1,
   // Applies to hooks too — first requests land while the server JIT-warms
   // against freshly started containers.

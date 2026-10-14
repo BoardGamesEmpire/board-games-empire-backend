@@ -76,7 +76,7 @@ describe('feedback submission throttling (#251)', () => {
   let actors: Actors;
 
   // Every accepted submission here enqueues a delivery job. This file never
-  // looks at the queue, but a job it leaves behind fails `harness.spec.ts`.
+  // looks at the queue, but a job it left behind would fail the file.
   isolateQueue(FEEDBACK_QUEUE_NAME);
 
   beforeAll(() => {

@@ -208,41 +208,67 @@ jobs:
           fail_ci_if_error: true
       - run: npx nx affected -t lint build --parallel --maxParallel=3
 
-      # Nx Cloud self-healing stays scoped to this job (D-259-1): letting it
-      # act on e2e failures against real containers is not something to
-      # invite while the suite's flake profile is uncharacterised. It needs Nx
-      # Cloud, so it is skipped on the runs that `NX_NO_CLOUD` keeps off it.
+      # Nx Cloud self-healing. It acts on failures anywhere in the CI pipeline
+      # execution, which is why the e2e shards running beside this job stay
+      # off Nx Cloud: letting it act on e2e failures against real containers
+      # is not something to invite while the suite's flake profile is
+      # uncharacterised (#259). It needs Nx Cloud, so it is skipped on the
+      # runs that `NX_NO_CLOUD` keeps off it.
       - run: npx nx fix-ci
         if: always() && env.NX_NO_CLOUD != 'true'
 
   # Black-box e2e gate (#259). Provisions real Postgres + Redis via
-  # testcontainers on the runner's Docker daemon (D-1 on #255). Advisory at
-  # first, then flipped to required in branch protection once flake is
-  # characterised (D-259-5).
+  # testcontainers on the runner's Docker daemon (#255). Advisory for now.
+  # Making it required in branch protection, once its flake is characterised,
+  # means requiring a summary job with `needs: e2e`, or every shard's check by
+  # name: a matrix reports one check per shard.
   #
-  # Gated on `main` rather than run alongside it — this revises D-259-1,
-  # which assumed this job would need only a cached `api:build`. It does
-  # not: the api bundle externalizes its workspace libraries, so this job
-  # builds the same affected graph `main` does. Run concurrently, a cold
-  # cache pays for that graph twice; run after, those builds are Nx Cloud
-  # cache hits and a failing lint or unit suite costs no container minutes
-  # at all. Unit feedback timing is unchanged either way — only the e2e
-  # verdict arrives later. Renovate's runs are the exception: they skip Nx
-  # Cloud (NX_NO_CLOUD above), so this job builds the affected graph again.
+  # Runs beside `main`, not after it (#684), so the e2e verdict arrives with
+  # the unit verdict instead of minutes later. What that gives up: a lint or
+  # unit failure doesn't spare the suite, and since the api bundle
+  # externalizes its workspace libraries, each shard builds the affected graph
+  # `main` does, uncached, on its own critical path: the job stays off Nx
+  # Cloud (see its env). Runner minutes cost a public repository nothing, so
+  # wall time is the cost here.
+  #
+  # Split into shards (#684), each a runner with its own containers, API child
+  # and single Jest worker, so the suite's isolation model holds inside each.
+  # Jest gives each spec file to a shard by a hash of its path, which balances
+  # the shards by file count, not by duration. Off Nx Cloud, the shards don't
+  # count against its free plan's 10 concurrent CI connections.
   e2e:
-    needs: main
+    name: e2e (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
-    # Hard stop for the whole job, setup included: npm ci, generation, and
-    # (on a cache miss) the affected build all land before the suite starts
-    # (D-259-7).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    # Hard stop for the whole job, setup included: npm ci, generation and the
+    # affected build all land before the suites start. Those take a few
+    # minutes even cold, so a suite step that runs into its own 20-minute cap
+    # still leaves the gateway step, which takes seconds, room to run.
     timeout-minutes: 30
     env:
+      # Off Nx Cloud, so `main`'s self-healing never sees an e2e task (#259).
+      # Connected, the shards would share `main`'s CI pipeline execution while
+      # running beside it, and self-healing acts on failures anywhere in it.
+      # Excluding e2e with `ai.fix-tasks-patterns` in `.nx/ci-config.yaml`
+      # instead failed quietly (#684): Nx Cloud answered a file without
+      # `dte.distribute-on` with a 400 on every request, so the run stored
+      # nothing in the remote cache and self-healing found no pipeline
+      # execution, and no step failed. The cost is that remote cache: each
+      # shard builds uncached, about 20 s more than a hit.
+      NX_NO_CLOUD: 'true'
       # Same value and reasoning as the `main` job. Covers the Jest process,
       # prisma migrate, and prisma db seed — NOT the API, worker and gateway
       # children, which the harness pins separately (apiEnvOverrides,
       # workerEnvOverrides, useGateway) because Jest's CLI assigns `test`
       # whenever the variable is unset.
       NODE_ENV: testing
+      # Stream every child's full output (API, worker, gateways) into the
+      # job log so a mid-run assertion failure is diagnosable without a
+      # local repro (#259). Failure-scoped alternative tracked as #274.
+      BGE_E2E_VERBOSE: 'true'
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -252,26 +278,47 @@ jobs:
 
       - uses: ./.github/actions/setup-workspace
 
-      # Built separately from the suite step for two reasons: `--parallel=1`
+      # Built separately from the suite steps for two reasons: `--parallel=1`
       # below serializes the entire task graph, and the api bundle
       # externalizes its workspace libraries, so `api:build` pulls ~40 `^build`
       # tasks that have no business running one at a time. Affected-scoped:
       # a doc-only PR runs no build tasks here, though the job still pays
       # checkout and setup regardless.
       - name: Build affected projects
+        id: build
         run: npx nx affected -t build --parallel --maxParallel=3
 
       # `affected` keeps doc-only PRs from paying the suites; each e2e app's
       # implicitDependencies pull it in for any change to the app it tests,
       # and ci.yml itself is in sharedGlobals.
+      #
+      # `--shard` reaches Jest because the jest executor passes on any option
+      # it doesn't declare. The gateway e2e apps sit this step out: Jest fails
+      # a run that finds no tests, so a project can't be split more ways than
+      # it has spec files, and each gateway app has two. They run whole in the
+      # first shard, in the next step, which leaves the shard count free to
+      # change. Both steps pick projects by exclusion, since `nx affected` has
+      # no `--projects`, so a new e2e app runs in both until it joins a list.
+      #
+      # `--outputStyle=stream-without-prefixes` prints the suite's output as it
+      # comes. Otherwise Nx holds a task's output until the task ends, then
+      # prints it in one write that its exit can cut short: off Nx Cloud, only
+      # about the first 64 KB reached the log, so the tests' results and Jest's
+      # summary were lost while the step stayed green.
       - name: Run e2e suite
         timeout-minutes: 20
-        env:
-          # Stream every child's full output (API, worker, gateways) into the
-          # job log so a mid-run assertion failure is diagnosable without a
-          # local repro (#259). Failure-scoped alternative tracked as #274.
-          BGE_E2E_VERBOSE: 'true'
-        run: npx nx affected -t e2e --parallel=1
+        run: >-
+          npx nx affected -t e2e --parallel=1
+          --exclude=@boardgamesempire/boardgamegeek-gateway-e2e,@boardgamesempire/igdb-gateway-e2e
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --outputStyle=stream-without-prefixes
+
+      # Runs after a failed suite step too, so an API failure still comes with
+      # the gateways' verdict.
+      - name: Run gateway e2e suites
+        if: ${{ !cancelled() && matrix.shard == 1 && steps.build.outcome == 'success' }}
+        timeout-minutes: 10
+        run: npx nx affected -t e2e --parallel=1 --exclude=@boardgamesempire/api-e2e
 
   # Builds the three images on master and pushes each by digest, untagged, for
   # the image smoke suite to test and publish to tag (#600). Nothing points at

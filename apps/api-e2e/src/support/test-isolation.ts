@@ -1,4 +1,6 @@
+import { FEEDBACK_QUEUE_NAME } from '@bge/queue-feedback';
 import { resetDatabase } from './database-reset';
+import { checkLeftoverJobs } from './queue-isolation';
 import { createTestDatabase, type TestDatabase } from './test-db';
 
 /**
@@ -28,3 +30,7 @@ afterAll(async () => {
   await db?.close();
   db = undefined;
 });
+
+// What every file IS held to: leaving the feedback queue no fuller than it
+// found it, so a file that forgets `isolateQueue` fails itself (#684).
+checkLeftoverJobs(FEEDBACK_QUEUE_NAME);

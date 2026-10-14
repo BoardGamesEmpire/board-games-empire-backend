@@ -13,7 +13,7 @@ import type { Queue } from 'bullmq';
 import type { ChildProcess } from 'node:child_process';
 import * as path from 'node:path';
 import { workerEnvOverrides } from './e2e-env';
-import { emptyQueue } from './queue-isolation';
+import { emptyQueue, registerDrain } from './queue-isolation';
 import { createTestQueue, type TestQueue } from './queues';
 import { requireDisposableRedis } from './redis-reset';
 
@@ -275,6 +275,8 @@ export async function startWorker(env: NodeJS.ProcessEnv = process.env): Promise
  * that dies without running `afterAll` can orphan the worker.
  */
 export function useWorker(): (name: WorkerQueueName) => Queue {
+  const drainRan = registerDrain(...WORKER_QUEUE_NAMES);
+
   let starting: Promise<StartedWorker> | undefined;
   let worker: StartedWorker | undefined;
 
@@ -288,10 +290,14 @@ export function useWorker(): (name: WorkerQueueName) => Queue {
     starting = undefined;
     worker = undefined;
 
-    // A start that failed has already cleaned up after itself, and
-    // `beforeAll` reported why.
-    const started = await pending?.catch(() => undefined);
-    await started?.stop();
+    try {
+      // A start that failed has already cleaned up after itself, and
+      // `beforeAll` reported why.
+      const started = await pending?.catch(() => undefined);
+      await started?.stop();
+    } finally {
+      drainRan();
+    }
   });
 
   return (name) => {
