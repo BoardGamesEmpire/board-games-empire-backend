@@ -133,6 +133,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   // manages its attendees but cannot read the event unless attending it.
   'read:event:participant:household',
   'read:household',
+  'read:household_invite',
   'read:household_member',
   'update:event_game_nomination:resolve:household',
   'update:event_occurrence:cancel:household',

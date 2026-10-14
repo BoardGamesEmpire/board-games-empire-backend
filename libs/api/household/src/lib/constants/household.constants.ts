@@ -33,6 +33,15 @@ export const HOUSEHOLD_RESTORE_PERMISSION_SLUG = 'update:household:restore' sati
 export const HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH = 128;
 
 /**
+ * Wire-contract caps on a household invite's free text (#162). The name is
+ * what a context reader sees beside the inviter, so it is a display name's
+ * length; the message is a note to the invitee, not a document.
+ */
+export const HOUSEHOLD_INVITE_MAX_NAME_LENGTH = 100;
+
+export const HOUSEHOLD_INVITE_MAX_MESSAGE_LENGTH = 1_000;
+
+/**
  * DB name of the `@@unique([createdById, clientRequestId])` constraint, as
  * mapped in `household.prisma`.
  *

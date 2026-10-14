@@ -1146,6 +1146,90 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe('household invites (#162)', () => {
+    // The whole shipped household role, as the household pass renders it. The
+    // invite routes ask about an instance carrying the household's roster with
+    // roles, because the role clause sits in the condition: given the
+    // household id alone, it matches nobody.
+    const holding = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          householdMember: [
+            {
+              householdId: 'hh-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const attending = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          eventsAttended: [
+            {
+              eventId: 'ev-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const inviteInto = (householdId: string, members: { userId: string; role: string }[]) =>
+      subject(ResourceType.Invite, {
+        householdId,
+        household: { members: members.map(({ userId, role }) => ({ userId, role: { role: { name: role } } })) },
+      });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      'lets a %s create and read invites in its own household and no other',
+      (roleName) => {
+        const ability = holding(roleName);
+        const own = inviteInto('hh-1', [{ userId: 'user-1', role: roleName }]);
+        const other = inviteInto('hh-2', [{ userId: 'user-1', role: roleName }]);
+
+        for (const action of [Action.create, Action.read]) {
+          expect(ability.can(action, own)).toBe(true);
+          expect(ability.can(action, other)).toBe(false);
+          // The household id alone carries no roster for the role clause.
+          expect(ability.can(action, subject(ResourceType.Invite, { householdId: 'hh-1' }))).toBe(false);
+        }
+      },
+    );
+
+    it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+      'refuses a %s both, even on its own row in its own household',
+      (roleName) => {
+        const ability = holding(roleName);
+        const own = inviteInto('hh-1', [{ userId: 'user-1', role: roleName }]);
+
+        expect(ability.can(Action.create, ResourceType.Invite)).toBe(false);
+        expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+        expect(ability.can(Action.create, own)).toBe(false);
+        expect(ability.can(Action.read, own)).toBe(false);
+      },
+    );
+
+    it("refuses an owner's row that belongs to another user", () => {
+      const ability = holding(SystemRole.HouseholdAdmin);
+      const someoneElses = inviteInto('hh-1', [{ userId: 'user-2', role: SystemRole.HouseholdOwner }]);
+
+      expect(ability.can(Action.create, someoneElses)).toBe(false);
+      expect(ability.can(Action.read, someoneElses)).toBe(false);
+    });
+
+    it('lets an event participant past the type-only create check, and not past the household instance', () => {
+      // Why the create route asks about the instance: `create:event_invite`
+      // reaches down to EventParticipant, and a type-only check reads no
+      // conditions.
+      const ability = attending(SystemRole.EventParticipant);
+
+      expect(ability.can(Action.create, ResourceType.Invite)).toBe(true);
+      expect(ability.can(Action.create, inviteInto('hh-1', []))).toBe(false);
+      expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+    });
+  });
+
   describe('staff grants (#244)', () => {
     // The composed staff roles, rendered through the GLOBAL `roles` pass — the
     // one that supplies neither `householdId` nor `eventId`. Before #244 that

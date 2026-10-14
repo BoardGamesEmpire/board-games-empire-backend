@@ -150,7 +150,9 @@
     "already_a_member": "User is already a member of household {householdId}",
     "member_origin_not_admissible": "Membership origin '{origin}' cannot be recorded by the member-admission path — founder membership is created with the household",
     "not_deleted": "Household {id} is not deleted, so there is nothing to restore",
-    "permission_not_provisioned": "Permission '{slug}' is not provisioned on this server"
+    "permission_not_provisioned": "Permission '{slug}' is not provisioned on this server",
+    "invitee_exactly_one": "Name exactly one invitee: a user id or an email address",
+    "invitee_already_member": "The invitee is already a member of household {householdId}"
   },
   "invite": {
     "not_found": "Invite with ID {id} not found",

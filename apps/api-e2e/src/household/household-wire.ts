@@ -292,7 +292,7 @@ const isNonNegativeInteger = (value: unknown): value is number => Number.isSafeI
  * arithmetic — `page: -1`, `limit: 0`, a `totalPages` that contradicts `total`
  * — is a server bug the suite should fail on, not narrow past.
  */
-function asPagination(value: unknown): PaginationWire | undefined {
+export function asPagination(value: unknown): PaginationWire | undefined {
   if (!isRecord(value)) {
     return undefined;
   }

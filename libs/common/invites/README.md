@@ -142,7 +142,7 @@ A settled invite sits outside those indexes, so a re-invite after a decline, a w
 
 The email column is compared as stored; the lib trims and lower-cases it before every insert.
 
-The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user; a route that accepts an address should resolve a registered one to its user first and open a user-bound invite (#162).
+The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user, and the household route does not either (#162). Binding the account that holds an address would show in how the create answers: the id index would refuse an invite by address beside one by id, and the route would refuse a member's address. Either refusal tells the inviter whose address it is. So an invite by address stays email-only until someone answers it by its token, and it can stand beside an invite by id to the same person.
 
 ---
 

@@ -1,6 +1,7 @@
-import { InviteStatus } from '@bge/database';
+import { InviteStatus, type Prisma } from '@bge/database';
 import {
   effectiveInviteStatus,
+  effectiveInviteStatusWhere,
   isOutstandingInviteStatus,
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
@@ -94,6 +95,50 @@ describe('invite expiry', () => {
         expect(effectiveInviteStatus({ status: InviteStatus.Pending, expiresAt: PAST })).toBe(InviteStatus.Expired);
       } finally {
         jest.useRealTimers();
+      }
+    });
+  });
+
+  describe('effectiveInviteStatusWhere', () => {
+    /**
+     * Evaluates the fragment against one row, for the shapes it produces: a
+     * status (or a list of them), an expiry bound, an `OR`. Anything else fails
+     * the test, so a new shape cannot pass by being ignored.
+     */
+    const matches = (where: Prisma.InviteWhereInput, row: { status: InviteStatus; expiresAt: Date }): boolean =>
+      Object.entries(where).every(([key, value]) => {
+        if (key === 'OR') {
+          return (value as Prisma.InviteWhereInput[]).some((branch) => matches(branch, row));
+        }
+
+        if (key === 'status') {
+          return typeof value === 'string'
+            ? row.status === value
+            : (value as { in: InviteStatus[] }).in.includes(row.status);
+        }
+
+        if (key === 'expiresAt') {
+          const bound = value as { gt?: Date; lte?: Date };
+
+          return bound.gt ? row.expiresAt > bound.gt : row.expiresAt <= (bound.lte as Date);
+        }
+
+        throw new Error(`unexpected key ${key}`);
+      });
+
+    it.each(Object.values(InviteStatus))('matches exactly the rows a read calls %s', (status) => {
+      const where = effectiveInviteStatusWhere(status, NOW);
+
+      for (const rowStatus of Object.values(InviteStatus)) {
+        for (const expiresAt of [PAST, NOW, FUTURE]) {
+          const row = { status: rowStatus, expiresAt };
+
+          expect([rowStatus, expiresAt, matches(where, row)]).toEqual([
+            rowStatus,
+            expiresAt,
+            effectiveInviteStatus(row, NOW) === status,
+          ]);
+        }
       }
     });
   });
