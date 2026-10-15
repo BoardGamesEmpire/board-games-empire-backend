@@ -7,7 +7,7 @@ The Board Games Empire backend, which serves game data to households and draws t
 ### Servers
 
 **Server**:
-One running Board Games Empire installation, with its own users, households and data.
+One running copy of Board Games Empire, with its own users, households and data.
 _Avoid_: instance, installation, deployment, site, system, global
 
 **Process role**:
@@ -19,7 +19,7 @@ A ready-made way to run a whole server: split, with each process role in its own
 _Avoid_: profile on its own (a user's profile), topology, combined deployment
 
 **BGE image**:
-The one container image that every part of a server runs from, with each remote DataGateway shipping as an image of its own.
+The one container image that every process role runs from, with each remote DataGateway shipping as an image of its own.
 
 **Bootstrap**:
 The work a process does at start, before it serves anything, such as applying migrations and seeding reference data. Connecting to DataGateways at start is not part of it.
@@ -72,7 +72,7 @@ How long a kind of record is kept before it is removed. It doesn't say how: some
 _Avoid_: retention to mean deletion, expiry
 
 **Domain event**:
-A notice that something happened in the system, announced to whatever listens for it.
+A notice that something happened on the server, announced to whatever listens for it.
 _Avoid_: event on its own (an event is a gathering)
 
 **Auto-disable**:
@@ -255,7 +255,7 @@ The part of a permission that limits which records it reaches, usually by tying 
 _Avoid_: ABAC, filter, template, bounding condition
 
 **Grant**:
-Access actually conferred: a permission a role holds, a direct permission, or a granted consent decision.
+Access actually conferred: an allowance that a role holds or that a user is given directly, or a granted consent decision. A denial is never a grant.
 _Avoid_: grant for a consent decision that refuses
 
 **Denial**:
@@ -442,7 +442,7 @@ _Avoid_: hidden game, opt-out; exclusion on its own (see Categorical exclusion)
 
 **Event**:
 A gathering to play games, such as a game night.
-_Avoid_: event for something that happened in the system (say domain event)
+_Avoid_: event for something that happened on the server (say domain event)
 
 **Event type**:
 What kind of gathering an event is, such as family night, strategy night or adults only, so people can decide whether to come.
@@ -669,7 +669,7 @@ The planned ranked list of a user's favorite games on their profile, whether or 
 _Avoid_: favorites, for this list
 
 **List**:
-A user's named list of games. Every user has a wishlist by default.
+A user's named list of games. Planned: every user has a wishlist by default.
 _Avoid_: list for an attendee's offered games
 
 **Game customization**:
@@ -720,7 +720,7 @@ The external service a DataGateway draws its data from, such as BoardGameGeek or
 _Avoid_: source, provider
 
 **DataGateway**:
-What an admin adds to connect the system to an upstream, as a remote service or a plugin. It either finds games or only adds data to games the system already knows.
+What an admin adds to connect the server to an upstream, as a remote service or a plugin. It either finds games or only adds data to games the server already knows.
 _Avoid_: game gateway, data source, data adapter, provider, gateway on its own (it also names WebSocket endpoints)
 
 **Remote DataGateway**:
@@ -740,7 +740,7 @@ An added DataGateway that the server may use. An admin enables or disables it, a
 _Avoid_: connected (each process holds its own connections); registered, for adding a DataGateway (say added)
 
 **Ping**:
-A quick check that a DataGateway is reachable and answering. It says nothing about what the DataGateway can do.
+A quick check that a DataGateway is reachable and answering. Learning what the DataGateway can do is the interview's job, not the ping's.
 _Avoid_: ping handshake
 
 **Upstream account**:
@@ -748,7 +748,7 @@ A user's own account on an upstream, such as their BoardGameGeek username, used 
 _Avoid_: gateway connection, gateway account, external profile, linked account (a sign-in method)
 
 **Capability**:
-Something a DataGateway can do that the system routes requests by: an operation it serves, or a kind of game it covers.
+Something a DataGateway can do that the server routes requests by: an operation it serves, or a kind of game it covers.
 _Avoid_: feature (a plugin's consent grouping)
 
 **Coverage**:
@@ -764,7 +764,7 @@ An item's id at a DataGateway, exactly as the DataGateway gave it.
 _Avoid_: external ID for the server's own id
 
 **Interview**:
-The system asking a DataGateway to describe itself: its capabilities, formats and vocabularies. It recurs over the DataGateway's life.
+The server asking a DataGateway to describe itself: its capabilities, formats and vocabularies. It recurs over the DataGateway's life.
 _Avoid_: handshake, registration, discovery, sync, language sync
 
 **DataGateway onboarding**:
@@ -776,7 +776,7 @@ An admin settling what the server could not settle on its own, such as which lan
 _Avoid_: curation, curate; curating, for staff changing games (say editing)
 
 **Vocabulary**:
-A set of things the system and each DataGateway name in their own terms, such as languages, platforms or regions.
+A set of things the server and each DataGateway name in their own terms, such as languages, platforms or regions.
 
 **Language code format**:
 The scheme a DataGateway uses to identify languages: a BCP 47 tag, a two- or three-letter ISO 639 code, or a language's name in English or in the language itself.
@@ -795,7 +795,7 @@ One search that looks in the game catalog and asks DataGateways at the same time
 _Avoid_: fan-out search, gateway search, search session; source (for one DataGateway's results); local, in system (say in the catalog)
 
 **Import**:
-Bringing a game from a DataGateway into the game catalog, with its platforms, releases, credits and taxonomy. If the game is already there, its data is updated instead.
+Bringing a game from a DataGateway into the game catalog, with its platforms, releases, credits and taxonomy. If the game already has a DataGateway link to that item, its data is updated instead, unless it is frozen.
 _Avoid_: upsert; fetch (that is only the first half)
 
 **Fetch**:
@@ -822,7 +822,7 @@ Bringing a server's mechanics, categories or families up to date from a DataGate
 _Avoid_: sync
 
 **Enrichment**:
-Adding to, or replacing, the data of a record the system already has, using a DataGateway other than the one the record came from. The records include games and the people and publishers credited on them.
+Adding to, or replacing, the data of a record the server already has, using a DataGateway other than the one the record came from. The records include games and the people and publishers credited on them.
 _Avoid_: augmentation
 
 **Game watch**:
@@ -1005,7 +1005,7 @@ How a plugin's code is run: inside the server's own process, or, planned, in a s
 _Avoid_: isolation tier, tier; isolation (the separate-process mode is not a security boundary); worker, for the separate-process mode
 
 **Plugin context**:
-The deliberately narrow set of server services a plugin is handed: logging, its own settings, emitting its declared events, and a read-only view of who triggered it. A plugin never reaches the server's internals directly.
+The deliberately narrow set of server services a plugin is handed: logging, its own settings, emitting its declared events, and a read-only view of who triggered it. It is the only way a plugin is meant to reach the server; nothing stops a plugin importing the server's internals directly, which is why such code is a forbidden import.
 _Avoid_: capability surface, DI scope
 
 **Forbidden import**:
