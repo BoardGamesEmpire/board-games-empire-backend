@@ -288,7 +288,7 @@ unavailable`; signature/not-found remapped inside `media-object.service.ts` to
   `WebhookDeliveryFailedError` — worker/boot-time, never HTTP.
 - **actor-context** (`libs/common/actor-context`): `TypeError` + plain `Error` invariants — dev-facing.
 - **permissions**: `AbilityContextNotPrimedError` + plain `Error` — dev-facing.
-- **quota registry** (`libs/common/quota/.../registry`): 3 plain `Error` throws — internal.
+- **quota registry** (`libs/common/quota/.../registry`): 4 plain `Error` throws — internal.
 - **actor-context-transport gRPC interceptors** (#144): 17 `HttpException` frames — 16 in
   `GrpcInternalActorInterceptor` (registered only on `gateway-coordinator`) and 1 in the unwired
   `GrpcActorInterceptor`. These are real exception classes, not custom errors, but nothing reads their

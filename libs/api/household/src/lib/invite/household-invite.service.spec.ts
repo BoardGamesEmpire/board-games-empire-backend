@@ -4,6 +4,7 @@ import {
   InviteStatus,
   InviteType,
   Prisma,
+  QuotaScope,
   ResourceType,
   SystemRole,
   Visibility,
@@ -16,6 +17,7 @@ import {
   type InvitePartyView,
 } from '@bge/invites';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
+import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -71,6 +73,17 @@ const partyView = (overrides: Partial<InvitePartyView> = {}): InvitePartyView =>
 /** Prisma's delegate types want full rows; the service selects narrower ones. */
 const resolves = (value: unknown) => value as never;
 
+/** What `consume` answers when no quota row applies. */
+const UNCONSTRAINED: QuotaCheckResult = {
+  allowed: true,
+  scope: null,
+  currentUsage: null,
+  limit: null,
+  softOverage: false,
+  constraints: [],
+  softOverages: [],
+};
+
 describe('HouseholdInviteService', () => {
   let service: HouseholdInviteService;
   let db: MockDatabaseService;
@@ -78,6 +91,7 @@ describe('HouseholdInviteService', () => {
     Pick<AbilityService, 'getActingUserId' | 'assertCurrentActorCan' | 'getCurrentResourceConditions'>
   >;
   let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'emit'>>;
+  let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let creation: InviteCreation;
 
   beforeEach(async () => {
@@ -95,6 +109,10 @@ describe('HouseholdInviteService', () => {
       createWithin: jest.fn().mockImplementation(() => Promise.resolve(creation)),
       emit: jest.fn(),
     };
+    quotas = {
+      consume: jest.fn().mockResolvedValue(UNCONSTRAINED),
+      emitSoftOverages: jest.fn(),
+    };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -105,6 +123,7 @@ describe('HouseholdInviteService', () => {
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: InviteService, useValue: invites },
+        { provide: QuotaService, useValue: quotas },
       ],
     });
 
@@ -601,6 +620,122 @@ describe('HouseholdInviteService', () => {
           expect(db.friendship.findFirst).toHaveBeenCalledTimes(1);
           expect(db.userPreferences.findFirst).toHaveBeenCalledTimes(1);
         });
+      });
+    });
+
+    describe('how many invites a day (#279)', () => {
+      const overage: QuotaSoftOverageEvent = {
+        scope: QuotaScope.User,
+        scopeId: 'owner-1',
+        resource: 'household_invite_daily_count',
+        currentUsage: '5',
+        attemptedAmount: '1',
+        limit: '5',
+      };
+
+      beforeEach(() => {
+        userById();
+      });
+
+      it("takes one of the inviter's and the household's daily invites, on the transaction, before the insert", async () => {
+        const steps: string[] = [];
+        quotas.consume.mockImplementation(() => {
+          steps.push('cap');
+
+          return Promise.resolve(UNCONSTRAINED);
+        });
+        invites.createWithin.mockImplementation(() => {
+          steps.push('insert');
+
+          return Promise.resolve(creation);
+        });
+
+        await service.createInvite('hh-1', byId());
+
+        expect(quotas.consume).toHaveBeenCalledWith(
+          'household_invite_daily_count',
+          1n,
+          { userId: 'owner-1', householdId: 'hh-1' },
+          db,
+        );
+        expect(steps).toEqual(['cap', 'insert']);
+      });
+
+      it('takes a slot for an invite by address as well', async () => {
+        inviterAddress('owner@example.test');
+
+        await service.createInvite('hh-1', byAddress());
+
+        expect(quotas.consume).toHaveBeenCalledWith(
+          'household_invite_daily_count',
+          1n,
+          { userId: 'owner-1', householdId: 'hh-1' },
+          db,
+        );
+      });
+
+      it('refuses with 402 past the cap, naming the binding scope, and writes and announces nothing', async () => {
+        quotas.consume.mockResolvedValue({
+          ...UNCONSTRAINED,
+          allowed: false,
+          scope: QuotaScope.Household,
+          currentUsage: 20n,
+          limit: 20n,
+        });
+
+        const error = await service.createInvite('hh-1', byId()).then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+        expect(error).toBeInstanceOf(QuotaExceededException);
+        expect((error as QuotaExceededException).getStatus()).toBe(402);
+        expect((error as QuotaExceededException).getResponse()).toMatchObject({
+          resource: 'household_invite_daily_count',
+          scope: QuotaScope.Household,
+          limit: '20',
+          currentUsage: '20',
+          attemptedAmount: '1',
+        });
+        expect(invites.createWithin).not.toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it('takes no slot for an invite the gate refuses, so it never waits on the cap', async () => {
+        db.systemSetting.findUnique.mockResolvedValue(resolves({ householdInviteePolicy: Visibility.Friends }));
+
+        await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
+
+        expect(quotas.consume).not.toHaveBeenCalled();
+      });
+
+      it("warns of a soft cap after the transaction, after the invite's own events", async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        let warnedInside: boolean | undefined;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          warnedInside = quotas.emitSoftOverages.mock.calls.length > 0;
+
+          return result;
+        }) as never);
+
+        await service.createInvite('hh-1', byId());
+
+        expect(warnedInside).toBe(false);
+        expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+        expect(invites.emit.mock.invocationCallOrder[0]).toBeLessThan(
+          quotas.emitSoftOverages.mock.invocationCallOrder[0] as number,
+        );
+      });
+
+      it('warns of nothing when the insert fails', async () => {
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        invites.createWithin.mockRejectedValue(new ConflictException());
+
+        await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ConflictException);
+
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
       });
     });
 

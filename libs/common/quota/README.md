@@ -155,12 +155,15 @@ Notes:
 
 Shipped resources:
 
-| Resource                     | Scopes                | Status                              |
-| ---------------------------- | --------------------- | ----------------------------------- |
-| `household_member_count`     | `Household`           | enforceable                         |
-| `webhook_subscription_count` | `User`                | enforceable                         |
-| `storage_bytes`              | `Server`, `User`      | **pending #58** (no usage provider) |
-| `plugin_install_count`       | `Server`, `Household` | **pending #59**                     |
+| Resource                       | Scopes                | Status                              |
+| ------------------------------ | --------------------- | ----------------------------------- |
+| `household_member_count`       | `Household`           | enforceable                         |
+| `webhook_subscription_count`   | `User`                | enforceable                         |
+| `storage_bytes`                | `Server`, `User`      | **pending #58** (no usage provider) |
+| `plugin_install_count`         | `Server`, `Household` | **pending #59**                     |
+| `household_invite_daily_count` | `User`, `Household`   | enforceable                         |
+
+`household_invite_daily_count` is a rate kept as a count: the household invites created in the **last 24 hours**, by the inviter at `User` scope and into the household at `Household` scope. The window is fixed in code; a row sets only how many invites fit in it. Every invite counts whatever its status, so revoking one frees no slot. A withheld invite (#278) counts too: leave it out and the inviter's remaining allowance would show which of their invites were withheld.
 
 A **pending** resource has no `usage` provider: caps can be pre-provisioned through `setQuota`, but `check()` against it throws until the underlying model exists. `requireUsage(resource)` is what enforces this.
 
