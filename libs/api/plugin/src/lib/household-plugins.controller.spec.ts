@@ -1,6 +1,7 @@
 import type { AuditContextService } from '@bge/actor-context';
-import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
-import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, type DatabaseService } from '@bge/database';
+import { HouseholdLivenessGuard } from '@bge/household';
+import { CHECK_POLICIES_KEY, PoliciesGuard, type AbilityService, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
@@ -11,7 +12,8 @@ import type {
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
-import { ForbiddenException, RequestMethod } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, RequestMethod, type ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdPluginsController } from './household-plugins.controller';
@@ -276,6 +278,42 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   // controller directly, so a deleted @CheckPolicies would be invisible to
   // every other test here. The instance gate (assertCurrentActorCan) is
   // asserted per-route above; this covers the coarse CASL half it layers on.
+  /**
+   * #553: these routes sit under `/households/:householdId`, so a missing or
+   * soft-deleted household answers 404 here as on the household routes (#299),
+   * through the same guard and with its narrowing intact.
+   */
+  describe('household liveness (#553)', () => {
+    it('runs the household liveness guard before PoliciesGuard', () => {
+      // Order is the mechanism: after PoliciesGuard, the 403 it answers an
+      // actor whose deleted household took its only rule would still win.
+      expect(Reflect.getMetadata('__guards__', HouseholdPluginsController)).toEqual([
+        HouseholdLivenessGuard,
+        PoliciesGuard,
+      ]);
+    });
+
+    it.each(['list', 'decideGrant', 'consentPresentation', 'enable', 'disable', 'updateConfig', 'featureStates'])(
+      'probes the route household on %s, and answers 404 when it is gone',
+      async (handler) => {
+        const count = jest.fn().mockResolvedValue(0);
+        const guard = new HouseholdLivenessGuard(
+          new Reflector(),
+          { household: { count } } as unknown as DatabaseService,
+          { getCurrentAbilities: () => [{ can: () => true }] } as unknown as AbilityService,
+        );
+        const context = {
+          getClass: () => HouseholdPluginsController,
+          getHandler: () => HouseholdPluginsController.prototype[handler as keyof HouseholdPluginsController],
+          switchToHttp: () => ({ getRequest: () => ({ params: { householdId: 'hh-gone', slug: 'demo-sink' } }) }),
+        } as unknown as ExecutionContext;
+
+        await expect(guard.canActivate(context)).rejects.toBeInstanceOf(NotFoundException);
+        expect(count).toHaveBeenCalledWith({ where: { id: 'hh-gone', deletedAt: null } });
+      },
+    );
+  });
+
   describe('policy gates', () => {
     const policiesFor = (handler: string) =>
       Reflect.getMetadata(CHECK_POLICIES_KEY, HouseholdPluginsController.prototype[handler as never]) as
