@@ -1,4 +1,4 @@
-import { AuditContextService, isUserActor, type UserPluginUnit } from '@bge/actor-context';
+import { AuditContextService, requireSessionUserId, type UserPluginUnit } from '@bge/actor-context';
 import { PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import {
@@ -9,7 +9,7 @@ import {
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
-import { Body, Controller, ForbiddenException, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -201,12 +201,6 @@ export class UserPluginsController {
    * kind check IS the missing ability floor (see the class doc).
    */
   private selfUserId(): string {
-    const actor = this.auditContext.getActor();
-
-    if (!actor || !isUserActor(actor)) {
-      throw new ForbiddenException(t('common.forbidden.action'));
-    }
-
-    return actor.userId;
+    return requireSessionUserId(this.auditContext.getActor());
   }
 }

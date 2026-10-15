@@ -24,9 +24,9 @@ import { arrangeEmptyHousehold, FK_PARENT_LOCK, SOFT_DELETE_HOUSEHOLD } from './
  * own mode is exercised as a control (it must NOT block), and the shipped
  * statement's mode is exercised as the guard (it must).
  *
- * ADMISSION HAS NO ENDPOINT YET (D-239-4). `addMemberWithin` is an internal
- * seam with no HTTP caller until the invite flow (#163), so the product-level
- * races belong there and this spec covers the mechanism only.
+ * This spec covers the mechanism only. Admission's endpoint is the invite
+ * accept (#163), and the product-level races between it and the soft delete
+ * are pinned in `household-invite-accept-races.spec.ts`.
  */
 describe('household share lock (FOR SHARE)', () => {
   /**

@@ -1,6 +1,11 @@
 import type { Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
-import { asPagination, type PaginationWire, type PendingInviteProjection } from './household-wire';
+import {
+  asPagination,
+  type HouseholdMemberProjection,
+  type PaginationWire,
+  type PendingInviteProjection,
+} from './household-wire';
 
 /**
  * Wire-contract types and fail-loud parsers for the household invite routes
@@ -8,7 +13,9 @@ import { asPagination, type PaginationWire, type PendingInviteProjection } from 
  *
  * Two shapes reach a client. Every row carries the context shape, which is the
  * household detail's invite embed. A row the caller sent carries the party
- * shape: the context shape plus the address and the message they wrote.
+ * shape: the context shape plus the address and the message they wrote. The
+ * invitee's routes (#163) answer in the party shape too, and their inbox adds
+ * the household that sent each invite.
  */
 
 /** The two columns only a party sees. */
@@ -85,4 +92,63 @@ export function inviteListEnvelope(response: HttpResponseLike, request: RequestD
   }
 
   return { invites: invites as unknown as ListedInviteWire[], pagination };
+}
+
+/** An invite as its invitee sees it in their inbox: the party shape and the household asking (#163). */
+export interface ReceivedInviteWire extends InvitePartyRowWire {
+  readonly household: { readonly id: string; readonly name: string };
+}
+
+export interface ReceivedInvitesEnvelope {
+  readonly invites: readonly ReceivedInviteWire[];
+  readonly pagination: PaginationWire;
+}
+
+export interface AcceptInviteEnvelope {
+  readonly message: string;
+  readonly invite: InvitePartyRowWire;
+  readonly member: HouseholdMemberProjection;
+}
+
+/**
+ * `POST /api/invites/:inviteId/accept` and `POST /api/invites/accept`:
+ * `{ message, invite, member }`. The member must name its household and
+ * user, which are what a client joins on.
+ */
+export function acceptEnvelope(response: HttpResponseLike, request: RequestDescription): AcceptInviteEnvelope {
+  const { message, invite } = inviteEnvelope(response, request);
+
+  // Proved by the parse above; repeated because TypeScript cannot see it there.
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const member = response.body['member'];
+  if (!hasStringId(member) || typeof member['householdId'] !== 'string' || typeof member['userId'] !== 'string') {
+    return fail("it carried no 'member' object with string 'id', 'householdId' and 'userId'", request, response);
+  }
+
+  return { message, invite, member: member as unknown as HouseholdMemberProjection };
+}
+
+/** `GET /api/invites`: `{ invites: [...], pagination }`, each row naming its household. */
+export function receivedInvitesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ReceivedInvitesEnvelope {
+  const { invites, pagination } = inviteListEnvelope(response, request);
+
+  for (const invite of invites) {
+    const row = invite as unknown as Record<string, unknown>;
+
+    if (!hasStringId(row['household']) || !('inviteeEmail' in row) || !('message' in row)) {
+      return fail(
+        `its invite ${invite.id} lacked the 'household' object or the party shape's 'inviteeEmail' or 'message' key`,
+        request,
+        response,
+      );
+    }
+  }
+
+  return { invites: invites as unknown as ReceivedInviteWire[], pagination };
 }

@@ -4,7 +4,8 @@ The invite lifecycle for Board Games Empire, as primitives a context owner drive
 
 The lib ships:
 
-- `InviteService` — `findForParty`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, and `emit`.
+- `InviteService` — `findForParty`, `findPartyScopeWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, and `emit`.
+- `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
 
@@ -47,27 +48,34 @@ export class HouseholdService {
 
 **Lock order: the context row, then the invite.** A context's delete locks its own row and then, through `revokeOutstandingWithin`, the invites into it. A consumer that holds its context row and transitions an invite in the same transaction takes them in that order too: lock the context row (`lockExistingHousehold` for a household) before the `*Within` call. The accept that admits a member is the case to get right, because `HouseholdMemberService.addMemberWithin` takes the household row `FOR SHARE`: an accept that transitioned the invite first and admitted second would hold the invite while waiting for the row a concurrent delete holds while waiting for the invite, and Postgres would abort one of them. Lock the household, then accept, then admit (#163). `TransactionDeadlockInterceptor` turns a victim into a retryable 409 either way; that is the backstop, not the design.
 
+The party view leaves the household's id out, so a consumer accepting by id or by token learns which row to lock from `findPartyScopeWithin(tx, lookup, InviteType.Household)` first. It binds the read as the transition does, so a stranger meets the same 404 before any household is named to them, and it takes no lock.
+
 ---
 
 ## Who may do what
 
 A **party** read or transition binds its `where` to the acting user, as inviter or invitee:
 
-| Primitive        | Who          | Bound by                                                      | Returns      |
-| ---------------- | ------------ | ------------------------------------------------------------- | ------------ |
-| `findForParty`   | either party | `inviterId` or `inviteeId`, or the token for email-only       | party view   |
-| `createWithin`   | the inviter  | `inviterId` is the caller's acting user                       | party view   |
-| `acceptWithin`   | the invitee  | `inviteeId`, or the token for email-only                      | party view   |
-| `declineWithin`  | the invitee  | `inviteeId`, or the token for email-only                      | party view   |
-| `withdrawWithin` | the inviter  | `inviterId`                                                   | party view   |
-| `revokeWithin`   | context      | `scope`: the household or event the caller's authority covers | context view |
-| `approveWithin`  | an approver  | `scope`, as a revoke                                          | context view |
+| Primitive              | Who          | Bound by                                                                     | Returns      |
+| ---------------------- | ------------ | ---------------------------------------------------------------------------- | ------------ |
+| `findForParty`         | either party | `inviterId` or `inviteeId`, or for email-only the token or a vouched address | party view   |
+| `findPartyScopeWithin` | either party | as `findForParty`, and the invite's type                                     | its context  |
+| `createWithin`         | the inviter  | `inviterId` is the caller's acting user                                      | party view   |
+| `acceptWithin`         | the invitee  | `inviteeId`, or for email-only the token or a vouched address                | party view   |
+| `declineWithin`        | the invitee  | `inviteeId`, or for email-only the token or a vouched address                | party view   |
+| `withdrawWithin`       | the inviter  | `inviterId`                                                                  | party view   |
+| `revokeWithin`         | context      | `scope`: the household or event the caller's authority covers                | context view |
+| `approveWithin`        | an approver  | `scope`, as a revoke                                                         | context view |
 
 A stranger addressing an invite that is not theirs, by id or by a link that is not theirs, meets a **404**, and so does a context authority addressing an invite outside the context it was authorized over: the binding is in the query, so the row is never found, and nothing confirms the invite exists. A party in the wrong role, the inviter trying to accept, meets a **403**.
 
 **Context authority is the consumer's to assert before calling.** An owner or admin revoking, an approver approving: the lib never checks a household or event role, and needs no `read` grant on `Invite` to do its work. That is also why an email-only invite, whose invitee is not a registered user and so can hold no grant, is reachable at all. What the lib does bind is the context that assertion was about: `revokeWithin` and `approveWithin` take the `scope` the caller's authority covers, a `householdId` or an `eventId`, and carry it into the read. A route that authorized an admin on one household and was handed an invite id from another transitions nothing, because the consumer's role check and the lib's query name the same context and neither is satisfied by the other's.
 
-An email-only invite (no `inviteeId`) answers only to the token its link carries. Addressed by id it answers to nobody, not even its inviter: the id is public to every context reader through the household detail, the token is not. Accepting or declining by token binds the invite to the user who responded. The inviter never answers by either route: `createWithin` refuses a self-invite by id, but cannot tell that an address is the inviter's own, so the link such an invite mails them is refused at accept and decline instead. A withheld invite (below) answers to nobody by its token either.
+An email-only invite (no `inviteeId`) answers to the token its link carries, and to the account holding its address when the consumer vouches for that address. Addressed by id it answers to nobody else, not even its inviter: the id is public to every context reader through the household detail, the token and the address are not.
+
+The address is the consumer's to vouch for, as `vouchedEmail` on the party lookup: the lib matches it, trimmed and lower-cased as it stores addresses, and never decides whose an address is. The household routes vouch for the acting user's address only once it is verified (#162, #724). A withheld invite is never reached by an address, as it is never reached by a token. `receivedInviteWhere(userId, vouchedEmail)` is the same rule as a `where` fragment, for a listing of the invites a user has received (#163's inbox), so a listed invite is always one its reader can answer by id.
+
+Accepting or declining by token or by address binds the invite to the user who responded. The inviter never answers by either route: `createWithin` refuses a self-invite by id, but cannot tell that an address is the inviter's own, so the link such an invite mails them is refused at accept and decline instead. A withheld invite (below) answers to nobody by its token either.
 
 An invite names exactly the context its type allows: a household invite a `householdId` and no `eventId`, an event invite the reverse, a system or campaign invite neither. A row carrying both would sit inside both context indexes and be revoked when either context closed.
 
@@ -142,7 +150,7 @@ A settled invite sits outside those indexes, so a re-invite after a decline, a w
 
 The email column is compared as stored; the lib trims and lower-cases it before every insert.
 
-The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user, and the household route does not either (#162). Binding the account that holds an address would show in how the create answers: the id index would refuse an invite by address beside one by id, and the route would refuse a member's address. Either refusal tells the inviter whose address it is. So an invite by address stays email-only until someone answers it by its token, and it can stand beside an invite by id to the same person.
+The id pair and the email pair are separate indexes, so the same person can hold an email-only invite and a user-bound invite to one context at once. The lib binds parties by id and does not resolve an address to a user at create, and the household route does not either (#162). Binding the account that holds an address would show in how the create answers: the id index would refuse an invite by address beside one by id, and the route would refuse a member's address. Either refusal tells the inviter whose address it is. So an invite by address stays email-only until someone answers it, by its token or by an address the consumer vouches for, and it can stand beside an invite by id to the same person. Answering one leaves the other outstanding (#163).
 
 ---
 
@@ -185,7 +193,7 @@ Two shapes, both `select`-based so a new column is invisible until someone names
 
 `read-shapes.spec.ts` reads the model's scalars out of the generated client and fails until every one is classified as published, party-only, or withheld with a reason. A consumer listing invites for a context must not widen to the party shape: that re-opens the address to every co-member, which is the leak #297 closed.
 
-`withheld` is on no shape and in no domain event (#278). The household route sets it through `createWithin` when a block or the invitee's preference refuses an invite by address: the invite is stored and answered like any other, so the inviter cannot tell. Anything that delivers invites reads the mark from the row and skips the invite: #173's mail, and #163's inbox, which matches invites to an account by address. The token, which the mail needs, is on no event either, so a mailer reads the row anyway. If a withheld invite's link is sent all the same, whoever follows it meets the miss a stranger meets in `findForParty`, `acceptWithin` and `declineWithin`, so the invitee cannot answer it. Its inviter still reaches it like any other invite of theirs, so no read tells them it was withheld. Only an invite by address can be withheld: `createWithin` refuses the mark beside an `inviteeId`, since that invitee would reach the invite by id.
+`withheld` is on no shape and in no domain event (#278). The household route sets it through `createWithin` when a block or the invitee's preference refuses an invite by address: the invite is stored and answered like any other, so the inviter cannot tell. Anything that delivers invites reads the mark from the row and skips the invite: #173's mail, and #163's inbox, which matches invites to an account by address through `receivedInviteWhere` and so never lists one. The token, which the mail needs, is on no event either, so a mailer reads the row anyway. If a withheld invite's link is sent all the same, whoever follows it meets the miss a stranger meets in `findForParty`, `findPartyScopeWithin`, `acceptWithin` and `declineWithin`, so the invitee cannot answer it; the account holding its address meets the same miss by id. Its inviter still reaches it like any other invite of theirs, so no read tells them it was withheld. Only an invite by address can be withheld: `createWithin` refuses the mark beside an `inviteeId`, since that invitee would reach the invite by id.
 
 ---
 
