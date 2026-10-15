@@ -8,7 +8,9 @@ import { asPagination, type PaginationWire, type PendingInviteProjection } from 
  *
  * Two shapes reach a client. Every row carries the context shape, which is the
  * household detail's invite embed. A row the caller sent carries the party
- * shape: the context shape plus the address and the message they wrote.
+ * shape: the context shape plus the address and the message they wrote. The
+ * invitee's routes (#163) answer in the party shape too, and their inbox adds
+ * the household that sent each invite.
  */
 
 /** The two columns only a party sees. */
@@ -85,4 +87,36 @@ export function inviteListEnvelope(response: HttpResponseLike, request: RequestD
   }
 
   return { invites: invites as unknown as ListedInviteWire[], pagination };
+}
+
+/** An invite as its invitee sees it in their inbox: the party shape and the household asking (#163). */
+export interface ReceivedInviteWire extends InvitePartyRowWire {
+  readonly household: { readonly id: string; readonly name: string };
+}
+
+export interface ReceivedInvitesEnvelope {
+  readonly invites: readonly ReceivedInviteWire[];
+  readonly pagination: PaginationWire;
+}
+
+/** `GET /api/invites`: `{ invites: [...], pagination }`, each row naming its household. */
+export function receivedInvitesEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ReceivedInvitesEnvelope {
+  const { invites, pagination } = inviteListEnvelope(response, request);
+
+  for (const invite of invites) {
+    const row = invite as unknown as Record<string, unknown>;
+
+    if (!hasStringId(row['household']) || !('inviteeEmail' in row) || !('message' in row)) {
+      return fail(
+        `its invite ${invite.id} lacked the 'household' object or the party shape's 'inviteeEmail' or 'message' key`,
+        request,
+        response,
+      );
+    }
+  }
+
+  return { invites: invites as unknown as ReceivedInviteWire[], pagination };
 }

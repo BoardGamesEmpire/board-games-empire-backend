@@ -6,16 +6,24 @@
  * clause, which is the failure this guard exists to make impossible — so
  * "unscoped" has to be a stated fact a reviewer can weigh, not an absence.
  *
- * Two distinct cases reach for it, and both are legitimate:
+ * Three distinct cases reach for it, and all are legitimate:
  *
  * - The envelope has no permissioned resource behind it at all. `GET /languages`
  *   serves a static i18n catalogue; there is no `ResourceType` to compose for.
  * - The resource exists and the read is deliberately install-wide.
+ * - The read is bound to its caller in its own query by a rule that is its
+ *   authority, and no ability covers its rows, so there is no ceiling to
+ *   compose. `GET /invites`, the invites a user has received, is bound by the
+ *   invites lib's party rule (#161, #163): an invitee holds no grant on
+ *   `Invite`, and a composed ceiling would list nothing. The reason must say
+ *   which rule binds the read, and why no delegated actor's narrower ceiling
+ *   is lost.
  *
  * What it is NOT for: a read that only looks install-wide. `GET /games` returns
  * every Public game plus the caller's own private ones (#472), so its rows vary
- * by caller. Declaring such a read unscoped would state a fact that is false,
- * which is worse than leaving it undeclared.
+ * by caller under the caller's ceiling. Declaring such a read unscoped would
+ * state a fact that is false and drop that ceiling, which is worse than leaving
+ * it undeclared.
  */
 export interface UnscopedList {
   readonly kind: 'unscoped';
