@@ -75,6 +75,10 @@ describe('@AuditExclude', () => {
 });
 
 describe('MutationEvent', () => {
+  // The timing tests move a fake clock: a real 5ms sleep can return before the
+  // clock has moved 5ms, which made them flaky.
+  afterEach(() => jest.useRealTimers());
+
   it('exposes before/after as readonly partials', () => {
     const event = new CreatedEvent(null, { id: 'g1', title: 'Catan' }, new Date());
 
@@ -151,24 +155,28 @@ describe('MutationEvent', () => {
       expect(event.occurredAt.getTime()).toBeLessThanOrEqual(after);
     });
 
-    it('assigns distinct occurredAt to events constructed at distinct times', async () => {
-      const first = new CreatedEvent(null, { id: 'g1' }, new Date());
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      const second = new CreatedEvent(null, { id: 'g2' }, new Date());
+    it('assigns distinct occurredAt to events constructed at distinct times', () => {
+      jest.useFakeTimers();
+      // One initiatedAt for both, so the test fails if occurredAt copies it.
+      const initiatedAt = new Date();
+      const first = new CreatedEvent(null, { id: 'g1' }, initiatedAt);
+      jest.advanceTimersByTime(5);
+      const second = new CreatedEvent(null, { id: 'g2' }, initiatedAt);
 
       expect(second.occurredAt.getTime()).toBeGreaterThan(first.occurredAt.getTime());
     });
   });
 
   describe('per-step duration semantics', () => {
-    it('occurredAt is after initiatedAt for a step that takes time', async () => {
+    it('occurredAt is after initiatedAt for a step that takes time', () => {
+      jest.useFakeTimers();
       // Simulate a step: capture start, do work, construct event at the end.
       const initiatedAt = new Date();
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      jest.advanceTimersByTime(5);
       const event = new CreatedEvent(null, { id: 'g1' }, initiatedAt);
 
       const durationMs = event.occurredAt.getTime() - event.initiatedAt.getTime();
-      expect(durationMs).toBeGreaterThanOrEqual(5);
+      expect(durationMs).toBe(5);
     });
 
     it('initiatedAt and occurredAt are independent — emitter controls initiation', () => {
