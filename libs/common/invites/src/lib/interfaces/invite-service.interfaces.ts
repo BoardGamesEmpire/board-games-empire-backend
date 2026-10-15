@@ -55,8 +55,9 @@ export interface CreateInviteParams {
  *
  * An invite bound to a user is reached by `inviteId`; an email-only invite,
  * which has no `inviteeId` to bind to, is reached by the `token` its link
- * carries (#161). Either form reaches a user-bound invite; only the token
- * reaches an email-only one.
+ * carries (#161). Either form reaches a user-bound invite. An email-only one
+ * is reached by its token, or by its id when the consumer vouches for its
+ * address ({@link InvitePartyLookup.vouchedEmail}, #163).
  */
 export type InviteTarget = { readonly inviteId: string } | { readonly token: string };
 
@@ -64,6 +65,14 @@ export type InviteTarget = { readonly inviteId: string } | { readonly token: str
 export interface InvitePartyLookup {
   readonly target: InviteTarget;
   readonly actingUserId: string;
+  /**
+   * An address the consumer vouches belongs to the acting user (#163). With
+   * it, an invite by address to that address is the actor's to answer by id,
+   * as its link would make it, unless it is withheld (#278). Which addresses
+   * deserve that is the consumer's rule; the household routes vouch only for
+   * a verified one. Trimmed and lower-cased before it is compared.
+   */
+  readonly vouchedEmail?: string | null;
 }
 
 /** Accept or decline: the invitee acts. */
@@ -83,6 +92,14 @@ export interface WithdrawInviteParams {
  * neither; that variant arrives with the first route that needs it.
  */
 export type InviteContextScope = { readonly householdId: string } | { readonly eventId: string };
+
+/** The invite types whose rows name a context. */
+export type ContextualInviteType = typeof InviteType.Household | typeof InviteType.Event;
+
+/** The context an invite of `Type` belongs to, as the scope a context transition binds to. */
+export type InviteScopeOf<Type extends ContextualInviteType> = Type extends typeof InviteType.Household
+  ? { readonly householdId: string }
+  : { readonly eventId: string };
 
 /**
  * Revoke: a context authority acts. The lib binds nothing to the actor here;

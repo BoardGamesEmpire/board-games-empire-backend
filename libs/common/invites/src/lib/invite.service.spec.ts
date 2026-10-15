@@ -23,7 +23,7 @@ import {
   InviteWithdrawnEvent,
   type InviteDomainEvent,
 } from './events/invite.events';
-import { InviteService } from './invite.service';
+import { InviteService, receivedInviteWhere } from './invite.service';
 import {
   CONTEXT_INVITE_SELECT,
   INVITE_SNAPSHOT_SELECT,
@@ -37,6 +37,7 @@ const FUTURE = new Date('2099-01-01T00:00:00Z');
 const INVITER_ID = 'user-inviter';
 const INVITEE_ID = 'user-invitee';
 const STRANGER_ID = 'user-stranger';
+const ADDRESS_HOLDER_ID = 'user-address-holder';
 const TOKEN = 'live-accept-credential';
 const BASE64URL_43 = /^[A-Za-z0-9_-]{43}$/;
 
@@ -91,6 +92,11 @@ const partyWhereById = (id: string, actor: string) => ({ id, OR: [{ inviterId: a
 const partyWhereByToken = (token: string, actor: string) => ({
   token,
   OR: [{ inviterId: actor }, { inviteeId: actor }, { inviteeId: null, withheld: false }],
+});
+/** By id, with an address the caller vouches is the actor's. */
+const partyWhereByAddress = (id: string, actor: string, address: string) => ({
+  id,
+  OR: [{ inviterId: actor }, { inviteeId: actor }, { inviteeId: null, inviteeEmail: address, withheld: false }],
 });
 
 function expectNoToken(event: InviteDomainEvent): void {
@@ -199,6 +205,112 @@ describe('InviteService', () => {
       await expect(service.findForParty({ target: { inviteId: 'inv-1' }, actingUserId: STRANGER_ID })).rejects.toThrow(
         NotFoundException,
       );
+    });
+
+    it('reaches an invite by address by its id through an address the caller vouches for, never a withheld one', async () => {
+      db.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+
+      await service.findForParty({
+        target: { inviteId: 'inv-1' },
+        actingUserId: ADDRESS_HOLDER_ID,
+        vouchedEmail: 'SAM@example.test',
+      });
+
+      expect(db.invite.findFirst).toHaveBeenCalledWith({
+        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        select: TRANSITION_SELECT,
+      });
+    });
+  });
+
+  describe('findPartyScopeWithin', () => {
+    it("reads the household on the caller's transaction, bound to the party and the type", async () => {
+      tx.invite.findFirst.mockResolvedValue({ id: 'inv-1', householdId: 'hh-1', eventId: null } as never);
+
+      const scope = await service.findPartyScopeWithin(
+        asTx(tx),
+        { target: { inviteId: 'inv-1' }, actingUserId: ADDRESS_HOLDER_ID, vouchedEmail: 'sam@example.test' },
+        InviteType.Household,
+      );
+
+      expect(scope).toEqual({ householdId: 'hh-1' });
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: { ...partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'), type: InviteType.Household },
+        select: { id: true, householdId: true, eventId: true },
+      });
+      // A read for the lock that follows, never a row lock or a write of its own.
+      expect(db.invite.findFirst).not.toHaveBeenCalled();
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('binds by token as the transition does', async () => {
+      tx.invite.findFirst.mockResolvedValue({ id: 'inv-1', householdId: 'hh-1', eventId: null } as never);
+
+      await service.findPartyScopeWithin(
+        asTx(tx),
+        { target: { token: TOKEN }, actingUserId: STRANGER_ID },
+        InviteType.Household,
+      );
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...partyWhereByToken(TOKEN, STRANGER_ID), type: InviteType.Household } }),
+      );
+    });
+
+    it('reads an event invite as its event', async () => {
+      tx.invite.findFirst.mockResolvedValue({ id: 'inv-1', householdId: null, eventId: 'ev-1' } as never);
+
+      await expect(
+        service.findPartyScopeWithin(
+          asTx(tx),
+          { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID },
+          InviteType.Event,
+        ),
+      ).resolves.toEqual({ eventId: 'ev-1' });
+    });
+
+    it('404s a stranger, or an invite of another type, before naming any context', async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.findPartyScopeWithin(
+          asTx(tx),
+          { target: { inviteId: 'inv-1' }, actingUserId: STRANGER_ID },
+          InviteType.Household,
+        ),
+      ).rejects.toMatchObject({
+        status: 404,
+        response: expect.objectContaining({ key: 'errors.invite.not_found' }),
+      });
+    });
+
+    it('answers a household invite that names no household as the server error it is', async () => {
+      tx.invite.findFirst.mockResolvedValue({ id: 'inv-1', householdId: null, eventId: null } as never);
+
+      const refusal = service.findPartyScopeWithin(
+        asTx(tx),
+        { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID },
+        InviteType.Household,
+      );
+
+      await expect(refusal).rejects.toThrow('Invite inv-1 is a Household invite that names no household');
+      await expect(refusal).rejects.not.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('receivedInviteWhere', () => {
+    it('matches the invites addressed to the user by id, and none they sent', () => {
+      expect(receivedInviteWhere(INVITEE_ID)).toEqual({
+        inviterId: { not: INVITEE_ID },
+        OR: [{ inviteeId: INVITEE_ID }],
+      });
+    });
+
+    it('matches an unwithheld invite by the address the caller vouches for, as it is stored', () => {
+      expect(receivedInviteWhere(ADDRESS_HOLDER_ID, ' Sam@Example.TEST ')).toEqual({
+        inviterId: { not: ADDRESS_HOLDER_ID },
+        OR: [{ inviteeId: ADDRESS_HOLDER_ID }, { inviteeId: null, inviteeEmail: 'sam@example.test', withheld: false }],
+      });
     });
   });
 
@@ -590,6 +702,68 @@ describe('InviteService', () => {
       expect(event.after.inviteeId).toBe(STRANGER_ID);
     });
 
+    it('reaches an invite by address by its id when the caller vouches for that address, and binds it', async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+      tx.invite.updateManyAndReturn.mockResolvedValue([
+        { ...rowWithToken(), status: InviteStatus.Accepted, inviteeId: ADDRESS_HOLDER_ID },
+      ] as never);
+
+      const { event } = await service.acceptWithin(asTx(tx), {
+        target: { inviteId: 'inv-1' },
+        actingUserId: ADDRESS_HOLDER_ID,
+        vouchedEmail: ' Sam@Example.TEST ',
+      });
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        select: TRANSITION_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ inviteeId: ADDRESS_HOLDER_ID }) }),
+      );
+      expect(event.before.inviteeId).toBeNull();
+      expect(event.after.inviteeId).toBe(ADDRESS_HOLDER_ID);
+    });
+
+    it('adds no address to the read when the caller vouches for none', async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID, vouchedEmail: '  ' }),
+      ).rejects.toThrow(NotFoundException);
+      expect(tx.invite.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: partyWhereById('inv-1', INVITEE_ID) }),
+      );
+    });
+
+    it('403s an invite by address whose address is not the one vouched for', async () => {
+      // The read's address branch never returns such a row; this is the role
+      // check standing behind it, as it stands behind the token.
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+
+      await expect(
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: ADDRESS_HOLDER_ID,
+          vouchedEmail: 'someone-else@example.test',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it('403s the inviter even when the address vouched for is the one on their invite', async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+
+      await expect(
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITER_ID,
+          vouchedEmail: 'sam@example.test',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
     it('404s an unknown id', async () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
@@ -819,6 +993,27 @@ describe('InviteService', () => {
       await expect(
         service.declineWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
       ).rejects.toThrow(GoneException);
+    });
+
+    it('declines an invite by address by its id when the caller vouches for that address', async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
+      tx.invite.updateManyAndReturn.mockResolvedValue([
+        { ...rowWithToken(), status: InviteStatus.Declined, inviteeId: ADDRESS_HOLDER_ID },
+      ] as never);
+
+      await service.declineWithin(asTx(tx), {
+        target: { inviteId: 'inv-1' },
+        actingUserId: ADDRESS_HOLDER_ID,
+        vouchedEmail: 'sam@example.test',
+      });
+
+      expect(tx.invite.findFirst).toHaveBeenCalledWith({
+        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        select: TRANSITION_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ inviteeId: ADDRESS_HOLDER_ID }) }),
+      );
     });
 
     it('403s the inviter', async () => {

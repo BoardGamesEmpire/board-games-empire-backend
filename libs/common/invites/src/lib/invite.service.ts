@@ -46,6 +46,7 @@ import {
 } from './events/invite.events';
 import type {
   ApproveInviteParams,
+  ContextualInviteType,
   CreateInviteParams,
   InviteAcceptance,
   InviteApproval,
@@ -55,6 +56,7 @@ import type {
   InviteOutcome,
   InvitePartyLookup,
   InviteRevocation,
+  InviteScopeOf,
   InviteTarget,
   InviteWithdrawal,
   OutstandingInviteRevocation,
@@ -93,6 +95,44 @@ export function normalizeInviteeEmail(value: string | null | undefined): string 
   const normalized = value?.trim().toLowerCase();
 
   return normalized ? normalized : null;
+}
+
+/** The column each invite type that names a context names it by. */
+const CONTEXT_COLUMN = {
+  [InviteType.Household]: 'householdId',
+  [InviteType.Event]: 'eventId',
+} as const satisfies Record<ContextualInviteType, 'householdId' | 'eventId'>;
+
+/**
+ * How an invitee reaches an invite without its link: named by id, or by an
+ * address the consumer vouches is theirs (#163). An invite by address matches
+ * only while it names no account and is not withheld (#278): the mark exists
+ * to keep the invite from whoever holds the address.
+ */
+function inviteeReach(actingUserId: string, vouchedEmail: string | null): Prisma.InviteWhereInput[] {
+  const reach: Prisma.InviteWhereInput[] = [{ inviteeId: actingUserId }];
+
+  if (vouchedEmail !== null) {
+    reach.push({ inviteeId: null, inviteeEmail: vouchedEmail, withheld: false });
+  }
+
+  return reach;
+}
+
+/**
+ * The invites a user has received, as a `where` fragment a listing filters by
+ * (#163's inbox). They are the rows the user reaches as invitee by id, through
+ * the same rule the party read and the invitee's transitions apply, so every
+ * row listed is one its reader can answer by id. An invite they sent is never
+ * one they received, even when the address on it is their own.
+ *
+ * Pair it with a status and expiry filter; this says only whose invites they are.
+ */
+export function receivedInviteWhere(actingUserId: string, vouchedEmail?: string | null): Prisma.InviteWhereInput {
+  return {
+    inviterId: { not: actingUserId },
+    OR: inviteeReach(actingUserId, normalizeInviteeEmail(vouchedEmail)),
+  };
 }
 
 /**
@@ -140,6 +180,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
   | {
       /** The acting user when the transition is a party's. Scopes the read: a stranger gets a miss. */
       readonly partyOf: string;
+      /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
+      readonly vouchedEmail?: string | null;
     }
   | {
       /** The context the caller's authority covers when the transition is a context authority's. Scopes the read: an id from another context gets a miss. */
@@ -167,7 +209,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
  * A party's read or transition binds its `where` to the acting user as
  * inviter or invitee, so a stranger meets a miss rather than a refusal. An
  * email-only invite, which has no invitee id, is reached by the token its link
- * carries instead. Context authority is the consumer's to assert before
+ * carries instead, or by an address the consumer vouches is the acting user's
+ * (#163). Context authority is the consumer's to assert before
  * calling: an owner or admin revoking, an approver approving. The lib never
  * checks a household or event role, and needs no `read` grant on `Invite` to
  * do its work. What it does bind is the context that assertion was about: a
@@ -208,13 +251,53 @@ export class InviteService {
    * An invite as one of its parties sees it, with its status as it stands
    * right now: an outstanding row past its date reads `Expired` whatever the
    * row still says, and nothing is written. The invitee reaches an email-only
-   * invite by the token its link carries; a stranger, by either route, gets
-   * 404 rather than confirmation that the invite exists.
+   * invite by the token its link carries, or by id through an address the
+   * consumer vouches for; a stranger, by any route, gets 404 rather than
+   * confirmation that the invite exists.
    */
-  async findForParty({ target, actingUserId }: InvitePartyLookup): Promise<InvitePartyView> {
-    const row = await this.loadForParty(this.db, target, actingUserId);
+  async findForParty({ target, actingUserId, vouchedEmail }: InvitePartyLookup): Promise<InvitePartyView> {
+    const row = await this.loadForParty(this.db, target, actingUserId, normalizeInviteeEmail(vouchedEmail));
 
     return withEffectiveInviteStatus(project(row, PARTY_INVITE_SELECT));
+  }
+
+  /**
+   * The context an invite of the party's belongs to, read on the caller's
+   * transaction BEFORE it locks that context (#163). An accept that admits a
+   * member locks the household row before it moves the invite (README, "The
+   * seam"), and the party view leaves the household's id out, so the consumer
+   * learns which row to lock here.
+   *
+   * Bound as the party's transitions are, and to the type the consumer
+   * handles: a stranger, or an invite of another type, meets the 404 the
+   * transition would give, before any context is named to them. The role and
+   * status checks are the transition's. No lock is taken, so the order the
+   * consumer locks in is its own.
+   */
+  async findPartyScopeWithin<Type extends ContextualInviteType>(
+    tx: Prisma.TransactionClient,
+    { target, actingUserId, vouchedEmail }: InvitePartyLookup,
+    type: Type,
+  ): Promise<InviteScopeOf<Type>> {
+    const row = await tx.invite.findFirst({
+      where: { ...this.partyWhere(target, actingUserId, normalizeInviteeEmail(vouchedEmail)), type },
+      select: { id: true, householdId: true, eventId: true },
+    });
+
+    if (!row) {
+      return this.refuseMissing(target);
+    }
+
+    const column = CONTEXT_COLUMN[type];
+    const contextId = row[column];
+
+    // `createWithin` never writes such a row, so this is drift in the data,
+    // and the party is not the one to blame for it.
+    if (contextId === null) {
+      throw new Error(`Invite ${row.id} is a ${type} invite that names no ${type.toLowerCase()}`);
+    }
+
+    return { [column]: contextId } as InviteScopeOf<Type>;
   }
 
   /**
@@ -301,14 +384,9 @@ export class InviteService {
    * The caller admits the member in the same transaction (#163); nothing here
    * touches the roster.
    */
-  acceptWithin(
-    tx: Prisma.TransactionClient,
-    { target, actingUserId }: RespondToInviteParams,
-  ): Promise<InviteAcceptance> {
+  acceptWithin(tx: Prisma.TransactionClient, params: RespondToInviteParams): Promise<InviteAcceptance> {
     return this.transitionWithin(tx, {
-      target,
-      partyOf: actingUserId,
-      assertRole: (row) => this.assertInvitee(row, target, actingUserId),
+      ...this.asInvitee(params),
       assertStatus: (row) => {
         if (row.status === InviteStatus.AwaitingApproval) {
           throw new ConflictException(t('errors.invite.awaiting_approval', { id: row.id }));
@@ -321,7 +399,7 @@ export class InviteService {
         respondedAt: now,
         // Binds an email-only invite to the user who accepted it. A no-op on a
         // user-bound row, whose invitee the role check already matched.
-        inviteeId: actingUserId,
+        inviteeId: params.actingUserId,
       }),
       view: PARTY_INVITE_SELECT,
       event: InviteAcceptedEvent,
@@ -332,20 +410,15 @@ export class InviteService {
    * The invitee declines, from either outstanding status. A refusal is never
    * gated on someone else's approval.
    */
-  declineWithin(
-    tx: Prisma.TransactionClient,
-    { target, actingUserId }: RespondToInviteParams,
-  ): Promise<InviteDeclination> {
+  declineWithin(tx: Prisma.TransactionClient, params: RespondToInviteParams): Promise<InviteDeclination> {
     return this.transitionWithin(tx, {
-      target,
-      partyOf: actingUserId,
-      assertRole: (row) => this.assertInvitee(row, target, actingUserId),
+      ...this.asInvitee(params),
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({
         status: InviteStatus.Declined,
         respondedAt: now,
         // Records who declined an email-only invite, as accept records who took it.
-        inviteeId: actingUserId,
+        inviteeId: params.actingUserId,
       }),
       view: PARTY_INVITE_SELECT,
       event: InviteDeclinedEvent,
@@ -473,7 +546,7 @@ export class InviteService {
     const now = new Date();
     const current =
       'partyOf' in spec
-        ? await this.loadForParty(tx, spec.target, spec.partyOf)
+        ? await this.loadForParty(tx, spec.target, spec.partyOf, spec.vouchedEmail ?? null)
         : await this.loadForContext(tx, spec.target, spec.scope);
 
     spec.assertRole?.(current);
@@ -709,25 +782,36 @@ export class InviteService {
    * confirms the invite exists. By token, an email-only row (no invitee yet)
    * is reachable too: the link is how its invitee arrives. A withheld one is
    * not (#278). Its link was never sent, so one that reaches the server anyway
-   * meets the miss a stranger meets, whatever delivered it.
+   * meets the miss a stranger meets, whatever delivered it. By an address the
+   * consumer vouches is the actor's, an email-only row to that address is
+   * reachable by id as well (#163), withheld ones again excepted.
    */
   private async loadForParty(
     client: ReadClient,
     target: InviteTarget,
     actingUserId: string,
+    vouchedEmail: string | null,
   ): Promise<InviteTransitionRow> {
-    const parties: Prisma.InviteWhereInput[] = [{ inviterId: actingUserId }, { inviteeId: actingUserId }];
+    const row = await client.invite.findFirst({
+      where: this.partyWhere(target, actingUserId, vouchedEmail),
+      select: TRANSITION_SELECT,
+    });
+
+    return row ?? this.refuseMissing(target);
+  }
+
+  /** The `where` a party's read binds by: the target, and the acting user as inviter or invitee. */
+  private partyWhere(target: InviteTarget, actingUserId: string, vouchedEmail: string | null): Prisma.InviteWhereInput {
+    const parties: Prisma.InviteWhereInput[] = [
+      { inviterId: actingUserId },
+      ...inviteeReach(actingUserId, vouchedEmail),
+    ];
 
     if ('token' in target) {
       parties.push({ inviteeId: null, withheld: false });
     }
 
-    const row = await client.invite.findFirst({
-      where: { ...this.whereTarget(target), OR: parties },
-      select: TRANSITION_SELECT,
-    });
-
-    return row ?? this.refuseMissing(target);
+    return { ...this.whereTarget(target), OR: parties };
   }
 
   /**
@@ -773,19 +857,44 @@ export class InviteService {
   }
 
   /**
+   * The half of a transition spec every invitee's transition shares: the read
+   * bound to them, widened by the address the consumer vouches for, and the
+   * role check that the row is theirs to answer. The address is normalized
+   * once, so the read and the check compare the same string.
+   */
+  private asInvitee({ target, actingUserId, vouchedEmail }: InvitePartyLookup) {
+    const vouched = normalizeInviteeEmail(vouchedEmail);
+
+    return {
+      target,
+      partyOf: actingUserId,
+      vouchedEmail: vouched,
+      assertRole: (row: InviteTransitionRow) => this.assertInvitee(row, target, actingUserId, vouched),
+    };
+  }
+
+  /**
    * The row is the actor's; is it theirs to answer? A user-bound invite
    * answers to its invitee, by id or by token. An email-only invite has no
    * invitee id and answers to whoever holds its link; addressed by id it
-   * answers to nobody, which is the point: the id reaches every context reader
-   * through the household detail, the token does not.
+   * answers only to the account whose address the consumer vouched for, which
+   * is the point: the id reaches every context reader through the household
+   * detail, the token and the address do not.
    *
    * The inviter never answers, by either route. Create refuses a self-invite
    * by id but cannot tell that an address is the inviter's own; without this
    * the link such an invite mails them would let them accept it.
    */
-  private assertInvitee(current: InviteTransitionRow, target: InviteTarget, actingUserId: string): void {
+  private assertInvitee(
+    current: InviteTransitionRow,
+    target: InviteTarget,
+    actingUserId: string,
+    vouchedEmail: string | null,
+  ): void {
     const isInviter = current.inviterId === actingUserId;
-    const reachable = current.inviteeId === actingUserId || (current.inviteeId === null && 'token' in target);
+    const byAddress = vouchedEmail !== null && current.inviteeEmail === vouchedEmail;
+    const reachable =
+      current.inviteeId === actingUserId || (current.inviteeId === null && ('token' in target || byAddress));
 
     if (isInviter || !reachable) {
       throw new ForbiddenException(t('errors.invite.only_invitee_responds'));
