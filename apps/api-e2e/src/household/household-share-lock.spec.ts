@@ -5,7 +5,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeEmptyHousehold, FK_PARENT_LOCK, SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**
- * `lockExistingHousehold`'s share lock (#276), under #239's 2026-08-10
+ * The household share lock (#276, `lockLiveHousehold` since #552), under #239's 2026-08-10
  * amendment. A different lock from the owner lock next door, and a different
  * claim: not mutual exclusion between two writers, but one writer blocking a
  * DIFFERENT KIND of writer — and the exact lock mode is the whole point.
@@ -29,15 +29,15 @@ import { arrangeEmptyHousehold, FK_PARENT_LOCK, SOFT_DELETE_HOUSEHOLD } from './
  * races belong there and this spec covers the mechanism only.
  */
 describe('household share lock (FOR SHARE)', () => {
-  const HELPERS = 'libs/api/household/src/lib/household-access.helpers.ts';
-
   /**
-   * The statement `lockExistingHousehold` ships, binding `${householdId}`. The
-   * file also holds the role-transition lock (#239), so the anchor names which
-   * of the two this spec means rather than relying on ordering.
+   * Where the lock lives since #552 moved it below the libraries that take it.
+   * `lockExistingHousehold` in the household lib wraps it.
    */
-  const shareLock = readShippedSql(HELPERS, ['householdId'], {
-    after: 'lockExistingHousehold',
+  const SHARE_LOCK = 'libs/database/src/lib/utils/household-share-lock.ts';
+
+  /** The statement `lockLiveHousehold` ships, binding `${householdId}`. */
+  const shareLock = readShippedSql(SHARE_LOCK, ['householdId'], {
+    after: 'lockLiveHousehold',
     matching: /FOR SHARE/,
   });
 
@@ -62,8 +62,8 @@ describe('household share lock (FOR SHARE)', () => {
   });
 
   it('matches nothing once the household is soft-deleted', async () => {
-    // The `deleted_at IS NULL` predicate is what turns the lock's miss into the
-    // 404 `lockExistingHousehold` raises.
+    // The `deleted_at IS NULL` predicate is what turns the lock's miss into a
+    // household reported dead, which `lockExistingHousehold` answers with a 404.
     const { householdId } = await arrangeEmptyHousehold(db.client);
     await db.client.household.update({ where: { id: householdId }, data: { deletedAt: new Date() } });
 
@@ -104,7 +104,7 @@ describe('household share lock (FOR SHARE)', () => {
     // the blocked statement does not return the row version it originally
     // located: on release it re-evaluates its WHERE against the NEW version
     // (EvalPlanQual), finds `deleted_at` set, and matches nothing — which is
-    // what makes `lockExistingHousehold` answer 404 rather than admitting a
+    // what makes the lock report the household dead rather than admitting a
     // member to a household that is being deleted.
     //
     // If that assumption were wrong, every unit test would still pass and the
