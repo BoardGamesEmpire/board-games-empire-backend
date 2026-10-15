@@ -1,4 +1,4 @@
-import { DatabaseService, QuotaScope } from '@bge/database';
+import { DatabaseService, InviteType, QuotaScope } from '@bge/database';
 import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
 import { QuotaResourceRegistry } from './quota-resource.registry';
 
@@ -17,6 +17,7 @@ describe('QuotaResourceRegistry', () => {
     it('recognizes registered resources and rejects unknown strings', () => {
       expect(registry.has('household_member_count')).toBe(true);
       expect(registry.has('webhook_subscription_count')).toBe(true);
+      expect(registry.has('household_invite_daily_count')).toBe(true);
       expect(registry.has('not_a_resource')).toBe(false);
     });
 
@@ -27,6 +28,7 @@ describe('QuotaResourceRegistry', () => {
           'webhook_subscription_count',
           'storage_bytes',
           'plugin_install_count',
+          'household_invite_daily_count',
         ]),
       );
     });
@@ -35,6 +37,13 @@ describe('QuotaResourceRegistry', () => {
       expect(registry.require('webhook_subscription_count').applicableScopes).toEqual([QuotaScope.User]);
       expect(registry.require('storage_bytes').applicableScopes).toEqual([QuotaScope.Server, QuotaScope.User]);
     });
+
+    it('measures household invites per inviter and per household', () => {
+      expect(registry.require('household_invite_daily_count').applicableScopes).toEqual([
+        QuotaScope.User,
+        QuotaScope.Household,
+      ]);
+    });
   });
 
   describe('requireUsage', () => {
@@ -42,6 +51,7 @@ describe('QuotaResourceRegistry', () => {
       expect(typeof registry.requireUsage('household_member_count')).toBe('function');
       expect(typeof registry.requireUsage('webhook_subscription_count')).toBe('function');
       expect(typeof registry.requireUsage('storage_bytes')).toBe('function');
+      expect(typeof registry.requireUsage('household_invite_daily_count')).toBe('function');
     });
 
     it('throws for registered-but-pending resources', () => {
@@ -100,6 +110,57 @@ describe('QuotaResourceRegistry', () => {
       await expect(registry.requireUsage('storage_bytes')(QuotaScope.Household, 'h1')).rejects.toThrow(
         /not defined for scope/,
       );
+    });
+
+    describe('household invites over the last 24 hours', () => {
+      const NOW = new Date('2026-10-14T12:00:00Z');
+      const DAY_BEFORE = new Date('2026-10-13T12:00:00Z');
+
+      beforeEach(() => {
+        jest.useFakeTimers({ now: NOW });
+      });
+
+      afterEach(() => {
+        jest.useRealTimers();
+      });
+
+      it('counts the invites a user sent, whatever their status or mark', async () => {
+        db.invite.count.mockResolvedValue(4);
+
+        const usage = await registry.requireUsage('household_invite_daily_count')(QuotaScope.User, 'user_1');
+
+        expect(db.invite.count).toHaveBeenCalledWith({
+          where: { type: InviteType.Household, inviterId: 'user_1', createdAt: { gt: DAY_BEFORE } },
+        });
+        expect(usage).toBe(4n);
+      });
+
+      it('counts the invites into a household, whoever sent them', async () => {
+        db.invite.count.mockResolvedValue(7);
+
+        const usage = await registry.requireUsage('household_invite_daily_count')(QuotaScope.Household, 'hh_1');
+
+        expect(db.invite.count).toHaveBeenCalledWith({
+          where: { type: InviteType.Household, householdId: 'hh_1', createdAt: { gt: DAY_BEFORE } },
+        });
+        expect(usage).toBe(7n);
+      });
+
+      it('counts on the transaction it is handed', async () => {
+        const tx = createMockDatabaseService();
+        tx.invite.count.mockResolvedValue(1);
+
+        await registry.requireUsage('household_invite_daily_count')(QuotaScope.User, 'user_1', tx as never);
+
+        expect(tx.invite.count).toHaveBeenCalledTimes(1);
+        expect(db.invite.count).not.toHaveBeenCalled();
+      });
+
+      it('throws for a scope it is not measured in', async () => {
+        await expect(registry.requireUsage('household_invite_daily_count')(QuotaScope.Server, '*')).rejects.toThrow(
+          /not defined for scope/,
+        );
+      });
     });
   });
 });

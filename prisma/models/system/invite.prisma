@@ -72,5 +72,9 @@ model Invite {
   @@index([inviteeEmail])
   @@index([status])
   @@index([type, status])
+  // The daily invite cap counts the last 24 hours by inviter and by household
+  // (#279). The household's newest-first list (#162) reads the second backward.
+  @@index([inviterId, createdAt])
+  @@index([householdId, createdAt])
   @@map("invites")
 }

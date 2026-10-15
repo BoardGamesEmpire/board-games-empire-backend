@@ -11,6 +11,7 @@ export const QUOTA_RESOURCES = [
   'webhook_subscription_count',
   'storage_bytes',
   'plugin_install_count',
+  'household_invite_daily_count',
 ] as const;
 
 export type QuotaResource = (typeof QUOTA_RESOURCES)[number];

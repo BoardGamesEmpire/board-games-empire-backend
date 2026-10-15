@@ -1,7 +1,10 @@
-import { DatabaseService, QuotaScope } from '@bge/database';
+import { DatabaseService, InviteType, QuotaScope } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 import type { QuotaResource } from '../constants/quota-resource';
 import type { QuotaExecutor, QuotaResourceDefinition, QuotaUsageProvider } from '../interfaces';
+
+/** How far back `household_invite_daily_count` looks. Fixed here, not set per row. */
+const HOUSEHOLD_INVITE_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Stateless catalogue of every quota-eligible resource. Mirrors
@@ -58,6 +61,20 @@ export class QuotaResourceRegistry {
         applicableScopes: [QuotaScope.Server, QuotaScope.Household],
       },
     ],
+    [
+      // A rate, measured as a count over a rolling window: the household
+      // invites created in the last 24 hours, by the inviter at User scope and
+      // into the household at Household scope. The window is fixed in code; a
+      // row sets only how many fit in it. Every invite counts whatever its
+      // status, so revoking one frees no slot, and a withheld invite (#278)
+      // counts like any other, so the cap cannot tell the inviter which it was.
+      'household_invite_daily_count',
+      {
+        key: 'household_invite_daily_count',
+        applicableScopes: [QuotaScope.User, QuotaScope.Household],
+        usage: this.countRecentHouseholdInvites.bind(this),
+      },
+    ],
   ]);
 
   constructor(private readonly databaseService: DatabaseService) {}
@@ -103,6 +120,22 @@ export class QuotaResourceRegistry {
   private async countWebhookSubscriptions(_scope: QuotaScope, scopeId: string, db?: QuotaExecutor) {
     const client = db ?? this.databaseService;
     const count = await client.webhookSubscription.count({ where: { createdById: scopeId, deletedAt: null } });
+    return BigInt(count);
+  }
+
+  private async countRecentHouseholdInvites(scope: QuotaScope, scopeId: string, db?: QuotaExecutor) {
+    if (scope !== QuotaScope.User && scope !== QuotaScope.Household) {
+      throw new Error(`household_invite_daily_count usage is not defined for scope '${scope}'`);
+    }
+    const client = db ?? this.databaseService;
+    const since = new Date(Date.now() - HOUSEHOLD_INVITE_WINDOW_MS);
+    const count = await client.invite.count({
+      where: {
+        type: InviteType.Household,
+        ...(scope === QuotaScope.User ? { inviterId: scopeId } : { householdId: scopeId }),
+        createdAt: { gt: since },
+      },
+    });
     return BigInt(count);
   }
 
