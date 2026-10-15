@@ -17,6 +17,7 @@ describe('WebhookDispatcherService', () => {
   let queue: { add: jest.Mock };
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
+  let emitter: jest.Mocked<Pick<EventEmitter2, 'onAny' | 'offAny'>>;
 
   const ability = createPrismaAbility([]) as AppAbility;
 
@@ -31,12 +32,13 @@ describe('WebhookDispatcherService', () => {
     queue = { add: jest.fn().mockResolvedValue(undefined) };
     visibility = { isVisibleTo: jest.fn().mockResolvedValue(true) };
     auditContext = { getActor: jest.fn().mockReturnValue(null) };
+    emitter = { onAny: jest.fn(), offAny: jest.fn() };
 
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         WebhookDispatcherService,
         WebhookEventRegistry,
-        { provide: EventEmitter2, useValue: { onAny: jest.fn(), offAny: jest.fn() } },
+        { provide: EventEmitter2, useValue: emitter },
         { provide: PermissionsService, useValue: { getUserRoleGraph: jest.fn().mockResolvedValue({}) } },
         { provide: AbilityFactory, useValue: { createForUser: jest.fn().mockReturnValue(ability) } },
         { provide: WebhookVisibilityService, useValue: visibility },
@@ -56,6 +58,15 @@ describe('WebhookDispatcherService', () => {
   // avoids the fire-and-forget timing of emitter.emit in tests.
   const dispatch = (name: string, payload: unknown) =>
     (service as unknown as { dispatch(name: string, payload: unknown): Promise<void> }).dispatch(name, payload);
+
+  it('registers on init and unregisters the same handler on shutdown', () => {
+    service.onModuleInit();
+    const anyListener = emitter.onAny.mock.calls[0][0];
+
+    service.onApplicationShutdown();
+
+    expect(emitter.offAny).toHaveBeenCalledWith(anyListener);
+  });
 
   it('ignores events not in the registry', async () => {
     await dispatch('event.event.created', event()); // unversioned, not registered

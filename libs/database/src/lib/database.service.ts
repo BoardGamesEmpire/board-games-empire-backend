@@ -1,14 +1,17 @@
 import { env } from '@bge/env';
 import type { DatabasePoolMetricsSnapshot, DatabasePoolMetricsSource } from '@bge/otel';
 import { createCaslExtension } from '@casl/prisma';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { Prisma, PrismaClient } from './client';
 
 @Injectable()
-export class DatabaseService extends PrismaClient implements OnModuleInit, OnModuleDestroy, DatabasePoolMetricsSource {
+export class DatabaseService
+  extends PrismaClient
+  implements OnModuleInit, OnApplicationShutdown, DatabasePoolMetricsSource
+{
   private readonly logger = new Logger(DatabaseService.name);
 
   /**
@@ -57,7 +60,17 @@ export class DatabaseService extends PrismaClient implements OnModuleInit, OnMod
     }
   }
 
-  async onModuleDestroy(): Promise<void> {
+  /**
+   * Runs in `onApplicationShutdown`, after Nest has closed the HTTP server,
+   * WebSockets and microservices. `onModuleDestroy` runs while they still
+   * accept requests, so a request in that window would find the pool already
+   * ended (#673).
+   *
+   * Nothing orders it after work that outlives a request. In the worker apps
+   * BullMQ's global module closes its workers after this hook, so a job still
+   * running can lose the pool (#738).
+   */
+  async onApplicationShutdown(): Promise<void> {
     await this.$disconnect();
     // An app-owned pool is not closed by Prisma's `$disconnect()`; we own
     // its lifecycle, so end it explicitly to release sockets on shutdown.

@@ -2,7 +2,7 @@ import { SystemActorScope } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
 import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type { GatewayServiceClient } from '@boardgamesempire/proto-gateway';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
@@ -62,7 +62,7 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * notification.
  */
 @Injectable()
-export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
+export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(GatewayRegistryService.name);
   private readonly clients = new Map<string, CachedDriver>();
   private readonly failures = new Map<string, FailureTrack>();
@@ -75,6 +75,9 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
   // finds nothing cached to tear down, and connect() then caches a driver for a
   // gateway that is no longer valid (served indefinitely until the next event).
   private readonly connectGeneration = new Map<string, number>();
+  // Set once shutdown disposes the drivers. A connect still awaiting its ping
+  // then discards its driver rather than caching one nothing will dispose.
+  private shuttingDown = false;
   private configUpdateUnsubscribe?: () => Promise<void>;
 
   constructor(
@@ -92,6 +95,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.configUpdateUnsubscribe?.();
+  }
+
+  // Not onModuleDestroy: the server still takes requests then, and a search in
+  // that window would find its gateway's driver already disposed (#673).
+  async onApplicationShutdown(): Promise<void> {
+    this.shuttingDown = true;
 
     // Await teardown so async dispose() work (flushing, closing handles)
     // completes — bounded by a timeout so a misbehaving driver can't hang
@@ -143,6 +152,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
       // unavailable, which is correct.
       if ((this.connectGeneration.get(options.gatewayId) ?? 0) !== generation) {
         this.logger.warn(`Gateway ${options.gatewayId} was invalidated while connecting; discarding the new client`);
+        this.disposeDriver(options.gatewayId, driver);
+        return;
+      }
+
+      // Shutdown already disposed the cached drivers and won't run again.
+      if (this.shuttingDown) {
         this.disposeDriver(options.gatewayId, driver);
         return;
       }
@@ -207,7 +222,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy {
    * in-process plugin closing handles — is awaited internally and its failure
    * logged rather than surfacing as an unhandledRejection. The returned
    * promise always resolves once teardown settles, so an async caller
-   * (onModuleDestroy) can await it while sync callers fire-and-forget safely.
+   * (onApplicationShutdown) can await it while sync callers fire-and-forget safely.
    */
   private async disposeDriver(gatewayId: string, driver: GameGatewayDriver): Promise<void> {
     try {

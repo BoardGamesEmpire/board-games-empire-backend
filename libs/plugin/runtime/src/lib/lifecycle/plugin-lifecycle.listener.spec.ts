@@ -92,7 +92,7 @@ describe('PluginLifecycleListener', () => {
   });
 
   afterEach(() => {
-    listener.onModuleDestroy();
+    listener.onApplicationShutdown();
   });
 
   describe('registration and filtering', () => {
@@ -110,8 +110,8 @@ describe('PluginLifecycleListener', () => {
       expect(db.pluginLifecycleEvent.create).not.toHaveBeenCalled();
     });
 
-    it('stops handling after onModuleDestroy', async () => {
-      listener.onModuleDestroy();
+    it('stops handling after onApplicationShutdown', async () => {
+      listener.onApplicationShutdown();
 
       emitter.emit(
         PluginEvent.Disabled,
