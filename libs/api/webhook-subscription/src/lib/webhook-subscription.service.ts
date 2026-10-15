@@ -1,4 +1,4 @@
-import { DatabaseService, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
+import { DatabaseService, lockLiveHousehold, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
 import { I18nMessage, t } from '@bge/i18n';
 import { AbilityService, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
@@ -67,20 +67,34 @@ export class WebhookSubscriptionService {
     }
 
     const plaintextSecret = dto.secret ?? this.generateSecret();
-    const created = await this.db.webhookSubscription.create({
-      data: {
-        url: dto.url,
-        secret: this.encryption.encrypt(plaintextSecret),
-        resourceType: dto.resourceType,
-        resourceId: dto.resourceId ?? null,
-        household: dto.householdId ? { connect: { id: dto.householdId } } : undefined,
-        status: WebhookSubscriptionStatus.Active,
-        createdBy: { connect: { id: userId } },
-        eventTypes: {
-          create: dto.eventTypes.map((eventType) => ({ eventType })),
+    const secret = this.encryption.encrypt(plaintextSecret);
+    const householdId = dto.householdId;
+
+    const created = await this.db.$transaction(async (tx) => {
+      // The readability check above saw the household live but locked nothing,
+      // so a soft-delete can commit before the insert lands (#552). The share
+      // lock waits out one in flight and reports one that committed. Its
+      // answer is the check's own 403: a request that loses the race reads
+      // like one that arrived just after the delete.
+      if (householdId && !(await lockLiveHousehold(tx, householdId))) {
+        throw new ForbiddenException(t('errors.webhook_subscription.forbidden_household', { householdId }));
+      }
+
+      return tx.webhookSubscription.create({
+        data: {
+          url: dto.url,
+          secret,
+          resourceType: dto.resourceType,
+          resourceId: dto.resourceId ?? null,
+          household: householdId ? { connect: { id: householdId } } : undefined,
+          status: WebhookSubscriptionStatus.Active,
+          createdBy: { connect: { id: userId } },
+          eventTypes: {
+            create: dto.eventTypes.map((eventType) => ({ eventType })),
+          },
         },
-      },
-      include: { eventTypes: true },
+        include: { eventTypes: true },
+      });
     });
 
     this.logger.debug(`Created webhook subscription ${created.id} for user ${userId} on ${created.resourceType}`);

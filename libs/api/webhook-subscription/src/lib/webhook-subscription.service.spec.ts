@@ -6,6 +6,8 @@ import {
   createTestingModuleWithDb,
   MockAbilityService,
   MockDatabaseService,
+  rawQueryText,
+  unwrapTransaction,
 } from '@bge/testing';
 import {
   CreateWebhookSubscriptionDto,
@@ -95,6 +97,11 @@ describe('WebhookSubscriptionService', () => {
     service = module.get(WebhookSubscriptionService);
     registry = module.get(WebhookEventRegistry);
     db = mockDb;
+    // Create writes inside a transaction (#552). The household share lock is
+    // its one raw statement, and it finds the household live unless a case
+    // says otherwise.
+    unwrapTransaction(db);
+    db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
   });
 
   /**
@@ -245,6 +252,47 @@ describe('WebhookSubscriptionService', () => {
     it('checks household readability when householdId is scoped', async () => {
       db.household.count.mockResolvedValue(0);
       await expect(service.create(baseDto({ householdId: 'hh-1' }))).rejects.toThrow(ForbiddenException);
+    });
+
+    describe('a household soft-deleted while the create is in flight (#552)', () => {
+      beforeEach(() => {
+        db.household.count.mockResolvedValue(1);
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub({ householdId: 'hh-1' }));
+      });
+
+      it("takes the household's share lock in the create's transaction, before the write", async () => {
+        await service.create(baseDto({ householdId: 'hh-1' }));
+
+        expect(db.$transaction).toHaveBeenCalledTimes(1);
+        const [query] = db.$queryRaw.mock.calls[0];
+        expect(rawQueryText(query)).toMatch(/FROM households h[\s\S]*FOR SHARE/);
+        expect(query).toEqual(expect.objectContaining({ values: ['hh-1'] }));
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.webhookSubscription.create.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('answers 403 once the lock finds the household gone, and writes nothing', async () => {
+        // The readability check ran before the transaction and saw it live. A
+        // request that loses the race gets the answer one arriving just after
+        // the delete gets from that check: forbidden_household, not a 404.
+        db.$queryRaw.mockResolvedValue([] as never);
+
+        const refusal = service.create(baseDto({ householdId: 'hh-1' }));
+
+        await expect(refusal).rejects.toThrow(ForbiddenException);
+        await expect(refusal).rejects.toThrow(/forbidden_household/);
+        expect(db.webhookSubscription.create).not.toHaveBeenCalled();
+      });
+
+      it('takes no household lock for a subscription that names no household', async () => {
+        db.webhookSubscription.create.mockResolvedValue(makeWebhookSub());
+
+        await service.create(baseDto());
+
+        expect(db.$queryRaw).not.toHaveBeenCalled();
+        expect(db.webhookSubscription.create).toHaveBeenCalledTimes(1);
+      });
     });
   });
 
