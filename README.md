@@ -4,6 +4,8 @@ Board Games Empire (BGE) is a self-hosted platform for managing board game and v
 
 The backend is a NestJS Nx monorepo exposing a REST + WebSocket API, with game data fetched through a microservice gateway layer that normalizes external platform differences into a shared domain model.
 
+[GLOSSARY.md](GLOSSARY.md) defines the project's vocabulary, such as what a DataGateway, a household or a consent decision is. Use its terms in code, issues and docs.
+
 This project is in early development. The API is not stable and may change without warning. Features likely do not fully function
 as intended.
 
