@@ -4,6 +4,7 @@ import {
   createMockAbilityService,
   createTestingModuleWithDb,
   MOCK_RESOURCE_CONDITION,
+  rawQueryText,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -342,6 +343,7 @@ describe('QuotaService', () => {
       registry.has.mockReturnValue(true);
       db.$transaction.mockImplementation((c) => c(db));
       db.quota.count.mockResolvedValue(1); // authorized by default
+      db.$queryRaw.mockResolvedValue([{ id: HOUSEHOLD_ID }] as never); // the household share lock finds it live
 
       registry.require.mockReturnValue({
         key: 'storage_bytes',
@@ -405,7 +407,7 @@ describe('QuotaService', () => {
       await service.setQuota(QuotaScope.HouseholdMember, MEMBER_ID, 'storage_bytes', { limit: '1024' });
 
       expect(db.householdMember.findUnique).toHaveBeenCalledWith({
-        where: { id: MEMBER_ID },
+        where: { id: MEMBER_ID, household: { deletedAt: null } },
         select: { householdId: true },
       });
       expect(db.quota.upsert).toHaveBeenCalledWith(
@@ -511,6 +513,66 @@ describe('QuotaService', () => {
       await expect(
         service.setQuota(QuotaScope.Household, 'hh_missing', 'storage_bytes', { limit: '1024' }),
       ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    describe('a soft-deleted household (#552)', () => {
+      beforeEach(() => {
+        db.household.findUnique.mockResolvedValue({ id: HOUSEHOLD_ID } as never);
+        db.householdMember.findUnique.mockResolvedValue({ householdId: HOUSEHOLD_ID } as HouseholdMember);
+        db.quota.upsert.mockResolvedValue(
+          makeQuota({ scope: QuotaScope.Household, scopeId: HOUSEHOLD_ID, householdId: HOUSEHOLD_ID, limit: 4n }),
+        );
+      });
+
+      it('resolves a Household target only while the household is live', async () => {
+        await service.setQuota(QuotaScope.Household, HOUSEHOLD_ID, 'storage_bytes', { limit: '4' });
+
+        expect(db.household.findUnique).toHaveBeenCalledWith({
+          where: { id: HOUSEHOLD_ID, deletedAt: null },
+          select: { id: true },
+        });
+      });
+
+      it.each([
+        ['Household', QuotaScope.Household, HOUSEHOLD_ID],
+        ['HouseholdMember', QuotaScope.HouseholdMember, MEMBER_ID],
+      ] as const)(
+        'locks the resolved household first in the transaction for a %s target',
+        async (_name, scope, scopeId) => {
+          await service.setQuota(scope, scopeId, 'storage_bytes', { limit: '4' });
+
+          const [query] = db.$queryRaw.mock.calls[0];
+          expect(rawQueryText(query)).toMatch(/FROM households h[\s\S]*FOR SHARE/);
+          expect(query).toEqual(expect.objectContaining({ values: [HOUSEHOLD_ID] }));
+          expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.quota.upsert.mock.invocationCallOrder[0]);
+        },
+      );
+
+      it('forbids once the lock finds the household gone, and writes and announces nothing', async () => {
+        // Resolution ran before the transaction and saw the household live; the
+        // lock is what sees a delete that committed since. The answer is the one
+        // resolution gives a household that is already gone: forbidden_manage.
+        db.$queryRaw.mockResolvedValue([] as never);
+
+        const refusal = service.setQuota(QuotaScope.HouseholdMember, MEMBER_ID, 'storage_bytes', { limit: '4' });
+
+        await expect(refusal).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(refusal).rejects.toThrow(/forbidden_manage/);
+        expect(db.quota.upsert).not.toHaveBeenCalled();
+        expect(emitter.emit).not.toHaveBeenCalled();
+      });
+
+      it.each([
+        ['a Server row', QuotaScope.Server, null],
+        ['a User row', QuotaScope.User, USER_ID],
+        ['a type-level Household default', QuotaScope.Household, null],
+      ] as const)('takes no household lock for %s', async (_name, scope, scopeId) => {
+        db.quota.upsert.mockResolvedValue(makeQuota({ scope, scopeId: scopeId ?? '*', limit: 4n }));
+
+        await service.setQuota(scope, scopeId, 'storage_bytes', { limit: '4' });
+
+        expect(db.$queryRaw).not.toHaveBeenCalled();
+      });
     });
   });
 

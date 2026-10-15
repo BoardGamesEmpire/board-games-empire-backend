@@ -1,4 +1,4 @@
-import { Action, DatabaseService, Prisma, Quota, QuotaScope, ResourceType } from '@bge/database';
+import { Action, DatabaseService, lockLiveHousehold, Prisma, Quota, QuotaScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
@@ -279,6 +279,15 @@ export class QuotaService {
     } satisfies Prisma.QuotaUncheckedUpdateInput;
 
     const quota = await this.databaseService.$transaction(async (tx) => {
+      // A quota bound to a household is that household's state. Resolution
+      // above read it live without a lock, so a soft-delete can commit before
+      // the write (#552); the share lock waits out one in flight and reports
+      // one that committed. The answer is resolution's own: a missing target
+      // is forbidden, never a 404, so the endpoint is no existence oracle.
+      if (householdId !== null && !(await lockLiveHousehold(tx, householdId))) {
+        throw new ForbiddenException(t('errors.quota.forbidden_manage'));
+      }
+
       let row: Quota;
       if (limit !== undefined) {
         row = await tx.quota.upsert({
@@ -403,7 +412,7 @@ export class QuotaService {
     switch (scope) {
       case QuotaScope.Household: {
         const household = await this.databaseService.household.findUnique({
-          where: { id: scopeId },
+          where: { id: scopeId, deletedAt: null },
           select: { id: true },
         });
 
@@ -415,8 +424,10 @@ export class QuotaService {
       }
 
       case QuotaScope.HouseholdMember: {
+        // Member rows survive a household's soft delete, so the member alone
+        // does not say the household is live.
         const member = await this.databaseService.householdMember.findUnique({
-          where: { id: scopeId },
+          where: { id: scopeId, household: { deletedAt: null } },
           select: { householdId: true },
         });
 

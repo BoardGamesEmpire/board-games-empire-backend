@@ -1,4 +1,5 @@
 import { AuditContextModule } from '@bge/actor-context';
+import { DatabaseModule } from '@bge/database';
 import { Module } from '@nestjs/common';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 import { HouseholdPluginsController } from './household-plugins.controller';
@@ -29,6 +30,11 @@ import { UserPluginsController } from './user-plugins.controller';
     // which reads the request locale to translate its copy. No provider in this
     // module injects it directly, so the need is easy to miss.
     AuditContextModule,
+    // Supplies DatabaseService to the controller-scoped HouseholdLivenessGuard
+    // (#553), which probes the route's household. Nest resolves a
+    // class-referenced guard in the controller's host module, and the database
+    // module is not global, so without this the app fails at boot.
+    DatabaseModule,
     // No import for the controller's other dependencies: PermissionsModule
     // (PoliciesGuard, AbilityService) and the runtime `@bge/plugin`
     // (PluginLifecycleService) are both global modules, the latter

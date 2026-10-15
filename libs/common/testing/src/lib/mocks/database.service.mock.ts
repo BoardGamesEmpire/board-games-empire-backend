@@ -210,6 +210,24 @@ export function unwrapTransaction(db: MockDatabaseService): void {
 }
 
 /**
+ * The SQL of a raw query's first argument, with each bound value written `?`
+ * and whitespace collapsed, so a pattern can name a statement without matching
+ * its line breaks.
+ *
+ * Raw SQL reaches a mocked `$queryRaw` or `$executeRaw` in two forms. A tagged
+ * template passes its strings array; a `Prisma.sql` object built in another lib
+ * (the household share lock in `@bge/database`, #552) carries the strings on a
+ * property instead. A reader that knows only the first form sees an empty
+ * string for the second, and a stub that routes on the SQL then answers it with
+ * its fallback, which keeps a test green for the wrong reason.
+ */
+export function rawQueryText(query: unknown): string {
+  const strings = Array.isArray(query) ? query : ((query as { strings?: readonly string[] } | null)?.strings ?? []);
+
+  return strings.join('?').replace(/\s+/g, ' ').trim();
+}
+
+/**
  * The `(operations, options)` a batch `$transaction` was called with.
  *
  * The mock's `$transaction` is typed for the callback form, so reading the

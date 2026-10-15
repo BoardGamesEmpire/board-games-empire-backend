@@ -1,5 +1,6 @@
 import { AuditContextService, type HouseholdPluginUnit } from '@bge/actor-context';
 import { Action, PluginGrantScope, ResourceType } from '@bge/database';
+import { HouseholdLivenessGuard, HouseholdPathParam } from '@bge/household';
 import { t } from '@bge/i18n';
 import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import {
@@ -42,10 +43,20 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
  * decision states to another's admin. The instance check is
  * `AbilityService.assertCurrentActorCan`, which applies PoliciesGuard's
  * every-ability rule, so an API key's floor applies here too.
+ *
+ * Ahead of all of it, the household lib's liveness guard (#553): a missing or
+ * soft-deleted household answers 404 on every route here, as on the household
+ * routes (#299), for an actor every one of whose abilities reads `Household`.
+ * Anyone else meets PoliciesGuard's 403 whatever the id. The guard's probe
+ * takes no lock; the writes re-check under the household's share lock inside
+ * their transactions (#548), and the exception filter answers that re-check's
+ * refusal by the guard's rule, so losing the race tells no one more than the
+ * guard would.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
-@UseGuards(PoliciesGuard)
+@HouseholdPathParam('householdId')
+@UseGuards(HouseholdLivenessGuard, PoliciesGuard)
 @UseFilters(PluginExceptionFilter)
 @ApiTags('household-plugins')
 @Controller('households/:householdId/plugins')
@@ -78,6 +89,7 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.Ok, type: PaginatedHouseholdPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
   // Must stay out of the response cache: the writes on this controller change
   // these rows, and must be visible on the re-read.
@@ -108,7 +120,7 @@ export class HouseholdPluginsController {
     status: Http.Forbidden,
     description: 'Not an owner/admin of this household, or a categorically ungrantable permission',
   })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.UnprocessableEntity,
@@ -153,7 +165,7 @@ export class HouseholdPluginsController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
   // Must stay out of the response cache: read right before a decide POST,
@@ -184,7 +196,7 @@ export class HouseholdPluginsController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not an owner/admin of this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.Conflict,
@@ -229,7 +241,10 @@ export class HouseholdPluginsController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not an owner/admin of this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or never enabled for this household' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, plugin not installed, or never enabled for this household',
+  })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.HouseholdPlugin))
   @HttpCode(Http.Ok)
@@ -252,7 +267,10 @@ export class HouseholdPluginsController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not an owner/admin of this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed, or never enabled for this household' })
+  @ApiResponse({
+    status: Http.NotFound,
+    description: 'Household not found or deleted, plugin not installed, or never enabled for this household',
+  })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.UnprocessableEntity,
@@ -295,7 +313,7 @@ export class HouseholdPluginsController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
-  @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
   @ApiResponse({
     status: Http.UnprocessableEntity,

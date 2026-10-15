@@ -133,6 +133,22 @@ export class PluginGrantScopeNotRevocableError extends Error {
   }
 }
 
+/**
+ * A household-scope decision addresses a household that is missing or
+ * soft-deleted (#548): its share lock found no live row inside the decision's
+ * transaction, or the admin check refused one of the household's own admins
+ * because it has been deleted. The filter answers 404, as the household routes
+ * do (#299, #553), to an actor those routes would tell, and
+ * {@link PluginGrantAuthorityError}'s 403 to anyone else.
+ */
+export class PluginGrantHouseholdNotFoundError extends Error {
+  override readonly name = 'PluginGrantHouseholdNotFoundError';
+
+  constructor(public readonly householdId: string) {
+    super(`Household '${householdId}' does not exist or has been deleted`);
+  }
+}
+
 /** The decider does not hold the authority being delegated. */
 export class PluginGrantAuthorityError extends Error {
   override readonly name = 'PluginGrantAuthorityError';

@@ -2,6 +2,7 @@ import type { Plugin, PluginGrant, Prisma } from '@bge/database';
 import {
   DatabaseService,
   hasBoundingConditions,
+  lockLiveHousehold,
   PluginGrantScope,
   PluginGrantStatus,
   retryOnDeadlock,
@@ -31,6 +32,7 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
+  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
@@ -203,7 +205,17 @@ export class PluginGrantService {
       };
 
       const outcome = await this.db.$transaction(async (tx): Promise<DecisionOutcome> => {
-        // The plugin row, claimed FIRST and shared (D-398-1, D-398-3). Not for
+        // A household decision locks its household first (#548). The admin
+        // check above ran outside this transaction and took no lock, so a
+        // soft-delete can commit in between; this waits out one in flight and
+        // refuses one that committed. Ahead of the plugin-row claim because a
+        // soft-delete holds the household row while it runs and touches no
+        // plugin table, so a decision queued here holds nothing it waits on.
+        if (input.scopeType === PluginGrantScope.Household && !(await lockLiveHousehold(tx, scopeId))) {
+          throw new PluginGrantHouseholdNotFoundError(scopeId);
+        }
+
+        // The plugin row, claimed next and shared (D-398-1, D-398-3). Not for
         // what it reads — nothing here interprets the row, and the
         // in-transaction re-judgment of the manifest stays #361's — but for
         // WHERE the lock lands. Every INSERT into `plugin_grants` takes
@@ -1343,15 +1355,23 @@ export class PluginGrantService {
       }
       case PluginGrantScope.Household: {
         const householdId = scopeId;
+        const standing = await this.authority.householdAdminStanding(input.deciderId, householdId);
 
-        if (!(await this.authority.isHouseholdAdmin(input.deciderId, householdId))) {
-          throw new PluginGrantAuthorityError(
-            input.deciderId,
-            `Household-scope consent requires an owner/admin membership in household '${householdId}'`,
-          );
+        if (standing === 'admin') {
+          return;
         }
 
-        return;
+        // Once the household is deleted, its own admin gets the 404; anyone
+        // else keeps the 403 whatever state the household is in, so the
+        // refusal says nothing about which households exist.
+        if (standing === 'deleted') {
+          throw new PluginGrantHouseholdNotFoundError(householdId);
+        }
+
+        throw new PluginGrantAuthorityError(
+          input.deciderId,
+          `Household-scope consent requires an owner/admin membership in household '${householdId}'`,
+        );
       }
       case PluginGrantScope.User: {
         // The subject check is the WHOLE user-scope authority predicate

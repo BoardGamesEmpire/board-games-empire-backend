@@ -1,6 +1,7 @@
 import type { HouseholdPlugin, Plugin, UserPlugin } from '@bge/database';
 import {
   DatabaseService,
+  lockLiveHousehold,
   PluginGrantScope,
   PluginGrantStatus,
   PluginScope,
@@ -26,6 +27,7 @@ import { MODULE_OPTIONS_TOKEN, type PluginModuleOptions } from '../plugin-module
 import {
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
+  PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
   PluginUnitNotEnrolledError,
   PluginUnitPluginChangedError,
@@ -120,18 +122,21 @@ type HouseholdEnableOutcome =
  *   way — the plugin row under `FOR SHARE`, then the `(scopeId, pluginId)`
  *   advisory lock, then the unit row (`openHouseholdUnit` /
  *   `openUserUnit`), a suffix of the total order
- *   (plugin row → grant row → advisory → unit row). The row-creating path
- *   cannot be serialized without the advisory lock; the existing-row paths
- *   take it too, by rule rather than by need — see the lock helper's
- *   contract before optimizing one away.
+ *   (household row → plugin row → grant row → advisory → unit row). A
+ *   household transaction takes the household row's share lock ahead of
+ *   all of it (#548), so a soft-deleted household refuses the write. The
+ *   row-creating path cannot be serialized without the advisory lock; the
+ *   existing-row paths take it too, by rule rather than by need — see the
+ *   lock helper's contract before optimizing one away.
  *
- *   The plugin row comes FIRST, and the order is not free: uninstall and
- *   activation both claim that row before touching grant rows, while
- *   `decide()` holds a grant row (its upsert) while taking this advisory
- *   lock. Taking the advisory before the plugin row therefore closed a
- *   cycle — advisory → plugin → grant → advisory — that Postgres resolves
- *   by aborting a caller (PR #363 review). Reading the plugin row shared
- *   first is what orders this transaction against both of those writers.
+ *   The plugin row comes before the advisory lock, and the order is not
+ *   free: uninstall and activation both claim that row before touching
+ *   grant rows, while `decide()` holds a grant row (its upsert) while
+ *   taking this advisory lock. Taking the advisory before the plugin row
+ *   therefore closed a cycle — advisory → plugin → grant → advisory — that
+ *   Postgres resolves by aborting a caller (PR #363 review). Reading the
+ *   plugin row shared before the advisory is what orders this transaction
+ *   against both of those writers.
  *
  *   The `FOR SHARE` itself exists because uninstall's purge deletes unit
  *   rows without joining the advisory scheme: reading the plugin row
@@ -482,11 +487,12 @@ export class PluginUnitLifecycleService {
 
   /**
    * Every unit-state transaction opens the same way, fused into one helper
-   * so obtaining the row WITHOUT the lock has no convenient API: the plugin
-   * row's liveness under `FOR SHARE`, then the advisory lock, then the unit
-   * row. See the class doc for why the plugin row must come first (a
-   * deadlock cycle against uninstall/activation and `decide()`) and why the
-   * share lock is load-bearing against uninstall's purge.
+   * so obtaining the row WITHOUT the lock has no convenient API: the
+   * household row's liveness under `FOR SHARE` (#548), then the plugin row's,
+   * then the advisory lock, then the unit row. See the class doc for why the
+   * plugin row must precede the advisory lock (a deadlock cycle against
+   * uninstall/activation and `decide()`) and why its share lock is
+   * load-bearing against uninstall's purge.
    *
    * The scope re-check runs on the freshly read row and reuses the same
    * predicate the pre-transaction guard used, so an activation that
@@ -519,6 +525,16 @@ export class PluginUnitLifecycleService {
     householdId: string,
     options: { readonly expected?: ManifestSnapshotRef; readonly requireSurface?: boolean } = {},
   ): Promise<HouseholdPlugin | null> {
+    // The household row, shared, before anything else (#548). The admin check
+    // ran before the transaction and took no lock, so a soft-delete can commit
+    // in between: this waits out one in flight and refuses one that committed.
+    // First because a soft-delete holds the row while it runs and touches no
+    // plugin table, so a unit write can queue behind it but never close a cycle
+    // with it.
+    if (!(await lockLiveHousehold(tx, householdId))) {
+      throw new PluginUnitHouseholdNotFoundError(householdId);
+    }
+
     const { scope } = await this.assertStillLiving(tx, plugin, options.expected);
 
     if (options.requireSurface !== false) {
@@ -743,10 +759,24 @@ export class PluginUnitLifecycleService {
       : {};
   }
 
+  /**
+   * The admin check, and what its refusal means. Once the household is
+   * deleted, its own admin gets the 404 the route's liveness guard and the
+   * in-transaction lock give; everyone else keeps the 403, whatever state the
+   * household is in, so the refusal says nothing about which households exist.
+   */
   private async assertHouseholdAdmin(actorId: string, householdId: string): Promise<void> {
-    if (!(await this.authority.isHouseholdAdmin(actorId, householdId))) {
-      throw new PluginUnitAuthorityError(actorId);
+    const standing = await this.authority.householdAdminStanding(actorId, householdId);
+
+    if (standing === 'admin') {
+      return;
     }
+
+    if (standing === 'deleted') {
+      throw new PluginUnitHouseholdNotFoundError(householdId);
+    }
+
+    throw new PluginUnitAuthorityError(actorId);
   }
 
   /** A server-scope plugin has no per-household enablement surface (the manifest gate's rule, enforced at the writer too). */

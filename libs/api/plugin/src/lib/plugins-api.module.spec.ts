@@ -1,4 +1,5 @@
 import { AuditContextService } from '@bge/actor-context';
+import { DatabaseService } from '@bge/database';
 import { AbilityService } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
@@ -64,10 +65,22 @@ class StubGlobalsModule {}
  * the test.
  */
 describe('PluginsApiModule (DI wiring smoke test)', () => {
+  /**
+   * The module's own `DatabaseModule` import is kept and only its provider is
+   * replaced, so the compile still proves the import is there: an override
+   * reaches only providers some imported module declares. The household
+   * liveness guard on HouseholdPluginsController needs it (#553): Nest builds a
+   * controller-scoped guard in this module's injector, and the database module
+   * is not global.
+   */
+  const compile = (root: unknown) =>
+    Test.createTestingModule({ imports: [ClsModule.forRoot({ global: true }), StubGlobalsModule, root as never] })
+      .overrideProvider(DatabaseService)
+      .useValue({})
+      .compile();
+
   it('resolves the exception filter and its dependencies at compile time', async () => {
-    const moduleRef = await Test.createTestingModule({
-      imports: [ClsModule.forRoot({ global: true }), StubGlobalsModule, PluginsApiModule],
-    }).compile();
+    const moduleRef = await compile(PluginsApiModule);
 
     // The filter resolves only because PluginsApiModule imports
     // AuditContextModule (the wiring under guard); I18nService is global.
@@ -90,9 +103,7 @@ describe('PluginsApiModule (DI wiring smoke test)', () => {
     })
     class ForeignHostModule {}
 
-    const moduleRef = await Test.createTestingModule({
-      imports: [ClsModule.forRoot({ global: true }), StubGlobalsModule, ForeignHostModule],
-    }).compile();
+    const moduleRef = await compile(ForeignHostModule);
 
     expect(moduleRef.select(ForeignHostModule).get(PluginExceptionFilter)).toBeInstanceOf(PluginExceptionFilter);
     await moduleRef.close();

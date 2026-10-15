@@ -35,6 +35,7 @@ import {
 describe('household role-transition locking', () => {
   const SERVICE = 'libs/api/household/src/lib/member/household-member.service.ts';
   const HELPERS = 'libs/api/household/src/lib/household-access.helpers.ts';
+  const SHARE_LOCK = 'libs/database/src/lib/utils/household-share-lock.ts';
 
   /** `${householdId}` and `${SystemRole.HouseholdOwner}`, in that order. */
   const ownerLock = readShippedSql(SERVICE, ['householdId', 'SystemRole.HouseholdOwner'], {
@@ -46,18 +47,20 @@ describe('household role-transition locking', () => {
    * The household-row mutex every role transition takes first, and the admission
    * guard (#276) for the one interaction worth pinning below.
    *
-   * Both live in the same file and both bind a single `householdId`, so the
-   * locking clause is what says which one was lifted — the parameter check
-   * cannot tell them apart, and an anchor that resolved to the wrong one would
-   * leave several cases here passing about the wrong statement.
+   * Both bind a single `householdId`, so the locking clause is what says which
+   * one was lifted — the parameter check cannot tell them apart, and an anchor
+   * that resolved to the wrong one would leave several cases here passing about
+   * the wrong statement. They live in different files since #552 moved the
+   * share lock into `@bge/database`, which makes that less likely, not
+   * impossible.
    */
   const transitionLock = readShippedSql(HELPERS, ['householdId'], {
     after: 'lockHouseholdForRoleTransition',
     matching: /FOR NO KEY UPDATE/,
   });
 
-  const shareLock = readShippedSql(HELPERS, ['householdId'], {
-    after: 'lockExistingHousehold',
+  const shareLock = readShippedSql(SHARE_LOCK, ['householdId'], {
+    after: 'lockLiveHousehold',
     matching: /FOR SHARE/,
   });
 

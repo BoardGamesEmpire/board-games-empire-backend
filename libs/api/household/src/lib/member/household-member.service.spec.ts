@@ -9,6 +9,7 @@ import {
   paginationQuery,
   prismaColumn,
   prismaTable,
+  rawQueryText,
   readPrismaModels,
   unwrapTransaction,
   type MockDatabaseService,
@@ -38,10 +39,7 @@ import {
   type HouseholdMemberWithRelations,
 } from './household-member.service';
 
-/**
- * `Prisma.sql` exposes both `strings` and a `text` getter; reading either
- * structurally avoids depending on which the installed client version keeps.
- *
+/*
  * Module-scoped because THREE independent raw statements now reach this
  * service — the household role-transition lock, the owner-row lock, and the
  * household share-lock — and both the dispatching `$queryRaw` stub and the
@@ -49,20 +47,15 @@ import {
  * `households`, so they are discriminated by their locking clause rather than
  * by their FROM list.
  */
-const rawText = (value: unknown): string => {
-  const sql = value as { strings?: readonly string[]; text?: string };
-
-  return sql.strings?.join(' ') ?? sql.text ?? '';
-};
 
 /** The admission guard: household row, `FOR SHARE` (#276). */
-const isHouseholdShareLockSql = (value: unknown): boolean => /FOR SHARE/.test(rawText(value));
+const isHouseholdShareLockSql = (value: unknown): boolean => /FOR SHARE/.test(rawQueryText(value));
 
 /** The role-transition mutex: household row, `FOR NO KEY UPDATE` (#239). */
-const isRoleTransitionLockSql = (value: unknown): boolean => /FOR NO KEY UPDATE/.test(rawText(value));
+const isRoleTransitionLockSql = (value: unknown): boolean => /FOR NO KEY UPDATE/.test(rawQueryText(value));
 
 /** The owner-row lock, which returns the member ids holding HouseholdOwner. */
-const isOwnerLockSql = (value: unknown): boolean => /FOR UPDATE OF hr/.test(rawText(value));
+const isOwnerLockSql = (value: unknown): boolean => /FOR UPDATE OF hr/.test(rawQueryText(value));
 
 /** Either statement that reads the `households` row rather than the roster. */
 const isHouseholdLockSql = (value: unknown): boolean =>
@@ -1898,7 +1891,7 @@ describe('HouseholdMemberService', () => {
       const ownerLock = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isOwnerLockSql);
       expect(ownerLock).toBeDefined();
 
-      return rawText(ownerLock);
+      return rawQueryText(ownerLock);
     };
 
     it('references only identifiers the Prisma models actually map to', async () => {
@@ -1939,7 +1932,7 @@ describe('HouseholdMemberService', () => {
         const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isRoleTransitionLockSql);
         expect(query).toBeDefined();
 
-        return rawText(query);
+        return rawQueryText(query);
       };
 
       it('references only identifiers the Prisma models actually map to', async () => {
@@ -1992,7 +1985,7 @@ describe('HouseholdMemberService', () => {
         const query = db.$queryRaw.mock.calls.map((call: unknown[]) => call[0]).find(isHouseholdShareLockSql);
         expect(query).toBeDefined();
 
-        return rawText(query);
+        return rawQueryText(query);
       };
 
       it('references only identifiers the Prisma models actually map to', async () => {

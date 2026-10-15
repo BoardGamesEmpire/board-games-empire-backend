@@ -21,8 +21,9 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * The claimed total lock order of the plugin consent path, in ONE place.
  *
  * `plugin row (FOR SHARE) -> grant row -> advisory key -> unit row`, as merged
- * in PR #363. Every writer takes a prefix or a suffix of it, and taking two of
- * these locks in a different order than another writer is a deadlock cycle —
+ * in PR #363, with the household row ahead of all four since #548. Every writer
+ * takes a prefix or a suffix of it, and taking two of these locks in a
+ * different order than another writer is a deadlock cycle —
  * not hypothetically: the branch that became #323 opened advisory-first,
  * closing `advisory -> plugin -> grant -> advisory` against writers that
  * already existed, and it was inverted in review rather than in production.
@@ -75,6 +76,25 @@ import { readShippedTree, workspaceRoot } from '../support/shipped-sql';
  * them: a static reader of source cannot observe a trigger.
  */
 export const CLAIMED_LOCK_ORDER = [
+  {
+    /**
+     * The household's share lock, which a household-scope write takes first so
+     * a soft-deleted household refuses it (#548). `openHouseholdUnit` and
+     * `decide()`'s household branch both call `lockLiveHousehold`.
+     *
+     * The SQL lives in `@bge/database` (#552), outside the plugin runtime, so a
+     * stage matched only by its `FOR SHARE` clause would see nothing in these
+     * bodies: the call is what a body shows (#401). The SQL alternative stays,
+     * for the replayed statement and for any raw copy someone writes later.
+     *
+     * First, and safely so. The soft-delete holds this row while it runs and
+     * touches no plugin table, and so do role transitions and restore. No
+     * writer of the household row takes a lock below it, so a plugin write
+     * queued here holds nothing anyone is waiting for.
+     */
+    name: 'household row',
+    pattern: anyOf(/lockLiveHousehold\(/, relationLock('households', 'FOR SHARE')),
+  },
   {
     /**
      * Taken by the unit paths through `assertStillLiving`, and by uninstall and
@@ -202,6 +222,7 @@ const INSTALLER_SERVICE = 'libs/plugin/runtime/src/lib/install/plugin-installer.
 
 /** The files the pinned paths live in, so no spec retypes one. */
 export const LOCK_SOURCES = {
+  householdShareLock: 'libs/database/src/lib/utils/household-share-lock.ts',
   grantService: GRANT_SERVICE,
   unitLifecycle: UNIT_LIFECYCLE,
   updateService: UPDATE_SERVICE,
@@ -225,11 +246,12 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     label: 'openHouseholdUnit (every household unit transaction)',
     file: UNIT_LIFECYCLE,
     functionName: 'openHouseholdUnit',
-    stages: ['plugin row', 'advisory key'],
+    stages: ['household row', 'plugin row', 'advisory key'],
     because:
-      'The fused opener, so obtaining the unit row without the plugin row and the key has no convenient API. ' +
-      'This is the path whose original order closed the cycle. It claims no unit-row lock because it takes ' +
-      'none: Prisma exposes no row-lock API, and the key is what orders its read.',
+      'The fused opener, so obtaining the unit row without the household row, the plugin row and the key has ' +
+      'no convenient API. This is the path whose original order closed the cycle. The household row comes ' +
+      'first so a soft-deleted household refuses the write (#548). It claims no unit-row lock because it ' +
+      'takes none: Prisma exposes no row-lock API, and the key is what orders its read.',
   },
   {
     label: 'openUserUnit (every user unit transaction)',
@@ -242,12 +264,13 @@ export const LOCK_ORDER_PATHS: readonly LockOrderPath[] = [
     label: 'decide() — the required-denial branch',
     file: GRANT_SERVICE,
     functionName: 'decide',
-    stages: ['plugin row', 'grant row', 'unit row'],
+    stages: ['household row', 'plugin row', 'grant row', 'unit row'],
     because:
-      'The claim opens the transaction (#398), then the upsert takes the grant row, then the suspend mirror ' +
-      'rides the same transaction. The plugin-row lock is not optional decoration: the grant INSERT takes ' +
-      'FOR KEY SHARE on that row through the FK anyway, and takes it AFTER writing the grant tuple, so ' +
-      'without the claim this path holds the plugin row LAST and deadlocks against activation.',
+      'A household decision opens with the household share lock (#548), then the plugin-row claim (#398), ' +
+      'then the upsert takes the grant row, then the suspend mirror rides the same transaction. The ' +
+      'plugin-row lock is not optional decoration: the grant INSERT takes FOR KEY SHARE on that row through ' +
+      'the FK anyway, and takes it AFTER writing the grant tuple, so without the claim this path holds the ' +
+      'plugin row LAST and deadlocks against activation.',
   },
   {
     label: 'decide() — the grant row precedes the unit-scope key',
