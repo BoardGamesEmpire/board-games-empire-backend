@@ -1374,6 +1374,7 @@ describe('HouseholdMemberService', () => {
         }),
       );
       expect(result.member).toBe(created);
+      expect(result.admitted).toBe(true);
     });
 
     it('defaults the role to HouseholdMember', async () => {
@@ -1496,6 +1497,8 @@ describe('HouseholdMemberService', () => {
         }),
       );
       expect(result.member).toBe(existing);
+      // Nobody joined: a caller whose act is a join can tell that from a join (#163).
+      expect(result.admitted).toBe(false);
       expect(db.householdMember.create).not.toHaveBeenCalled();
     });
 
@@ -1785,9 +1788,9 @@ describe('HouseholdMemberService', () => {
 
       // A denial while a concurrent admission of the SAME user committed is not a
       // full household — the usage measured against already includes the row this
-      // call was about to insert. Reporting 402 would tell the caller their write
-      // failed when it has effectively succeeded; for #163 that is an invitee
-      // being told the household is full straight after joining it.
+      // call was about to insert. Reporting 402 would tell the caller the
+      // household is full when the membership it asked for exists; for #163 that
+      // would be an invitee told so about a household they are in.
       it('returns the concurrently admitted row instead of reporting quota exhaustion', async () => {
         const winner = makeMember({ id: 'member-winner', userId: 'user-2' });
         db.role.findUnique.mockResolvedValue({ id: 'role-member' } as never);
@@ -1801,6 +1804,7 @@ describe('HouseholdMemberService', () => {
 
         expect(result.member).toBe(winner);
         // Nothing was admitted by this call, so it crossed no soft cap.
+        expect(result.admitted).toBe(false);
         expect(result.softOverages).toEqual([]);
         expect(db.householdMember.create).not.toHaveBeenCalled();
         expect(db.householdMember.findUnique).toHaveBeenCalledTimes(2);
@@ -1820,6 +1824,7 @@ describe('HouseholdMemberService', () => {
 
         expect(db.householdMember.create).toHaveBeenCalled();
         expect(result.member.id).toBe('member-new');
+        expect(result.admitted).toBe(true);
       });
 
       // Consuming after the insert would take the advisory lock too late to

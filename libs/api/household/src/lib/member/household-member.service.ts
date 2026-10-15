@@ -116,6 +116,15 @@ export interface AddMemberParams {
 export interface AddMemberResult {
   readonly member: HouseholdMemberWithRelations;
   /**
+   * Whether this call wrote the membership. False when the user was a member
+   * already, at the pre-read or by a rival admission that landed while this
+   * one waited on the quota lock. The row comes back either way; a caller
+   * whose act is a join, as an accepted invite is (#163), reads this to tell
+   * a join from a no-op rather than re-reading the roster, which would miss
+   * the second case.
+   */
+  readonly admitted: boolean;
+  /**
    * Soft caps this admission crossed (#159). The caller MUST forward these to
    * `QuotaService.emitSoftOverages(...)` only AFTER its transaction commits —
    * emitting inside would warn about usage a rollback undoes.
@@ -574,14 +583,18 @@ export class HouseholdMemberService {
    *
    * ## Idempotency
    *
-   * An already-present membership is RETURNED, not rejected: the client's
-   * offline retry queue makes a double-submitted accept a real scenario, and
-   * this matches the `clientRequestId` posture #210 adopted for household
-   * create. The pre-read is what delivers that — catching the P2002 could not,
+   * An already-present membership is RETURNED, not rejected, so the caller
+   * decides what a join that joined nobody means. The invite accept (#163)
+   * answers 409 and rolls back, leaving the invite outstanding. A replayed
+   * accept never gets here: the invites lib refuses the settled invite first.
+   * The pre-read is what delivers the return — catching the P2002 could not,
    * because Postgres aborts the transaction on a constraint violation and
    * Prisma opens no savepoint, so the recovering re-read would itself fail. A
-   * genuine concurrent double-admit therefore surfaces as 409 and the caller
-   * retries the whole transaction, hitting the pre-read on the second attempt.
+   * genuine concurrent double-admit therefore surfaces as 409, and a caller that
+   * retries the whole transaction meets the pre-read on the second attempt.
+   *
+   * Returned is not the same as admitted; {@link AddMemberResult.admitted}
+   * says which.
    *
    * The same race is also absorbed on the quota path: a denial is only reported
    * as a cap breach once a re-read confirms the membership is still absent, since
@@ -615,8 +628,8 @@ export class HouseholdMemberService {
     // Runtime guard as well as the compile-time one. `AssignableHouseholdRole`
     // stops an in-process caller passing `HouseholdOwner`, but the roles that
     // reach this seam are not all statically known — an invite carries a `Role`
-    // FK, so #163 reads back a plain `SystemRole` — and a cast would sail past
-    // the type. Admitting an owner here would let a second owner appear without
+    // FK, so #163 reads back the role's name as a plain string — and a cast
+    // would sail past the type. Admitting an owner here would let a second owner appear without
     // going through transfer-ownership's locking (#158).
     if (!isAssignableHouseholdRole(role)) {
       throw new BadRequestException(t('errors.household.member_role_not_assignable', { role }));
@@ -641,7 +654,7 @@ export class HouseholdMemberService {
     if (existing) {
       this.logger.debug(`addMemberWithin(${householdId}, ${userId}) → already a member, returning existing row`);
 
-      return { member: existing, softOverages: [] };
+      return { member: existing, admitted: false, softOverages: [] };
     }
 
     const roleId = await resolveHouseholdRoleId(tx, role);
@@ -673,9 +686,10 @@ export class HouseholdMemberService {
       // against already includes the row we were about to insert, and a cap that
       // was exactly binding tips over. Throwing here would report "cap exceeded"
       // for a membership that now exists — a wrong answer rather than merely a
-      // wrong status, since the caller's intent has in fact been satisfied. For
-      // #163 that is an invitee being told the household is full immediately
-      // after they successfully joined it.
+      // wrong status, since the membership the caller asked for exists. For
+      // #163 that would tell an invitee the household is full when they are in
+      // it; returned with `admitted: false`, the accept answers that they are a
+      // member already.
       //
       // Re-reading is safe here in a way it is not in the P2002 branch below:
       // `consume` returned a value rather than raising, so the transaction is
@@ -689,7 +703,7 @@ export class HouseholdMemberService {
           `addMemberWithin(${householdId}, ${userId}) → admitted concurrently while awaiting the quota lock`,
         );
 
-        return { member: admittedConcurrently, softOverages: [] };
+        return { member: admittedConcurrently, admitted: false, softOverages: [] };
       }
 
       throw new QuotaExceededException(
@@ -714,7 +728,7 @@ export class HouseholdMemberService {
         select: MEMBER_SELECT,
       });
 
-      return { member, softOverages: decision.softOverages };
+      return { member, admitted: true, softOverages: decision.softOverages };
     } catch (error) {
       // Only the membership unique means "already a member". The nested
       // member/role create can raise P2002 from either generated primary key
@@ -731,8 +745,8 @@ export class HouseholdMemberService {
         const identity = constraintIdentity(error);
 
         if (this.isDuplicateMembership(identity)) {
-          // Lost the race against a concurrent admission of the same user. 409,
-          // and the caller retries the whole transaction into the pre-read.
+          // Lost the race against a concurrent admission of the same user. 409;
+          // a caller that retries the whole transaction meets the pre-read.
           this.logger.debug(`Concurrent admission of user ${userId} to household ${householdId}`);
 
           throw new ConflictException(t('errors.household.already_a_member', { householdId }));
