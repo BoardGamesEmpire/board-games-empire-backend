@@ -1,5 +1,8 @@
+import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
+import { get, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { DatabaseService } from './database.service';
 
 jest.mock('./client', () => {
@@ -45,6 +48,37 @@ interface MockPoolInstance {
 
 const getPool = (service: DatabaseService): MockPoolInstance =>
   (service as unknown as { readonly pool: MockPoolInstance }).pool;
+
+/**
+ * Mounts a route that holds its request open until the test releases it, so a
+ * test can close the app while a request is still in flight.
+ */
+const holdOneRequest = (app: INestApplication) => {
+  let release!: () => void;
+  let markArrived!: () => void;
+  const arrived = new Promise<void>((resolve) => (markArrived = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+
+  app.getHttpAdapter().get('/held', (_req: IncomingMessage, res: ServerResponse) => {
+    markArrived();
+    void released.then(() => res.end('done'));
+  });
+
+  return { arrived, release };
+};
+
+// No keep-alive agent, so the connection ends with the response.
+const getBody = (port: number, path: string) =>
+  new Promise<string>((resolve, reject) => {
+    get({ host: '127.0.0.1', port, path, agent: false }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => (body += chunk));
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+
+const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 describe('DatabaseService', () => {
   let module: TestingModule;
@@ -109,9 +143,9 @@ describe('DatabaseService', () => {
     });
   });
 
-  describe('onModuleDestroy', () => {
+  describe('onApplicationShutdown', () => {
     it('calls $disconnect exactly once', async () => {
-      await service.onModuleDestroy();
+      await service.onApplicationShutdown();
 
       expect(service.$disconnect).toHaveBeenCalledTimes(1);
     });
@@ -119,7 +153,7 @@ describe('DatabaseService', () => {
     it('ends the owned pool after disconnecting', async () => {
       const pool = getPool(service);
 
-      await service.onModuleDestroy();
+      await service.onApplicationShutdown();
 
       expect(service.$disconnect).toHaveBeenCalledTimes(1);
       expect(pool.end).toHaveBeenCalledTimes(1);
@@ -127,6 +161,34 @@ describe('DatabaseService', () => {
       const disconnectOrder = (service.$disconnect as jest.Mock).mock.invocationCallOrder[0];
       const endOrder = pool.end.mock.invocationCallOrder[0];
       expect(disconnectOrder).toBeLessThan(endOrder);
+    });
+  });
+
+  describe('shutdown order', () => {
+    it('ends the pool only after an in-flight request has finished', async () => {
+      const app = module.createNestApplication({ logger: false });
+      const { arrived, release } = holdOneRequest(app);
+      await app.listen(0, '127.0.0.1');
+      const server = app.getHttpServer() as Server;
+      const pool = getPool(app.get(DatabaseService));
+
+      const response = getBody((server.address() as AddressInfo).port, '/held');
+      await arrived;
+      const closing = app.close();
+      await flush();
+
+      try {
+        // close() has stopped the server and is waiting on the open request.
+        expect(server.listening).toBe(false);
+        expect(pool.end).not.toHaveBeenCalled();
+      } finally {
+        // A failed assertion must still let close() finish, or Jest never exits.
+        release();
+      }
+      await expect(response).resolves.toBe('done');
+      await closing;
+
+      expect(pool.end).toHaveBeenCalledTimes(1);
     });
   });
 

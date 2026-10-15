@@ -1,12 +1,14 @@
-import type { AuditContextService } from '@bge/actor-context';
-import { AuditExclude, Auditable, MutationEvent } from '@bge/actor-context';
-import { Logger } from '@nestjs/common';
+import { AuditContextService, AuditExclude, Auditable, MutationEvent } from '@bge/actor-context';
+import { Logger, type INestApplication } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import type { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Test } from '@nestjs/testing';
+import { get, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { UNATTRIBUTED_ACTOR } from '../constants/audit-log.constants';
-import type { AuditLogService } from './audit-log.service';
+import { AuditLogService } from './audit-log.service';
 import { AuditPersistenceListener } from './audit-persistence.listener';
-import type { AuditUnattributedNotifierService } from './audit-unattributed-notifier.service';
+import { AuditUnattributedNotifierService } from './audit-unattributed-notifier.service';
 
 interface SamplePayload {
   id: string;
@@ -39,6 +41,35 @@ class RedactedEvent extends SampleEvent {}
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+/**
+ * Mounts a route that holds its request open until the test releases it, so a
+ * test can close the app while a request is still in flight.
+ */
+const holdOneRequest = (app: INestApplication) => {
+  let release!: () => void;
+  let markArrived!: () => void;
+  const arrived = new Promise<void>((resolve) => (markArrived = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+
+  app.getHttpAdapter().get('/held', (_req: IncomingMessage, res: ServerResponse) => {
+    markArrived();
+    void released.then(() => res.end('done'));
+  });
+
+  return { arrived, release };
+};
+
+// No keep-alive agent, so the connection ends with the response.
+const getBody = (port: number, path: string) =>
+  new Promise<string>((resolve, reject) => {
+    get({ host: '127.0.0.1', port, path, agent: false }, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => (body += chunk));
+      res.on('end', () => resolve(body));
+    }).on('error', reject);
+  });
+
 describe('AuditPersistenceListener', () => {
   let emitter: jest.Mocked<Pick<EventEmitter2, 'onAny' | 'offAny'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor' | 'getSource' | 'getCorrelationId'>>;
@@ -69,12 +100,48 @@ describe('AuditPersistenceListener', () => {
     anyListener = emitter.onAny.mock.calls[0][0] as typeof anyListener;
   });
 
-  it('registers on init and unregisters the same handler on destroy', () => {
+  it('registers on init and unregisters the same handler on shutdown', () => {
     expect(emitter.onAny).toHaveBeenCalledTimes(1);
 
-    listener.onModuleDestroy();
+    listener.onApplicationShutdown();
 
     expect(emitter.offAny).toHaveBeenCalledWith(anyListener);
+  });
+
+  it('stays attached until an in-flight request has finished', async () => {
+    const moduleRef = await Test.createTestingModule({
+      providers: [
+        AuditPersistenceListener,
+        Reflector,
+        { provide: EventEmitter2, useValue: emitter },
+        { provide: AuditContextService, useValue: auditContext },
+        { provide: AuditLogService, useValue: auditLog },
+        { provide: AuditUnattributedNotifierService, useValue: notifier },
+      ],
+    }).compile();
+    const app = moduleRef.createNestApplication({ logger: false });
+    const { arrived, release } = holdOneRequest(app);
+    await app.listen(0, '127.0.0.1');
+    const server = app.getHttpServer() as Server;
+    emitter.offAny.mockClear();
+
+    const response = getBody((server.address() as AddressInfo).port, '/held');
+    await arrived;
+    const closing = app.close();
+    await flush();
+
+    try {
+      // close() has stopped the server and is waiting on the open request.
+      expect(server.listening).toBe(false);
+      expect(emitter.offAny).not.toHaveBeenCalled();
+    } finally {
+      // A failed assertion must still let close() finish, or Jest never exits.
+      release();
+    }
+    await expect(response).resolves.toBe('done');
+    await closing;
+
+    expect(emitter.offAny).toHaveBeenCalledTimes(1);
   });
 
   it('ignores payloads that are not MutationEvents', async () => {

@@ -6,7 +6,7 @@ import {
   type PluginLifecycleEventType,
   type Prisma,
 } from '@bge/database';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PluginConfigEventsService } from '../config/plugin-config-events.service';
 import { PLUGIN_EVENT_TO_LIFECYCLE_TYPE } from '../events/plugin-lifecycle-event-type.map';
@@ -88,7 +88,7 @@ interface LifecycleRowIdentity {
  * break the domain operation that produced the event.
  */
 @Injectable()
-export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
+export class PluginLifecycleListener implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(PluginLifecycleListener.name);
 
   constructor(
@@ -102,7 +102,9 @@ export class PluginLifecycleListener implements OnModuleInit, OnModuleDestroy {
     this.emitter.onAny(this.anyListener);
   }
 
-  onModuleDestroy(): void {
+  // Not onModuleDestroy: the server still takes requests then, and a lifecycle
+  // change in that window would commit without its lifecycle event row (#673).
+  onApplicationShutdown(): void {
     this.emitter.offAny(this.anyListener);
   }
 

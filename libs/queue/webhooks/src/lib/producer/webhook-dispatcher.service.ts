@@ -10,7 +10,7 @@ import {
   type WebhookEventType,
 } from '@bge/webhooks';
 import { InjectQueue } from '@nestjs/bullmq';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'node:crypto';
@@ -42,7 +42,7 @@ import type { WebhookDeliveryJob } from '../interfaces/webhook-delivery-job.inte
  * the domain transaction that produced the event.
  */
 @Injectable()
-export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
+export class WebhookDispatcherService implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(WebhookDispatcherService.name);
 
   constructor(
@@ -60,7 +60,9 @@ export class WebhookDispatcherService implements OnModuleInit, OnModuleDestroy {
     this.emitter.onAny(this.anyListener);
   }
 
-  onModuleDestroy(): void {
+  // Not onModuleDestroy: the server still takes requests then, and a mutation
+  // in that window would commit without its webhook delivery (#673).
+  onApplicationShutdown(): void {
     this.emitter.offAny(this.anyListener);
   }
 

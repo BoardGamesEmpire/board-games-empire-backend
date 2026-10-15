@@ -1,5 +1,5 @@
 import { AuditContextService, AuditExclude, Auditable, MutationEvent } from '@bge/actor-context';
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { UNATTRIBUTED_ACTOR } from '../constants/audit-log.constants';
@@ -32,7 +32,7 @@ import { AuditUnattributedNotifierService } from './audit-unattributed-notifier.
  * break the domain operation that produced the event.
  */
 @Injectable()
-export class AuditPersistenceListener implements OnModuleInit, OnModuleDestroy {
+export class AuditPersistenceListener implements OnModuleInit, OnApplicationShutdown {
   private readonly logger = new Logger(AuditPersistenceListener.name);
 
   constructor(
@@ -47,7 +47,9 @@ export class AuditPersistenceListener implements OnModuleInit, OnModuleDestroy {
     this.emitter.onAny(this.anyListener);
   }
 
-  onModuleDestroy(): void {
+  // Not onModuleDestroy: the server still takes requests then, and a mutation
+  // in that window would commit without its audit row (#673).
+  onApplicationShutdown(): void {
     this.emitter.offAny(this.anyListener);
   }
 

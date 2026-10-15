@@ -183,6 +183,42 @@ describe('GatewayRegistryService', () => {
     });
   });
 
+  describe('shutdown', () => {
+    it('keeps serving its drivers through onModuleDestroy, while the server still takes requests', async () => {
+      const driver = makeDriver();
+      service.register('bgg', driver);
+
+      await service.onModuleDestroy();
+
+      expect(driver.dispose).not.toHaveBeenCalled();
+      await expect(service.resolve('bgg')).resolves.toBe(driver);
+    });
+
+    it('disposes every driver on onApplicationShutdown', async () => {
+      const driver = makeDriver();
+      service.register('bgg', driver);
+
+      await service.onApplicationShutdown();
+
+      expect(driver.dispose).toHaveBeenCalledTimes(1);
+      expect(service.isConnected('bgg')).toBe(false);
+    });
+
+    it('disposes a driver whose connect finishes after shutdown, instead of caching it', async () => {
+      const driver = makeDriver();
+      let finishPing!: (driver: GameGatewayDriver) => void;
+      factory.create.mockReturnValue(new Promise<GameGatewayDriver>((resolve) => (finishPing = resolve)));
+
+      const connecting = service.connect(connectOpts);
+      await service.onApplicationShutdown();
+      finishPing(driver);
+      await connecting;
+
+      expect(driver.dispose).toHaveBeenCalledTimes(1);
+      expect(service.isConnected('bgg')).toBe(false);
+    });
+  });
+
   // Regression: an eager bootstrap connect and a job-triggered lazy resolve for
   // the same gateway race. Neither should leak — whichever driver loses the
   // cache slot must be disposed. Ordering-agnostic on purpose (last write by
