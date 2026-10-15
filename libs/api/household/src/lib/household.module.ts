@@ -19,9 +19,10 @@ import { HouseholdMemberService } from './member/household-member.service';
   // (#279).
   // InvitesModule supplies InviteService, the only writer of an invite's
   // status; the soft delete revokes a household's outstanding invites through
-  // it (#161), and the invite routes create through it (#162).
-  // AuditContextModule supplies AuditContextService to the inbox, which
-  // refuses every actor but a session user (#163).
+  // it (#161), and the invite routes create and accept through it (#162,
+  // #163).
+  // AuditContextModule supplies AuditContextService to the accept and the
+  // inbox, which refuse every actor but a session user (#163).
   imports: [DatabaseModule, QuotaModule, InvitesModule, AuditContextModule],
   controllers: [HouseholdController, HouseholdMemberController, HouseholdInviteController, PartyInviteController],
   providers: [HouseholdService, HouseholdMemberService, HouseholdInviteService, PartyInviteService],

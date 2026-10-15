@@ -1,3 +1,4 @@
+export * from './accept-invite-by-token.dto';
 export * from './create-household-invite.dto';
 export * from './create-household.dto';
 export * from './list-household-invites-query.dto';

@@ -1,6 +1,11 @@
 import type { Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
-import { asPagination, type PaginationWire, type PendingInviteProjection } from './household-wire';
+import {
+  asPagination,
+  type HouseholdMemberProjection,
+  type PaginationWire,
+  type PendingInviteProjection,
+} from './household-wire';
 
 /**
  * Wire-contract types and fail-loud parsers for the household invite routes
@@ -97,6 +102,33 @@ export interface ReceivedInviteWire extends InvitePartyRowWire {
 export interface ReceivedInvitesEnvelope {
   readonly invites: readonly ReceivedInviteWire[];
   readonly pagination: PaginationWire;
+}
+
+export interface AcceptInviteEnvelope {
+  readonly message: string;
+  readonly invite: InvitePartyRowWire;
+  readonly member: HouseholdMemberProjection;
+}
+
+/**
+ * `POST /api/invites/:inviteId/accept` and `POST /api/invites/accept`:
+ * `{ message, invite, member }`. The member must name its household and
+ * user, which are what a client joins on.
+ */
+export function acceptEnvelope(response: HttpResponseLike, request: RequestDescription): AcceptInviteEnvelope {
+  const { message, invite } = inviteEnvelope(response, request);
+
+  // Proved by the parse above; repeated because TypeScript cannot see it there.
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const member = response.body['member'];
+  if (!hasStringId(member) || typeof member['householdId'] !== 'string' || typeof member['userId'] !== 'string') {
+    return fail("it carried no 'member' object with string 'id', 'householdId' and 'userId'", request, response);
+  }
+
+  return { message, invite, member: member as unknown as HouseholdMemberProjection };
 }
 
 /** `GET /api/invites`: `{ invites: [...], pagination }`, each row naming its household. */
