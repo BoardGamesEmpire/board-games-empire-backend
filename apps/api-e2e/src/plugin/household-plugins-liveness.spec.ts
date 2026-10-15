@@ -1,4 +1,4 @@
-import { PluginCategory, PluginGrantStatus, PluginScope, ResourceType, RiskLevel, type Plugin } from '@bge/database';
+import { PluginCategory, PluginGrantStatus, PluginScope, RiskLevel, type Plugin } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
@@ -6,6 +6,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import { householdPluginKey, type Caller } from './plugin-api-key';
 
 /**
  * The household plugin routes answer 404 for a household that is missing or
@@ -74,11 +75,6 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
   });
 
   const base = (householdId: string) => `/api/households/${householdId}/plugins`;
-
-  /** Whoever sends the request: a session, or an API key. */
-  interface Caller {
-    readonly headers: Readonly<Record<string, string>>;
-  }
 
   const READS: readonly { readonly name: string; readonly send: (actor: Caller, id: string) => request.Test }[] = [
     { name: 'GET plugins', send: (actor, id) => request(baseUrl).get(base(id)).set(actor.headers) },
@@ -238,32 +234,9 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
    * routes holds no read on Household, so it was never told which households
    * exist and must not be told here. Its answer is 403 whatever the household's
    * state.
-   *
-   * Minted the way `auth/api-key.spec.ts` mints its keys, scope rows arranged
-   * directly because no route writes them yet (#266, and #270 for the fixture).
    */
   describe('an API key with no household read', () => {
-    const pluginKey = async (owner: SessionActor): Promise<Caller> => {
-      const response = await request(baseUrl)
-        .post('/api/auth/api-key/create')
-        .set('Origin', baseUrl)
-        .set(owner.headers)
-        .send({ name: 'e2e' });
-
-      if (response.status !== 200 || typeof response.body?.key !== 'string') {
-        throw new Error(`minting a key failed: ${response.status} ${JSON.stringify(response.body)}`);
-      }
-
-      for (const slug of ['read:plugin:household', 'manage:plugin:household']) {
-        const permission = await db.client.permission.findUniqueOrThrow({ where: { slug } });
-
-        await db.client.apiKeyScope.create({
-          data: { apiKeyId: response.body.id, permissionId: permission.id, resourceType: ResourceType.HouseholdPlugin },
-        });
-      }
-
-      return { headers: { 'x-api-key': response.body.key } };
-    };
+    const pluginKey = (owner: SessionActor) => householdPluginKey(baseUrl, db.client, owner);
 
     it("reads its owner's own household, so the refusals below are not a key that works nowhere", async () => {
       const owner = await actors.user();
@@ -285,6 +258,25 @@ describe('household plugin routes for a missing or deleted household (#553)', ()
       };
 
       expect(answered).toEqual({ missing: all403(routes), deleted: all403(routes), live: all403(routes) });
+    });
+
+    /**
+     * Its owner was the household's admin, and the key was let in before the
+     * delete. Once the delete lands, the owner's graph drops the household and
+     * the key is refused 403 like any other. A write that loses the race to the
+     * delete must answer the same (`plugin-household-tombstone.spec.ts`).
+     */
+    it("answers 403 on all seven routes for its owner's own household once it is deleted", async () => {
+      const owner = await actors.user();
+      // Kept, so the key still holds plugin rules and the 403 is the deleted household's.
+      await actors.householdWithMembers({ owner, name: 'Kept by the key owner' });
+      const { household } = await actors.householdWithMembers({ owner, name: 'Deleted by the key owner' });
+      const key = await pluginKey(owner);
+      const routes = [...READS, ...WRITES];
+
+      await request(baseUrl).delete(`/api/households/${household.id}`).set(owner.headers).expect(200);
+
+      await expect(statuses(routes, key, household.id)).resolves.toEqual(all403(routes));
     });
   });
 });

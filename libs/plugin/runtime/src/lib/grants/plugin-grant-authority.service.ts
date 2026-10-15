@@ -70,7 +70,9 @@ export class PluginGrantAuthorityService {
    * Everyone else answers `none`, whatever state the household is in. The
    * route's liveness guard passes some actors through untouched, an API key
    * with no household read among them, and a refusal that varied with the
-   * household's state would tell them which households exist.
+   * household's state would tell them which households exist. The same holds
+   * for the admin's own key of that kind, so the HTTP filter answers `deleted`
+   * as 404 only to an actor the guard would have told.
    *
    * One read, and it takes no lock: the writers that act on `admin` re-check
    * liveness under the household's share lock inside their transactions.

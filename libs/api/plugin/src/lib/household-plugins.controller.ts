@@ -49,7 +49,9 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
  * routes (#299), for an actor every one of whose abilities reads `Household`.
  * Anyone else meets PoliciesGuard's 403 whatever the id. The guard's probe
  * takes no lock; the writes re-check under the household's share lock inside
- * their transactions (#548).
+ * their transactions (#548), and the exception filter answers that re-check's
+ * refusal by the guard's rule, so losing the race tells no one more than the
+ * guard would.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')

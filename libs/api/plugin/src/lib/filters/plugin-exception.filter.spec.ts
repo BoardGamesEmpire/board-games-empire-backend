@@ -1,4 +1,4 @@
-import { PluginGrantScope } from '@bge/database';
+import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import * as pluginRuntime from '@bge/plugin';
 import {
   type PluginConfigIssue,
@@ -89,12 +89,25 @@ describe('PluginExceptionFilter', () => {
   let superCatch: jest.SpyInstance;
   let translate: jest.Mock;
   let host: ArgumentsHost;
+  let getCurrentAbilities: jest.Mock;
+
+  /** An ability that reads Household or not; the filter asks nothing else of it. */
+  const ability = (readsHousehold: boolean) => ({
+    can: (action: Action, subject: ResourceType) =>
+      readsHousehold && action === Action.read && subject === ResourceType.Household,
+  });
 
   beforeEach(() => {
     // Echo the key back so tests can assert which catalog message was chosen —
     // never the raw domain-error message (English-only, admin-log copy).
     translate = jest.fn((key: string) => `t:${key}`);
-    filter = new PluginExceptionFilter({ translate } as never, { getLocale: () => 'en' } as never);
+    // A user session by default: every ability reads Household.
+    getCurrentAbilities = jest.fn(() => [ability(true)]);
+    filter = new PluginExceptionFilter(
+      { translate } as never,
+      { getLocale: () => 'en' } as never,
+      { getCurrentAbilities, getActingUserId: () => 'user-1' } as never,
+    );
     superCatch = jest.spyOn(BaseExceptionFilter.prototype, 'catch').mockImplementation(() => undefined);
     jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     host = { switchToHttp: () => ({ getResponse: () => ({}) }) } as unknown as ArgumentsHost;
@@ -373,6 +386,53 @@ describe('PluginExceptionFilter', () => {
         expect(body()['code']).toBe(exception.name);
       },
     );
+
+    // The liveness guard's rule (#553), applied where the status is chosen: an
+    // actor it passes through untouched was never told which households exist,
+    // so losing the race to a delete must not tell it either.
+    const HIDDEN = [
+      { actor: 'an API key with no household read', abilities: () => [ability(true), ability(false)] },
+      { actor: 'an actor with no abilities', abilities: () => [] },
+    ];
+    const REFUSED = [
+      {
+        exception: new PluginUnitHouseholdNotFoundError('hh_1'),
+        key: 'unit_authority',
+        code: 'PluginUnitAuthorityError',
+      },
+      {
+        exception: new PluginGrantHouseholdNotFoundError('hh_1'),
+        key: 'grant_authority',
+        code: 'PluginGrantAuthorityError',
+      },
+    ];
+
+    it.each(HIDDEN.flatMap((hidden) => REFUSED.map((refused) => ({ ...hidden, ...refused }))))(
+      "answers $actor the admin check's 403 for a $exception.name",
+      ({ abilities, exception, key, code }) => {
+        getCurrentAbilities.mockImplementation(abilities);
+
+        filter.catch(exception, host);
+
+        expect(rendered().getStatus()).toBe(Http.Forbidden);
+        expect(body()['message']).toBe(`t:errors.plugin.${key}`);
+        expect(body()['code']).toBe(code);
+        expect(body()).not.toHaveProperty('householdId');
+        // The logs still see what happened.
+        expect((rendered() as unknown as { cause?: unknown }).cause).toBe(exception);
+      },
+    );
+
+    it('asks for the abilities only when a household was deleted, so the other errors render without them', () => {
+      getCurrentAbilities.mockImplementation(() => {
+        throw new Error('not primed');
+      });
+
+      filter.catch(new PluginUnitPluginNotFoundError('sample'), host);
+
+      expect(rendered().getStatus()).toBe(Http.NotFound);
+      expect(getCurrentAbilities).not.toHaveBeenCalled();
+    });
 
     it('maps the not-enrolled 404 with the addressed axis, so the client knows WHICH unit has no row', () => {
       filter.catch(new PluginUnitNotEnrolledError('sample', 'Household'), host);

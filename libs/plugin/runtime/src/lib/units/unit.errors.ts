@@ -23,7 +23,8 @@ export class PluginUnitAuthorityError extends Error {
  * household's share lock finds no live row inside the write's transaction, and
  * when the admin check refuses one of the household's own admins because it has
  * been deleted. The filter answers 404, the status the household routes give a
- * deleted household (#299, #553).
+ * deleted household (#299, #553), to an actor those routes would tell, and
+ * {@link PluginUnitAuthorityError}'s 403 to anyone else.
  */
 export class PluginUnitHouseholdNotFoundError extends Error {
   override readonly name = 'PluginUnitHouseholdNotFoundError';

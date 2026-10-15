@@ -15,6 +15,7 @@ import { requireBaseUrl } from '../support/e2e-env';
 import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
+import { householdPluginKey, type Caller } from './plugin-api-key';
 
 /**
  * #548's acceptance over HTTP: a household plugin write that passed every check
@@ -30,7 +31,8 @@ import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
  * request reaches its transaction and queues on the household row.
  * `expectLockWaiter` proves it queued there, and the running statement proves
  * which lock it queued on. Then the delete commits, and the request must come
- * back 404 with nothing written.
+ * back refused with nothing written: 404 to the owner, and 403 to the owner's
+ * API key, which the route never tells which households exist.
  *
  * Same harness as `household/role-transition-tombstone.spec.ts`, which drives
  * the role transitions through the same race.
@@ -101,22 +103,26 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
   };
 
   /**
-   * Each write, sent by the household's owner, who would succeed on a live
-   * household. That is what makes the 404 mean the lock refused it.
+   * Each write, sent on behalf of the household's owner, who would succeed on a
+   * live household. That is what makes the refusal mean the lock refused it.
+   * `code` is the refusal the owner's session gets; `hiddenCode` is the one an
+   * actor that cannot tell households apart gets instead.
    */
   const WRITES: readonly {
     readonly name: string;
     readonly code: string;
-    readonly send: (a: Arrangement) => request.Test;
+    readonly hiddenCode: string;
+    readonly send: (a: Arrangement, caller: Caller) => request.Test;
     readonly written: (a: Arrangement) => Promise<number>;
   }[] = [
     {
       name: 'enable',
       code: 'PluginUnitHouseholdNotFoundError',
-      send: ({ householdId, owner, plugin }) =>
+      hiddenCode: 'PluginUnitAuthorityError',
+      send: ({ householdId, plugin }, caller) =>
         request(baseUrl)
           .post(`/api/households/${householdId}/plugins/${plugin.slug}/enable`)
-          .set(owner.headers)
+          .set(caller.headers)
           .send({}),
       written: ({ householdId, plugin }) =>
         db.client.householdPlugin.count({ where: { householdId, pluginId: plugin.id } }),
@@ -124,10 +130,11 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     {
       name: 'consent decision',
       code: 'PluginGrantHouseholdNotFoundError',
-      send: ({ householdId, owner, plugin }) =>
+      hiddenCode: 'PluginGrantAuthorityError',
+      send: ({ householdId, plugin }, caller) =>
         request(baseUrl)
           .post(`/api/households/${householdId}/plugins/${plugin.slug}/grants`)
-          .set(owner.headers)
+          .set(caller.headers)
           .send({ permissionSlug: HOUSEHOLD_CHECK.slug, status: PluginGrantStatus.Granted }),
       written: ({ householdId, plugin }) =>
         db.client.pluginGrant.count({
@@ -162,21 +169,28 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
     return { settled, settledEarly: () => outcome };
   };
 
-  it.each(WRITES)('answers 404 for a $name that queued behind the soft-delete', async (write) => {
-    const arrangement = await arrange();
-
-    const response = await withBarrier(async (barrier) => {
+  /**
+   * Holds a soft-delete of the arranged household open, sends the write, proves
+   * it queued on the household's share lock, then commits the delete and hands
+   * back the write's response.
+   */
+  const raceTheDelete = (
+    { householdId }: Arrangement,
+    name: string,
+    send: () => request.Test,
+  ): Promise<request.Response> =>
+    withBarrier(async (barrier) => {
       const { holder } = barrier;
 
       await holder.begin();
-      await expect(holder.query(SOFT_DELETE_HOUSEHOLD, [arrangement.householdId])).resolves.toHaveLength(1);
+      await expect(holder.query(SOFT_DELETE_HOUSEHOLD, [householdId])).resolves.toHaveLength(1);
 
       // Deliberately not awaited: it is supposed to be stuck.
-      const pending = fire(() => write.send(arrangement));
+      const pending = fire(send);
 
       const waiter = await expectLockWaiter(barrier, {
         heldBy: holder.pid,
-        description: `the ${write.name} request`,
+        description: `the ${name} request`,
         timeoutMs: REQUEST_REACHES_LOCK_MS,
         exclude: barrierPids(barrier),
         settledEarly: pending.settledEarly,
@@ -194,8 +208,35 @@ describe('household plugin writes racing a soft-delete (#548)', () => {
       return pending.settled;
     });
 
+  it.each(WRITES)('answers 404 for a $name that queued behind the soft-delete', async (write) => {
+    const arrangement = await arrange();
+
+    const response = await raceTheDelete(arrangement, write.name, () => write.send(arrangement, arrangement.owner));
+
     expect(response.status).toBe(404);
     expect(response.body).toMatchObject({ code: write.code, householdId: arrangement.householdId });
     await expect(write.written(arrangement)).resolves.toBe(0);
   });
+
+  /**
+   * The same race, sent through the owner's API key, which holds no read on
+   * Household. The route's liveness guard never tells that key which households
+   * exist, and once the delete lands it is refused 403 on this household
+   * (`household-plugins-liveness.spec.ts`). Losing the race reads the same:
+   * the 403 the admin check gives anyone who is not the household's admin.
+   */
+  it.each(WRITES)(
+    "answers 403 to the owner's API key with no household read, for a $name that queued behind the soft-delete",
+    async (write) => {
+      const arrangement = await arrange();
+      const key = await householdPluginKey(baseUrl, db.client, arrangement.owner);
+
+      const response = await raceTheDelete(arrangement, write.name, () => write.send(arrangement, key));
+
+      expect(response.status).toBe(403);
+      expect(response.body).toMatchObject({ code: write.hiddenCode });
+      expect(response.body).not.toHaveProperty('householdId');
+      await expect(write.written(arrangement)).resolves.toBe(0);
+    },
+  );
 });

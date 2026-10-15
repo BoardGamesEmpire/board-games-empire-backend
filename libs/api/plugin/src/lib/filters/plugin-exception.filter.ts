@@ -1,5 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
+import { alreadyTellsHouseholdsApart } from '@bge/household';
 import { I18nMessage, I18nPath, I18nTranslations, t, translateException } from '@bge/i18n';
+import { AbilityService } from '@bge/permissions';
 import {
   PluginConfigSchemaUnusableError,
   PluginConfigValidationError,
@@ -164,7 +166,9 @@ function buildRenderers(): RendererMap {
 
   // A household deleted while a write to it was in flight (#548). The household
   // routes' own copy and status, so losing the race to a delete reads exactly
-  // like arriving after it, when the liveness guard answers first (#553).
+  // like arriving after it, when the liveness guard answers first (#553). Only
+  // for an actor that guard would answer: the filter hands anyone else the
+  // admin check's 403 instead (`PluginExceptionFilter.asTheActorSeesIt`).
   const householdNotFound = (
     exception: PluginUnitHouseholdNotFoundError | PluginGrantHouseholdNotFoundError,
   ): PluginErrorRendering => ({
@@ -611,12 +615,14 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
   constructor(
     private readonly i18n: I18nService<I18nTranslations>,
     private readonly auditContext: AuditContextService,
+    private readonly abilityService: AbilityService,
   ) {
     super();
   }
 
   override catch(exception: Error, host: ArgumentsHost): void {
-    const render = this.resolveRenderer(exception);
+    const shown = this.asTheActorSeesIt(exception);
+    const render = this.resolveRenderer(shown);
 
     // Only reachable for an exception that instanceof-matches @Catch without
     // any mapped ancestor — impossible while the list derives from the map,
@@ -626,16 +632,13 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
       return;
     }
 
-    const { status, message, fields, operatorActionable } = render(exception);
+    const { status, message, fields, operatorActionable } = render(shown);
 
     if (operatorActionable) {
       // The domain message interpolates its own prose detail, but the
       // structured fields (issues[], failedCapabilities, …) don't all fit
       // it — carry them so the log is diagnosable without request replay.
-      this.logger.error(
-        `${exception.name}: ${exception.message}${fields ? ` ${JSON.stringify(fields)}` : ''}`,
-        exception.stack,
-      );
+      this.logger.error(`${shown.name}: ${shown.message}${fields ? ` ${JSON.stringify(fields)}` : ''}`, shown.stack);
     }
 
     // Envelope keys last: a renderer field can never clobber the dispatch
@@ -645,14 +648,45 @@ export class PluginExceptionFilter extends BaseExceptionFilter {
       ...fields,
       statusCode: status,
       message,
-      error: STATUS_CODES[status] ?? exception.name,
-      code: exception.name,
+      error: STATUS_CODES[status] ?? shown.name,
+      code: shown.name,
     };
 
     super.catch(
       translateException(new HttpException(body, status, { cause: exception }), this.i18n, this.auditContext),
       host,
     );
+  }
+
+  /**
+   * A household deleted under a write answers 404 only to an actor the route's
+   * liveness guard would answer 404: one every one of whose abilities reads
+   * Household (#553). Anyone else, an API key scoped away from households
+   * among them, gets the 403 the admin check gives anyone who is not the
+   * household's admin, and the status the routes give them once the delete has
+   * landed. The 404 would otherwise tell them which household was deleted,
+   * and only when their request happened to lose the race.
+   *
+   * The runtime raises the 404 for the household's own admin, and cannot see
+   * abilities (#409), so the rule is applied here, where the status is chosen.
+   * The original error stays the response's `cause`, for the logs.
+   */
+  private asTheActorSeesIt(exception: Error): Error {
+    const householdGone =
+      exception instanceof PluginUnitHouseholdNotFoundError || exception instanceof PluginGrantHouseholdNotFoundError;
+
+    if (!householdGone || alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())) {
+      return exception;
+    }
+
+    const actorId = this.abilityService.getActingUserId();
+
+    return exception instanceof PluginUnitHouseholdNotFoundError
+      ? new PluginUnitAuthorityError(actorId)
+      : new PluginGrantAuthorityError(
+          actorId,
+          `Household-scope consent requires an owner/admin membership in household '${exception.householdId}'`,
+        );
   }
 
   /**

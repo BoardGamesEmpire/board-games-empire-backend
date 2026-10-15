@@ -1,5 +1,5 @@
 import { Action, DatabaseService, ResourceType } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, type AppAbility } from '@bge/permissions';
 import { CanActivate, ExecutionContext, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { assertHouseholdExists } from '../household-access.helpers';
@@ -81,7 +81,7 @@ export class HouseholdLivenessGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<{ params?: Record<string, string | undefined> }>();
     const householdId = request.params?.[param];
 
-    if (householdId === undefined || !this.alreadyTellsHouseholdsApart()) {
+    if (householdId === undefined || !alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities())) {
       return true;
     }
 
@@ -89,16 +89,18 @@ export class HouseholdLivenessGuard implements CanActivate {
 
     return true;
   }
+}
 
-  /**
-   * Whether the actor could already distinguish a missing household from a
-   * hidden one through `GET /households/:id`: every primed ability reads
-   * Household, the same AND `PoliciesGuard` applies. An empty array is no, not
-   * a vacuous yes.
-   */
-  private alreadyTellsHouseholdsApart(): boolean {
-    const abilities = this.abilityService.getCurrentAbilities();
-
-    return abilities.length > 0 && abilities.every((ability) => ability.can(Action.read, ResourceType.Household));
-  }
+/**
+ * Whether the actor could already distinguish a missing household from a
+ * hidden one through `GET /households/:id`: every primed ability reads
+ * Household, the same AND `PoliciesGuard` applies. An empty array is no, not
+ * a vacuous yes.
+ *
+ * Exported for the routes whose services answer a deleted household
+ * themselves, so a request that loses the race to a delete is told only what
+ * this guard would have told it.
+ */
+export function alreadyTellsHouseholdsApart(abilities: readonly AppAbility[]): boolean {
+  return abilities.length > 0 && abilities.every((ability) => ability.can(Action.read, ResourceType.Household));
 }
