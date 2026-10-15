@@ -25,7 +25,26 @@
       "dependsOn": ["generate"]
     },
     "typecheck": {
-      "dependsOn": ["generate"]
+      "dependsOn": ["generate", "^typecheck"],
+      "// inputs": "The inferred list plus the generated TypeScript itself (the last entry, which hashes generate's output). src/gen is gitignored, so without it a .proto change keeps this task's hash and restores stale declarations. See docs/NX_CACHING.md.",
+      "inputs": [
+        "{projectRoot}/package.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.lib.json",
+        "{projectRoot}/src/**/*.ts",
+        {
+          "dependentTasksOutputFiles": "**/*.{d.ts,d.cts,d.mts,tsbuildinfo}",
+          "transitive": true
+        },
+        {
+          "fileset": "{projectRoot}/**/*.{d.ts,d.cts,d.mts}",
+          "dependencies": true
+        },
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
     },
     "test": {
       "dependsOn": ["generate"]

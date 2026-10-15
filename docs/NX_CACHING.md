@@ -55,7 +55,7 @@ absent from the hash, so upgrading Prisma did not invalidate consumers.
 ## `test` depends on `^generate`
 
 `nx.json` sets `"dependsOn": ["^build", "^generate"]` on the `test` target
-default, mirroring what `typecheck` has always declared.
+default, mirroring the `^generate` that `typecheck` declares.
 
 This is load-bearing **because** `generate` is uncached. The task now genuinely
 rewrites the generated directory in place rather than restoring it atomically,
@@ -161,9 +161,9 @@ The task emits the declarations every other project compiles against,
 `dist/lib/generated/i18n.generated.d.ts` among them. The generated source is
 gitignored, so it is absent from Nx's file map, and the inferred inputs cover
 only the lib's TypeScript. Without the catalogs as inputs, a catalog change left
-the task's hash unchanged. CI's catalog guard ("Detect i18n catalog changes" in
-`.github/workflows/ci.yml`) runs that change's typecheck with `--skip-nx-cache`,
-which writes nothing, so the entry cached before the change stayed current.
+the task's hash unchanged. CI's catalog guard, since removed (#330), ran that
+change's typecheck with `--skip-nx-cache`, which writes nothing, so the entry
+cached before the change stayed current.
 Every later run whose own diff missed the catalogs restored declarations without
 the change: #615 failed on a key #605 had added (#619).
 
@@ -177,3 +177,68 @@ back.
 To check that the input works, run the target twice, so that the second run is a
 cache hit. Then change a catalog and run it again: it should execute rather than
 restore.
+
+## `typecheck` depends on `^typecheck`
+
+`nx.json` sets `"dependsOn": ["^typecheck", "^generate"]` on the `typecheck`
+target default. The `@nx/js/typescript` plugin infers `["^typecheck"]`, and a
+`targetDefaults` entry replaces the inferred value rather than merging with it,
+so the default has to name it again.
+
+The task is `tsc --build`, which brings every referenced project up to date
+before checking its own. Without `^typecheck`, a project and its dependencies
+start at the same time, and two `tsc --build` processes write the same
+`dist/*.d.ts` files. A process that reads a half-written file fails with
+`TS2306: File '.../dist/....d.ts' is not a module` or `TS6305`, and passes on a
+re-run (#330).
+
+The projects that declare their own `typecheck.dependsOn` (`apps/api`,
+`@bge/database`, `i18n-core`, `proto-gateway`) replace the default too, so each
+of them lists `^typecheck` as well. A new override must keep it.
+
+`^typecheck` is also what re-keys a project when a dependency's declarations
+change. The inferred inputs hash dependencies' `.d.ts` files through
+`dependentTasksOutputFiles`, which follows only the tasks in `dependsOn`. Drop
+`^typecheck` from an override and that project keeps its hash when a dependency
+changes, and a cached run restores a verdict made against the old declarations.
+
+That is why CI no longer bypasses the cache when the i18n catalogs change. The
+catalogs are inputs of `i18n-core:typecheck`, so a catalog change re-keys it and,
+through its declarations, every project that compiles against it. A re-keyed
+task on CI finds no `dist`, since the workflow deletes it before running, so it
+compiles from scratch. Locally, a leftover `dist` can let `tsc --build` pass a
+project it should fail, so delete `dist` before trusting a local run after a
+catalog edit (`docs/i18n/typed-keys.md` has the measurement).
+
+## Generated sources are typecheck inputs
+
+`@bge/database` and `proto-gateway` give the `typecheck` target an explicit
+`inputs` list: the list the plugin infers, unchanged, plus
+`{"dependentTasksOutputFiles": "**/*.ts"}`. That entry hashes the TypeScript the
+project's own `generate` task wrote: the Prisma client and
+`migrations-manifest.ts` in `libs/database/src/lib/generated`, and the
+`buf generate` output in `libs/proto/gateway/src/gen`.
+
+Both directories are gitignored, so they are absent from Nx's file map, and the
+inferred inputs never see them change. Without the entry, a schema change, a
+new migration or a `.proto` edit kept the task's hash, and every run restored
+the declarations cached before it. On CI that failed every cached typecheck
+after #278 added fields, on code the failing PRs never touched; only runs that
+skipped the cache passed (#330).
+
+Hashing the output rather than naming what `generate` reads means the list
+cannot fall behind the generator: a new schema file, a migration, a Prisma or
+`buf` upgrade and a generator script change are all covered by what they write.
+It works because `generate` is in the task's `dependsOn`, and its output is
+deterministic, so an unchanged tree keeps the cache.
+
+Projects that depend on these two need nothing extra, as long as their
+`typecheck` keeps `^typecheck` (see above): they hash the declarations this
+task emits.
+
+Re-derive the list after an `@nx/js` upgrade, as for `i18n-core`: remove the
+`inputs` key, read the inferred list from `nx show project <name> --json`, and
+add the `dependentTasksOutputFiles` entry back. To check that it works, run the
+target twice so that the second run is a cache hit, then add a migration
+directory with a `migration.sql` (for `@bge/database`) or a message to a `.proto` file and run it
+again: it should execute rather than restore.

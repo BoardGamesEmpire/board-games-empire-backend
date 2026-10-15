@@ -65,51 +65,38 @@ A project that declares its own `typecheck.dependsOn` **replaces** the `nx.json`
 merging with it, and loses `^generate` unless it lists it. What counts is the project-reference
 closure, not direct imports: `tsc --build` compiles every referenced project. `@bge/database`
 reaches `@bge/i18n-core` through `@bge/otel` → `@bge/actor-context`, so it declares the union
-`["generate", "^generate"]`. `@boardgamesempire/proto-gateway` references nothing and keeps
-`["generate"]`; the first reference it gains that leads to `@bge/i18n-core` fails its typecheck on a
-cold clone until its `dependsOn` gets the union too (#312).
+`["generate", "^typecheck", "^generate"]`. `@boardgamesempire/proto-gateway` references nothing and
+keeps `["generate", "^typecheck"]`; the first reference it gains that leads to `@bge/i18n-core` fails
+its typecheck on a cold clone until its `dependsOn` gets `^generate` too (#312).
 
 `test` pulls it in through the same `^generate` default, but no test needs it: Jest transpiles
 through `@swc/jest`, which erases these type-only imports.
 
-## Known hazard: a cached typecheck can outlive a catalog change
+## A catalog change re-keys every caller
 
-**Nx cannot hash a gitignored file.** The generated types are excluded from Nx's file map, so they are
-not an input to any `typecheck`, and the catalog JSONs are not inputs either. A change that edits
-only a catalog therefore leaves every `typecheck` hash unchanged: the generator re-runs and rewrites
-the type, and `typecheck` serves a cache hit against the old one.
+The generated types are gitignored, so they are absent from Nx's file map and cannot be a
+`typecheck` input themselves. Two things stand in for them. The catalog JSONs are inputs of
+`i18n-core:typecheck` (#619), so a catalog-only change re-keys that task. And every `typecheck`
+depends on `^typecheck` and hashes its dependencies' declarations, so the new
+`i18n.generated.d.ts` re-keys every project that compiles against it (#330). A PR that deletes or
+renames a key without touching its call sites fails CI's cached typecheck with `TS2345`.
 
-Measured on this workspace: deleting `errors.household.last_owner` from `en/errors.json` and running
-`nx typecheck @board-games-empire/household` regenerates the type without the key and reports
-success, while the same command with `--skip-nx-cache` fails with `TS2345` on the now-invalid `t()`
-call. The failure mode is a PR that deletes or renames a key without touching its call sites.
-
-Nothing else catches it either. The app builds do not type-check — `tsPlugins` is not wired to
+Nothing else would catch it. The app builds do not type-check — `tsPlugins` is not wired to
 ts-loader's `transformers` option, so it runs `transpileOnly`, and a deliberate type error in
 `apps/api/src/main.ts` builds clean. Jest erases the type-only imports through `@swc/jest`.
 
-**CI covers this**: `ci.yml` detects when a PR touches `libs/common/i18n-core/src/lib/i18n/` and runs
-`typecheck` with `--skip-nx-cache` for that run. That is strictly stronger than the byte-comparison
-drift gate it replaced, since it compiles the workspace against the regenerated type.
+**Locally, delete `dist` first.** CI removes every `dist` before typechecking, so a re-keyed task
+compiles from scratch. A local tree keeps them, and the leftover tsbuildinfo can let `tsc --build`
+pass a project it should fail. Measured: deleting a key `household` uses and typechecking
+`@board-games-empire/household` re-ran the task but passed, cached or with `--skip-nx-cache`; the
+same run after removing `dist` failed with `TS2345`. The likely cause is that `household` reaches
+the keys through `@bge/i18n`, whose own declarations only re-export them and so do not change. After
+deleting or renaming a key, run `find libs apps -name dist -type d -prune -exec rm -rf {} +` and then
+`nx run-many -t typecheck`.
 
-**Locally you are on your own.** A cached `typecheck` after a catalog edit proves nothing. Run
-`nx run-many -t typecheck --skip-nx-cache` if you have deleted or renamed a key.
-
-### Accepted, not fixed
-
-The local gap is knowingly left open: CI catches it before anything merges, so the cost is a
-confusing local green rather than a broken master. If that starts wasting real time — someone chasing
-a passing typecheck that CI then rejects — the fix is to stop relying on the cache for these targets,
-not to start committing the artifact.
-
-Worth knowing that this is a **class** of problem, not an i18n one. Any generated source that is
-gitignored is invisible to Nx's file map and so cannot be an input to the tasks that consume it. The
-Prisma client has the identical shape; it is just far less likely to bite, because a schema change
-normally arrives alongside a migration and application code, and those move the hashes anyway. A
-catalog edit is unusual in being able to change the meaning of existing code all by itself. On a fresh clone the file does not exist until
-something generates it, which means your editor will report unresolved `I18nPath` /
-`I18nTranslations` imports until you run one of the commands above — the same first-clone
-experience the Prisma client and protobuf types already have.
+On a fresh clone the generated file does not exist until something generates it, which means your
+editor will report unresolved `I18nPath` / `I18nTranslations` imports until you run one of the
+commands above — the same first-clone experience the Prisma client and protobuf types already have.
 
 ## Using the types
 

@@ -28,8 +28,34 @@
       "dependsOn": ["generate"]
     },
     "typecheck": {
-      "// dependsOn": "^generate: this project compiles @bge/i18n-core through otel → actor-context, and its key types are generated and untracked, so a cold typecheck fails without them. The union, because a project-level dependsOn replaces the nx.json default rather than merging (#312).",
-      "dependsOn": ["generate", "^generate"]
+      "// dependsOn": "^generate: this project compiles @bge/i18n-core through otel → actor-context, and its key types are generated and untracked, so a cold typecheck fails without them. ^typecheck: tsc --build rebuilds every referenced project, so without it this task races its dependencies' own typecheck over the same declarations (#330). The union, because a project-level dependsOn replaces the nx.json default rather than merging (#312).",
+      "dependsOn": ["generate", "^typecheck", "^generate"],
+      "// inputs": "The inferred list plus the generated TypeScript itself (the last entry, which hashes generate's output). The client and migrations manifest are gitignored, so without it a schema or migration change keeps this task's hash and restores stale declarations. See docs/NX_CACHING.md.",
+      "inputs": [
+        "{projectRoot}/package.json",
+        "{workspaceRoot}/tsconfig.base.json",
+        "{projectRoot}/tsconfig.json",
+        "{projectRoot}/tsconfig.lib.json",
+        "{projectRoot}/tsconfig.spec.json",
+        "{projectRoot}/src/**/*.ts",
+        "{projectRoot}/jest.config.ts",
+        "{projectRoot}/jest.config.cts",
+        "{projectRoot}/src/**/*.test.ts",
+        "{projectRoot}/src/**/*.spec.ts",
+        "{projectRoot}/src/**/*.d.ts",
+        {
+          "dependentTasksOutputFiles": "**/*.{d.ts,d.cts,d.mts,tsbuildinfo}",
+          "transitive": true
+        },
+        {
+          "fileset": "{projectRoot}/**/*.{d.ts,d.cts,d.mts}",
+          "dependencies": true
+        },
+        "^{projectRoot}/tsconfig.lib.json",
+        {
+          "dependentTasksOutputFiles": "**/*.ts"
+        }
+      ]
     },
     "test": {
       "dependsOn": ["generate"]

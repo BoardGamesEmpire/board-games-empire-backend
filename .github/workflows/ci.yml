@@ -96,84 +96,13 @@ jobs:
       - name: Check formatting
         run: npx nx format:check --all
 
-      # Replaces the i18n drift gate removed in #260, and guards a real hole rather
-      # than a cosmetic one.
-      #
-      # `i18n.generated.ts` is generated and gitignored, so it is absent from Nx's
-      # file map and cannot be a `typecheck` input. The catalog JSONs are inputs of
-      # `i18n-core:typecheck` alone (see below), not of the projects that compile
-      # against it. A catalog-only change therefore regenerates the type while
-      # leaving every other `typecheck` hash unchanged, and Nx serves the verdict it
-      # cached for the PREVIOUS type. Deleting a key without touching its call sites
-      # goes green.
-      #
-      # Nothing else catches it: the app builds do not type-check (tsPlugins is not
-      # wired to ts-loader's `transformers`, so it runs transpileOnly), and Jest
-      # erases the type-only imports through @swc/jest. Verified by deleting
-      # `errors.household.last_owner` — cached typecheck and a full `api:build` both
-      # pass; `typecheck --skip-nx-cache` fails with TS2345.
-      #
-      # So when the catalogs move, bypass the cache. Strictly stronger than the old
-      # gate, which only compared bytes: this compiles the workspace against the
-      # regenerated type. Catalogs change rarely, so the cost is paid rarely.
-      #
-      # KNOWN COST, accepted: `--skip-nx-cache` also severs the Nx Cloud connection
-      # for that command. On exactly the runs where typecheck is load-bearing, the
-      # typecheck tasks are therefore absent from the Nx Cloud report, their results
-      # are not written to the remote cache (so the follow-on master push
-      # re-typechecks uncached), and `nx fix-ci` below has no record of them to act
-      # on. Self-healing and reporting are lost on those runs.
-      #
-      # Correctness after them holds only because the catalogs are inputs of
-      # `i18n-core:typecheck`, which emits the declarations every other project
-      # compiles against. Before the input, a catalog change left that task's hash
-      # unchanged, and since this step writes nothing, the entry cached before the
-      # change stayed current. Every later run whose own diff missed the catalogs
-      # restored declarations without the change: #615 failed on a key #605 had
-      # added (#619). With the input, the old entry stops matching, and the first
-      # run that uses the cache writes a fresh one. docs/NX_CACHING.md has why the
-      # target names its inputs and how to keep the list current.
-      #
-      # `--no-renames` is load-bearing: with rename detection on (the default),
-      # `git diff --name-only` reports ONLY the destination path, so moving a
-      # catalog out of `src/lib/i18n/` would not match this pattern — while
-      # `i18n:generate`'s own inputs DID change, dropping that whole subtree from
-      # `I18nTranslations`. That is the failure this step exists to catch, at its
-      # largest. `--no-renames` reports the old path too, so the move matches.
-      #
-      # `set -euo pipefail` matters for the same reason: without it a git failure is
-      # swallowed by the exit status of whatever follows it in the pipe and the step
-      # reports `changed=false` — failing OPEN on the only guard standing between a
-      # catalog key deletion and a green master. The explicit NX_BASE/NX_HEAD
-      # assertions cover nx-set-shas failing, changing its env-var contract, or
-      # `fetch-depth` being reduced.
-      #
-      # The diff is captured BEFORE matching, and matched with `grep -c` rather than
-      # `grep -q`, because `pipefail` and `grep -q` together reintroduce the same
-      # fail-open from the other end: `-q` exits on the first match, its producer
-      # gets SIGPIPE (141), `pipefail` propagates that, and the `if` takes the false
-      # branch — so a catalog change that sorts EARLY in a large diff reports
-      # `changed=false`. Reproduced with a 4001-file diff. `grep -c` has to read to
-      # EOF, so it cannot kill its producer; `|| true` absorbs its exit 1 on zero
-      # matches without hiding a git failure, which `set -e` catches on the
-      # assignment above.
-      - name: Detect i18n catalog changes
-        id: catalogs
-        shell: bash
-        run: |
-          set -euo pipefail
-          : "${NX_BASE:?NX_BASE is unset — nx-set-shas did not run or changed its contract}"
-          : "${NX_HEAD:?NX_HEAD is unset — nx-set-shas did not run or changed its contract}"
-          files="$(git diff --no-renames --name-only "$NX_BASE" "$NX_HEAD")"
-          matches="$(printf '%s\n' "$files" | grep -c '^libs/common/i18n-core/src/lib/i18n/' || true)"
-          changed=false
-          if [ "$matches" -gt 0 ]; then
-            changed=true
-          fi
-          echo "changed=$changed" >> "$GITHUB_OUTPUT"
-          echo "i18n catalogs changed: $changed ($matches catalog file(s))"
-
-      - run: npx nx run-many -t typecheck ${{ steps.catalogs.outputs.changed == 'true' && '--skip-nx-cache' || '' }}
+      # Cached like every other step, catalog changes included (#330). The catalog
+      # JSONs are inputs of `i18n-core:typecheck`, and every project that compiles
+      # against it depends on `^typecheck` and hashes its declarations, so deleting
+      # a key re-keys each caller. A re-keyed task finds no `dist` (the clean step
+      # above removed it), so it compiles from scratch rather than trusting a
+      # leftover tsbuildinfo. docs/NX_CACHING.md has the detail.
+      - run: npx nx run-many -t typecheck
       # `run-many`, not `affected`, so every commit uploads a WHOLE-workspace
       # report: an affected-only upload would show Codecov a handful of
       # projects and read as a collapse in project coverage. The cost stays
