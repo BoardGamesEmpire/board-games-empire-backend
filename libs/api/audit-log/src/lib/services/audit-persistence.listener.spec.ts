@@ -130,11 +130,14 @@ describe('AuditPersistenceListener', () => {
     const closing = app.close();
     await flush();
 
-    // close() has stopped the server and is waiting on the open request.
-    expect(server.listening).toBe(false);
-    expect(emitter.offAny).not.toHaveBeenCalled();
-
-    release();
+    try {
+      // close() has stopped the server and is waiting on the open request.
+      expect(server.listening).toBe(false);
+      expect(emitter.offAny).not.toHaveBeenCalled();
+    } finally {
+      // A failed assertion must still let close() finish, or Jest never exits.
+      release();
+    }
     await expect(response).resolves.toBe('done');
     await closing;
 
