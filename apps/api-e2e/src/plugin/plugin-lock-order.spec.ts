@@ -31,7 +31,8 @@ import {
 
 /**
  * The claimed total order — `plugin row -> grant row -> advisory key -> unit
- * row` — proven the only two ways it can be (#360).
+ * row`, with the household row ahead of it since #548 — proven the only two
+ * ways it can be (#360).
  *
  * Neither half counts alone, and saying which is which is the point:
  *
@@ -58,6 +59,16 @@ import {
 describe('the plugin consent path is one lock order (#360)', () => {
   const { unitLifecycle: UNIT_LIFECYCLE, unitScopeLock: UNIT_SCOPE_LOCK } = LOCK_SOURCES;
   const { grantService: GRANT_SERVICE, updateService: UPDATE_SERVICE } = LOCK_SOURCES;
+
+  /**
+   * Stage 0: the household row, as a household-scope write takes it (#548).
+   * Lifted from `@bge/database`, where the statement lives (#552); the plugin
+   * paths reach it by calling the helper.
+   */
+  const householdShareLock = readShippedSql(LOCK_SOURCES.householdShareLock, ['householdId'], {
+    after: 'lockLiveHousehold',
+    matching: /FOR SHARE/,
+  });
 
   /**
    * Stage 1: the plugin row, as the unit paths take it. Binds the expected
@@ -220,6 +231,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // builder can see. Nothing in the schema collides today, which is why
       // this is cheap now and would be a puzzle later.
       const cases = [
+        { stage: 'household row', suffix: 'FOR SHARE', table: 'households' },
         { stage: 'plugin row', suffix: 'FOR SHARE', table: 'plugins' },
         // D-CN (#370): the plugin row is now also recognised by a raw
         // `FOR UPDATE`, since activation's config lock takes it that way.
@@ -684,7 +696,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // The lifts above already refuse a moved statement, so this case is about
       // something they cannot see: whether what was lifted is what the stage
       // NAMES claim. A statement lifted from the wrong file blocks just as
-      // convincingly, and three of these four files ship a `pg_advisory_xact_lock`
+      // convincingly, and three of these five files ship a `pg_advisory_xact_lock`
       // or a `FOR UPDATE` of their own.
       //
       // Asserting EXACTLY one match rather than at-least-one is what keeps this
@@ -692,6 +704,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
       // pattern that grew loose enough to claim a neighbour's statement fails
       // here even though every lift still succeeds.
       const replayed: ReadonlyArray<readonly [LockStageName, string]> = [
+        ['household row', householdShareLock.text],
         ['plugin row', pluginShareLock.text],
         ['grant row', grantRowLock.text],
         ['advisory key', advisoryLock.text],
@@ -704,7 +717,7 @@ describe('the plugin consent path is one lock order (#360)', () => {
         expect(matched.map((stage) => stage.name)).toEqual([name]);
       }
 
-      // And every stage is replayed, so the four above cannot quietly become three.
+      // And every stage is replayed, so the five above cannot quietly become four.
       expect(replayed.map(([name]) => name)).toEqual(stagesNamed(replayed.map(([name]) => name)).map((s) => s.name));
       expect(replayed).toHaveLength(CLAIMED_LOCK_ORDER.length);
     });

@@ -10,7 +10,7 @@ import {
   type Plugin,
   type UserPlugin,
 } from '@bge/database';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest, type PluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -29,6 +29,7 @@ import { PluginUnitLifecycleService } from './plugin-unit-lifecycle.service';
 import {
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
+  PluginUnitHouseholdNotFoundError,
   PluginUnitNotEnrolledError,
   PluginUnitPluginChangedError,
   PluginUnitPluginNotFoundError,
@@ -126,6 +127,18 @@ describe('PluginUnitLifecycleService', () => {
     ...overrides,
   });
 
+  /** Index of the first `$queryRaw` call whose SQL matches. */
+  const rawCallIndex = (pattern: RegExp): number =>
+    db.$queryRaw.mock.calls.findIndex((call: readonly unknown[]) => pattern.test(rawQueryText(call[0])));
+
+  const HOUSEHOLD_LOCK = /FROM households h .* FOR SHARE/;
+  const PLUGIN_ROW = /FROM plugins WHERE id = \? FOR SHARE/;
+
+  /** The household share lock finds no live row: the household is missing or soft-deleted. */
+  const householdGone = () =>
+    db.$queryRaw.mockImplementation(((query: unknown) =>
+      Promise.resolve(HOUSEHOLD_LOCK.test(rawQueryText(query)) ? [] : [livingRow()])) as never);
+
   const makeHouseholdRow = (overrides: Partial<HouseholdPlugin> = {}): HouseholdPlugin => ({
     id: 'hp-1',
     householdId: 'hh-1',
@@ -157,7 +170,7 @@ describe('PluginUnitLifecycleService', () => {
   const enableInput = { slug: 'demo-sink', householdId: 'hh-1', actorId: 'admin-1' };
 
   let db: MockDatabaseService;
-  let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isHouseholdAdmin'>>;
+  let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'householdAdminStanding'>>;
   let emitter: { emit: jest.Mock };
   let service: PluginUnitLifecycleService;
 
@@ -173,7 +186,9 @@ describe('PluginUnitLifecycleService', () => {
     // The in-transaction liveness re-read (FOR SHARE): alive by default.
     db.$queryRaw.mockResolvedValue([livingRow()] as never);
     db.pluginGrant.findMany.mockResolvedValue([]);
-    authority = { isHouseholdAdmin: jest.fn().mockResolvedValue(true) };
+    authority = {
+      householdAdminStanding: jest.fn().mockResolvedValue('admin'),
+    };
     emitter = { emit: jest.fn() };
 
     service = new PluginUnitLifecycleService(
@@ -274,30 +289,36 @@ describe('PluginUnitLifecycleService', () => {
       });
     });
 
-    it('opens the transaction plugin-row first: liveness re-read, then the scope lock, then the unit row', async () => {
+    it('opens the transaction household row first: share lock, plugin-row re-read, scope lock, unit row', async () => {
       db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow({ enabled: false }));
       db.householdPlugin.update.mockResolvedValue(makeHouseholdRow());
 
       await service.enableHousehold(enableInput);
 
       const [advisoryStrings, ...advisoryValues] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(advisoryStrings.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
+      expect(rawQueryText(advisoryStrings)).toContain('pg_advisory_xact_lock(hashtextextended(');
       expect(advisoryValues).toContain('plugin_grant:household_unit:hh-1:plugin-1');
 
-      const [livenessStrings] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray];
-      expect(livenessStrings.join('?').replace(/\s+/g, ' ')).toContain(
+      const householdAt = rawCallIndex(HOUSEHOLD_LOCK);
+      const livenessAt = rawCallIndex(PLUGIN_ROW);
+      expect(rawQueryText(db.$queryRaw.mock.calls[livenessAt][0])).toContain(
         'SELECT uninstalled_at, scope, version, installed_at, manifest_json = ?::jsonb AS manifest_matches ' +
           'FROM plugins WHERE id = ? FOR SHARE',
       );
 
+      // The household row comes first (#548): a soft-delete holds it while it
+      // runs and touches no plugin table, so taking it first can only queue.
+      //
       // The plugin row MUST precede the advisory lock. Uninstall and
       // activation claim that row before touching grant rows, and decide()
       // holds a grant row while taking this advisory — advisory-first would
       // close the cycle advisory → plugin → grant → advisory, which
       // Postgres resolves by aborting a caller.
-      const livenessOrder = db.$queryRaw.mock.invocationCallOrder[0];
+      const householdOrder = db.$queryRaw.mock.invocationCallOrder[householdAt];
+      const livenessOrder = db.$queryRaw.mock.invocationCallOrder[livenessAt];
       const advisoryOrder = db.$executeRaw.mock.invocationCallOrder[0];
       const readOrder = db.householdPlugin.findUnique.mock.invocationCallOrder[0];
+      expect(householdOrder).toBeLessThan(livenessOrder);
       expect(livenessOrder).toBeLessThan(advisoryOrder);
       expect(advisoryOrder).toBeLessThan(readOrder);
     });
@@ -400,8 +421,11 @@ describe('PluginUnitLifecycleService', () => {
 
       await service.enableHousehold(enableInput);
 
-      const [strings, ...values] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(strings.join('?').replace(/\s+/g, ' ')).toContain('manifest_json = ?::jsonb AS manifest_matches');
+      const [strings, ...values] = db.$queryRaw.mock.calls[rawCallIndex(PLUGIN_ROW)] as [
+        TemplateStringsArray,
+        ...unknown[],
+      ];
+      expect(rawQueryText(strings)).toContain('manifest_json = ?::jsonb AS manifest_matches');
       expect(values[0]).toEqual(JSON.stringify(makePlugin().manifestJson));
     });
 
@@ -428,7 +452,7 @@ describe('PluginUnitLifecycleService', () => {
 
       await service.disableHousehold(enableInput);
 
-      const [, ...values] = db.$queryRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
+      const [, ...values] = db.$queryRaw.mock.calls[rawCallIndex(PLUGIN_ROW)] as [TemplateStringsArray, ...unknown[]];
       expect(values[0]).toBeNull();
     });
 
@@ -794,9 +818,21 @@ describe('PluginUnitLifecycleService', () => {
     });
 
     it('refuses a non-admin of the anchoring household', async () => {
-      authority.isHouseholdAdmin.mockResolvedValue(false);
+      authority.householdAdminStanding.mockResolvedValue('none');
 
       await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitAuthorityError);
+      expect(authority.householdAdminStanding).toHaveBeenCalledWith('admin-1', 'hh-1');
+      expect(db.$transaction).not.toHaveBeenCalled();
+    });
+
+    it("answers the household's own admin as gone, not as refused, once it has been deleted", async () => {
+      // A delete that commits after the route's liveness guard but before this
+      // check leaves the actor no longer the admin of a live household. The 404
+      // keeps the answer the guard and the in-transaction lock give (#553)
+      // rather than a 403 that depends on which check the delete landed between.
+      authority.householdAdminStanding.mockResolvedValue('deleted');
+
+      await expect(service.enableHousehold(enableInput)).rejects.toBeInstanceOf(PluginUnitHouseholdNotFoundError);
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
@@ -935,6 +971,43 @@ describe('PluginUnitLifecycleService', () => {
     });
   });
 
+  describe('a household soft-deleted while the write is in flight (#548)', () => {
+    const WRITERS = [
+      { name: 'enable', write: () => service.enableHousehold(enableInput) },
+      { name: 'disable', write: () => service.disableHousehold(enableInput) },
+      {
+        name: 'config PATCH',
+        write: () => service.updateHouseholdConfig({ ...enableInput, config: { webhookUrl: 'https://z' } }),
+      },
+    ];
+
+    it.each(WRITERS)('refuses a $name once the share lock finds the household gone', async ({ write }) => {
+      // Every check in front of the transaction saw the household live; the
+      // lock is what sees the delete, because it waits for one in flight and
+      // re-reads the row after it commits.
+      db.householdPlugin.findUnique.mockResolvedValue(makeHouseholdRow());
+      householdGone();
+
+      await expect(write()).rejects.toBeInstanceOf(PluginUnitHouseholdNotFoundError);
+
+      // Refused before it took anything else: no plugin-row claim, no key, no write.
+      expect(rawCallIndex(PLUGIN_ROW)).toBe(-1);
+      expect(db.$executeRaw).not.toHaveBeenCalled();
+      expect(db.householdPlugin.create).not.toHaveBeenCalled();
+      expect(db.householdPlugin.update).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('names the household it could not find', async () => {
+      householdGone();
+
+      await expect(service.enableHousehold(enableInput)).rejects.toMatchObject({
+        name: 'PluginUnitHouseholdNotFoundError',
+        householdId: 'hh-1',
+      });
+    });
+  });
+
   describe('user enable/disable', () => {
     const userInput = { slug: 'demo-sink', userId: 'user-1' };
 
@@ -947,7 +1020,7 @@ describe('PluginUnitLifecycleService', () => {
 
       expect(row.enabled).toBe(true);
       const [strings, ...values] = db.$executeRaw.mock.calls[0] as [TemplateStringsArray, ...unknown[]];
-      expect(strings.join('?')).toContain('pg_advisory_xact_lock(hashtextextended(');
+      expect(rawQueryText(strings)).toContain('pg_advisory_xact_lock(hashtextextended(');
       expect(values).toContain('plugin_grant:user_unit:user-1:plugin-1');
 
       const [{ name, event }] = emittedEvents();

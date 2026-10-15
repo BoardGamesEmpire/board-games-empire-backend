@@ -14,6 +14,7 @@ import {
   createMockDatabaseService,
   prismaColumn,
   prismaTable,
+  rawQueryText,
   readPrismaModels,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -170,7 +171,7 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     db = createMockDatabaseService();
     const authority = {
       isServerAdmin: jest.fn().mockResolvedValue(false),
-      isHouseholdAdmin: jest.fn().mockResolvedValue(true),
+      householdAdminStanding: jest.fn().mockResolvedValue('admin'),
     } satisfies Partial<jest.Mocked<PluginGrantAuthorityService>>;
     emitter = { emit: jest.fn() };
     service = new PluginGrantService(
@@ -326,18 +327,19 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
 
   /**
    * The unit-row lock among `$queryRaw`'s calls — never `mock.calls[0]`, because
-   * `decide()` opens its transaction with the plugin-row claim (#398) and that is
-   * a raw statement too.
+   * `decide()` opens its transaction with the plugin-row claim (#398), and a
+   * household decision with the household share lock before that (#548). Both
+   * are raw statements too.
    */
   const unitLockCalls = (): [TemplateStringsArray, ...unknown[]][] =>
     (db.$queryRaw.mock.calls as [TemplateStringsArray, ...unknown[]][]).filter(([template]) =>
-      /FROM (household_plugins|user_plugins)/.test(template.join('')),
+      /FROM (household_plugins|user_plugins)/.test(rawQueryText(template)),
     );
 
   /** Its invocation order, for the assertions that pin what precedes it. */
   const unitLockOrder = (): number => {
     const index = (db.$queryRaw.mock.calls as [TemplateStringsArray][]).findIndex(([template]) =>
-      /FROM (household_plugins|user_plugins)/.test(template.join('')),
+      /FROM (household_plugins|user_plugins)/.test(rawQueryText(template)),
     );
 
     expect(index).toBeGreaterThanOrEqual(0);
@@ -349,15 +351,21 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
    * Fails the unit-row lock and only it.
    *
    * A blanket `$queryRaw` rejection would fail the plugin-row claim instead
-   * (#398) — aborting the decision before it writes anything, which is a
-   * different scenario than any mirror case here means to describe, and one that
-   * would keep some of them green for the wrong reason.
+   * (#398), or the household share lock ahead of it (#548) — aborting the
+   * decision before it writes anything, which is a different scenario than any
+   * mirror case here means to describe, and one that would keep some of them
+   * green for the wrong reason.
    */
   const failUnitLock = (error: Error): void => {
-    db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) =>
-      strings.join('').includes('FROM plugins')
-        ? Promise.resolve([{ id: 'plugin-1' }])
-        : Promise.reject(error)) as never);
+    db.$queryRaw.mockImplementation(((query: unknown) => {
+      const sql = rawQueryText(query);
+
+      if (sql.includes('FROM plugins')) {
+        return Promise.resolve([{ id: 'plugin-1' }]);
+      }
+
+      return sql.includes('FROM households') ? Promise.resolve([{ id: 'hh-1' }]) : Promise.reject(error);
+    }) as never);
   };
 
   it('never fails the committed decision when the re-enable check errors — logged, not thrown', async () => {
@@ -565,7 +573,10 @@ describe('PluginGrantService — late-acceptance re-enable post-effect', () => {
     });
 
     it('a rowless unit is untouched — nothing exists to suspend', async () => {
-      db.$queryRaw.mockResolvedValue([]);
+      // Rowless, not householdless: the household's share lock still finds it
+      // live, or the decision would refuse before the mirror ran (#548).
+      db.$queryRaw.mockImplementation(((query: unknown) =>
+        Promise.resolve(rawQueryText(query).includes('FROM households') ? [{ id: 'hh-1' }] : [])) as never);
 
       await service.decide(decision({ status: PluginGrantStatus.Denied }));
 

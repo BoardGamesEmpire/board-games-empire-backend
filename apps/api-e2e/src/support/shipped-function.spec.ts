@@ -989,6 +989,54 @@ describe('shipped-function', () => {
       expect(unconditionalClaimants(source, 'g.ts', /FOR SHARE/)).toEqual([]);
     });
 
+    it('promotes a helper whose guard clause throws before the lock', () => {
+      // A throw is no way past the helper, unlike a return: it leaves the caller
+      // as well, so the caller's write never runs on that path. The shape is a
+      // writer's opener that refuses on the first lock's answer before taking
+      // the next one (#548).
+      const source = `
+        async function openUnit(tx, householdId) {
+          if (!(await lockLiveHousehold(tx, householdId))) {
+            throw new HouseholdGone(householdId);
+          }
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+      `;
+
+      expect(unconditionalClaimants(source, 'u.ts', /FOR SHARE/)).toEqual(['openUnit']);
+    });
+
+    it('still refuses a caller that catches what that helper throws', () => {
+      // The other half of the rule above. A catch around the call swallows the
+      // throw, and the caller walks on to its write having claimed nothing: the
+      // try rule has to keep that red when the throw comes from a delegate.
+      const helper = `
+        async function openUnit(tx, householdId) {
+          if (!(await lockLiveHousehold(tx, householdId))) {
+            throw new HouseholdGone(householdId);
+          }
+          await tx.$queryRaw\`SELECT id FROM plugins WHERE id = $1 FOR SHARE\`;
+        }
+      `;
+      const claims = claimsIncludingDelegates(helper, 'u.ts', /FOR SHARE/);
+      const [site] = auditedWrites(
+        `async function persist(tx) {
+          try {
+            await openUnit(tx, householdId);
+          } catch {
+            // best effort
+          }
+
+          await tx.pluginGrant.create({ data });
+        }`,
+        'persist.ts',
+        [{ pattern: /pluginGrant\.create$/ }],
+        claims,
+      );
+
+      expect(site?.claimed).toBe(false);
+    });
+
     it('promotes a helper written as a class property arrow', () => {
       // `private readonly claim = async (tx) => {…}` is a method spelled the
       // other way. Missing it costs a false failure on the caller; missing the

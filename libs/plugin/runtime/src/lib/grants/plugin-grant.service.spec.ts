@@ -1,7 +1,7 @@
 import type { Permission, Plugin, PluginGrant, PluginPermission } from '@bge/database';
 import { DatabaseService, PluginGrantScope, PluginGrantStatus, RiskLevel } from '@bge/database';
 import { deadlock } from '@bge/database/testing';
-import { createMockDatabaseService, type MockDatabaseService } from '@bge/testing';
+import { createMockDatabaseService, rawQueryText, type MockDatabaseService } from '@bge/testing';
 import { PluginEvent } from '@boardgamesempire/plugin-contract';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { Logger } from '@nestjs/common';
@@ -12,6 +12,7 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
+  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
@@ -80,8 +81,11 @@ describe('PluginGrantService', () => {
 
   let db: MockDatabaseService;
   let emitter: { emit: jest.Mock };
-  let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin'>>;
+  let authority: jest.Mocked<Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'householdAdminStanding'>>;
   let service: PluginGrantService;
+
+  /** Whether the household share lock finds a live row; flipped by the soft-delete cases. */
+  let householdLive: boolean;
 
   beforeEach(() => {
     db = createMockDatabaseService();
@@ -93,11 +97,16 @@ describe('PluginGrantService', () => {
     // "no row" answer. A fourth raw statement landing here would otherwise get
     // whichever row shape happened to match first and the test driving it would
     // pass or fail for the wrong reason, so it fails loudly instead.
-    db.$queryRaw.mockImplementation(((strings: TemplateStringsArray) => {
-      const sql = strings.join('');
+    householdLive = true;
+    db.$queryRaw.mockImplementation(((query: unknown) => {
+      const sql = rawQueryText(query);
 
       if (sql.includes('FROM plugins')) {
         return Promise.resolve([{ id: plugin.id }]);
+      }
+
+      if (sql.includes('FROM households')) {
+        return Promise.resolve(householdLive ? [{ id: 'hh_1' }] : []);
       }
 
       if (sql.includes('FROM household_plugins') || sql.includes('FROM user_plugins')) {
@@ -126,12 +135,12 @@ describe('PluginGrantService', () => {
     emitter = { emit: jest.fn() };
     authority = {
       isServerAdmin: jest.fn(),
-      isHouseholdAdmin: jest.fn(),
+      householdAdminStanding: jest.fn(),
     } satisfies Partial<jest.Mocked<PluginGrantAuthorityService>> as jest.Mocked<
-      Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'isHouseholdAdmin'>
+      Pick<PluginGrantAuthorityService, 'isServerAdmin' | 'householdAdminStanding'>
     >;
     authority.isServerAdmin.mockResolvedValue(true);
-    authority.isHouseholdAdmin.mockResolvedValue(true);
+    authority.householdAdminStanding.mockResolvedValue('admin');
 
     service = new PluginGrantService(
       db as unknown as DatabaseService,
@@ -219,6 +228,85 @@ describe('PluginGrantService', () => {
 
       await expect(service.decide(serverDecision)).rejects.toBe(boom);
       expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('decide — a household soft-deleted mid-decision (#548)', () => {
+    const householdDecision = {
+      ...serverDecision,
+      permissionSlug: 'update:calendar',
+      scopeType: PluginGrantScope.Household,
+      scopeId: 'hh_1',
+      deciderId: 'user-hh-admin',
+    } as const;
+
+    const rawCalls = () => db.$queryRaw.mock.calls.map(([query]) => rawQueryText(query));
+
+    it("takes the household's share lock first, ahead of the plugin-row claim", async () => {
+      await service.decide(householdDecision);
+
+      const calls = rawCalls();
+      const householdAt = calls.findIndex((sql) => /FROM households h .* FOR SHARE/.test(sql));
+      const pluginAt = calls.findIndex((sql) => sql.includes('FROM plugins'));
+
+      expect(householdAt).toBeGreaterThanOrEqual(0);
+      expect(db.$queryRaw.mock.calls[householdAt][0]).toEqual(expect.objectContaining({ values: ['hh_1'] }));
+
+      // First: a soft-delete holds the household row while it runs and touches
+      // no plugin table, so a decision queued behind it holds nothing it needs.
+      expect(householdAt).toBeLessThan(pluginAt);
+      expect(db.$queryRaw.mock.invocationCallOrder[householdAt]).toBeLessThan(
+        db.pluginGrant.findUnique.mock.invocationCallOrder[0],
+      );
+    });
+
+    it.each([
+      ['Server', serverDecision],
+      [
+        'User',
+        {
+          ...serverDecision,
+          permissionSlug: 'read:public_content',
+          scopeType: PluginGrantScope.User,
+          scopeId: 'user-a',
+          deciderId: 'user-a',
+        },
+      ],
+    ] as const)('takes no household lock for a %s-scope decision', async (_scope, decision) => {
+      await service.decide(decision);
+
+      expect(rawCalls().some((sql) => sql.includes('FROM households'))).toBe(false);
+    });
+
+    it('refuses once the lock finds the household gone, before it claims or writes anything', async () => {
+      householdLive = false;
+
+      await expect(service.decide(householdDecision)).rejects.toBeInstanceOf(PluginGrantHouseholdNotFoundError);
+
+      expect(rawCalls().some((sql) => sql.includes('FROM plugins'))).toBe(false);
+      expect(db.pluginGrant.upsert).not.toHaveBeenCalled();
+      expect(emitter.emit).not.toHaveBeenCalled();
+      // A refusal, not a deadlock: nothing to replay.
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('names the household it could not find', async () => {
+      householdLive = false;
+
+      await expect(service.decide(householdDecision)).rejects.toMatchObject({
+        name: 'PluginGrantHouseholdNotFoundError',
+        householdId: 'hh_1',
+      });
+    });
+
+    it("answers the household's own admin as gone, not as refused, once it was deleted before the admin check", async () => {
+      // A delete landing after the route's liveness guard leaves the actor no
+      // longer the admin of a live household, and the 404 is what the guard
+      // would have answered them a moment later.
+      authority.householdAdminStanding.mockResolvedValue('deleted');
+
+      await expect(service.decide(householdDecision)).rejects.toBeInstanceOf(PluginGrantHouseholdNotFoundError);
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
 
@@ -419,11 +507,11 @@ describe('PluginGrantService', () => {
         deciderId: 'user-hh-admin',
       });
 
-      expect(authority.isHouseholdAdmin).toHaveBeenCalledWith('user-hh-admin', 'hh_1');
+      expect(authority.householdAdminStanding).toHaveBeenCalledWith('user-hh-admin', 'hh_1');
     });
 
-    it('rejects a Household-scope decision from a non-admin member', async () => {
-      authority.isHouseholdAdmin.mockResolvedValue(false);
+    it('rejects a Household-scope decision from a non-admin', async () => {
+      authority.householdAdminStanding.mockResolvedValue('none');
 
       await expect(
         service.decide({
@@ -461,7 +549,7 @@ describe('PluginGrantService', () => {
       // manifest requests the permission at user scope, and the plugin is
       // not tombstoned — nothing else is authority-relevant.
       expect(authority.isServerAdmin).not.toHaveBeenCalled();
-      expect(authority.isHouseholdAdmin).not.toHaveBeenCalled();
+      expect(authority.householdAdminStanding).not.toHaveBeenCalled();
     });
   });
 

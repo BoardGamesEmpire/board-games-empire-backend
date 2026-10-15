@@ -1112,7 +1112,14 @@ function claimsOnEveryPath(node: ts.Node, claims: RegExp, blanked: string, file:
 }
 
 /**
- * Whether control can leave `node` without reaching what follows it.
+ * Whether control can leave `node` and carry on somewhere without reaching what
+ * follows it.
+ *
+ * A `throw` is not such a way out. Whoever asks is asking whether later code
+ * can run unclaimed, and a throw runs none: it leaves the caller as well,
+ * unless something catches it, and a `try` with a catch is held to its own rule
+ * in {@link claimsOnEveryPath}. Counting it refused the opener that throws when
+ * its first lock reports the row gone, then takes the next (#548).
  *
  * Nested functions are not descended into: a `return` inside a callback returns
  * from the callback, and says nothing about the statement that defines it.
@@ -1125,12 +1132,7 @@ function canLeaveEarly(node: ts.Node): boolean {
       return;
     }
 
-    if (
-      ts.isReturnStatement(current) ||
-      ts.isThrowStatement(current) ||
-      ts.isBreakStatement(current) ||
-      ts.isContinueStatement(current)
-    ) {
+    if (ts.isReturnStatement(current) || ts.isBreakStatement(current) || ts.isContinueStatement(current)) {
       leaves = true;
 
       return;

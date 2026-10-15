@@ -11,6 +11,7 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
+  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
@@ -30,6 +31,7 @@ import {
   PluginStaticAnalysisUnavailableError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
+  PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
   PluginUnitNotEnrolledError,
   PluginUnitPluginChangedError,
@@ -353,6 +355,24 @@ describe('PluginExceptionFilter', () => {
       expect(body()['slug']).toBe('sample');
       expect(body()['code']).toBe(exception.name);
     });
+
+    it.each([
+      ['unit write', new PluginUnitHouseholdNotFoundError('hh_1')],
+      ['consent decision', new PluginGrantHouseholdNotFoundError('hh_1')],
+    ] as const)(
+      'maps a household deleted under a %s to 404 with the household copy the route guard gives (#548)',
+      (_path, exception) => {
+        filter.catch(exception, host);
+
+        expect(rendered().getStatus()).toBe(Http.NotFound);
+        // The same marker the household liveness guard answers with, so a
+        // request that loses the race to a delete reads like one that arrived
+        // after it.
+        expect(body()['message']).toBe('t:errors.household.not_found');
+        expect(body()['householdId']).toBe('hh_1');
+        expect(body()['code']).toBe(exception.name);
+      },
+    );
 
     it('maps the not-enrolled 404 with the addressed axis, so the client knows WHICH unit has no row', () => {
       filter.catch(new PluginUnitNotEnrolledError('sample', 'Household'), host);

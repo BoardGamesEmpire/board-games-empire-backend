@@ -18,6 +18,21 @@ export class PluginUnitAuthorityError extends Error {
   }
 }
 
+/**
+ * The addressed household is missing or soft-deleted (#548). Raised when the
+ * household's share lock finds no live row inside the write's transaction, and
+ * when the admin check refuses one of the household's own admins because it has
+ * been deleted. The filter answers 404, the status the household routes give a
+ * deleted household (#299, #553).
+ */
+export class PluginUnitHouseholdNotFoundError extends Error {
+  override readonly name = 'PluginUnitHouseholdNotFoundError';
+
+  constructor(public readonly householdId: string) {
+    super(`Household '${householdId}' does not exist or has been deleted`);
+  }
+}
+
 /** No `Plugin` row exists for the slug. */
 export class PluginUnitPluginNotFoundError extends Error {
   override readonly name = 'PluginUnitPluginNotFoundError';

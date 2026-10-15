@@ -12,6 +12,7 @@ import {
   PluginGrantAuthorityError,
   PluginGrantConsentScopeMismatchError,
   PluginGrantExclusionError,
+  PluginGrantHouseholdNotFoundError,
   PluginGrantManifestInvalidError,
   PluginGrantPluginNotFoundError,
   PluginGrantPluginTombstonedError,
@@ -39,6 +40,7 @@ import {
   PluginUninstallBundledError,
   PluginUnitAuthorityError,
   PluginUnitConfigRequiredError,
+  PluginUnitHouseholdNotFoundError,
   PluginUnitManifestError,
   PluginUnitNotEnrolledError,
   PluginUnitPluginChangedError,
@@ -160,6 +162,17 @@ function buildRenderers(): RendererMap {
       fields: { slug: exception.slug, missingSlugs: exception.missingSlugs },
     });
 
+  // A household deleted while a write to it was in flight (#548). The household
+  // routes' own copy and status, so losing the race to a delete reads exactly
+  // like arriving after it, when the liveness guard answers first (#553).
+  const householdNotFound = (
+    exception: PluginUnitHouseholdNotFoundError | PluginGrantHouseholdNotFoundError,
+  ): PluginErrorRendering => ({
+    status: Http.NotFound,
+    message: t('errors.household.not_found', { id: exception.householdId }),
+    fields: { householdId: exception.householdId },
+  });
+
   const provenanceMismatch = (
     exception: PluginInstallProvenanceMismatchError | PluginUpdateProvenanceMismatchError,
   ): PluginErrorRendering => ({
@@ -254,6 +267,9 @@ function buildRenderers(): RendererMap {
     message: t('errors.plugin.unit_plugin_not_found', { slug: exception.pluginSlug }),
     fields: { slug: exception.pluginSlug },
   }));
+
+  renders(PluginUnitHouseholdNotFoundError, householdNotFound);
+  renders(PluginGrantHouseholdNotFoundError, householdNotFound);
 
   // A unit with no enablement row is addressed state that does not exist —
   // a 404 on the unit, distinct from the plugin-level 404 above, and the

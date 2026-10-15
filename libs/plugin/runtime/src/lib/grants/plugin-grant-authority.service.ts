@@ -2,6 +2,13 @@ import { DatabaseService, SystemRole } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 
 /**
+ * What a user's owner/admin membership says about a household: `admin` of a
+ * live one, `deleted` when they administered it and it has been soft-deleted,
+ * `none` without that membership.
+ */
+export type HouseholdAdminStanding = 'admin' | 'deleted' | 'none';
+
+/**
  * Grant-time authority predicates: the per-unit analog of
  * install-validation step 12. The consent-time delegation model is
  * security-equivalent to runtime intersection only if the decider actually
@@ -49,17 +56,39 @@ export class PluginGrantAuthorityService {
     return assignment !== null;
   }
 
-  /** Household-scope decisions: the decider is an owner/admin MEMBER of the anchoring household. */
-  async isHouseholdAdmin(userId: string, householdId: string): Promise<boolean> {
+  /**
+   * Household-scope decisions: the decider is an owner/admin MEMBER of the
+   * anchoring household, and the household is live.
+   *
+   * Member rows survive a soft delete, so the membership alone would still make
+   * the admin of a deleted household its admin (#548); the user-graph loader
+   * drops those memberships the same way. That admin answers `deleted` rather
+   * than `none`, because they are the one actor entitled to learn the household
+   * is gone: a delete landing mid-request reads to them as gone, not as refused
+   * (#553).
+   *
+   * Everyone else answers `none`, whatever state the household is in. The
+   * route's liveness guard passes some actors through untouched, an API key
+   * with no household read among them, and a refusal that varied with the
+   * household's state would tell them which households exist.
+   *
+   * One read, and it takes no lock: the writers that act on `admin` re-check
+   * liveness under the household's share lock inside their transactions.
+   */
+  async householdAdminStanding(userId: string, householdId: string): Promise<HouseholdAdminStanding> {
     const membership = await this.db.householdMember.findFirst({
       where: {
         userId,
         householdId,
         role: { role: { name: { in: [SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin] } } },
       },
-      select: { id: true },
+      select: { household: { select: { deletedAt: true } } },
     });
 
-    return membership !== null;
+    if (membership === null) {
+      return 'none';
+    }
+
+    return membership.household.deletedAt === null ? 'admin' : 'deleted';
   }
 }
