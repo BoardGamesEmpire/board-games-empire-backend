@@ -12,6 +12,7 @@ import {
   type InvitePartyView,
 } from '@bge/invites';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
+import { QuotaExceededException, QuotaService } from '@bge/quota';
 import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto } from '../dto';
@@ -68,6 +69,7 @@ export class HouseholdInviteService {
     private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
     private readonly invites: InviteService,
+    private readonly quotas: QuotaService,
   ) {}
 
   /**
@@ -93,18 +95,24 @@ export class HouseholdInviteService {
    *    preference decide whether they may be invited (#278). By id, each
    *    refuses with 403. By address, only the policy refuses; the other two
    *    store the invite withheld, and it answers like any other.
-   * 6. The lib inserts. A second outstanding invite to the same id, or to the
+   * 6. The invite takes one of the inviter's and the household's invites for
+   *    the day (#279), under the cap's advisory lock, so two invites at once
+   *    cannot both take the last one. A refused invite never gets here and
+   *    takes none; a withheld one takes one like any other. Past a hard cap
+   *    the answer is 402.
+   * 7. The lib inserts. A second outstanding invite to the same id, or to the
    *    same address, is the database's 409, through the lib.
    *
    * The domain events go out after commit, in the order the writes happened:
    * any expired rivals the lib stamped on the way, then the created invite.
+   * Any soft cap the invite went past is warned of after them.
    */
   async createInvite(householdId: string, dto: CreateHouseholdInviteDto): Promise<InvitePartyView> {
     const inviterId = this.abilityService.getActingUserId();
     const request = this.inviteeRequestOf(dto);
     const role = dto.role ?? SystemRole.HouseholdMember;
 
-    const { invite, event, expired } = await this.db.$transaction(async (tx) => {
+    const { invite, event, expired, softOverages } = await this.db.$transaction(async (tx) => {
       await this.assertInviteAuthority(tx, householdId, Action.create);
       await lockExistingHousehold(tx, householdId);
 
@@ -125,10 +133,25 @@ export class HouseholdInviteService {
 
       const { withheld } = await gateInvitee(tx, inviterId, invitee);
 
-      // How many invites a day (#279) is checked here: the invitee is known,
-      // and nothing is written yet.
+      const decision = await this.quotas.consume(
+        'household_invite_daily_count',
+        1n,
+        { userId: inviterId, householdId },
+        tx,
+      );
 
-      return this.invites.createWithin(tx, {
+      if (!decision.allowed) {
+        throw new QuotaExceededException(
+          // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
+          'household_invite_daily_count',
+          decision.scope!,
+          decision.limit!,
+          decision.currentUsage!,
+          1n,
+        );
+      }
+
+      const created = await this.invites.createWithin(tx, {
         type: InviteType.Household,
         inviterId,
         householdId,
@@ -137,9 +160,12 @@ export class HouseholdInviteService {
         message: dto.message ?? null,
         withheld,
       });
+
+      return { ...created, softOverages: decision.softOverages };
     });
 
     this.invites.emit([...expired, event]);
+    this.quotas.emitSoftOverages(softOverages);
 
     return invite;
   }

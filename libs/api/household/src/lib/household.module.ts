@@ -11,7 +11,9 @@ import { HouseholdMemberService } from './member/household-member.service';
 
 @Module({
   // QuotaModule supplies QuotaService to the member-creation seam, which gates
-  // `household_member_count` inside the caller's transaction (#159).
+  // `household_member_count` inside the caller's transaction (#159), and to
+  // the invite create, which gates `household_invite_daily_count` in its own
+  // (#279).
   // InvitesModule supplies InviteService, the only writer of an invite's
   // status; the soft delete revokes a household's outstanding invites through
   // it (#161), and the invite routes create through it (#162).
