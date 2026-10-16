@@ -13,7 +13,7 @@ import {
   type ConstraintIdentity,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
@@ -156,11 +156,15 @@ export class HouseholdMemberService {
     private readonly permissions: PermissionsService,
     private readonly events: EventEmitter2,
     private readonly quotas: QuotaService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
-   * Paginated member roster, row-scoped by the actor's `read` conditions on
-   * `HouseholdMember` (membership grant OR friends-visibility grant).
+   * Paginated member roster: the path household's members, clipped by the
+   * actor's `read` ceiling on `HouseholdMember` (membership grant OR
+   * friends-visibility grant). The read always named its household, so
+   * composing the scope (#515) changes no rows; it is what the envelope's guard
+   * checks for.
    *
    * A missing or soft-deleted household is a 404. An empty scoped page is
    * resolved by {@link isHiddenFromActor}: rows the actor cannot see mean a
@@ -173,10 +177,7 @@ export class HouseholdMemberService {
   ): Promise<PaginatedRows<HouseholdMemberWithRelations>> {
     await assertHouseholdExists(this.db, householdId);
 
-    const scopedWhere = {
-      householdId,
-      AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.read),
-    } satisfies Prisma.HouseholdMemberWhereInput;
+    const scopedWhere = this.scopeComposer.compose(ResourceType.HouseholdMember, Action.read, { householdId });
 
     // REPEATABLE READ, so `total` and the rows come from one snapshot (#230):
     // under Prisma's default batch isolation each statement snapshots
@@ -229,6 +230,7 @@ export class HouseholdMemberService {
     const scopedWhere = {
       id: memberId,
       householdId,
+      // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.read),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
@@ -276,6 +278,7 @@ export class HouseholdMemberService {
     const scopedWhere = {
       id: memberId,
       householdId,
+      // eslint-disable-next-line no-restricted-syntax -- single-row role write by id, not a collection read
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
@@ -404,6 +407,7 @@ export class HouseholdMemberService {
     const ownerRoleId = await resolveHouseholdRoleId(this.db, SystemRole.HouseholdOwner);
     const adminRoleId = await resolveHouseholdRoleId(this.db, SystemRole.HouseholdAdmin);
 
+    // eslint-disable-next-line no-restricted-syntax -- clips the two rows a transfer writes, not a collection read
     const conditions = this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage);
     const actorWhere = {
       householdId,
@@ -862,6 +866,7 @@ export class HouseholdMemberService {
     const scopedWhere = {
       id: memberId,
       householdId,
+      // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.manage),
     } satisfies Prisma.HouseholdMemberWhereInput;
 
@@ -895,6 +900,7 @@ export class HouseholdMemberService {
     const scopedWhere = {
       householdId,
       userId: actorUserId,
+      // eslint-disable-next-line no-restricted-syntax -- the actor's own membership row, not a collection read
       AND: this.abilityService.getCurrentResourceConditions(ResourceType.HouseholdMember, Action.delete),
     } satisfies Prisma.HouseholdMemberWhereInput;
 

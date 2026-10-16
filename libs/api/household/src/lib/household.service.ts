@@ -100,6 +100,7 @@ export class HouseholdService {
       where: {
         id,
         deletedAt: null,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
       include: {
@@ -447,6 +448,7 @@ export class HouseholdService {
         where: {
           id,
           deletedAt: null,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
         },
         data: {
@@ -630,6 +632,7 @@ export class HouseholdService {
           where: {
             id,
             deletedAt: null,
+            // eslint-disable-next-line no-restricted-syntax -- single-row soft delete by id, not a collection read
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.delete),
           },
           data: { deletedAt: new Date() },
@@ -740,6 +743,7 @@ export class HouseholdService {
           where: {
             id,
             deletedAt: { not: null },
+            // eslint-disable-next-line no-restricted-syntax -- single-row restore by id, not a collection read
             AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
           },
           data: { deletedAt: null },
@@ -794,6 +798,7 @@ export class HouseholdService {
       where: {
         id,
         deletedAt: null,
+        // eslint-disable-next-line no-restricted-syntax -- one-row existence probe by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.read),
       },
     });

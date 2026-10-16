@@ -1,6 +1,8 @@
-import { SystemRole } from '@bge/database';
+import { ResourceType, SystemRole } from '@bge/database';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
+import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdMemberController } from './household-member.controller';
@@ -42,6 +44,21 @@ describe('HouseholdMemberController (delegation)', () => {
       members: [MEMBER],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
     });
+  });
+
+  // The service composes the `HouseholdMember` scope; the envelope is where
+  // the guard checks for it. Built inside a request with nothing composed, this
+  // envelope must fail. An `Unscoped` envelope, or a type still in
+  // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+  // The name is asserted too: an envelope naming another swept type would also
+  // fail, for the wrong reason.
+  it('getMembers builds its envelope under the HouseholdMember scope guard', async () => {
+    const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+      firstValueFrom(controller.getMembers('hh-1', PAGINATION)),
+    );
+
+    await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+    await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.HouseholdMember}'`);
   });
 
   it('getMember forwards householdId and memberId, wrapping the result', async () => {

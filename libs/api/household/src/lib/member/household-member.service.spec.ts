@@ -1,6 +1,6 @@
 import { Action, HouseholdMembershipOrigin, Prisma, QuotaScope, ResourceType, SystemRole } from '@bge/database';
 import { uniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { AbilityService, PermissionsService } from '@bge/permissions';
+import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
 import { DEFAULT_PAGE_SIZE } from '@bge/shared';
 import {
@@ -125,6 +125,7 @@ describe('HouseholdMemberService', () => {
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
   let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
+  let compose: jest.SpyInstance;
 
   /**
    * Dispatches the two `householdMember.count` probes by shape rather than by
@@ -194,6 +195,9 @@ describe('HouseholdMemberService', () => {
     const ctx = await createTestingModuleWithDb({
       providers: [
         HouseholdMemberService,
+        // The REAL composer, over the mocked ability service, so the roster's
+        // where clause asserted below is the merge the read actually runs.
+        ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
         { provide: PermissionsService, useValue: permissions },
         { provide: EventEmitter2, useValue: events },
@@ -203,6 +207,7 @@ describe('HouseholdMemberService', () => {
 
     db = ctx.db;
     service = ctx.module.get(HouseholdMemberService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
 
     // Household exists by default; individual tests override the probe.
     db.household.count.mockResolvedValue(1);
@@ -239,7 +244,23 @@ describe('HouseholdMemberService', () => {
 
   afterEach(() => jest.clearAllMocks());
 
+  /**
+   * #515. The roster declares its own set, the path household's members, and
+   * the ceiling only clips it. The read already filtered on `householdId`, so
+   * no actor's rows change; what changes is that `HouseholdMember` has left
+   * `PENDING_SCOPE_SWEEP`, so a later edit that stops composing answers 500 at
+   * the envelope rather than widening silently. That is why the composer call
+   * itself is pinned.
+   */
   describe('getMembers', () => {
+    it("asks the composer for its where clause, declaring the household's members", async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
+
+      await service.getMembers('hh-1', PAGINATION);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.HouseholdMember, Action.read, { householdId: 'hh-1' });
+    });
+
     it('scopes the list by read conditions on HouseholdMember and shapes with MEMBER_SELECT', async () => {
       db.householdMember.findMany.mockResolvedValue(resolves([makeMember()]));
 
