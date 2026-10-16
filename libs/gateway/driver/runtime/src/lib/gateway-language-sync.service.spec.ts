@@ -26,13 +26,13 @@ describe('GatewayLanguageSyncService', () => {
 
     db = testing.db;
     service = testing.module.get(GatewayLanguageSyncService);
-    db.gameGateway.update.mockResolvedValue({} as never);
+    db.dataGateway.update.mockResolvedValue({} as never);
   });
 
   afterEach(() => jest.clearAllMocks());
 
   it('interviews a gateway that has never been synced and stamps languagesSyncedAt', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
+    db.dataGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
     const client = clientWith([
       { value: 'en-US', format: 3, ietfTag: 'en-US', iso6393: 'eng', iso6391: 'en', name: 'English (US)' },
     ]);
@@ -50,13 +50,13 @@ describe('GatewayLanguageSyncService', () => {
         nativeName: undefined,
       },
     ]);
-    expect(db.gameGateway.update).toHaveBeenCalledWith(
+    expect(db.dataGateway.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { languagesSyncedAt: expect.any(Date) } }),
     );
   });
 
   it('maps string enum names (loader enums: String) to the Prisma format', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
+    db.dataGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
     const client = clientWith([
       { value: 'Czech', format: 'LANGUAGE_CODE_FORMAT_NAME', iso6393: 'ces', iso6391: 'cs', name: 'Czech' },
     ]);
@@ -69,7 +69,7 @@ describe('GatewayLanguageSyncService', () => {
   });
 
   it('skips the interview inside the throttle window', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({
+    db.dataGateway.findUnique.mockResolvedValue({
       languagesSyncedAt: new Date(Date.now() - LANGUAGE_SYNC_INTERVAL_MS / 2),
     } as never);
     const client = clientWith([]);
@@ -81,7 +81,7 @@ describe('GatewayLanguageSyncService', () => {
   });
 
   it('re-interviews once the window has elapsed', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({
+    db.dataGateway.findUnique.mockResolvedValue({
       languagesSyncedAt: new Date(Date.now() - LANGUAGE_SYNC_INTERVAL_MS - 1000),
     } as never);
     const client = clientWith([]);
@@ -92,7 +92,7 @@ describe('GatewayLanguageSyncService', () => {
   });
 
   it('drops entries with unknown formats or blank values', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
+    db.dataGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
     const client = clientWith([
       { value: '  ', format: 3 },
       { value: 'en', format: 0 },
@@ -107,13 +107,13 @@ describe('GatewayLanguageSyncService', () => {
   });
 
   it('never throws on RPC failure and still stamps the sync time (daily retry, not per-connect)', async () => {
-    db.gameGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
+    db.dataGateway.findUnique.mockResolvedValue({ languagesSyncedAt: null } as never);
     const client = {
       listLanguages: jest.fn().mockReturnValue(throwError(() => new Error('UNIMPLEMENTED'))),
     } as unknown as GatewayServiceClient;
 
     await expect(service.syncIfStale(GW, client)).resolves.toBeUndefined();
-    expect(db.gameGateway.update).toHaveBeenCalledWith(
+    expect(db.dataGateway.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: { languagesSyncedAt: expect.any(Date) } }),
     );
   });

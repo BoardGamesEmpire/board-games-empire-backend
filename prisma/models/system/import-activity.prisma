@@ -12,7 +12,7 @@ model ImportActivity {
   importedBy   User?   @relation(fields: [importedById], references: [id], onDelete: SetNull)
   importedById String? @map("imported_by_id")
 
-  gateway   GameGateway @relation(fields: [gatewayId], references: [id])
+  gateway   DataGateway @relation(fields: [gatewayId], references: [id])
   gatewayId String      @map("gateway_id")
 
   isExpansion Boolean @default(false) @map("is_expansion")

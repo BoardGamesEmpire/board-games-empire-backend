@@ -34,7 +34,7 @@ const PROTO_FORMAT_MAP: Readonly<Record<string | number, LanguageCodeFormat>> = 
  * gateway's ListLanguages inventory and feeds it to LanguageLinkService,
  * which upserts LanguageGatewayLink rows per the unknown-language policy.
  *
- * Runs after a successful connect, throttled by GameGateway.languagesSyncedAt
+ * Runs after a successful connect, throttled by DataGateway.languagesSyncedAt
  * to once per LANGUAGE_SYNC_INTERVAL_MS — routine pings and reconnects inside
  * the window skip the interview entirely.
  */
@@ -53,7 +53,7 @@ export class GatewayLanguageSyncService {
    */
   async syncIfStale(gatewayId: string, client: GatewayServiceClient): Promise<void> {
     try {
-      const gateway = await this.db.gameGateway.findUnique({
+      const gateway = await this.db.dataGateway.findUnique({
         where: { id: gatewayId },
         select: { languagesSyncedAt: true },
       });
@@ -74,7 +74,7 @@ export class GatewayLanguageSyncService {
 
       await this.languageLinks.interview(gatewayId, entries);
 
-      await this.db.gameGateway.update({
+      await this.db.dataGateway.update({
         where: { id: gatewayId },
         data: { languagesSyncedAt: new Date() },
       });
@@ -86,7 +86,7 @@ export class GatewayLanguageSyncService {
         `Language interview for gateway ${gatewayId} failed: ${err instanceof Error ? err.message : err}`,
       );
 
-      await this.db.gameGateway
+      await this.db.dataGateway
         .update({ where: { id: gatewayId }, data: { languagesSyncedAt: new Date() } })
         .catch(() => undefined);
     }

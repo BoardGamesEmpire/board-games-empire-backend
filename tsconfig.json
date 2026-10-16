@@ -52,7 +52,7 @@
       "path": "./libs/api/gateway-coordinator-client"
     },
     {
-      "path": "./libs/api/game-gateway"
+      "path": "./libs/api/data-gateway"
     },
     {
       "path": "./apps/boardgamegeek-gateway-e2e"

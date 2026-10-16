@@ -1,6 +1,6 @@
 # Image smoke suite
 
-Tests the images, not a checkout (#600). It runs the BGE image and both game gateway images as `compose.yaml`'s split profile, and drives them from outside, as a self-hoster's clients do:
+Tests the images, not a checkout (#600). It runs the BGE image and both DataGateway images as `compose.yaml`'s split profile, and drives them from outside, as a self-hoster's clients do:
 
 - a first boot on an empty database, with every role up;
 - both gateway images healthy, without real credentials;

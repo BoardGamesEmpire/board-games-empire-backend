@@ -64,10 +64,10 @@ Every e2e suite runs the apps it tests from their built bundles, as child proces
   `@bge/testing-e2e/child-process`, launch and stop a bundle. `api-e2e` runs the API and the worker
   on them. `igdb-gateway-e2e` calls `launchChild` directly, against a token endpoint that answers
   with an error, to check that a gateway whose boot fails exits 1.
-- `useGateway`, from `@bge/testing-e2e/gateway`, runs a game gateway for one spec file, on a free
+- `useGateway`, from `@bge/testing-e2e/gateway`, runs a DataGateway for one spec file, on a free
   port, and hands out a gRPC client once the gateway answers `Check` with `SERVING`. The
   `boardgamegeek-gateway-e2e` and `igdb-gateway-e2e` suites are built on it.
-- `apps/stub-gateway` is a game gateway that answers every RPC from fixtures and calls no
+- `apps/stub-gateway` is a DataGateway that answers every RPC from fixtures and calls no
   upstream, so a search or an import can reach a gateway with no credentials. `useGateway` runs it
   as it runs the real ones: `app: 'stub-gateway'`, with its address in `STUB_GATEWAY_GRPC_HOST`
   and `STUB_GATEWAY_GRPC_PORT`. The image smoke suite (`apps/image-smoke`) runs it in a container.

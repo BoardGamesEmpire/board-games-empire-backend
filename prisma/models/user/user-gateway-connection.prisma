@@ -4,7 +4,7 @@ model UserGatewayConnection {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId String @map("user_id")
 
-  gateway   GameGateway @relation(fields: [gatewayId], references: [id])
+  gateway   DataGateway @relation(fields: [gatewayId], references: [id])
   gatewayId String      @map("gateway_id")
 
   // External profile

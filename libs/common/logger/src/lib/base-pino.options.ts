@@ -52,7 +52,7 @@ export function resolvePinoLevel(env: NodeJS.ProcessEnv): string {
  *
  * Designed to be either:
  * - Consumed directly by services that have no OTel pipeline (the BGG
- *   and IGDB game gateways), passed to `bootstrapLogging` and then to
+ *   and IGDB DataGateways), passed to `bootstrapLogging` and then to
  *   `LoggerModule.forRoot({ pinoHttp: { logger } })`.
  * - Composed by `@bge/otel`'s `buildOtelPinoOptions`, which appends
  *   the OTel trace correlation mixin and the conditional

@@ -10,7 +10,7 @@ import type { PluginContext } from './context/plugin-context.js';
  * same signature over RPC shims.
  *
  * The return type is `unknown` at this layer on purpose: category-specific
- * typing (`GameGatewayDriver` etc.) is applied by the category registries
+ * typing (`DataGatewayDriver` etc.) is applied by the category registries
  * when they adopt loaded instances (#61/#194) — the loader itself is
  * category-agnostic.
  */

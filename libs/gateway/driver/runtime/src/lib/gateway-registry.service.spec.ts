@@ -1,7 +1,7 @@
 import { SystemActorScope } from '@bge/actor-context';
 import { AuthType, DatabaseService } from '@bge/database';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
-import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
@@ -16,7 +16,7 @@ import type { GatewayConfigEvent } from './interfaces';
 
 describe('GatewayRegistryService', () => {
   let service: GatewayRegistryService;
-  let db: { gameGateway: { updateMany: jest.Mock; findFirst: jest.Mock } };
+  let db: { dataGateway: { updateMany: jest.Mock; findFirst: jest.Mock } };
   let emitter: EventEmitter2;
   let systemActorScope: { run: jest.Mock };
   let factory: { create: jest.Mock };
@@ -25,7 +25,7 @@ describe('GatewayRegistryService', () => {
    * Builds a driver double satisfying the port surface. The registry treats
    * drivers opaquely, so the RPC methods only need to exist.
    */
-  const makeDriver = (): GameGatewayDriver & { dispose: jest.Mock } =>
+  const makeDriver = (): DataGatewayDriver & { dispose: jest.Mock } =>
     ({
       ping: jest.fn(),
       check: jest.fn(),
@@ -34,10 +34,10 @@ describe('GatewayRegistryService', () => {
       fetchExpansions: jest.fn(),
       listLanguages: jest.fn(),
       dispose: jest.fn(),
-    }) as unknown as GameGatewayDriver & { dispose: jest.Mock };
+    }) as unknown as DataGatewayDriver & { dispose: jest.Mock };
 
   /** Routes the factory to a ready driver, as a successful remote connect would. */
-  const stubFactory = (driver: GameGatewayDriver = makeDriver()): GameGatewayDriver => {
+  const stubFactory = (driver: DataGatewayDriver = makeDriver()): DataGatewayDriver => {
     factory.create.mockResolvedValue(driver);
     return driver;
   };
@@ -71,7 +71,7 @@ describe('GatewayRegistryService', () => {
       on: jest.fn(),
     } as unknown as Redis;
 
-    db = { gameGateway: { updateMany: jest.fn(), findFirst: jest.fn() } };
+    db = { dataGateway: { updateMany: jest.fn(), findFirst: jest.fn() } };
     systemActorScope = { run: jest.fn((_reason: string, fn: () => unknown) => fn()) };
     factory = { create: jest.fn() };
 
@@ -104,7 +104,7 @@ describe('GatewayRegistryService', () => {
 
   describe('resolve (lazy connect)', () => {
     it('connects from DB config on a cache miss and returns the driver', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(gatewayRow);
+      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
       const driver = stubFactory();
 
       const result = await service.resolve('bgg');
@@ -115,7 +115,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('getServiceClient is a deprecated alias returning the same driver', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(gatewayRow);
+      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
       const driver = stubFactory();
 
       const client = await service.getServiceClient('bgg');
@@ -124,7 +124,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('deduplicates concurrent connects for the same gateway', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(gatewayRow);
+      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
       let release!: () => void;
       const gate = new Promise<void>((resolve) => (release = resolve));
       factory.create.mockImplementation(async () => {
@@ -140,7 +140,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('throws and does not connect when the gateway is absent/disabled/deleted', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(null);
+      db.dataGateway.findFirst.mockResolvedValue(null);
       stubFactory();
 
       await expect(service.resolve('gone')).rejects.toThrow(/not available/);
@@ -155,7 +155,7 @@ describe('GatewayRegistryService', () => {
       service.register('plugin-bgg', driver);
 
       await expect(service.resolve('plugin-bgg')).resolves.toBe(driver);
-      expect(db.gameGateway.findFirst).not.toHaveBeenCalled();
+      expect(db.dataGateway.findFirst).not.toHaveBeenCalled();
       expect(factory.create).not.toHaveBeenCalled();
       expect(service.isConnected('plugin-bgg')).toBe(true);
     });
@@ -206,8 +206,8 @@ describe('GatewayRegistryService', () => {
 
     it('disposes a driver whose connect finishes after shutdown, instead of caching it', async () => {
       const driver = makeDriver();
-      let finishPing!: (driver: GameGatewayDriver) => void;
-      factory.create.mockReturnValue(new Promise<GameGatewayDriver>((resolve) => (finishPing = resolve)));
+      let finishPing!: (driver: DataGatewayDriver) => void;
+      factory.create.mockReturnValue(new Promise<DataGatewayDriver>((resolve) => (finishPing = resolve)));
 
       const connecting = service.connect(connectOpts);
       await service.onApplicationShutdown();
@@ -225,7 +225,7 @@ describe('GatewayRegistryService', () => {
   // completion order wins; we assert only the no-leak invariant).
   describe('concurrent connect race (no leak)', () => {
     it('disposes exactly the driver that loses the cache slot', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(gatewayRow);
+      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
       const a = makeDriver();
       const b = makeDriver();
       let release!: () => void;
@@ -242,8 +242,8 @@ describe('GatewayRegistryService', () => {
       release();
       await Promise.all([lazy, explicit]);
 
-      const survivor = (await service.resolve('bgg')) as GameGatewayDriver & { dispose: jest.Mock };
-      const evicted = (survivor === a ? b : a) as GameGatewayDriver & { dispose: jest.Mock };
+      const survivor = (await service.resolve('bgg')) as DataGatewayDriver & { dispose: jest.Mock };
+      const evicted = (survivor === a ? b : a) as DataGatewayDriver & { dispose: jest.Mock };
       expect(evicted.dispose).toHaveBeenCalledTimes(1);
       expect(survivor.dispose).not.toHaveBeenCalled();
     });
@@ -301,7 +301,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('caches the driver normally when nothing invalidates it during connect', async () => {
-      const driver = stubFactory() as GameGatewayDriver & { dispose: jest.Mock };
+      const driver = stubFactory() as DataGatewayDriver & { dispose: jest.Mock };
 
       await service.connect(connectOpts);
 
@@ -323,8 +323,8 @@ describe('GatewayRegistryService', () => {
       // register() would tag it 'registered', which handleConfigUpdate now
       // intentionally exempts from reconnect events (see the in-process test
       // below) — reconnect only applies to remote connections.
-      db.gameGateway.findFirst.mockResolvedValue(gatewayRow);
-      const oldDriver = stubFactory() as GameGatewayDriver & { dispose: jest.Mock };
+      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
+      const oldDriver = stubFactory() as DataGatewayDriver & { dispose: jest.Mock };
       await service.connect(connectOpts); // origin: 'remote'
       expect(service.isConnected('bgg')).toBe(true);
 
@@ -364,7 +364,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('reconnect-requested swallows reconnect failures (no throw out of the handler)', async () => {
-      db.gameGateway.findFirst.mockResolvedValue(null);
+      db.dataGateway.findFirst.mockResolvedValue(null);
 
       await expect(
         dispatch({ gatewayId: 'bgg', configHash: 'x', changeType: 'reconnect-requested', timestamp: 0 }),
@@ -382,16 +382,16 @@ describe('GatewayRegistryService', () => {
     it('does not touch the DB below the failure threshold', async () => {
       await service.reportFailure('bgg', new Error('boom'));
 
-      expect(db.gameGateway.updateMany).not.toHaveBeenCalled();
+      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
     });
 
     it('disables the gateway inside a system actor scope and emits a GatewayDisabledEvent', async () => {
-      db.gameGateway.updateMany.mockResolvedValue({ count: 1 });
+      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
       const emitSpy = jest.spyOn(emitter, 'emit');
 
       await failUntilThreshold();
 
-      expect(db.gameGateway.updateMany).toHaveBeenCalledWith({
+      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
         where: { id: 'bgg', enabled: true },
         data: { enabled: false },
       });
@@ -414,24 +414,24 @@ describe('GatewayRegistryService', () => {
     });
 
     it('does not emit when another process already disabled the gateway', async () => {
-      db.gameGateway.updateMany.mockResolvedValue({ count: 0 });
+      db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
       const emitSpy = jest.spyOn(emitter, 'emit');
 
       await failUntilThreshold();
 
-      expect(db.gameGateway.updateMany).toHaveBeenCalledTimes(1);
+      expect(db.dataGateway.updateMany).toHaveBeenCalledTimes(1);
       expect(emitSpy).not.toHaveBeenCalled();
     });
 
     it('is transport-agnostic: a registered in-process driver trips the same threshold and is disposed on disable', async () => {
-      db.gameGateway.updateMany.mockResolvedValue({ count: 1 });
+      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
       const driver = new InMemoryGatewayDriver();
       driver.failWith(new Error('in-proc boom'));
       service.register('plugin-bgg', driver);
 
       await failUntilThreshold('plugin-bgg');
 
-      expect(db.gameGateway.updateMany).toHaveBeenCalledWith({
+      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
         where: { id: 'plugin-bgg', enabled: true },
         data: { enabled: false },
       });

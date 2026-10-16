@@ -1,5 +1,5 @@
 # The split profile (#593): each BGE role in a container of its own, all from
-# the one image, with Postgres, Redis and the two game gateways. From the
+# the one image, with Postgres, Redis and the two DataGateways. From the
 # repository root:
 #
 #   docker compose --profile split up --build
@@ -148,7 +148,7 @@ services:
       # It waits for the api's first migration before it listens.
       start_period: 5m
 
-  # The game gateways are images of their own (#194). Register each one with
+  # The DataGateways are images of their own (#194). Register each one with
   # the api to search through it; docs/DEPLOYMENT.md shows how.
   boardgamegeek-gateway:
     image: ${BGE_BOARDGAMEGEEK_GATEWAY_IMAGE:-bge-boardgamegeek-gateway:local}

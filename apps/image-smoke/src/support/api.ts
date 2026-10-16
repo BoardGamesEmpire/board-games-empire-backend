@@ -59,7 +59,7 @@ export async function currentUser(baseUrl: string, session: Session): Promise<Se
 }
 
 export interface GatewayRegistration {
-  readonly gateway: { readonly id: string; readonly enabled: boolean };
+  readonly dataGateway: { readonly id: string; readonly enabled: boolean };
   readonly connection_attempt: boolean;
   readonly connection_response: { readonly success: boolean; readonly message?: string } | null;
 }
@@ -90,7 +90,7 @@ export async function registerGateway(
   try {
     return await pollUntil(
       async () => {
-        const response = await fetch(`${baseUrl}/api/game-gateways`, {
+        const response = await fetch(`${baseUrl}/api/data-gateways`, {
           method: 'POST',
           headers: { ...bearer(session), 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...gateway, authType: 'None' }),

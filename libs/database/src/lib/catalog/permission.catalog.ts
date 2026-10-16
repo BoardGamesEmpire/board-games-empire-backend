@@ -994,34 +994,34 @@ export const PERMISSION_CATALOG = [
     reason: 'Remove game from collection',
   }),
 
-  // --- Game Gateway ---
+  // --- DataGateway ---
   permission({
     action: Action.read,
-    subject: ResourceType.GameGateway,
-    slug: 'read:game_gateway',
+    subject: ResourceType.DataGateway,
+    slug: 'read:data_gateway',
     riskLevel: RiskLevel.High,
-    reason: 'View game gateway connections',
+    reason: 'View DataGateway connections',
   }),
   permission({
     action: Action.create,
-    subject: ResourceType.GameGateway,
-    slug: 'create:game_gateway',
+    subject: ResourceType.DataGateway,
+    slug: 'create:data_gateway',
     riskLevel: RiskLevel.High,
-    reason: 'Create game gateway connections',
+    reason: 'Create DataGateway connections',
   }),
   permission({
     action: Action.update,
-    subject: ResourceType.GameGateway,
-    slug: 'update:game_gateway',
+    subject: ResourceType.DataGateway,
+    slug: 'update:data_gateway',
     riskLevel: RiskLevel.High,
-    reason: 'Update game gateway connections',
+    reason: 'Update DataGateway connections',
   }),
   permission({
     action: Action.delete,
-    subject: ResourceType.GameGateway,
-    slug: 'delete:game_gateway',
+    subject: ResourceType.DataGateway,
+    slug: 'delete:data_gateway',
     riskLevel: RiskLevel.High,
-    reason: 'Delete game gateway connections',
+    reason: 'Delete DataGateway connections',
   }),
 
   // --- Households ---

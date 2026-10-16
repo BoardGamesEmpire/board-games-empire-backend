@@ -68,7 +68,7 @@ model User {
   gamesUpdated       Game[]                  @relation("GamesUpdated")
   gameCustomizations UserGameCustomization[]
 
-  gameGatewaysCreated GameGateway[] @relation("GameGatewayCreator")
+  dataGatewaysCreated DataGateway[] @relation("DataGatewayCreator")
 
   households Household[] @relation("HouseholdsCreated")
 

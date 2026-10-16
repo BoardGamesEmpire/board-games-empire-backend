@@ -17,11 +17,11 @@
   "game_release": {
     "not_found": "Release with ID {id} not found"
   },
-  "game_gateway": {
-    "not_found": "Game gateway with ID {id} not found.",
-    "not_found_or_denied": "Game gateway with ID {id} not found or access denied.",
-    "connect_failed": "Failed to connect to the game gateway.",
-    "disconnect_failed": "Failed to disconnect from the game gateway."
+  "data_gateway": {
+    "not_found": "DataGateway with ID {id} not found.",
+    "not_found_or_denied": "DataGateway with ID {id} not found or access denied.",
+    "connect_failed": "Failed to connect to the DataGateway.",
+    "disconnect_failed": "Failed to disconnect from the DataGateway."
   },
   "event": {
     "not_found": "Event with ID {id} not found",

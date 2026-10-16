@@ -29,10 +29,10 @@ export interface ListFilter {
 /**
  * Slug-keyed registry base for plugin category implementations (#59 Phase A):
  * generalized from the two concrete precedents — the storage driver router
- * (#100/#101) and the game-gateway driver registry (#193/#203)
+ * (#100/#101) and the DataGateway driver registry (#193/#203)
  * — per the concrete-first rule (extract once ≥2 implementations validate
  * the shape). Category registries subclass with their instance type, e.g.
- * `class DataGatewayRegistry extends BasePluginRegistry<GameGatewayDriver>`.
+ * `class DataGatewayRegistry extends BasePluginRegistry<DataGatewayDriver>`.
  *
  * Two read paths with different contracts:
  *

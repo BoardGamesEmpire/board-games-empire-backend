@@ -10,7 +10,7 @@
 # images), plus the stub gateway's below.
 
 services:
-  # A game gateway that answers from fixtures and calls nothing upstream
+  # A DataGateway that answers from fixtures and calls nothing upstream
   # (apps/stub-gateway). Its image is the candidate BGE image with the stub's
   # bundle added (apps/stub-gateway/Dockerfile), so it runs on the install
   # under test. The suite registers it with the api, as an owner registers a

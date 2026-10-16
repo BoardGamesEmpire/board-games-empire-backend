@@ -1,18 +1,18 @@
 # Deployment: one image, one role per container
 
-BGE ships as one image that runs any of its four roles, chosen by `BGE_ROLES`, and as one image for each game gateway. This page is the operator's view of them: what each image holds, what each role needs and when it is ready, and the `split` Compose profile that runs them all. Issue #593 carries the decisions. What happens when a role boots, including migrations, is in [BOOTSTRAP.md](BOOTSTRAP.md), and the Redis connections are in [REDIS.md](REDIS.md).
+BGE ships as one image that runs any of its four roles, chosen by `BGE_ROLES`, and as one image for each DataGateway. This page is the operator's view of them: what each image holds, what each role needs and when it is ready, and the `split` Compose profile that runs them all. Issue #593 carries the decisions. What happens when a role boots, including migrations, is in [BOOTSTRAP.md](BOOTSTRAP.md), and the Redis connections are in [REDIS.md](REDIS.md).
 
 ## The images
 
 One `Dockerfile` at the repository root builds all three, from the root:
 
-| Image                 | Build                                                    | Runs                                      |
-| --------------------- | -------------------------------------------------------- | ----------------------------------------- |
-| BGE                   | `docker build -t bge .`                                  | the role named by `BGE_ROLES`             |
-| BoardGameGeek gateway | `docker build --target boardgamegeek-gateway -t <tag> .` | the BoardGameGeek game gateway, over gRPC |
-| IGDB gateway          | `docker build --target igdb-gateway -t <tag> .`          | the IGDB game gateway, over gRPC          |
+| Image                 | Build                                                    | Runs                                     |
+| --------------------- | -------------------------------------------------------- | ---------------------------------------- |
+| BGE                   | `docker build -t bge .`                                  | the role named by `BGE_ROLES`            |
+| BoardGameGeek gateway | `docker build --target boardgamegeek-gateway -t <tag> .` | the BoardGameGeek DataGateway, over gRPC |
+| IGDB gateway          | `docker build --target igdb-gateway -t <tag> .`          | the IGDB DataGateway, over gRPC          |
 
-The BGE image is the default target. The game gateways stay out of it: a deployment adds the data sources it wants (#194).
+The BGE image is the default target. The DataGateways stay out of it: a deployment adds the data sources it wants (#194).
 
 Each image:
 
@@ -32,7 +32,7 @@ The bundles load their npm dependencies at runtime instead of inlining them, so 
 
 ## The web client
 
-The BGE image carries the web client's build (#598). It is copied from the client's own image, `ghcr.io/boardgamesempire/bge-client-web`, to `apps/api/dist/web`, beside the api's bundle. The `Dockerfile` pins that image by digest in `CLIENT_WEB_IMAGE`, and the BGE image records the reference in its `io.github.boardgamesempire.web.image` label, so every image names the client it carries. The game gateway images don't carry it.
+The BGE image carries the web client's build (#598). It is copied from the client's own image, `ghcr.io/boardgamesempire/bge-client-web`, to `apps/api/dist/web`, beside the api's bundle. The `Dockerfile` pins that image by digest in `CLIENT_WEB_IMAGE`, and the BGE image records the reference in its `io.github.boardgamesempire.web.image` label, so every image names the client it carries. The DataGateway images don't carry it.
 
 The api serves the client from its own origin. A browser pointed at the api's URL (`BGE_PUBLIC_URL` in the split profile) loads the app, and the app's sign-in cookies work without a proxy in front.
 
@@ -77,7 +77,7 @@ GHCR creates a package private. Once an org owner has made these public, after t
 | `gateway-fetch` | `apps/gateway-worker`      | nothing                               | no probe: it logs `Bootstrap complete` |                |
 | `coordinator`   | `apps/gateway-coordinator` | gRPC on `COORDINATOR_GRPC_PORT`       | a TCP connection to that port succeeds |                |
 
-The game gateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, and are ready on the same TCP check.
+The DataGateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, and are ready on the same TCP check.
 
 What "ready" means here, role by role:
 
@@ -118,7 +118,7 @@ The image creates both, owned by `node`, so a new named volume mounted on either
 
 ## The split profile
 
-`compose.yaml` runs each role in a container of its own, with Postgres 17, Redis 7 (the versions the e2e suite tests against) and both game gateways:
+`compose.yaml` runs each role in a container of its own, with Postgres 17, Redis 7 (the versions the e2e suite tests against) and both DataGateways:
 
 ```sh
 docker compose --profile split up --build
@@ -133,7 +133,7 @@ docker compose --profile split up --build
 Search goes through the coordinator to the gateways registered with the api, and a new deployment has none: it adds the data sources it wants (#194). The first account to sign up becomes the owner. Sign up, then register each gateway once as that account:
 
 ```http
-POST /api/game-gateways
+POST /api/data-gateways
 Content-Type: application/json
 
 { "name": "BoardGameGeek", "connectionUrl": "boardgamegeek-gateway", "connectionPort": 50053, "authType": "None" }

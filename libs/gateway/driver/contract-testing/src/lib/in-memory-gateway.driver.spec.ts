@@ -1,12 +1,12 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { firstValueFrom } from 'rxjs';
 import { InMemoryGatewayDriver } from './in-memory-gateway.driver.js';
-import { runGameGatewayDriverContract } from './run-game-gateway-driver-contract.js';
+import { runDataGatewayDriverContract } from './run-data-gateway-driver-contract.js';
 
 const knownGame = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameData;
 const searchHit = { externalId: 'bgg-13', name: 'Catan' } as unknown as proto.GameSearchData;
 
-runGameGatewayDriverContract('InMemoryGatewayDriver', () => ({
+runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
   driver: new InMemoryGatewayDriver({
     games: [knownGame],
     searchResults: [searchHit],

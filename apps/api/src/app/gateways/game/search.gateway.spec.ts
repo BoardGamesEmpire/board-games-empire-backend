@@ -791,7 +791,7 @@ describe('GameSearchGateway', () => {
         await expect(gateway.handleSearchStart(client, makeStartDto())).resolves.toBeUndefined();
       });
 
-      // TODO: we don't want to remove all searches on stream error - multiple game gateways could
+      // TODO: we don't want to remove all searches on stream error - multiple DataGateways could
       // be active under the same correlationId, and one gateway error shouldn't cancel them all.
       it.skip('cleans up the subscription from activeSearches on stream error', async () => {
         const client = makeSocket(gateway);

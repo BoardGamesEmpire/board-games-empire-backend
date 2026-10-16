@@ -82,7 +82,7 @@ enum LanguageTagSource {
 model LanguageGatewayLink {
   id String @id @default(cuid(2))
 
-  // GameGateway.id — plain string by gateway-link convention (no FK).
+  // DataGateway.id — plain string by gateway-link convention (no FK).
   gatewayId String @map("gateway_id")
 
   // Gateway-native value, verbatim: "en-US", "eng", "Czech".

@@ -1,6 +1,6 @@
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { createTestingModuleWithDb, type CacheMock, type MockDatabaseService } from '@bge/testing';
-import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Logger } from '@nestjs/common';
@@ -35,7 +35,7 @@ interface ScriptedStreams {
 }
 
 /** A driver whose streams are exactly the given frames, for statuses the fixture-backed driver never produces. */
-const scriptedDriver = ({ searchGames = [], fetchExpansions = [] }: ScriptedStreams): GameGatewayDriver =>
+const scriptedDriver = ({ searchGames = [], fetchExpansions = [] }: ScriptedStreams): DataGatewayDriver =>
   Object.assign(new InMemoryGatewayDriver(), {
     searchGames: () => from(searchGames),
     fetchExpansions: () => from(fetchExpansions),
@@ -49,9 +49,9 @@ const scriptedDriver = ({ searchGames = [], fetchExpansions = [] }: ScriptedStre
  */
 class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'connectedGatewayIds'> {
   readonly resolved: string[] = [];
-  private readonly drivers = new Map<string, GameGatewayDriver>();
+  private readonly drivers = new Map<string, DataGatewayDriver>();
 
-  register(gatewayId: string, driver: GameGatewayDriver): this {
+  register(gatewayId: string, driver: DataGatewayDriver): this {
     this.drivers.set(gatewayId, driver);
     return this;
   }
@@ -60,7 +60,7 @@ class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'connecte
     return [...this.drivers.keys()];
   }
 
-  async resolve(gatewayId: string): Promise<GameGatewayDriver> {
+  async resolve(gatewayId: string): Promise<DataGatewayDriver> {
     this.resolved.push(gatewayId);
 
     const driver = this.drivers.get(gatewayId);

@@ -128,7 +128,7 @@ describe('the BGE images, run as the split profile', () => {
       });
 
       expect(registration).toMatchObject({ connection_attempt: true, connection_response: { success: true } });
-      gatewayId = registration.gateway.id;
+      gatewayId = registration.dataGateway.id;
     });
 
     it('finds its games over HTTP, through the coordinator', async () => {

@@ -244,11 +244,11 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:platform',
     'delete:platform',
 
-    // Game Gateway
-    'read:game_gateway',
-    'create:game_gateway',
-    'update:game_gateway',
-    'delete:game_gateway',
+    // DataGateway
+    'read:data_gateway',
+    'create:data_gateway',
+    'update:data_gateway',
+    'delete:data_gateway',
 
     // Events. Only the moderation variant: `delete:event` is scoped
     // `createdById: '{{ user.id }}'` and an event's creator is seeded

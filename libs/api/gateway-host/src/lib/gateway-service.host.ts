@@ -3,10 +3,10 @@ import type { Observable } from 'rxjs';
 
 /**
  * The provider-agnostic contract a gateway app fulfils so it can be
- * hosted by the shared {@link GameGatewayController}.
+ * hosted by the shared {@link DataGatewayController}.
  *
- * Each gateway app's `GameGatewayService` implements this and is bound to
- * the token (`{ provide: GatewayServiceHost, useClass: GameGatewayService }`).
+ * Each gateway app's `DataGatewayService` implements this and is bound to
+ * the token (`{ provide: GatewayServiceHost, useClass: DataGatewayService }`).
  * The controller depends only on this abstraction, so the gRPC host layer
  * is identical across every gateway (BoardGameGeek, IGDB, …) while the
  * search/fetch logic stays provider-specific.
