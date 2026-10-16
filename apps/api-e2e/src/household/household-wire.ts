@@ -202,17 +202,29 @@ export function deleteEnvelope(response: HttpResponseLike, request: RequestDescr
   const { message, household } = createEnvelope(response, request);
   const body = response.body as Record<string, unknown>;
 
-  if (!('restorableUntil' in body)) {
-    return fail("it carried no 'restorableUntil' key", request, response);
+  const problem = restorableUntilProblem(body);
+  if (problem !== undefined) {
+    return fail(`it carried ${problem}`, request, response);
   }
 
-  const restorableUntil = body['restorableUntil'];
+  return { message, household, restorableUntil: body['restorableUntil'] as string | null };
+}
 
-  if (restorableUntil !== null && (typeof restorableUntil !== 'string' || Number.isNaN(Date.parse(restorableUntil)))) {
-    return fail("its 'restorableUntil' is neither null nor a timestamp", request, response);
+/**
+ * What is wrong with `record`'s `restorableUntil`, or `undefined` when it is a
+ * parseable timestamp or `null`. Both routes that send it must send it, so a
+ * missing key is wrong too: a client reads it as `null`.
+ */
+function restorableUntilProblem(record: Record<string, unknown>): string | undefined {
+  if (!('restorableUntil' in record)) {
+    return "no 'restorableUntil' key";
   }
 
-  return { message, household, restorableUntil };
+  const value = record['restorableUntil'];
+
+  return value === null || (typeof value === 'string' && !Number.isNaN(Date.parse(value)))
+    ? undefined
+    : "a 'restorableUntil' that is neither null nor a timestamp";
 }
 
 /** `GET /api/households/:id`: `{ household }` with member and language embeds. */
@@ -423,6 +435,49 @@ export function listEnvelope(response: HttpResponseLike, request: RequestDescrip
   }
 
   return { households: rows, pagination };
+}
+
+/** A row of `GET /api/households/restorable` (#542): the list row with its roster, and when the window ends. */
+export interface RestorableHouseholdWire extends HouseholdWire {
+  readonly members: readonly HouseholdMemberProjection[];
+  /** ISO timestamp the acting user's restore window ends at, or `null` when their grant has no end date. */
+  readonly restorableUntil: string | null;
+}
+
+export interface ListRestorableHouseholdsEnvelope {
+  readonly households: readonly RestorableHouseholdWire[];
+  readonly pagination: PaginationWire;
+}
+
+/**
+ * `GET /api/households/restorable`: the list envelope, where every row also
+ * carries its roster and `restorableUntil`.
+ *
+ * `restorableUntil` must be PRESENT on each row, as a parseable timestamp or
+ * `null`, as on {@link deleteEnvelope}: a missing key reads as `null`, which
+ * here means a window with no end. The roster is checked
+ * because it is how a household owner recognises a household they deleted.
+ */
+export function restorableListEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): ListRestorableHouseholdsEnvelope {
+  const { households, pagination } = listEnvelope(response, request);
+
+  for (const household of households) {
+    const row = household as unknown as Record<string, unknown>;
+
+    if (!Array.isArray(row['members'])) {
+      return fail(`household '${household.id}' carried no 'members' array`, request, response);
+    }
+
+    const problem = restorableUntilProblem(row);
+    if (problem !== undefined) {
+      return fail(`household '${household.id}' carried ${problem}`, request, response);
+    }
+  }
+
+  return { households: households as readonly RestorableHouseholdWire[], pagination };
 }
 
 /**
