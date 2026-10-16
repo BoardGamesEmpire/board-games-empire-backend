@@ -5,6 +5,7 @@ import {
   FriendshipStatus,
   HUMAN_USER_WHERE,
   NominationStatus,
+  Prisma,
   ResourceType,
   SystemRole,
   Visibility,
@@ -15,6 +16,7 @@ import {
   createTestingModuleWithDb,
   makeEventAttendee,
   makeEventAttendeeGameList,
+  rawQueryText,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -299,6 +301,31 @@ describe('EventAttendeeService', () => {
       expect(removedGame).toBeInstanceOf(GameRemovedFromEventEvent);
       expect(removedGame.action).toBe('delete');
       expect(removedGame.subjectId).toBe('eg-1');
+    });
+
+    // A date write in flight finishes before the lineups are judged, and
+    // the event's row is locked before any nomination: removing a date writes
+    // to the nominations that name it while holding that row.
+    it("updateStatus locks the event's dates after the RSVP write, before pausing a nomination", async () => {
+      db.event.count.mockResolvedValue(1);
+      db.eventAttendee.findUnique.mockResolvedValue({
+        id: 'att-1',
+        userId: 'user-1',
+        status: EventParticipationStatus.Attending,
+      } as EventAttendee);
+      db.eventAttendee.update.mockResolvedValue(attendeeRow({ status: EventParticipationStatus.NotAttending }));
+
+      await service.updateStatus('event-1', 'att-1', { status: EventParticipationStatus.NotAttending });
+
+      const [[datesLock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+      expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeGreaterThan(
+        db.eventAttendee.update.mock.invocationCallOrder[0],
+      );
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        db.eventGameNomination.updateManyAndReturn.mock.invocationCallOrder[0],
+      );
     });
 
     // Their paused nominations return to the status each paused from; the
@@ -728,10 +755,13 @@ describe('EventAttendeeService', () => {
         expect(db.eventAttendeeGameList.delete).not.toHaveBeenCalled();
       });
 
-      it('counts what the entry supplies after locking it', async () => {
+      it("counts what the entry supplies after locking it, and the event's dates", async () => {
         await service.removeGameFromList('event-1', 'att-1', 'gl-1');
 
-        expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+        expect(db.$queryRaw).toHaveBeenCalledTimes(2);
+        const [, [datesLock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+        expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
         expect(db.eventGameNomination.count).toHaveBeenCalledWith({
           where: {
             suppliedFromId: 'gl-1',
@@ -741,9 +771,10 @@ describe('EventAttendeeService', () => {
         expect(db.eventGame.count).toHaveBeenCalledWith({
           where: { suppliedById: 'gl-1', ...lineupStillAhead(expect.any(Date)) },
         });
-        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
           db.eventGameNomination.count.mock.invocationCallOrder[0],
         );
+        expect(db.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(db.eventGame.count.mock.invocationCallOrder[0]);
       });
 
       // An attendee acting alone does not pull a game from the lineup the

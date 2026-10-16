@@ -10,12 +10,14 @@ import {
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
 import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
+  eventGameEnvelope,
   nominationEnvelope,
   occurrenceEnvelope,
   resolutionEnvelope,
@@ -440,6 +442,145 @@ describe('leaving an event', () => {
       await run(host, eventId, occurrenceId);
 
       expect(await scheduledGameExists(scheduledGameId)).toBe(false);
+    });
+
+    /**
+     * The same, raced. While a date that has started is being moved, a game
+     * is added to its lineup from an entry the move has not seen, and then
+     * its supplier leaves, or the entry comes off. Reading the date as
+     * started, either would keep the game, so it waits for the move and then
+     * reads the date as moved.
+     *
+     * The barrier holds the date's row, so the move queues on its update of
+     * the date, inside its transaction. The game's add does not queue: its key
+     * into the date takes FOR KEY SHARE, which the barrier's lock leaves alone.
+     */
+    describe('raced by a game added and then left with nobody bringing it', () => {
+      /** Generous for the reason `household-write-tombstone.spec.ts` gives: a cold request clears several guards first. */
+      const REQUEST_REACHES_LOCK_MS = 20_000;
+
+      interface Arrangement {
+        readonly leaver: AuthenticatedActor;
+        readonly eventId: string;
+        readonly leaverId: string;
+        readonly entryId: string;
+      }
+
+      /** The barrier's own backends, which are never the request under test. */
+      const barrierPids = (barrier: Barrier): number[] => [barrier.waiter.pid, barrier.observer.pid];
+
+      /**
+       * Fires a request that is expected to block, and keeps hold of it
+       * safely. Same shape as the helper in `household-write-tombstone.spec.ts`.
+       */
+      const fire = (send: () => request.Test) => {
+        let outcome: string | undefined;
+        const settled = send().then(
+          (response) => {
+            outcome = `HTTP ${response.status}`;
+
+            return response;
+          },
+          (error: unknown) => {
+            outcome = `it failed: ${error instanceof Error ? error.message : String(error)}`;
+            throw error;
+          },
+        );
+
+        settled.catch(() => undefined);
+
+        return { settled, settledEarly: () => outcome };
+      };
+
+      it.each([
+        {
+          leaving: 'its supplier leaving',
+          outcome: 'takes the game off',
+          send: ({ leaver, eventId, leaverId }: Arrangement) =>
+            rsvp(leaver, eventId, leaverId, EventParticipationStatus.NotAttending),
+          status: 200,
+          inLineup: false,
+        },
+        {
+          leaving: 'its entry coming off their offered games',
+          outcome: 'answers 409, the game being in a lineup still ahead',
+          send: ({ leaver, eventId, leaverId, entryId }: Arrangement) => removeGame(leaver, eventId, leaverId, entryId),
+          status: 409,
+          inLineup: true,
+        },
+      ])('$leaving waits for the move, then $outcome', async ({ send, status, inLineup }) => {
+        const host = await actors.user();
+        const leaver = await actors.user();
+        const eventId = await createdEventId(host);
+        const leaverId = attendeeEnvelope(
+          await addAttendee(host, eventId, {
+            userId: leaver.user.id,
+            status: EventParticipationStatus.Attending,
+          }).expect(201),
+          'POST /api/events/:eventId/attendees as the host',
+        ).id;
+        const occurrenceId = await confirmedDate(eventId, new Date(Date.now() - DAY));
+        const entry = await arrangeListEntry(db.client, eventId, leaver.user.id);
+
+        const { moved, left, gameId } = await withBarrier(async (barrier) => {
+          const { holder } = barrier;
+
+          await holder.begin();
+          await expect(
+            holder.query('SELECT id FROM event_occurrences WHERE id = $1 FOR NO KEY UPDATE', [occurrenceId]),
+          ).resolves.toHaveLength(1);
+
+          // Deliberately not awaited: it is supposed to be stuck.
+          const move = fire(() =>
+            request(baseUrl)
+              .patch(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`)
+              .set(host.headers)
+              .send({ startDate: new Date(Date.now() + DAY).toISOString() }),
+          );
+
+          const moving = await expectLockWaiter(barrier, {
+            heldBy: holder.pid,
+            description: 'the move of the date',
+            timeoutMs: REQUEST_REACHES_LOCK_MS,
+            exclude: barrierPids(barrier),
+            settledEarly: move.settledEarly,
+          });
+          expect(moving.query).toMatch(/UPDATE[\s\S]*event_occurrences/);
+
+          const { id: gameId } = eventGameEnvelope(
+            await request(baseUrl)
+              .post(`${EVENTS_PATH}/${eventId}/nominations/direct-add`)
+              .set(host.headers)
+              .send({ ...entry, occurrenceId })
+              .expect(201),
+            'POST /api/events/:eventId/nominations/direct-add as the host',
+          );
+
+          const leaving = fire(() => send({ leaver, eventId, leaverId, entryId: entry.suppliedById }));
+
+          // Queued on the event's row behind the move, which is queued behind
+          // the barrier.
+          const queued = await expectBackendsQueuedBehind(barrier, {
+            heldBy: holder.pid,
+            count: 2,
+            description: 'the move, and the request behind it',
+          });
+          expect(queued.map(({ query }) => query)).toContainEqual(
+            expect.stringMatching(/FROM events WHERE id = \$1 FOR SHARE/),
+          );
+
+          // Released before anything else is asked of the database: both
+          // requests are inside interactive transactions on the default 5s
+          // budget, and an expired budget surfaces as a 500.
+          await holder.rollback();
+
+          return { moved: await move.settled, left: await leaving.settled, gameId };
+        });
+
+        expect(moved.status).toBe(200);
+        expect(left.status).toBe(status);
+        expect(await scheduledGameExists(gameId)).toBe(inLineup);
+      });
     });
   });
 

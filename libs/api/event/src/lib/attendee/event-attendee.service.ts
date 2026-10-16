@@ -26,7 +26,13 @@ import { ATTENDEE_ORDER } from '../constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from '../constants/attendee-user-and-role.constant';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { assertEventExists, requireEvent } from '../event-access.helpers';
-import { ACTIVE_NOMINATION_STATUSES, emitSuppliedGameChanges, lineupStillAhead, syncSuppliedGames } from './attendance';
+import {
+  ACTIVE_NOMINATION_STATUSES,
+  emitSuppliedGameChanges,
+  lineupStillAhead,
+  lockEventDates,
+  syncSuppliedGames,
+} from './attendance';
 import { AddAttendeeDto } from './dto/add-attendee.dto';
 import { AddGameToListDto } from './dto/add-game-to-list.dto';
 import { UpdateAttendeeStatusDto } from './dto/update-attendee-status.dto';
@@ -519,7 +525,10 @@ export class EventAttendeeService {
    *
    * The entry is locked `FOR UPDATE` before the check, so a nomination or
    * direct add naming it either commits first and is counted, or waits
-   * (`lockSupplier`) and then finds it removed.
+   * (`lockSupplier`) and then finds it removed. The event's dates are locked
+   * too (`lockEventDates`), so a date write that puts a lineup ahead again
+   * either commits first and the game is counted, or waits and then takes
+   * the game off itself.
    */
   async removeGameFromList(eventId: string, attendeeId: string, gameListId: string): Promise<EventAttendeeGameList> {
     const initiatedAt = new Date();
@@ -558,6 +567,8 @@ export class EventAttendeeService {
         if (permitted === 0) {
           throw new ForbiddenException(t('errors.attendee.forbidden_remove_game'));
         }
+
+        await lockEventDates(tx, eventId);
 
         const nominations = await tx.eventGameNomination.count({
           where: { suppliedFromId: gameListId, status: { in: ACTIVE_NOMINATION_STATUSES } },

@@ -356,7 +356,10 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.update.mockResolvedValue(row);
       db.eventOccurrence.delete.mockResolvedValue(row);
       db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1')] as never);
-      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-1')] as never);
+      // The answer's read finds the game. A date write's read after the
+      // write, for the games nobody is bringing, finds none.
+      db.eventGame.findMany.mockImplementation(((args: { where: object }) =>
+        Promise.resolve('suppliedBy' in args.where ? [] : [game('g1', 'occ-1')])) as never);
     });
 
     it.each(writes)('$name embeds the policy alone in its write', async ({ name, op, status }) => {
@@ -395,7 +398,7 @@ describe('EventOccurrenceService', () => {
       const answer = await service.addOccurrence('event-1', { label: 'Day 1' });
 
       expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
-      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+      expect(compose).not.toHaveBeenCalledWith(ResourceType.EventGame, Action.read, expect.anything());
       expect(answer).toEqual(expect.objectContaining({ id: 'occ-1', availabilityVotes: [], games: [] }));
     });
 
@@ -569,12 +572,6 @@ describe('EventOccurrenceService', () => {
       }
     };
 
-    /** An entry supplying the lineup as the lock reads it: in the event, and on the offered games, unless `state` says otherwise. */
-    const supplier = (
-      id: string,
-      state: { status?: EventParticipationStatus; attendeeRemovedAt?: Date; entryRemovedAt?: Date } = {},
-    ) => ({ id, status: EventParticipationStatus.Attending, attendeeRemovedAt: null, entryRemovedAt: null, ...state });
-
     /** The lineup game the write takes off, as its domain event reports it. */
     const takenOff = {
       id: 'eg-off',
@@ -586,14 +583,6 @@ describe('EventOccurrenceService', () => {
       addedById: null,
       role: ScheduledGameRole.Primary,
     };
-
-    const someSuppliersOut = () =>
-      db.$queryRaw.mockResolvedValueOnce([
-        supplier('gl-in'),
-        supplier('gl-not-attending', { status: EventParticipationStatus.NotAttending }),
-        supplier('gl-removed', { attendeeRemovedAt: new Date() }),
-        supplier('gl-entry-off', { entryRemovedAt: new Date() }),
-      ] as never);
 
     beforeEach(() => {
       const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
@@ -608,38 +597,51 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.delete.mockResolvedValue(row);
     });
 
-    it.each(dateWrites)(
-      "$name locks every entry supplying the event's lineup, and its attendee, before it writes",
-      async ({ name, op }) => {
-        await run(name);
+    // FOR NO KEY UPDATE conflicts with the FOR SHARE a supplier leaving, or
+    // an entry coming off, takes on the same row, and not with the FOR KEY
+    // SHARE a game added to the lineup takes through its key.
+    it.each(dateWrites)("$name locks the event's row before it writes", async ({ name, op }) => {
+      await run(name);
 
-        const [[lock]] = db.$queryRaw.mock.calls;
-        expect(rawQueryText(lock)).toMatch(
-          /WHERE a\.event_id = \? AND EXISTS \(.*supplied_by_id = l\.id\) FOR SHARE OF l, a$/,
-        );
-        expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
-        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-          db.eventOccurrence[op].mock.invocationCallOrder[0],
-        );
-        expect(db.$transaction).toHaveBeenCalledTimes(1);
-      },
-    );
+      const [[lock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+      expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventOccurrence[op].mock.invocationCallOrder[0]);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
 
     it.each(dateWrites)(
       '$name takes off each game still ahead whose supplier is out of the event, or whose entry came off their offered games',
       async ({ name, op }) => {
-        someSuppliersOut();
         db.eventGame.findMany.mockResolvedValue([takenOff] as never);
 
         await run(name);
 
-        expect(db.eventGame.findMany).toHaveBeenCalledWith({
+        expect(db.eventGame.findMany).toHaveBeenLastCalledWith({
           where: {
-            suppliedById: { in: ['gl-not-attending', 'gl-removed', 'gl-entry-off'] },
+            suppliedBy: {
+              is: {
+                attendee: { is: { eventId: 'event-1' } },
+                OR: [
+                  { removedAt: { not: null } },
+                  {
+                    attendee: {
+                      is: {
+                        OR: [{ removedAt: { not: null } }, { status: EventParticipationStatus.NotAttending }],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
             ...lineupStillAhead(expect.any(Date)),
           },
           select: expect.any(Object),
         });
+        expect(db.eventGame.findMany.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
         expect(db.eventGame.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['eg-off'] } } });
         expect(db.eventGame.deleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
           db.eventOccurrence[op].mock.invocationCallOrder[0],
@@ -648,7 +650,6 @@ describe('EventOccurrenceService', () => {
     );
 
     it.each(dateWrites)('$name reports each game it took off, after the date itself', async ({ name }) => {
-      someSuppliersOut();
       db.eventGame.findMany.mockResolvedValue([takenOff] as never);
 
       await run(name);
@@ -660,9 +661,7 @@ describe('EventOccurrenceService', () => {
       expect(removed.eventId).toBe('event-1');
     });
 
-    it.each(dateWrites)('$name takes nothing off while every supplier is in the event', async ({ name }) => {
-      db.$queryRaw.mockResolvedValueOnce([supplier('gl-in')] as never);
-
+    it.each(dateWrites)('$name takes nothing off when every game ahead has someone bringing it', async ({ name }) => {
       await run(name);
 
       expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
@@ -672,7 +671,6 @@ describe('EventOccurrenceService', () => {
     });
 
     it.each(dateWrites)('$name reports nothing when its transaction fails', async ({ name }) => {
-      someSuppliersOut();
       db.eventGame.findMany.mockResolvedValue([takenOff] as never);
       db.eventGame.deleteMany.mockRejectedValue(new Error('deadlock detected'));
 
@@ -682,7 +680,6 @@ describe('EventOccurrenceService', () => {
     });
 
     it('updateOccurrence answers without the games it took off', async () => {
-      someSuppliersOut();
       db.eventGame.findMany
         .mockResolvedValueOnce([game('eg-off', 'occ-1'), game('eg-kept', 'occ-1')] as never)
         .mockResolvedValueOnce([{ ...takenOff, occurrenceId: 'occ-1' }] as never);

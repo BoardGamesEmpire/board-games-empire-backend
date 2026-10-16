@@ -21,6 +21,11 @@ export function isOutOfEvent(attendee: Pick<EventAttendee, 'removedAt' | 'status
   return attendee.removedAt !== null || attendee.status === EventParticipationStatus.NotAttending;
 }
 
+/** {@link isOutOfEvent}, as a filter on attendees. */
+const OUT_OF_EVENT = {
+  OR: [{ removedAt: { not: null } }, { status: EventParticipationStatus.NotAttending }],
+} satisfies Prisma.EventAttendeeWhereInput;
+
 /** The statuses that await an outcome, which a nomination pauses from and returns to. */
 const PAUSABLE_STATUSES = [NominationStatus.Open, NominationStatus.AwaitingApproval] as const;
 
@@ -107,7 +112,8 @@ export interface LockedSupplier {
  * a game whose supplier left a moment before, and nothing would pause it.
  *
  * Take it before any other lock the write needs, as {@link syncSuppliedGames}
- * comes after the attendee row's: the attendee row first, then nominations.
+ * comes after the attendee row's: the attendee row first, then the event's
+ * ({@link lockEventDates}), then nominations.
  */
 export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: string): Promise<LockedSupplier | null> {
   const rows = await tx.$queryRaw<LockedSupplier[]>(Prisma.sql`
@@ -127,6 +133,30 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
 }
 
 /**
+ * Locks the event's row `FOR SHARE` until the caller's transaction ends, so
+ * the event's dates stay as they are while the caller judges which lineups
+ * are still ahead (#551). A write that can leave a lineup game with nobody
+ * bringing it takes it before that read: a supplier leaving the event, or an
+ * entry coming off their offered games.
+ *
+ * A write to the event's dates takes the same row `FOR NO KEY UPDATE`
+ * ({@link writeEventDates}), which conflicts with this: whichever comes
+ * second waits, then sees the first. Without this lock, a supplier could
+ * leave while a date that has started is moved to a start still to come.
+ * Their leaving would read the date as started and keep their game in its
+ * lineup, and the move, reading before they left, would see them in the
+ * event, so the lineup would end up ahead, holding a game nobody is
+ * bringing.
+ *
+ * Adding a game to a lineup waits for neither. Its supplier is in the event
+ * when it is added ({@link lockSupplier}), and whichever of the two runs when
+ * they leave judges it then.
+ */
+export async function lockEventDates(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR SHARE`);
+}
+
+/**
  * Brings the games an attendee supplies into line with whether they are in
  * the event (#551).
  *
@@ -143,12 +173,18 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  * replaced. Run it in the transaction that wrote that state, AFTER the write:
  * the write's row lock is what keeps a nomination or direct add from naming
  * this attendee's games until the transaction commits (`lockSupplier`).
+ *
+ * It locks the event's row first ({@link lockEventDates}), before any
+ * nomination: removing a date writes to the nominations that name it while
+ * holding that row, so locking a nomination first could deadlock with it.
  */
 export async function syncSuppliedGames(
   tx: Prisma.TransactionClient,
   attendee: Pick<EventAttendee, 'id' | 'eventId' | 'removedAt' | 'status'>,
   now: Date,
 ): Promise<SuppliedGameChanges> {
+  await lockEventDates(tx, attendee.eventId);
+
   const changes: SuppliedGameChanges = { paused: [], resumed: [], removedGames: [] };
   const fromTheirList = {
     suppliedFrom: { is: { attendeeId: attendee.id } },
@@ -188,14 +224,6 @@ export async function syncSuppliedGames(
   return changes;
 }
 
-/** An entry supplying a lineup, as {@link writeEventDates} locks and judges it. */
-interface LineupSupplier {
-  id: string;
-  status: EventParticipationStatus;
-  attendeeRemovedAt: Date | null;
-  entryRemovedAt: Date | null;
-}
-
 /**
  * Runs `write`, a write to an event's dates, and takes off the lineup each
  * game it put back ahead that nobody is bringing: its supplier is out of the
@@ -207,11 +235,12 @@ interface LineupSupplier {
  * ahead again, and no route takes a game off a lineup. No other write does:
  * a declined or cancelled date never returns to proposed or confirmed.
  *
- * Every entry supplying the event's lineup is locked, with its attendee,
- * before the write, as {@link lockSupplier} locks one before any write that
- * names it, and is judged by that read. A supplier leaving, or an entry coming
- * off, at the same moment either commits first and is seen here, or waits for
- * this to commit and then finds the lineup ahead itself.
+ * The event's row is locked `FOR NO KEY UPDATE` before the write, so this
+ * and each write that can leave a lineup game with nobody bringing it take
+ * turns ({@link lockEventDates}). One that commits first is seen by the
+ * read after the write. One that comes second waits for this to commit,
+ * then finds the lineup ahead itself. Two date writes to one event take
+ * turns the same way.
  */
 export async function writeEventDates<T>(
   tx: Prisma.TransactionClient,
@@ -219,31 +248,20 @@ export async function writeEventDates<T>(
   now: Date,
   write: () => Promise<T>,
 ): Promise<{ written: T; removedGames: RemovedLineupGame[] }> {
-  const suppliers = await tx.$queryRaw<LineupSupplier[]>(Prisma.sql`
-    SELECT l.id AS "id",
-           a.status AS "status",
-           a.removed_at AS "attendeeRemovedAt",
-           l.removed_at AS "entryRemovedAt"
-    FROM attendee_game_lists l
-    JOIN event_attendees a ON a.id = l.attendee_id
-    WHERE a.event_id = ${eventId}
-      AND EXISTS (SELECT 1 FROM event_games g WHERE g.supplied_by_id = l.id)
-    FOR SHARE OF l, a
-  `);
+  await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR NO KEY UPDATE`);
 
   const written = await write();
 
-  const unsupplied = suppliers.filter(
-    ({ status, attendeeRemovedAt, entryRemovedAt }) =>
-      entryRemovedAt !== null || isOutOfEvent({ status, removedAt: attendeeRemovedAt }),
-  );
-
-  if (unsupplied.length === 0) {
-    return { written, removedGames: [] };
-  }
-
   const removedGames = await tx.eventGame.findMany({
-    where: { suppliedById: { in: unsupplied.map(({ id }) => id) }, ...lineupStillAhead(now) },
+    where: {
+      suppliedBy: {
+        is: {
+          attendee: { is: { eventId } },
+          OR: [{ removedAt: { not: null } }, { attendee: { is: OUT_OF_EVENT } }],
+        },
+      },
+      ...lineupStillAhead(now),
+    },
     select: SCHEDULED_GAME_SNAPSHOT_SELECT,
   });
 
