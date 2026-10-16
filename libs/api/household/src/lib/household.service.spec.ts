@@ -6,6 +6,7 @@ import { CONTEXT_INVITE_SELECT, InviteService, type InviteRevokedEvent } from '@
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
+  createMockDatabaseService,
   createTestingModuleWithDb,
   paginationQuery,
   unwrapTransaction,
@@ -941,25 +942,32 @@ describe('HouseholdService', () => {
     const UPDATE_CEILING = { id: 'update-ceiling' };
     const UNTIL = new Date('2026-11-15T12:00:00Z');
 
+    // A client of its own, so a read that skips the transaction lands on `db`
+    // and shows.
+    let tx: MockDatabaseService;
+
     const read = (subject: HouseholdService, query = paginationQuery({ limit: 10 })) =>
       subject.getRestorableHouseholdsForUser(query);
 
     beforeEach(() => {
+      tx = createMockDatabaseService();
+      db.$transaction.mockImplementation((callback) => callback(tx));
+
       abilityService.getCurrentResourceConditions.mockImplementation((_type, action) =>
         action === Action.update ? [UPDATE_CEILING] : [READ_CEILING],
       );
-      db.userPermission.findMany.mockResolvedValue([
+      tx.userPermission.findMany.mockResolvedValue([
         { resourceId: 'hh-1', expiresAt: UNTIL },
         { resourceId: 'hh-2', expiresAt: null },
       ] as never);
-      db.household.findMany.mockResolvedValue([]);
-      db.household.count.mockResolvedValue(0);
+      tx.household.findMany.mockResolvedValue([]);
+      tx.household.count.mockResolvedValue(0);
     });
 
     it('reads the acting user’s live grants of the restore permission, each pinned to a household', async () => {
       await read(service);
 
-      expect(db.userPermission.findMany).toHaveBeenCalledWith({
+      expect(tx.userPermission.findMany).toHaveBeenCalledWith({
         where: {
           userId: 'user-1',
           resourceType: ResourceType.Household,
@@ -1000,14 +1008,14 @@ describe('HouseholdService', () => {
         ],
       };
 
-      expect(db.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
-      expect(db.household.count).toHaveBeenCalledWith({ where });
+      expect(tx.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(tx.household.count).toHaveBeenCalledWith({ where });
     });
 
     it('pages the same way as the household list', async () => {
       await read(service, paginationQuery({ page: 2, limit: 10 }));
 
-      expect(db.household.findMany).toHaveBeenCalledWith(
+      expect(tx.household.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           include: expect.objectContaining({ members: { select: MEMBER_SELECT } }),
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
@@ -1015,17 +1023,34 @@ describe('HouseholdService', () => {
           take: 10,
         }),
       );
+    });
 
-      const { options } = batchTransactionCall(db);
-      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    // Read apart, staff restoring the household and deleting it again in
+    // between would pair the new deletion with the window the restore revoked.
+    // The mock runs the callback at any isolation level, so the level is pinned
+    // here, and each read has to go through the transaction's client.
+    it('reads the grants, the rows and the count in one REPEATABLE READ transaction', async () => {
+      await read(service);
+
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+      expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+
+      expect(tx.userPermission.findMany).toHaveBeenCalledTimes(1);
+      expect(tx.household.findMany).toHaveBeenCalledTimes(1);
+      expect(tx.household.count).toHaveBeenCalledTimes(1);
+      expect(db.userPermission.findMany).not.toHaveBeenCalled();
+      expect(db.household.findMany).not.toHaveBeenCalled();
+      expect(db.household.count).not.toHaveBeenCalled();
     });
 
     // A grant with no end date is restorable for as long as it stands, so its
     // row says so with `null`. DELETE's `null` means something else: that the
     // delete opened no window.
     it('gives each row the end of the acting user’s restore window, null when it has none', async () => {
-      db.household.findMany.mockResolvedValue([{ id: 'hh-2' }, { id: 'hh-1' }] as never);
-      db.household.count.mockResolvedValue(2);
+      tx.household.findMany.mockResolvedValue([{ id: 'hh-2' }, { id: 'hh-1' }] as never);
+      tx.household.count.mockResolvedValue(2);
 
       await expect(read(service)).resolves.toEqual({
         rows: [
@@ -1039,8 +1064,8 @@ describe('HouseholdService', () => {
     // `null` already means "no end date", so a row with no window must not
     // borrow it and advertise an undo that never closes.
     it('fails rather than answer null for a row the scope let through without a window', async () => {
-      db.household.findMany.mockResolvedValue([{ id: 'hh-elsewhere' }] as never);
-      db.household.count.mockResolvedValue(1);
+      tx.household.findMany.mockResolvedValue([{ id: 'hh-elsewhere' }] as never);
+      tx.household.count.mockResolvedValue(1);
 
       await expect(read(service)).rejects.toThrow('household hh-elsewhere was listed with no restore window');
     });
@@ -1048,7 +1073,7 @@ describe('HouseholdService', () => {
     // Most users hold no grant. The read is still composed, or the envelope
     // guard would answer them 500 instead of an empty page.
     it('still composes when the acting user holds no grant, matching nothing', async () => {
-      db.userPermission.findMany.mockResolvedValue([]);
+      tx.userPermission.findMany.mockResolvedValue([]);
 
       await expect(read(service)).resolves.toEqual({ rows: [], total: 0 });
       expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, {
@@ -1064,8 +1089,7 @@ describe('HouseholdService', () => {
       });
 
       await expect(read(service)).rejects.toThrow(ForbiddenException);
-      expect(db.userPermission.findMany).not.toHaveBeenCalled();
-      expect(db.household.findMany).not.toHaveBeenCalled();
+      expect(db.$transaction).not.toHaveBeenCalled();
     });
   });
 });

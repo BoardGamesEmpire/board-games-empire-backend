@@ -61,6 +61,25 @@ export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeo
  */
 export type RestorableHousehold = HouseholdWithRelations & { readonly restorableUntil: Date | null };
 
+/**
+ * The rows of one page of a household list: the list include, the order, and
+ * the page window. Each list counts over the same `where`, in the same
+ * snapshot as its rows.
+ *
+ * The order is total: `createdAt` alone would let rows created in the same
+ * transaction share a key and drift across page boundaries between requests —
+ * page 2 re-showing a row page 1 already had, and dropping another.
+ */
+function householdPageArgs(where: Prisma.HouseholdWhereInput, pagination: PaginationQueryDto) {
+  return {
+    where,
+    include: HOUSEHOLD_LIST_INCLUDE,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: pagination.skip,
+    take: pagination.pageSize,
+  } satisfies Prisma.HouseholdFindManyArgs;
+}
+
 /** How many of each member's entries the household detail embeds. */
 const MEMBER_GAME_SAMPLE_SIZE = 5;
 
@@ -568,23 +587,37 @@ export class HouseholdService {
    * A grant pinned to no household is left out. It reaches every deleted
    * household, which is the all-subject view #419 owns, as is staff's reach.
    *
+   * The grants, the rows and the count share one REPEATABLE READ transaction.
+   * Read apart, staff restoring the household and deleting it again in
+   * between would list the new deletion with the window the restore revoked:
+   * a row that was never true. The ceilings would not catch it, since they
+   * come from the abilities loaded when the request came in, which still hold
+   * the revoked grant.
+   *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors,
    * as for {@link getHouseholdsForUser}. PROVISIONAL — #395.
    */
   async getRestorableHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<RestorableHousehold>> {
     const userId = resolveScopeSubjectId(this.abilityService);
-    const windows = await this.restoreWindows(userId);
 
-    const scope: Prisma.HouseholdWhereInput = { deletedAt: { not: null }, id: { in: [...windows.keys()] } };
+    const { windows, rows, total } = await this.db.$transaction(
+      async (tx) => {
+        const windows = await this.restoreWindows(tx, userId);
+        const scope: Prisma.HouseholdWhereInput = { deletedAt: { not: null }, id: { in: [...windows.keys()] } };
 
-    const { rows, total } = await this.paginateHouseholds(
-      {
-        AND: [
-          this.scopeComposer.compose(ResourceType.Household, Action.read, scope),
-          this.scopeComposer.compose(ResourceType.Household, Action.update, scope),
-        ],
+        const where: Prisma.HouseholdWhereInput = {
+          AND: [
+            this.scopeComposer.compose(ResourceType.Household, Action.read, scope),
+            this.scopeComposer.compose(ResourceType.Household, Action.update, scope),
+          ],
+        };
+
+        const rows = await tx.household.findMany(householdPageArgs(where, pagination));
+        const total = await tx.household.count({ where });
+
+        return { windows, rows, total };
       },
-      pagination,
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
     return {
@@ -609,9 +642,15 @@ export class HouseholdService {
    * not of a retired permission. "Not a denial" is spelled as
    * {@link restoreHousehold} spells it, since `inverted` is nullable. A grant
    * with no end date is kept, since the restore route honours it.
+   *
+   * Read on the caller's transaction, so the windows come from the same
+   * snapshot as the rows they are paired with.
    */
-  private async restoreWindows(userId: string): Promise<ReadonlyMap<string, Date | null>> {
-    const grants = await this.db.userPermission.findMany({
+  private async restoreWindows(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<ReadonlyMap<string, Date | null>> {
+    const grants = await tx.userPermission.findMany({
       where: {
         userId,
         resourceType: ResourceType.Household,
@@ -636,33 +675,22 @@ export class HouseholdService {
    * One page of households plus the total matching row count for the response
    * envelope (#230). Scope is the caller's business; everything below it holds
    * whatever the scope, so a household list that declares a different one
-   * (#485) would read through here rather than restate either invariant.
+   * (#485) would read through here rather than restate either invariant. A
+   * list whose scope comes from its own read, as
+   * {@link getRestorableHouseholdsForUser}'s does, makes that read in the same
+   * transaction instead, through the same {@link householdPageArgs}.
    *
    * Rows and count share a REPEATABLE READ transaction: Prisma's default batch
    * isolation is the database default (READ COMMITTED on Postgres), where each
    * statement takes its own snapshot and a concurrent create or delete between
    * the two makes `hasMore` disagree with the rows actually sent.
-   *
-   * The order is total: `createdAt` alone would let rows created in the same
-   * transaction share a key and drift across page boundaries between requests —
-   * page 2 re-showing a row page 1 already had, and dropping another.
    */
   private async paginateHouseholds(
     where: Prisma.HouseholdWhereInput,
     pagination: PaginationQueryDto,
   ): Promise<PaginatedRows<HouseholdWithRelations>> {
     const [rows, total] = await this.db.$transaction(
-      [
-        this.db.household.findMany({
-          where,
-          include: HOUSEHOLD_LIST_INCLUDE,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          skip: pagination.skip,
-          take: pagination.pageSize,
-        }),
-
-        this.db.household.count({ where }),
-      ],
+      [this.db.household.findMany(householdPageArgs(where, pagination)), this.db.household.count({ where })],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
