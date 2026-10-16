@@ -148,6 +148,8 @@ export interface ListHouseholdsEnvelope {
 
 const fail = envelopeFailure('apps/api-e2e/src/household/household-wire.ts');
 
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+
 /**
  * Narrows an unknown value to a household row: an object carrying a non-empty
  * string `id`. Only `id` is checked, on purpose — it is the one field every
@@ -162,7 +164,7 @@ function asHousehold(value: unknown): HouseholdWire | undefined {
 
   const id = value['id'];
 
-  return typeof id === 'string' && id.length > 0 ? (value as unknown as HouseholdWire) : undefined;
+  return isNonEmptyString(id) ? (value as unknown as HouseholdWire) : undefined;
 }
 
 /** `POST /api/households` / `PATCH` / `DELETE`: `{ message, household }`. */
@@ -238,6 +240,37 @@ export function readEnvelope(response: HttpResponseLike, request: RequestDescrip
   return { household: household as unknown as HouseholdDetail };
 }
 
+export interface MemberEnvelope {
+  readonly message: string;
+  readonly member: HouseholdMemberProjection;
+}
+
+/**
+ * `DELETE …/members/:memberId` and `DELETE …/members/me`: `{ message, member }`,
+ * where `member` is the membership that was deleted.
+ *
+ * `userId` is checked as well as `id`, unlike the household rows above: the
+ * remove and leave cases assert WHOSE membership went, and `userId` is the
+ * field that says.
+ */
+export function memberEnvelope(response: HttpResponseLike, request: RequestDescription): MemberEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const member = response.body['member'];
+  if (!isRecord(member) || !isNonEmptyString(member['id']) || !isNonEmptyString(member['userId'])) {
+    return fail("it carried no 'member' object with a string id and userId", request, response);
+  }
+
+  const message = response.body['message'];
+  if (typeof message !== 'string') {
+    return fail("it carried no 'message' string", request, response);
+  }
+
+  return { message, member: member as unknown as HouseholdMemberProjection };
+}
+
 /**
  * The ids in one member's game sample on `GET /api/households/:id`, from
  * `members[].user.gameCollections` (#514).
@@ -268,7 +301,7 @@ export function memberGameSampleIds(
   const ids: string[] = [];
   for (const entry of sample) {
     const id = isRecord(entry) ? entry['id'] : undefined;
-    if (typeof id !== 'string' || id.length === 0) {
+    if (!isNonEmptyString(id)) {
       return fail(`one of member '${memberUserId}'s sampled games has no string id`, request, response);
     }
 

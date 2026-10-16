@@ -298,7 +298,13 @@ describe('staff floor over the wire', () => {
     return { fixture, owner, admin, outsider, target: fixture.members[0] };
   };
 
-  const { transferOwnership } = createMemberClient(baseUrl);
+  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+
+  /** Every membership id in a household, so "unchanged" is a comparison rather than a count. */
+  const rosterIds = async (householdId: string): Promise<string[]> =>
+    (
+      await db.client.householdMember.findMany({ where: { householdId }, select: { id: true }, orderBy: { id: 'asc' } })
+    ).map((row) => row.id);
 
   it('lets staff read a roster they are no member of, and refuses an outsider the same read', async () => {
     const { fixture, admin, outsider } = await foreignHousehold();
@@ -328,6 +334,62 @@ describe('staff floor over the wire', () => {
     ).resolves.toEqual({ role: { name: SystemRole.HouseholdAdmin } });
 
     await request(baseUrl).patch(path).set(outsider.headers).send(payload).expect(403);
+  });
+
+  it('lets staff remove a member of a household they are no member of, and refuses an outsider the same request', async () => {
+    // `manage:household_member:administer` is unconditioned, so it reaches the
+    // remove route for every household. The outsider goes first, while the
+    // membership still exists to be refused.
+    const { fixture, admin, outsider, target } = await foreignHousehold();
+
+    await removeMember(outsider, fixture.household.id, target.member.id).expect(403);
+
+    await removeMember(admin, fixture.household.id, target.member.id).expect(200);
+
+    await expect(rosterIds(fixture.household.id)).resolves.toEqual([fixture.owner.member.id]);
+  });
+
+  it("refuses staff who try to remove a household's last owner, and refuses an outsider the same request", async () => {
+    // Staff authority gets the request past the route guard, not past the
+    // last-owner guard, which reads the household's owners whoever is asking.
+    // The route guard answers 403, as it does the outsider, so the Admin's 400
+    // means the request reached the last-owner guard.
+    const { fixture, admin, outsider } = await foreignHousehold();
+    const before = await rosterIds(fixture.household.id);
+
+    await removeMember(outsider, fixture.household.id, fixture.owner.member.id).expect(403);
+
+    const refused = await removeMember(admin, fixture.household.id, fixture.owner.member.id);
+
+    expect(refused.status).toBe(400);
+    expect(refused.body.message).toEqual(expect.stringContaining(fixture.household.id));
+    expect(refused.body.message).toMatch(/transfer ownership/i);
+    await expect(rosterIds(fixture.household.id)).resolves.toEqual(before);
+  });
+
+  it('resolves …/members/me to the caller even for staff, who hold no membership in the household', async () => {
+    // The widest test of the leave route's `userId` pin. Staff conditions
+    // render to `{}`, so without the pin the route would delete whichever
+    // membership in the household it found first: a 200 that removed somebody
+    // else, or a 400 for the last owner. The 404 says it looked for the
+    // Admin's own membership and found none, and the route guard would have
+    // answered 403, so the request got past it.
+    //
+    // The message is what shows the leave route answered. Were `DELETE
+    // :memberId` ever declared first, it would take this request, pass the
+    // same unconditioned grant, look for a membership with the id `me`, and
+    // answer a 404 of its own.
+    //
+    // Unlike its neighbours, this case sends no outsider. What leave answers
+    // a user outside the household is still open (#288): 403 for one in no
+    // household, 404 for one in another. Pinning either here would decide it.
+    const { fixture, admin } = await foreignHousehold();
+    const before = await rosterIds(fixture.household.id);
+
+    const refused = await leave(admin, fixture.household.id).expect(404);
+
+    expect(refused.body.message).toBe(`You are not a member of household ${fixture.household.id}`);
+    await expect(rosterIds(fixture.household.id)).resolves.toEqual(before);
   });
 
   it('lets staff soft-delete a foreign household, and refuses an outsider the same delete', async () => {

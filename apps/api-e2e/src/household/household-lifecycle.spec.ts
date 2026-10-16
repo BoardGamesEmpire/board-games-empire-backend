@@ -39,8 +39,9 @@ describe('household lifecycle', () => {
 
   /**
    * Arranges an invite directly (#257): inline rather than as a
-   * `@bge/testing-e2e` factory until #273 supplies a second consumer and the
-   * shared shape is visible rather than guessed.
+   * `@bge/testing-e2e` factory. Each invite suite keeps a copy of its own for
+   * now. Extracting one shared factory falls to #747, whose e2e arranges
+   * invites for a removed member, by id and by address.
    *
    * `token` is random rather than sequential for the same reason
    * `prepareSignup` is — it is unique-constrained, and predictable identifiers
