@@ -47,29 +47,78 @@ describe('DataGatewayService', () => {
       expect(service.ping({}).gatewayName).toBe('IgdbGateway');
     });
 
-    it('includes "GatewayService" in supportedServices', () => {
-      expect(service.ping({}).supportedServices).toContain('GatewayService');
-    });
-
     it('returns a bigint timestampMs', () => {
       expect(typeof service.ping({}).timestampMs).toBe('bigint');
     });
+  });
 
-    it('declares language preferences (IETF BCP 47 + ISO 639-1 accepted, IETF BCP 47 emitted)', () => {
-      const response = service.ping({});
+  describe('describe', () => {
+    it('returns a response using the correlationId from the request', () => {
+      expect(service.describe({ correlationId: 'corr-describe-1' }).correlationId).toBe('corr-describe-1');
+    });
 
-      expect(response.languagePreferences).toEqual({
+    it('generates a correlationId when none is provided in the request', () => {
+      expect(service.describe({}).correlationId).toEqual(expect.any(String));
+    });
+
+    it('declares search, fetch, fetch expansions and list languages', () => {
+      expect(new Set(service.describe({}).capabilities)).toEqual(
+        new Set([
+          proto.Capability.CAPABILITY_SEARCH,
+          proto.Capability.CAPABILITY_FETCH,
+          proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+          proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        ]),
+      );
+    });
+
+    it('covers every video platform type, never tabletop', () => {
+      expect(new Set(service.describe({}).coverage?.platformTypes)).toEqual(
+        new Set([
+          proto.PlatformType.PLATFORM_TYPE_CONSOLE,
+          proto.PlatformType.PLATFORM_TYPE_PC,
+          proto.PlatformType.PLATFORM_TYPE_PORTABLE,
+          proto.PlatformType.PLATFORM_TYPE_MOBILE,
+          proto.PlatformType.PLATFORM_TYPE_ARCADE,
+          proto.PlatformType.PLATFORM_TYPE_OTHER,
+        ]),
+      );
+    });
+
+    it('covers every content type its game types map to, and no accessories', () => {
+      expect(new Set(service.describe({}).coverage?.contentTypes)).toEqual(
+        new Set([
+          proto.ContentType.CONTENT_TYPE_BASE_GAME,
+          proto.ContentType.CONTENT_TYPE_EXPANSION,
+          proto.ContentType.CONTENT_TYPE_DLC,
+          proto.ContentType.CONTENT_TYPE_STANDALONE_EXPANSION,
+          proto.ContentType.CONTENT_TYPE_BUNDLE,
+          proto.ContentType.CONTENT_TYPE_REMAKE,
+          proto.ContentType.CONTENT_TYPE_REMASTER,
+          proto.ContentType.CONTENT_TYPE_EXPANDED_EDITION,
+          proto.ContentType.CONTENT_TYPE_PORT,
+          proto.ContentType.CONTENT_TYPE_MOD,
+        ]),
+      );
+    });
+
+    it('declares no filterable axes, since a search request carries no filter', () => {
+      expect(service.describe({}).filterableAxes).toEqual([]);
+    });
+
+    it('accepts BCP 47 tags before ISO 639-1 codes, sends BCP 47 tags, and wants the search language translated', () => {
+      expect(service.describe({}).languageCodeFormats).toEqual({
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
         ],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
-        passthroughRawLocale: false,
-      } satisfies proto.GatewayLanguagePreferences);
+        passthroughSearchLanguage: false,
+      } satisfies proto.LanguageCodeFormats);
     });
 
-    it('does not request raw locale passthrough', () => {
-      expect(service.ping({}).languagePreferences?.passthroughRawLocale).toBe(false);
+    it('declares its free text as plain text', () => {
+      expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
     });
   });
 

@@ -50,20 +50,58 @@ describe('the IGDB gateway over gRPC', () => {
     const sentAt = Date.now();
     const reply = await gateway().ping('e2e-ping');
 
-    expect(reply).toMatchObject({
-      correlationId: 'e2e-ping',
-      gatewayName: 'IgdbGateway',
-      supportedServices: ['GatewayService'],
-      languagePreferences: {
-        acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_IETF_BCP_47', 'LANGUAGE_CODE_FORMAT_ISO_639_1'],
-        responseFormat: 'LANGUAGE_CODE_FORMAT_IETF_BCP_47',
-        passthroughRawLocale: false,
-      },
-    });
+    expect(reply).toMatchObject({ correlationId: 'e2e-ping', gatewayName: 'IgdbGateway' });
 
     // An int64 on the wire: the server's clock reading, taken during the call.
     expect(Number(reply.timestampMs)).toBeGreaterThanOrEqual(sentAt);
     expect(Number(reply.timestampMs)).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('describes its operations, coverage and formats on Describe, and echoes the correlation id', async () => {
+    const reply = await gateway().describe('e2e-describe');
+
+    expect(reply).toMatchObject({
+      correlationId: 'e2e-describe',
+      capabilities: [
+        'CAPABILITY_SEARCH',
+        'CAPABILITY_FETCH',
+        'CAPABILITY_FETCH_EXPANSIONS',
+        'CAPABILITY_LIST_LANGUAGES',
+      ],
+      filterableAxes: [],
+      languageCodeFormats: {
+        acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_IETF_BCP_47', 'LANGUAGE_CODE_FORMAT_ISO_639_1'],
+        responseFormat: 'LANGUAGE_CODE_FORMAT_IETF_BCP_47',
+        passthroughSearchLanguage: false,
+      },
+      contentFormat: 'CONTENT_FORMAT_PLAIN_TEXT',
+    });
+
+    // Coverage's lists are sets: their order is the game mapper's, and means nothing.
+    expect(new Set(reply.coverage?.platformTypes)).toEqual(
+      new Set([
+        'PLATFORM_TYPE_CONSOLE',
+        'PLATFORM_TYPE_PC',
+        'PLATFORM_TYPE_PORTABLE',
+        'PLATFORM_TYPE_MOBILE',
+        'PLATFORM_TYPE_ARCADE',
+        'PLATFORM_TYPE_OTHER',
+      ]),
+    );
+    expect(new Set(reply.coverage?.contentTypes)).toEqual(
+      new Set([
+        'CONTENT_TYPE_BASE_GAME',
+        'CONTENT_TYPE_EXPANSION',
+        'CONTENT_TYPE_DLC',
+        'CONTENT_TYPE_STANDALONE_EXPANSION',
+        'CONTENT_TYPE_BUNDLE',
+        'CONTENT_TYPE_REMAKE',
+        'CONTENT_TYPE_REMASTER',
+        'CONTENT_TYPE_EXPANDED_EDITION',
+        'CONTENT_TYPE_PORT',
+        'CONTENT_TYPE_MOD',
+      ]),
+    );
   });
 
   it('lists its languages by BCP 47 tag', async () => {

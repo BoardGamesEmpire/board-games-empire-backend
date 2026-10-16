@@ -36,12 +36,30 @@ export class StubGatewayService implements GatewayServiceHost {
       timestampMs: BigInt(Date.now()),
       gatewayName: 'StubGateway',
       gatewayVersion: '1.0.0',
-      supportedServices: ['GatewayService'],
-      languagePreferences: {
+    };
+  }
+
+  /** Declares what its fixtures hold: tabletop base games and expansions, tagged in BCP 47. */
+  describe(request: proto.DescribeRequest): proto.DescribeResponse {
+    return {
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      capabilities: [
+        proto.Capability.CAPABILITY_SEARCH,
+        proto.Capability.CAPABILITY_FETCH,
+        proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+        proto.Capability.CAPABILITY_LIST_LANGUAGES,
+      ],
+      coverage: {
+        platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+        contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
+      },
+      filterableAxes: [],
+      languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
-        passthroughRawLocale: false,
+        passthroughSearchLanguage: false,
       },
+      contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
     };
   }
 

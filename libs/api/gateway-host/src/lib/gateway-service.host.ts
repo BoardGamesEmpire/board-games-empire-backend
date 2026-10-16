@@ -19,6 +19,8 @@ export abstract class GatewayServiceHost {
 
   abstract healthCheck(request: proto.HealthCheckRequest): proto.HealthCheckResponse;
 
+  abstract describe(request: proto.DescribeRequest): proto.DescribeResponse;
+
   abstract searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult>;
 
   abstract fetchGame(request: proto.FetchGameRequest): Observable<proto.FetchGameResponse>;

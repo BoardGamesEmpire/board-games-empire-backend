@@ -1,5 +1,7 @@
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type {
+  DescribeRequest,
+  DescribeResponse,
   FetchExpansionsRequest,
   FetchGameRequest,
   FetchGameResponse,
@@ -47,6 +49,10 @@ export class RemoteGatewayDriver implements DataGatewayDriver {
 
   check(request: HealthCheckRequest): Observable<HealthCheckResponse> {
     return this.client.check(request);
+  }
+
+  describe(request: DescribeRequest): Observable<DescribeResponse> {
+    return this.client.describe(request);
   }
 
   searchGames(request: GatewaySearchRequest): Observable<GatewaySearchResult> {

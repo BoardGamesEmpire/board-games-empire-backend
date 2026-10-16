@@ -5,13 +5,22 @@ import type { BggLink, BggName, BggSearchItem, BggThing, BggVersion } from '../t
 import { toLanguageDataList } from './language.mapper';
 
 /**
- * BGG `type` → proto ContentType. Accessories fall through to UNSPECIFIED.
+ * BGG `type` → proto ContentType. Video games and RPG items and issues fall
+ * through to UNSPECIFIED.
  */
 const BGG_CONTENT_TYPE_MAP: Readonly<Record<string, proto.ContentType>> = {
   [BggThingType.BoardGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
   [BggThingType.BoardGameExpansion]: proto.ContentType.CONTENT_TYPE_EXPANSION,
   [BggThingType.BoardGameAccessory]: proto.ContentType.CONTENT_TYPE_ACCESSORY,
 };
+
+/**
+ * The content types BGG things of `thingTypes` map to, each once. A type the
+ * map doesn't name is left out, since coverage never lists UNSPECIFIED.
+ */
+export function toContentTypes(thingTypes: readonly BggThingType[]): proto.ContentType[] {
+  return [...new Set(thingTypes.flatMap((type) => BGG_CONTENT_TYPE_MAP[type] ?? []))];
+}
 
 const COMPLEXITY_WEIGHT_SCALE = 1000;
 

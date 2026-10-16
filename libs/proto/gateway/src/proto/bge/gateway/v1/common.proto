@@ -63,12 +63,12 @@ enum ReleaseStatus {
   RELEASE_STATUS_DELISTED = 11;
 }
 
-// Format a gateway uses when emitting language codes in LanguageData and when
-// accepting locale parameters on inbound requests. Reflects the canonical
-// language models: ISO 639-1 (`Language.iso6391`), ISO 639-3
-// (`Language.iso6393`), and IETF BCP 47 (`LanguageTag.tag` — the system's
+// Format a DataGateway uses when emitting language codes in LanguageData and
+// when reading the search language from a request's `locale` field. Reflects
+// the canonical language models: ISO 639-1 (`Language.iso6391`), ISO 639-3
+// (`Language.iso6393`), and IETF BCP 47 (`LanguageTag.tag` — the server's
 // preferred identifier). NAME and NATIVE_NAME are display-oriented fallbacks
-// for sources that publish only display strings (BGG).
+// for upstreams that publish only display strings (BGG).
 enum LanguageCodeFormat {
   LANGUAGE_CODE_FORMAT_UNSPECIFIED = 0;
 
@@ -126,10 +126,11 @@ message PlatformData {
   PlatformType platform_type = 4;
 }
 
-// A language attached to gateway content. Gateways fill only the fields they
-// genuinely know — the host resolves entries to canonical LanguageTag rows
-// via LanguageGatewayLink, preferring ietf_tag, then iso6393, then name.
-// NAME-format sources (BGG) legitimately send name alone.
+// A language attached to DataGateway content. DataGateways fill only the
+// fields they genuinely know — the server resolves entries to canonical
+// LanguageTag rows via LanguageGatewayLink, preferring ietf_tag, then
+// iso6393, then name. NAME-format DataGateways (BGG) legitimately send name
+// alone.
 message LanguageData {
   // "eng", "fra", "zho"
   optional string iso6393 = 1;
@@ -171,13 +172,14 @@ message LocalizationData {
 //   - BGG without version data: one synthetic "default" release
 //   - IGDB / Steam: one per platform-region combination
 //
-// In search context (GameSearchData.available_releases), gateways populate
+// In search context (GameSearchData.available_releases), DataGateways populate
 // identity and availability fields only — edition fields (edition_name,
 // release_year, parent_edition_external_id, *_overrides)
 // stay absent. Call FetchGame for full edition data.
 message GameReleaseData {
   // ─── Identity ────────────────────────────────────────────────────────
-  // Gateway-stable identifier for this edition. Maps to GameRelease.editionKey.
+  // DataGateway-stable identifier for this edition. Maps to
+  // GameRelease.editionKey.
   //   - BGG: <version> id (e.g. "416798" for Catan Afrikaans edition)
   //   - BGG fallback (no version data): literal "default"
   //   - IGDB: release_date entity id
@@ -193,7 +195,8 @@ message GameReleaseData {
   optional string edition_name = 3;
 
   // Year this edition was first published. Distinct from release_date which
-  // is region-specific. Gateways must coerce sentinel zero values to absent.
+  // is region-specific. DataGateways must coerce sentinel zero values to
+  // absent.
   optional int32 release_year = 4;
 
   // External_id of the parent edition within the same GameData payload.
@@ -272,11 +275,11 @@ message GameSearchData {
   optional string base_game_external_id = 10;
   optional string summary = 11;
 
-  // Platform chips — populated by gateways that expose platform data.
-  // BGG gateways leave this empty; IGDB / Steam gateways populate it.
+  // Platform chips — populated by DataGateways that expose platform data.
+  // BGG DataGateways leave this empty; IGDB / Steam DataGateways populate it.
   repeated PlatformData available_platforms = 12;
 
-  // Platform-specific releases at search granularity. Gateways populate
+  // Platform-specific releases at search granularity. DataGateways populate
   // identity and availability fields only — edition fields stay absent.
   repeated GameReleaseData available_releases = 13;
 }

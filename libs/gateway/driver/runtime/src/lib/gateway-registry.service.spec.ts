@@ -29,6 +29,7 @@ describe('GatewayRegistryService', () => {
     ({
       ping: jest.fn(),
       check: jest.fn(),
+      describe: jest.fn(),
       searchGames: jest.fn(),
       fetchGame: jest.fn(),
       fetchExpansions: jest.fn(),

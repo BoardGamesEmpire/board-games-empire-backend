@@ -13,6 +13,7 @@ describe('DataGatewayController', () => {
     const mockHost: jest.Mocked<GatewayServiceHost> = {
       ping: jest.fn(),
       healthCheck: jest.fn(),
+      describe: jest.fn(),
       searchGames: jest.fn(),
       fetchGame: jest.fn(),
       fetchExpansions: jest.fn(),
@@ -42,18 +43,39 @@ describe('DataGatewayController', () => {
         timestampMs: BigInt(0),
         gatewayName: 'TestGateway',
         gatewayVersion: '1.0.0',
-        supportedServices: ['GatewayService'],
-        languagePreferences: {
-          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
-          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
-          passthroughRawLocale: false,
-        },
       };
       host.ping.mockReturnValue(expected);
 
       const result = controller.ping(request);
 
       expect(host.ping).toHaveBeenCalledWith(request);
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe('describe', () => {
+    it('delegates to the host and returns its result', () => {
+      const request: proto.DescribeRequest = { correlationId: 'corr-1' };
+      const expected: proto.DescribeResponse = {
+        correlationId: 'corr-1',
+        capabilities: [proto.Capability.CAPABILITY_FETCH],
+        coverage: {
+          platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+          contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME],
+        },
+        filterableAxes: [],
+        languageCodeFormats: {
+          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
+          passthroughSearchLanguage: false,
+        },
+        contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+      };
+      host.describe.mockReturnValue(expected);
+
+      const result = controller.describe(request);
+
+      expect(host.describe).toHaveBeenCalledWith(request);
       expect(result).toBe(expected);
     });
   });

@@ -26,6 +26,11 @@ export class DataGatewayController implements proto.GatewayServiceController {
     return this.gatewayService.healthCheck(request);
   }
 
+  describe(request: proto.DescribeRequest): proto.DescribeResponse {
+    this.logger.log('Describe request received');
+    return this.gatewayService.describe(request);
+  }
+
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     this.logger.log(`SearchGames request received with query: '${request.query}'`);
     return this.gatewayService.searchGames(request);

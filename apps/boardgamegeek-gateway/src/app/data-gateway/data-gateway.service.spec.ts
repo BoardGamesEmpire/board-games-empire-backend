@@ -49,22 +49,54 @@ describe('DataGatewayService', () => {
       expect(service.ping({}).gatewayName).toBe('BoardGameGeekGateway');
     });
 
-    it('includes "GatewayService" in supportedServices', () => {
-      expect(service.ping({}).supportedServices).toContain('GatewayService');
-    });
-
     it('returns a bigint timestampMs', () => {
       expect(typeof service.ping({}).timestampMs).toBe('bigint');
     });
+  });
 
-    it('declares language preferences (NAME format, no passthrough)', () => {
-      const response = service.ping({});
+  describe('describe', () => {
+    it('returns a response using the correlationId from the request', () => {
+      expect(service.describe({ correlationId: 'corr-describe-1' }).correlationId).toBe('corr-describe-1');
+    });
 
-      expect(response.languagePreferences).toEqual({
+    it('generates a correlationId when none is provided in the request', () => {
+      expect(service.describe({}).correlationId).toEqual(expect.any(String));
+    });
+
+    it('declares search, fetch, fetch expansions and list languages', () => {
+      expect(new Set(service.describe({}).capabilities)).toEqual(
+        new Set([
+          proto.Capability.CAPABILITY_SEARCH,
+          proto.Capability.CAPABILITY_FETCH,
+          proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+          proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        ]),
+      );
+    });
+
+    it('covers tabletop base games and expansions', () => {
+      const { coverage } = service.describe({});
+
+      expect(coverage?.platformTypes).toEqual([proto.PlatformType.PLATFORM_TYPE_TABLETOP]);
+      expect(new Set(coverage?.contentTypes)).toEqual(
+        new Set([proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION]),
+      );
+    });
+
+    it('declares no filterable axes, since a search request carries no filter', () => {
+      expect(service.describe({}).filterableAxes).toEqual([]);
+    });
+
+    it('declares English language names, on requests and responses alike', () => {
+      expect(service.describe({}).languageCodeFormats).toEqual({
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
-        passthroughRawLocale: false,
-      } satisfies proto.GatewayLanguagePreferences);
+        passthroughSearchLanguage: false,
+      } satisfies proto.LanguageCodeFormats);
+    });
+
+    it('declares its free text as plain text', () => {
+      expect(service.describe({}).contentFormat).toBe(proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT);
     });
   });
 

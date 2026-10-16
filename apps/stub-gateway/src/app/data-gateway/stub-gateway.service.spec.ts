@@ -1,6 +1,6 @@
 import * as proto from '@boardgamesempire/proto-gateway';
 import { lastValueFrom, toArray, type Observable } from 'rxjs';
-import { STUB_BASE_GAME, STUB_EXPANSION, STUB_LANGUAGES } from '../fixtures/catalog';
+import { STUB_BASE_GAME, STUB_EXPANSION, STUB_GAMES, STUB_LANGUAGES } from '../fixtures/catalog';
 import { StubGatewayService } from './stub-gateway.service';
 
 const collect = <T>(source: Observable<T>) => lastValueFrom(source.pipe(toArray()));
@@ -19,22 +19,53 @@ describe('StubGatewayService', () => {
       const before = Date.now();
       const reply = service.ping({ correlationId: 'ping-1' });
 
-      expect(reply).toMatchObject({
-        correlationId: 'ping-1',
-        gatewayName: 'StubGateway',
-        supportedServices: ['GatewayService'],
-        languagePreferences: {
-          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
-          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
-          passthroughRawLocale: false,
-        },
-      });
+      expect(reply).toMatchObject({ correlationId: 'ping-1', gatewayName: 'StubGateway' });
       expect(Number(reply.timestampMs)).toBeGreaterThanOrEqual(before);
       expect(Number(reply.timestampMs)).toBeLessThanOrEqual(Date.now());
     });
 
     it('makes up a correlation id when the request carries none', () => {
       expect(service.ping({}).correlationId).toEqual(expect.any(String));
+    });
+  });
+
+  describe('describe', () => {
+    it('declares every operation, tabletop base games and expansions, BCP 47 tags and plain text', () => {
+      expect(service.describe({ correlationId: 'describe-1' })).toEqual({
+        correlationId: 'describe-1',
+        capabilities: [
+          proto.Capability.CAPABILITY_SEARCH,
+          proto.Capability.CAPABILITY_FETCH,
+          proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+          proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        ],
+        coverage: {
+          platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+          contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
+        },
+        filterableAxes: [],
+        languageCodeFormats: {
+          acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
+          responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
+          passthroughSearchLanguage: false,
+        },
+        contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+      } satisfies proto.DescribeResponse);
+    });
+
+    it('covers every game it serves', () => {
+      const { coverage } = service.describe({});
+
+      for (const game of STUB_GAMES) {
+        expect(coverage?.contentTypes).toContain(game.contentType);
+        for (const platform of game.platforms) {
+          expect(coverage?.platformTypes).toContain(platform.platformType);
+        }
+      }
+    });
+
+    it('makes up a correlation id when the request carries none', () => {
+      expect(service.describe({}).correlationId).toEqual(expect.any(String));
     });
   });
 

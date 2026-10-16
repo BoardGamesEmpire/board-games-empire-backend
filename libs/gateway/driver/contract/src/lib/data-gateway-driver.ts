@@ -13,12 +13,19 @@ import type { GatewayInboundEvent } from './types.js';
  *    gateway service. Server-internal.
  *  - In-process `DataGateway` plugins (#59/#194): implement this interface
  *    directly. Third-party authors depend on this package.
- *  - `InMemoryGatewayDriver` (`@boardgamesempire/gateway-contract-testing`):
+ *  - `InMemoryGatewayDriver` (`@boardgamesempire/gateway-driver-contract-testing`):
  *    fixture-backed test double; also the reference for expected semantics.
  *
  * Semantics that implementations MUST honor (enforced by the shared contract
- * suite in `@boardgamesempire/gateway-contract-testing`):
+ * suite in `@boardgamesempire/gateway-driver-contract-testing`):
  *
+ *  - `describe` declares the operations the driver serves, any subset of
+ *    search, fetch, fetch expansions and list languages, and a content format
+ *    of plain text, HTML, BBCode or Markdown. An operation left out may
+ *    answer UNIMPLEMENTED. The server doesn't route by the declarations yet,
+ *    so until it does, it may still call one. Each run of the suite names
+ *    the operations its driver serves: the suite checks that `describe`
+ *    declares exactly those, and runs only their cases.
  *  - Streaming RPCs (`searchGames`, `fetchExpansions`) emit zero or more
  *    RESULT frames and terminate the stream; search streams end with a
  *    SOURCE_DONE frame.
@@ -28,6 +35,11 @@ import type { GatewayInboundEvent } from './types.js';
  *    tracking exempts the former).
  *  - `dispose()` releases transport resources and must be safe to call on an
  *    already-disposed driver.
+ *
+ * Also required, though the suite doesn't check it: every string a driver
+ * sends is decoded Unicode text. The driver undoes its upstream's encoding,
+ * such as HTML entities, before sending. Only free text may carry markup, in
+ * the content format `describe` declares.
  */
 export interface DataGatewayDriver extends GatewayServiceClient {
   /**
