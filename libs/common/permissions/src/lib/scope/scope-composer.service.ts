@@ -27,9 +27,9 @@ export { isUnscoped, Unscoped, type ListScope, type UnscopedList };
  * for a ceiling, and `AbilityService` knows nothing about scope.
  *
  * Both halves are written HERE and nowhere else. A read that names a scope and
- * quietly drops its ceiling is the inverse defect and is already in the tree —
- * `GET /webhook-subscriptions` filters by `createdById` and ANDs in no
- * conditions, which under an API-key actor returns the key owner's rows
+ * quietly drops its ceiling is the inverse defect, and the tree had one until
+ * #515: `GET /webhooks/subscriptions` filtered by `createdById` and ANDed in no
+ * conditions, so under an API-key actor it returned the key owner's rows
  * regardless of the key's own scope. Routing both halves through one call makes
  * that shape unrepresentable rather than merely discouraged.
  */

@@ -1,9 +1,11 @@
 import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityService, type AppAbility } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, ScopeComposer, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
+  MOCK_RESOURCE_CONDITION,
   MockAbilityService,
   MockDatabaseService,
   rawQueryText,
@@ -62,6 +64,7 @@ describe('WebhookSubscriptionService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
+  let compose: jest.SpyInstance;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
   const denyAll = createPrismaAbility([]) as AppAbility;
@@ -87,6 +90,9 @@ describe('WebhookSubscriptionService', () => {
       providers: [
         WebhookSubscriptionService,
         WebhookEventRegistry,
+        // The REAL composer, over the mocked ability service, so the list's
+        // where clause asserted below is the merge the read actually runs.
+        ScopeComposer,
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: EncryptionService, useValue: encryption },
         { provide: AbilityService, useValue: ability },
@@ -96,6 +102,7 @@ describe('WebhookSubscriptionService', () => {
 
     service = module.get(WebhookSubscriptionService);
     registry = module.get(WebhookEventRegistry);
+    compose = jest.spyOn(module.get(ScopeComposer), 'compose');
     db = mockDb;
     // Create writes inside a transaction (#552). The household share lock is
     // its one raw statement, and it finds the household live unless a case
@@ -311,13 +318,43 @@ describe('WebhookSubscriptionService', () => {
       const result = await service.list();
       expect(result.map((s) => s.secret)).toEqual([WEBHOOK_SECRET_REDACTED, WEBHOOK_SECRET_REDACTED]);
     });
+  });
 
-    it('scopes the list to the acting user', async () => {
+  /**
+   * #515. The list declares its own set, the acting user's live
+   * subscriptions, and the ceiling clips it. It used to filter on the owner
+   * and ask for no ceiling at all, so an API key scoped to one subscription
+   * listed every subscription its owner had.
+   */
+  describe('list', () => {
+    it("asks the composer for its where clause, declaring the acting user's live subscriptions", async () => {
       db.webhookSubscription.findMany.mockResolvedValue([]);
+
       await service.list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.WebhookSubscription, Action.read, {
+        createdById: ACTING_USER_ID,
+        deletedAt: null,
+      });
       expect(db.webhookSubscription.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { createdById: ACTING_USER_ID, deletedAt: null } }),
+        expect.objectContaining({
+          where: { createdById: ACTING_USER_ID, deletedAt: null, AND: [MOCK_RESOURCE_CONDITION] },
+        }),
       );
+    });
+
+    // PROVISIONAL (#395). "My subscriptions" has no meaning for an actor with
+    // no user behind it, and the refusal must not soften into an empty list.
+    it('refuses an actor kind with no user behind it, with a message about reading', async () => {
+      ability.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await service.list().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.webhookSubscription.findMany).not.toHaveBeenCalled();
     });
   });
 

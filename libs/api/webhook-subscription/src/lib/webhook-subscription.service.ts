@@ -1,6 +1,13 @@
-import { DatabaseService, lockLiveHousehold, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  lockLiveHousehold,
+  Prisma,
+  ResourceType,
+  WebhookSubscriptionStatus,
+} from '@bge/database';
 import { I18nMessage, t } from '@bge/i18n';
-import { AbilityService, type AppAbility } from '@bge/permissions';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   CreateWebhookSubscriptionDto,
@@ -36,6 +43,7 @@ export class WebhookSubscriptionService {
     private readonly visibility: WebhookVisibilityService,
     private readonly encryption: EncryptionService,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -102,11 +110,26 @@ export class WebhookSubscriptionService {
     return this.reveal(created, plaintextSecret);
   }
 
-  /** Lists the caller's own subscriptions (excluding soft-deleted), secrets redacted. */
+  /**
+   * Lists the acting user's own subscriptions (excluding soft-deleted),
+   * secrets redacted.
+   *
+   * The scope is the acting user's live subscriptions, and the ceiling clips
+   * it (#515). For a session the two coincide. For an API key they don't: a
+   * key scoped to one subscription carries a ceiling of that one row, and
+   * without it the list answered with every subscription the key's owner has.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my subscriptions" has no meaning without a user, and the refusal must
+   * never soften into an empty list. PROVISIONAL — #395.
+   */
   async list(): Promise<WebhookSubscriptionWithEventTypes[]> {
-    const userId = this.abilityService.getActingUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
     const subscriptions = await this.db.webhookSubscription.findMany({
-      where: { createdById: userId, deletedAt: null },
+      where: this.scopeComposer.compose(ResourceType.WebhookSubscription, Action.read, {
+        createdById: userId,
+        deletedAt: null,
+      }),
       include: { eventTypes: true },
       orderBy: { createdAt: 'desc' },
     });
