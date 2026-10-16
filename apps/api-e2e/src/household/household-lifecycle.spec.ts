@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createMemberClient, membersPath } from './household-request';
 import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
 
 /**
@@ -34,10 +35,13 @@ describe('household lifecycle', () => {
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
+  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
+
   /**
    * Arranges an invite directly (#257): inline rather than as a
-   * `@bge/testing-e2e` factory until #273 supplies a second consumer and the
-   * shared shape is visible rather than guessed.
+   * `@bge/testing-e2e` factory. Each invite suite keeps a copy of its own for
+   * now. Extracting one shared factory falls to #747, whose e2e arranges
+   * invites for a removed member, by id and by address.
    *
    * `token` is random rather than sequential for the same reason
    * `prepareSignup` is — it is unique-constrained, and predictable identifiers
@@ -363,20 +367,20 @@ describe('household lifecycle', () => {
 
       const householdId = fixture.household.id;
       const memberId = fixture.members[0].member.id;
-      const membersPath = `${HOUSEHOLDS_PATH}/${householdId}/members`;
+      const rosterPath = membersPath(householdId);
 
       await request(baseUrl).delete(`${HOUSEHOLDS_PATH}/${householdId}`).set(owner.headers).expect(200);
 
-      await request(baseUrl).get(membersPath).set(owner.headers).expect(404);
-      await request(baseUrl).get(`${membersPath}/${memberId}`).set(owner.headers).expect(404);
+      await request(baseUrl).get(rosterPath).set(owner.headers).expect(404);
+      await request(baseUrl).get(`${rosterPath}/${memberId}`).set(owner.headers).expect(404);
       await request(baseUrl)
-        .patch(`${membersPath}/${memberId}/role`)
+        .patch(`${rosterPath}/${memberId}/role`)
         .set(owner.headers)
         .send({ role: SystemRole.HouseholdAdmin })
         .expect(404);
-      await request(baseUrl).post(`${membersPath}/${memberId}/transfer-ownership`).set(owner.headers).expect(404);
-      await request(baseUrl).delete(`${membersPath}/${memberId}`).set(owner.headers).expect(404);
-      await request(baseUrl).delete(`${membersPath}/me`).set(member.headers).expect(404);
+      await transferOwnership(owner, householdId, memberId).expect(404);
+      await removeMember(owner, householdId, memberId).expect(404);
+      await leave(member, householdId).expect(404);
 
       const roster = await db.client.householdMember.findMany({
         where: { householdId },

@@ -4,6 +4,7 @@ import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing
 import { WebhookEventType } from '@bge/webhooks';
 import request from 'supertest';
 import { createEventClient, EVENTS_PATH } from '../event/event-request';
+import { createMemberClient } from '../household/household-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { isolateQueue } from '../support/queue-isolation';
 import { waitForStableJobCount } from '../support/queues';
@@ -35,6 +36,7 @@ const RECEIVER_URL = 'https://receiver.e2e.invalid/bge';
 describe('webhook dispatch from the API (#538)', () => {
   const baseUrl = requireBaseUrl(process.env);
   const events = createEventClient(baseUrl);
+  const { transferOwnership } = createMemberClient(baseUrl);
 
   let db: TestDatabase;
   let actors: Actors;
@@ -95,10 +97,7 @@ describe('webhook dispatch from the API (#538)', () => {
       eventTypes: [WebhookEventType.HouseholdOwnershipTransferred],
     });
 
-    await request(baseUrl)
-      .post(`/api/households/${householdId}/members/${heirMember.member.id}/transfer-ownership`)
-      .set(owner.headers)
-      .expect(200);
+    await transferOwnership(owner, householdId, heirMember.member.id).expect(200);
 
     const delivery = await onlyDelivery();
 

@@ -5,6 +5,7 @@ import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createMemberClient, membersPath } from './household-request';
 import { SOFT_DELETE_HOUSEHOLD } from './lock-fixtures';
 
 /**
@@ -61,7 +62,7 @@ describe('role transitions racing a soft-delete (#386)', () => {
     await db.close();
   });
 
-  const membersPath = (householdId: string): string => `/api/households/${householdId}/members`;
+  const { removeMember, leave, transferOwnership } = createMemberClient(baseUrl);
 
   interface Arrangement {
     readonly householdId: string;
@@ -92,10 +93,7 @@ describe('role transitions racing a soft-delete (#386)', () => {
   const TRANSITIONS: readonly { readonly name: string; readonly send: (a: Arrangement) => request.Test }[] = [
     {
       name: 'transfer of ownership',
-      send: ({ householdId, owner, memberId }) =>
-        request(baseUrl)
-          .post(`${membersPath(householdId)}/${memberId}/transfer-ownership`)
-          .set(owner.headers),
+      send: ({ householdId, owner, memberId }) => transferOwnership(owner, householdId, memberId),
     },
     {
       name: 'role change',
@@ -107,17 +105,11 @@ describe('role transitions racing a soft-delete (#386)', () => {
     },
     {
       name: 'removal',
-      send: ({ householdId, owner, memberId }) =>
-        request(baseUrl)
-          .delete(`${membersPath(householdId)}/${memberId}`)
-          .set(owner.headers),
+      send: ({ householdId, owner, memberId }) => removeMember(owner, householdId, memberId),
     },
     {
       name: 'departure',
-      send: ({ householdId, member }) =>
-        request(baseUrl)
-          .delete(`${membersPath(householdId)}/me`)
-          .set(member.headers),
+      send: ({ householdId, member }) => leave(member, householdId),
     },
   ];
 

@@ -3,6 +3,7 @@ import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createMemberClient, membersPath } from './household-request';
 import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
 
 /**
@@ -46,7 +47,7 @@ describe('household reads after a write', () => {
   const readHousehold = (actor: SessionActor, id: string) =>
     request(baseUrl).get(`${HOUSEHOLDS_PATH}/${id}`).set(actor.headers);
 
-  const membersPath = (householdId: string) => `${HOUSEHOLDS_PATH}/${householdId}/members`;
+  const { removeMember, leave } = createMemberClient(baseUrl);
 
   const listedIds = async (actor: SessionActor, description: string) =>
     listEnvelope(await listHouseholds(actor).expect(200), description).households.map((household) => household.id);
@@ -96,10 +97,7 @@ describe('household reads after a write', () => {
 
     await readHousehold(member, fixture.household.id).expect(200);
 
-    await request(baseUrl)
-      .delete(`${membersPath(fixture.household.id)}/${membership.member.id}`)
-      .set(owner.headers)
-      .expect(200);
+    await removeMember(owner, fixture.household.id, membership.member.id).expect(200);
 
     // 403, not 404: the household still exists, and this caller may no longer
     // see it — the same answer any non-member gets (household-authorization).
@@ -118,10 +116,7 @@ describe('household reads after a write', () => {
 
     await expect(listedIds(member, 'GET /api/households before leaving')).resolves.toEqual([fixture.household.id]);
 
-    await request(baseUrl)
-      .delete(`${membersPath(fixture.household.id)}/me`)
-      .set(member.headers)
-      .expect(200);
+    await leave(member, fixture.household.id).expect(200);
 
     await expect(listedIds(member, 'GET /api/households after leaving')).resolves.toEqual([]);
   });
@@ -142,7 +137,7 @@ describe('household reads after a write', () => {
 
     await request(baseUrl).get(memberPath).set(owner.headers).expect(200);
 
-    await request(baseUrl).delete(memberPath).set(owner.headers).expect(200);
+    await removeMember(owner, fixture.household.id, membership.member.id).expect(200);
 
     await request(baseUrl).get(memberPath).set(owner.headers).expect(404);
   });

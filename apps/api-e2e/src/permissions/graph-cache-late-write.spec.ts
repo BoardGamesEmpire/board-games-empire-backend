@@ -2,6 +2,7 @@ import { SystemRole } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
+import { createMemberClient } from '../household/household-request';
 import { apiCacheReadRaw, apiCacheWriteRaw } from '../support/api-cache';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
@@ -24,6 +25,8 @@ const HOUSEHOLDS_PATH = '/api/households';
  */
 describe('a permission graph written to the cache after its eviction', () => {
   const baseUrl = requireBaseUrl(process.env);
+
+  const { removeMember } = createMemberClient(baseUrl);
 
   let db: TestDatabase;
   let actors: Actors;
@@ -55,7 +58,7 @@ describe('a permission graph written to the cache after its eviction', () => {
     await request(baseUrl).get(householdPath).set(member.headers).expect(200);
     const loadedAsMember = await apiCacheReadRaw(graphKey);
 
-    await request(baseUrl).delete(`${householdPath}/members/${membership.member.id}`).set(owner.headers).expect(200);
+    await removeMember(owner, fixture.household.id, membership.member.id).expect(200);
 
     // A key this spec spelled wrong reads null, and the replay below would
     // then write a value the api never reads.

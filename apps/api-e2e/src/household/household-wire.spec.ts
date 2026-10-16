@@ -4,6 +4,7 @@ import {
   deleteEnvelope,
   HOUSEHOLD_CLIENT_REQUEST_ID_CONSTRAINT,
   listEnvelope,
+  memberEnvelope,
   memberGameSampleIds,
   readEnvelope,
   type HttpResponseLike,
@@ -118,6 +119,42 @@ describe('household wire parsers (pure logic)', () => {
       expect(() => readEnvelope(response({ household: { id: 'h1', members: [] } }), 'GET')).toThrow(
         /no 'invites' array/,
       );
+    });
+  });
+
+  describe('memberEnvelope', () => {
+    const member = { id: 'm1', userId: 'u1', householdId: 'h1', role: null };
+
+    it('returns the deleted membership and the message', () => {
+      const parsed = memberEnvelope(response({ message: 'You have left the household', member }), 'DELETE');
+
+      expect(parsed.member.id).toBe('m1');
+      expect(parsed.member.userId).toBe('u1');
+      expect(parsed.message).toBe('You have left the household');
+    });
+
+    it('rejects a membership without a string id', () => {
+      expect(() => memberEnvelope(response({ message: 'm', member: { userId: 'u1' } }), 'DELETE')).toThrow(
+        /no 'member' object with a string id and userId/,
+      );
+    });
+
+    it('rejects a membership without a string userId', () => {
+      // The leave cases assert whose membership went; without this check an
+      // absent userId would reach them as undefined.
+      for (const userId of [undefined, '', 7]) {
+        expect(() => memberEnvelope(response({ message: 'm', member: { id: 'm1', userId } }), 'DELETE')).toThrow(
+          /no 'member' object with a string id and userId/,
+        );
+      }
+    });
+
+    it('rejects a missing message', () => {
+      expect(() => memberEnvelope(response({ member }), 'DELETE')).toThrow(/no 'message' string/);
+    });
+
+    it('rejects a non-object body', () => {
+      expect(() => memberEnvelope(response([member]), 'DELETE')).toThrow(/body is not an object/);
     });
   });
 
