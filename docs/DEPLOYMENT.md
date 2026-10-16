@@ -12,7 +12,7 @@ One `Dockerfile` at the repository root builds all three, from the root:
 | BoardGameGeek gateway | `docker build --target boardgamegeek-gateway -t <tag> .` | the BoardGameGeek DataGateway, over gRPC |
 | IGDB gateway          | `docker build --target igdb-gateway -t <tag> .`          | the IGDB DataGateway, over gRPC          |
 
-The BGE image is the default target. The DataGateways stay out of it: a deployment adds the data sources it wants (#194).
+The BGE image is the default target. The DataGateways stay out of it: a deployment adds the ones it wants (#194).
 
 Each image:
 
@@ -130,7 +130,7 @@ docker compose --profile split up --build
 - **Postgres and Redis** keep their data in the `postgres` and `redis` volumes, which `docker compose down` leaves in place and `down --volumes` deletes. Redis holds the job queues and the sign-in sessions, so it logs each write and flushes the log every second (append-only persistence), as BullMQ advises.
 - **Published images** replace the local builds through `BGE_IMAGE`, `BGE_BOARDGAMEGEEK_GATEWAY_IMAGE` and `BGE_IGDB_GATEWAY_IMAGE`, such as `ghcr.io/boardgamesempire/bge:edge` (see [Published images](#published-images)). Fetch them with `docker compose --profile split pull`, then start them with `up` and no `--build`, which would build the checkout under their names instead.
 
-Search goes through the coordinator to the gateways registered with the api, and a new deployment has none: it adds the data sources it wants (#194). The first account to sign up becomes the owner. Sign up, then register each gateway once as that account:
+Search goes through the coordinator to the DataGateways registered with the api, and a new deployment has none: it adds the ones it wants (#194). The first account to sign up becomes the owner. Sign up, then register each DataGateway once as that account:
 
 ```http
 POST /api/data-gateways

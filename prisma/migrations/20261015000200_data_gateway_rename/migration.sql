@@ -29,6 +29,12 @@ ALTER INDEX "game_gateways_name_key" RENAME TO "data_gateways_name_key";
 -- confers nothing. A row an operator changed keeps its own fields, but names
 -- the renamed subject. On a new database the table is still empty here, and
 -- the catalog sync fills it after.
+--
+-- A plugin's consent decisions are not renamed. They name the slug the
+-- plugin's manifest asks for, not a row, and that manifest still asks for the
+-- old slug, which no longer exists, so the plugin's grant confers nothing
+-- until it ships a manifest that names the new one. An update that does
+-- asks for consent to that slug as a new permission.
 UPDATE "permissions"
 SET "slug" = replace("slug", ':game_gateway', ':data_gateway'), "updated_at" = CURRENT_TIMESTAMP
 WHERE "slug" IN ('read:game_gateway', 'create:game_gateway', 'update:game_gateway', 'delete:game_gateway');
