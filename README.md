@@ -1,8 +1,8 @@
 # Board Games Empire — Backend
 
-Board Games Empire (BGE) is a self-hosted platform for managing board game and video game collections, coordinating game nights, and tracking play sessions. It integrates with external data sources (BoardGameGeek, IGDB) to enrich game records automatically, while keeping your data in a database you control.
+Board Games Empire (BGE) is a self-hosted platform for managing board game and video game collections, coordinating game nights, and tracking play sessions. It integrates with external services (BoardGameGeek, IGDB) to enrich game records automatically, while keeping your data in a database you control.
 
-The backend is a NestJS Nx monorepo exposing a REST + WebSocket API, with game data fetched through a microservice gateway layer that normalizes external platform differences into a shared domain model.
+The backend is a NestJS Nx monorepo exposing a REST + WebSocket API, with game data fetched through DataGateways: gRPC services that normalize each external service's data into a shared domain model.
 
 This project is in early development. The API is not stable and may change without warning. Features likely do not fully function
 as intended.
@@ -16,13 +16,13 @@ apps/
   api/                     — Main NestJS API (REST, WebSocket)
   worker/                  — Background job worker (queue consumer)
   gateway-worker/          — Gateway worker: fetches games from DataGateways for imports
-  gateway-coordinator/     — gRPC microservice coordinating gateway fan-out
+  gateway-coordinator/     — Coordinator: carries the api's DataGateway traffic over gRPC
   launcher/                — Image entry point: runs the process role named by BGE_ROLES
-  igdb-gateway/            — IGDB data adapter (gRPC) - (search and import)
-  boardgamegeek-gateway/   — BoardGameGeek data adapter (gRPC) - (WIP)
+  igdb-gateway/            — IGDB DataGateway (gRPC) - (search and import)
+  boardgamegeek-gateway/   — BoardGameGeek DataGateway (gRPC) - (WIP)
 
 libs/
-  proto/gateway/           — Shared protobuf definitions for gateway communication
+  proto/gateway/           — Shared protobuf definitions for the coordinator and DataGateways
   api/*/                   — Feature libraries (game, auth, households, …)
   database/*/              — Prisma schema generation and database access utilities
   common/*/                — Cross-cutting concerns (permissions, utilities, …)
@@ -58,7 +58,7 @@ npm install
 cp .env.example .env
 ```
 
-Open `.env` and fill in at minimum: (one or both gateways)
+Open `.env` and fill in at minimum (credentials for one or both DataGateways):
 
 ```
 DATABASE_URL=postgresql://user:password@localhost:5432/boardgamesempire
@@ -112,8 +112,8 @@ This runs `nf start`, which launches all processes defined in `Procfile` concurr
 | `coordinator`    | 50052        | Gateway coordinator (gRPC)                       |
 | `worker`         |              | Worker service (Queue consumer)                  |
 | `gateway-worker` |              | Gateway worker (DataGateway fetches for imports) |
-| `bgg-gateway`    | 50053        | BoardGameGeek data gateway (gRPC)                |
-| `igdb-gateway`   | 50054        | IGDB data gateway (gRPC)                         |
+| `bgg-gateway`    | 50053        | BoardGameGeek DataGateway (gRPC)                 |
+| `igdb-gateway`   | 50054        | IGDB DataGateway (gRPC)                          |
 
 To run a single service in isolation:
 

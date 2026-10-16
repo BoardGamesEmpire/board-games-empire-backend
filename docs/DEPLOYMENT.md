@@ -82,7 +82,7 @@ The game gateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, a
 What "ready" means here, role by role:
 
 - **The api** answers `/health/ready` once it has booted. That checks Postgres, the api's cache and queue Redis connections, and its storage. `/health/live` answers whenever the server is up. A first boot migrates and seeds before anything listens, so give the api a startup probe that allows minutes ([BOOTSTRAP.md](BOOTSTRAP.md), "First boot takes longer").
-- **The coordinator and the gateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the gateways have no database and open theirs at start.
+- **The coordinator and the DataGateways** serve no standard gRPC health service (`grpc.health.v1.Health`) yet, so a Kubernetes `grpc` probe fails against them. Probe the port over TCP (`tcpSocket`). The coordinator opens its port once its bootstrap is done; the DataGateways have no database and open theirs at start.
 - **`worker` and `gateway-fetch`** listen on nothing, so there is nothing to probe. Their `Bootstrap complete` log line is the evidence they came up. A role that fails exits, and the restart policy brings it back.
 
 Real health checks for every role are #612.
@@ -124,7 +124,7 @@ The image creates both, owned by `node`, so a new named volume mounted on either
 docker compose --profile split up --build
 ```
 
-- **Secrets** come from the shell, or from a `.env` file beside `compose.yaml`, which Compose reads for interpolation only. Set `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY`, and the gateways' credentials for search. In a development checkout, that `.env` is the development one.
+- **Secrets** come from the shell, or from a `.env` file beside `compose.yaml`, which Compose reads for interpolation only. Set `BETTER_AUTH_SECRET` and `DATA_ENCRYPTION_KEY`, and the DataGateways' credentials for search. In a development checkout, that `.env` is the development one.
 - **The roles start together.** The api migrates and seeds an empty database while the others log that they are waiting, then they boot ([BOOTSTRAP.md](BOOTSTRAP.md)).
 - **The api** is on `http://localhost:33333`, and so is the web client: open that address in a browser. It is published on the host's loopback interface only: the first account to sign up becomes the owner, so a new deployment starts out unreachable from other machines. Once the owner has signed up, `BGE_BIND_ADDRESS` opens it, as `0.0.0.0` for every IPv4 interface or one interface's address. `BGE_PORT` changes the port. `BGE_PUBLIC_URL` sets the URL the api trusts for sign-in and the base of the media links it signs, which defaults to the one above; set it, without a trailing slash, whenever clients reach the api at another URL, including after changing `BGE_PORT`.
 - **Postgres and Redis** keep their data in the `postgres` and `redis` volumes, which `docker compose down` leaves in place and `down --volumes` deletes. Redis holds the job queues and the sign-in sessions, so it logs each write and flushes the log every second (append-only persistence), as BullMQ advises.
