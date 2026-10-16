@@ -928,6 +928,146 @@ describe('HouseholdService', () => {
       await expect(read(service)).rejects.toThrow(ForbiddenException);
     });
   });
+
+  /**
+   * #542. The undo `DELETE` offered, found again: the deleted households the
+   * acting user holds a restore window for. The list has to answer the
+   * question the restore route answers, so its rows are clipped by the same
+   * `update` ceiling the restore write uses, where denials and key scopes
+   * already apply.
+   */
+  describe('getRestorableHouseholdsForUser (#542)', () => {
+    const READ_CEILING = { id: 'read-ceiling' };
+    const UPDATE_CEILING = { id: 'update-ceiling' };
+    const UNTIL = new Date('2026-11-15T12:00:00Z');
+
+    const read = (subject: HouseholdService, query = paginationQuery({ limit: 10 })) =>
+      subject.getRestorableHouseholdsForUser(query);
+
+    beforeEach(() => {
+      abilityService.getCurrentResourceConditions.mockImplementation((_type, action) =>
+        action === Action.update ? [UPDATE_CEILING] : [READ_CEILING],
+      );
+      db.userPermission.findMany.mockResolvedValue([
+        { resourceId: 'hh-1', expiresAt: UNTIL },
+        { resourceId: 'hh-2', expiresAt: null },
+      ] as never);
+      db.household.findMany.mockResolvedValue([]);
+      db.household.count.mockResolvedValue(0);
+    });
+
+    it('reads the acting user’s live grants of the restore permission, each pinned to a household', async () => {
+      await read(service);
+
+      expect(db.userPermission.findMany).toHaveBeenCalledWith({
+        where: {
+          userId: 'user-1',
+          resourceType: ResourceType.Household,
+          resourceId: { not: null },
+          permission: { slug: 'update:household:restore', retiredAt: null },
+          AND: [
+            { OR: [{ inverted: null }, { inverted: false }] },
+            { OR: [{ expiresAt: null }, { expiresAt: { gt: expect.any(Date) } }] },
+          ],
+        },
+        select: { resourceId: true, expiresAt: true },
+      });
+    });
+
+    // The `read` composition is what the envelope's guard checks for; the
+    // `update` one is the ceiling the restore write is scoped by. Either alone
+    // is wrong: `update` alone fails the guard, and `read` alone lists a
+    // household the actor was denied the restore of.
+    it('composes one scope twice, under read and under update', async () => {
+      await read(service);
+
+      const scope = { deletedAt: { not: null }, id: { in: ['hh-1', 'hh-2'] } };
+      expect(compose).toHaveBeenCalledTimes(2);
+      expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, scope);
+      expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.update, scope);
+    });
+
+    // Both in the top-level `where`, where the CASL extension finds a deny-all
+    // from either ceiling and denies the whole query.
+    it('queries with both compositions ANDed, and counts over the same where', async () => {
+      await read(service);
+
+      const scope = { deletedAt: { not: null }, id: { in: ['hh-1', 'hh-2'] } };
+      const where = {
+        AND: [
+          { ...scope, AND: [READ_CEILING] },
+          { ...scope, AND: [UPDATE_CEILING] },
+        ],
+      };
+
+      expect(db.household.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.household.count).toHaveBeenCalledWith({ where });
+    });
+
+    it('pages the same way as the household list', async () => {
+      await read(service, paginationQuery({ page: 2, limit: 10 }));
+
+      expect(db.household.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          include: expect.objectContaining({ members: { select: MEMBER_SELECT } }),
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: 10,
+          take: 10,
+        }),
+      );
+
+      const { options } = batchTransactionCall(db);
+      expect(options).toEqual({ isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    });
+
+    // A grant with no end date is restorable for as long as it stands, so its
+    // row says so with `null`. DELETE's `null` means something else: that the
+    // delete opened no window.
+    it('gives each row the end of the acting user’s restore window, null when it has none', async () => {
+      db.household.findMany.mockResolvedValue([{ id: 'hh-2' }, { id: 'hh-1' }] as never);
+      db.household.count.mockResolvedValue(2);
+
+      await expect(read(service)).resolves.toEqual({
+        rows: [
+          { id: 'hh-2', restorableUntil: null },
+          { id: 'hh-1', restorableUntil: UNTIL },
+        ],
+        total: 2,
+      });
+    });
+
+    // `null` already means "no end date", so a row with no window must not
+    // borrow it and advertise an undo that never closes.
+    it('fails rather than answer null for a row the scope let through without a window', async () => {
+      db.household.findMany.mockResolvedValue([{ id: 'hh-elsewhere' }] as never);
+      db.household.count.mockResolvedValue(1);
+
+      await expect(read(service)).rejects.toThrow('household hh-elsewhere was listed with no restore window');
+    });
+
+    // Most users hold no grant. The read is still composed, or the envelope
+    // guard would answer them 500 instead of an empty page.
+    it('still composes when the acting user holds no grant, matching nothing', async () => {
+      db.userPermission.findMany.mockResolvedValue([]);
+
+      await expect(read(service)).resolves.toEqual({ rows: [], total: 0 });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Household, Action.read, {
+        deletedAt: { not: null },
+        id: { in: [] },
+      });
+    });
+
+    // PROVISIONAL, as for the household list (#395).
+    it('refuses an actor kind with no user behind it before reading anything', async () => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      await expect(read(service)).rejects.toThrow(ForbiddenException);
+      expect(db.userPermission.findMany).not.toHaveBeenCalled();
+      expect(db.household.findMany).not.toHaveBeenCalled();
+    });
+  });
 });
 
 interface HouseholdWithMembers extends Household {

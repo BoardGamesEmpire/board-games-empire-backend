@@ -37,10 +37,14 @@ import { Prisma } from '@bge/database';
  * both is still `include:`-shaped in `household.service.ts` — both the detail
  * read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to `Household` still
  * reaches clients with this suite green. Nothing sensitive ships today
- * (`clientRequestId` is a per-creator idempotency key; `deletedAt` is filtered
- * to null on the read path), which is why it was left rather than folded in:
- * converting it changes the exported `HouseholdWithRelations` payload type and
- * every consumer of it. Tracked as a named candidate on #460.
+ * (`clientRequestId` is a per-creator idempotency key, and `deletedAt` is null
+ * on every read but `GET /households/restorable`, where telling the household
+ * owners who can restore it when it was deleted is intended), which is why it
+ * was left rather than folded in: converting it changes the exported
+ * `HouseholdWithRelations` payload type and every consumer of it. Tracked as a
+ * named candidate on #460. That route raises the stakes: a column about the
+ * deletion itself, such as who deleted it, would reach those household owners
+ * the moment it was added.
  *
  * @see #296, #297, and #460 for the same class elsewhere in the tree.
  */

@@ -54,6 +54,13 @@ const HOUSEHOLD_LIST_INCLUDE = {
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
 
+/**
+ * A deleted household as the restorable list returns it (#542): the list row,
+ * plus when the acting user's restore window for it ends, or `null` when their
+ * grant has no end date.
+ */
+export type RestorableHousehold = HouseholdWithRelations & { readonly restorableUntil: Date | null };
+
 /** How many of each member's entries the household detail embeds. */
 const MEMBER_GAME_SAMPLE_SIZE = 5;
 
@@ -539,6 +546,93 @@ export class HouseholdService {
   }
 
   /**
+   * One page of the deleted households the acting user can restore (#542),
+   * each with when their restore window ends. It is how a household owner
+   * finds the undo `DELETE` offered again, from another device or after the
+   * response was lost.
+   *
+   * The set is the acting user's grants of the restore permission, each pinned
+   * to one household ({@link restoreWindows}). The scope over them is composed
+   * twice, and the two results are ANDed:
+   *
+   * - Under `update`: the ceiling the restore write is scoped by
+   *   ({@link restoreHousehold}). Denials, pinned or not, and an API key's key
+   *   scopes all apply there, so a household is listed only when the route
+   *   would restore it, and this read does not restate how the loader ranks
+   *   a denial against a grant.
+   * - Under `read`: only a `read` composition is recorded, and the envelope's
+   *   guard checks for one. It is also what entitles the actor to the roster
+   *   each row carries. For a household owner it removes nothing: memberships
+   *   of a deleted household are frozen, and `read:households` matches them.
+   *
+   * A grant pinned to no household is left out. It reaches every deleted
+   * household, which is the all-subject view #419 owns, as is staff's reach.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors,
+   * as for {@link getHouseholdsForUser}. PROVISIONAL — #395.
+   */
+  async getRestorableHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<RestorableHousehold>> {
+    const userId = resolveScopeSubjectId(this.abilityService);
+    const windows = await this.restoreWindows(userId);
+
+    const scope: Prisma.HouseholdWhereInput = { deletedAt: { not: null }, id: { in: [...windows.keys()] } };
+
+    const { rows, total } = await this.paginateHouseholds(
+      {
+        AND: [
+          this.scopeComposer.compose(ResourceType.Household, Action.read, scope),
+          this.scopeComposer.compose(ResourceType.Household, Action.update, scope),
+        ],
+      },
+      pagination,
+    );
+
+    return {
+      rows: rows.map((row) => {
+        // `null` means a grant with no end date, so it is never the fallback
+        // for a row the scope let through without a window.
+        const restorableUntil = windows.get(row.id);
+        assert(restorableUntil !== undefined, `household ${row.id} was listed with no restore window`);
+
+        return { ...row, restorableUntil };
+      }),
+      total,
+    };
+  }
+
+  /**
+   * The acting user's live grants of the restore permission, each pinned to a
+   * household: when each one ends, keyed by household id. Never returned
+   * as-is; only the household ceilings decide what is listed.
+   *
+   * Filtered as the ability loader filters direct permissions: unexpired, and
+   * not of a retired permission. "Not a denial" is spelled as
+   * {@link restoreHousehold} spells it, since `inverted` is nullable. A grant
+   * with no end date is kept, since the restore route honours it.
+   */
+  private async restoreWindows(userId: string): Promise<ReadonlyMap<string, Date | null>> {
+    const grants = await this.db.userPermission.findMany({
+      where: {
+        userId,
+        resourceType: ResourceType.Household,
+        resourceId: { not: null },
+        permission: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG, retiredAt: null },
+        AND: [
+          { OR: [{ inverted: null }, { inverted: false }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        ],
+      },
+      select: { resourceId: true, expiresAt: true },
+    });
+
+    // The `where` already excludes a null `resourceId`; the generated type
+    // cannot know that.
+    return new Map(
+      grants.flatMap(({ resourceId, expiresAt }) => (resourceId === null ? [] : [[resourceId, expiresAt] as const])),
+    );
+  }
+
+  /**
    * One page of households plus the total matching row count for the response
    * envelope (#230). Scope is the caller's business; everything below it holds
    * whatever the scope, so a household list that declares a different one
@@ -578,9 +672,11 @@ export class HouseholdService {
   /**
    * Soft-delete: the row is retained (`deletedAt` stamped) and hidden from every
    * read — `getHouseholdById`, `getHouseholdsForUser` and `updateHousehold` all
-   * filter `deletedAt: null`. Outstanding invites to the household are revoked
-   * in the same transaction so a stale token can never be accepted into a dead
-   * household. Members and game-collection shares are intentionally left in
+   * filter `deletedAt: null` — except {@link getRestorableHouseholdsForUser},
+   * which lists it to the household owners who can still restore it (not to
+   * staff, who can restore any). Outstanding invites to the household are
+   * revoked in the same transaction so a stale token can never be accepted into
+   * a dead household. Members and game-collection shares are intentionally left in
    * place — a soft delete is reversible ({@link restoreHousehold}) and reads
    * already exclude the household; hard cascade/cleanup is deferred to the
    * purge path (#543).
