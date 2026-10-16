@@ -72,9 +72,18 @@ describe('import status read scope', () => {
     return { first, second, firstBase: firstBase.id, secondBase: secondBase.id, expansion: expansion.id };
   };
 
-  it('lists its owner every batch, by when each started, with all of its jobs', async () => {
-    const owner = await actors.user();
+  it("lists its owner every batch, by when each started, with all of its jobs, and no one else's", async () => {
+    const [owner, stranger] = await Promise.all([actors.user(), actors.user()]);
     const batches = await arrangeBatches(owner.user.id);
+    const strangers = await arrangeBatches(stranger.user.id);
+
+    // The control: a session's ceiling admits every import job, so the owner
+    // reads a stranger's batch by id. Only the list's own scope names the
+    // acting user, and it alone keeps the stranger's batches off the page.
+    batchEnvelope(
+      await readBatch(owner, strangers.second).expect(200),
+      "GET /api/games/import/:batchId for a stranger's batch",
+    );
 
     const page = listBatchesEnvelope(await listImports(owner).expect(200), 'GET /api/games/import as its owner');
 
