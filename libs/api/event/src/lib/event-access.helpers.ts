@@ -2,6 +2,7 @@ import type { DatabaseService, Event } from '@bge/database';
 import { t } from '@bge/i18n';
 import type { AbilityService } from '@bge/permissions';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { NOT_REMOVED } from './constants/not-removed.constant';
 
 /**
  * Asserts an event exists (and is not soft-deleted), throwing `NotFoundException`
@@ -41,9 +42,9 @@ export async function requireEvent(db: DatabaseService, eventId: string): Promis
 
 /**
  * Resolves the acting user's attendee id for an event, throwing
- * `ForbiddenException` when the actor is not an attendee. Shared by the
- * nomination and occurrence services, whose mutation paths attribute work to
- * the acting attendee.
+ * `ForbiddenException` when the actor is not an attendee, a host having
+ * removed them included (#551). Shared by the nomination and occurrence
+ * services, whose mutation paths attribute work to the acting attendee.
  */
 export async function resolveActingAttendeeId(
   db: DatabaseService,
@@ -52,7 +53,7 @@ export async function resolveActingAttendeeId(
 ): Promise<string> {
   const userId = abilityService.getActingUserId();
   const attendee = await db.eventAttendee.findUnique({
-    where: { eventId_userId: { eventId, userId } },
+    where: { eventId_userId: { eventId, userId }, ...NOT_REMOVED },
     select: { id: true },
   });
 

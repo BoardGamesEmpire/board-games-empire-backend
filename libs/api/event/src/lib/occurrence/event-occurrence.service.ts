@@ -16,6 +16,8 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
+import { isOutOfEvent } from '../attendee/attendance';
+import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { assertEventExists, resolveActingAttendeeId } from '../event-access.helpers';
@@ -164,7 +166,7 @@ export class EventOccurrenceService {
       }),
     ]);
 
-    const votesByOccurrence = groupByOccurrence(votes);
+    const votesByOccurrence = groupByOccurrence(votes.map(toOccurrenceVote));
     const gamesByOccurrence = groupByOccurrence(games);
 
     return occurrences.map((occurrence) => ({
@@ -540,8 +542,8 @@ export class EventOccurrenceService {
 
     const [attendees, occurrences, votes] = await Promise.all([
       this.db.eventAttendee.findMany({
-        where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId }),
-        select: { id: true, userId: true, status: true },
+        where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId, ...NOT_REMOVED }),
+        select: { id: true, userId: true, status: true, removedAt: true },
       }),
       this.db.eventOccurrence.findMany({
         where: this.scopeComposer.compose(ResourceType.EventOccurrence, Action.read, { eventId }),
@@ -555,12 +557,20 @@ export class EventOccurrenceService {
       }),
     ]);
 
-    const countedAttendeeIds = new Set(attendees.map((a) => a.id));
-    const votesByOccurrence = groupByOccurrence(votes.filter((vote) => countedAttendeeIds.has(vote.attendeeId)));
+    // An attendee who is not attending keeps their votes, and the summary
+    // lists them, marked as not counting; none of the counts includes them
+    // (#551). A removed attendee is not read at all.
+    const attendeeById = new Map(attendees.map((a) => [a.id, a]));
+    const votesByOccurrence = groupByOccurrence(
+      votes.flatMap((vote) => {
+        const attendee = attendeeById.get(vote.attendeeId);
+        return attendee ? [{ ...vote, eligible: !isOutOfEvent(attendee) }] : [];
+      }),
+    );
 
     const registered = attendees.filter((a) => a.userId !== null);
     const guests = attendees.filter((a) => a.userId === null);
-    const eligibleVoters = registered.length;
+    const eligibleVoters = registered.filter((a) => !isOutOfEvent(a)).length;
 
     const byStatus = {
       attending: 0,
@@ -592,7 +602,9 @@ export class EventOccurrenceService {
       let maybe = 0;
       let unavailable = 0;
 
-      for (const vote of occurrenceVotes) {
+      const countedVotes = occurrenceVotes.filter((vote) => vote.eligible);
+
+      for (const vote of countedVotes) {
         switch (vote.response) {
           case AvailabilityResponse.Available:
             available++;
@@ -606,7 +618,7 @@ export class EventOccurrenceService {
         }
       }
 
-      const totalVotes = occurrenceVotes.length;
+      const totalVotes = countedVotes.length;
 
       return {
         occurrenceId: occ.id,
@@ -623,6 +635,7 @@ export class EventOccurrenceService {
         voters: occurrenceVotes.map((v) => ({
           attendeeId: v.attendeeId,
           response: v.response,
+          eligible: v.eligible,
         })),
       } satisfies AvailabilitySummaryEntry;
     });
@@ -640,16 +653,39 @@ export class EventOccurrenceService {
   }
 }
 
-/** Each vote as the occurrence routes serve it: the response, the attendee who cast it, and their user. */
+/**
+ * Each vote as the occurrence routes read it: the response, the attendee who
+ * cast it, their user, and whether they are still in the event, which
+ * {@link toOccurrenceVote} turns into the vote's `eligible` mark.
+ */
 const OCCURRENCE_VOTE_SELECT = {
   id: true,
   attendeeId: true,
   response: true,
 
   attendee: {
-    select: { userId: true },
+    select: { userId: true, status: true, removedAt: true },
   },
 } as const satisfies Prisma.EventAvailabilityVoteSelect;
+
+type OccurrenceVoteRow = Prisma.EventAvailabilityVoteGetPayload<{ select: typeof OCCURRENCE_VOTE_SELECT }>;
+
+/**
+ * A vote as the occurrence routes serve it: the response, the attendee who
+ * cast it and their user, and whether it counts. It counts while its voter
+ * is in the event (#551); one who left keeps the vote, marked as not counting.
+ */
+export type OccurrenceVote = Omit<OccurrenceVoteRow, 'attendee'> & {
+  attendee: Pick<OccurrenceVoteRow['attendee'], 'userId'>;
+  eligible: boolean;
+};
+
+function toOccurrenceVote<TRow extends OccurrenceVoteRow>({
+  attendee: { userId, status, removedAt },
+  ...vote
+}: TRow): Omit<TRow, 'attendee'> & Pick<OccurrenceVote, 'attendee' | 'eligible'> {
+  return { ...vote, attendee: { userId }, eligible: !isOutOfEvent({ status, removedAt }) };
+}
 
 // In the order each attendee first voted. A changed vote keeps its place, and
 // `id` breaks ties between votes cast in the same millisecond.
@@ -680,10 +716,9 @@ const OCCURRENCE_GAME_ORDER = [
 export type OccurrenceDetail = Prisma.EventOccurrenceGetPayload<{
   include: {
     policy: true;
-    availabilityVotes: { select: typeof OCCURRENCE_VOTE_SELECT };
     games: { select: typeof OCCURRENCE_GAME_SELECT };
   };
-}>;
+}> & { availabilityVotes: OccurrenceVote[] };
 
 type VotesAndGames = Pick<OccurrenceDetail, 'availabilityVotes' | 'games'>;
 

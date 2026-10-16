@@ -86,6 +86,7 @@ export function makeEventAttendee(
     invitedById: null,
     notes: null,
     rsvpDate: null,
+    removedAt: null,
     createdAt: new Date('2024-01-01T00:00:00Z'),
     updatedAt: new Date('2024-01-01T00:00:00Z'),
     ...overrides,
@@ -119,6 +120,7 @@ export function makeEventAttendeeGameList(
     attendeeId,
     collectionId,
     createdAt: new Date('2024-01-01T00:00:00Z'),
+    removedAt: null,
     ...overrides,
   };
 }

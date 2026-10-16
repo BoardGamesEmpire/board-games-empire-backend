@@ -162,6 +162,7 @@ describe('EventNotificationListener', () => {
       db.event.findUnique.mockResolvedValue(makeEvent({ title: 'Strategy Night' }));
 
       const event = new AttendeeAddedEvent(
+        null,
         makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: 'user-invited' }),
         new Date(),
       );
@@ -182,6 +183,7 @@ describe('EventNotificationListener', () => {
 
     it('skips guest attendees (no userId)', async () => {
       const event = new AttendeeAddedEvent(
+        null,
         makeEventAttendee({ id: 'att-1', eventId: 'ev-1', userId: null, guestName: 'Alice' }),
         new Date(),
       );

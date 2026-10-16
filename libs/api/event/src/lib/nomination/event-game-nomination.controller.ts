@@ -57,6 +57,7 @@ export class EventGameNominationController {
   @ApiParam({ name: 'eventId', type: String })
   @ApiResponse({ status: Http.Created, description: 'Nomination created' })
   @ApiResponse({ status: Http.Forbidden, description: 'Mode does not allow nominations' })
+  @ApiResponse({ status: Http.Conflict, description: 'The attendee offering the game is not attending' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventGameNomination))
   @Post()
   nominate(@Param('eventId') eventId: string, @Body() dto: NominateGameDto) {
@@ -149,6 +150,7 @@ export class EventGameNominationController {
   @ApiOperation({ summary: 'Directly add a game to the event lineup (Direct/HostOnly mode)' })
   @ApiResponse({ status: Http.Created, description: 'Game added to event' })
   @ApiResponse({ status: Http.Forbidden, description: 'Mode does not permit direct add' })
+  @ApiResponse({ status: Http.Conflict, description: 'The attendee offering the game is not attending' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.EventGame))
   @Post('direct-add')
   directAdd(@Param('eventId') eventId: string, @Body() dto: DirectAddGameDto) {

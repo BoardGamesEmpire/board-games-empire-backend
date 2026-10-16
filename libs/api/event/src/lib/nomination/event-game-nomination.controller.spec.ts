@@ -1,10 +1,10 @@
-import { ResourceType, type EventGameNomination } from '@bge/database';
+import { ResourceType } from '@bge/database';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom } from 'rxjs';
 import { EventGameNominationController } from './event-game-nomination.controller';
-import { EventGameNominationService } from './event-game-nomination.service';
+import { EventGameNominationService, type NominationDetail } from './event-game-nomination.service';
 
 const PAGINATION = paginationQuery({ limit: 10 });
 
@@ -31,7 +31,7 @@ describe('EventGameNominationController', () => {
     // #372: the echoed paging describes the query the controller was handed,
     // so a deep page has to report itself as one.
     it('wraps the rows in the paginated envelope, echoing the requested page', async () => {
-      const nominations = [{ id: 'nom-1' }] as EventGameNomination[];
+      const nominations = [{ id: 'nom-1' }] as NominationDetail[];
       service.getNominations.mockResolvedValue({ rows: nominations, total: 31 });
 
       const response = await firstValueFrom(

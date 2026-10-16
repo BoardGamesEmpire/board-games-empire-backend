@@ -24,6 +24,10 @@ model EventGameNomination {
 
   status NominationStatus @default(Open)
 
+  // The status a Paused nomination returns to when its supplier is back.
+  // Null unless the status is Paused.
+  pausedFrom NominationStatus? @map("paused_from")
+
   votes      EventGameVote[]
   elevatedTo EventGame? // set when vote succeeds, null while pending
 
@@ -50,12 +54,13 @@ enum GameAdditionMode {
 enum NominationStatus {
   Open // accepting votes (RequiresVote mode)
   AwaitingApproval // pending host decision (HostApproval mode)
-  Approved // host approved, elevated to EventGame
-  Passed // vote succeeded, elevated to EventGame
+  Approved // host approved, elevated to EventGame; the game leaves the lineup if its supplier leaves before its date
+  Passed // vote succeeded, elevated to EventGame; the game leaves the lineup if its supplier leaves before its date
   Failed // vote did not succeed
   QuorumNotMet // voting ended without reaching quorum (RequiresVote mode)
   Rejected // host rejected (HostApproval mode)
   Withdrawn // nominator pulled before resolution
+  Paused // its supplier is out of the event; returns to pausedFrom when they are back
 
   @@map("nomination_statuses")
 }

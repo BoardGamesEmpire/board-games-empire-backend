@@ -7,15 +7,22 @@ import {
   VoteThresholdType,
   VoteType,
 } from '@bge/database';
+import { isOutOfEvent } from '../attendee/attendance';
 import type { ResolutionResult, VoteTally, VotingPolicy } from '../interfaces/vote.interface';
 
 export class VoteResolver {
   /**
    * Resolve a nomination based on cast votes, policy rules, and attendee pool.
+   *
+   * A vote counts only while its voter is eligible, by the same rule that
+   * counts the pool, so quorum and threshold judge the same people (#551).
+   * Votes are never discarded for it: the voter's state is read when
+   * counting, so a voter who comes back counts again.
    */
   static resolve(votes: VoteStub[], policy: VotingPolicy, attendees: AttendeeStub[]): ResolutionResult {
     const eligibleCount = this.countEligibleVoters(attendees, policy.voteEligibility);
-    const tally = this.tally(votes, policy.interestedWeight);
+    const counted = votes.filter((vote) => this.isEligibleVoter(vote.voter, policy.voteEligibility));
+    const tally = this.tally(counted, policy.interestedWeight);
     const quorumMet = this.checkQuorum(tally.totalVotes, eligibleCount, policy);
     const thresholdMet = this.checkThreshold(tally, eligibleCount, policy);
 
@@ -40,7 +47,7 @@ export class VoteResolver {
   /**
    * Count votes, applying InterestedWeight to reclassify Interested votes.
    */
-  static tally(votes: VoteStub[], interestedWeight: InterestedWeight): VoteTally {
+  static tally(votes: Pick<VoteStub, 'voteType'>[], interestedWeight: InterestedWeight): VoteTally {
     let forCount = 0;
     let againstCount = 0;
     let interestedCount = 0;
@@ -91,13 +98,25 @@ export class VoteResolver {
    * Determine how many attendees are eligible to vote based on the policy.
    */
   static countEligibleVoters(attendees: AttendeeStub[], eligibility: VoteEligibility): number {
+    return attendees.filter((attendee) => this.isEligibleVoter(attendee, eligibility)).length;
+  }
+
+  /**
+   * Whether an attendee's vote counts under the policy. No one who is out of
+   * the event counts, under any rule: removed by a host, or not attending.
+   */
+  static isEligibleVoter(attendee: AttendeeStub, eligibility: VoteEligibility): boolean {
+    if (isOutOfEvent(attendee)) {
+      return false;
+    }
+
     switch (eligibility) {
       case VoteEligibility.AllAttendees:
-        return attendees.length;
+        return true;
       case VoteEligibility.ConfirmedOnly:
-        return attendees.filter((a) => a.status === EventParticipationStatus.Attending).length;
+        return attendee.status === EventParticipationStatus.Attending;
       case VoteEligibility.PoolParticipants:
-        return attendees.filter((a) => a.availableGames.length > 0).length;
+        return attendee.availableGames.length > 0;
     }
   }
 
@@ -155,9 +174,12 @@ export class VoteResolver {
 
 export interface AttendeeStub {
   status: EventParticipationStatus;
+  removedAt: Date | null;
+  /** The games they offer, without the ones taken back. */
   availableGames: { id: string }[];
 }
 
-interface VoteStub {
+export interface VoteStub {
   voteType: VoteType;
+  voter: AttendeeStub;
 }

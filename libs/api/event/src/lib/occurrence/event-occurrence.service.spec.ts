@@ -34,13 +34,29 @@ import {
 
 const COND = { id: 'sentinel-condition' };
 
-/** A vote as the vote read selects it, with the occurrence it is matched back to. */
-const vote = (id: string, occurrenceId: string) => ({
+/**
+ * A vote as the vote read selects it, with the occurrence it is matched back
+ * to, cast by an attendee who is attending unless `attendee` says otherwise.
+ */
+const vote = (
+  id: string,
+  occurrenceId: string,
+  attendee: { status?: EventParticipationStatus; removedAt?: Date | null } = {},
+) => ({
   id,
   occurrenceId,
   attendeeId: `att-${id}`,
   response: AvailabilityResponse.Available,
+  attendee: { userId: `user-${id}`, status: EventParticipationStatus.Attending, removedAt: null, ...attendee },
+});
+
+/** A vote as the occurrence routes serve it: the voter's user alone, and whether the vote counts. */
+const servedVote = (id: string, eligible = true) => ({
+  id,
+  attendeeId: `att-${id}`,
+  response: AvailabilityResponse.Available,
   attendee: { userId: `user-${id}` },
+  eligible,
 });
 
 /** A game as the game read selects it, with the occurrence it is matched back to. */
@@ -250,20 +266,7 @@ describe('EventOccurrenceService', () => {
       expect(rows.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
         {
           id: 'occ-1',
-          availabilityVotes: [
-            {
-              id: 'v1',
-              attendeeId: 'att-v1',
-              response: AvailabilityResponse.Available,
-              attendee: { userId: 'user-v1' },
-            },
-            {
-              id: 'v2',
-              attendeeId: 'att-v2',
-              response: AvailabilityResponse.Available,
-              attendee: { userId: 'user-v2' },
-            },
-          ],
+          availabilityVotes: [servedVote('v1'), servedVote('v2')],
           games: [],
         },
         {
@@ -274,6 +277,25 @@ describe('EventOccurrenceService', () => {
           ],
         },
       ]);
+    });
+
+    // A voter who left keeps their vote. It is served, marked as not
+    // counting, and what marks it is not served.
+    it('marks the vote of a voter who is not attending, or was removed, as not counting', async () => {
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        vote('v1', 'occ-1'),
+        vote('v2', 'occ-1', { status: EventParticipationStatus.NotAttending }),
+        vote('v3', 'occ-1', { removedAt: new Date() }),
+      ] as never);
+
+      const { rows } = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(rows[0].availabilityVotes).toEqual([servedVote('v1'), servedVote('v2', false), servedVote('v3', false)]);
+      expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ attendee: { select: { userId: true, status: true, removedAt: true } } }),
+        }),
+      );
     });
 
     it('reads no votes or games for an empty page', async () => {
@@ -355,14 +377,7 @@ describe('EventOccurrenceService', () => {
         expect(answer).toEqual(
           expect.objectContaining({
             id: 'occ-1',
-            availabilityVotes: [
-              {
-                id: 'v1',
-                attendeeId: 'att-v1',
-                response: AvailabilityResponse.Available,
-                attendee: { userId: 'user-v1' },
-              },
-            ],
+            availabilityVotes: [servedVote('v1')],
             games: [
               { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
             ],
@@ -674,10 +689,14 @@ describe('EventOccurrenceService', () => {
     it('composes the attendee half too, so its counts are clipped by the caller’s attendee ceiling', async () => {
       await service.getAvailabilitySummary('event-1');
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      // Without the attendees a host removed: they count toward nothing.
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        eventId: 'event-1',
+        removedAt: null,
+      });
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read);
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
+        expect.objectContaining({ where: { eventId: 'event-1', removedAt: null, AND: [COND] } }),
       );
     });
 
@@ -730,7 +749,40 @@ describe('EventOccurrenceService', () => {
           totalVotes: 1,
           pendingVotes: 0,
           participationRate: 1,
-          voters: [{ attendeeId: 'att-1', response: AvailabilityResponse.Available }],
+          voters: [{ attendeeId: 'att-1', response: AvailabilityResponse.Available, eligible: true }],
+        }),
+      ]);
+    });
+
+    // A voter not attending keeps their vote, listed and marked as not
+    // counting; no count includes it, and they are no eligible voter.
+    it('lists the vote of an attendee not attending without counting it', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', status: EventParticipationStatus.Attending }),
+        makeEventAttendee({ id: 'att-2', eventId: 'event-1', status: EventParticipationStatus.NotAttending }),
+        makeEventAttendee({ id: 'att-3', eventId: 'event-1', status: EventParticipationStatus.Maybe }),
+      ]);
+      db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        { occurrenceId: 'occ-1', attendeeId: 'att-1', response: AvailabilityResponse.Available },
+        { occurrenceId: 'occ-1', attendeeId: 'att-2', response: AvailabilityResponse.Unavailable },
+      ] as EventAvailabilityVote[]);
+
+      const summary = await service.getAvailabilitySummary('event-1');
+
+      expect(summary.eligibleVoters).toBe(2);
+      expect(summary.attendees.byStatus).toEqual({ attending: 1, invited: 0, maybe: 1, notAttending: 1 });
+      expect(summary.occurrences).toEqual([
+        expect.objectContaining({
+          available: 1,
+          unavailable: 0,
+          totalVotes: 1,
+          pendingVotes: 1,
+          participationRate: 0.5,
+          voters: [
+            { attendeeId: 'att-1', response: AvailabilityResponse.Available, eligible: true },
+            { attendeeId: 'att-2', response: AvailabilityResponse.Unavailable, eligible: false },
+          ],
         }),
       ]);
     });

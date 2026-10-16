@@ -85,6 +85,42 @@ export class NominationResolvedEvent extends MutationEvent<EventGameNomination> 
   }
 }
 
+/**
+ * A nomination paused because the attendee supplying its game is out of the
+ * event (#551). Its own name, apart from {@link NominationResumedEvent}, so
+ * the audit notifier's per-name dedupe cannot mask one behind the other.
+ */
+export class NominationPausedEvent extends MutationEvent<EventGameNomination> {
+  static readonly eventName = NominationEvent.NominationPaused;
+
+  declare readonly before: NominationStatusSnapshot;
+  declare readonly after: NominationStatusSnapshot;
+
+  readonly subject = ResourceType.EventGameNomination;
+  readonly subjectId: string;
+
+  constructor(before: NominationStatusSnapshot, after: NominationStatusSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
+/** A paused nomination returned to the status it paused from, its supplier back in the event (#551). */
+export class NominationResumedEvent extends MutationEvent<EventGameNomination> {
+  static readonly eventName = NominationEvent.NominationResumed;
+
+  declare readonly before: NominationStatusSnapshot;
+  declare readonly after: NominationStatusSnapshot;
+
+  readonly subject = ResourceType.EventGameNomination;
+  readonly subjectId: string;
+
+  constructor(before: NominationStatusSnapshot, after: NominationStatusSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
+  }
+}
+
 type VoteCastSnapshot = Readonly<Partial<EventGameVote> & Pick<EventGameVote, 'id'>>;
 
 /**
@@ -139,5 +175,29 @@ export class GameAddedToEventEvent extends MutationEvent<EventGame> {
   ) {
     super(null, after, initiatedAt);
     this.subjectId = after.id;
+  }
+}
+
+/**
+ * An EventGame row was deleted because the attendee supplying it is out of the
+ * event (#551). Its own name, apart from {@link GameAddedToEventEvent}.
+ */
+export class GameRemovedFromEventEvent extends MutationEvent<EventGame> {
+  static readonly eventName = NominationEvent.GameRemovedFromEvent;
+
+  declare readonly before: EventGameAddedSnapshot;
+  declare readonly after: null;
+
+  readonly subject = ResourceType.EventGame;
+  readonly subjectId: string;
+
+  constructor(
+    before: EventGameAddedSnapshot,
+    /** Parent event id — the row's own `eventId` is null for occurrence-scoped games. */
+    public readonly eventId: string,
+    initiatedAt: Date,
+  ) {
+    super(before, null, initiatedAt);
+    this.subjectId = before.id;
   }
 }

@@ -6,6 +6,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { AttendeeEvents } from '../attendee/constants';
 import type { AttendeeAddedEvent, AttendeeStatusUpdatedEvent } from '../attendee/events/attendee.events';
 import { EventEvents } from '../constants/event-events.constant';
+import { NOT_REMOVED } from '../constants/not-removed.constant';
 import type { EventCreatedEvent } from '../events/event.events';
 import { NominationEvent } from '../nomination/constants';
 import type {
@@ -187,7 +188,7 @@ export class EventNotificationListener {
 
       // Notify all attendees except the nominator
       const attendees = await this.db.eventAttendee.findMany({
-        where: { eventId, userId: { not: null } },
+        where: { eventId, userId: { not: null }, ...NOT_REMOVED },
         select: { userId: true, id: true },
       });
 
@@ -304,7 +305,7 @@ export class EventNotificationListener {
       }
 
       const attendees = await this.db.eventAttendee.findMany({
-        where: { eventId, userId: { not: null } },
+        where: { eventId, userId: { not: null }, ...NOT_REMOVED },
         select: { userId: true, id: true },
       });
 
@@ -372,7 +373,7 @@ export class EventNotificationListener {
 
       // Only notify attendees who voted on this occurrence
       const voters = await this.db.eventAvailabilityVote.findMany({
-        where: { occurrenceId },
+        where: { occurrenceId, attendee: { is: NOT_REMOVED } },
         select: {
           attendeeId: true,
           attendee: {

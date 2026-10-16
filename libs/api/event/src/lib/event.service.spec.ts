@@ -81,9 +81,10 @@ describe('EventService', () => {
     it('asks the composer for its where clause, declaring the events the caller is an attendee of', async () => {
       await read();
 
+      // A row a host removed keeps no role, so its event is not the caller's.
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
         deletedAt: null,
-        attendees: { some: { userId: MOCK_ACTING_USER_ID } },
+        attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
       });
     });
 
@@ -97,7 +98,11 @@ describe('EventService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
       expect(db.event.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { deletedAt: null, attendees: { some: { userId: MOCK_ACTING_USER_ID } }, AND: [COND] },
+          where: {
+            deletedAt: null,
+            attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
+            AND: [COND],
+          },
         }),
       );
     });
@@ -185,9 +190,13 @@ describe('EventService', () => {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
       });
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      // Without the attendees a host removed.
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        eventId: 'event-1',
+        removedAt: null,
+      });
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
-        where: { eventId: 'event-1', AND: [COND] },
+        where: { eventId: 'event-1', removedAt: null, AND: [COND] },
         include: {
           user: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
           role: { include: { role: { select: { id: true, name: true } } } },

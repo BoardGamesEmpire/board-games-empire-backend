@@ -94,7 +94,9 @@ describe('event write authorization', () => {
   const removeOccurrence = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
     request(baseUrl).delete(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`).set(actor.headers);
 
-  const attendeeCount = (eventId: string) => db.client.eventAttendee.count({ where: { eventId } });
+  // A removal keeps the row and marks it (#551), so the count is of the
+  // attendees still on the event.
+  const attendeeCount = (eventId: string) => db.client.eventAttendee.count({ where: { eventId, removedAt: null } });
 
   const attendeeRowId = async (eventId: string, userId: string) =>
     (
