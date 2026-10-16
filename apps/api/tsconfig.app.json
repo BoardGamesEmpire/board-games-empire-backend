@@ -50,6 +50,9 @@
       "path": "../../libs/api/webhook-subscription/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/version/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/user/tsconfig.lib.json"
     },
     {
@@ -116,9 +119,6 @@
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/data-gateway/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/api/game-collection/tsconfig.lib.json"
     },
     {
@@ -138,6 +138,9 @@
     },
     {
       "path": "../../libs/database/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/api/data-gateway/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/gateway-coordinator-client/tsconfig.lib.json"

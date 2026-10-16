@@ -7,7 +7,7 @@ Nothing imports this library. Its entrypoints are invoked by path, from Nx targe
 | Entrypoint                          | Invoked by                                                       |
 | ----------------------------------- | ---------------------------------------------------------------- |
 | `src/bin/prisma-generate.js`        | `@bge/database:generate`                                         |
-| `src/bin/generate-bge-version.js`   | `@boardgamesempire/api:generate`                                 |
+| `src/bin/generate-bge-version.js`   | `@board-games-empire/version:generate`                           |
 | `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
 | `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
 | `src/bin/find-published-images.js`  | `ci.yml`'s `build-push` job, on `master`                         |

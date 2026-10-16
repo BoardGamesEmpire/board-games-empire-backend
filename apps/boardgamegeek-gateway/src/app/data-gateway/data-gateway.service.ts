@@ -1,4 +1,5 @@
 import type { GatewayServiceHost } from '@bge/gateway-host';
+import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'node:crypto';
@@ -37,7 +38,7 @@ export class DataGatewayService implements GatewayServiceHost {
       correlationId: request.correlationId ?? crypto.randomUUID(),
       timestampMs: BigInt(Date.now()),
       gatewayName: 'BoardGameGeekGateway',
-      gatewayVersion: '1.0.0',
+      gatewayVersion: BGE_VERSION,
     } satisfies proto.GatewayPingResponse;
   }
 

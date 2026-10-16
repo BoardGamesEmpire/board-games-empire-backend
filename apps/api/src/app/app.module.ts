@@ -38,6 +38,7 @@ import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
 import { UserModule } from '@bge/user';
+import { BGE_VERSION } from '@bge/version';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
 import KeyvValkey from '@keyv/valkey';
@@ -60,7 +61,6 @@ import { API_CACHE_NAMESPACE, configuration, configurationValidationSchema } fro
 import { WsFrameScope } from './gateways/base/ws-frame-scope';
 import { WsTranslator } from './gateways/base/ws-translator';
 import { GameSearchGateway } from './gateways/game/search.gateway';
-import { BGE_VERSION } from './generated/bge-version';
 import { TransactionDeadlockInterceptor } from './interceptors/transaction-deadlock.interceptor';
 import { UserAwareCacheInterceptor } from './interceptors/user-aware-cache.interceptor';
 import { baseLogger } from './lib/logger';
@@ -238,8 +238,8 @@ import { createThrottlers } from './lib/throttlers';
       useFactory: (config: ConfigService) => ({
         pluginsRoot: config.getOrThrow<string>('plugins.pluginsRoot'),
         bundledRoot: config.getOrThrow<string>('plugins.bundledRoot'),
-        // Build-time codegen constant (api `generate` target) — the version
-        // is a property of the artifact, not of the environment it runs in.
+        // Build-time codegen constant (`@bge/version`) — the version is a
+        // property of the artifact, not of the environment it runs in.
         bgeVersion: BGE_VERSION,
         // Manifest localization bottoms out where the request-time resolver
         // chain does — the shipped-catalog fallback, not a separate knob.

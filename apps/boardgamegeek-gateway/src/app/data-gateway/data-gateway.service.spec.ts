@@ -1,3 +1,4 @@
+import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
@@ -47,6 +48,10 @@ describe('DataGatewayService', () => {
 
     it('returns the gateway name "BoardGameGeekGateway"', () => {
       expect(service.ping({}).gatewayName).toBe('BoardGameGeekGateway');
+    });
+
+    it('reports the product version it was built at', () => {
+      expect(service.ping({}).gatewayVersion).toBe(BGE_VERSION);
     });
 
     it('returns a bigint timestampMs', () => {
