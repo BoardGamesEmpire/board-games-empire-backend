@@ -201,18 +201,12 @@ describe('EventGameNominationService', () => {
   // the attendees no host has removed. Each voter is judged as the pool reads
   // them, so the votes and the pool can't disagree about who is in.
   it('resolveNomination judges each voter as its pool reads them: a voter who left or was removed counts in neither', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      status: NominationStatus.Open,
-      platformGameId: 'pg-1',
-      occurrenceId: null,
-      suppliedFromId: 'gl-1',
-      votes: [
-        { voteType: VoteType.Against, attendeeId: 'att-in' },
-        { voteType: VoteType.For, attendeeId: 'att-left' },
-        { voteType: VoteType.For, attendeeId: 'att-removed' },
-      ],
-    } as never);
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([
+      { voteType: VoteType.Against, attendeeId: 'att-in' },
+      { voteType: VoteType.For, attendeeId: 'att-left' },
+      { voteType: VoteType.For, attendeeId: 'att-removed' },
+    ] as never);
     db.eventAttendee.findMany.mockResolvedValue([
       { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
       { id: 'att-left', ...voter(EventParticipationStatus.NotAttending) },
@@ -232,15 +226,38 @@ describe('EventGameNominationService', () => {
     expect(db.eventGame.create).not.toHaveBeenCalled();
   });
 
+  // A vote is written under a share lock on its nomination, so votes read
+  // after the nomination's own lock are every vote it settles on: none can
+  // land between the count and the settle.
+  it("resolveNomination counts the votes and the pool under the nomination's lock", async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.Against, attendeeId: 'att-in' }] as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+    ] as never);
+    db.$queryRaw
+      .mockResolvedValueOnce([lockedSupplier()] as never)
+      .mockResolvedValueOnce([{ status: NominationStatus.Open }] as never);
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Failed }));
+
+    await service.resolveNomination('event-1', 'nom-1');
+
+    const [, nominationLock] = db.$queryRaw.mock.invocationCallOrder;
+    const [votesRead] = db.eventGameVote.findMany.mock.invocationCallOrder;
+    const [poolRead] = db.eventAttendee.findMany.mock.invocationCallOrder;
+    const [settled] = db.eventGameNomination.update.mock.invocationCallOrder;
+
+    expect(db.eventGameVote.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { eventGameNominationId: 'nom-1' } }),
+    );
+    expect(votesRead).toBeGreaterThan(nominationLock);
+    expect(poolRead).toBeGreaterThan(nominationLock);
+    expect(settled).toBeGreaterThan(Math.max(votesRead, poolRead));
+  });
+
   it('resolveNomination adds a nomination that passes to the lineup, and emits NominationResolved then GameAddedToEvent', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      status: NominationStatus.Open,
-      platformGameId: 'pg-1',
-      occurrenceId: null,
-      suppliedFromId: 'gl-1',
-      votes: [{ voteType: VoteType.For, attendeeId: 'att-in' }],
-    } as never);
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
+    db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-in' }] as never);
     db.eventAttendee.findMany.mockResolvedValue([
       { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
     ] as never);
@@ -274,23 +291,17 @@ describe('EventGameNominationService', () => {
     expect(gameEvent.addedByAttendeeId).toBe('att-nominator');
   });
 
-  // The votes are counted outside the transaction; the supplier leaving in
-  // between pauses the nomination, so it is checked again under its lock.
-  it('resolveNomination answers 400 for a nomination that paused after it was read, and writes nothing', async () => {
-    db.eventGameNomination.findUnique.mockResolvedValue({
-      id: 'nom-1',
-      status: NominationStatus.Open,
-      platformGameId: 'pg-1',
-      occurrenceId: null,
-      suppliedFromId: 'gl-1',
-      votes: [],
-    } as never);
-    db.eventAttendee.findMany.mockResolvedValue([]);
+  // The status is first checked outside the transaction; the supplier leaving
+  // in between pauses the nomination, so it is checked again under its lock,
+  // before anything is counted.
+  it('resolveNomination answers 400 for a nomination that paused after it was read, and counts and writes nothing', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
     db.$queryRaw
       .mockResolvedValueOnce([lockedSupplier({ status: EventParticipationStatus.NotAttending })] as never)
       .mockResolvedValueOnce([{ status: NominationStatus.Paused }] as never);
 
     await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+    expect(db.eventGameVote.findMany).not.toHaveBeenCalled();
     expect(db.eventGameNomination.update).not.toHaveBeenCalled();
     expect(db.eventGame.create).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
@@ -957,6 +968,17 @@ function voter(status: EventParticipationStatus, removedAt: Date | null = null) 
 /** A vote as the nomination include reads it, cast For by `attendee`. */
 function voteRow(id: string, attendee: ReturnType<typeof voter>) {
   return { id, attendeeId: `att-${id}`, voteType: VoteType.For, priority: null, comment: null, attendee };
+}
+
+/** An open nomination as resolve first reads it, before its lock: on event-1 and no date, supplied from gl-1. */
+function openNomination() {
+  return {
+    id: 'nom-1',
+    status: NominationStatus.Open,
+    platformGameId: 'pg-1',
+    occurrenceId: null,
+    suppliedFromId: 'gl-1',
+  } as never;
 }
 
 /** A nomination row as the include reads it, on event-1 and no date, with no votes unless given. */

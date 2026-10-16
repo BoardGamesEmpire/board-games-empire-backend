@@ -420,7 +420,6 @@ export class EventGameNominationService {
         platformGameId: true,
         occurrenceId: true,
         suppliedFromId: true,
-        votes: { select: { voteType: true, attendeeId: true } },
       },
     });
 
@@ -431,25 +430,20 @@ export class EventGameNominationService {
     );
 
     const policy = await this.getEffectivePolicy(eventId, nomination.occurrenceId ?? undefined);
-    const attendees = await this.getEventAttendees(eventId);
-
-    // Each voter as the pool's read has them, not as a read of the votes
-    // would: two reads can fall either side of a voter leaving, and then
-    // count a vote the pool no longer holds. A voter the pool lacks was
-    // removed, and their vote doesn't count.
-    const voterById = new Map(attendees.map((attendee) => [attendee.id, attendee]));
-    const resolution = VoteResolver.resolve(
-      nomination.votes.flatMap(({ voteType, attendeeId }) => {
-        const voter = voterById.get(attendeeId);
-        return voter ? [{ voteType, voter }] : [];
-      }),
-      policy,
-      attendees,
-    );
-    const resolvedStatus = resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed;
 
     try {
-      const { updated, elevated } = await this.settle(eventId, nomination, NominationStatus.Open, resolvedStatus);
+      const { updated, elevated, decision } = await this.settle(
+        eventId,
+        nomination,
+        NominationStatus.Open,
+        async (tx) => {
+          const resolution = await this.countVotes(tx, eventId, nomination.id, policy);
+          return {
+            outcome: resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed,
+            resolution,
+          };
+        },
+      );
 
       this.eventEmitter.emit(
         NominationResolvedEvent.eventName,
@@ -467,7 +461,7 @@ export class EventGameNominationService {
 
       return {
         nomination: await this.withVoteEligibilityOf(eventId, updated, policy.voteEligibility),
-        resolution: { ...resolution, status: resolvedStatus },
+        resolution: { ...decision.resolution, status: decision.outcome },
       };
     } catch (error) {
       this.logger.error(`Error resolving nomination ${nominationId} for event ${eventId}`, error);
@@ -514,7 +508,12 @@ export class EventGameNominationService {
     );
 
     try {
-      const { updated, elevated } = await this.settle(eventId, nomination, NominationStatus.AwaitingApproval, decision);
+      const { updated, elevated } = await this.settle(
+        eventId,
+        nomination,
+        NominationStatus.AwaitingApproval,
+        async () => ({ outcome: decision }),
+      );
 
       this.eventEmitter.emit(
         NominationResolvedEvent.eventName,
@@ -649,24 +648,25 @@ export class EventGameNominationService {
   }
 
   /**
-   * Moves a nomination from `expected` to its outcome, adding its game to the
-   * lineup when the outcome passes it.
+   * Moves a nomination from `expected` to the outcome `decide` gives, adding
+   * its game to the lineup when the outcome passes it.
    *
-   * The status was checked before the votes were counted, and a nomination
-   * can pause in between: its supplier leaving the event pauses it in the
-   * leaving transaction (#551). So the supplier is locked first, the order
-   * the leaving transaction takes them in, then the nomination is locked and
+   * The caller checked the status before this transaction, and a nomination
+   * can pause since: its supplier leaving the event pauses it in the leaving
+   * transaction (#551). So the supplier is locked first, the order the
+   * leaving transaction takes them in, then the nomination is locked and
    * checked again. One that has since paused, or been withdrawn, answers as
    * the first check would have.
+   *
+   * `decide` runs under the nomination's lock, so an outcome it reads from the
+   * votes is the one the nomination settles on ({@link countVotes}).
    */
-  private async settle(
+  private async settle<Decision extends { outcome: NominationStatus }>(
     eventId: string,
     nomination: Pick<NominationRow, 'id' | 'platformGameId' | 'suppliedFromId' | 'occurrenceId'>,
     expected: NominationStatus,
-    outcome: NominationStatus,
-  ): Promise<{ updated: NominationRow; elevated: LineupAddition | null }> {
-    const elevates = outcome === NominationStatus.Passed || outcome === NominationStatus.Approved;
-
+    decide: (tx: Prisma.TransactionClient) => Promise<Decision>,
+  ): Promise<{ updated: NominationRow; elevated: LineupAddition | null; decision: Decision }> {
     return this.db.$transaction(async (tx) => {
       const supplier = await lockSupplier(tx, nomination.suppliedFromId);
       const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(Prisma.sql`
@@ -682,6 +682,9 @@ export class EventGameNominationService {
         );
       }
 
+      const decision = await decide(tx);
+      const elevates = decision.outcome === NominationStatus.Passed || decision.outcome === NominationStatus.Approved;
+
       if (elevates) {
         this.assertSupplies(supplier, eventId, nomination.suppliedFromId, nomination.platformGameId);
       }
@@ -692,7 +695,7 @@ export class EventGameNominationService {
           // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventGameNomination, Action.update),
         },
-        data: { status: outcome },
+        data: { status: decision.outcome },
         include: NOMINATION_INCLUDE,
       });
 
@@ -700,8 +703,41 @@ export class EventGameNominationService {
         ? await this.elevateToEventGame(tx, nomination, eventId, nomination.occurrenceId ?? undefined)
         : null;
 
-      return { updated, elevated };
+      return { updated, elevated, decision };
     });
+  }
+
+  /**
+   * A nomination's votes counted against the event's attendees, on the
+   * transaction holding the nomination's lock ({@link settle}). A vote is
+   * written under a share lock on the same row (`castVote`), so none lands
+   * while they're read, and the count is the one the nomination settles on.
+   *
+   * Each voter is judged as the attendees' read has them, so the votes and
+   * the pool judge the same people. A voter missing from that read was
+   * removed, and their vote doesn't count.
+   */
+  private async countVotes(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+    nominationId: string,
+    policy: VotingPolicy,
+  ): Promise<ResolutionResult> {
+    const votes = await tx.eventGameVote.findMany({
+      where: { eventGameNominationId: nominationId },
+      select: { voteType: true, attendeeId: true },
+    });
+    const attendees = await this.getEventAttendees(tx, eventId);
+
+    const voterById = new Map(attendees.map((attendee) => [attendee.id, attendee]));
+    return VoteResolver.resolve(
+      votes.flatMap(({ voteType, attendeeId }) => {
+        const voter = voterById.get(attendeeId);
+        return voter ? [{ voteType, voter }] : [];
+      }),
+      policy,
+      attendees,
+    );
   }
 
   private async requireOccurrence(eventId: string, occurrenceId: string): Promise<Pick<EventOccurrence, 'id'>> {
@@ -832,8 +868,11 @@ export class EventGameNominationService {
   }
 
   /** The event's attendees, as the resolver counts its pool. Removed attendees are no part of it. */
-  private async getEventAttendees(eventId: string): Promise<(AttendeeStub & { id: string })[]> {
-    return this.db.eventAttendee.findMany({
+  private async getEventAttendees(
+    tx: Prisma.TransactionClient,
+    eventId: string,
+  ): Promise<(AttendeeStub & { id: string })[]> {
+    return tx.eventAttendee.findMany({
       where: { eventId, ...NOT_REMOVED },
       select: { id: true, ...VOTER_SELECT },
     });
