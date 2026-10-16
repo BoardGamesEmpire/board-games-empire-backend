@@ -151,6 +151,34 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(storedInvite(invite.id)).resolves.toMatchObject({ status: InviteStatus.Declined });
     });
 
+    it("settles a member's leftover invite, which accept refuses, and leaves their role as it was", async () => {
+      const [owner, member] = await Promise.all([actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: member, role: SystemRole.HouseholdGuest }],
+      });
+      await verify(member);
+      // An invite to a member's address stays open when their accept is refused
+      // (#163), and decline is how they settle it.
+      const invite = await createdInvite(owner, household.id, {
+        inviteeEmail: member.user.email,
+        role: SystemRole.HouseholdAdmin,
+      });
+      await request(baseUrl).post(`/api/invites/${invite.id}/accept`).set(member.headers).expect(409);
+
+      await declineById(member, invite.id).expect(200);
+
+      await expect(storedInvite(invite.id)).resolves.toMatchObject({
+        status: InviteStatus.Declined,
+        inviteeId: member.user.id,
+      });
+      const role = await db.client.householdRole.findFirstOrThrow({
+        where: { householdMember: { householdId: household.id, userId: member.user.id } },
+        select: { role: { select: { name: true } } },
+      });
+      expect(role.role.name).toBe(SystemRole.HouseholdGuest);
+    });
+
     it('answers 404 for a stranger, an unverified address and a withheld invite, and 403 for the inviter', async () => {
       const [owner, invitee, stranger, unverified, blocked] = await Promise.all(
         Array.from({ length: 5 }, () => actors.user()),
