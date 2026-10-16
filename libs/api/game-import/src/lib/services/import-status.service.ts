@@ -1,5 +1,6 @@
-import { DatabaseService, JobStatus, JobType, Prisma } from '@bge/database';
+import { Action, DatabaseService, JobStatus, JobType, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { ImportBatchStatusResponseDto, ImportJobStatusDto } from '../dto/import-status.dto';
@@ -30,27 +31,24 @@ const JOB_SELECT = {
 type JobRow = Prisma.JobGetPayload<{ select: typeof JOB_SELECT }>;
 
 /**
- * The user's import batches: every GameImport job of theirs that belongs to a
- * batch. The scope of the page.
+ * The user's import batches, one row each: every batch has exactly one base
+ * job (`parentJobId: null`), which the coordinator creates when the import is
+ * enqueued. Expansion jobs join the batch later, as the base job spawns them.
+ * The parent foreign key cascades, so deleting a base job deletes its
+ * expansions rather than leaving each one parentless, and so a base job.
  *
- * It is NOT the only statement of that predicate, and saying otherwise would be
- * the more dangerous comment: `countBatchesForUser` re-states it in raw SQL,
- * because a `COUNT(DISTINCT …)` cannot be expressed as a Prisma `where`. So the
- * two are coupled by agreement rather than by construction — add a clause here
- * and `total` keeps counting batches the page can no longer reach.
- *
- * Exported for the regression test that holds them in step: it reads the keys
- * of this object and requires the raw statement to constrain each one, so a new
- * clause fails until the SQL grows it too.
+ * So a page of base jobs is a page of batches, and counting them counts
+ * batches. Both are plain Prisma reads, which is what lets the page and its
+ * `total` take one composed `where` (#515): `total` used to be a raw
+ * `COUNT(DISTINCT batch_id)`, which no ceiling could reach.
  */
-export const BATCH_SCOPE = (userId: string) =>
-  ({ userId, type: JobType.GameImport, batchId: { not: null } }) satisfies Prisma.JobWhereInput;
+const batchBaseJobs = (userId: string) =>
+  ({ userId, type: JobType.GameImport, batchId: { not: null }, parentJobId: null }) satisfies Prisma.JobWhereInput;
 
 /**
- * Base job first (parentJobId null), then expansions. All rows of a batch are
- * created in one transaction and share an identical createdAt (Postgres holds
- * CURRENT_TIMESTAMP constant within a transaction), so createdAt cannot order
- * them; id breaks ties deterministically.
+ * Base job first (parentJobId null), then expansions. The expansions of a batch
+ * are created together, after their base, so createdAt does not order them
+ * among themselves; id breaks ties deterministically.
  */
 const BATCH_JOB_ORDER = [
   { parentJobId: { sort: 'asc', nulls: 'first' } },
@@ -66,11 +64,21 @@ const BATCH_JOB_ORDER = [
  */
 @Injectable()
 export class GameImportStatusService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
+  ) {}
 
+  /**
+   * Every job of one import batch. Not scoped to the acting user: any
+   * signed-in user may poll any batch, and a session's `Job` ceiling admits
+   * every import job. The ceiling still clips the read (#515), so an actor it
+   * admits none of the batch's jobs to gets the same 404 as an unknown batch.
+   */
   async getBatchStatus(batchId: string): Promise<ImportBatchStatusResponseDto> {
     const jobs = await this.db.job.findMany({
-      where: { batchId, type: JobType.GameImport },
+      where: this.scopeComposer.compose(ResourceType.Job, Action.read, { batchId, type: JobType.GameImport }),
       orderBy: BATCH_JOB_ORDER,
       select: JOB_SELECT,
     });
@@ -87,36 +95,46 @@ export class GameImportStatusService {
    * This is how a client recovers batch/job ids it no longer holds
    * (page refresh, reinstall) — the create-time response is the only
    * other place they appear.
+   *
+   * The scope is the acting user's base import jobs, and the `Job` ceiling
+   * clips it (#515). For a session nothing changes. For an API key scoped to
+   * some jobs, the page lists only the batches whose base job the key may
+   * read, each with only the jobs it may read, and `total` counts just those
+   * batches. A key that admits an expansion but not its base job lists no
+   * batch for it, so the narrowing fails closed.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my imports" has no meaning without a user, and the refusal must never
+   * soften into an empty page. PROVISIONAL — #395.
    */
-  async listBatchesForUser(
-    userId: string,
-    pagination: PaginationQueryDto,
-  ): Promise<PaginatedRows<ImportBatchStatusResponseDto>> {
+  async listBatchesForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<ImportBatchStatusResponseDto>> {
+    const userId = resolveScopeSubjectId(this.abilityService);
+    const baseJobs = this.scopeComposer.compose(ResourceType.Job, Action.read, batchBaseJobs(userId));
+
     /**
      * All three statements run in ONE interactive REPEATABLE READ transaction,
      * rather than the array form the other paginated reads use, because the
      * third depends on the first: the job rows are fetched by the batchIds the
-     * groupBy resolved. Under separate snapshots a job deleted between them
-     * would yield a batch with no jobs — the case the old code carried a
-     * `jobs.length > 0` filter for. One snapshot removes the possibility
-     * instead of tolerating it, and it is also what makes `total` describe the
-     * same set of batches the rows came from.
+     * page resolved. Under separate snapshots a job deleted between them would
+     * yield a batch with no jobs. One snapshot removes the possibility instead
+     * of tolerating it, and it is also what makes `total` describe the same set
+     * of batches the rows came from.
      */
     return this.db.$transaction(
       async (tx) => {
-        const groups = await tx.job.groupBy({
-          by: ['batchId'],
-          where: BATCH_SCOPE(userId),
-          _max: { createdAt: true },
-          // batchId tiebreaker: batches sharing a _max(createdAt) would otherwise
-          // shift across page boundaries between requests.
-          orderBy: [{ _max: { createdAt: 'desc' } }, { batchId: 'desc' }],
+        const bases = await tx.job.findMany({
+          where: baseJobs,
+          select: { batchId: true },
+          // The base job is the batch's first row, so its createdAt is when the
+          // batch started. `id` breaks ties, so batches started in the same
+          // millisecond hold their place across page boundaries.
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip: pagination.skip,
           take: pagination.pageSize,
         });
 
-        const total = await this.countBatchesForUser(tx, userId);
-        const batchIds = groups.map((group) => group.batchId).filter((id): id is string => id !== null);
+        const total = await tx.job.count({ where: baseJobs });
+        const batchIds = bases.map((base) => base.batchId).filter((id): id is string => id !== null);
 
         if (batchIds.length === 0) {
           return { rows: [], total };
@@ -126,7 +144,11 @@ export class GameImportStatusService {
         // call and never shared across users — but costs nothing and guards
         // against ever mixing another user's rows into this user-scoped view.
         const rows = await tx.job.findMany({
-          where: { batchId: { in: batchIds }, type: JobType.GameImport, userId },
+          where: this.scopeComposer.compose(ResourceType.Job, Action.read, {
+            batchId: { in: batchIds },
+            type: JobType.GameImport,
+            userId,
+          }),
           orderBy: BATCH_JOB_ORDER,
           select: JOB_SELECT,
         });
@@ -141,9 +163,9 @@ export class GameImportStatusService {
           rowsByBatch.set(row.batchId, bucket);
         }
 
-        // batchIds carries the recency ordering from the groupBy. Every id came
-        // from a group of at least one job in this same snapshot, so each lookup
-        // is non-empty by construction.
+        // batchIds carries the page's order. Every id came from a base job the
+        // ceiling admitted in this same snapshot, and the job fetch is clipped
+        // by the same ceiling, so each lookup holds at least that base job.
         return {
           rows: batchIds.map((batchId) => this.toBatchDto(batchId, rowsByBatch.get(batchId) ?? [])),
           total,
@@ -161,47 +183,14 @@ export class GameImportStatusService {
         // the transaction, and that is the trade being made: an interactive
         // transaction holds a pooled connection and an open snapshot for as
         // long as it runs. Dropping it would return the count to a separate
-        // snapshot from the groups, which is the defect the transaction is
-        // here for, and would bring back the empty-batch case the removed
-        // `jobs.length > 0` filter used to paper over. So the hold is accepted
-        // and bounded instead. 15s is a ceiling, not a budget — the read is a
-        // paged groupBy plus an indexed count. What actually makes this route
-        // scale with a user's whole history is the groupBy itself, which is
-        // #411, and the number here is a guess until that is measured.
+        // snapshot from the page, which is the defect the transaction is here
+        // for. So the hold is accepted and bounded instead. 15s is a ceiling,
+        // not a budget — the read is a paged, indexed scan of the user's base
+        // jobs plus a count of them. Whether that holds for a user's whole
+        // history is #411's to measure.
         timeout: 15_000,
       },
     );
-  }
-
-  /**
-   * How many import batches the user has, for the envelope's `total`.
-   *
-   * Raw SQL because a batch is a GROUP, not a row: `groupBy` has no
-   * count-of-groups, and the alternatives both scale with the user's whole
-   * history rather than with a page — a second unpaged `groupBy`, or a
-   * `findMany({ distinct })`, each materialise every batch the user has ever
-   * run in order to count them, which is the unbounded read #372 exists to
-   * remove. `COUNT(DISTINCT batch_id)` does it in the database, over the
-   * `Job.[userId, type]` index.
-   *
-   * Cast to `int` in SQL: Postgres `COUNT` is `bigint`, which the driver hands
-   * back as a JS BigInt, and `Math.ceil(total / pageSize)` on a BigInt throws.
-   */
-  private async countBatchesForUser(tx: Pick<DatabaseService, '$queryRaw'>, userId: string): Promise<number> {
-    // Hand-written twin of {@link BATCH_SCOPE}: user, job type, and "belongs to
-    // a batch". Any clause added there has to be added here, or `total` and the
-    // page describe different sets — the spec enforces the pairing.
-    const counted = await tx.$queryRaw<{ total: number }[]>(Prisma.sql`
-      SELECT COUNT(DISTINCT batch_id)::int AS total
-      FROM jobs
-      WHERE user_id = ${userId}
-        AND type = CAST(${JobType.GameImport} AS job_types)
-        AND batch_id IS NOT NULL
-    `);
-
-    // A COUNT always returns exactly one row; the tuple type above is a claim
-    // the compiler cannot check, so the absence is handled rather than asserted.
-    return counted[0]?.total ?? 0;
   }
 
   private toBatchDto(batchId: string, jobs: JobRow[]): ImportBatchStatusResponseDto {

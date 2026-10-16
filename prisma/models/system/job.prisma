@@ -31,7 +31,10 @@ model Job {
   error   String?
   note    String?
 
-  parentJob   Job?    @relation("JobHierarchy", fields: [parentJobId], references: [id], onDelete: SetNull)
+  // Cascade, not SetNull: an import batch has exactly one base job (no
+  // parent), and GET /games/import pages and counts batches by it. Detached,
+  // each expansion of a deleted base job would list as a batch of its own.
+  parentJob   Job?    @relation("JobHierarchy", fields: [parentJobId], references: [id], onDelete: Cascade)
   parentJobId String? @map("parent_job_id")
   childJobs   Job[]   @relation("JobHierarchy")
 

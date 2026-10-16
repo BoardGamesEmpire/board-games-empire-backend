@@ -1,12 +1,9 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { JobStatus } from '@bge/database';
+import { JobStatus, ResourceType } from '@bge/database';
 import { AbilityService, PoliciesGuard } from '@bge/permissions';
-import {
-  createMockAbilityService,
-  createTestingModuleWithDb,
-  MOCK_ACTING_USER_ID,
-  paginationQuery,
-} from '@bge/testing';
+import { ListScopeNotComposedError } from '@bge/shared';
+import { createMockAbilityService, createTestingModuleWithDb, paginationQuery } from '@bge/testing';
+import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom, of } from 'rxjs';
 import { GameImportController } from './game-import.controller';
 import { ImportBatchStatus } from './interfaces/import-job.interface';
@@ -86,11 +83,26 @@ describe('GameImportController', () => {
 
       const response = await firstValueFrom(controller.listImports(pagination));
 
-      expect(importStatus.listBatchesForUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID, pagination);
+      expect(importStatus.listBatchesForUser).toHaveBeenCalledWith(pagination);
       expect(response).toEqual({
         batches: [batchStatus],
         pagination: { page: 1, limit: 5, total: 1, totalPages: 1, hasMore: false },
       });
+    });
+
+    // The service composes the `Job` scope; the envelope is where the guard
+    // checks for it. Built inside a request with nothing composed, this
+    // envelope must fail. An `Unscoped` envelope, or a type still in
+    // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+    // The name is asserted too: an envelope naming another swept type would
+    // also fail, for the wrong reason.
+    it('builds its envelope under the Job scope guard', async () => {
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.listImports(paginationQuery({ limit: 5 }))),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Job}'`);
     });
 
     // #372: the batches are the rows, so `total` is a batch count — the value a
