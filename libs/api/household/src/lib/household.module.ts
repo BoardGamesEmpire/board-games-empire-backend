@@ -11,12 +11,13 @@ import { PartyInviteController } from './invite/party-invite.controller';
 import { PartyInviteService } from './invite/party-invite.service';
 import { HouseholdMemberController } from './member/household-member.controller';
 import { HouseholdMemberService } from './member/household-member.service';
+import { HouseholdQuotaController } from './quota/household-quota.controller';
 
 @Module({
   // QuotaModule supplies QuotaService to the member-creation seam, which gates
   // `household_member_count` inside the caller's transaction (#159), and to
   // the invite create, which gates `household_invite_daily_count` in its own
-  // (#279).
+  // (#279), and to the household's quota list (#515).
   // InvitesModule supplies InviteService, the only writer of an invite's
   // status; the soft delete revokes a household's outstanding invites through
   // it (#161), and the invite routes create and accept through it (#162,
@@ -24,7 +25,13 @@ import { HouseholdMemberService } from './member/household-member.service';
   // AuditContextModule supplies AuditContextService to the accept and the
   // inbox, which refuse every actor but a session user (#163).
   imports: [DatabaseModule, QuotaModule, InvitesModule, AuditContextModule],
-  controllers: [HouseholdController, HouseholdMemberController, HouseholdInviteController, PartyInviteController],
+  controllers: [
+    HouseholdController,
+    HouseholdMemberController,
+    HouseholdInviteController,
+    PartyInviteController,
+    HouseholdQuotaController,
+  ],
   providers: [HouseholdService, HouseholdMemberService, HouseholdInviteService, PartyInviteService],
   exports: [HouseholdService, HouseholdMemberService],
 })

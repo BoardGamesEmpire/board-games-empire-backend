@@ -1,6 +1,6 @@
 import { Action, DatabaseService, lockLiveHousehold, Prisma, Quota, QuotaScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHash } from 'node:crypto';
@@ -26,6 +26,18 @@ interface ResolvedTarget {
   readonly scopeId: string;
 }
 
+/**
+ * Both quota lists' order. `scopeId` comes last because `(scope, scopeId,
+ * resource)` is unique, so the order is total: several users' quotas on one
+ * resource, or several members', come back the same way on every call.
+ * Prisma adds no tiebreaker of its own to an ordered read with no `take`.
+ */
+const QUOTA_ORDER = [
+  { scope: 'asc' },
+  { resource: 'asc' },
+  { scopeId: 'asc' },
+] satisfies Prisma.QuotaOrderByWithRelationInput[];
+
 /** The subset of a quota row the resolver reads. */
 type QuotaRow = { scope: QuotaScope; scopeId: string; limit: bigint; softOverage: boolean; enforced: boolean };
 
@@ -38,6 +50,7 @@ export class QuotaService {
     private readonly registry: QuotaResourceRegistry,
     private readonly eventEmitter: EventEmitter2,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -219,10 +232,51 @@ export class QuotaService {
     return createHash('sha1').update(`quota:${resource}:${scope}:${scopeId}`).digest().readBigInt64BE(0);
   }
 
+  /**
+   * The quotas that belong to no household: server and user quotas, and the
+   * default quotas. The ceiling clips them (#515). A household's own and
+   * per-member quotas are {@link getHouseholdQuotas}'s, so a household owner
+   * or admin, whose only quota permission is on their household's rows, gets
+   * an empty list here rather than every household they administer mixed in
+   * with the server's quotas.
+   */
   async getQuotas(): Promise<QuotaView[]> {
     const quotas = await this.databaseService.quota.findMany({
-      where: { AND: this.abilityService.getCurrentResourceConditions(ResourceType.Quota, Action.read) },
-      orderBy: [{ scope: 'asc' }, { resource: 'asc' }],
+      where: this.scopeComposer.compose(ResourceType.Quota, Action.read, { householdId: null }),
+      orderBy: QUOTA_ORDER,
+    });
+
+    return quotas.map(toQuotaView);
+  }
+
+  /**
+   * One household's own quotas and its members' quotas: every quota row bound
+   * to the household. Read by the household's owners and admins, by staff and
+   * by the Owner.
+   *
+   * The instance check comes first, as on the invite list. Without it the
+   * ceiling alone would answer, and a household member would get 403 at the
+   * type gate (they hold no quota permission at all) while an admin of another
+   * household got an empty list: the answer would depend on unrelated roles.
+   *
+   * Liveness comes second, as on the invite list, so only an actor who may
+   * read the quotas learns that the household is gone. The route's liveness
+   * guard answers first for a user session, but it passes through an actor
+   * that may not read households, such as an API key scoped to quotas alone,
+   * and a soft delete leaves the household's quota rows in place. The 404 is
+   * the guard's own.
+   */
+  async getHouseholdQuotas(householdId: string): Promise<QuotaView[]> {
+    this.abilityService.assertCurrentActorCan(Action.read, ResourceType.Quota, { householdId });
+
+    const live = await this.databaseService.household.count({ where: { id: householdId, deletedAt: null } });
+    if (live === 0) {
+      throw new NotFoundException(t('errors.household.not_found', { id: householdId }));
+    }
+
+    const quotas = await this.databaseService.quota.findMany({
+      where: this.scopeComposer.compose(ResourceType.Quota, Action.read, { householdId }),
+      orderBy: QUOTA_ORDER,
     });
 
     return quotas.map(toQuotaView);
@@ -318,6 +372,7 @@ export class QuotaService {
       const authorized = await tx.quota.count({
         where: {
           id: row.id,
+          // eslint-disable-next-line no-restricted-syntax -- authorizes the one row just written, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Quota, Action.manage),
         },
       });

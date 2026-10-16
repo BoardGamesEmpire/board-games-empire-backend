@@ -66,7 +66,7 @@ export const restrictedImportPaths = {
 // use it; this is what stops a newly written list from reaching past it. The
 // runtime half (the keyed `paginated()` assertion) covers paginated reads —
 // this one reaches reads that never build an envelope at all, of which one
-// carries the ceiling-only shape today: `GET /quotas`.
+// carried the ceiling-only shape until #515: `GET /quotas`.
 //
 // It catches ONE of the two omissions, and only that one. A ceiling used as
 // the answer set is a CALL this selector can name. The inverse — an intrinsic

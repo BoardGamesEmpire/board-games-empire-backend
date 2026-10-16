@@ -1,5 +1,5 @@
 import { Action, HouseholdMember, Prisma, QuotaScope, ResourceType, type Quota } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
@@ -8,7 +8,7 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { QuotaEvents } from './constants/quota-events.constant';
 import type { QuotaResourceDefinition, QuotaUsageProvider } from './interfaces';
@@ -48,6 +48,7 @@ describe('QuotaService', () => {
   let registry: RegistryStub;
   let emitter: { emit: jest.Mock };
   let ability: MockAbilityService;
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     registry = { has: jest.fn(), require: jest.fn(), requireUsage: jest.fn() };
@@ -57,6 +58,9 @@ describe('QuotaService', () => {
     const { module, db: mockDb } = await createTestingModuleWithDb({
       providers: [
         QuotaService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the reads actually run.
+        ScopeComposer,
         { provide: QuotaResourceRegistry, useValue: registry },
         { provide: EventEmitter2, useValue: emitter },
         { provide: AbilityService, useValue: ability },
@@ -64,6 +68,7 @@ describe('QuotaService', () => {
     });
     service = module.get(QuotaService);
     db = mockDb;
+    compose = jest.spyOn(module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -576,7 +581,22 @@ describe('QuotaService', () => {
     });
   });
 
+  /**
+   * #515. `GET /quotas` declares its own set, the quotas that belong to no
+   * household (server, user and default rows), and the ceiling clips it. A
+   * household's rows are read on that household's own route. Before, the
+   * ceiling was the whole answer, so one list mixed every household a caller
+   * administers with the server's quotas.
+   */
   describe('getQuotas', () => {
+    it('asks the composer for the quotas that belong to no household', async () => {
+      db.quota.findMany.mockResolvedValue([]);
+
+      await service.getQuotas();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Quota, Action.read, { householdId: null });
+    });
+
     it('lists the rows the caller can read, narrowed by the ability conditions', async () => {
       db.quota.findMany.mockResolvedValue([makeQuota({ scope: QuotaScope.User, scopeId: USER_ID, limit: 5n })]);
 
@@ -584,8 +604,8 @@ describe('QuotaService', () => {
 
       expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Quota, Action.read);
       expect(db.quota.findMany).toHaveBeenCalledWith({
-        where: { AND: [MOCK_RESOURCE_CONDITION] },
-        orderBy: [{ scope: 'asc' }, { resource: 'asc' }],
+        where: { householdId: null, AND: [MOCK_RESOURCE_CONDITION] },
+        orderBy: [{ scope: 'asc' }, { resource: 'asc' }, { scopeId: 'asc' }],
       });
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({ scope: QuotaScope.User, limit: '5' });
@@ -598,6 +618,74 @@ describe('QuotaService', () => {
 
       await expect(service.getQuotas()).rejects.toBeInstanceOf(ForbiddenException);
       expect(db.quota.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #515. `GET /households/:householdId/quotas`: the household's own quota
+   * and its members' quotas. The instance check comes first, so the answer for a
+   * caller who may not read this household's quotas is 403, never an empty
+   * list: a household member and an admin of another household would
+   * otherwise get different answers for the same reason.
+   */
+  describe('getHouseholdQuotas', () => {
+    beforeEach(() => {
+      db.household.count.mockResolvedValue(1);
+    });
+
+    it("checks the caller may read this household's quotas before reading any", async () => {
+      ability.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException('forbidden');
+      });
+
+      await expect(service.getHouseholdQuotas(HOUSEHOLD_ID)).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(ability.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.Quota, {
+        householdId: HOUSEHOLD_ID,
+      });
+      // Refused before liveness, so a 403 never says whether the household exists.
+      expect(db.household.count).not.toHaveBeenCalled();
+      expect(db.quota.findMany).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The route's liveness guard passes through an actor that may not read
+     * households, such as an API key scoped to quotas alone, and a soft
+     * delete leaves the household's quota rows in place.
+     */
+    it('answers 404 for a missing or deleted household, and reads no quotas', async () => {
+      db.household.count.mockResolvedValue(0);
+
+      await expect(service.getHouseholdQuotas(HOUSEHOLD_ID)).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(db.household.count).toHaveBeenCalledWith({ where: { id: HOUSEHOLD_ID, deletedAt: null } });
+      expect(db.quota.findMany).not.toHaveBeenCalled();
+    });
+
+    it("asks the composer for the household's quotas", async () => {
+      db.quota.findMany.mockResolvedValue([]);
+
+      await service.getHouseholdQuotas(HOUSEHOLD_ID);
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Quota, Action.read, { householdId: HOUSEHOLD_ID });
+    });
+
+    it('lists the rows in the same order as the server list', async () => {
+      db.quota.findMany.mockResolvedValue([
+        makeQuota({ scope: QuotaScope.Household, scopeId: HOUSEHOLD_ID, householdId: HOUSEHOLD_ID, limit: 8n }),
+        makeQuota({ scope: QuotaScope.HouseholdMember, scopeId: MEMBER_ID, householdId: HOUSEHOLD_ID, limit: 2n }),
+      ]);
+
+      const result = await service.getHouseholdQuotas(HOUSEHOLD_ID);
+
+      expect(db.quota.findMany).toHaveBeenCalledWith({
+        where: { householdId: HOUSEHOLD_ID, AND: [MOCK_RESOURCE_CONDITION] },
+        orderBy: [{ scope: 'asc' }, { resource: 'asc' }, { scopeId: 'asc' }],
+      });
+      expect(result).toEqual([
+        expect.objectContaining({ scope: QuotaScope.Household, limit: '8' }),
+        expect.objectContaining({ scope: QuotaScope.HouseholdMember, limit: '2' }),
+      ]);
     });
   });
 });
