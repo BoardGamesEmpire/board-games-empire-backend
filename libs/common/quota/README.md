@@ -17,12 +17,12 @@ The lib ships two things:
 
 A cap is attached to one `QuotaScope` target:
 
-| Scope             | Target             | Example                                |
-| ----------------- | ------------------ | -------------------------------------- |
-| `Server`          | the whole instance | total storage across everyone          |
-| `Household`       | one household      | members per household                  |
-| `HouseholdMember` | one membership     | a member's slice of the household pool |
-| `User`            | one user           | webhook subscriptions per user         |
+| Scope             | Target             | Example                                         |
+| ----------------- | ------------------ | ----------------------------------------------- |
+| `Server`          | the whole instance | total storage across everyone                   |
+| `Household`       | one household      | members per household                           |
+| `HouseholdMember` | one membership     | planned: a member's slice of the household pool |
+| `User`            | one user           | webhook subscriptions per user                  |
 
 ### Resolution
 
@@ -31,7 +31,7 @@ Two independent operations, often conflated as "strictest wins":
 1. **Within a scope, most-specific wins.** An _instance_ row (e.g. `Household` `hh_42`) overrides the _type-level default_ for that scope — including a disabling override (`enforced: false` → unlimited for that scope). The default is a row whose target is the whole scope class, stored under the sentinel `scopeId` `'*'` and surfaced as `scopeId: null`.
 2. **Across scopes, every applicable scope is an independent ceiling.** A write is checked against each scope the resource is _measured_ in; usage is computed **per scope** and the write must satisfy every _hard_ constraint. This is stronger than `min(limit)` because usage differs per scope. The reported binding constraint is the one with least headroom (hard violations first).
 
-Net effect — the "painless" path: set **one** `Server` (or per-scope) default row and every instance is capped; set an instance row to override; a household admin can only ever _tighten_ via a `HouseholdMember` sub-limit, never raise a server- or tier-set ceiling, because each scope is its own ceiling.
+Net effect — the "painless" path: set **one** `Server` (or per-scope) default row and every instance is capped; set an instance row to override; because each scope is its own ceiling, a narrower scope can only ever _tighten_ a server- or tier-set ceiling, never raise it. A household admin is meant to tighten through a `HouseholdMember` sub-limit; that is planned, since no resource is measured in that scope yet and `setQuota` rejects a row there.
 
 ### Soft / hard / enforced
 
@@ -120,7 +120,7 @@ interface QuotaCheckResult {
 These are normally reached through the `@bge/quotas` HTTP controller (`PATCH /api/quotas/:scope/:scopeId/:resource`), but the service methods are the programmatic entry points.
 
 ```ts
-// Set a Server-wide default of 5 GiB of storage for every user.
+// Set a default quota of 5 GiB of storage for every user (the User scope's default).
 // publicScopeId = null addresses the type-level default (stored as '*').
 await quotas.setQuota(QuotaScope.User, null, 'storage_bytes', { limit: '5368709120' }, actorId, abilities);
 

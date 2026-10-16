@@ -32,11 +32,11 @@ BGE uses **three logical databases**, each with its own purpose and isolation
 guarantees. They can live on the same Redis server (default), on three
 different servers, or any combination.
 
-| Database | Default `db:` | Purpose                                                                          | Client library                |
-| -------- | ------------- | -------------------------------------------------------------------------------- | ----------------------------- |
-| Cache    | `0`           | App-level cache, gateway config events pub/sub, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
-| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                    | `node-redis`                  |
-| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                  | `iovalkey`                    |
+| Database | Default `db:` | Purpose                                                                                                                           | Client library                |
+| -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Cache    | `0`           | App-level cache, pub/sub for DataGateway config, outbound HTTP policy and plugin config updates, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
+| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                                                                     | `node-redis`                  |
+| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                                                                   | `iovalkey`                    |
 
 Rate-limit counters share the cache connection rather than opening a fourth
 (#341). They are small, short-lived and namespaced under `bge:throttle:`, and a
@@ -130,88 +130,94 @@ Note that database indices need not match across servers — each connection's
 Use AWS ElastiCache (Valkey) for cache and run Valkey/Dragonfly locally for
 queue and sockets. Or any other mix that fits your infrastructure.
 
-## Deployment topologies
+## Process roles
 
 The two `iovalkey` connections managed by `@bge/redis` (`CACHE_REDIS_CLIENT`
 and `QUEUE_REDIS_CLIENT`) are **independently optional** at the
 `RedisModule.forRootAsync` level. This is not a feature-toggle mechanism —
-both connections are required for full system functionality — but a
-deployment topology mechanism that lets you split work across processes.
+both connections are required for full system functionality — but a way for
+each process role to configure only the connections it uses.
 
-| Topology                              | Cache       | Queue       | Sockets |
-| ------------------------------------- | ----------- | ----------- | ------- |
-| Combined: API + worker in one process | ✅          | ✅          | ✅      |
-| Split: API process                    | ✅          | ✅          | ✅      |
-| Split: dedicated worker process       | optional\*  | ✅ required | ❌      |
-| Coordinator (BGE gRPC service)        | ✅ required | ✅ required | ❌      |
+A server runs four process roles: api, worker, gateway worker and
+coordinator. A process runs exactly one of them: the launcher refuses a
+`BGE_ROLES` that names more than one, and there the gateway worker's role is
+named `gateway-fetch`. The `split` deployment profile runs each role in its
+own container (see [DEPLOYMENT.md](DEPLOYMENT.md)); an all-in-one deployment
+profile, running several roles in one process, is planned (#200).
 
-\* Worker processes consume queue jobs. They configure `cache` only if their
-job handlers read or write cached data — e.g. the game-import worker reads
-cached gateway responses. If a worker process never touches cache, omit it.
+| Process role   | Cache       | Queue                  | Sockets |
+| -------------- | ----------- | ---------------------- | ------- |
+| api            | ✅ required | ✅ required (producer) | ✅      |
+| worker         | ✅ required | ✅ required            | ❌      |
+| gateway worker | ✅ required | ✅ required            | ❌      |
+| coordinator    | ✅ required | ✅ required (producer) | ❌      |
 
-### Combined deployment (default)
+Every role reads the same `REDIS_*` and `REDIS_BULLMQ_*` variables (the api
+also reads `REDIS_WEBSOCKET_*`). A variable left unset takes its default —
+`localhost`, `6379` and the database index shown above — so set the blocks in
+every role's environment, not only the api's.
 
-The simplest deployment runs the API and worker in a single process. This
-is what the default `apps/api` configuration produces. Both connections are
-configured because the same process runs both the HTTP layer and BullMQ
-workers.
+For horizontal scaling, run more worker or gateway worker processes beside
+one or more api processes.
 
-### Split deployment
+### Worker
 
-For horizontal scaling, run dedicated worker processes alongside one or
-more API processes. The worker process configures only the connections it
-needs:
+The worker runs the server's background jobs: it consumes game imports
+(`{bge.games.import}`), webhook and feedback deliveries, and the media sweep.
+It configures the cache as well: it backs the worker's cache store and
+carries the outbound HTTP policy's update channel, which webhook delivery
+follows.
 
-```bash
-# Worker — typically only needs queue, plus cache for job handlers
-REDIS_BULLMQ_HOST=valkey.internal
-REDIS_BULLMQ_PORT=6379
-REDIS_BULLMQ_DATABASE=2
+### Gateway worker
 
-# Optional — cache config block only if job handlers touch cache
-REDIS_HOST=valkey.internal
-REDIS_PORT=6379
-REDIS_DATABASE=0
+The gateway worker fetches games from DataGateways for imports. It calls
+each DataGateway directly over gRPC, through the gateway registry; it never
+calls the coordinator. It needs **both** Redis connections:
 
-# Cache env vars omitted entirely if not needed — CACHE_REDIS_CLIENT is
-# then not registered, and any code path attempting to inject it will fail
-# fast at module init with a clear "No provider found" error.
-```
+- **Cache** — for gateway registry pub/sub. The gateway worker listens for
+  DataGateway config events (added, changed, removed, disabled) on the cache
+  connection's pub/sub channel, and publishes one when it auto-disables a
+  DataGateway after repeated failures.
+- **Queue** — it consumes fetch jobs from `{bge.gateway.fetch}`, whose
+  results the worker's import jobs read, and enqueues webhook deliveries for
+  the import events it emits.
 
-### Coordinator deployment
+### Coordinator
 
-The coordinator process is the BGE gRPC service that brokers traffic
-between API/worker processes and external game-data gateways. It needs
-**both** Redis connections:
+The coordinator is the BGE gRPC service that carries live DataGateway
+traffic for the api: searches, fetching one game, and starting imports. It
+needs **both** Redis connections:
 
 - **Cache** — for gateway registry pub/sub. The coordinator listens for
-  gateway config events (registrations, capability changes) on the cache
-  connection's pub/sub channel.
-- **Queue** — for BullMQ producer-side work. The coordinator enqueues
-  game-import flow jobs via `FlowProducer`, which uses the queue
-  connection.
+  DataGateway config events (added, changed, removed, disabled) on the cache
+  connection's pub/sub channel, and publishes one when it auto-disables a
+  DataGateway after repeated failed connections.
+- **Queue** — for BullMQ producer-side work. When the api starts an import,
+  the coordinator enqueues the game-import flow via `FlowProducer`, which
+  uses the queue connection.
 
-The coordinator does NOT use the sockets connection — only API processes
-serving WebSocket clients need that one.
+The coordinator does NOT use the sockets connection — only the api serves
+WebSocket clients.
 
-### Workers are not optional
+### The worker and gateway worker are not optional
 
-Workers consume queue jobs. Without at least one worker process (combined
-or separate), game imports, enrichment, and fan-out jobs will accumulate
-in the queue and never run. A deployment without workers is technically
-possible but severely degrades the system — search and import will be
-unusable. Either run the combined deployment (workers in the API process)
-or run dedicated worker processes.
+An import runs in both: the gateway worker fetches the game from its
+DataGateway, and the worker writes it to the database. Without at least one
+gateway worker process, fetch jobs accumulate in the queue and no import
+finishes; without at least one worker process, imports, webhook deliveries
+and feedback deliveries accumulate and never run. Search needs neither: it
+goes from the api through the coordinator. Run at least one of each.
 
-### Gateways are independent services
+### DataGateways are independent services
 
-Game-data gateways (BGG, IGDB, Steam, or third-party implementations) are
-separate processes that communicate with the BGE coordinator via gRPC.
-They do not use `@bge/redis` and are not part of the topology described
-here. A gateway's infrastructure choices are its own concern.
+Remote DataGateways (BGG, IGDB, a planned Steam DataGateway, or third-party
+implementations) are separate services that the coordinator and the gateway
+worker call over gRPC. They do not use `@bge/redis` and are not part of the
+process roles described here. A DataGateway's infrastructure choices are its
+own concern.
 
 A self-hoster who does not need game search/import functionality can run
-BGE without any gateways at all. At least one gateway (of any
+BGE without any DataGateways at all. At least one DataGateway (of any
 implementation) is required for game search and import to function.
 
 ## Server-specific notes
@@ -356,11 +362,18 @@ cycles feel slow.
 
 Per-process connection counts depend on which connections are configured:
 
-| Process     | iovalkey (cache)             | iovalkey (queue) | node-redis (sockets) | BullMQ workers                 |
-| ----------- | ---------------------------- | ---------------- | -------------------- | ------------------------------ |
-| Main API    | 1                            | 1                | 1                    | 0                              |
-| Coordinator | 1                            | 1 producer       | 0                    | 0                              |
-| Worker      | 0 (or 1 if cache configured) | 1 producer       | 0                    | 1 blocking per worker instance |
+| Process        | iovalkey (cache) | iovalkey (cache subscribers) | iovalkey (queue) | node-redis (sockets) | BullMQ workers                 |
+| -------------- | ---------------- | ---------------------------- | ---------------- | -------------------- | ------------------------------ |
+| Main API       | 1                | 2                            | 1                | 1                    | 0                              |
+| Coordinator    | 1                | 1                            | 1 producer       | 0                    | 0                              |
+| Worker         | 1                | 1                            | 1 producer       | 0                    | 1 blocking per worker instance |
+| Gateway worker | 1                | 1                            | 1 producer       | 0                    | 1 blocking per worker instance |
+
+A subscriber is a dedicated connection: a client in subscribe mode can run no
+other commands, so each update channel a process listens on gets its own
+duplicate of the cache connection. The api listens for outbound HTTP policy
+and plugin config updates, the worker for outbound HTTP policy updates, and
+the coordinator and gateway worker for DataGateway config events.
 
 Default Redis `maxclients` is 10000 — well above typical needs even with
 many worker replicas. Check `CLIENT LIST` to see who's connected; the BGE

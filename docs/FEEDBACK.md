@@ -15,15 +15,16 @@ report.
 
 ## Sink drivers
 
-A **`FeedbackSink`** is a destination a report can be forwarded to. The bundled
-**`LocalDatabaseSink`** (`slug: 'local'`) is the canonical reference
-implementation and the floor every deployment has. External sinks (GitHub
-Issues, Discord, Sentry, …) arrive as plugins once the loader (#59) lands.
+A **`FeedbackSink`** is a destination a report can be forwarded to. The
+built-in **`LocalDatabaseSink`** (`slug: 'local'`) ships inside the server, not
+as a plugin; it is the canonical reference implementation and the floor every
+server has. External sinks (GitHub Issues, Discord, Sentry, …) arrive as
+plugins once the loader (#59) lands.
 
 ```ts
 interface FeedbackSink {
   readonly slug: string; // persisted on FeedbackSubmission.sinkSlug
-  readonly bundled?: boolean; // ships in-tree; cannot be uninstalled
+  readonly bundled?: boolean; // true for a built-in sink; informational
   acceptsCategory?(category): boolean; // category filter (absent = accept all)
   submit(report, context): Promise<SinkSubmissionResult>;
   syncStatus?(submission): Promise<SinkSubmissionResult>; // deferred (see below)
@@ -65,13 +66,13 @@ worker); the worker attaches the consumer.
 - **Per-household sink selection + category filtering** — a
   `HouseholdFeedbackSinkConfig` table so households choose which sinks are active
   and which categories route where. Blocked on the plugin loader (#59). Today the
-  category filter is a per-sink static `acceptsCategory()`; the bundled local sink
+  category filter is a per-sink static `acceptsCategory()`; the built-in local sink
   accepts everything. `FeedbackSinkRegistry.sinksAccepting()` is the seam this
   will layer onto.
 - **Auto-disable of a repeatedly-failing sink** — the race-safe
   `updateMany(...Active -> Disabled) count===0` pattern used by the webhook queue.
   Needs the per-sink config row above to hold the consecutive-failure counter and
-  disabled flag. Bundled sinks are always-on, so there is nothing to disable yet;
+  disabled flag. Built-in sinks are always-on, so there is nothing to disable yet;
   the seam is marked in `FeedbackDeliveryService.recordTerminalFailure`.
 - **`syncStatus()` implementation** — pulling external state back onto a
   submission (e.g. a GitHub issue closed). The interface method exists; no sink
