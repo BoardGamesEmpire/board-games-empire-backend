@@ -46,12 +46,15 @@ message DescribeRequest {
 // The answers to the server's interview that don't change between calls:
 // what the DataGateway can do, which kinds of game it covers, and the
 // formats it uses. Ping carries its name and version, so this doesn't.
+//
+// The server asks again daily, and sooner when Ping reports a different
+// version, so a new build whose answers differ should report a new version.
 message DescribeResponse {
   string correlation_id = 1;
 
   // The operations it serves. Any subset is valid, even one without search
-  // or fetch. An operation left out may answer UNIMPLEMENTED. The server
-  // doesn't route by these yet, so until it does, it may still call one.
+  // or fetch. The server calls only the operations listed, so one left out
+  // may answer UNIMPLEMENTED.
   repeated Capability capabilities = 2;
 
   // The kinds of game it can return.

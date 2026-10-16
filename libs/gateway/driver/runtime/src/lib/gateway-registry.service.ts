@@ -1,14 +1,14 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { DatabaseService } from '@bge/database';
+import { DatabaseService, DataGatewayCapability } from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import type { GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FAILURE_THRESHOLD, FAILURE_WINDOW_MS } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
+import { GatewayRoutingRefusedError, type GatewayRefusalReason } from './errors/gateway-routing-refused.error';
 import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
-import { GatewayLanguageSyncService } from './gateway-language-sync.service';
+import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
 import { hashGatewayConfig } from './utils/hash-config';
 
@@ -35,6 +35,55 @@ interface FailureTrack {
   lastError: string;
 }
 
+/** What a routing decision reads from a DataGateway's row. */
+interface RoutingRow {
+  enabled: boolean;
+  firstInterviewedAt: Date | null;
+  capabilities: DataGatewayCapability[];
+  disabledCapabilities: DataGatewayCapability[];
+}
+
+const ROUTING_FIELDS = {
+  enabled: true,
+  firstInterviewedAt: true,
+  capabilities: true,
+  disabledCapabilities: true,
+} as const;
+
+/**
+ * The routing rule, the one place it's written: why a DataGateway may not
+ * serve `capability` now, or null when it may. `row` is its routing row,
+ * null when it's absent or deleted. Without a capability, only whether the
+ * DataGateway may be used at all.
+ */
+function routingRefusal(row: RoutingRow | null, capability?: DataGatewayCapability): GatewayRefusalReason | null {
+  if (!row) {
+    return 'unknown';
+  }
+
+  if (!row.enabled) {
+    return 'disabled';
+  }
+
+  if (capability === undefined) {
+    return null;
+  }
+
+  if (!row.firstInterviewedAt) {
+    return 'not_interviewed';
+  }
+
+  if (!row.capabilities.includes(capability)) {
+    return 'not_declared';
+  }
+
+  if (row.disabledCapabilities.includes(capability)) {
+    return 'switched_off';
+  }
+
+  return null;
+}
+
 /** Max time to wait for all driver dispose() calls during shutdown. */
 export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
 
@@ -47,19 +96,28 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * through `RemoteGatewayDriverFactory` (ping-verified gRPC), and in-process
  * drivers arrive via {@link register} — the seam #59's DataGateway plugin
  * registrations use. Everything below the port is transport-agnostic:
- * failure tracking, auto-disable, and config-event invalidation treat an
- * in-process driver exactly like a remote one.
+ * the interview, failure tracking, auto-disable, and config-event
+ * invalidation treat an in-process driver exactly like a remote one.
+ *
+ * A DataGateway is routed only by its answers to the interview (#712). Its
+ * first interview runs before its driver is cached, whichever way the driver
+ * arrived, and a DataGateway whose first interview fails is neither cached
+ * nor routed. Every routing decision then reads the DataGateway's row, so
+ * both processes route by the answers whichever of them interviewed, and by
+ * an admin's latest word on `enabled` and on the capabilities switched off
+ * ({@link resolve}, {@link routableGatewayIds}).
  *
  * State authority for DataGateway rows lives in the coordinator. Other
  * processes treat this service as a read-side: they react to config-update
  * events via Redis pub/sub, but never mutate gateway state except for
- * auto-disable triggered by their own repeated-failure observations.
+ * auto-disable triggered by their own repeated-failure observations, and the
+ * answers of the interviews they run.
  *
  * Failure tracking is per-process and in-memory. When N consecutive failures
  * accumulate within a time window, this service disables the gateway in the
- * DB and emits an event for admin notification. The DB update uses
- * conditional write so concurrent disables across processes only fire one
- * notification.
+ * DB and emits an event, which the audit log records. The DB update uses
+ * conditional write so concurrent disables across processes only emit once.
+ * Telling server admins is #763's.
  */
 @Injectable()
 export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
@@ -75,6 +133,12 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   // finds nothing cached to tear down, and connect() then caches a driver for a
   // gateway that is no longer valid (served indefinitely until the next event).
   private readonly connectGeneration = new Map<string, number>();
+  // DataGateways whose connection config changed since this process cached a
+  // driver for them. Their stored answers came through the old connection,
+  // so the next connect interviews them again, whatever the answers' age and
+  // version. Held in memory: a process that missed the change goes by the
+  // version and the answers' age, as before.
+  private readonly connectionChanged = new Set<string>();
   // Set once shutdown disposes the drivers. A connect still awaiting its ping
   // then discards its driver rather than caching one nothing will dispose.
   private shuttingDown = false;
@@ -86,7 +150,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     private readonly configEvents: GatewayConfigEventsService,
     private readonly eventEmitter: EventEmitter2,
     private readonly systemActorScope: SystemActorScope,
-    private readonly languageSync: GatewayLanguageSyncService,
+    private readonly interviews: GatewayInterviewService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -121,13 +185,16 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     this.failures.clear();
     this.connecting.clear();
     this.connectGeneration.clear();
+    this.connectionChanged.clear();
   }
 
   /**
    * Establishes (or re-establishes) a connection to the specified remote
-   * gateway. The factory verifies via ping before a driver exists. Existing
-   * drivers are disposed and replaced. Failures during connect contribute to
-   * the failure-tracking counter that can trigger auto-disable.
+   * DataGateway. The factory verifies via ping before a driver exists, and the
+   * driver is cached only once the DataGateway has passed its first
+   * interview ({@link register}). Existing drivers are disposed and replaced.
+   * Failures to connect contribute to the failure-tracking counter that can
+   * trigger auto-disable; a failed interview doesn't.
    */
   async connect(options: GatewayConnectionOptions): Promise<void> {
     if (this.clients.has(options.gatewayId)) {
@@ -140,61 +207,123 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     // driver we're about to cache rather than serve a now-invalid gateway.
     const generation = this.connectGeneration.get(options.gatewayId) ?? 0;
 
+    let driver: DataGatewayDriver;
     try {
-      const driver = await this.remoteDriverFactory.create(options);
-
-      // A 'disabled'/'deleted' event may have arrived while we awaited the ping.
-      // If so, this gateway must not be cached here — discard the freshly-built
-      // driver instead of leaving a live connection to an invalidated gateway.
-      // Return (do not throw): throwing would route through the catch below and
-      // wrongly count a legitimate invalidation as a connection failure. The
-      // caller (resolve) then sees no cached driver and treats the gateway as
-      // unavailable, which is correct.
-      if ((this.connectGeneration.get(options.gatewayId) ?? 0) !== generation) {
-        this.logger.warn(`Gateway ${options.gatewayId} was invalidated while connecting; discarding the new client`);
-        this.disposeDriver(options.gatewayId, driver);
-        return;
-      }
-
-      // Shutdown already disposed the cached drivers and won't run again.
-      if (this.shuttingDown) {
-        this.disposeDriver(options.gatewayId, driver);
-        return;
-      }
-
-      this.register(options.gatewayId, driver, hashGatewayConfig(options), 'remote');
-
-      // Language capabilities interview — fire-and-forget so connect latency
-      // is unaffected. Internally throttled (daily) and never throws. The
-      // driver satisfies the client parameter structurally (it IS the port).
-      void this.languageSync.syncIfStale(options.gatewayId, driver);
+      driver = await this.remoteDriverFactory.create(options);
     } catch (err) {
       await this.reportFailure(options.gatewayId, err, 'repeated_connection_failure');
       throw err;
     }
+
+    await this.interviewAndCache(
+      { gatewayId: options.gatewayId, driver, configHash: hashGatewayConfig(options), origin: 'remote' },
+      generation,
+    );
   }
 
   /**
-   * Places a driver into the routing table under the given gateway id and
-   * resets its failure history. Remote connects land here after ping
-   * verification; in-process DataGateway plugin registrations (#59) call it
-   * directly — from that point on, routing, failure tracking, and
-   * auto-disable are identical for both.
+   * Places an in-process driver into the routing table under the given
+   * gateway id and resets its failure history: the seam DataGateway plugin
+   * registrations (#59) will call. connect() caches a remote driver the same
+   * way after its ping, and from then on the interview, routing, failure
+   * tracking, and auto-disable are identical for both.
+   *
+   * A DataGateway never interviewed is interviewed first, and its driver is
+   * cached only if that succeeds. Otherwise the driver is disposed and this
+   * throws, so nothing is routed. A remote DataGateway is connected and
+   * interviewed again when next reached, but the gateway registry can't
+   * rebuild a driver handed in here: whoever handed it in registers it again.
    */
-  register(gatewayId: string, driver: DataGatewayDriver, configHash = '', origin: DriverOrigin = 'registered'): void {
+  async register(
+    gatewayId: string,
+    driver: DataGatewayDriver,
+    configHash = '',
+    origin: DriverOrigin = 'registered',
+  ): Promise<void> {
+    await this.interviewAndCache({ gatewayId, driver, configHash, origin }, this.connectGeneration.get(gatewayId) ?? 0);
+  }
+
+  /**
+   * Caches a driver once its DataGateway has passed its first interview,
+   * unless the DataGateway was invalidated meanwhile. `generation` is the
+   * invalidation counter from before the driver was built.
+   */
+  private async interviewAndCache(entry: CachedDriver, generation: number): Promise<void> {
+    const { gatewayId, driver } = entry;
+
+    if (this.discardIfInvalidated(gatewayId, driver, generation)) {
+      return;
+    }
+
+    // Outside connect()'s failure tracking on purpose: the DataGateway
+    // answered its ping, so it isn't down, and re-enabling it couldn't fix an
+    // interview. The interview records the failure on the row.
+    let interviewedNow: boolean;
+    try {
+      interviewedNow = await this.interviews.interviewUnlessDone(gatewayId, driver);
+    } catch (err) {
+      // An invalidation abandons the interview: that's a discard, as during the ping.
+      if (this.discardIfInvalidated(gatewayId, driver, generation)) {
+        return;
+      }
+
+      void this.disposeDriver(gatewayId, driver);
+      throw err;
+    }
+
+    // The interview is a second wait in which the DataGateway may be invalidated.
+    if (this.discardIfInvalidated(gatewayId, driver, generation)) {
+      return;
+    }
+
     // Last write wins, but never silently: a driver losing the cache slot to a
     // racing connect (eager bootstrap vs. lazy resolve for the same gateway)
     // must have its transport torn down, or its gRPC channel leaks. Skip when
     // re-registering the identical instance.
     const existing = this.clients.get(gatewayId);
     if (existing && existing.driver !== driver) {
-      this.disposeDriver(gatewayId, existing.driver);
+      void this.disposeDriver(gatewayId, existing.driver);
     }
 
-    this.clients.set(gatewayId, { gatewayId, driver, configHash, origin });
+    this.clients.set(gatewayId, entry);
 
     // A freshly-registered driver starts with a clean failure slate.
     this.reportSuccess(gatewayId);
+
+    // Answers from an earlier connect, perhaps another process's, may have
+    // gone stale: interview again in the background if the connection
+    // changed since, the DataGateway reports a new version, or its answers
+    // are a day old. It keeps its last good answers meanwhile.
+    const connectionChanged = this.connectionChanged.delete(gatewayId);
+    if (!interviewedNow) {
+      void this.interviews.refreshIfStale(gatewayId, driver, connectionChanged);
+    }
+  }
+
+  /**
+   * Disposes a driver that mustn't be cached: a 'disabled'/'deleted' or
+   * config-change event arrived while it was connecting or being
+   * interviewed, or shutdown already disposed the cached drivers. Returns
+   * true rather than throwing, so the invalidation isn't counted as a
+   * connection failure; the caller (resolve) then finds no cached driver and
+   * treats the DataGateway as unavailable, which is correct.
+   */
+  private discardIfInvalidated(gatewayId: string, driver: DataGatewayDriver, generation: number): boolean {
+    if ((this.connectGeneration.get(gatewayId) ?? 0) !== generation) {
+      this.logger.warn(
+        `DataGateway ${gatewayId} was invalidated while connecting or being interviewed; discarding the new driver`,
+      );
+      void this.disposeDriver(gatewayId, driver);
+      return true;
+    }
+
+    // Shutdown already disposed the cached drivers and won't run again.
+    if (this.shuttingDown) {
+      void this.disposeDriver(gatewayId, driver);
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -226,6 +355,9 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    */
   private async disposeDriver(gatewayId: string, driver: DataGatewayDriver): Promise<void> {
     try {
+      // An interview asking through the driver would otherwise wait on, or
+      // record a failure of, the connection closed under it.
+      this.interviews.abandon(gatewayId, driver);
       await driver.dispose();
     } catch (err) {
       this.logger.warn(`Error disposing driver for ${gatewayId}: ${err instanceof Error ? err.message : err}`);
@@ -233,17 +365,115 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
   }
 
   /**
-   * Resolves a gateway's driver, lazily establishing the remote connection on
-   * a cache miss by loading the gateway's config from the DB (the source of
-   * truth). Concurrent callers for the same gateway share a single in-flight
-   * connect, so a burst of jobs for a newly-added gateway triggers one
-   * connect — not a ping stampede.
+   * Resolves a DataGateway's driver for one operation, the capability that
+   * names it. Reads the DataGateway's row first, and refuses, with a
+   * {@link GatewayRoutingRefusedError}, a DataGateway that's absent, deleted
+   * or disabled, one whose first interview hasn't succeeded, and a capability
+   * it doesn't declare or that an admin switched off. A refusal holds even
+   * while this process caches the driver, and never counts toward
+   * auto-disable.
    *
-   * Throws if the gateway is absent, disabled, or soft-deleted in the DB, or
-   * if the connection (ping) fails. Connection failures feed the same
-   * auto-disable tracking as any other failed interaction.
+   * On a cache miss the remote connection is established lazily from the
+   * DB config (the source of truth), and concurrent callers for the same
+   * DataGateway share a single in-flight connect, so a burst of jobs for a
+   * newly added DataGateway triggers one connect — not a ping stampede.
+   * Reaching a DataGateway never interviewed connects it, which interviews
+   * it, before the capability is checked.
+   *
+   * Also throws when the connection (ping) or the first interview fails.
+   * Connection failures feed the same auto-disable tracking as any other
+   * failed interaction.
    */
-  async resolve(gatewayId: string): Promise<DataGatewayDriver> {
+  async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
+    let row = await this.routingRow(gatewayId);
+
+    if (row?.enabled && !row.firstInterviewedAt) {
+      await this.ensureConnected(gatewayId);
+      row = await this.routingRow(gatewayId);
+    }
+
+    const refusal = routingRefusal(row, capability);
+    if (refusal) {
+      throw new GatewayRoutingRefusedError(gatewayId, refusal, capability);
+    }
+
+    return this.driverFor(gatewayId);
+  }
+
+  /**
+   * Whether the DataGateway may serve the capability now, by its row,
+   * without connecting it: for a caller that can answer without the driver,
+   * such as a search served from its cache.
+   */
+  async isRoutable(gatewayId: string, capability: DataGatewayCapability): Promise<boolean> {
+    return routingRefusal(await this.routingRow(gatewayId), capability) === null;
+  }
+
+  /**
+   * The DataGateways this process has connected that may serve the
+   * capability now: enabled, past their first interview, declaring it, and
+   * without an admin's switch-off. A search that names no DataGateway goes
+   * to these; one this process hasn't connected yet isn't reached that way
+   * (#722).
+   */
+  async routableGatewayIds(capability: DataGatewayCapability): Promise<string[]> {
+    const connected = this.connectedGatewayIds();
+    if (connected.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db.dataGateway.findMany({
+      where: { id: { in: connected }, deletedAt: null },
+      select: { id: true, ...ROUTING_FIELDS },
+    });
+
+    const routable = new Set(rows.filter((row) => routingRefusal(row, capability) === null).map((row) => row.id));
+    return connected.filter((gatewayId) => routable.has(gatewayId));
+  }
+
+  /**
+   * Interviews a DataGateway now, however recent its answers: for an admin
+   * who asks (#715 adds the route). Connects it first if this process hasn't,
+   * and for a DataGateway never interviewed, that connect is the interview.
+   * Throws when it's absent, deleted or disabled, or when the interview
+   * fails, which the row records.
+   */
+  async reinterview(gatewayId: string): Promise<void> {
+    const row = await this.routingRow(gatewayId);
+    const refusal = routingRefusal(row);
+    if (refusal) {
+      throw new GatewayRoutingRefusedError(gatewayId, refusal);
+    }
+
+    // Connecting a DataGateway never interviewed interviews it.
+    if (!row?.firstInterviewedAt && !this.clients.has(gatewayId)) {
+      await this.ensureConnected(gatewayId);
+      return;
+    }
+
+    await this.interviews.interview(gatewayId, await this.driverFor(gatewayId));
+  }
+
+  /**
+   * Interviews a DataGateway this process has connected again if its answers
+   * have gone stale: the hourly backstop's job. Never throws.
+   */
+  async refreshInterview(gatewayId: string): Promise<void> {
+    const cached = this.clients.get(gatewayId);
+    if (cached) {
+      await this.interviews.refreshIfStale(gatewayId, cached.driver);
+    }
+  }
+
+  private routingRow(gatewayId: string): Promise<RoutingRow | null> {
+    return this.db.dataGateway.findFirst({
+      where: { id: gatewayId, deletedAt: null },
+      select: ROUTING_FIELDS,
+    });
+  }
+
+  /** The cached driver, or one connected lazily from the DB config. */
+  private async driverFor(gatewayId: string): Promise<DataGatewayDriver> {
     const cached = this.clients.get(gatewayId);
     if (cached) {
       return cached.driver;
@@ -257,15 +487,6 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       throw new Error(`No connection established for gateway ${gatewayId}.`);
     }
     return connected.driver;
-  }
-
-  /**
-   * @deprecated Phase-0 alias for {@link resolve} (#193). A driver IS a
-   * `GatewayServiceClient` structurally, so existing call sites keep working;
-   * migrate them to `resolve()` opportunistically and drop this in Phase 1.
-   */
-  async getServiceClient(gatewayId: string): Promise<GatewayServiceClient> {
-    return this.resolve(gatewayId);
   }
 
   /**
@@ -319,12 +540,18 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    */
   private bumpConnectGeneration(gatewayId: string): void {
     this.connectGeneration.set(gatewayId, (this.connectGeneration.get(gatewayId) ?? 0) + 1);
+    // An interview under way asks through a driver from before the bump.
+    this.interviews.abandon(gatewayId);
   }
 
   isConnected(gatewayId: string): boolean {
     return this.clients.has(gatewayId);
   }
 
+  /**
+   * The DataGateways this process holds a driver for. Holding one says
+   * nothing about whether it may be routed: see {@link routableGatewayIds}.
+   */
   connectedGatewayIds(): string[] {
     return Array.from(this.clients.keys());
   }
@@ -530,11 +757,13 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     //   config (served until the next event). Skip the bump only when this
     //   process already holds the current config, where nothing stale can be
     //   in flight. Then drop any stale cached driver so the next call
-    //   reconnects from current config.
+    //   reconnects from current config, and interviews the DataGateway it
+    //   reaches there.
     const configChanged = !cached || cached.configHash !== event.configHash;
 
     if (event.changeType === 'updated' && configChanged) {
       this.bumpConnectGeneration(event.gatewayId);
+      this.connectionChanged.add(event.gatewayId);
     }
 
     if (cached && configChanged) {

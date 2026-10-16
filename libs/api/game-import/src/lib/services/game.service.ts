@@ -6,8 +6,9 @@ import {
   Prisma,
   Visibility,
 } from '@bge/database';
+import { toStoredContentType } from '@bge/gateway-registry';
 import { ServiceAccountService } from '@bge/services';
-import { DlcData, type GameData, ContentType as ProtoContentType } from '@boardgamesempire/proto-gateway';
+import { DlcData, type GameData } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { ImportJobResult, PlatformGameRef } from '../interfaces/import-job.interface';
 import { toReleaseDate, toReleaseRegion } from './helpers';
@@ -374,24 +375,9 @@ export class GameUpsertService {
   }
 }
 
-const PROTO_TO_DB_CONTENT_TYPE: Record<string, ContentType> = {
-  [ProtoContentType.CONTENT_TYPE_BASE_GAME]: ContentType.BaseGame,
-  [ProtoContentType.CONTENT_TYPE_EXPANSION]: ContentType.Expansion,
-  [ProtoContentType.CONTENT_TYPE_STANDALONE_EXPANSION]: ContentType.StandaloneExpansion,
-  [ProtoContentType.CONTENT_TYPE_DLC]: ContentType.DLC,
-  [ProtoContentType.CONTENT_TYPE_ACCESSORY]: ContentType.Accessory,
-  [ProtoContentType.CONTENT_TYPE_BUNDLE]: ContentType.Bundle,
-  [ProtoContentType.CONTENT_TYPE_REMAKE]: ContentType.Remake,
-  [ProtoContentType.CONTENT_TYPE_REMASTER]: ContentType.Remaster,
-  [ProtoContentType.CONTENT_TYPE_EXPANDED_EDITION]: ContentType.ExpandedEdition,
-  [ProtoContentType.CONTENT_TYPE_PORT]: ContentType.Port,
-  [ProtoContentType.CONTENT_TYPE_MOD]: ContentType.Mod,
-  [ProtoContentType.UNRECOGNIZED]: ContentType.Unknown,
-  [ProtoContentType.CONTENT_TYPE_UNSPECIFIED]: ContentType.Unknown,
-};
-
+/** A content type with no stored equivalent, UNSPECIFIED included, is stored as unknown. */
 function toDbContentType(protoType: string | undefined): ContentType {
-  return (protoType && PROTO_TO_DB_CONTENT_TYPE[protoType]) || ContentType.Unknown;
+  return toStoredContentType(protoType) ?? ContentType.Unknown;
 }
 
 /**

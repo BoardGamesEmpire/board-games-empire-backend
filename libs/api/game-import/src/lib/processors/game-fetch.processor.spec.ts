@@ -1,5 +1,5 @@
-import { DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
-import { GatewayRegistryService } from '@bge/gateway-registry';
+import { DatabaseService, DataGatewayCapability, InitiatorType, JobStatus, ResourceType } from '@bge/database';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
 import * as proto from '@boardgamesempire/proto-gateway';
@@ -131,6 +131,24 @@ describe('GameFetchProcessor', () => {
       await expect(processor.process(makeJob())).rejects.toBeInstanceOf(NotFoundException);
       expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
       expect(gatewayRegistry.reportSuccess).toHaveBeenCalledWith('bgg');
+    });
+
+    it('asks the gateway registry for the job’s DataGateway to fetch', async () => {
+      fetchGame.mockReturnValue(of({ game: { title: 'Catan' } as proto.GameData }));
+
+      await processor.process(makeJob());
+
+      expect(gatewayRegistry.resolve).toHaveBeenCalledWith('bgg', DataGatewayCapability.Fetch);
+    });
+
+    it('fails the job without fetching when the gateway registry refuses the DataGateway, and never counts that as a failure', async () => {
+      gatewayRegistry.resolve.mockRejectedValue(
+        new GatewayRoutingRefusedError('bgg', 'disabled', DataGatewayCapability.Fetch),
+      );
+
+      await expect(processor.process(makeJob())).rejects.toBeInstanceOf(GatewayRoutingRefusedError);
+      expect(fetchGame).not.toHaveBeenCalled();
+      expect(gatewayRegistry.reportFailure).not.toHaveBeenCalled();
     });
 
     it('reports a genuine gateway/transport error as a failure (feeds auto-disable)', async () => {

@@ -1,4 +1,5 @@
-import { GatewayRegistryService } from '@bge/gateway-registry';
+import { DataGatewayCapability } from '@bge/database';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import { createTestingModuleWithDb, type CacheMock, type MockDatabaseService } from '@bge/testing';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
@@ -41,34 +42,46 @@ const scriptedDriver = ({ searchGames = [], fetchExpansions = [] }: ScriptedStre
     fetchExpansions: () => from(fetchExpansions),
   });
 
-/**
- * Stands in for GatewayRegistryService with the two calls the service makes,
- * typed against the real ones so the two cannot drift apart. Like the real
- * registry, `resolve` rejects for a gateway it cannot produce a driver for,
- * and only registered gateways count as connected.
- */
-class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'connectedGatewayIds'> {
-  readonly resolved: string[] = [];
-  private readonly drivers = new Map<string, DataGatewayDriver>();
+const EVERY_CAPABILITY = Object.values(DataGatewayCapability);
 
-  register(gatewayId: string, driver: DataGatewayDriver): this {
-    this.drivers.set(gatewayId, driver);
+/**
+ * Stands in for GatewayRegistryService with the calls the service makes,
+ * typed against the real ones so the two cannot drift apart. Like the real
+ * gateway registry, `resolve` rejects for a DataGateway it cannot produce a
+ * driver for, and refuses a capability the DataGateway may not serve; only
+ * registered DataGateways count as connected.
+ */
+class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'routableGatewayIds' | 'isRoutable'> {
+  readonly resolved: string[] = [];
+  private readonly drivers = new Map<string, { driver: DataGatewayDriver; capabilities: DataGatewayCapability[] }>();
+
+  /** Connects a DataGateway that may serve `capabilities`, every one unless given. */
+  register(gatewayId: string, driver: DataGatewayDriver, capabilities = EVERY_CAPABILITY): this {
+    this.drivers.set(gatewayId, { driver, capabilities });
     return this;
   }
 
-  connectedGatewayIds(): string[] {
-    return [...this.drivers.keys()];
+  async routableGatewayIds(capability: DataGatewayCapability): Promise<string[]> {
+    return [...this.drivers].filter(([, { capabilities }]) => capabilities.includes(capability)).map(([id]) => id);
   }
 
-  async resolve(gatewayId: string): Promise<DataGatewayDriver> {
+  async isRoutable(gatewayId: string, capability: DataGatewayCapability): Promise<boolean> {
+    return this.drivers.get(gatewayId)?.capabilities.includes(capability) ?? false;
+  }
+
+  async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
     this.resolved.push(gatewayId);
 
-    const driver = this.drivers.get(gatewayId);
-    if (!driver) {
+    const connected = this.drivers.get(gatewayId);
+    if (!connected) {
       throw new Error(`No connection established for gateway ${gatewayId}.`);
     }
 
-    return driver;
+    if (!connected.capabilities.includes(capability)) {
+      throw new GatewayRoutingRefusedError(gatewayId, 'not_declared', capability);
+    }
+
+    return connected.driver;
   }
 }
 
@@ -122,7 +135,7 @@ describe('GatewayGameSearchService', () => {
   });
 
   describe('searchGames', () => {
-    it('fans an untargeted search out to every connected gateway, each closing with its own SOURCE_DONE', async () => {
+    it('sends an untargeted search to every connected DataGateway that may search, each closing with its own SOURCE_DONE', async () => {
       registry
         .register('bgg', new InMemoryGatewayDriver({ searchResults: [catan, brass] }))
         .register('igdb', new InMemoryGatewayDriver({ searchResults: [halo] }));
@@ -178,6 +191,34 @@ describe('GatewayGameSearchService', () => {
       await expect(collect(service.searchGames(searchRequest()))).resolves.toEqual([]);
     });
 
+    it('leaves a connected DataGateway that may not search out of an untargeted search', async () => {
+      registry
+        .register('bgg', new InMemoryGatewayDriver({ searchResults: [catan] }))
+        .register('enricher', new InMemoryGatewayDriver({ searchResults: [halo] }), [DataGatewayCapability.Fetch]);
+
+      const frames = await collect(service.searchGames(searchRequest()));
+
+      expect(registry.resolved).toEqual(['bgg']);
+      expect(new Set(frames.map((frame) => frame.gatewayId))).toEqual(new Set(['bgg']));
+    });
+
+    it('answers a named DataGateway that may not search as UNAVAILABLE, saying why', async () => {
+      registry.register('enricher', new InMemoryGatewayDriver({ searchResults: [halo] }), [
+        DataGatewayCapability.Fetch,
+      ]);
+
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['enricher'] })));
+
+      expect(frames).toEqual([
+        {
+          correlationId: 'corr-1',
+          gatewayId: 'enricher',
+          status: UNAVAILABLE,
+          message: `DataGateway enricher doesn't declare Search`,
+        },
+      ]);
+    });
+
     it('reports a gateway it cannot reach as UNAVAILABLE while the others still answer', async () => {
       registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [catan] }));
 
@@ -188,7 +229,7 @@ describe('GatewayGameSearchService', () => {
           correlationId: 'corr-1',
           gatewayId: 'steam',
           status: UNAVAILABLE,
-          message: 'Gateway steam is not connected',
+          message: 'DataGateway steam is not connected',
         },
       ]);
       expect(frames).toContainEqual(expect.objectContaining({ gatewayId: 'bgg', status: SOURCE_DONE }));
@@ -310,6 +351,24 @@ describe('GatewayGameSearchService', () => {
   describe('searchGames cache', () => {
     beforeEach(() => {
       registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [catan, brass] }));
+    });
+
+    it('stops replaying a DataGateway’s cached results once it may no longer search, and says why', async () => {
+      await collect(service.searchGames(searchRequest({ gatewayIds: ['bgg'] })));
+
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [catan, brass] }), [
+        DataGatewayCapability.Fetch,
+      ]);
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['bgg'] })));
+
+      expect(frames).toEqual([
+        {
+          correlationId: 'corr-1',
+          gatewayId: 'bgg',
+          status: UNAVAILABLE,
+          message: `DataGateway bgg doesn't declare Search`,
+        },
+      ]);
     });
 
     it('replays a completed search from the cache without asking the gateway again', async () => {
@@ -452,6 +511,19 @@ describe('GatewayGameSearchService', () => {
       });
     });
 
+    it('answers a DataGateway that may not fetch with an ERROR response saying why', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ games: [catanData] }), [DataGatewayCapability.Search]);
+
+      const response = await lastValueFrom(service.fetchGame(fetchRequest('bgg', '13')));
+
+      expect(response).toEqual({
+        correlationId: 'corr-2',
+        gatewayId: 'bgg',
+        status: ERROR,
+        message: `DataGateway bgg doesn't declare Fetch`,
+      });
+    });
+
     it('answers a failing gateway with an ERROR response carrying the failure', async () => {
       const failing = new InMemoryGatewayDriver({ games: [catanData] });
       failing.failWith(new Error('upstream exploded'));
@@ -529,7 +601,26 @@ describe('GatewayGameSearchService', () => {
           correlationId: 'corr-3',
           gatewayId: 'bgg',
           status: UNAVAILABLE,
-          message: 'Gateway bgg is not connected',
+          message: 'DataGateway bgg is not connected',
+        },
+      ]);
+    });
+
+    it('reports a linked DataGateway that may not fetch expansions as UNAVAILABLE, saying why', async () => {
+      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
+      registry.register('bgg', new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [seafarers] } }), [
+        DataGatewayCapability.Search,
+        DataGatewayCapability.Fetch,
+      ]);
+
+      const frames = await collect(service.fetchExpansions(expansionsRequest));
+
+      expect(frames).toEqual([
+        {
+          correlationId: 'corr-3',
+          gatewayId: 'bgg',
+          status: UNAVAILABLE,
+          message: `DataGateway bgg doesn't declare FetchExpansions`,
         },
       ]);
     });

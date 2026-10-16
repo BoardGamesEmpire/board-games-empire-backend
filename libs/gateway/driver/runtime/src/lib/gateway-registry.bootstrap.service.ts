@@ -7,6 +7,10 @@ import { GatewayRegistryService } from './gateway-registry.service';
  * bootstrapped. Uses OnApplicationBootstrap (not OnModuleInit) so that
  * Test.createTestingModule().compile() does NOT trigger gateway connection
  * attempts — only real app starts via app.init() / app.listen() do.
+ *
+ * Connecting a DataGateway never interviewed runs its first interview. One
+ * that fails it isn't routed, and is connected and interviewed again when
+ * next reached.
  */
 @Injectable()
 export class GatewayRegistryBootstrapService implements OnApplicationBootstrap {

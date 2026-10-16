@@ -24,10 +24,38 @@ model DataGateway {
   usageCount Int       @default(0) @map("usage_count")
   lastUsed   DateTime? @map("last_used") @db.Timestamptz(3)
 
-  // Last completed language capabilities interview (ListLanguages preload).
-  // Gates re-interviews to at most once per day — routine pings within the
-  // window skip the preload.
-  languagesSyncedAt DateTime? @map("languages_synced_at") @db.Timestamptz(3)
+  // The DataGateway's answers to the server's interview. Each interview
+  // overwrites them, and an answer it leaves unset is stored unset: null, or
+  // an empty list. The lists are kept in their enum's order, so unchanged
+  // answers are written identically, except acceptedLanguageCodeFormats,
+  // which keeps the DataGateway's order, most preferred first.
+  capabilities                DataGatewayCapability[] @default([])
+  coveragePlatformTypes       PlatformType[]          @default([]) @map("coverage_platform_types")
+  coverageContentTypes        ContentType[]           @default([]) @map("coverage_content_types")
+  filterableAxes              CoverageAxis[]          @default([]) @map("filterable_axes")
+  acceptedLanguageCodeFormats LanguageCodeFormat[]    @default([]) @map("accepted_language_code_formats")
+  responseLanguageCodeFormat  LanguageCodeFormat?     @map("response_language_code_format")
+  passthroughSearchLanguage   Boolean?                @map("passthrough_search_language")
+  contentFormat               ContentFormat?          @map("content_format")
+  // The version it reported on Ping at its last interview. A different one
+  // reported since brings the next interview forward.
+  gatewayVersion              String?                 @map("gateway_version")
+
+  // Capabilities an admin switched off. The server doesn't route them, even
+  // while the DataGateway declares them, and no interview writes this list.
+  disabledCapabilities DataGatewayCapability[] @default([]) @map("disabled_capabilities")
+
+  // The DataGateway isn't used until its first interview succeeds.
+  firstInterviewedAt    DateTime?                    @map("first_interviewed_at") @db.Timestamptz(3)
+  // The last interview that succeeded: its answers are the ones in use.
+  lastInterviewedAt     DateTime?                    @map("last_interviewed_at") @db.Timestamptz(3)
+  // The last interview that failed, or that succeeded with a section failing,
+  // and a coarse code for why. The admin routes return the whole row, so the
+  // raw error is only logged. A later success leaves both in place: the
+  // failure is current while lastInterviewFailedAt isn't before
+  // lastInterviewedAt.
+  lastInterviewFailedAt DateTime?                    @map("last_interview_failed_at") @db.Timestamptz(3)
+  lastInterviewFailure  DataGatewayInterviewFailure? @map("last_interview_failure")
 
   gameSources            GameSource[]
   importActivities       ImportActivity[]
@@ -41,4 +69,49 @@ model DataGateway {
   updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("data_gateways")
+}
+
+// An operation a DataGateway serves. Mirrors proto Capability
+// (bge.gateway.v1).
+enum DataGatewayCapability {
+  Search
+  Fetch
+  FetchExpansions
+  ListLanguages
+
+  @@map("data_gateway_capabilities")
+}
+
+// A coverage axis a DataGateway's search can filter by. Mirrors proto
+// CoverageAxis (bge.gateway.v1).
+enum CoverageAxis {
+  PlatformType
+  ContentType
+
+  @@map("coverage_axes")
+}
+
+// The form a DataGateway's free text arrives in. Mirrors proto ContentFormat
+// (bge.gateway.v1).
+enum ContentFormat {
+  PlainText
+  Html
+  BBCode
+  Markdown
+
+  @@map("content_formats")
+}
+
+// Why an interview, or a section of one, failed.
+enum DataGatewayInterviewFailure {
+  // The interview's ping went unanswered.
+  PingFailed
+  // The DataGateway doesn't implement Describe.
+  DescribeUnsupported
+  // Describe failed in some other way.
+  DescribeFailed
+  // ListLanguages failed. The interview still succeeded with the rest.
+  LanguageSectionFailed
+
+  @@map("data_gateway_interview_failures")
 }

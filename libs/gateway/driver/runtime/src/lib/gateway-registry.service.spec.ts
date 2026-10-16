@@ -1,56 +1,70 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { AuthType, DatabaseService } from '@bge/database';
+import { AuthType, DatabaseService, DataGatewayCapability, DataGatewayInterviewFailure } from '@bge/database';
+import { LanguageLinkService } from '@bge/language';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
-import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
+import { InMemoryGatewayDriver, type InMemoryGatewayFixtures } from '@boardgamesempire/gateway-driver-contract-testing';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
+import { setTimeout as delay } from 'node:timers/promises';
+import { concatMap, from, throwError } from 'rxjs';
 import { FAILURE_THRESHOLD } from './constants/gateway-registry.constants';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
+import { GatewayInterviewError } from './errors/gateway-interview.error';
+import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.error';
 import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
-import { GatewayLanguageSyncService } from './gateway-language-sync.service';
+import { GatewayInterviewService } from './gateway-interview.service';
 import { GatewayRegistryService } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
+import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
+
+const { Search, Fetch, FetchExpansions, ListLanguages } = DataGatewayCapability;
+const EVERY_CAPABILITY = [Search, Fetch, FetchExpansions, ListLanguages];
+
+/** The version the in-memory driver reports on Ping. */
+const IN_MEMORY_VERSION = '0.0.0-test';
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/** A fixture-backed driver, with `dispose` spied so a spec can count teardowns. */
+const makeDriver = (fixtures: InMemoryGatewayFixtures = {}) => {
+  const driver = new InMemoryGatewayDriver(fixtures);
+  jest.spyOn(driver, 'dispose');
+  return driver;
+};
+
+/** A driver whose DataGateway answers its ping but fails Describe. */
+const failingInterview = () =>
+  Object.assign(makeDriver(), { describe: () => throwError(() => new Error('Describe exploded')) });
+
+/** Lets background work, such as a connect's check for stale answers, run to the end. */
+const settle = () => delay(0);
 
 describe('GatewayRegistryService', () => {
   let service: GatewayRegistryService;
-  let db: { dataGateway: { updateMany: jest.Mock; findFirst: jest.Mock } };
+  let table: FakeDataGatewayTable;
   let emitter: EventEmitter2;
   let systemActorScope: { run: jest.Mock };
   let factory: { create: jest.Mock };
 
-  /**
-   * Builds a driver double satisfying the port surface. The registry treats
-   * drivers opaquely, so the RPC methods only need to exist.
-   */
-  const makeDriver = (): DataGatewayDriver & { dispose: jest.Mock } =>
-    ({
-      ping: jest.fn(),
-      check: jest.fn(),
-      describe: jest.fn(),
-      searchGames: jest.fn(),
-      fetchGame: jest.fn(),
-      fetchExpansions: jest.fn(),
-      listLanguages: jest.fn(),
-      dispose: jest.fn(),
-    }) as unknown as DataGatewayDriver & { dispose: jest.Mock };
-
   /** Routes the factory to a ready driver, as a successful remote connect would. */
-  const stubFactory = (driver: DataGatewayDriver = makeDriver()): DataGatewayDriver => {
+  const stubFactory = <T extends DataGatewayDriver>(driver: T): T => {
     factory.create.mockResolvedValue(driver);
     return driver;
   };
 
-  const gatewayRow = {
-    id: 'bgg',
-    name: 'BGG',
-    connectionUrl: 'http://gateway',
-    connectionPort: 50051,
-    authType: AuthType.None,
-    authParameters: null,
-  };
+  /** A row whose first interview declared `capabilities`, just now, at the in-memory driver's version. */
+  const interviewedRow = (id: string, capabilities = EVERY_CAPABILITY) =>
+    table.seed({
+      id,
+      capabilities,
+      gatewayVersion: IN_MEMORY_VERSION,
+      firstInterviewedAt: new Date(),
+      lastInterviewedAt: new Date(),
+    });
 
   const connectOpts = {
     gatewayId: 'bgg',
@@ -72,20 +86,21 @@ describe('GatewayRegistryService', () => {
       on: jest.fn(),
     } as unknown as Redis;
 
-    db = { dataGateway: { updateMany: jest.fn(), findFirst: jest.fn() } };
+    table = new FakeDataGatewayTable();
     systemActorScope = { run: jest.fn((_reason: string, fn: () => unknown) => fn()) };
     factory = { create: jest.fn() };
 
     const module = await Test.createTestingModule({
       providers: [
         GatewayRegistryService,
+        GatewayInterviewService,
         GatewayConfigEventsService,
         EventEmitter2,
         { provide: RemoteGatewayDriverFactory, useValue: factory },
-        { provide: DatabaseService, useValue: db },
+        { provide: DatabaseService, useValue: { dataGateway: table.delegate } },
         { provide: CACHE_REDIS_CLIENT, useValue: redisMock },
         { provide: SystemActorScope, useValue: systemActorScope },
-        { provide: GatewayLanguageSyncService, useValue: { syncIfStale: jest.fn().mockResolvedValue(undefined) } },
+        { provide: LanguageLinkService, useValue: { interview: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -95,37 +110,123 @@ describe('GatewayRegistryService', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('is defined', () => {
-    expect(service).toBeDefined();
-  });
-
   it('reports no connected gateways initially', () => {
     expect(service.connectedGatewayIds()).toEqual([]);
   });
 
-  describe('resolve (lazy connect)', () => {
-    it('connects from DB config on a cache miss and returns the driver', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
-      const driver = stubFactory();
+  describe('the first interview', () => {
+    it('runs on connect, before the driver is cached, so the DataGateway is routed straight away', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(makeDriver());
 
-      const result = await service.resolve('bgg');
+      await service.connect(connectOpts);
 
-      expect(factory.create).toHaveBeenCalledTimes(1);
+      expect(table.row('bgg')).toMatchObject({ capabilities: EVERY_CAPABILITY, firstInterviewedAt: expect.any(Date) });
+      await expect(service.resolve('bgg', Search)).resolves.toBe(driver);
+    });
+
+    it('fails the connect, disposes the driver and caches nothing when it fails', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(failingInterview());
+
+      await expect(service.connect(connectOpts)).rejects.toBeInstanceOf(GatewayInterviewError);
+
+      expect(driver.disposed).toBe(true);
+      expect(service.isConnected('bgg')).toBe(false);
+      expect(table.row('bgg')).toMatchObject({
+        firstInterviewedAt: null,
+        lastInterviewFailure: DataGatewayInterviewFailure.DescribeFailed,
+      });
+    });
+
+    it('never counts a failed interview toward auto-disable', async () => {
+      table.seed({ id: 'bgg' });
+      factory.create.mockImplementation(async () => failingInterview());
+      const emitSpy = jest.spyOn(emitter, 'emit');
+
+      for (let attempt = 0; attempt < FAILURE_THRESHOLD + 1; attempt++) {
+        await expect(service.connect(connectOpts)).rejects.toThrow();
+      }
+
+      expect(table.row('bgg')?.enabled).toBe(true);
+      expect(emitSpy).not.toHaveBeenCalledWith(GatewayDisabledEvent.eventName, expect.anything());
+    });
+
+    it('is skipped when the row shows it already, as when the other process got there first', async () => {
+      interviewedRow('bgg');
+      const driver = stubFactory(makeDriver());
+      const describe = jest.spyOn(driver, 'describe');
+
+      await service.connect(connectOpts);
+      await settle();
+
+      expect(describe).not.toHaveBeenCalled();
+      expect(service.isConnected('bgg')).toBe(true);
+    });
+
+    it('is followed, on a later connect, by a background interview when the answers are a day old', async () => {
+      const stale = new Date(Date.now() - 2 * DAY);
+      table.seed({
+        id: 'bgg',
+        capabilities: [Fetch],
+        gatewayVersion: IN_MEMORY_VERSION,
+        firstInterviewedAt: stale,
+        lastInterviewedAt: stale,
+      });
+      stubFactory(makeDriver());
+
+      await service.connect(connectOpts);
+      await settle();
+
+      expect(table.row('bgg')).toMatchObject({ capabilities: EVERY_CAPABILITY, firstInterviewedAt: stale });
+      expect(table.row('bgg')?.lastInterviewedAt?.getTime()).toBeGreaterThan(stale.getTime());
+    });
+
+    it('runs for a driver handed to register(), as a plugin DataGateway’s will be', async () => {
+      table.seed({ id: 'plugin-bgg' });
+      const driver = makeDriver({ capabilities: [proto.Capability.CAPABILITY_FETCH] });
+
+      await service.register('plugin-bgg', driver);
+
+      expect(table.row('plugin-bgg')?.capabilities).toEqual([Fetch]);
+      await expect(service.resolve('plugin-bgg', Fetch)).resolves.toBe(driver);
+    });
+
+    it('keeps a driver handed to register() out of routing when its first interview fails', async () => {
+      table.seed({ id: 'plugin-bgg' });
+      const driver = failingInterview();
+
+      await expect(service.register('plugin-bgg', driver)).rejects.toBeInstanceOf(GatewayInterviewError);
+
+      expect(driver.disposed).toBe(true);
+      expect(service.isConnected('plugin-bgg')).toBe(false);
+    });
+  });
+
+  describe('resolve', () => {
+    it('connects a DataGateway on its first reach, interviews it, and routes it', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(makeDriver());
+
+      await expect(service.resolve('bgg', Fetch)).resolves.toBe(driver);
+
       expect(factory.create).toHaveBeenCalledWith(expect.objectContaining({ gatewayId: 'bgg', connectionPort: 50051 }));
-      expect(result).toBe(driver);
+      expect(table.row('bgg')?.firstInterviewedAt).toEqual(expect.any(Date));
     });
 
-    it('getServiceClient is a deprecated alias returning the same driver', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
-      const driver = stubFactory();
+    it('connects an interviewed DataGateway lazily without interviewing it again', async () => {
+      interviewedRow('bgg');
+      const driver = stubFactory(makeDriver());
+      const describe = jest.spyOn(driver, 'describe');
 
-      const client = await service.getServiceClient('bgg');
+      await expect(service.resolve('bgg', Search)).resolves.toBe(driver);
+      await settle();
 
-      expect(client).toBe(driver);
+      expect(describe).not.toHaveBeenCalled();
     });
 
-    it('deduplicates concurrent connects for the same gateway', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
+    it('shares one connect among concurrent callers for the same DataGateway', async () => {
+      interviewedRow('bgg');
       let release!: () => void;
       const gate = new Promise<void>((resolve) => (release = resolve));
       factory.create.mockImplementation(async () => {
@@ -133,37 +234,195 @@ describe('GatewayRegistryService', () => {
         return makeDriver();
       });
 
-      const inFlight = Promise.all([service.resolve('bgg'), service.resolve('bgg')]);
+      const inFlight = Promise.all([service.resolve('bgg', Search), service.resolve('bgg', Fetch)]);
       release();
       await inFlight;
 
       expect(factory.create).toHaveBeenCalledTimes(1);
     });
 
-    it('throws and does not connect when the gateway is absent/disabled/deleted', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(null);
-      stubFactory();
+    it('refuses a capability the DataGateway doesn’t declare, and doesn’t count it as a failure', async () => {
+      interviewedRow('bgg', [Fetch]);
+      stubFactory(makeDriver());
 
-      await expect(service.resolve('gone')).rejects.toThrow(/not available/);
+      await expect(service.resolve('bgg', Search)).rejects.toMatchObject({
+        name: GatewayRoutingRefusedError.name,
+        reason: 'not_declared',
+      });
+
+      for (let attempt = 0; attempt < FAILURE_THRESHOLD; attempt++) {
+        await expect(service.resolve('bgg', Search)).rejects.toThrow();
+      }
+      expect(table.row('bgg')?.enabled).toBe(true);
+    });
+
+    it('refuses a capability an admin switched off, while routing the rest', async () => {
+      interviewedRow('bgg');
+      table.patch('bgg', { disabledCapabilities: [Search] });
+      const driver = stubFactory(makeDriver());
+
+      await expect(service.resolve('bgg', Search)).rejects.toMatchObject({ reason: 'switched_off' });
+      await expect(service.resolve('bgg', Fetch)).resolves.toBe(driver);
+    });
+
+    it('refuses a DataGateway an admin disabled, even while this process still holds its driver', async () => {
+      interviewedRow('bgg');
+      stubFactory(makeDriver());
+      await service.connect(connectOpts);
+
+      table.patch('bgg', { enabled: false });
+
+      await expect(service.resolve('bgg', Fetch)).rejects.toMatchObject({ reason: 'disabled' });
+    });
+
+    it('refuses a DataGateway that doesn’t exist or was deleted, without connecting', async () => {
+      table.seed({ id: 'deleted', deletedAt: new Date() });
+
+      await expect(service.resolve('gone', Search)).rejects.toMatchObject({ reason: 'unknown' });
+      await expect(service.resolve('deleted', Search)).rejects.toMatchObject({ reason: 'unknown' });
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a DataGateway whose first interview failed, and tries again on the next reach', async () => {
+      table.seed({ id: 'bgg' });
+      factory.create.mockResolvedValueOnce(failingInterview());
+      const recovered = makeDriver();
+      factory.create.mockResolvedValueOnce(recovered);
+
+      await expect(service.resolve('bgg', Search)).rejects.toBeInstanceOf(GatewayInterviewError);
+      await expect(service.resolve('bgg', Search)).resolves.toBe(recovered);
+    });
+
+    it('refuses a DataGateway it holds a driver for but whose row shows no first interview', async () => {
+      table.seed({ id: 'plugin-bgg' });
+      await service.register('plugin-bgg', makeDriver());
+
+      table.patch('plugin-bgg', { firstInterviewedAt: null });
+
+      await expect(service.resolve('plugin-bgg', Search)).rejects.toMatchObject({ reason: 'not_interviewed' });
+    });
+  });
+
+  describe('routableGatewayIds', () => {
+    it('lists the connected DataGateways that may serve the capability, and no others', async () => {
+      interviewedRow('searches');
+      interviewedRow('fetches-only', [Fetch]);
+      interviewedRow('switched-off');
+      table.patch('switched-off', { disabledCapabilities: [Search] });
+      interviewedRow('disabled');
+      interviewedRow('not-connected');
+
+      for (const id of ['searches', 'fetches-only', 'switched-off', 'disabled']) {
+        await service.register(id, makeDriver());
+      }
+      table.patch('disabled', { enabled: false });
+
+      await expect(service.routableGatewayIds(Search)).resolves.toEqual(['searches']);
+      await expect(service.routableGatewayIds(Fetch)).resolves.toEqual(['searches', 'fetches-only', 'switched-off']);
+    });
+
+    it('lists none while nothing is connected', async () => {
+      interviewedRow('bgg');
+
+      await expect(service.routableGatewayIds(Search)).resolves.toEqual([]);
+    });
+  });
+
+  describe('isRoutable', () => {
+    it('says by the row whether a DataGateway may serve a capability, without connecting it', async () => {
+      interviewedRow('bgg', [Fetch, Search]);
+      table.patch('bgg', { disabledCapabilities: [Search] });
+
+      await expect(service.isRoutable('bgg', Fetch)).resolves.toBe(true);
+      await expect(service.isRoutable('bgg', Search)).resolves.toBe(false);
+      await expect(service.isRoutable('bgg', FetchExpansions)).resolves.toBe(false);
+      await expect(service.isRoutable('gone', Fetch)).resolves.toBe(false);
       expect(factory.create).not.toHaveBeenCalled();
     });
   });
 
-  describe('register (in-process drivers)', () => {
-    it('routes a registered driver without touching the DB or the remote factory', async () => {
-      const driver = new InMemoryGatewayDriver({ gatewayName: 'in-proc' });
+  describe('reinterview', () => {
+    it('interviews a DataGateway now, however recent its answers', async () => {
+      interviewedRow('bgg', [Fetch]);
+      stubFactory(makeDriver());
+      await service.connect(connectOpts);
 
-      service.register('plugin-bgg', driver);
+      await service.reinterview('bgg');
 
-      await expect(service.resolve('plugin-bgg')).resolves.toBe(driver);
-      expect(db.dataGateway.findFirst).not.toHaveBeenCalled();
+      expect(table.row('bgg')?.capabilities).toEqual(EVERY_CAPABILITY);
+    });
+
+    it('connects a DataGateway this process hasn’t, to interview it', async () => {
+      interviewedRow('bgg', [Fetch]);
+      stubFactory(makeDriver());
+
+      await service.reinterview('bgg');
+
+      expect(service.isConnected('bgg')).toBe(true);
+      expect(table.row('bgg')?.capabilities).toEqual(EVERY_CAPABILITY);
+    });
+
+    it('interviews a DataGateway never interviewed once, by connecting it', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(makeDriver());
+      const describe = jest.spyOn(driver, 'describe');
+
+      await service.reinterview('bgg');
+
+      expect(describe).toHaveBeenCalledTimes(1);
+      expect(table.row('bgg')?.firstInterviewedAt).toEqual(expect.any(Date));
+    });
+
+    it('refuses a disabled DataGateway', async () => {
+      interviewedRow('bgg');
+      table.patch('bgg', { enabled: false });
+      stubFactory(makeDriver());
+
+      await expect(service.reinterview('bgg')).rejects.toMatchObject({
+        name: GatewayRoutingRefusedError.name,
+        reason: 'disabled',
+      });
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('refreshInterview', () => {
+    it('interviews a connected DataGateway again when it reports a version other than the stored one', async () => {
+      interviewedRow('bgg', [Fetch]);
+      stubFactory(makeDriver());
+      await service.connect(connectOpts);
+      await settle();
+      table.patch('bgg', { gatewayVersion: '0.0.0-older' });
+
+      await service.refreshInterview('bgg');
+
+      expect(table.row('bgg')).toMatchObject({ gatewayVersion: IN_MEMORY_VERSION, capabilities: EVERY_CAPABILITY });
+    });
+
+    it('leaves a DataGateway this process hasn’t connected alone', async () => {
+      interviewedRow('bgg');
+
+      await expect(service.refreshInterview('bgg')).resolves.toBeUndefined();
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('register', () => {
+    it('routes a driver handed to it without the remote factory', async () => {
+      table.seed({ id: 'plugin-bgg' });
+      const driver = makeDriver({ gatewayName: 'in-proc' });
+
+      await service.register('plugin-bgg', driver);
+
+      await expect(service.resolve('plugin-bgg', Search)).resolves.toBe(driver);
       expect(factory.create).not.toHaveBeenCalled();
       expect(service.isConnected('plugin-bgg')).toBe(true);
     });
 
-    it('disconnect disposes a registered driver', () => {
-      const driver = new InMemoryGatewayDriver();
-      service.register('plugin-bgg', driver);
+    it('disconnect disposes a registered driver', async () => {
+      table.seed({ id: 'plugin-bgg' });
+      const driver = makeDriver();
+      await service.register('plugin-bgg', driver);
 
       service.disconnect('plugin-bgg');
 
@@ -171,12 +430,13 @@ describe('GatewayRegistryService', () => {
       expect(service.isConnected('plugin-bgg')).toBe(false);
     });
 
-    it('disposes an evicted driver when a new one is registered under the same id', () => {
+    it('disposes an evicted driver when a new one is registered under the same id', async () => {
+      table.seed({ id: 'bgg' });
       const evicted = makeDriver();
-      service.register('bgg', evicted);
+      await service.register('bgg', evicted);
       const replacement = makeDriver();
 
-      service.register('bgg', replacement);
+      await service.register('bgg', replacement);
 
       // No leaked channel: the displaced driver is torn down, the new one kept.
       expect(evicted.dispose).toHaveBeenCalledTimes(1);
@@ -186,18 +446,20 @@ describe('GatewayRegistryService', () => {
 
   describe('shutdown', () => {
     it('keeps serving its drivers through onModuleDestroy, while the server still takes requests', async () => {
+      interviewedRow('bgg');
       const driver = makeDriver();
-      service.register('bgg', driver);
+      await service.register('bgg', driver);
 
       await service.onModuleDestroy();
 
       expect(driver.dispose).not.toHaveBeenCalled();
-      await expect(service.resolve('bgg')).resolves.toBe(driver);
+      await expect(service.resolve('bgg', Search)).resolves.toBe(driver);
     });
 
     it('disposes every driver on onApplicationShutdown', async () => {
+      interviewedRow('bgg');
       const driver = makeDriver();
-      service.register('bgg', driver);
+      await service.register('bgg', driver);
 
       await service.onApplicationShutdown();
 
@@ -206,6 +468,7 @@ describe('GatewayRegistryService', () => {
     });
 
     it('disposes a driver whose connect finishes after shutdown, instead of caching it', async () => {
+      interviewedRow('bgg');
       const driver = makeDriver();
       let finishPing!: (driver: DataGatewayDriver) => void;
       factory.create.mockReturnValue(new Promise<DataGatewayDriver>((resolve) => (finishPing = resolve)));
@@ -226,7 +489,7 @@ describe('GatewayRegistryService', () => {
   // completion order wins; we assert only the no-leak invariant).
   describe('concurrent connect race (no leak)', () => {
     it('disposes exactly the driver that loses the cache slot', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
+      table.seed({ id: 'bgg' });
       const a = makeDriver();
       const b = makeDriver();
       let release!: () => void;
@@ -238,13 +501,13 @@ describe('GatewayRegistryService', () => {
         })
         .mockResolvedValueOnce(b);
 
-      const lazy = service.resolve('bgg'); // factory call #1 (gated → a)
+      const lazy = service.resolve('bgg', Search); // factory call #1 (gated → a)
       const explicit = service.connect(connectOpts); // factory call #2 → b
       release();
       await Promise.all([lazy, explicit]);
 
-      const survivor = (await service.resolve('bgg')) as DataGatewayDriver & { dispose: jest.Mock };
-      const evicted = (survivor === a ? b : a) as DataGatewayDriver & { dispose: jest.Mock };
+      const survivor = await service.resolve('bgg', Search);
+      const evicted = survivor === a ? b : a;
       expect(evicted.dispose).toHaveBeenCalledTimes(1);
       expect(survivor.dispose).not.toHaveBeenCalled();
     });
@@ -252,6 +515,7 @@ describe('GatewayRegistryService', () => {
 
   describe('connect (mid-connect invalidation race)', () => {
     it('discards the freshly-connected driver when a disable event arrives during the ping', async () => {
+      interviewedRow('bgg');
       const driver = makeDriver();
 
       // Gate the factory so we can inject a disable event while connect() is suspended.
@@ -275,7 +539,31 @@ describe('GatewayRegistryService', () => {
       expect(driver.dispose).toHaveBeenCalledTimes(1);
     });
 
+    it('discards the freshly-connected driver when a disable event arrives during its first interview', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(makeDriver());
+
+      // Hold Describe open, so the disable event lands mid-interview.
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const describe = driver.describe.bind(driver);
+      driver.describe = (request) => from(answered).pipe(concatMap(() => describe(request)));
+
+      const connecting = service.connect(connectOpts);
+      await settle();
+      await dispatch({ gatewayId: 'bgg', configHash: '', changeType: 'disabled', timestamp: 0 });
+
+      answer();
+      await connecting;
+
+      expect(service.isConnected('bgg')).toBe(false);
+      expect(driver.dispose).toHaveBeenCalledTimes(1);
+      // The interview was abandoned with the connect, so it stored nothing.
+      expect(table.row('bgg')?.firstInterviewedAt).toBeNull();
+    });
+
     it('discards the freshly-connected driver when a config-change event arrives during the ping', async () => {
+      interviewedRow('bgg');
       const driver = makeDriver();
 
       // Gate the factory so we can inject an 'updated' event while connect() is suspended.
@@ -302,7 +590,8 @@ describe('GatewayRegistryService', () => {
     });
 
     it('caches the driver normally when nothing invalidates it during connect', async () => {
-      const driver = stubFactory() as DataGatewayDriver & { dispose: jest.Mock };
+      interviewedRow('bgg');
+      const driver = stubFactory(makeDriver());
 
       await service.connect(connectOpts);
 
@@ -311,10 +600,66 @@ describe('GatewayRegistryService', () => {
     });
 
     it('feeds connection failures into failure tracking and rethrows', async () => {
+      table.seed({ id: 'bgg' });
       factory.create.mockRejectedValue(new Error('unreachable'));
 
-      await expect(service.connect(connectOpts)).rejects.toThrow('unreachable');
+      for (let attempt = 0; attempt < FAILURE_THRESHOLD; attempt++) {
+        await expect(service.connect(connectOpts)).rejects.toThrow('unreachable');
+      }
+
       expect(service.isConnected('bgg')).toBe(false);
+      expect(table.row('bgg')?.enabled).toBe(false);
+    });
+  });
+
+  describe('an interview under way when its driver is let go', () => {
+    it('is abandoned when a config event replaces the driver, so the reconnect interviews afresh and isn’t overwritten', async () => {
+      const stale = new Date(Date.now() - 2 * DAY);
+      table.seed({
+        id: 'bgg',
+        capabilities: [Fetch],
+        gatewayVersion: IN_MEMORY_VERSION,
+        firstInterviewedAt: stale,
+        lastInterviewedAt: stale,
+      });
+      // The old endpoint declares Search and Fetch, and holds back its answer to Describe.
+      const old = makeDriver({ capabilities: [proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_FETCH] });
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const describe = old.describe.bind(old);
+      old.describe = (request) => from(answered).pipe(concatMap(() => describe(request)));
+      stubFactory(old);
+      await service.connect(connectOpts);
+      await settle(); // The connect's re-interview now waits on the old endpoint.
+
+      await dispatch({ gatewayId: 'bgg', configHash: 'new-hash', changeType: 'updated', timestamp: 0 });
+      stubFactory(makeDriver());
+      await service.resolve('bgg', Fetch);
+      await settle();
+      answer();
+      await settle();
+
+      expect(table.row('bgg')).toMatchObject({ capabilities: EVERY_CAPABILITY, lastInterviewFailure: null });
+    });
+
+    it('is abandoned when its driver is disposed, as on a reconnect, and fails for whoever waits on it', async () => {
+      interviewedRow('bgg');
+      const old = stubFactory(makeDriver());
+      await service.connect(connectOpts);
+      await settle();
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const describe = old.describe.bind(old);
+      old.describe = (request) => from(answered).pipe(concatMap(() => describe(request)));
+      const asked = service.reinterview('bgg');
+      await settle();
+
+      stubFactory(makeDriver());
+      await dispatch({ gatewayId: 'bgg', configHash: 'x', changeType: 'reconnect-requested', timestamp: 0 });
+      answer();
+
+      await expect(asked).rejects.toThrow(/abandoned/);
+      expect(table.row('bgg')?.lastInterviewFailure).toBeNull();
     });
   });
 
@@ -324,13 +669,12 @@ describe('GatewayRegistryService', () => {
       // register() would tag it 'registered', which handleConfigUpdate now
       // intentionally exempts from reconnect events (see the in-process test
       // below) — reconnect only applies to remote connections.
-      db.dataGateway.findFirst.mockResolvedValue(gatewayRow);
-      const oldDriver = stubFactory() as DataGatewayDriver & { dispose: jest.Mock };
+      interviewedRow('bgg');
+      const oldDriver = stubFactory(makeDriver());
       await service.connect(connectOpts); // origin: 'remote'
       expect(service.isConnected('bgg')).toBe(true);
 
-      const newDriver = makeDriver();
-      factory.create.mockResolvedValue(newDriver);
+      stubFactory(makeDriver());
 
       await dispatch({ gatewayId: 'bgg', configHash: 'x', changeType: 'reconnect-requested', timestamp: 0 });
 
@@ -340,9 +684,25 @@ describe('GatewayRegistryService', () => {
       expect(service.isConnected('bgg')).toBe(true);
     });
 
+    it('has the next connect interview again after the connection changes, whatever the answers’ age and version', async () => {
+      interviewedRow('bgg', [Fetch]);
+      stubFactory(makeDriver({ capabilities: [proto.Capability.CAPABILITY_FETCH] }));
+      await service.connect(connectOpts);
+      await settle();
+
+      // An admin points the row at another DataGateway, which reports the same version.
+      await dispatch({ gatewayId: 'bgg', configHash: 'new-hash', changeType: 'updated', timestamp: 0 });
+      stubFactory(makeDriver());
+      await service.resolve('bgg', Fetch);
+      await settle();
+
+      expect(table.row('bgg')?.capabilities).toEqual(EVERY_CAPABILITY);
+    });
+
     it('ignores updated/reconnect-requested for registered in-process drivers', async () => {
-      const driver = new InMemoryGatewayDriver();
-      service.register('plugin-bgg', driver);
+      interviewedRow('plugin-bgg');
+      const driver = makeDriver();
+      await service.register('plugin-bgg', driver);
 
       await dispatch({ gatewayId: 'plugin-bgg', configHash: 'h', changeType: 'updated', timestamp: 0 });
       await dispatch({ gatewayId: 'plugin-bgg', configHash: 'h', changeType: 'reconnect-requested', timestamp: 0 });
@@ -355,8 +715,9 @@ describe('GatewayRegistryService', () => {
     });
 
     it('still tears down a registered driver on disabled (admin intent wins)', async () => {
-      const driver = new InMemoryGatewayDriver();
-      service.register('plugin-bgg', driver);
+      interviewedRow('plugin-bgg');
+      const driver = makeDriver();
+      await service.register('plugin-bgg', driver);
 
       await dispatch({ gatewayId: 'plugin-bgg', configHash: '', changeType: 'disabled', timestamp: 0 });
 
@@ -365,8 +726,6 @@ describe('GatewayRegistryService', () => {
     });
 
     it('reconnect-requested swallows reconnect failures (no throw out of the handler)', async () => {
-      db.dataGateway.findFirst.mockResolvedValue(null);
-
       await expect(
         dispatch({ gatewayId: 'bgg', configHash: 'x', changeType: 'reconnect-requested', timestamp: 0 }),
       ).resolves.toBeUndefined();
@@ -380,22 +739,21 @@ describe('GatewayRegistryService', () => {
       }
     };
 
-    it('does not touch the DB below the failure threshold', async () => {
+    it('leaves the DataGateway enabled below the failure threshold', async () => {
+      table.seed({ id: 'bgg' });
+
       await service.reportFailure('bgg', new Error('boom'));
 
-      expect(db.dataGateway.updateMany).not.toHaveBeenCalled();
+      expect(table.row('bgg')?.enabled).toBe(true);
     });
 
     it('disables the gateway inside a system actor scope and emits a GatewayDisabledEvent', async () => {
-      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
+      table.seed({ id: 'bgg' });
       const emitSpy = jest.spyOn(emitter, 'emit');
 
       await failUntilThreshold();
 
-      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
-        where: { id: 'bgg', enabled: true },
-        data: { enabled: false },
-      });
+      expect(table.row('bgg')?.enabled).toBe(false);
       expect(systemActorScope.run).toHaveBeenCalledWith('gateway-registry:auto-disable', expect.any(Function));
 
       const [name, emitted] = emitSpy.mock.calls[0] as [string, GatewayDisabledEvent];
@@ -415,27 +773,23 @@ describe('GatewayRegistryService', () => {
     });
 
     it('does not emit when another process already disabled the gateway', async () => {
-      db.dataGateway.updateMany.mockResolvedValue({ count: 0 });
+      table.seed({ id: 'bgg', enabled: false });
       const emitSpy = jest.spyOn(emitter, 'emit');
 
       await failUntilThreshold();
 
-      expect(db.dataGateway.updateMany).toHaveBeenCalledTimes(1);
       expect(emitSpy).not.toHaveBeenCalled();
     });
 
     it('is transport-agnostic: a registered in-process driver trips the same threshold and is disposed on disable', async () => {
-      db.dataGateway.updateMany.mockResolvedValue({ count: 1 });
-      const driver = new InMemoryGatewayDriver();
+      interviewedRow('plugin-bgg');
+      const driver = makeDriver();
+      await service.register('plugin-bgg', driver);
       driver.failWith(new Error('in-proc boom'));
-      service.register('plugin-bgg', driver);
 
       await failUntilThreshold('plugin-bgg');
 
-      expect(db.dataGateway.updateMany).toHaveBeenCalledWith({
-        where: { id: 'plugin-bgg', enabled: true },
-        data: { enabled: false },
-      });
+      expect(table.row('plugin-bgg')?.enabled).toBe(false);
       expect(driver.disposed).toBe(true);
       expect(service.isConnected('plugin-bgg')).toBe(false);
     });
