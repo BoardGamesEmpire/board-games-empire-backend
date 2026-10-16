@@ -169,6 +169,7 @@
     "token_unavailable": "Could not mint a unique invite token",
     "only_invitee_responds": "Only the invitee can accept or decline an invite",
     "only_inviter_withdraws": "Only the inviter can withdraw an invite",
+    "revoke_own_invite": "You sent invite {id}: withdraw it instead, while signed in",
     "awaiting_approval": "Invite {id} is awaiting approval and cannot be accepted yet",
     "not_awaiting_approval": "Invite {id} is not awaiting approval",
     "not_outstanding": "Invite {id} is {status} and can no longer be changed",

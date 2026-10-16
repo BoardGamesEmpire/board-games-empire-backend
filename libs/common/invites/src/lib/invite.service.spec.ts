@@ -1089,6 +1089,7 @@ describe('InviteService', () => {
 
   describe('revokeWithin', () => {
     const scope = { householdId: 'hh-1' };
+    const REVOKER_ID = 'user-admin';
 
     it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval])(
       'revokes from %s, bound to the authorized household and to no party, and returns the context view',
@@ -1098,7 +1099,11 @@ describe('InviteService', () => {
           { ...rowWithToken(), status: InviteStatus.Revoked, respondedAt: FUTURE },
         ] as never);
 
-        const { invite, event } = await service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope });
+        const { invite, event } = await service.revokeWithin(asTx(tx), {
+          inviteId: 'inv-1',
+          revokerId: REVOKER_ID,
+          scope,
+        });
 
         // The caller asserted the context authority; the read carries the
         // context that assertion covered, and binds to no party.
@@ -1125,14 +1130,18 @@ describe('InviteService', () => {
     it.each(TERMINAL)('409s a settled invite (%s)', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(ConflictException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('410s an expired invite rather than revoking it', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(GoneException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
+        GoneException,
+      );
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
@@ -1140,7 +1149,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope: { householdId: 'hh-other' } }),
+        service.revokeWithin(asTx(tx), {
+          inviteId: 'inv-1',
+          revokerId: REVOKER_ID,
+          scope: { householdId: 'hh-other' },
+        }),
       ).rejects.toMatchObject({
         status: 404,
         response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-1' } }),
@@ -1151,6 +1164,31 @@ describe('InviteService', () => {
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval, InviteStatus.Revoked])(
+      "403s the invite's own inviter (%s), who withdraws it instead, and moves nothing",
+      async (status) => {
+        tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
+
+        await expect(
+          service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: INVITER_ID, scope }),
+        ).rejects.toMatchObject({
+          status: 403,
+          response: expect.objectContaining({ key: 'errors.invite.revoke_own_invite', args: { id: 'inv-1' } }),
+        });
+        expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+      },
+    );
+
+    it("403s the inviter before an expiry is stamped: the refusal is about who asks, not the invite's state", async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
+
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: INVITER_ID, scope })).rejects.toThrow(
+        ForbiddenException,
+      );
+      await settled();
+      expect(db.invite.updateMany).not.toHaveBeenCalled();
     });
   });
 

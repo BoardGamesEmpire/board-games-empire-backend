@@ -169,7 +169,10 @@ function project<Select extends Prisma.InviteSelect>(
  */
 type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent> = {
   readonly target: InviteTarget;
-  /** The role the transition needs once the row is known to be the actor's. Throws 403. */
+  /**
+   * Whether the actor is the one this transition needs, once the row is read:
+   * the invitee, the inviter, or for a revoke anyone but the inviter. Throws 403.
+   */
   readonly assertRole?: (row: InviteTransitionRow) => void;
   /** The statuses the transition may start from. Throws 409 otherwise; runs again on a guard miss. */
   readonly assertStatus: (row: InviteTransitionRow) => void;
@@ -213,7 +216,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
  * (#163). Context authority is the consumer's to assert before
  * calling: an owner or admin revoking, an approver approving. The lib never
  * checks a household or event role, and needs no `read` grant on `Invite` to
- * do its work. What it does bind is the context that assertion was about: a
+ * do its work. It does refuse a revoke by the invite's own inviter, who
+ * withdraws it instead. What it does bind is the context that assertion was about: a
  * context transition takes the `scope` the caller's authority covers and
  * carries it into the read, so an invite id from another context meets the
  * same miss a stranger does.
@@ -442,16 +446,22 @@ export class InviteService {
   }
 
   /**
-   * A context authority cancels the invite, from either outstanding status.
-   * The caller has asserted that authority over `scope`; nothing here binds
-   * to an actor, and the read binds to the scope instead, so an id from
-   * another context is a miss. Returns the context shape: a revoker is not a
-   * party and does not see the address or the message.
+   * A context authority cancels someone else's invite, from either
+   * outstanding status. The caller has asserted that authority over `scope`,
+   * and the read binds to the scope rather than to a party, so an id from
+   * another context is a miss. The invite's own inviter is refused with 403
+   * whatever their authority: they withdraw it instead (#164). Returns the
+   * context shape: a revoker is not a party and does not see the address or
+   * the message.
    */
-  revokeWithin(tx: Prisma.TransactionClient, { inviteId, scope }: RevokeInviteParams): Promise<InviteRevocation> {
+  revokeWithin(
+    tx: Prisma.TransactionClient,
+    { inviteId, revokerId, scope }: RevokeInviteParams,
+  ): Promise<InviteRevocation> {
     return this.transitionWithin(tx, {
       target: { inviteId },
       scope,
+      assertRole: (row) => this.assertNotInviter(row, revokerId),
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({ status: InviteStatus.Revoked, respondedAt: now }),
       view: CONTEXT_INVITE_SELECT,
@@ -904,6 +914,12 @@ export class InviteService {
   private assertInviter(current: InviteTransitionRow, actingUserId: string): void {
     if (current.inviterId !== actingUserId) {
       throw new ForbiddenException(t('errors.invite.only_inviter_withdraws'));
+    }
+  }
+
+  private assertNotInviter(current: InviteTransitionRow, actingUserId: string): void {
+    if (current.inviterId === actingUserId) {
+      throw new ForbiddenException(t('errors.invite.revoke_own_invite', { id: current.id }));
     }
   }
 
