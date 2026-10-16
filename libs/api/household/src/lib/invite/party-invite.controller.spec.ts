@@ -10,15 +10,19 @@ import type { PartyInviteService, ReceivedInviteView } from './party-invite.serv
 const INVITE = { id: 'invite-1', status: InviteStatus.Accepted } as InvitePartyView;
 const RECEIVED = { id: 'invite-2', household: { id: 'hh-1', name: 'Home' } } as ReceivedInviteView;
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
+const DECLINED = { id: 'invite-1', status: InviteStatus.Declined } as InvitePartyView;
+const WITHDRAWN = { id: 'invite-1', status: InviteStatus.Withdrawn } as InvitePartyView;
 
 describe('PartyInviteController (delegation)', () => {
   let controller: PartyInviteController;
-  let service: jest.Mocked<Pick<PartyInviteService, 'accept' | 'listReceived'>>;
+  let service: jest.Mocked<Pick<PartyInviteService, 'accept' | 'listReceived' | 'decline' | 'withdraw'>>;
 
   beforeEach(() => {
     service = {
       accept: jest.fn().mockResolvedValue({ invite: INVITE, member: MEMBER }),
       listReceived: jest.fn().mockResolvedValue({ rows: [RECEIVED], total: 1 }),
+      decline: jest.fn().mockResolvedValue(DECLINED),
+      withdraw: jest.fn().mockResolvedValue(WITHDRAWN),
     };
     controller = new PartyInviteController(service as never);
   });
@@ -50,6 +54,33 @@ describe('PartyInviteController (delegation)', () => {
     expect(result).toEqual({
       invites: [RECEIVED],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
+  });
+
+  it('decline forwards the id as the target, answering the invite', async () => {
+    const result = await firstValueFrom(controller.decline('invite-1'));
+
+    expect(service.decline).toHaveBeenCalledWith({ inviteId: 'invite-1' });
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.invite_declined' }),
+      invite: DECLINED,
+    });
+  });
+
+  it('declineByToken forwards the token from the body as the target', async () => {
+    const result = await firstValueFrom(controller.declineByToken({ token: 'live-accept-credential' }));
+
+    expect(service.decline).toHaveBeenCalledWith({ token: 'live-accept-credential' });
+    expect(result).toMatchObject({ invite: DECLINED });
+  });
+
+  it('withdraw forwards the id, answering the invite', async () => {
+    const result = await firstValueFrom(controller.withdraw('invite-1'));
+
+    expect(service.withdraw).toHaveBeenCalledWith('invite-1');
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.invite_withdrawn' }),
+      invite: WITHDRAWN,
     });
   });
 });

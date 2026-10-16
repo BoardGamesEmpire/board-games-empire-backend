@@ -185,6 +185,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
       readonly partyOf: string;
       /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
       readonly vouchedEmail?: string | null;
+      /** The type the consumer handles. Scopes the read: an invite of another type gets a miss. */
+      readonly type: InviteType;
     }
   | {
       /** The context the caller's authority covers when the transition is a context authority's. Scopes the read: an id from another context gets a miss. */
@@ -277,6 +279,9 @@ export class InviteService {
    * transition would give, before any context is named to them. The role and
    * status checks are the transition's. No lock is taken, so the order the
    * consumer locks in is its own.
+   *
+   * A consumer that locks nothing has no use for it: a transition binds the
+   * type in its own read (#164).
    */
   async findPartyScopeWithin<Type extends ContextualInviteType>(
     tx: Prisma.TransactionClient,
@@ -432,11 +437,12 @@ export class InviteService {
   /** The inviter takes the invite back, from either outstanding status. */
   withdrawWithin(
     tx: Prisma.TransactionClient,
-    { inviteId, actingUserId }: WithdrawInviteParams,
+    { inviteId, actingUserId, type }: WithdrawInviteParams,
   ): Promise<InviteWithdrawal> {
     return this.transitionWithin(tx, {
       target: { inviteId },
       partyOf: actingUserId,
+      type,
       assertRole: (row) => this.assertInviter(row, actingUserId),
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({ status: InviteStatus.Withdrawn, respondedAt: now }),
@@ -556,7 +562,7 @@ export class InviteService {
     const now = new Date();
     const current =
       'partyOf' in spec
-        ? await this.loadForParty(tx, spec.target, spec.partyOf, spec.vouchedEmail ?? null)
+        ? await this.loadForParty(tx, spec.target, spec.partyOf, spec.vouchedEmail ?? null, spec.type)
         : await this.loadForContext(tx, spec.target, spec.scope);
 
     spec.assertRole?.(current);
@@ -794,16 +800,19 @@ export class InviteService {
    * not (#278). Its link was never sent, so one that reaches the server anyway
    * meets the miss a stranger meets, whatever delivered it. By an address the
    * consumer vouches is the actor's, an email-only row to that address is
-   * reachable by id as well (#163), withheld ones again excepted.
+   * reachable by id as well (#163), withheld ones again excepted. A
+   * transition names the type its consumer handles, and a row of another
+   * type is a miss too (#164); a plain read names none.
    */
   private async loadForParty(
     client: ReadClient,
     target: InviteTarget,
     actingUserId: string,
     vouchedEmail: string | null,
+    type?: InviteType,
   ): Promise<InviteTransitionRow> {
     const row = await client.invite.findFirst({
-      where: this.partyWhere(target, actingUserId, vouchedEmail),
+      where: { ...this.partyWhere(target, actingUserId, vouchedEmail), ...(type && { type }) },
       select: TRANSITION_SELECT,
     });
 
@@ -868,17 +877,19 @@ export class InviteService {
 
   /**
    * The half of a transition spec every invitee's transition shares: the read
-   * bound to them, widened by the address the consumer vouches for, and the
-   * role check that the row is theirs to answer. The address is normalized
-   * once, so the read and the check compare the same string.
+   * bound to them and to the type the consumer handles, widened by the
+   * address the consumer vouches for, and the role check that the row is
+   * theirs to answer. The address is normalized once, so the read and the
+   * check compare the same string.
    */
-  private asInvitee({ target, actingUserId, vouchedEmail }: InvitePartyLookup) {
+  private asInvitee({ target, actingUserId, vouchedEmail, type }: RespondToInviteParams) {
     const vouched = normalizeInviteeEmail(vouchedEmail);
 
     return {
       target,
       partyOf: actingUserId,
       vouchedEmail: vouched,
+      type,
       assertRole: (row: InviteTransitionRow) => this.assertInvitee(row, target, actingUserId, vouched),
     };
   }

@@ -144,6 +144,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:event:household',
   'update:game_play_session:household',
   'update:household',
+  'update:household_invite:revoke',
   'update:household_role:transfer-ownership',
 ];
 

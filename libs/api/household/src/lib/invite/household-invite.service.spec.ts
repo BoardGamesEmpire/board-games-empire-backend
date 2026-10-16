@@ -15,6 +15,7 @@ import {
   type InviteContextView,
   type InviteCreation,
   type InvitePartyView,
+  type InviteRevocation,
 } from '@bge/invites';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService, type QuotaCheckResult, type QuotaSoftOverageEvent } from '@bge/quota';
@@ -90,9 +91,10 @@ describe('HouseholdInviteService', () => {
   let abilityService: jest.Mocked<
     Pick<AbilityService, 'getActingUserId' | 'assertCurrentActorCan' | 'getCurrentResourceConditions'>
   >;
-  let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'emit'>>;
+  let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'revokeWithin' | 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let creation: InviteCreation;
+  let revocation: InviteRevocation;
 
   beforeEach(async () => {
     abilityService = {
@@ -105,8 +107,16 @@ describe('HouseholdInviteService', () => {
       event: { eventName: 'invite.created' } as never,
       expired: [{ eventName: 'invite.expired' } as never],
     };
+    revocation = {
+      invite: contextView({
+        status: InviteStatus.Revoked,
+        inviter: { id: 'admin-2', username: 'admin', profile: null },
+      }),
+      event: { eventName: 'invite.revoked' } as never,
+    };
     invites = {
       createWithin: jest.fn().mockImplementation(() => Promise.resolve(creation)),
+      revokeWithin: jest.fn().mockImplementation(() => Promise.resolve(revocation)),
       emit: jest.fn(),
     };
     quotas = {
@@ -762,6 +772,100 @@ describe('HouseholdInviteService', () => {
       invites.createWithin.mockRejectedValue(new ConflictException());
 
       await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ConflictException);
+
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('revokeInvite', () => {
+    it('asks about revoking an invite of the household before the lock, and again of the roster read under it', async () => {
+      const steps: string[] = [];
+      db.$queryRaw.mockImplementation((() => {
+        steps.push('lock');
+        return Promise.resolve([{ id: 'hh-1' }]);
+      }) as never);
+      db.householdMember.findMany.mockImplementation((() => {
+        steps.push('roster');
+        return Promise.resolve(ROSTER);
+      }) as never);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        steps.push('check');
+      });
+      invites.revokeWithin.mockImplementation(() => {
+        steps.push('revoke');
+        return Promise.resolve(revocation);
+      });
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toBe(revocation.invite);
+
+      // The household row, then the invite: the order a soft delete takes them in.
+      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
+      expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
+        [Action.update, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
+        [Action.update, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
+      ]);
+      // The revoker is named so the lib refuses an inviter revoking their own invite.
+      expect(invites.revokeWithin).toHaveBeenCalledWith(db, {
+        inviteId: 'invite-1',
+        revokerId: 'owner-1',
+        scope: { householdId: 'hh-1' },
+      });
+    });
+
+    it('refuses a caller with no say here with 403 before taking the lock, and revokes nothing', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(invites.revokeWithin).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+
+    it('decides from the roster read under the lock, where a demotion that landed first is seen', async () => {
+      const demoted = [rosterRow('owner-1', SystemRole.HouseholdMember)];
+      db.householdMember.findMany.mockResolvedValueOnce(resolves(ROSTER)).mockResolvedValueOnce(resolves(demoted));
+      abilityService.assertCurrentActorCan.mockImplementation((_action, _type, instance) => {
+        if ((instance as { household: { members: RosterRow[] } }).household.members === demoted) {
+          throw new ForbiddenException();
+        }
+      });
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(invites.revokeWithin).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a missing or deleted household, and revokes nothing', async () => {
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(invites.revokeWithin).not.toHaveBeenCalled();
+    });
+
+    it('announces the revoke after the transaction', async () => {
+      let emittedInside: boolean | undefined;
+      db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await work(db);
+        emittedInside = invites.emit.mock.calls.length > 0;
+
+        return result;
+      }) as never);
+
+      await service.revokeInvite('hh-1', 'invite-1');
+
+      expect(emittedInside).toBe(false);
+      expect(invites.emit).toHaveBeenCalledWith([revocation.event]);
+    });
+
+    it('announces nothing when the lib refuses', async () => {
+      invites.revokeWithin.mockRejectedValue(new ForbiddenException());
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
 
       expect(invites.emit).not.toHaveBeenCalled();
     });

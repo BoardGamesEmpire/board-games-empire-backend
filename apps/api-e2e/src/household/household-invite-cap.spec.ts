@@ -15,8 +15,8 @@ const RESOURCE = 'household_invite_daily_count';
  * invites created in the last 24 hours, by the inviter at `User` scope and into
  * the household at `Household` scope. Past a hard cap the create answers 402.
  *
- * Every invite counts whatever became of it, so revoking one frees no slot,
- * and a withheld one (#278) counts like any other. No row means no cap.
+ * Every invite counts whatever became of it, so withdrawing or revoking one
+ * frees no slot, and a withheld one (#278) counts like any other. No row means no cap.
  *
  * Each test caps its own inviter or household with an instance row. A
  * type-level default would cap every other suite's inviters as well.
@@ -120,15 +120,32 @@ describe('household invite cap', () => {
     expect(refused.body).toMatchObject({ scope: QuotaScope.Household, limit: '2', currentUsage: '2' });
   });
 
-  it('frees no slot when an invite is revoked', async () => {
+  it('frees no slot when an invite is withdrawn or revoked', async () => {
+    const [owner, admin] = await Promise.all([actors.user(), actors.user()]);
+    const { household } = await actors.householdWithMembers({
+      owner,
+      members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+    });
+    await cap(QuotaScope.User, owner.user.id, 2);
+
+    const withdrawn = await invite(owner, household.id);
+    const revoked = await invite(owner, household.id);
+    await request(baseUrl).post(`/api/invites/${withdrawn.id}/withdraw`).set(owner.headers).expect(200);
+    await request(baseUrl)
+      .post(`${invitesPath(household.id)}/${revoked.id}/revoke`)
+      .set(admin.headers)
+      .expect(200);
+
+    await createInvite(owner, household.id, { inviteeEmail: address() }).expect(402);
+  });
+
+  it('frees no slot when a household delete revokes its invites', async () => {
     const owner = await actors.user();
     const { household: deleted } = await actors.householdWithMembers({ owner });
     const { household: kept } = await actors.householdWithMembers({ owner });
     await cap(QuotaScope.User, owner.user.id, 1);
 
     const { id } = await invite(owner, deleted.id);
-    // No route revokes one invite yet (#164). Deleting a household revokes
-    // its outstanding invites, through the same lib.
     await request(baseUrl).delete(`/api/households/${deleted.id}`).set(owner.headers).expect(200);
     expect((await db.client.invite.findUniqueOrThrow({ where: { id }, select: { status: true } })).status).toBe(
       InviteStatus.Revoked,

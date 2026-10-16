@@ -58,9 +58,9 @@ type InviteeRequest = { readonly inviteeId: string } | { readonly inviteeEmail: 
 type ResolvedInvitee = StoredInvitee & { readonly inviteeName: string | null };
 
 /**
- * Creates and lists a household's invites (#162). The lifecycle itself is
- * `@bge/invites`'s; this is the household's side of it: who may invite, whom
- * an address names, and who sees which rows.
+ * Creates, lists and revokes a household's invites (#162, #164). The
+ * lifecycle itself is `@bge/invites`'s; this is the household's side of it:
+ * who may invite or revoke, whom an address names, and who sees which rows.
  */
 @Injectable()
 export class HouseholdInviteService {
@@ -171,6 +171,44 @@ export class HouseholdInviteService {
   }
 
   /**
+   * Cancels an invite someone else sent into the household (#164), in one
+   * transaction, in the order the create takes:
+   *
+   * 1. The caller must hold `update` on an invite into THIS household, asked
+   *    of the instance: the route's type-only check passes the Owner or Admin
+   *    of any household. Asked before the lock, so a caller with no say here
+   *    is refused without holding the household's row.
+   * 2. The household row is share-locked. A role transition takes the same
+   *    row `FOR NO KEY UPDATE`, which conflicts, so no demotion lands between
+   *    the answer below and the revoke; and a soft delete, which locks the row
+   *    before it revokes every outstanding invite, is ordered with this one
+   *    rather than deadlocking against it.
+   * 3. The question is asked again of the roster read under the lock, and that
+   *    answer decides.
+   * 4. The lib revokes, bound to this household: 404 for an id from another
+   *    one, 403 for the invite's own inviter, who withdraws it instead, 410
+   *    once expired, 409 once settled.
+   *
+   * The revoked invite is announced after commit. The row stays, so it still
+   * counts against the day's invite quota (#279).
+   */
+  async revokeInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
+    const revokerId = this.abilityService.getActingUserId();
+
+    const { invite, event } = await this.db.$transaction(async (tx) => {
+      await this.assertInviteAuthority(tx, householdId, Action.update);
+      await lockExistingHousehold(tx, householdId);
+      await this.assertInviteAuthority(tx, householdId, Action.update);
+
+      return this.invites.revokeWithin(tx, { inviteId, revokerId, scope: { householdId } });
+    });
+
+    this.invites.emit([event]);
+
+    return invite;
+  }
+
+  /**
    * One page of the household's invites, newest first (#162).
    *
    * The caller must hold `read` on this household's invites, asked of the
@@ -268,7 +306,7 @@ export class HouseholdInviteService {
   private async assertInviteAuthority(
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
-    action: typeof Action.create | typeof Action.read,
+    action: typeof Action.create | typeof Action.read | typeof Action.update,
   ): Promise<RosterRow[]> {
     const members = await client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
 

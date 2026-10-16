@@ -1,5 +1,5 @@
 import { InviteStatus } from '@bge/database';
-import type { InvitePartyView } from '@bge/invites';
+import type { InviteContextView, InvitePartyView } from '@bge/invites';
 import { paginationQuery } from '@bge/testing';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
@@ -8,15 +8,17 @@ import { HouseholdInviteController } from './household-invite.controller';
 import type { HouseholdInviteService } from './household-invite.service';
 
 const INVITE = { id: 'invite-1', status: InviteStatus.Pending } as InvitePartyView;
+const REVOKED = { id: 'invite-1', status: InviteStatus.Revoked } as InviteContextView;
 
 describe('HouseholdInviteController (delegation)', () => {
   let controller: HouseholdInviteController;
-  let service: jest.Mocked<Pick<HouseholdInviteService, 'createInvite' | 'listInvites'>>;
+  let service: jest.Mocked<Pick<HouseholdInviteService, 'createInvite' | 'listInvites' | 'revokeInvite'>>;
 
   beforeEach(() => {
     service = {
       createInvite: jest.fn().mockResolvedValue(INVITE),
       listInvites: jest.fn().mockResolvedValue({ rows: [INVITE], total: 1 }),
+      revokeInvite: jest.fn().mockResolvedValue(REVOKED),
     };
     controller = new HouseholdInviteController(service as never);
   });
@@ -44,6 +46,16 @@ describe('HouseholdInviteController (delegation)', () => {
     expect(result).toEqual({
       invites: [INVITE],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
+  });
+
+  it('revokeInvite forwards the household and the invite, wrapping the invite with a success message', async () => {
+    const result = await firstValueFrom(controller.revokeInvite('hh-1', 'invite-1'));
+
+    expect(service.revokeInvite).toHaveBeenCalledWith('hh-1', 'invite-1');
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.invite_revoked' }),
+      invite: REVOKED,
     });
   });
 });

@@ -9,6 +9,7 @@ import {
   unexpiredInviteWhere,
   type InvitePartyView,
   type InviteTarget,
+  type RespondToInviteParams,
 } from '@bge/invites';
 import { PermissionsService } from '@bge/permissions';
 import { QuotaService } from '@bge/quota';
@@ -37,15 +38,18 @@ export interface HouseholdInviteAcceptance {
 }
 
 /**
- * The invitee's side of a household invite (#163): the invites they have
- * received, and accepting one. The household's side, creating and listing a
- * household's invites, is `HouseholdInviteService`.
+ * A party's side of a household invite: the invites they have received,
+ * accepting or declining one (#163, #164), and withdrawing one they sent
+ * (#164). The household's side, creating, listing and revoking a household's
+ * invites, is `HouseholdInviteService`.
  *
- * No CASL rule stands behind either: an invitee holds no grant on `Invite`,
+ * No CASL rule stands behind any of them: a party holds no grant on `Invite`,
  * and needs none, because `@bge/invites` binds every party read to the acting
- * user in the query (#161). What this service adds is whose address may stand
- * in for that binding, and who the acting user may be: only a person signed in
- * as themself, since joining a household is the joiner's own act (#276). An
+ * user in the query (#161). That is why an inviter withdraws whatever their
+ * role in the household is now, demoted or gone. What this service adds is
+ * whose address may stand in for that binding, and who the acting user may
+ * be: only a person signed in as themself, since joining a household, or
+ * turning down or taking back an invite, is that person's own act (#276). An
  * API key acts for its owner but is not the owner, neither a plugin nor the
  * system joins anyone, and no invite by id can name an anonymous guest.
  */
@@ -137,7 +141,7 @@ export class PartyInviteService {
     const inviteeId = requireSessionUserId(this.auditContext.getActor());
 
     const { invite, member, event, softOverages } = await this.db.$transaction(async (tx) => {
-      const lookup = { target, actingUserId: inviteeId, vouchedEmail: await this.vouchedEmailOf(tx, inviteeId) };
+      const lookup = await this.inviteeLookup(tx, target, inviteeId);
 
       const { householdId } = await this.invites.findPartyScopeWithin(tx, lookup, InviteType.Household);
       await lockExistingHousehold(tx, householdId);
@@ -164,6 +168,68 @@ export class PartyInviteService {
     this.quotas.emitSoftOverages(softOverages);
 
     return { invite, member };
+  }
+
+  /**
+   * The acting user declines an invite they received, by id or by the token
+   * from its link (#164). From `Pending`, or from `AwaitingApproval`: a
+   * refusal never waits on an approver.
+   *
+   * The lib's read is bound to a household invite, so an invite of another
+   * type is the 404 a stranger meets. Only the invite row moves, so no
+   * household lock is taken; a soft delete that revoked the invite first
+   * leaves the decline its 409. The lib answers the rest: 403 for the
+   * inviter, 410 once expired, 409 once settled. After commit the declined
+   * invite is announced.
+   */
+  async decline(target: InviteTarget): Promise<InvitePartyView> {
+    const inviteeId = requireSessionUserId(this.auditContext.getActor());
+
+    const { invite, event } = await this.db.$transaction(async (tx) =>
+      this.invites.declineWithin(tx, await this.inviteeLookup(tx, target, inviteeId)),
+    );
+
+    this.invites.emit([event]);
+
+    return invite;
+  }
+
+  /**
+   * The acting user takes back an invite they sent (#164), from either
+   * outstanding status. It is theirs whatever their role in the household
+   * now, so nothing about the household is asked: a demoted or departed
+   * inviter withdraws as an Owner does. Revoking someone else's invite is
+   * `HouseholdInviteService.revokeInvite`, and never stands in for this.
+   *
+   * Bound to a household invite as {@link decline} is, and for the same
+   * reason no lock is taken. The lib answers 404 to anyone who is not a party,
+   * 403 to the invitee, 410 once expired and 409 once settled. After commit
+   * the withdrawn invite is announced.
+   */
+  async withdraw(inviteId: string): Promise<InvitePartyView> {
+    const inviterId = requireSessionUserId(this.auditContext.getActor());
+
+    const { invite, event } = await this.db.$transaction((tx) =>
+      this.invites.withdrawWithin(tx, { inviteId, actingUserId: inviterId, type: InviteType.Household }),
+    );
+
+    this.invites.emit([event]);
+
+    return invite;
+  }
+
+  /** How an invitee names a household invite of theirs to the lib: the target, their vouched address, the type. */
+  private async inviteeLookup(
+    tx: Prisma.TransactionClient,
+    target: InviteTarget,
+    inviteeId: string,
+  ): Promise<RespondToInviteParams> {
+    return {
+      target,
+      actingUserId: inviteeId,
+      vouchedEmail: await this.vouchedEmailOf(tx, inviteeId),
+      type: InviteType.Household,
+    };
   }
 
   /**

@@ -9,13 +9,13 @@ import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
 const INVITE_TOKEN_MAX_LENGTH = 256;
 
 /**
- * `POST /invites/accept` (#163).
+ * `POST /invites/accept` (#163) and `POST /invites/decline` (#164).
  *
- * The token is the invite's accept credential (#161), so it travels in the
- * body and never in the path: a path reaches proxy access logs, browser
- * history and `Referer` headers.
+ * The token is the invite's credential (#161), so it travels in the body and
+ * never in the path: a path reaches proxy access logs, browser history and
+ * `Referer` headers.
  */
-export class AcceptInviteByTokenDto {
+export class InviteTokenDto {
   @ApiProperty({ description: 'The token from the invite link.', maxLength: INVITE_TOKEN_MAX_LENGTH })
   @IsString({ message: i18nValidationMessage('validation.isString') })
   @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })

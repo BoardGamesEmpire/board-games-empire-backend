@@ -1272,6 +1272,32 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: "View a household's invites",
   }),
+  // Revoking cancels an invite someone else sent (#164). The audience and the
+  // role clause are `create:household_invite`'s, read off an instance for the
+  // same reason, so a type-only check passes any household's Owner or Admin
+  // and the service asks again about THIS household.
+  //
+  // An inviter takes their own invite back by withdrawing it, which needs no
+  // grant: it belongs to whoever sent the invite, whatever their role now. The
+  // invites lib refuses a revoke by the invite's own inviter, so holding this
+  // never lets a sender revoke rather than withdraw.
+  //
+  // Bound to `status`, the one column a revoke means to change, so a later
+  // check for editing an invite's role or message does not pass on it. The
+  // slug alone cannot tell a revoke from another status change; an approver's
+  // grant is #166's to design.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Invite,
+    fields: ['status'],
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'update:household_invite:revoke',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Revoke an invite someone else sent to the household',
+  }),
 
   // No grant here is a JOIN grant, and joining must not be gated on
   // `can(create, HouseholdMember)`: `manage` implies `create`, so the

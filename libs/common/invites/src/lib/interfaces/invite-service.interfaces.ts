@@ -75,13 +75,22 @@ export interface InvitePartyLookup {
   readonly vouchedEmail?: string | null;
 }
 
-/** Accept or decline: the invitee acts. */
-export type RespondToInviteParams = InvitePartyLookup;
+/**
+ * Accept or decline: the invitee acts.
+ *
+ * `type` is the one the consumer handles, and the read binds to it, so a
+ * household route never settles an event invite: one of another type meets
+ * the 404 a stranger meets (#164).
+ */
+export interface RespondToInviteParams extends InvitePartyLookup {
+  readonly type: InviteType;
+}
 
-/** Withdraw: the inviter acts. */
+/** Withdraw: the inviter acts. `type` binds the read as it does for a response. */
 export interface WithdrawInviteParams {
   readonly inviteId: string;
   readonly actingUserId: string;
+  readonly type: InviteType;
 }
 
 /**
