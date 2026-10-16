@@ -800,9 +800,11 @@ describe('HouseholdInviteService', () => {
 
       // The household row, then the invite: the order a soft delete takes them in.
       expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
+      // Named by its id, so a key scoped to this one invite is asked about it.
+      const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
-        [Action.update, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
-        [Action.update, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
+        [Action.update, ResourceType.Invite, instance],
+        [Action.update, ResourceType.Invite, instance],
       ]);
       // The revoker is named so the lib refuses an inviter revoking their own invite.
       expect(invites.revokeWithin).toHaveBeenCalledWith(db, {

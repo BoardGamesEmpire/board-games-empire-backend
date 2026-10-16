@@ -174,10 +174,11 @@ export class HouseholdInviteService {
    * Cancels an invite someone else sent into the household (#164), in one
    * transaction, in the order the create takes:
    *
-   * 1. The caller must hold `update` on an invite into THIS household, asked
+   * 1. The caller must hold `update` on this invite into THIS household, asked
    *    of the instance: the route's type-only check passes the Owner or Admin
-   *    of any household. Asked before the lock, so a caller with no say here
-   *    is refused without holding the household's row.
+   *    of any household. The instance carries the invite's id, so a key scoped
+   *    to this one invite is asked about it. Asked before the lock, so a caller
+   *    with no say here is refused without holding the household's row.
    * 2. The household row is share-locked. A role transition takes the same
    *    row `FOR NO KEY UPDATE`, which conflicts, so no demotion lands between
    *    the answer below and the revoke; and a soft delete, which locks the row
@@ -196,9 +197,9 @@ export class HouseholdInviteService {
     const revokerId = this.abilityService.getActingUserId();
 
     const { invite, event } = await this.db.$transaction(async (tx) => {
-      await this.assertInviteAuthority(tx, householdId, Action.update);
+      await this.assertInviteAuthority(tx, householdId, Action.update, inviteId);
       await lockExistingHousehold(tx, householdId);
-      await this.assertInviteAuthority(tx, householdId, Action.update);
+      await this.assertInviteAuthority(tx, householdId, Action.update, inviteId);
 
       return this.invites.revokeWithin(tx, { inviteId, revokerId, scope: { householdId } });
     });
@@ -302,15 +303,24 @@ export class HouseholdInviteService {
   /**
    * Asks whether the caller may `action` an invite into this household, of the
    * household's roster as `client` reads it, and hands the roster back.
+   *
+   * An action on an existing invite names it by `inviteId`. An API key scoped
+   * to one invite holds its grant only on that id, so an instance without one
+   * would refuse the key even on the invite it was scoped to.
    */
   private async assertInviteAuthority(
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
     action: typeof Action.create | typeof Action.read | typeof Action.update,
+    inviteId?: string,
   ): Promise<RosterRow[]> {
     const members = await client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
 
-    this.abilityService.assertCurrentActorCan(action, ResourceType.Invite, { householdId, household: { members } });
+    this.abilityService.assertCurrentActorCan(action, ResourceType.Invite, {
+      ...(inviteId === undefined ? {} : { id: inviteId }),
+      householdId,
+      household: { members },
+    });
 
     return members;
   }

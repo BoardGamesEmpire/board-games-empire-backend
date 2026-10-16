@@ -88,9 +88,9 @@ describe('declining, withdrawing and revoking a household invite', () => {
       },
     });
 
-  /** A key its owner minted, scoped to the given grants on `Invite`. */
-  const inviteKey = (owner: SessionActor, slugs: readonly string[]) =>
-    mintApiKey(baseUrl, db.client, owner, { slugs, resourceType: ResourceType.Invite });
+  /** A key its owner minted, scoped to the given grants on `Invite`, or on the one invite `resourceId` names. */
+  const inviteKey = (owner: SessionActor, slugs: readonly string[], resourceId?: string) =>
+    mintApiKey(baseUrl, db.client, owner, { slugs, resourceType: ResourceType.Invite, resourceId });
 
   /** The message a refusal carries, so a surprise reads as a diff rather than as a bare status. */
   const messageOf = (response: { body: unknown }) => (response.body as { message?: unknown } | null)?.message;
@@ -375,6 +375,23 @@ describe('declining, withdrawing and revoking a household invite', () => {
       await expect(storedInvite(adminsInvite.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
 
       await withdraw(admin, adminsInvite.id).expect(200);
+    });
+
+    it('revokes the one invite it is scoped to, and no other', async () => {
+      const [owner, admin, first, second] = await Promise.all(Array.from({ length: 4 }, () => actors.user()));
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+      });
+      const scopedTo = await createdInvite(owner, household.id, { inviteeId: first.user.id });
+      const other = await createdInvite(owner, household.id, { inviteeId: second.user.id });
+      const key = await inviteKey(admin, ['update:household_invite:revoke'], scopedTo.id);
+
+      await revoke(key, household.id, other.id).expect(403);
+      await revoke(key, household.id, scopedTo.id).expect(200);
+
+      await expect(storedInvite(scopedTo.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
+      await expect(storedInvite(other.id)).resolves.toMatchObject({ status: InviteStatus.Pending });
     });
 
     it('cannot decline for its owner', async () => {

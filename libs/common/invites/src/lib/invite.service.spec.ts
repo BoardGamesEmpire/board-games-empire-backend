@@ -1038,7 +1038,11 @@ describe('InviteService', () => {
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'inv-1', status },
-          data: expect.objectContaining({ status: InviteStatus.Declined, inviteeId: INVITEE_ID }),
+          data: expect.objectContaining({
+            status: InviteStatus.Declined,
+            respondedAt: expect.any(Date),
+            inviteeId: INVITEE_ID,
+          }),
         }),
       );
       expect(invite.status).toBe(InviteStatus.Declined);

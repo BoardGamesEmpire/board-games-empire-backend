@@ -14,10 +14,14 @@ export interface ApiKeyCaller extends Caller {
   readonly id: string;
 }
 
-/** The grants a key holds, every one on the same resource type. */
+/**
+ * The grants a key holds, every one on the same resource type, and on the one
+ * resource `resourceId` names when it is given.
+ */
 export interface ApiKeyScope {
   readonly slugs: readonly string[];
   readonly resourceType: ResourceType;
+  readonly resourceId?: string;
 }
 
 /**
@@ -49,7 +53,12 @@ export const mintApiKey = async (
       const permission = await prisma.permission.findUniqueOrThrow({ where: { slug } });
 
       await prisma.apiKeyScope.create({
-        data: { apiKeyId: response.body.id, permissionId: permission.id, resourceType: scope.resourceType },
+        data: {
+          apiKeyId: response.body.id,
+          permissionId: permission.id,
+          resourceType: scope.resourceType,
+          resourceId: scope.resourceId ?? null,
+        },
       });
     }
   }
