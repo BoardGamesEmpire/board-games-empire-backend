@@ -505,6 +505,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:event_occurrence',
     'read:event_policy',
     'read:event:participant',
+    // A spectator is part of the headcount, so they answer whether they are
+    // coming, as every other attending role does (#568).
+    'update:event_attendee:status:self',
   ],
 };
 

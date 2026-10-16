@@ -435,12 +435,12 @@ describe('event write authorization', () => {
 
   describe("the actor's own attendee row (#458)", () => {
     /**
-     * An attendee who attends one event as a spectator, which casts no vote,
-     * updates no RSVP and withdraws no nomination, and another as a
-     * participant, which does all three. An event role is rendered once per
-     * attendance, so the participant's grants are in the attendee's graph
-     * beside the spectator's, and each route's type-only check passes on them
-     * in either event.
+     * An attendee who attends one event as a spectator, which casts no vote
+     * and withdraws no nomination, and another as a participant, which does
+     * both. An event role is rendered once per attendance, so the
+     * participant's grants are in the attendee's graph beside the
+     * spectator's, and each route's type-only check passes on them in either
+     * event.
      */
     const arrangeAttendee = async () => {
       const spectatedHost = await actors.user();
@@ -510,21 +510,21 @@ describe('event write authorization', () => {
       expect(await db.client.eventAvailabilityVote.count({ where: { occurrenceId: spectatedOccurrence } })).toBe(0);
     });
 
-    it('refuses an RSVP from a spectator who participates in another event, and leaves it as it was', async () => {
-      const { attendee, spectatedId, participatedId } = await arrangeAttendee();
+    // A spectator answers their own RSVP (#568), on their own row in that
+    // event. The grant that lets them is bound to that row, so it reaches no
+    // one else's: not the host's in the event they spectate, and not their
+    // own in another.
+    it("lets a spectator RSVP on their own row, and refuses them anyone else's, leaving it as it was", async () => {
+      const { attendee, spectatedHost, spectatedId } = await arrangeAttendee();
       const spectatedRow = await attendeeRowId(spectatedId, attendee.user.id);
-      const participatedRow = await attendeeRowId(participatedId, attendee.user.id);
+      const hostRow = await attendeeRowId(spectatedId, spectatedHost.user.id);
 
-      // Control: the attendee RSVPs where they participate.
-      await updateStatus(attendee, participatedId, participatedRow).expect(200);
+      await updateStatus(attendee, spectatedId, spectatedRow).expect(200);
 
-      await updateStatus(attendee, spectatedId, spectatedRow).expect(403);
+      await updateStatus(attendee, spectatedId, hostRow).expect(403);
       expect(
-        await db.client.eventAttendee.findUniqueOrThrow({
-          where: { id: spectatedRow },
-          select: { status: true, rsvpDate: true },
-        }),
-      ).toEqual({ status: EventParticipationStatus.Invited, rsvpDate: null });
+        await db.client.eventAttendee.findUniqueOrThrow({ where: { id: hostRow }, select: { rsvpDate: true } }),
+      ).toEqual({ rsvpDate: null });
     });
 
     it('refuses a spectator who participates in another event the withdrawal of their own nomination, and leaves it open', async () => {

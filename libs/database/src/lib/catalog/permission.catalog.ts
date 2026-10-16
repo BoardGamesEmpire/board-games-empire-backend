@@ -611,8 +611,8 @@ export const PERMISSION_CATALOG = [
     reason: "View the attendees of your household's events",
   }),
   // Held on the actor's own attendee row in this event, as the votes are.
-  // Bound to the user alone, the grant from an event where the actor RSVPs
-  // passed their RSVP in one where their role makes none.
+  // Bound to the user alone, the grant from one event where the actor RSVPs
+  // passed their RSVP in any other, whatever their role there.
   permission({
     action: Action.update,
     subject: ResourceType.EventAttendee,
