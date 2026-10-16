@@ -12,7 +12,7 @@ api ──gRPC──▶ coordinator ──gRPC──▶ remote DataGateways (Boa
 - **Fetching one game** asks one DataGateway for that game's full data.
 - **Starting an import** enqueues the import flow and returns the job ids at once. The coordinator fetches nothing for it: the gateway worker calls the DataGateways itself, and the worker writes the games.
 
-It reaches DataGateways through the gateway registry (`@bge/gateway-registry`, `libs/gateway/driver/runtime`, which the gateway worker uses too). Once started, it connects every enabled DataGateway (and any enabled one it is not connected to when a call first needs it), and follows the DataGateway config changes published over Redis. The registry auto-disables a DataGateway after repeated failures: three failed connection attempts within five minutes, with no success between, switch it off.
+It reaches DataGateways through the gateway registry (`@bge/gateway-registry`, `libs/gateway/driver/runtime`, which the gateway worker uses too). Once started, it connects every enabled DataGateway (and any enabled one it is not connected to when a call first needs it), and follows the DataGateway config changes published over Redis. The registry auto-disables a DataGateway after repeated failures: three within five minutes, with no success between, switch it off. Each process keeps its own count. Failed connection attempts count in every process; in the gateway worker, so do failed game fetches for an import. A fetch that finds no game is a success, not a failure.
 
 The api, not the coordinator, keeps the DataGateway records. Admins add, change, enable and disable DataGateways through the api, which asks the coordinator to connect or disconnect them; auto-disable is the one change the registry writes itself.
 
