@@ -48,7 +48,7 @@ export class HouseholdService {
 
 **Lock order: the context row, then the invite.** A context's delete locks its own row and then, through `revokeOutstandingWithin`, the invites into it. A consumer that holds its context row and transitions an invite in the same transaction takes them in that order too: lock the context row (`lockExistingHousehold` for a household) before the `*Within` call. The accept that admits a member is the case to get right, because `HouseholdMemberService.addMemberWithin` takes the household row `FOR SHARE`: an accept that transitioned the invite first and admitted second would hold the invite while waiting for the row a concurrent delete holds while waiting for the invite, and Postgres would abort one of them. Lock the household, then accept, then admit (#163). `TransactionDeadlockInterceptor` turns a victim into a retryable 409 either way; that is the backstop, not the design.
 
-The party view leaves the household's id out, so a consumer accepting by id or by token learns which row to lock from `findPartyScopeWithin(tx, lookup, InviteType.Household)` first. It binds the read as the transition does, so a stranger meets the same 404 before any household is named to them, and it takes no lock.
+The party view leaves the household's id out, so a consumer accepting by id or by token learns which row to lock from `findPartyScopeWithin(tx, lookup, InviteType.Household)` first. It binds the read as the transition does, so a stranger meets the same 404 before any household is named to them, and it takes no lock. A transition binds the type in its own read, so a decline or a withdraw, which locks nothing, needs no such read first (#164).
 
 ---
 
@@ -56,20 +56,22 @@ The party view leaves the household's id out, so a consumer accepting by id or b
 
 A **party** read or transition binds its `where` to the acting user, as inviter or invitee:
 
-| Primitive              | Who          | Bound by                                                                     | Returns      |
-| ---------------------- | ------------ | ---------------------------------------------------------------------------- | ------------ |
-| `findForParty`         | either party | `inviterId` or `inviteeId`, or for email-only the token or a vouched address | party view   |
-| `findPartyScopeWithin` | either party | as `findForParty`, and the invite's type                                     | its context  |
-| `createWithin`         | the inviter  | `inviterId` is the caller's acting user                                      | party view   |
-| `acceptWithin`         | the invitee  | `inviteeId`, or for email-only the token or a vouched address                | party view   |
-| `declineWithin`        | the invitee  | `inviteeId`, or for email-only the token or a vouched address                | party view   |
-| `withdrawWithin`       | the inviter  | `inviterId`                                                                  | party view   |
-| `revokeWithin`         | context      | `scope`: the household or event the caller's authority covers                | context view |
-| `approveWithin`        | an approver  | `scope`, as a revoke                                                         | context view |
+| Primitive              | Who          | Bound by                                                                       | Returns      |
+| ---------------------- | ------------ | ------------------------------------------------------------------------------ | ------------ |
+| `findForParty`         | either party | `inviterId` or `inviteeId`, or for email-only the token or a vouched address   | party view   |
+| `findPartyScopeWithin` | either party | as `findForParty`, and the invite's type                                       | its context  |
+| `createWithin`         | the inviter  | `inviterId` is the caller's acting user                                        | party view   |
+| `acceptWithin`         | the invitee  | `inviteeId`, or for email-only the token or a vouched address; and the type    | party view   |
+| `declineWithin`        | the invitee  | `inviteeId`, or for email-only the token or a vouched address; and the type    | party view   |
+| `withdrawWithin`       | the inviter  | `inviterId`, and the type                                                      | party view   |
+| `revokeWithin`         | context      | `scope`: the household or event the caller's authority covers; not the inviter | context view |
+| `approveWithin`        | an approver  | `scope`, as a revoke                                                           | context view |
 
-A stranger addressing an invite that is not theirs, by id or by a link that is not theirs, meets a **404**, and so does a context authority addressing an invite outside the context it was authorized over: the binding is in the query, so the row is never found, and nothing confirms the invite exists. A party in the wrong role, the inviter trying to accept, meets a **403**.
+A stranger addressing an invite that is not theirs, by id or by a link that is not theirs, meets a **404**, and so does a context authority addressing an invite outside the context it was authorized over: the binding is in the query, so the row is never found, and nothing confirms the invite exists. A party in the wrong role, the inviter trying to accept, meets a **403**, and so does an inviter revoking their own invite: they withdraw it instead (#164).
 
 **Context authority is the consumer's to assert before calling.** An owner or admin revoking, an approver approving: the lib never checks a household or event role, and needs no `read` grant on `Invite` to do its work. That is also why an email-only invite, whose invitee is not a registered user and so can hold no grant, is reachable at all. What the lib does bind is the context that assertion was about: `revokeWithin` and `approveWithin` take the `scope` the caller's authority covers, a `householdId` or an `eventId`, and carry it into the read. A route that authorized an admin on one household and was handed an invite id from another transitions nothing, because the consumer's role check and the lib's query name the same context and neither is satisfied by the other's.
+
+**Withdraw and revoke never stand in for each other.** `revokeWithin` takes the `revokerId` and refuses the invite's own inviter, whatever authority they hold, and `withdrawWithin` answers to the inviter alone, whatever their role in the context now. So `invite.withdrawn` always means the sender took the invite back and `invite.revoked` always means someone else cancelled it, or the context closed (#164).
 
 An email-only invite (no `inviteeId`) answers to the token its link carries, and to the account holding its address when the consumer vouches for that address. Addressed by id it answers to nobody else, not even its inviter: the id is public to every context reader through the household detail, the token and the address are not.
 
@@ -89,13 +91,13 @@ An invite names exactly the context its type allows: a household invite a `house
 Pending          → Accepted  (invitee)
                  → Declined  (invitee)
                  → Withdrawn (inviter)
-                 → Revoked   (context authority)
+                 → Revoked   (context authority, never the inviter)
                  → Expired   (clock)
 
 AwaitingApproval → Pending   (approver; stamps approvedBy / approvedAt)
                  → Declined  (invitee — a refusal never waits on someone else's approval)
                  → Withdrawn (inviter)
-                 → Revoked   (context authority)
+                 → Revoked   (context authority, never the inviter)
                  → Expired   (clock)
 
 Accepted, Declined, Withdrawn, Revoked, Expired are terminal.
@@ -111,15 +113,15 @@ Reading first is also what lets every domain event carry the status the row actu
 
 Refusals, in the order they are checked:
 
-| Situation                                                                     | Status | Key                                                             |
-| ----------------------------------------------------------------------------- | ------ | --------------------------------------------------------------- |
-| no such id or token, not this user's invite, or not in the authorized context | 404    | `not_found` / `link_not_found`                                  |
-| a party, but not the one this transition needs                                | 403    | `only_invitee_responds` / `only_inviter_withdraws`              |
-| outstanding but past `expiresAt`                                              | 410    | `expired`                                                       |
-| accept on `AwaitingApproval`                                                  | 409    | `awaiting_approval`                                             |
-| approve on anything but `AwaitingApproval`                                    | 409    | `not_awaiting_approval`                                         |
-| settled                                                                       | 409    | `not_outstanding`                                               |
-| moved between the read and the guarded update                                 | 409    | the transition the row now refuses, else `changed_concurrently` |
+| Situation                                                                             | Status | Key                                                                      |
+| ------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------ |
+| no such id or token, not this user's invite or type, or not in the authorized context | 404    | `not_found` / `link_not_found`                                           |
+| a party, but not the one this transition needs, or a revoke by the inviter            | 403    | `only_invitee_responds` / `only_inviter_withdraws` / `revoke_own_invite` |
+| outstanding but past `expiresAt`                                                      | 410    | `expired`                                                                |
+| accept on `AwaitingApproval`                                                          | 409    | `awaiting_approval`                                                      |
+| approve on anything but `AwaitingApproval`                                            | 409    | `not_awaiting_approval`                                                  |
+| settled                                                                               | 409    | `not_outstanding`                                                        |
+| moved between the read and the guarded update                                         | 409    | the transition the row now refuses, else `changed_concurrently`          |
 
 All keys live under `errors.invite.*`.
 

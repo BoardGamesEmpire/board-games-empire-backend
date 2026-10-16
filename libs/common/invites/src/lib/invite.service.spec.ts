@@ -656,10 +656,11 @@ describe('InviteService', () => {
       const { invite, event } = await service.acceptWithin(asTx(tx), {
         target: { inviteId: 'inv-1' },
         actingUserId: INVITEE_ID,
+        type: InviteType.Household,
       });
 
       expect(tx.invite.findFirst).toHaveBeenCalledWith({
-        where: partyWhereById('inv-1', INVITEE_ID),
+        where: { ...partyWhereById('inv-1', INVITEE_ID), type: InviteType.Household },
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith({
@@ -689,10 +690,14 @@ describe('InviteService', () => {
         { ...rowWithToken(), status: InviteStatus.Accepted, inviteeId: STRANGER_ID },
       ] as never);
 
-      const { event } = await service.acceptWithin(asTx(tx), { target: { token: TOKEN }, actingUserId: STRANGER_ID });
+      const { event } = await service.acceptWithin(asTx(tx), {
+        target: { token: TOKEN },
+        actingUserId: STRANGER_ID,
+        type: InviteType.Household,
+      });
 
       expect(tx.invite.findFirst).toHaveBeenCalledWith({
-        where: partyWhereByToken(TOKEN, STRANGER_ID),
+        where: { ...partyWhereByToken(TOKEN, STRANGER_ID), type: InviteType.Household },
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
@@ -712,10 +717,11 @@ describe('InviteService', () => {
         target: { inviteId: 'inv-1' },
         actingUserId: ADDRESS_HOLDER_ID,
         vouchedEmail: ' Sam@Example.TEST ',
+        type: InviteType.Household,
       });
 
       expect(tx.invite.findFirst).toHaveBeenCalledWith({
-        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        where: { ...partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'), type: InviteType.Household },
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
@@ -729,10 +735,15 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID, vouchedEmail: '  ' }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          vouchedEmail: '  ',
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(NotFoundException);
       expect(tx.invite.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: partyWhereById('inv-1', INVITEE_ID) }),
+        expect.objectContaining({ where: { ...partyWhereById('inv-1', INVITEE_ID), type: InviteType.Household } }),
       );
     });
 
@@ -746,6 +757,7 @@ describe('InviteService', () => {
           target: { inviteId: 'inv-1' },
           actingUserId: ADDRESS_HOLDER_ID,
           vouchedEmail: 'someone-else@example.test',
+          type: InviteType.Household,
         }),
       ).rejects.toThrow(ForbiddenException);
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
@@ -759,6 +771,7 @@ describe('InviteService', () => {
           target: { inviteId: 'inv-1' },
           actingUserId: INVITER_ID,
           vouchedEmail: 'sam@example.test',
+          type: InviteType.Household,
         }),
       ).rejects.toThrow(ForbiddenException);
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
@@ -768,7 +781,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-missing' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-missing' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -776,7 +793,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { token: TOKEN }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { token: TOKEN },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toMatchObject({
         response: expect.objectContaining({ key: 'errors.invite.link_not_found' }),
       });
@@ -788,10 +809,14 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: STRANGER_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: STRANGER_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(NotFoundException);
       expect(tx.invite.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: partyWhereById('inv-1', STRANGER_ID) }),
+        expect.objectContaining({ where: { ...partyWhereById('inv-1', STRANGER_ID), type: InviteType.Household } }),
       );
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
@@ -800,7 +825,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.Declined }) as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITER_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITER_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(ForbiddenException);
       // Role is refused before the status is mentioned.
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
@@ -813,7 +842,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITER_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITER_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(ForbiddenException);
     });
 
@@ -824,7 +857,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ inviteeId: null }) as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { token: TOKEN }, actingUserId: INVITER_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { token: TOKEN },
+          actingUserId: INVITER_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(ForbiddenException);
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
@@ -833,7 +870,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.AwaitingApproval }) as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({ key: 'errors.invite.awaiting_approval' }),
@@ -844,7 +885,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({ key: 'errors.invite.not_outstanding', args: { id: 'inv-1', status } }),
@@ -857,7 +902,11 @@ describe('InviteService', () => {
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(GoneException);
       await settled();
 
@@ -888,7 +937,11 @@ describe('InviteService', () => {
       db.invite.updateMany.mockReturnValue(never() as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(GoneException);
     });
 
@@ -897,7 +950,11 @@ describe('InviteService', () => {
       db.invite.updateMany.mockRejectedValue(new Error('pool exhausted'));
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(GoneException);
       await settled();
 
@@ -911,7 +968,11 @@ describe('InviteService', () => {
       db.invite.updateMany.mockResolvedValue({ count: 0 });
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(GoneException);
       await settled();
 
@@ -928,7 +989,11 @@ describe('InviteService', () => {
       tx.invite.updateManyAndReturn.mockResolvedValue([] as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({
@@ -945,7 +1010,11 @@ describe('InviteService', () => {
       tx.invite.updateManyAndReturn.mockResolvedValue([] as never);
 
       await expect(
-        service.acceptWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.acceptWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toMatchObject({
         status: 409,
         response: expect.objectContaining({ key: 'errors.invite.changed_concurrently' }),
@@ -963,12 +1032,17 @@ describe('InviteService', () => {
       const { invite, event } = await service.declineWithin(asTx(tx), {
         target: { inviteId: 'inv-1' },
         actingUserId: INVITEE_ID,
+        type: InviteType.Household,
       });
 
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'inv-1', status },
-          data: expect.objectContaining({ status: InviteStatus.Declined, inviteeId: INVITEE_ID }),
+          data: expect.objectContaining({
+            status: InviteStatus.Declined,
+            respondedAt: expect.any(Date),
+            inviteeId: INVITEE_ID,
+          }),
         }),
       );
       expect(invite.status).toBe(InviteStatus.Declined);
@@ -982,7 +1056,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
       await expect(
-        service.declineWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.declineWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(ConflictException);
     });
 
@@ -991,7 +1069,11 @@ describe('InviteService', () => {
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
       await expect(
-        service.declineWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITEE_ID }),
+        service.declineWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(GoneException);
     });
 
@@ -1005,10 +1087,11 @@ describe('InviteService', () => {
         target: { inviteId: 'inv-1' },
         actingUserId: ADDRESS_HOLDER_ID,
         vouchedEmail: 'sam@example.test',
+        type: InviteType.Household,
       });
 
       expect(tx.invite.findFirst).toHaveBeenCalledWith({
-        where: partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'),
+        where: { ...partyWhereByAddress('inv-1', ADDRESS_HOLDER_ID, 'sam@example.test'), type: InviteType.Household },
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
@@ -1020,8 +1103,30 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken() as never);
 
       await expect(
-        service.declineWithin(asTx(tx), { target: { inviteId: 'inv-1' }, actingUserId: INVITER_ID }),
+        service.declineWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITER_ID,
+          type: InviteType.Household,
+        }),
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('404s an invite of another type: the read binds the type the consumer handles', async () => {
+      // The where carries the type, so the mock's miss IS the answer an event
+      // invite gets at a household route.
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.declineWithin(asTx(tx), {
+          target: { inviteId: 'inv-1' },
+          actingUserId: INVITEE_ID,
+          type: InviteType.Event,
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(tx.invite.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...partyWhereById('inv-1', INVITEE_ID), type: InviteType.Event } }),
+      );
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
   });
 
@@ -1032,10 +1137,14 @@ describe('InviteService', () => {
         { ...rowWithToken(), status: InviteStatus.Withdrawn, respondedAt: FUTURE },
       ] as never);
 
-      const { invite, event } = await service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID });
+      const { invite, event } = await service.withdrawWithin(asTx(tx), {
+        inviteId: 'inv-1',
+        actingUserId: INVITER_ID,
+        type: InviteType.Household,
+      });
 
       expect(tx.invite.findFirst).toHaveBeenCalledWith({
-        where: partyWhereById('inv-1', INVITER_ID),
+        where: { ...partyWhereById('inv-1', INVITER_ID), type: InviteType.Household },
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
@@ -1053,26 +1162,26 @@ describe('InviteService', () => {
     it.each(TERMINAL)('409s a settled invite (%s)', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
-      await expect(service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID })).rejects.toThrow(
-        ConflictException,
-      );
+      await expect(
+        service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID, type: InviteType.Household }),
+      ).rejects.toThrow(ConflictException);
     });
 
     it('410s an expired invite', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID })).rejects.toThrow(
-        GoneException,
-      );
+      await expect(
+        service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID, type: InviteType.Household }),
+      ).rejects.toThrow(GoneException);
     });
 
     it('403s the invitee', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken() as never);
 
-      await expect(service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITEE_ID })).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(
+        service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITEE_ID, type: InviteType.Household }),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('withdraws an email-only invite: the inviter needs no invitee to bind to', async () => {
@@ -1081,14 +1190,31 @@ describe('InviteService', () => {
         { ...rowWithToken({ inviteeId: null }), status: InviteStatus.Withdrawn },
       ] as never);
 
-      const { invite } = await service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID });
+      const { invite } = await service.withdrawWithin(asTx(tx), {
+        inviteId: 'inv-1',
+        actingUserId: INVITER_ID,
+        type: InviteType.Household,
+      });
 
       expect(invite.status).toBe(InviteStatus.Withdrawn);
+    });
+
+    it('404s an invite of another type: the read binds the type the consumer handles', async () => {
+      tx.invite.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.withdrawWithin(asTx(tx), { inviteId: 'inv-1', actingUserId: INVITER_ID, type: InviteType.Event }),
+      ).rejects.toThrow(NotFoundException);
+      expect(tx.invite.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { ...partyWhereById('inv-1', INVITER_ID), type: InviteType.Event } }),
+      );
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
   });
 
   describe('revokeWithin', () => {
     const scope = { householdId: 'hh-1' };
+    const REVOKER_ID = 'user-admin';
 
     it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval])(
       'revokes from %s, bound to the authorized household and to no party, and returns the context view',
@@ -1098,7 +1224,11 @@ describe('InviteService', () => {
           { ...rowWithToken(), status: InviteStatus.Revoked, respondedAt: FUTURE },
         ] as never);
 
-        const { invite, event } = await service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope });
+        const { invite, event } = await service.revokeWithin(asTx(tx), {
+          inviteId: 'inv-1',
+          revokerId: REVOKER_ID,
+          scope,
+        });
 
         // The caller asserted the context authority; the read carries the
         // context that assertion covered, and binds to no party.
@@ -1125,14 +1255,18 @@ describe('InviteService', () => {
     it.each(TERMINAL)('409s a settled invite (%s)', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(ConflictException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
+        ConflictException,
+      );
     });
 
     it('410s an expired invite rather than revoking it', async () => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
       db.invite.updateMany.mockResolvedValue({ count: 1 });
 
-      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope })).rejects.toThrow(GoneException);
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: REVOKER_ID, scope })).rejects.toThrow(
+        GoneException,
+      );
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
     });
 
@@ -1140,7 +1274,11 @@ describe('InviteService', () => {
       tx.invite.findFirst.mockResolvedValue(null);
 
       await expect(
-        service.revokeWithin(asTx(tx), { inviteId: 'inv-1', scope: { householdId: 'hh-other' } }),
+        service.revokeWithin(asTx(tx), {
+          inviteId: 'inv-1',
+          revokerId: REVOKER_ID,
+          scope: { householdId: 'hh-other' },
+        }),
       ).rejects.toMatchObject({
         status: 404,
         response: expect.objectContaining({ key: 'errors.invite.not_found', args: { id: 'inv-1' } }),
@@ -1151,6 +1289,31 @@ describe('InviteService', () => {
         select: TRANSITION_SELECT,
       });
       expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    it.each([InviteStatus.Pending, InviteStatus.AwaitingApproval, InviteStatus.Revoked])(
+      "403s the invite's own inviter (%s), who withdraws it instead, and moves nothing",
+      async (status) => {
+        tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
+
+        await expect(
+          service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: INVITER_ID, scope }),
+        ).rejects.toMatchObject({
+          status: 403,
+          response: expect.objectContaining({ key: 'errors.invite.revoke_own_invite', args: { id: 'inv-1' } }),
+        });
+        expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+      },
+    );
+
+    it("403s the inviter before an expiry is stamped: the refusal is about who asks, not the invite's state", async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ expiresAt: PAST }) as never);
+
+      await expect(service.revokeWithin(asTx(tx), { inviteId: 'inv-1', revokerId: INVITER_ID, scope })).rejects.toThrow(
+        ForbiddenException,
+      );
+      await settled();
+      expect(db.invite.updateMany).not.toHaveBeenCalled();
     });
   });
 

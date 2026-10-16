@@ -44,7 +44,8 @@ function hasStringId(value: unknown): value is Record<string, unknown> & { id: s
 }
 
 /**
- * `POST /api/households/:householdId/invites`: `{ message, invite }`.
+ * `POST /api/households/:householdId/invites`: `{ message, invite }`. Also the
+ * answer to a decline and a withdraw (#164), which a party makes.
  *
  * Both party columns must be PRESENT, as a value or `null`: a missing key
  * would make an assertion that the address is null pass against `undefined`.
@@ -69,6 +70,34 @@ export function inviteEnvelope(response: HttpResponseLike, request: RequestDescr
   }
 
   return { message, invite: invite as unknown as InvitePartyRowWire };
+}
+
+export interface RevokeInviteEnvelope {
+  readonly message: string;
+  readonly invite: PendingInviteProjection;
+}
+
+/**
+ * `POST /api/households/:householdId/invites/:inviteId/revoke`: `{ message, invite }`
+ * (#164), in the context shape. A revoker is not a party, so the caller
+ * asserts the party columns are absent; this checks only what a client joins on.
+ */
+export function revokeEnvelope(response: HttpResponseLike, request: RequestDescription): RevokeInviteEnvelope {
+  if (!isRecord(response.body)) {
+    return fail('the body is not an object', request, response);
+  }
+
+  const invite = response.body['invite'];
+  if (!hasStringId(invite) || typeof invite['status'] !== 'string') {
+    return fail("it carried no 'invite' object with a string id and status", request, response);
+  }
+
+  const message = response.body['message'];
+  if (typeof message !== 'string') {
+    return fail("it carried no 'message' string", request, response);
+  }
+
+  return { message, invite: invite as unknown as PendingInviteProjection };
 }
 
 /** `GET /api/households/:householdId/invites`: `{ invites: [...], pagination }`. */

@@ -1,6 +1,13 @@
 import { AuditContextService, type Actor } from '@bge/actor-context';
 import { HouseholdMembershipOrigin, InviteStatus, InviteType, Prisma, QuotaScope, SystemRole } from '@bge/database';
-import { InviteService, PARTY_INVITE_SELECT, type InviteAcceptance, type InvitePartyView } from '@bge/invites';
+import {
+  InviteService,
+  PARTY_INVITE_SELECT,
+  type InviteAcceptance,
+  type InviteDeclination,
+  type InvitePartyView,
+  type InviteWithdrawal,
+} from '@bge/invites';
 import { PermissionsService } from '@bge/permissions';
 import { QuotaService, type QuotaSoftOverageEvent } from '@bge/quota';
 import {
@@ -22,6 +29,7 @@ const LATER = new Date('2099-01-01T00:00:00Z');
 const NOW = new Date('2026-10-15T12:00:00Z');
 
 const SESSION_USER: Actor = { kind: 'user', userId: INVITEE_ID } as Actor;
+const INVITER_SESSION: Actor = { kind: 'user', userId: INVITER_ID } as Actor;
 
 const partyView = (overrides: Partial<InvitePartyView> = {}): InvitePartyView => ({
   id: 'invite-1',
@@ -53,21 +61,35 @@ describe('PartyInviteService', () => {
   let service: PartyInviteService;
   let db: MockDatabaseService;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getActor'>>;
-  let invites: jest.Mocked<Pick<InviteService, 'findPartyScopeWithin' | 'acceptWithin' | 'emit'>>;
+  let invites: jest.Mocked<
+    Pick<InviteService, 'findPartyScopeWithin' | 'acceptWithin' | 'declineWithin' | 'withdrawWithin' | 'emit'>
+  >;
   let members: jest.Mocked<Pick<HouseholdMemberService, 'addMemberWithin'>>;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'emitSoftOverages'>>;
   let acceptance: InviteAcceptance;
+  let declination: InviteDeclination;
+  let withdrawal: InviteWithdrawal;
   let admission: AddMemberResult;
 
   beforeEach(async () => {
     acceptance = { invite: partyView(), event: { eventName: 'invite.accepted' } as never };
+    declination = {
+      invite: partyView({ status: InviteStatus.Declined }),
+      event: { eventName: 'invite.declined' } as never,
+    };
+    withdrawal = {
+      invite: partyView({ status: InviteStatus.Withdrawn }),
+      event: { eventName: 'invite.withdrawn' } as never,
+    };
     admission = { member: { id: 'member-new' } as never, admitted: true, softOverages: [OVERAGE] };
 
     auditContext = { getActor: jest.fn().mockReturnValue(SESSION_USER) };
     invites = {
       findPartyScopeWithin: jest.fn().mockResolvedValue({ householdId: HOUSEHOLD_ID }),
       acceptWithin: jest.fn().mockImplementation(() => Promise.resolve(acceptance)),
+      declineWithin: jest.fn().mockImplementation(() => Promise.resolve(declination)),
+      withdrawWithin: jest.fn().mockImplementation(() => Promise.resolve(withdrawal)),
       emit: jest.fn(),
     };
     members = { addMemberWithin: jest.fn().mockImplementation(() => Promise.resolve(admission)) };
@@ -124,6 +146,20 @@ describe('PartyInviteService', () => {
 
       expect(db.invite.findMany).not.toHaveBeenCalled();
     });
+
+    it('refuses a decline with 403 before reading anything', async () => {
+      await expect(service.decline({ inviteId: 'invite-1' })).rejects.toThrow(ForbiddenException);
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(invites.declineWithin).not.toHaveBeenCalled();
+    });
+
+    it('refuses a withdraw with 403 before reading anything', async () => {
+      await expect(service.withdraw('invite-1')).rejects.toThrow(ForbiddenException);
+
+      expect(db.$transaction).not.toHaveBeenCalled();
+      expect(invites.withdrawWithin).not.toHaveBeenCalled();
+    });
   });
 
   describe('accept', () => {
@@ -138,7 +174,12 @@ describe('PartyInviteService', () => {
 
       const { invite, member } = await service.accept({ inviteId: 'invite-1' });
 
-      const lookup = { target: { inviteId: 'invite-1' }, actingUserId: INVITEE_ID, vouchedEmail: ADDRESS };
+      const lookup = {
+        target: { inviteId: 'invite-1' },
+        actingUserId: INVITEE_ID,
+        vouchedEmail: ADDRESS,
+        type: InviteType.Household,
+      };
       expect(invites.findPartyScopeWithin).toHaveBeenCalledWith(db, lookup, InviteType.Household);
       expect(invites.acceptWithin).toHaveBeenCalledWith(db, lookup);
       expect(members.addMemberWithin).toHaveBeenCalledWith(db, {
@@ -166,6 +207,7 @@ describe('PartyInviteService', () => {
         target: { inviteId: 'invite-1' },
         actingUserId: INVITEE_ID,
         vouchedEmail: null,
+        type: InviteType.Household,
       });
     });
 
@@ -291,6 +333,113 @@ describe('PartyInviteService', () => {
         inviterId: { not: INVITEE_ID },
         OR: [{ inviteeId: INVITEE_ID }],
       });
+    });
+  });
+
+  describe('decline', () => {
+    it('declines a household invite of theirs, the lib binding the type in its own read, taking no lock', async () => {
+      await expect(service.decline({ inviteId: 'invite-1' })).resolves.toBe(declination.invite);
+
+      expect(invites.declineWithin).toHaveBeenCalledWith(db, {
+        target: { inviteId: 'invite-1' },
+        actingUserId: INVITEE_ID,
+        vouchedEmail: ADDRESS,
+        type: InviteType.Household,
+      });
+      // The transition's read binds the type, so no read goes ahead of it.
+      expect(invites.findPartyScopeWithin).not.toHaveBeenCalled();
+      // Only the invite row moves, so there is no household row to order it after.
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('vouches for no address that is unverified', async () => {
+      db.user.findUnique.mockResolvedValue(resolves({ email: ADDRESS, emailVerified: false }));
+
+      await service.decline({ inviteId: 'invite-1' });
+
+      expect(invites.declineWithin).toHaveBeenCalledWith(db, {
+        target: { inviteId: 'invite-1' },
+        actingUserId: INVITEE_ID,
+        vouchedEmail: null,
+        type: InviteType.Household,
+      });
+    });
+
+    it('passes a token through as the target', async () => {
+      await service.decline({ token: 'live-accept-credential' });
+
+      expect(invites.declineWithin).toHaveBeenCalledWith(
+        db,
+        expect.objectContaining({ target: { token: 'live-accept-credential' } }),
+      );
+    });
+
+    it('announces the decline after commit', async () => {
+      let committed = false;
+      db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await work(db);
+        committed = true;
+        return result;
+      }) as never);
+      invites.emit.mockImplementation(() => expect(committed).toBe(true));
+
+      await service.decline({ inviteId: 'invite-1' });
+
+      expect(invites.emit).toHaveBeenCalledWith([declination.event]);
+    });
+
+    it('announces nothing when the lib refuses, as it refuses an invite of another type', async () => {
+      invites.declineWithin.mockRejectedValue(new NotFoundException());
+
+      await expect(service.decline({ inviteId: 'invite-1' })).rejects.toThrow(NotFoundException);
+
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('withdraw', () => {
+    beforeEach(() => auditContext.getActor.mockReturnValue(INVITER_SESSION));
+
+    it('withdraws a household invite of theirs, the lib binding the type in its own read, taking no lock', async () => {
+      await expect(service.withdraw('invite-1')).resolves.toBe(withdrawal.invite);
+
+      expect(invites.withdrawWithin).toHaveBeenCalledWith(db, {
+        inviteId: 'invite-1',
+        actingUserId: INVITER_ID,
+        type: InviteType.Household,
+      });
+      expect(invites.findPartyScopeWithin).not.toHaveBeenCalled();
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing of the inviter’s role in the household, nor of their address', async () => {
+      await service.withdraw('invite-1');
+
+      expect(db.householdMember.findMany).not.toHaveBeenCalled();
+      expect(db.householdMember.findUnique).not.toHaveBeenCalled();
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('announces the withdrawal after commit', async () => {
+      let committed = false;
+      db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await work(db);
+        committed = true;
+        return result;
+      }) as never);
+      invites.emit.mockImplementation(() => expect(committed).toBe(true));
+
+      await service.withdraw('invite-1');
+
+      expect(invites.emit).toHaveBeenCalledWith([withdrawal.event]);
+    });
+
+    it('announces nothing when the lib refuses, as it refuses an invite of another type', async () => {
+      invites.withdrawWithin.mockRejectedValue(new NotFoundException());
+
+      await expect(service.withdraw('invite-1')).rejects.toThrow(NotFoundException);
+
+      expect(invites.emit).not.toHaveBeenCalled();
     });
   });
 });

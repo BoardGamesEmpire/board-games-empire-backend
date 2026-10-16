@@ -11,11 +11,12 @@ import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { SOFT_DELETE_HOUSEHOLD } from '../household/lock-fixtures';
+import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
-import { householdPluginKey, type Caller } from './plugin-api-key';
+import { householdPluginKey } from './plugin-api-key';
 
 /**
  * #548's acceptance over HTTP: a household plugin write that passed every check

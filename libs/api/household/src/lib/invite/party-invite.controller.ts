@@ -1,11 +1,12 @@
 import { t } from '@bge/i18n';
+import type { InvitePartyView } from '@bge/invites';
 import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated, Unscoped } from '@bge/shared';
 import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { AcceptInviteByTokenDto } from '../dto';
+import { InviteTokenDto } from '../dto';
 import { PartyInviteService, type HouseholdInviteAcceptance } from './party-invite.service';
 
 /** The third case `UnscopedList` documents: bound by a rule of its own, with no ceiling to compose. */
@@ -22,22 +23,37 @@ const ACCEPT_CONFLICT_DESCRIPTION =
   'Already a member of the household, in which case the invite stays open; or the invite was settled, is still ' +
   'awaiting approval, or changed while it was being accepted';
 
+const ACCEPT_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot join a household';
+
+const DECLINED_DESCRIPTION = 'Declined: `{ message, invite }`, the invite as you see it, now `Declined`.';
+
+const DECLINE_FORBIDDEN_DESCRIPTION = 'Your own invite, or not a signed-in user: API keys cannot decline an invite';
+
+const SETTLED_CONFLICT_DESCRIPTION = 'The invite was already settled, or changed while it was being answered';
+
 /** Both accept routes answer alike, whichever way the invite was named. */
 function acceptedResponse({ invite, member }: HouseholdInviteAcceptance) {
   return { message: t('success.household.invite_accepted'), invite, member };
 }
 
+/** Both decline routes answer alike, whichever way the invite was named. */
+function declinedResponse(invite: InvitePartyView) {
+  return { message: t('success.household.invite_declined'), invite };
+}
+
 // The actions a party takes on an invite of theirs, beside the household's own
 // routes under `/households/:householdId/invites`, as the invites lib splits a
-// party's primitives from a context authority's. #164 adds decline and
-// withdraw here.
+// party's primitives from a context authority's: the invitee accepts or
+// declines, and the inviter withdraws. Withdraw is not revoke, which is the
+// household's route for an invite someone else sent (#164).
 //
-// No API key: joining a household is the joiner's own act (#276), so the
-// service refuses every actor but a session user (403).
+// No API key: joining a household, or turning down or taking back an invite,
+// is the person's own act (#276), so the service refuses every actor but a
+// session user (403).
 //
 // Must stay out of the response cache: the inbox has to drop an invite the
-// caller just accepted, and a cache hit would skip the service, where the
-// caller is bound (#528).
+// caller just accepted or declined, and a cache hit would skip the service,
+// where the caller is bound (#528).
 @ApiBearerAuth()
 @ApiTags('invites')
 @Controller('invites')
@@ -73,16 +89,13 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.BadRequest, description: 'No token given' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.PaymentRequired, description: 'The household is at its member cap (#288)' })
-  @ApiResponse({
-    status: Http.Forbidden,
-    description: 'Your own invite, or not a signed-in user: API keys cannot join a household',
-  })
+  @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link, or its household is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
   @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
   @HttpCode(Http.Ok)
   @Post('accept')
-  acceptByToken(@Body() dto: AcceptInviteByTokenDto) {
+  acceptByToken(@Body() dto: InviteTokenDto) {
     return from(this.partyInvites.accept({ token: dto.token })).pipe(map(acceptedResponse));
   }
 
@@ -96,10 +109,7 @@ export class PartyInviteController {
   @ApiResponse({ status: Http.Ok, description: ACCEPTED_DESCRIPTION })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.PaymentRequired, description: 'The household is at its member cap (#288)' })
-  @ApiResponse({
-    status: Http.Forbidden,
-    description: 'Your own invite, or not a signed-in user: API keys cannot join a household',
-  })
+  @ApiResponse({ status: Http.Forbidden, description: ACCEPT_FORBIDDEN_DESCRIPTION })
   @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id, or its household is gone' })
   @ApiResponse({ status: Http.Conflict, description: ACCEPT_CONFLICT_DESCRIPTION })
   @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
@@ -107,5 +117,72 @@ export class PartyInviteController {
   @Post(':inviteId/accept')
   accept(@Param('inviteId') inviteId: string) {
     return from(this.partyInvites.accept({ inviteId })).pipe(map(acceptedResponse));
+  }
+
+  @ApiOperation({
+    summary: 'Decline a household invite by the token from its link',
+    description:
+      'The token goes in the body, never the URL. An invite awaiting approval can be declined too: a refusal ' +
+      'never waits on an approver.',
+  })
+  @ApiResponse({ status: Http.Ok, description: DECLINED_DESCRIPTION })
+  @ApiResponse({ status: Http.BadRequest, description: 'No token given' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: DECLINE_FORBIDDEN_DESCRIPTION })
+  @ApiResponse({ status: Http.NotFound, description: 'No invite matches the link' })
+  @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
+  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
+  @HttpCode(Http.Ok)
+  @Post('decline')
+  declineByToken(@Body() dto: InviteTokenDto) {
+    return from(this.partyInvites.decline({ token: dto.token })).pipe(map(declinedResponse));
+  }
+
+  @ApiOperation({
+    summary: 'Decline a household invite you have received',
+    description:
+      'An invite sent to your user id, or to your email address once it is verified. An invite awaiting ' +
+      'approval can be declined too. Declining one you could not reach is a 404, so the answer never confirms ' +
+      'that someone else’s invite exists.',
+  })
+  @ApiParam({ name: 'inviteId', type: String })
+  @ApiResponse({ status: Http.Ok, description: DECLINED_DESCRIPTION })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: DECLINE_FORBIDDEN_DESCRIPTION })
+  @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id' })
+  @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
+  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
+  @HttpCode(Http.Ok)
+  @Post(':inviteId/decline')
+  decline(@Param('inviteId') inviteId: string) {
+    return from(this.partyInvites.decline({ inviteId })).pipe(map(declinedResponse));
+  }
+
+  @ApiOperation({
+    summary: 'Withdraw a household invite you sent',
+    description:
+      'Takes back an invite you sent, pending or awaiting approval, whatever your role in the household is ' +
+      'now. To cancel an invite someone else sent, an owner or admin revokes it: ' +
+      '`POST /households/:householdId/invites/:inviteId/revoke`.',
+  })
+  @ApiParam({ name: 'inviteId', type: String })
+  @ApiResponse({
+    status: Http.Ok,
+    description: 'Withdrawn: `{ message, invite }`, the invite as you see it, now `Withdrawn`.',
+  })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'You received this invite rather than sent it, or not a signed-in user: API keys cannot withdraw',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'No invite of yours has that id' })
+  @ApiResponse({ status: Http.Conflict, description: SETTLED_CONFLICT_DESCRIPTION })
+  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
+  @HttpCode(Http.Ok)
+  @Post(':inviteId/withdraw')
+  withdraw(@Param('inviteId') inviteId: string) {
+    return from(this.partyInvites.withdraw(inviteId)).pipe(
+      map((invite) => ({ message: t('success.household.invite_withdrawn'), invite })),
+    );
   }
 }

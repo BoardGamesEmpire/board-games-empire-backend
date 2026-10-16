@@ -75,13 +75,22 @@ export interface InvitePartyLookup {
   readonly vouchedEmail?: string | null;
 }
 
-/** Accept or decline: the invitee acts. */
-export type RespondToInviteParams = InvitePartyLookup;
+/**
+ * Accept or decline: the invitee acts.
+ *
+ * `type` is the one the consumer handles, and the read binds to it, so a
+ * household route never settles an event invite: one of another type meets
+ * the 404 a stranger meets (#164).
+ */
+export interface RespondToInviteParams extends InvitePartyLookup {
+  readonly type: InviteType;
+}
 
-/** Withdraw: the inviter acts. */
+/** Withdraw: the inviter acts. `type` binds the read as it does for a response. */
 export interface WithdrawInviteParams {
   readonly inviteId: string;
   readonly actingUserId: string;
+  readonly type: InviteType;
 }
 
 /**
@@ -102,16 +111,23 @@ export type InviteScopeOf<Type extends ContextualInviteType> = Type extends type
   : { readonly eventId: string };
 
 /**
- * Revoke: a context authority acts. The lib binds nothing to the actor here;
- * the consumer has asserted the owner or admin role before calling, which is
- * the one authority check the lib never makes (#161). What the lib does bind
- * is the context: `scope` names the household or event that assertion was
- * about, and the read carries it, so an invite id from another context meets
- * a 404 as a stranger's does, not a transition the caller was never
- * authorized to make.
+ * Revoke: a context authority acts. The consumer has asserted the owner or
+ * admin role before calling, which is the one authority check the lib never
+ * makes (#161). What the lib does bind is the context: `scope` names the
+ * household or event that assertion was about, and the read carries it, so an
+ * invite id from another context meets a 404 as a stranger's does, not a
+ * transition the caller was never authorized to make.
+ *
+ * The revoker is named so the lib can refuse the invite's own inviter (#164).
+ * An inviter takes their invite back by withdrawing it, whatever authority
+ * they hold over the context, so `invite.withdrawn` always means its sender
+ * took it back and `invite.revoked` means someone else cancelled it, or the
+ * context closed (`revokeOutstandingWithin`, which revokes the closer's own
+ * invites with the rest).
  */
 export interface RevokeInviteParams {
   readonly inviteId: string;
+  readonly revokerId: string;
   readonly scope: InviteContextScope;
 }
 

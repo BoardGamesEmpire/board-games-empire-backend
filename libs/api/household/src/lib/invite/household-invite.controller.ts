@@ -2,7 +2,7 @@ import { Action, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { ApiPaginatedEnvelope, paginated } from '@bge/shared';
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -79,6 +79,39 @@ export class HouseholdInviteController {
   listInvites(@Param('householdId') householdId: string, @Query() query: ListHouseholdInvitesQueryDto) {
     return from(this.inviteService.listInvites(householdId, query)).pipe(
       map((page) => paginated('invites', page, query, ResourceType.Invite)),
+    );
+  }
+
+  // The type-only check below passes the Owner or Admin of any household; the
+  // service asks again about an invite into this one.
+  @ApiOperation({
+    summary: 'Revoke an invite someone else sent (owner or admin)',
+    description:
+      'Cancels an invite into the household, pending or awaiting approval, that someone else sent, whether or ' +
+      'not they are still a member. An invite you sent yourself is refused here: withdraw it with ' +
+      '`POST /invites/:inviteId/withdraw`, signed in. Through an API key, an invite the key’s owner sent is ' +
+      'refused the same way, and withdraw does not take a key. The answer carries the invite as the household ' +
+      'sees it, without the address or the message.',
+  })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiParam({ name: 'inviteId', type: String })
+  @ApiResponse({ status: Http.Ok, description: 'Revoked: `{ message, invite }`, the invite now `Revoked`.' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'Not an owner or admin of this household, or you sent this invite: withdraw it instead',
+  })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no such invite in it' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The invite was already settled, or changed while it was being revoked',
+  })
+  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Invite))
+  @HttpCode(Http.Ok)
+  @Post(':inviteId/revoke')
+  revokeInvite(@Param('householdId') householdId: string, @Param('inviteId') inviteId: string) {
+    return from(this.inviteService.revokeInvite(householdId, inviteId)).pipe(
+      map((invite) => ({ message: t('success.household.invite_revoked'), invite })),
     );
   }
 }

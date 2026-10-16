@@ -19,7 +19,10 @@
     "member_left": "You have left the household",
     "ownership_transferred": "Ownership transferred to member {memberId}; you are now a household admin",
     "invite_created": "Invite created successfully",
-    "invite_accepted": "Invite accepted; you are now a member of the household"
+    "invite_accepted": "Invite accepted; you are now a member of the household",
+    "invite_declined": "Invite declined",
+    "invite_withdrawn": "Invite withdrawn",
+    "invite_revoked": "Invite revoked"
   },
   "event": {
     "created": "Event created successfully",

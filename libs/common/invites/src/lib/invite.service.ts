@@ -169,7 +169,10 @@ function project<Select extends Prisma.InviteSelect>(
  */
 type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTransitionEvent> = {
   readonly target: InviteTarget;
-  /** The role the transition needs once the row is known to be the actor's. Throws 403. */
+  /**
+   * Whether the actor is the one this transition needs, once the row is read:
+   * the invitee, the inviter, or for a revoke anyone but the inviter. Throws 403.
+   */
   readonly assertRole?: (row: InviteTransitionRow) => void;
   /** The statuses the transition may start from. Throws 409 otherwise; runs again on a guard miss. */
   readonly assertStatus: (row: InviteTransitionRow) => void;
@@ -182,6 +185,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
       readonly partyOf: string;
       /** An address the consumer vouches is the acting user's, normalized. Widens the read to invites by it. */
       readonly vouchedEmail?: string | null;
+      /** The type the consumer handles. Scopes the read: an invite of another type gets a miss. */
+      readonly type: InviteType;
     }
   | {
       /** The context the caller's authority covers when the transition is a context authority's. Scopes the read: an id from another context gets a miss. */
@@ -213,7 +218,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
  * (#163). Context authority is the consumer's to assert before
  * calling: an owner or admin revoking, an approver approving. The lib never
  * checks a household or event role, and needs no `read` grant on `Invite` to
- * do its work. What it does bind is the context that assertion was about: a
+ * do its work. It does refuse a revoke by the invite's own inviter, who
+ * withdraws it instead. What it does bind is the context that assertion was about: a
  * context transition takes the `scope` the caller's authority covers and
  * carries it into the read, so an invite id from another context meets the
  * same miss a stranger does.
@@ -273,6 +279,9 @@ export class InviteService {
    * transition would give, before any context is named to them. The role and
    * status checks are the transition's. No lock is taken, so the order the
    * consumer locks in is its own.
+   *
+   * A consumer that locks nothing has no use for it: a transition binds the
+   * type in its own read (#164).
    */
   async findPartyScopeWithin<Type extends ContextualInviteType>(
     tx: Prisma.TransactionClient,
@@ -428,11 +437,12 @@ export class InviteService {
   /** The inviter takes the invite back, from either outstanding status. */
   withdrawWithin(
     tx: Prisma.TransactionClient,
-    { inviteId, actingUserId }: WithdrawInviteParams,
+    { inviteId, actingUserId, type }: WithdrawInviteParams,
   ): Promise<InviteWithdrawal> {
     return this.transitionWithin(tx, {
       target: { inviteId },
       partyOf: actingUserId,
+      type,
       assertRole: (row) => this.assertInviter(row, actingUserId),
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({ status: InviteStatus.Withdrawn, respondedAt: now }),
@@ -442,16 +452,22 @@ export class InviteService {
   }
 
   /**
-   * A context authority cancels the invite, from either outstanding status.
-   * The caller has asserted that authority over `scope`; nothing here binds
-   * to an actor, and the read binds to the scope instead, so an id from
-   * another context is a miss. Returns the context shape: a revoker is not a
-   * party and does not see the address or the message.
+   * A context authority cancels someone else's invite, from either
+   * outstanding status. The caller has asserted that authority over `scope`,
+   * and the read binds to the scope rather than to a party, so an id from
+   * another context is a miss. The invite's own inviter is refused with 403
+   * whatever their authority: they withdraw it instead (#164). Returns the
+   * context shape: a revoker is not a party and does not see the address or
+   * the message.
    */
-  revokeWithin(tx: Prisma.TransactionClient, { inviteId, scope }: RevokeInviteParams): Promise<InviteRevocation> {
+  revokeWithin(
+    tx: Prisma.TransactionClient,
+    { inviteId, revokerId, scope }: RevokeInviteParams,
+  ): Promise<InviteRevocation> {
     return this.transitionWithin(tx, {
       target: { inviteId },
       scope,
+      assertRole: (row) => this.assertNotInviter(row, revokerId),
       assertStatus: (row) => this.assertFrom(row, OUTSTANDING_INVITE_STATUSES),
       data: (now) => ({ status: InviteStatus.Revoked, respondedAt: now }),
       view: CONTEXT_INVITE_SELECT,
@@ -546,7 +562,7 @@ export class InviteService {
     const now = new Date();
     const current =
       'partyOf' in spec
-        ? await this.loadForParty(tx, spec.target, spec.partyOf, spec.vouchedEmail ?? null)
+        ? await this.loadForParty(tx, spec.target, spec.partyOf, spec.vouchedEmail ?? null, spec.type)
         : await this.loadForContext(tx, spec.target, spec.scope);
 
     spec.assertRole?.(current);
@@ -784,16 +800,19 @@ export class InviteService {
    * not (#278). Its link was never sent, so one that reaches the server anyway
    * meets the miss a stranger meets, whatever delivered it. By an address the
    * consumer vouches is the actor's, an email-only row to that address is
-   * reachable by id as well (#163), withheld ones again excepted.
+   * reachable by id as well (#163), withheld ones again excepted. A
+   * transition names the type its consumer handles, and a row of another
+   * type is a miss too (#164); a plain read names none.
    */
   private async loadForParty(
     client: ReadClient,
     target: InviteTarget,
     actingUserId: string,
     vouchedEmail: string | null,
+    type?: InviteType,
   ): Promise<InviteTransitionRow> {
     const row = await client.invite.findFirst({
-      where: this.partyWhere(target, actingUserId, vouchedEmail),
+      where: { ...this.partyWhere(target, actingUserId, vouchedEmail), ...(type && { type }) },
       select: TRANSITION_SELECT,
     });
 
@@ -858,17 +877,19 @@ export class InviteService {
 
   /**
    * The half of a transition spec every invitee's transition shares: the read
-   * bound to them, widened by the address the consumer vouches for, and the
-   * role check that the row is theirs to answer. The address is normalized
-   * once, so the read and the check compare the same string.
+   * bound to them and to the type the consumer handles, widened by the
+   * address the consumer vouches for, and the role check that the row is
+   * theirs to answer. The address is normalized once, so the read and the
+   * check compare the same string.
    */
-  private asInvitee({ target, actingUserId, vouchedEmail }: InvitePartyLookup) {
+  private asInvitee({ target, actingUserId, vouchedEmail, type }: RespondToInviteParams) {
     const vouched = normalizeInviteeEmail(vouchedEmail);
 
     return {
       target,
       partyOf: actingUserId,
       vouchedEmail: vouched,
+      type,
       assertRole: (row: InviteTransitionRow) => this.assertInvitee(row, target, actingUserId, vouched),
     };
   }
@@ -904,6 +925,12 @@ export class InviteService {
   private assertInviter(current: InviteTransitionRow, actingUserId: string): void {
     if (current.inviterId !== actingUserId) {
       throw new ForbiddenException(t('errors.invite.only_inviter_withdraws'));
+    }
+  }
+
+  private assertNotInviter(current: InviteTransitionRow, actingUserId: string): void {
+    if (current.inviterId === actingUserId) {
+      throw new ForbiddenException(t('errors.invite.revoke_own_invite', { id: current.id }));
     }
   }
 
