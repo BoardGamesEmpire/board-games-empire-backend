@@ -3,10 +3,11 @@ import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import type { Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { MANAGE_DIGEST_CHECK, type Check } from './manifest-checks';
-import { householdPluginKey, type Caller } from './plugin-api-key';
+import { householdPluginKey } from './plugin-api-key';
 
 /**
  * The household plugin routes answer 404 for a household that is missing or

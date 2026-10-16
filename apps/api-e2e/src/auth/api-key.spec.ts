@@ -2,11 +2,9 @@ import { ResourceType } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { apiCacheHas, responseCacheKey } from '../support/api-cache';
+import { API_KEY_HEADER, mintApiKey, type ApiKeyCaller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-
-const API_KEY_HEADER = 'x-api-key';
-const CREATE_KEY_PATH = '/api/auth/api-key/create';
 
 /** A policy-checked read: `read` on `Notification`, which the owner's role grants. */
 const UNREAD_PATH = '/api/notifications/unread';
@@ -17,11 +15,6 @@ const ME_PATH = '/api/users/me';
 
 /** A route that opts into the response cache (#530), and one any caller reaches. */
 const LANGUAGES_PATH = '/api/languages';
-
-interface MintedKey {
-  readonly id: string;
-  readonly headers: { readonly [API_KEY_HEADER]: string };
-}
 
 /**
  * Requests that carry an API key (#529).
@@ -52,35 +45,15 @@ describe('API key requests', () => {
     await db.close();
   });
 
-  const mintKey = async (owner: SessionActor): Promise<MintedKey> => {
-    const response = await request(baseUrl)
-      .post(CREATE_KEY_PATH)
-      .set('Origin', baseUrl)
-      .set(owner.headers)
-      .send({ name: 'e2e' });
-
-    if (response.status !== 200 || typeof response.body?.key !== 'string') {
-      throw new Error(`minting a key failed: ${response.status} ${JSON.stringify(response.body)}`);
-    }
-
-    return { id: response.body.id, headers: { [API_KEY_HEADER]: response.body.key } };
-  };
-
-  const grantScope = async (key: MintedKey, slug: string, resourceType: ResourceType): Promise<void> => {
-    const permission = await db.client.permission.findUniqueOrThrow({ where: { slug } });
-
-    await db.client.apiKeyScope.create({
-      data: { apiKeyId: key.id, permissionId: permission.id, resourceType },
-    });
-  };
+  /** A key its owner minted, with no scope. */
+  const mintKey = (owner: SessionActor): Promise<ApiKeyCaller> => mintApiKey(baseUrl, db.client, owner);
 
   /** A key its owner minted, scoped to read notifications. */
-  const scopedKey = async (owner: SessionActor): Promise<MintedKey> => {
-    const key = await mintKey(owner);
-    await grantScope(key, UNREAD_PERMISSION_SLUG, ResourceType.Notification);
-
-    return key;
-  };
+  const scopedKey = (owner: SessionActor): Promise<ApiKeyCaller> =>
+    mintApiKey(baseUrl, db.client, owner, {
+      slugs: [UNREAD_PERMISSION_SLUG],
+      resourceType: ResourceType.Notification,
+    });
 
   describe('authentication', () => {
     it('serves a policy-checked read to a key whose scope allows it', async () => {
