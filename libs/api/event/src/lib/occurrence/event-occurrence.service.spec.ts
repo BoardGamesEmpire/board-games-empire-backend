@@ -18,11 +18,15 @@ import {
   makeEventAttendee,
   makeEventOccurrence,
   paginationQuery,
+  rawQueryText,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { lineupStillAhead } from '../attendee/attendance';
+import { GameRemovedFromEventEvent } from '../nomination/events/nomination.events';
 import { OccurrenceEvents } from './constants';
 import { EventOccurrenceService } from './event-occurrence.service';
 import {
@@ -92,6 +96,7 @@ describe('EventOccurrenceService', () => {
     });
 
     db = ctx.db;
+    unwrapTransaction(db);
     service = ctx.module.get(EventOccurrenceService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
 
@@ -533,6 +538,158 @@ describe('EventOccurrenceService', () => {
         ResourceType.EventOccurrence,
         Action.delete,
       );
+    });
+  });
+
+  /**
+   * A game stays on a date that has started when its supplier leaves, or when
+   * its entry comes off their offered games (#551). Moving that date's start
+   * to one still to come, adding a date, or removing the last one puts the
+   * lineup ahead again, holding a game nobody is bringing, and no route takes
+   * a game off a lineup. Each of those writes takes such games off in its own
+   * transaction.
+   */
+  describe('a lineup a date write puts ahead again', () => {
+    const NEXT_WEEK = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const dateWrites = [
+      { name: 'addOccurrence', op: 'create' },
+      { name: 'updateOccurrence', op: 'update' },
+      { name: 'removeOccurrence', op: 'delete' },
+    ] as const;
+
+    const run = (name: (typeof dateWrites)[number]['name']) => {
+      switch (name) {
+        case 'addOccurrence':
+          return service.addOccurrence('event-1', { startDate: NEXT_WEEK });
+        case 'updateOccurrence':
+          return service.updateOccurrence('event-1', 'occ-1', { startDate: NEXT_WEEK });
+        case 'removeOccurrence':
+          return service.removeOccurrence('event-1', 'occ-1');
+      }
+    };
+
+    /** An entry supplying the lineup as the lock reads it: in the event, and on the offered games, unless `state` says otherwise. */
+    const supplier = (
+      id: string,
+      state: { status?: EventParticipationStatus; attendeeRemovedAt?: Date; entryRemovedAt?: Date } = {},
+    ) => ({ id, status: EventParticipationStatus.Attending, attendeeRemovedAt: null, entryRemovedAt: null, ...state });
+
+    /** The lineup game the write takes off, as its domain event reports it. */
+    const takenOff = {
+      id: 'eg-off',
+      eventId: null,
+      occurrenceId: 'occ-2',
+      platformGameId: 'pg-off',
+      suppliedById: 'gl-not-attending',
+      nominationId: null,
+      addedById: null,
+      role: ScheduledGameRole.Primary,
+    };
+
+    const someSuppliersOut = () =>
+      db.$queryRaw.mockResolvedValueOnce([
+        supplier('gl-in'),
+        supplier('gl-not-attending', { status: EventParticipationStatus.NotAttending }),
+        supplier('gl-removed', { attendeeRemovedAt: new Date() }),
+        supplier('gl-entry-off', { entryRemovedAt: new Date() }),
+      ] as never);
+
+    beforeEach(() => {
+      const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        schedulingMode: EventSchedulingMode.MultiDay,
+        householdId: null,
+      } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue(row);
+      db.eventOccurrence.create.mockResolvedValue(row);
+      db.eventOccurrence.update.mockResolvedValue(row);
+      db.eventOccurrence.delete.mockResolvedValue(row);
+    });
+
+    it.each(dateWrites)(
+      "$name locks every entry supplying the event's lineup, and its attendee, before it writes",
+      async ({ name, op }) => {
+        await run(name);
+
+        const [[lock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(lock)).toMatch(
+          /WHERE a\.event_id = \? AND EXISTS \(.*supplied_by_id = l\.id\) FOR SHARE OF l, a$/,
+        );
+        expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+        expect(db.$transaction).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(dateWrites)(
+      '$name takes off each game still ahead whose supplier is out of the event, or whose entry came off their offered games',
+      async ({ name, op }) => {
+        someSuppliersOut();
+        db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+
+        await run(name);
+
+        expect(db.eventGame.findMany).toHaveBeenCalledWith({
+          where: {
+            suppliedById: { in: ['gl-not-attending', 'gl-removed', 'gl-entry-off'] },
+            ...lineupStillAhead(expect.any(Date)),
+          },
+          select: expect.any(Object),
+        });
+        expect(db.eventGame.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['eg-off'] } } });
+        expect(db.eventGame.deleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it.each(dateWrites)('$name reports each game it took off, after the date itself', async ({ name }) => {
+      someSuppliersOut();
+      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+
+      await run(name);
+
+      const [eventName, removed] = emitter.emit.mock.calls.at(-1) ?? [];
+      expect(eventName).toBe(GameRemovedFromEventEvent.eventName);
+      expect(removed).toBeInstanceOf(GameRemovedFromEventEvent);
+      expect(removed.subjectId).toBe('eg-off');
+      expect(removed.eventId).toBe('event-1');
+    });
+
+    it.each(dateWrites)('$name takes nothing off while every supplier is in the event', async ({ name }) => {
+      db.$queryRaw.mockResolvedValueOnce([supplier('gl-in')] as never);
+
+      await run(name);
+
+      expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit.mock.calls.map(([eventName]) => eventName)).not.toContain(
+        GameRemovedFromEventEvent.eventName,
+      );
+    });
+
+    it.each(dateWrites)('$name reports nothing when its transaction fails', async ({ name }) => {
+      someSuppliersOut();
+      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+      db.eventGame.deleteMany.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(run(name)).rejects.toThrow('deadlock detected');
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('updateOccurrence answers without the games it took off', async () => {
+      someSuppliersOut();
+      db.eventGame.findMany
+        .mockResolvedValueOnce([game('eg-off', 'occ-1'), game('eg-kept', 'occ-1')] as never)
+        .mockResolvedValueOnce([{ ...takenOff, occurrenceId: 'occ-1' }] as never);
+
+      const answer = await service.updateOccurrence('event-1', 'occ-1', { startDate: NEXT_WEEK });
+
+      expect(answer.games.map(({ id }) => id)).toEqual(['eg-kept']);
     });
   });
 

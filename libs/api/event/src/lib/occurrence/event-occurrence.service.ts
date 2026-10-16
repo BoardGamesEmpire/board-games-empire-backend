@@ -16,7 +16,7 @@ import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { isOutOfEvent } from '../attendee/attendance';
+import { emitRemovedGames, isOutOfEvent, writeEventDates } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from '../constants/occurrence-order.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
@@ -207,18 +207,22 @@ export class EventOccurrenceService {
       dto.status ??
       (event.schedulingMode === EventSchedulingMode.Poll ? OccurrenceStatus.Proposed : OccurrenceStatus.Confirmed);
 
-    const occurrence = await this.db.eventOccurrence.create({
-      data: {
-        event: { connect: { id: eventId } },
-        label: dto.label,
-        startDate: dto.startDate,
-        endDate: dto.endDate,
-        location: dto.location,
-        status,
-        sortOrder: dto.sortOrder ?? 0,
-      },
-      include: { policy: true },
-    });
+    const { written: occurrence, removedGames } = await this.db.$transaction((tx) =>
+      writeEventDates(tx, eventId, initiatedAt, () =>
+        tx.eventOccurrence.create({
+          data: {
+            event: { connect: { id: eventId } },
+            label: dto.label,
+            startDate: dto.startDate,
+            endDate: dto.endDate,
+            location: dto.location,
+            status,
+            sortOrder: dto.sortOrder ?? 0,
+          },
+          include: { policy: true },
+        }),
+      ),
+    );
 
     this.eventEmitter.emit(
       OccurrenceAddedEvent.eventName,
@@ -236,6 +240,7 @@ export class EventOccurrenceService {
         initiatedAt,
       ),
     );
+    emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
     // A new occurrence has no votes or games yet, so it answers with none
     // rather than reading for them. That read would run after the row has
@@ -259,26 +264,30 @@ export class EventOccurrenceService {
 
     assert(existing, new NotFoundException(t('errors.occurrence.not_found', { occurrenceId, eventId })));
 
-    // Read before the write, which changes neither, so a failed read leaves
-    // the occurrence as it was.
+    // Read before the write, so a failed read leaves the occurrence as it was.
+    // The write can take games off the lineup, and the answer leaves those out.
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const updated = await this.db.eventOccurrence.update({
-        where: {
-          id: occurrenceId,
-          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
-        },
-        data: {
-          label: dto.label,
-          startDate: dto.startDate,
-          endDate: dto.endDate,
-          location: dto.location,
-          sortOrder: dto.sortOrder,
-        },
-        include: { policy: true },
-      });
+      const { written: updated, removedGames } = await this.db.$transaction((tx) =>
+        writeEventDates(tx, eventId, initiatedAt, () =>
+          tx.eventOccurrence.update({
+            where: {
+              id: occurrenceId,
+              // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+              AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.update),
+            },
+            data: {
+              label: dto.label,
+              startDate: dto.startDate,
+              endDate: dto.endDate,
+              location: dto.location,
+              sortOrder: dto.sortOrder,
+            },
+            include: { policy: true },
+          }),
+        ),
+      );
 
       const changedKeys = (['label', 'startDate', 'endDate', 'location', 'sortOrder'] as const).filter(
         (key) => dto[key] !== undefined,
@@ -291,8 +300,10 @@ export class EventOccurrenceService {
           initiatedAt,
         ),
       );
+      emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
-      return { ...updated, availabilityVotes, games };
+      const removedIds = new Set(removedGames.map((game) => game.id));
+      return { ...updated, availabilityVotes, games: games.filter((game) => !removedIds.has(game.id)) };
     } catch (error) {
       this.logger.error(`Error updating occurrence ${occurrenceId} for event ${eventId}`, error);
       if (isPrismaDependentRecordNotFoundError(error)) {
@@ -303,6 +314,7 @@ export class EventOccurrenceService {
   }
 
   async removeOccurrence(eventId: string, occurrenceId: string): Promise<OccurrenceDetail> {
+    const initiatedAt = new Date();
     this.logger.debug(`Attempting to remove occurrence ${occurrenceId} from event ${eventId}`);
 
     const existing = await this.db.eventOccurrence.findUnique({
@@ -321,14 +333,19 @@ export class EventOccurrenceService {
     const [{ availabilityVotes, games }] = await this.withVotesAndGames([existing]);
 
     try {
-      const removed = await this.db.eventOccurrence.delete({
-        where: {
-          id: occurrenceId,
-          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
-          AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
-        },
-        include: { policy: true },
-      });
+      const { written: removed, removedGames } = await this.db.$transaction((tx) =>
+        writeEventDates(tx, eventId, initiatedAt, () =>
+          tx.eventOccurrence.delete({
+            where: {
+              id: occurrenceId,
+              // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
+              AND: this.abilityService.getCurrentResourceConditions(ResourceType.EventOccurrence, Action.delete),
+            },
+            include: { policy: true },
+          }),
+        ),
+      );
+      emitRemovedGames(this.eventEmitter, eventId, removedGames, initiatedAt);
 
       return { ...removed, availabilityVotes, games };
     } catch (error) {

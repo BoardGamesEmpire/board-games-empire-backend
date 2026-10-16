@@ -1,6 +1,7 @@
 import {
   AvailabilityResponse,
   EventParticipationStatus,
+  EventSchedulingMode,
   GameAdditionMode,
   NominationStatus,
   OccurrenceStatus,
@@ -16,6 +17,7 @@ import {
   attendeeEnvelope,
   availabilitySummaryEnvelope,
   nominationEnvelope,
+  occurrenceEnvelope,
   resolutionEnvelope,
   type NominationWire,
 } from './event-wire';
@@ -114,6 +116,28 @@ describe('leaving an event', () => {
     nomination.votes.find((vote) => vote.attendeeId === attendeeId);
 
   const scheduledGameExists = async (id: string) => (await db.client.eventGame.count({ where: { id } })) === 1;
+
+  const DAY = 24 * 60 * 60 * 1000;
+
+  /** A confirmed date of the event, starting at `startDate`. */
+  const confirmedDate = async (eventId: string, startDate: Date) =>
+    (
+      await db.client.eventOccurrence.create({
+        data: { eventId, status: OccurrenceStatus.Confirmed, startDate },
+        select: { id: true },
+      })
+    ).id;
+
+  /** A game from `supplier`'s offered games, in the lineup of the date, and the entry it comes from. */
+  const inLineupOf = async (eventId: string, occurrenceId: string, supplier: AuthenticatedActor) => {
+    const entry = await arrangeListEntry(db.client, eventId, supplier.user.id);
+    const { id } = await db.client.eventGame.create({
+      data: { occurrenceId, platformGameId: entry.platformGameId, suppliedById: entry.suppliedById },
+      select: { id: true },
+    });
+
+    return { id, entryId: entry.suppliedById };
+  };
 
   /**
    * An event that votes on its games, with a host, a leaver and a stayer,
@@ -331,21 +355,9 @@ describe('leaving an event', () => {
 
     it('keeps the lineup of a date that has started, which then no longer holds the game on their offered games', async () => {
       const { leaver, eventId, leaverId } = await arrangeEvent();
-      const DAY = 24 * 60 * 60 * 1000;
 
-      const scheduledOn = async (startDate: Date) => {
-        const { id: occurrenceId } = await db.client.eventOccurrence.create({
-          data: { eventId, status: OccurrenceStatus.Confirmed, startDate },
-          select: { id: true },
-        });
-        const entry = await arrangeListEntry(db.client, eventId, leaver.user.id);
-        const { id } = await db.client.eventGame.create({
-          data: { occurrenceId, platformGameId: entry.platformGameId, suppliedById: entry.suppliedById },
-          select: { id: true },
-        });
-
-        return { id, entryId: entry.suppliedById };
-      };
+      const scheduledOn = async (startDate: Date) =>
+        inLineupOf(eventId, await confirmedDate(eventId, startDate), leaver);
 
       const played = await scheduledOn(new Date(Date.now() - DAY));
       const ahead = await scheduledOn(new Date(Date.now() + DAY));
@@ -357,6 +369,77 @@ describe('leaving an event', () => {
 
       await removeGame(leaver, eventId, leaverId, played.entryId).expect(200);
       expect(await scheduledGameExists(played.id)).toBe(true);
+    });
+  });
+
+  /**
+   * A started date keeps its lineup, games nobody is bringing included. A
+   * write to the event's dates that puts that lineup ahead again takes them
+   * off, since no route does.
+   */
+  describe('a date write that puts a lineup ahead again', () => {
+    it('takes off the games nobody is bringing when a date that has started is moved to a start still to come', async () => {
+      const { host, leaver, stayer, eventId, leaverId, stayerId } = await arrangeEvent();
+      const occurrenceId = await confirmedDate(eventId, new Date(Date.now() - DAY));
+      const leavers = await inLineupOf(eventId, occurrenceId, leaver);
+      const offTheList = await inLineupOf(eventId, occurrenceId, stayer);
+      const hosts = await inLineupOf(eventId, occurrenceId, host);
+
+      await rsvp(leaver, eventId, leaverId, EventParticipationStatus.NotAttending).expect(200);
+      await removeGame(stayer, eventId, stayerId, offTheList.entryId).expect(200);
+      expect(await scheduledGameExists(leavers.id)).toBe(true);
+      expect(await scheduledGameExists(offTheList.id)).toBe(true);
+
+      const moved = occurrenceEnvelope(
+        await request(baseUrl)
+          .patch(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`)
+          .set(host.headers)
+          .send({ startDate: new Date(Date.now() + DAY).toISOString() })
+          .expect(200),
+        'PATCH /api/events/:eventId/occurrences/:occurrenceId',
+      );
+
+      expect(moved.games.map(({ id }) => id)).toEqual([hosts.id]);
+      expect(await scheduledGameExists(leavers.id)).toBe(false);
+      expect(await scheduledGameExists(offTheList.id)).toBe(false);
+
+      // The leaver's entry supplies nothing ahead now, so it can come off.
+      await removeGame(leaver, eventId, leaverId, leavers.entryId).expect(200);
+    });
+
+    it.each([
+      {
+        write: 'a date added',
+        run: (host: AuthenticatedActor, eventId: string) =>
+          request(baseUrl)
+            .post(`${EVENTS_PATH}/${eventId}/occurrences`)
+            .set(host.headers)
+            .send({ startDate: new Date(Date.now() + DAY).toISOString() })
+            .expect(201),
+      },
+      {
+        write: 'its last date removed',
+        run: (host: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+          request(baseUrl)
+            .delete(`${EVENTS_PATH}/${eventId}/occurrences/${occurrenceId}`)
+            .set(host.headers)
+            .expect(200),
+      },
+    ])("takes a game nobody is bringing off the event's own lineup with $write", async ({ run }) => {
+      const { host, leaver, eventId, leaverId, scheduledGameId, occurrenceId } = await arrangeEvent();
+      // The event's one date has started, so its own lineup is no longer ahead.
+      await db.client.eventOccurrence.update({
+        where: { id: occurrenceId },
+        data: { startDate: new Date(Date.now() - DAY) },
+      });
+      await db.client.event.update({ where: { id: eventId }, data: { schedulingMode: EventSchedulingMode.MultiDay } });
+
+      await rsvp(leaver, eventId, leaverId, EventParticipationStatus.NotAttending).expect(200);
+      expect(await scheduledGameExists(scheduledGameId)).toBe(true);
+
+      await run(host, eventId, occurrenceId);
+
+      expect(await scheduledGameExists(scheduledGameId)).toBe(false);
     });
   });
 

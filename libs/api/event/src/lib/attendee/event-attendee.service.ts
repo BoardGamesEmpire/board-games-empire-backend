@@ -511,10 +511,11 @@ export class EventAttendeeService {
    * Refused with 409 while the entry supplies the event: a nomination that
    * has not reached an outcome, paused ones included, or a game in the lineup
    * of a date still ahead (`lineupStillAhead`). Taking a game off the list
-   * never takes it out of the lineup; only its supplier leaving the event
-   * does. Otherwise the row is marked removed, not deleted, because closed
-   * nominations, and the lineups of dates that have started, still name it
-   * as their supplier.
+   * never takes it out of the lineup by itself: its supplier leaving the
+   * event does, and so does a date write that puts a started date's lineup
+   * ahead again (`writeEventDates`). Otherwise the row is marked removed, not
+   * deleted, because closed nominations, and the lineups of dates that have
+   * started, still name it as their supplier.
    *
    * The entry is locked `FOR UPDATE` before the check, so a nomination or
    * direct add naming it either commits first and is counted, or waits

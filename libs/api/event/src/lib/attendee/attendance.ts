@@ -38,7 +38,9 @@ export const ACTIVE_NOMINATION_STATUSES: NominationStatus[] = [...PAUSABLE_STATU
  *
  * Only these leave with a supplier who is out of the event, and only these
  * hold a game on its supplier's offered games (#551). A date that has started
- * keeps its lineup as it stood, as the record of what was planned for it.
+ * keeps its lineup as it stood, as the record of what was planned for it,
+ * until a write to the event's dates puts it ahead again
+ * ({@link writeEventDates}).
  */
 export function lineupStillAhead(now: Date): Prisma.EventGameWhereInput {
   const dateAhead = {
@@ -68,6 +70,9 @@ const SCHEDULED_GAME_SNAPSHOT_SELECT = {
   role: true,
 } as const satisfies Prisma.EventGameSelect;
 
+/** A lineup game as it stood when it was taken off, for the domain event that reports it. */
+export type RemovedLineupGame = Prisma.EventGameGetPayload<{ select: typeof SCHEDULED_GAME_SNAPSHOT_SELECT }>;
+
 interface NominationStatusChange {
   id: string;
   from: NominationStatus;
@@ -78,7 +83,7 @@ interface NominationStatusChange {
 export interface SuppliedGameChanges {
   paused: NominationStatusChange[];
   resumed: NominationStatusChange[];
-  removedGames: Prisma.EventGameGetPayload<{ select: typeof SCHEDULED_GAME_SNAPSHOT_SELECT }>[];
+  removedGames: RemovedLineupGame[];
 }
 
 /** A game-list entry as a supply check reads it: whose it is, which game, and whether either was removed. */
@@ -183,6 +188,84 @@ export async function syncSuppliedGames(
   return changes;
 }
 
+/** An entry supplying a lineup, as {@link writeEventDates} locks and judges it. */
+interface LineupSupplier {
+  id: string;
+  status: EventParticipationStatus;
+  attendeeRemovedAt: Date | null;
+  entryRemovedAt: Date | null;
+}
+
+/**
+ * Runs `write`, a write to an event's dates, and takes off the lineup each
+ * game it put back ahead that nobody is bringing: its supplier is out of the
+ * event, or its entry came off their offered games (#551).
+ *
+ * Neither takes a game off a date that has started ({@link lineupStillAhead}).
+ * Moving that date's start to one still to come, adding a date to an event
+ * whose dates have all started, or removing its last date, puts the lineup
+ * ahead again, and no route takes a game off a lineup. No other write does:
+ * a declined or cancelled date never returns to proposed or confirmed.
+ *
+ * Every entry supplying the event's lineup is locked, with its attendee,
+ * before the write, as {@link lockSupplier} locks one before any write that
+ * names it, and is judged by that read. A supplier leaving, or an entry coming
+ * off, at the same moment either commits first and is seen here, or waits for
+ * this to commit and then finds the lineup ahead itself.
+ */
+export async function writeEventDates<T>(
+  tx: Prisma.TransactionClient,
+  eventId: string,
+  now: Date,
+  write: () => Promise<T>,
+): Promise<{ written: T; removedGames: RemovedLineupGame[] }> {
+  const suppliers = await tx.$queryRaw<LineupSupplier[]>(Prisma.sql`
+    SELECT l.id AS "id",
+           a.status AS "status",
+           a.removed_at AS "attendeeRemovedAt",
+           l.removed_at AS "entryRemovedAt"
+    FROM attendee_game_lists l
+    JOIN event_attendees a ON a.id = l.attendee_id
+    WHERE a.event_id = ${eventId}
+      AND EXISTS (SELECT 1 FROM event_games g WHERE g.supplied_by_id = l.id)
+    FOR SHARE OF l, a
+  `);
+
+  const written = await write();
+
+  const unsupplied = suppliers.filter(
+    ({ status, attendeeRemovedAt, entryRemovedAt }) =>
+      entryRemovedAt !== null || isOutOfEvent({ status, removedAt: attendeeRemovedAt }),
+  );
+
+  if (unsupplied.length === 0) {
+    return { written, removedGames: [] };
+  }
+
+  const removedGames = await tx.eventGame.findMany({
+    where: { suppliedById: { in: unsupplied.map(({ id }) => id) }, ...lineupStillAhead(now) },
+    select: SCHEDULED_GAME_SNAPSHOT_SELECT,
+  });
+
+  if (removedGames.length > 0) {
+    await tx.eventGame.deleteMany({ where: { id: { in: removedGames.map((game) => game.id) } } });
+  }
+
+  return { written, removedGames };
+}
+
+/** Emits a domain event for each lineup game taken off. Call it after the transaction commits. */
+export function emitRemovedGames(
+  emitter: EventEmitter2,
+  eventId: string,
+  games: RemovedLineupGame[],
+  initiatedAt: Date,
+): void {
+  for (const game of games) {
+    emitter.emit(GameRemovedFromEventEvent.eventName, new GameRemovedFromEventEvent(game, eventId, initiatedAt));
+  }
+}
+
 /** Emits one domain event per row {@link syncSuppliedGames} changed. Call it after the transaction commits. */
 export function emitSuppliedGameChanges(
   emitter: EventEmitter2,
@@ -204,7 +287,5 @@ export function emitSuppliedGameChanges(
     );
   }
 
-  for (const game of changes.removedGames) {
-    emitter.emit(GameRemovedFromEventEvent.eventName, new GameRemovedFromEventEvent(game, eventId, initiatedAt));
-  }
+  emitRemovedGames(emitter, eventId, changes.removedGames, initiatedAt);
 }
