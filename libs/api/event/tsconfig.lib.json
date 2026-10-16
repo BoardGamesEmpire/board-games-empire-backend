@@ -21,6 +21,9 @@
       "path": "../../common/webhooks/tsconfig.lib.json"
     },
     {
+      "path": "../../common/invites/tsconfig.lib.json"
+    },
+    {
       "path": "../household/tsconfig.lib.json"
     },
     {

@@ -1,5 +1,14 @@
 import type { Event, EventAttendee, EventGame, GameCollection } from '@bge/database';
-import { Action, EventParticipationStatus, NominationStatus, ResourceType, SystemRole } from '@bge/database';
+import {
+  Action,
+  EventParticipationStatus,
+  FriendshipStatus,
+  HUMAN_USER_WHERE,
+  NominationStatus,
+  ResourceType,
+  SystemRole,
+  Visibility,
+} from '@bge/database';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
   createMockAbilityService,
@@ -64,6 +73,11 @@ describe('EventAttendeeService', () => {
     db.$transaction.mockImplementation((cb) => cb(db));
     db.eventGameNomination.updateManyAndReturn.mockResolvedValue([]);
     db.eventGame.findMany.mockResolvedValue([]);
+    // Every user an add names is a person unless a test says otherwise. The
+    // invite checks' other reads find no row: the default policy and
+    // preference, and no friendship.
+    db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
+      Promise.resolve({ id: args.where.id })) as never);
   });
 
   /** The status write's row: an attendee of event-1 who has not been removed. */
@@ -374,6 +388,80 @@ describe('EventAttendeeService', () => {
     });
   });
 
+  describe('whom addAttendee may place on the event (#546)', () => {
+    beforeEach(() => {
+      abilityService.getActingUserId.mockReturnValue('user-actor');
+      db.event.findUnique.mockResolvedValue({ id: 'event-1', householdId: null } as Event);
+      db.eventAttendee.findUnique.mockResolvedValue({ id: 'att-actor' } as EventAttendee);
+      db.eventAttendee.create.mockResolvedValue(
+        makeEventAttendee({ id: 'att-new', eventId: 'event-1', userId: 'user-2' }),
+      );
+    });
+
+    it('answers 404 for an id that names no person, and writes nothing', async () => {
+      db.user.findUnique.mockResolvedValue(null);
+
+      await expect(service.addAttendee('event-1', { userId: 'ghost' })).rejects.toThrow(NotFoundException);
+      expect(db.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ghost', ...HUMAN_USER_WHERE } }),
+      );
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+    });
+
+    it('answers 403 for a user who blocked the caller, or was blocked by them, and writes nothing', async () => {
+      db.friendship.findFirst.mockResolvedValue({ status: FriendshipStatus.Blocked } as never);
+
+      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ForbiddenException);
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+    });
+
+    it("reads the user's preference for events, not for households", async () => {
+      db.userPreferences.findFirst.mockResolvedValue({
+        allowHouseholdInvitesFrom: Visibility.Private,
+        allowEventInvitesFrom: Visibility.Public,
+      } as never);
+
+      await service.addAttendee('event-1', { userId: 'user-2' });
+
+      expect(db.eventAttendee.create).toHaveBeenCalled();
+
+      db.userPreferences.findFirst.mockResolvedValue({
+        allowHouseholdInvitesFrom: Visibility.Public,
+        allowEventInvitesFrom: Visibility.Private,
+      } as never);
+
+      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ForbiddenException);
+    });
+
+    // Already on the event is the answer, whatever the checks would say now.
+    it('answers 409 for a user already on the event, before asking whether they may be placed', async () => {
+      db.eventAttendee.findFirst.mockResolvedValue({
+        id: 'att-2',
+        status: EventParticipationStatus.Attending,
+        invitedById: null,
+        removedAt: null,
+      } as EventAttendee);
+
+      await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ConflictException);
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(db.eventAttendee.create).not.toHaveBeenCalled();
+      expect(db.eventAttendee.update).not.toHaveBeenCalled();
+    });
+
+    it('asks nothing about the caller adding themselves', async () => {
+      await service.addAttendee('event-1', { userId: 'user-actor' });
+
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(db.eventAttendee.create).toHaveBeenCalled();
+    });
+
+    it('asks nothing about an attendee added by name, without an account', async () => {
+      await service.addAttendee('event-1', { guestName: 'Pat' });
+
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+    });
+  });
+
   describe('addAttendee authorization (#539)', () => {
     beforeEach(() => {
       abilityService.getActingUserId.mockReturnValue('user-actor');
@@ -460,7 +548,7 @@ describe('EventAttendeeService', () => {
       await service.addAttendee('event-1', { userId: 'user-2', role: SystemRole.EventSpectator });
 
       expect(db.eventAttendee.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { eventId: 'event-1', userId: 'user-2', removedAt: { not: null } } }),
+        expect.objectContaining({ where: { eventId: 'event-1', userId: 'user-2' } }),
       );
       expect(db.eventAttendee.update).toHaveBeenCalledWith(
         expect.objectContaining({

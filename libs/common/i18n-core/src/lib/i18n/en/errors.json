@@ -26,7 +26,9 @@
   "event": {
     "not_found": "Event with ID {id} not found",
     "not_attendee": "You are not an attendee of this event.",
-    "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence."
+    "fixed_mode_single": "Fixed scheduling mode allows at most one occurrence.",
+    "invitee_friends_only": "This server only allows you to place your friends on an event",
+    "invitee_refused": "You cannot place this user on an event"
   },
   "occurrence": {
     "not_found": "Occurrence {occurrenceId} not found for event {eventId}",

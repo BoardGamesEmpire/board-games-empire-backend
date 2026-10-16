@@ -1,7 +1,7 @@
-import { FriendshipStatus, Prisma, Visibility } from '@bge/database';
+import { FriendshipStatus, InviteType, Prisma, Visibility } from '@bge/database';
 import { t } from '@bge/i18n';
-import { normalizeInviteeEmail } from '@bge/invites';
 import { ForbiddenException } from '@nestjs/common';
+import { normalizeInviteeEmail } from './invite.service';
 
 /** The invitee as the create stores them: an account by id, or an address alone. */
 export type StoredInvitee =
@@ -15,10 +15,44 @@ export type StoredInvitee =
  */
 type Invitee = { readonly id: string } | { readonly email: string };
 
+/** The invites the gate rules on: each reads settings of its own. */
+export type GatedInviteType = typeof InviteType.Household | typeof InviteType.Event;
+
 /**
- * Whether the invitee may get an invite from the inviter (#278), asked in the
- * create's transaction once the invitee is known and before anything is
- * written. Three checks, in this order:
+ * Which of the server's settings and the invitee's preferences decide each
+ * type, and the words it refuses in. Joining a household shares its
+ * collection, while an event is one evening, so the two are set apart (#546).
+ */
+const GATE_SETTINGS = {
+  [InviteType.Household]: {
+    policy: 'householdInviteePolicy',
+    preference: 'allowHouseholdInvitesFrom',
+    friendsOnly: 'errors.household.invitee_friends_only',
+    refused: 'errors.household.invitee_refused',
+  },
+  [InviteType.Event]: {
+    policy: 'eventInviteePolicy',
+    preference: 'allowEventInvitesFrom',
+    friendsOnly: 'errors.event.invitee_friends_only',
+    refused: 'errors.event.invitee_refused',
+  },
+} as const satisfies Record<
+  GatedInviteType,
+  {
+    policy: keyof Prisma.SystemSettingSelect;
+    preference: keyof Prisma.UserPreferencesSelect;
+    friendsOnly: string;
+    refused: string;
+  }
+>;
+
+type GateSettings = (typeof GATE_SETTINGS)[GatedInviteType];
+
+/**
+ * Whether the invitee may get an invite of this type from the inviter (#278),
+ * asked in the create's transaction once the invitee is known and before
+ * anything is written. Each type reads its own settings ({@link GATE_SETTINGS}).
+ * Three checks, in this order:
  *
  * 1. The server's policy. `Friends` lets in the inviter's friends by id and
  *    refuses every invite by address, before anything about the address is
@@ -46,44 +80,46 @@ type Invitee = { readonly id: string } | { readonly email: string };
  */
 export async function gateInvitee(
   tx: Prisma.TransactionClient,
+  type: GatedInviteType,
   inviterId: string,
   invitee: StoredInvitee,
 ): Promise<{ readonly withheld: boolean }> {
-  const policy = await serverInviteePolicy(tx);
+  const settings = GATE_SETTINGS[type];
+  const policy = await serverInviteePolicy(tx, settings);
 
   if (invitee.inviteeId === null) {
     if (policy !== Visibility.Public) {
-      throw new ForbiddenException(t('errors.household.invitee_friends_only'));
+      throw new ForbiddenException(t(settings.friendsOnly));
     }
 
-    return { withheld: await addressHolderRefuses(tx, inviterId, invitee.inviteeEmail) };
+    return { withheld: await addressHolderRefuses(tx, settings, inviterId, invitee.inviteeEmail) };
   }
 
   const holder = { id: invitee.inviteeId };
   const status = await friendshipStatus(tx, inviterId, holder);
 
   if (!reaches(policy, status)) {
-    throw new ForbiddenException(t('errors.household.invitee_friends_only'));
+    throw new ForbiddenException(t(settings.friendsOnly));
   }
 
-  if (refuses(status, await invitePreference(tx, holder))) {
-    throw new ForbiddenException(t('errors.household.invitee_refused'));
+  if (refuses(status, await invitePreference(tx, settings, holder))) {
+    throw new ForbiddenException(t(settings.refused));
   }
 
   return { withheld: false };
 }
 
 /**
- * The server's policy, read in the caller's transaction. No settings row
- * reads as the column's default.
+ * The server's policy for the type, read in the caller's transaction. No
+ * settings row reads as the column's default.
  */
-async function serverInviteePolicy(tx: Prisma.TransactionClient): Promise<Visibility> {
-  const settings = await tx.systemSetting.findUnique({
+async function serverInviteePolicy(tx: Prisma.TransactionClient, settings: GateSettings): Promise<Visibility> {
+  const row = await tx.systemSetting.findUnique({
     where: { singleton: true },
-    select: { householdInviteePolicy: true },
+    select: { householdInviteePolicy: true, eventInviteePolicy: true },
   });
 
-  return settings?.householdInviteePolicy ?? Visibility.Public;
+  return row?.[settings.policy] ?? Visibility.Public;
 }
 
 /**
@@ -97,6 +133,7 @@ async function serverInviteePolicy(tx: Prisma.TransactionClient): Promise<Visibi
  */
 async function addressHolderRefuses(
   tx: Prisma.TransactionClient,
+  settings: GateSettings,
   inviterId: string,
   address: string,
 ): Promise<boolean> {
@@ -112,7 +149,7 @@ async function addressHolderRefuses(
 
   const holder = { email };
 
-  return refuses(await friendshipStatus(tx, inviterId, holder), await invitePreference(tx, holder));
+  return refuses(await friendshipStatus(tx, inviterId, holder), await invitePreference(tx, settings, holder));
 }
 
 /** Whether a block between the pair, or the invitee's own preference, keeps the invite from them. */
@@ -121,16 +158,21 @@ function refuses(status: FriendshipStatus | null, preference: Visibility): boole
 }
 
 /**
- * Who the invitee lets invite them. No preferences row, or no account, reads
- * as the column's default, as a friend request reads `allowFriendRequests`.
+ * Who the invitee lets invite them, to this type. No preferences row, or no
+ * account, reads as the column's default, as a friend request reads
+ * `allowFriendRequests`.
  */
-async function invitePreference(tx: Prisma.TransactionClient, invitee: Invitee): Promise<Visibility> {
+async function invitePreference(
+  tx: Prisma.TransactionClient,
+  settings: GateSettings,
+  invitee: Invitee,
+): Promise<Visibility> {
   const preferences = await tx.userPreferences.findFirst({
     where: { user: invitee },
-    select: { allowHouseholdInvitesFrom: true },
+    select: { allowHouseholdInvitesFrom: true, allowEventInvitesFrom: true },
   });
 
-  return preferences?.allowHouseholdInvitesFrom ?? Visibility.Public;
+  return preferences?.[settings.preference] ?? Visibility.Public;
 }
 
 /**

@@ -1301,9 +1301,9 @@ export const PERMISSION_CATALOG = [
   // reach this write sets covers the invitees' names and avatars in the
   // attendee embed as well as the creator's, and every attendee reads that
   // embed. The creator's friends read the event but not its attendees
-  // (#560). Two decisions re-rate it. If invitees hold no role and don't
-  // appear until they accept (#546), the write covers the creator alone and
-  // goes back to `Low`. And the rule that makes public reach live for events
+  // (#560). Two decisions re-rate it. Invitees will hold no role and not
+  // appear until they accept (#742); then the write covers the creator alone
+  // and goes back to `Low`. And the rule that makes public reach live for events
   // (#495) is the point to rate it again, alongside the updates below (#533).
   permission({
     action: Action.create,
@@ -1446,8 +1446,8 @@ export const PERMISSION_CATALOG = [
   // writes the invitee as an attendee. `read:event:participant` then lets
   // them read the event, its attendee embed included, so an invite extends
   // the event's reach over the attendees already on it. They re-rate with
-  // `create:event`: if invitees hold no role and don't appear until they
-  // accept (#546), an invite reaches no one else's data and both go back to
+  // `create:event`: once invitees hold no role and don't appear until they
+  // accept (#742), an invite reaches no one else's data and both go back to
   // `Low`. The rule that makes public reach live for events (#495) is the
   // point to rate them again (#533).
   //

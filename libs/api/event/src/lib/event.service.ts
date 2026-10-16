@@ -20,6 +20,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { isDeepStrictEqual } from 'node:util';
+import { assertInvitable } from './attendee/invitable';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
 import { NOT_REMOVED } from './constants/not-removed.constant';
@@ -196,6 +197,8 @@ export class EventService {
       if (householdId !== null) {
         await lockExistingHousehold(tx, householdId);
       }
+
+      await assertInvitable(tx, userId, uniqueInviteIds);
 
       const created = await tx.event.create({
         data: {

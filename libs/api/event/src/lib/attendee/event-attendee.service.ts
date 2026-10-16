@@ -37,6 +37,7 @@ import {
   GameAddedToListEvent,
   GameRemovedFromListEvent,
 } from './events/attendee.events';
+import { assertInvitable } from './invitable';
 
 @Injectable()
 export class EventAttendeeService {
@@ -133,13 +134,21 @@ export class EventAttendeeService {
     });
 
     // A user a host removed keeps their row, and the (event, user) key with
-    // it, so adding them again revives that row (#551).
-    const removed = dto.userId
+    // it, so adding them again revives that row (#551). One still on the
+    // event answers as the duplicate they are, before the checks below ask
+    // whether they may be placed on it.
+    const existing = dto.userId
       ? await this.db.eventAttendee.findFirst({
-          where: { eventId, userId: dto.userId, removedAt: { not: null } },
+          where: { eventId, userId: dto.userId },
           select: { id: true, status: true, invitedById: true, removedAt: true },
         })
       : null;
+
+    if (existing && existing.removedAt === null) {
+      throw new ConflictException(t('errors.attendee.already_attendee'));
+    }
+
+    const removed = existing;
 
     try {
       const fields = {
@@ -154,35 +163,42 @@ export class EventAttendeeService {
         },
       };
 
-      const { attendee, changes } = removed
-        ? await this.db.$transaction(async (tx) => {
-            const attendee = await tx.eventAttendee.update({
-              // Matches nothing once a concurrent add has revived it, which
-              // answers as the duplicate it then is.
-              where: { id: removed.id, removedAt: { not: null } },
-              data: {
-                ...fields,
-                removedAt: null,
-                rsvpDate: null,
-                invitedBy: inviter ? { connect: { id: inviter.id } } : { disconnect: true },
-              },
-              include: ATTENDEE_INCLUDE,
-            });
+      const { attendee, changes } = await this.db.$transaction(async (tx) => {
+        // Whom the caller may place on the event, as the event's create asks
+        // of its invitees (#546).
+        if (dto.userId) {
+          await assertInvitable(tx, invitedByUserId, [dto.userId]);
+        }
 
-            return { attendee, changes: await syncSuppliedGames(tx, attendee, initiatedAt) };
-          })
-        : {
-            attendee: await this.db.eventAttendee.create({
-              data: {
-                ...fields,
-                event: { connect: { id: eventId } },
-                user: dto.userId ? { connect: { id: dto.userId } } : undefined,
-                invitedBy: inviter ? { connect: { id: inviter.id } } : undefined,
-              },
-              include: ATTENDEE_INCLUDE,
-            }),
-            changes: null,
-          };
+        if (!removed) {
+          const attendee = await tx.eventAttendee.create({
+            data: {
+              ...fields,
+              event: { connect: { id: eventId } },
+              user: dto.userId ? { connect: { id: dto.userId } } : undefined,
+              invitedBy: inviter ? { connect: { id: inviter.id } } : undefined,
+            },
+            include: ATTENDEE_INCLUDE,
+          });
+
+          return { attendee, changes: null };
+        }
+
+        const attendee = await tx.eventAttendee.update({
+          // Matches nothing once a concurrent add has revived it, which
+          // answers as the duplicate it then is.
+          where: { id: removed.id, removedAt: { not: null } },
+          data: {
+            ...fields,
+            removedAt: null,
+            rsvpDate: null,
+            invitedBy: inviter ? { connect: { id: inviter.id } } : { disconnect: true },
+          },
+          include: ATTENDEE_INCLUDE,
+        });
+
+        return { attendee, changes: await syncSuppliedGames(tx, attendee, initiatedAt) };
+      });
 
       this.eventEmitter.emit(
         AttendeeAddedEvent.eventName,

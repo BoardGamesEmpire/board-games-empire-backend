@@ -3,6 +3,7 @@ import { t } from '@bge/i18n';
 import {
   CONTEXT_INVITE_SELECT,
   effectiveInviteStatusWhere,
+  gateInvitee,
   INVITE_SCALARS_PARTY_ONLY,
   InviteService,
   OUTSTANDING_INVITE_STATUSES,
@@ -10,6 +11,7 @@ import {
   withEffectiveInviteStatus,
   type InviteContextView,
   type InvitePartyView,
+  type StoredInvitee,
 } from '@bge/invites';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
@@ -17,7 +19,6 @@ import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
-import { gateInvitee, type StoredInvitee } from './invitee-gate';
 
 /**
  * Each member's user id and household role: what the invite grants' role
@@ -131,7 +132,7 @@ export class HouseholdInviteService {
 
       const roleId = await resolveHouseholdRoleId(tx, role);
 
-      const { withheld } = await gateInvitee(tx, inviterId, invitee);
+      const { withheld } = await gateInvitee(tx, InviteType.Household, inviterId, invitee);
 
       const decision = await this.quotas.consume(
         'household_invite_daily_count',

@@ -32,6 +32,7 @@ export const SYSTEM_SETTINGS_SELECT = {
   reviewGatewayLanguages: true,
 
   householdInviteePolicy: true,
+  eventInviteePolicy: true,
 } as const satisfies Prisma.SystemSettingSelect;
 
 /**

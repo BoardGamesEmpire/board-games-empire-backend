@@ -42,6 +42,7 @@ describe('system settings read shape', () => {
         'auditLogRetentionDays',
         'reviewGatewayLanguages',
         'householdInviteePolicy',
+        'eventInviteePolicy',
       ].sort(),
     );
   });
