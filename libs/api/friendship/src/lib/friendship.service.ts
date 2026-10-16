@@ -8,7 +8,7 @@ import {
   ResourceType,
 } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import {
   BadRequestException,
@@ -38,6 +38,7 @@ export class FriendshipService {
   constructor(
     private readonly db: DatabaseService,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -120,16 +121,32 @@ export class FriendshipService {
   }
 
   /**
-   * Every friendship visible to the caller, newest activity first, optionally
-   * narrowed to one status. One page plus the total for the envelope (#372).
+   * The acting user's friendships, in either direction, newest activity first,
+   * optionally narrowed to one status. One page plus the total for the
+   * envelope (#372).
+   *
+   * The scope is the acting user's friendships, and the ceiling only clips it
+   * (#515). Before, the ceiling was the whole answer, so staff and the Owner,
+   * who read every friendship on the server, got everyone's. The status filter
+   * is a query parameter, so it sits beside the composed clause rather than
+   * inside it.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my friendships" has no meaning without a user, and the refusal must never
+   * soften into an empty page. PROVISIONAL — #395.
    */
   async listForUser(query: ListFriendshipsQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
     const { status } = query;
+    const userId = resolveScopeSubjectId(this.abilityService);
 
     return this.paginateFriendships(
       {
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
-        ...(status ? { status } : {}),
+        AND: [
+          this.scopeComposer.compose(ResourceType.Friendship, Action.read, {
+            OR: [{ requesterId: userId }, { addresseeId: userId }],
+          }),
+          status ? { status } : {},
+        ],
       },
       // `id` breaks ties on `updatedAt`: a batch status change stamps several
       // rows identically, which a tie-less sort lets drift across pages.
@@ -139,21 +156,22 @@ export class FriendshipService {
   }
 
   /**
-   * Incoming pending requests where the acting user is the addressee.
+   * Incoming pending requests where the acting user is the addressee. The
+   * scope already named the addressee, so composing it (#515) changes no rows;
+   * it is what the envelope's guard checks for.
    *
    * Takes the bare page contract, not `ListFriendshipsQueryDto`: this set is
    * Pending by definition, so there is no status to filter on, and the route
    * binds a status-less DTO for the same reason.
    */
   async listIncomingRequests(query: PaginationQueryDto): Promise<PaginatedRows<FriendshipWithParticipants>> {
-    const userId = this.abilityService.getActingUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
 
     return this.paginateFriendships(
-      {
-        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
+      this.scopeComposer.compose(ResourceType.Friendship, Action.read, {
         addresseeId: userId,
         status: FriendshipStatus.Pending,
-      },
+      }),
       [{ createdAt: 'desc' }, { id: 'desc' }],
       query,
     );
@@ -261,6 +279,7 @@ export class FriendshipService {
       return await this.db.friendship.delete({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row delete by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.delete),
         },
       });
@@ -274,6 +293,7 @@ export class FriendshipService {
       return await this.db.friendship.update({
         where: {
           id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.update),
         },
         data,
@@ -289,6 +309,7 @@ export class FriendshipService {
     const friendship = await this.db.friendship.findUnique({
       where: {
         id,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
         AND: this.abilityService.getCurrentResourceConditions(ResourceType.Friendship, Action.read),
       },
     });
