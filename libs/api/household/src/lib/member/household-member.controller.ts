@@ -127,6 +127,7 @@ export class HouseholdMemberController {
   @ApiParam({ name: 'householdId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Left the household' })
   @ApiResponse({ status: Http.BadRequest, description: 'Sole owner must transfer ownership first' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Not a member, or household not found' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.HouseholdMember))
   @Delete('me')

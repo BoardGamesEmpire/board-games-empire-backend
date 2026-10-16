@@ -1196,10 +1196,10 @@ export class HouseholdMemberService {
    * Returns `true` only when rows matching `unscopedWhere` exist but none are
    * visible under `scopedWhere` — the actor is being denied, not merely looking
    * at an empty set. Deliberately makes NO assumption about a household always
-   * having at least one member: that invariant is upheld today only by the
-   * absence of a removal endpoint, and #157 (remove member / leave household) is
-   * exactly where it would come under pressure. Comparing scoped against
-   * unscoped is exact either way.
+   * having at least one member. The guard in {@link deleteMembership} refuses
+   * to let the last owner leave or be removed, so a household with an owner
+   * keeps one, but comparing scoped against unscoped is exact either way, so
+   * this check does not depend on that guard.
    *
    * The unscoped count runs only when the scoped count is zero, so an authorized
    * reader looking at a row they may not see never triggers the second query.
