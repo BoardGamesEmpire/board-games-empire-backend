@@ -198,8 +198,9 @@ describe('EventGameNominationService', () => {
   });
 
   // The resolver counts only the votes of eligible voters, and its pool is
-  // the attendees no host has removed.
-  it('resolveNomination counts no vote from a voter who is not attending, out of a pool without removed attendees', async () => {
+  // the attendees no host has removed. Each voter is judged as the pool reads
+  // them, so the votes and the pool can't disagree about who is in.
+  it('resolveNomination judges each voter as its pool reads them: a voter who left or was removed counts in neither', async () => {
     db.eventGameNomination.findUnique.mockResolvedValue({
       id: 'nom-1',
       status: NominationStatus.Open,
@@ -207,12 +208,15 @@ describe('EventGameNominationService', () => {
       occurrenceId: null,
       suppliedFromId: 'gl-1',
       votes: [
-        { voteType: VoteType.Against, attendee: voter(EventParticipationStatus.Attending) },
-        { voteType: VoteType.For, attendee: voter(EventParticipationStatus.NotAttending) },
-        { voteType: VoteType.For, attendee: voter(EventParticipationStatus.NotAttending) },
+        { voteType: VoteType.Against, attendeeId: 'att-in' },
+        { voteType: VoteType.For, attendeeId: 'att-left' },
+        { voteType: VoteType.For, attendeeId: 'att-removed' },
       ],
     } as never);
-    db.eventAttendee.findMany.mockResolvedValue([voter(EventParticipationStatus.Attending)] as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+      { id: 'att-left', ...voter(EventParticipationStatus.NotAttending) },
+    ] as never);
     db.$queryRaw
       .mockResolvedValueOnce([lockedSupplier()] as never)
       .mockResolvedValueOnce([{ status: 'Open' }] as never);
@@ -226,6 +230,70 @@ describe('EventGameNominationService', () => {
     expect(resolution.tally.totalVotes).toBe(1);
     expect(resolution.status).toBe(NominationStatus.Failed);
     expect(db.eventGame.create).not.toHaveBeenCalled();
+  });
+
+  it('resolveNomination adds a nomination that passes to the lineup, and emits NominationResolved then GameAddedToEvent', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue({
+      id: 'nom-1',
+      status: NominationStatus.Open,
+      platformGameId: 'pg-1',
+      occurrenceId: null,
+      suppliedFromId: 'gl-1',
+      votes: [{ voteType: VoteType.For, attendeeId: 'att-in' }],
+    } as never);
+    db.eventAttendee.findMany.mockResolvedValue([
+      { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+    ] as never);
+    db.$queryRaw
+      .mockResolvedValueOnce([lockedSupplier()] as never)
+      .mockResolvedValueOnce([{ status: NominationStatus.Open }] as never);
+    db.eventGameNomination.update.mockResolvedValue(
+      nominationRow({ nominatedById: 'att-nominator', status: NominationStatus.Passed }),
+    );
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    const { resolution } = await service.resolveNomination('event-1', 'nom-1');
+
+    expect(resolution.status).toBe(NominationStatus.Passed);
+    expect(db.eventGame.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event: { connect: { id: 'event-1' } },
+        nomination: { connect: { id: 'nom-1' } },
+        suppliedBy: { connect: { id: 'gl-1' } },
+      }),
+    });
+
+    const [resolvedName, resolvedEvent] = emitter.emit.mock.calls[0];
+    expect(resolvedName).toBe(NominationResolvedEvent.eventName);
+    expect(resolvedEvent.elevatedToEventGameId).toBe('eg-1');
+    expect(resolvedEvent.after).toEqual(expect.objectContaining({ id: 'nom-1', status: NominationStatus.Passed }));
+
+    const [gameName, gameEvent] = emitter.emit.mock.calls[1];
+    expect(gameName).toBe(GameAddedToEventEvent.eventName);
+    expect(gameEvent.subjectId).toBe('eg-1');
+    expect(gameEvent.addedByAttendeeId).toBe('att-nominator');
+  });
+
+  // The votes are counted outside the transaction; the supplier leaving in
+  // between pauses the nomination, so it is checked again under its lock.
+  it('resolveNomination answers 400 for a nomination that paused after it was read, and writes nothing', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue({
+      id: 'nom-1',
+      status: NominationStatus.Open,
+      platformGameId: 'pg-1',
+      occurrenceId: null,
+      suppliedFromId: 'gl-1',
+      votes: [],
+    } as never);
+    db.eventAttendee.findMany.mockResolvedValue([]);
+    db.$queryRaw
+      .mockResolvedValueOnce([lockedSupplier({ status: EventParticipationStatus.NotAttending })] as never)
+      .mockResolvedValueOnce([{ status: NominationStatus.Paused }] as never);
+
+    await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
+    expect(db.eventGameNomination.update).not.toHaveBeenCalled();
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
   });
 
   it('withdraw → update', async () => {
@@ -391,6 +459,33 @@ describe('EventGameNominationService', () => {
       expect.objectContaining({ id: 'nom-1', status: NominationStatus.AwaitingApproval }),
     );
     expect(resolvedEvent.after).toEqual(expect.objectContaining({ id: 'nom-1', status: NominationStatus.Approved }));
+  });
+
+  it('hostReject settles the nomination, adds nothing to the lineup, and emits only NominationResolved', async () => {
+    db.eventGameNomination.findUnique.mockResolvedValue({
+      id: 'nom-1',
+      status: NominationStatus.AwaitingApproval,
+      platformGameId: 'pg-1',
+      occurrenceId: null,
+      suppliedFromId: 'gl-1',
+    } as EventGameNomination);
+    db.$queryRaw
+      .mockResolvedValueOnce([lockedSupplier()] as never)
+      .mockResolvedValueOnce([{ status: NominationStatus.AwaitingApproval }] as never);
+    db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Rejected }));
+
+    await service.hostReject('event-1', 'nom-1');
+
+    expect(db.eventGameNomination.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: NominationStatus.Rejected } }),
+    );
+    expect(db.eventGame.create).not.toHaveBeenCalled();
+    expect(emitter.emit).toHaveBeenCalledTimes(1);
+
+    const [resolvedName, resolvedEvent] = emitter.emit.mock.calls[0];
+    expect(resolvedName).toBe(NominationResolvedEvent.eventName);
+    expect(resolvedEvent.elevatedToEventGameId).toBeNull();
+    expect(resolvedEvent.after).toEqual(expect.objectContaining({ id: 'nom-1', status: NominationStatus.Rejected }));
   });
 
   it('resolveNomination rejects a non-Open nomination', async () => {
@@ -764,6 +859,39 @@ describe('EventGameNominationService', () => {
       status: NominationStatus.Open,
       votingDeadline: null,
     });
+  });
+
+  // A Direct-mode nomination passes as it is made, and its game joins the
+  // lineup in the transaction that vouched for its supplier.
+  it('nominate under Direct adds the game to the lineup, and emits NominationCreated then GameAddedToEvent', async () => {
+    db.eventPolicy.findUnique.mockResolvedValue({
+      gameAdditionMode: GameAdditionMode.Direct,
+      votingWindowHours: null,
+    } as EventPolicy);
+    db.$queryRaw.mockResolvedValueOnce([lockedSupplier()] as never);
+    db.eventGameNomination.create.mockResolvedValue(nominationRow({ status: NominationStatus.Passed }));
+    db.eventGame.create.mockResolvedValue({ id: 'eg-1', nominationId: 'nom-1' } as EventGame);
+
+    await service.nominate('event-1', { platformGameId: 'pg-1', suppliedFromId: 'gl-1' } as NominateGameDto);
+
+    expect(db.eventGameNomination.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: NominationStatus.Passed }) }),
+    );
+    expect(db.eventGame.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        event: { connect: { id: 'event-1' } },
+        nomination: { connect: { id: 'nom-1' } },
+        suppliedBy: { connect: { id: 'gl-1' } },
+      }),
+    });
+
+    expect(emitter.emit.mock.calls.map(([name]) => name)).toEqual([
+      NominationCreatedEvent.eventName,
+      GameAddedToEventEvent.eventName,
+    ]);
+    const [, gameEvent] = emitter.emit.mock.calls[1];
+    expect(gameEvent.subjectId).toBe('eg-1');
+    expect(gameEvent.addedByAttendeeId).toBe('att-1');
   });
 
   it('directAddGame emits a GameAddedToEventEvent with the acting attendee as context', async () => {

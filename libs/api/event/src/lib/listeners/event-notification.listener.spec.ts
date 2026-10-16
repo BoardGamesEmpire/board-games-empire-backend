@@ -256,7 +256,7 @@ describe('EventNotificationListener', () => {
       db.eventGameNomination.findUnique.mockResolvedValue({
         nominatedById: 'att-1',
         ...(<any>{
-          nominatedBy: { userId: 'user-nominator' },
+          nominatedBy: { userId: 'user-nominator', removedAt: null },
           platformGame: { game: { title: 'Wingspan' } },
         }),
         platformGameId: 'plat-game-1',
@@ -306,6 +306,21 @@ describe('EventNotificationListener', () => {
 
     it('does not notify on Withdrawn status', async () => {
       await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Withdrawn, null));
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    // A nomination of someone else's game outlives its nominator's removal
+    // (#551), but the removed user hears nothing more from the event.
+    it('does not notify a nominator a host has removed', async () => {
+      db.eventGameNomination.findUnique.mockResolvedValue({
+        nominatedById: 'att-1',
+        nominatedBy: { userId: 'user-nominator', removedAt: new Date() },
+        platformGame: { game: { title: 'Wingspan' } },
+        platformGameId: 'plat-game-1',
+      } as never);
+
+      await listener.onNominationResolved(makeResolvedEvent(NominationStatus.Passed));
 
       expect(notifications.create).not.toHaveBeenCalled();
     });

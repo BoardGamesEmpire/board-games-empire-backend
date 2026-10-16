@@ -225,7 +225,7 @@ export class EventNotificationListener {
         where: { id: nominationId },
         select: {
           nominatedById: true,
-          nominatedBy: { select: { userId: true } },
+          nominatedBy: { select: { userId: true, removedAt: true } },
           platformGame: {
             select: {
               id: true,
@@ -239,6 +239,14 @@ export class EventNotificationListener {
       if (!nomination?.nominatedBy?.userId) {
         return this.logger.warn(
           `Nominator user not found for NominationResolved notification, nominationId=${nominationId}`,
+        );
+      }
+
+      // The nomination outlives its nominator's removal (#551); they hear
+      // nothing more from the event, as the other notifications here skip them.
+      if (nomination.nominatedBy.removedAt !== null) {
+        return this.logger.debug(
+          `Nominator was removed, skipping NominationResolved notification, nominationId=${nominationId}`,
         );
       }
 

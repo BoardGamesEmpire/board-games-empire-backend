@@ -420,7 +420,7 @@ export class EventGameNominationService {
         platformGameId: true,
         occurrenceId: true,
         suppliedFromId: true,
-        votes: { select: { voteType: true, attendee: { select: VOTER_SELECT } } },
+        votes: { select: { voteType: true, attendeeId: true } },
       },
     });
 
@@ -433,8 +433,16 @@ export class EventGameNominationService {
     const policy = await this.getEffectivePolicy(eventId, nomination.occurrenceId ?? undefined);
     const attendees = await this.getEventAttendees(eventId);
 
+    // Each voter as the pool's read has them, not as a read of the votes
+    // would: two reads can fall either side of a voter leaving, and then
+    // count a vote the pool no longer holds. A voter the pool lacks was
+    // removed, and their vote doesn't count.
+    const voterById = new Map(attendees.map((attendee) => [attendee.id, attendee]));
     const resolution = VoteResolver.resolve(
-      nomination.votes.map(({ voteType, attendee }) => ({ voteType, voter: attendee })),
+      nomination.votes.flatMap(({ voteType, attendeeId }) => {
+        const voter = voterById.get(attendeeId);
+        return voter ? [{ voteType, voter }] : [];
+      }),
       policy,
       attendees,
     );
@@ -824,10 +832,10 @@ export class EventGameNominationService {
   }
 
   /** The event's attendees, as the resolver counts its pool. Removed attendees are no part of it. */
-  private async getEventAttendees(eventId: string): Promise<AttendeeStub[]> {
+  private async getEventAttendees(eventId: string): Promise<(AttendeeStub & { id: string })[]> {
     return this.db.eventAttendee.findMany({
       where: { eventId, ...NOT_REMOVED },
-      select: VOTER_SELECT,
+      select: { id: true, ...VOTER_SELECT },
     });
   }
 }

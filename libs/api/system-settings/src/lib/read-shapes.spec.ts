@@ -27,7 +27,7 @@ describe('system settings read shape', () => {
     );
   });
 
-  it('publishes the row id and the eleven settings', () => {
+  it('publishes the row id and the twelve settings', () => {
     expect(Object.keys(SYSTEM_SETTINGS_SELECT).sort()).toEqual(
       [
         'id',
