@@ -8,6 +8,7 @@ import {
 import { AuditLogApiModule } from '@bge/audit-log';
 import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
+import { DataGatewayModule } from '@bge/data-gateway';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
@@ -15,7 +16,6 @@ import { FeedbackModule } from '@bge/feedback';
 import { FriendshipModule } from '@bge/friendship';
 import { GameModule } from '@bge/game';
 import { GameCollectionModule } from '@bge/game-collection';
-import { GameGatewayModule } from '@bge/game-gateway';
 import { GameImportProducerModule } from '@bge/game-import';
 import { GameSearchModule } from '@bge/game-search';
 import { GatewayConfigEventsModule } from '@bge/gateway-registry';
@@ -204,6 +204,7 @@ import { createThrottlers } from './lib/throttlers';
     // the HTTP surface.
     AuditLogApiModule,
     AuthModule,
+    DataGatewayModule,
     EventModule,
     FeedbackModule,
     // Feedback sink fan-out PRODUCER: listens for feedback.report.submitted
@@ -212,7 +213,6 @@ import { createThrottlers } from './lib/throttlers';
     FeedbackQueueProducerModule,
     FriendshipModule,
     GameCollectionModule,
-    GameGatewayModule,
     GameImportProducerModule,
     GameSearchModule,
     GameModule,

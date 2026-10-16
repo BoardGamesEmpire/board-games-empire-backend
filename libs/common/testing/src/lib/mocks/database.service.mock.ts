@@ -138,7 +138,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     gameDocument: mockDelegate(),
     gameExpansion: mockDelegate(),
     gameFamily: mockDelegate(),
-    gameGateway: mockDelegate(),
+    dataGateway: mockDelegate(),
     gameImage: mockDelegate(),
     gameMechanic: mockDelegate(),
     gamePlaySession: mockDelegate(),

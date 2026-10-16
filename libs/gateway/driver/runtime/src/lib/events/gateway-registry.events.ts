@@ -1,5 +1,5 @@
 import { MutationEvent } from '@bge/actor-context';
-import { ResourceType, type GameGateway } from '@bge/database';
+import { ResourceType, type DataGateway } from '@bge/database';
 import { GATEWAY_DISABLED_EVENT } from '../constants/gateway-registry.constants';
 
 /**
@@ -26,20 +26,20 @@ export interface GatewayAutoDisableFailure {
   readonly lastError: string;
 }
 
-type GatewayDisabledSnapshot = Readonly<Pick<GameGateway, 'id' | 'enabled'>>;
+type GatewayDisabledSnapshot = Readonly<Pick<DataGateway, 'id' | 'enabled'>>;
 
 /**
  * Emitted when repeated failures auto-disable a gateway. Update-shaped:
  * the conditional write (`where: { enabled: true }`) proves the before
  * state, so before/after carry the `enabled` flip.
  */
-export class GatewayDisabledEvent extends MutationEvent<GameGateway> {
+export class GatewayDisabledEvent extends MutationEvent<DataGateway> {
   static readonly eventName = GATEWAY_DISABLED_EVENT;
 
   declare readonly before: GatewayDisabledSnapshot;
   declare readonly after: GatewayDisabledSnapshot;
 
-  readonly subject = ResourceType.GameGateway;
+  readonly subject = ResourceType.DataGateway;
   readonly subjectId: string;
 
   constructor(

@@ -3,7 +3,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LoggerModule } from 'nestjs-pino';
 import { configuration, configurationValidationSchema } from './configuration';
-import { GameGatewayModule } from './game-gateway/game-gateway.module';
+import { DataGatewayModule } from './data-gateway/data-gateway.module';
 import { IgdbModule } from './igdb/igdb.module';
 import { baseLogger } from './lib/logger';
 
@@ -35,7 +35,7 @@ import { baseLogger } from './lib/logger';
       },
     }),
 
-    GameGatewayModule,
+    DataGatewayModule,
     IgdbModule,
   ],
 })

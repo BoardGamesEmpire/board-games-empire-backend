@@ -1,7 +1,7 @@
-import type { GameGateway } from '@bge/database';
+import type { DataGateway } from '@bge/database';
 
-type ConfigOptions = Pick<GameGateway, 'connectionUrl' | 'connectionPort' | 'authType'> &
-  Partial<Pick<GameGateway, 'authParameters'>>;
+type ConfigOptions = Pick<DataGateway, 'connectionUrl' | 'connectionPort' | 'authType'> &
+  Partial<Pick<DataGateway, 'authParameters'>>;
 
 /**
  * Deterministic hash over the fields that affect gateway client behavior.

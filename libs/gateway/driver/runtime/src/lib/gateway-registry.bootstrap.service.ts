@@ -18,7 +18,7 @@ export class GatewayRegistryBootstrapService implements OnApplicationBootstrap {
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    const gateways = await this.db.gameGateway.findMany({
+    const gateways = await this.db.dataGateway.findMany({
       where: { enabled: true, deletedAt: null },
     });
 

@@ -1,7 +1,7 @@
 /**
  * RESERVED — inbound topic event envelope (#196).
  *
- * Declared in the contract now so the `GameGatewayDriver.handleInbound?` slot
+ * Declared in the contract now so the `DataGatewayDriver.handleInbound?` slot
  * is stable for driver authors, but the shape is a stub: #196 owns its final
  * definition (topic naming, payload schema versioning, delivery metadata).
  * Treat every field as provisional until that issue lands.

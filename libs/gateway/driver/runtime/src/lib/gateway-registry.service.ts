@@ -1,6 +1,6 @@
 import { SystemActorScope } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
-import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type { GatewayServiceClient } from '@boardgamesempire/proto-gateway';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -14,7 +14,7 @@ import { hashGatewayConfig } from './utils/hash-config';
 
 /**
  * How a cached driver entered the routing table. Config-update events from
- * Redis describe remote GameGateway rows; an in-process driver placed via
+ * Redis describe remote DataGateway rows; an in-process driver placed via
  * `register()` ('registered') has its own lifecycle and must not be torn
  * down by those events (see handleConfigUpdate). 'remote' drivers came from
  * `connect()` and do react to config changes.
@@ -23,7 +23,7 @@ type DriverOrigin = 'remote' | 'registered';
 
 interface CachedDriver {
   gatewayId: string;
-  driver: GameGatewayDriver;
+  driver: DataGatewayDriver;
   configHash: string;
   origin: DriverOrigin;
 }
@@ -39,7 +39,7 @@ interface FailureTrack {
 export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
 
 /**
- * Routes gateway ids to live {@link GameGatewayDriver} instances (#193).
+ * Routes gateway ids to live {@link DataGatewayDriver} instances (#193).
  * Used by both the coordinator (for synchronous RPC routing) and the
  * gateway-worker (for async fetch processing).
  *
@@ -50,7 +50,7 @@ export const DRIVER_DISPOSE_TIMEOUT_MS = 5_000;
  * failure tracking, auto-disable, and config-event invalidation treat an
  * in-process driver exactly like a remote one.
  *
- * State authority for GameGateway rows lives in the coordinator. Other
+ * State authority for DataGateway rows lives in the coordinator. Other
  * processes treat this service as a read-side: they react to config-update
  * events via Redis pub/sub, but never mutate gateway state except for
  * auto-disable triggered by their own repeated-failure observations.
@@ -181,7 +181,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * directly — from that point on, routing, failure tracking, and
    * auto-disable are identical for both.
    */
-  register(gatewayId: string, driver: GameGatewayDriver, configHash = '', origin: DriverOrigin = 'registered'): void {
+  register(gatewayId: string, driver: DataGatewayDriver, configHash = '', origin: DriverOrigin = 'registered'): void {
     // Last write wins, but never silently: a driver losing the cache slot to a
     // racing connect (eager bootstrap vs. lazy resolve for the same gateway)
     // must have its transport torn down, or its gRPC channel leaks. Skip when
@@ -224,7 +224,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * promise always resolves once teardown settles, so an async caller
    * (onApplicationShutdown) can await it while sync callers fire-and-forget safely.
    */
-  private async disposeDriver(gatewayId: string, driver: GameGatewayDriver): Promise<void> {
+  private async disposeDriver(gatewayId: string, driver: DataGatewayDriver): Promise<void> {
     try {
       await driver.dispose();
     } catch (err) {
@@ -243,7 +243,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * if the connection (ping) fails. Connection failures feed the same
    * auto-disable tracking as any other failed interaction.
    */
-  async resolve(gatewayId: string): Promise<GameGatewayDriver> {
+  async resolve(gatewayId: string): Promise<DataGatewayDriver> {
     const cached = this.clients.get(gatewayId);
     if (cached) {
       return cached.driver;
@@ -294,7 +294,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * callers should treat that as "gateway unavailable".
    */
   private async connectFromDb(gatewayId: string): Promise<void> {
-    const gateway = await this.db.gameGateway.findFirst({
+    const gateway = await this.db.dataGateway.findFirst({
       where: { id: gatewayId, enabled: true, deletedAt: null },
     });
 
@@ -400,7 +400,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     const initiatedAt = new Date();
 
     await this.systemActorScope.run('gateway-registry:auto-disable', async () => {
-      const result = await this.db.gameGateway.updateMany({
+      const result = await this.db.dataGateway.updateMany({
         where: { id: gatewayId, enabled: true },
         data: { enabled: false },
       });
@@ -466,7 +466,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     const cached = this.clients.get(event.gatewayId);
 
     // In-process drivers (registered via register(), e.g. #59 DataGateway
-    // plugins) own their own config lifecycle. A GameGateway 'updated' or
+    // plugins) own their own config lifecycle. A DataGateway 'updated' or
     // 'reconnect-requested' event describes a REMOTE connection row; acting on
     // it here would disconnect the plugin driver and send the next resolve()
     // to connectFromDb, which can only build a RemoteGatewayDriver — silently

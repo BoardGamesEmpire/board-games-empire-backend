@@ -7,7 +7,7 @@ type ConfigEventHandler = (event: GatewayConfigEvent) => Promise<void> | void;
 
 /**
  * Pub/sub layer for gateway config invalidation. The coordinator publishes
- * when a GameGateway row mutates (config updates, auto-disables, admin
+ * when a DataGateway row mutates (config updates, auto-disables, admin
  * reconnects). Every process running GatewayRegistryService subscribes
  * to invalidate cached clients.
  *
@@ -43,7 +43,7 @@ export class GatewayConfigEventsService implements OnModuleDestroy {
 
   /**
    * Publishes a config-update event to subscribed processes. Called by the
-   * coordinator after persisting changes to a GameGateway row, and by any
+   * coordinator after persisting changes to a DataGateway row, and by any
    * process auto-disabling a gateway due to repeated failures.
    */
   async publish(event: GatewayConfigEvent): Promise<void> {

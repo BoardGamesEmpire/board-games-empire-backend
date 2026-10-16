@@ -34,7 +34,7 @@ enum ResourceType {
   GameCollection
   GameCreationRequest
   GameCustomization
-  GameGateway
+  DataGateway
   GamePlayResult
   GamePlaySession
   GameSharing

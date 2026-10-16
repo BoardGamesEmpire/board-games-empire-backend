@@ -116,7 +116,7 @@
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/api/game-gateway/tsconfig.lib.json"
+      "path": "../../libs/api/data-gateway/tsconfig.lib.json"
     },
     {
       "path": "../../libs/api/game-collection/tsconfig.lib.json"

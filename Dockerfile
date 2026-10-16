@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# One image for every BGE role, and one image for each game gateway (#593).
+# One image for every BGE role, and one image for each DataGateway (#593).
 # Build from the repository root:
 #
 #   docker build -t bge .

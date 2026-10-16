@@ -30,7 +30,7 @@ export const KEEP_STACK = process.env['BGE_SMOKE_KEEP'] === 'true';
 /** The four roles, each in a container of its own, as the split profile runs them. */
 export const ROLES = ['api', 'worker', 'gateway-fetch', 'coordinator'] as const;
 
-/** The game gateways: the stub the suite searches through, and both published gateway images. */
+/** The DataGateways: the stub the suite searches through, and both published gateway images. */
 export const GATEWAYS = ['stub-gateway', 'boardgamegeek-gateway', 'igdb-gateway'] as const;
 
 /**

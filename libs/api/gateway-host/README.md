@@ -7,9 +7,9 @@ its `main.ts` bootstrap, and its bootstrap logger. This library holds the one
 copy:
 
 - **`GatewayServiceHost`** — abstract DI contract each gateway app's
-  `GameGatewayService` implements. The controller depends on this abstraction,
+  `DataGatewayService` implements. The controller depends on this abstraction,
   never on a concrete service.
-- **`GameGatewayController`** — the shared gRPC controller. Logs and delegates
+- **`DataGatewayController`** — the shared gRPC controller. Logs and delegates
   every RPC to the injected `GatewayServiceHost`.
 - **`createGatewayLogger(serviceName)`** — builds the base + `bootstrap`-tagged
   pino loggers a gateway app needs.
@@ -19,8 +19,8 @@ copy:
   config is validated.
 
 A new gateway app wires up by: implementing `GatewayServiceHost`, binding it
-(`{ provide: GatewayServiceHost, useClass: GameGatewayService }`), registering
-`GameGatewayController`, and calling `bootstrapGrpcGateway` from its `main.ts`.
+(`{ provide: GatewayServiceHost, useClass: DataGatewayService }`), registering
+`DataGatewayController`, and calling `bootstrapGrpcGateway` from its `main.ts`.
 
 ## Running unit tests
 

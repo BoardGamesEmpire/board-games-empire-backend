@@ -96,7 +96,7 @@ export const createLoggerShutdown = (app: ShutdownableApp, logger: PinoInstance)
  *
  * Intended for services that bootstrap pino via `@bge/logger` but do
  * NOT participate in the OpenTelemetry pipeline — currently the BGG
- * and IGDB game gateways. OTel-enabled apps continue to use
+ * and IGDB DataGateways. OTel-enabled apps continue to use
  * `registerShutdownHandlers` from `@bge/otel`, which additionally
  * drains the trace exporter.
  *

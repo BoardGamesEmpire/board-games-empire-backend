@@ -4,7 +4,7 @@ import { GatewayRegistryService } from './gateway-registry.service';
 
 /**
  * Hourly tick; the actual re-interview is gated by syncIfStale's daily
- * throttle (GameGateway.languagesSyncedAt), so this only determines how
+ * throttle (DataGateway.languagesSyncedAt), so this only determines how
  * promptly a stale gateway is noticed — not how often it is interviewed.
  */
 export const LANGUAGE_SYNC_TICK_MS = 60 * 60 * 1000;

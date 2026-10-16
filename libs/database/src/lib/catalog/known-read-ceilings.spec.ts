@@ -133,8 +133,8 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   GameCreationRequest: {},
   GameCustomization: {},
-  GameGateway: {
-    Admin: { 'read:game_gateway': 'every row' },
+  DataGateway: {
+    Admin: { 'read:data_gateway': 'every row' },
   },
   GamePlayResult: {},
   GamePlaySession: {

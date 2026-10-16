@@ -1,4 +1,4 @@
-import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import type {
   FetchExpansionsRequest,
   FetchGameRequest,
@@ -18,7 +18,7 @@ import type { ClientGrpcProxy } from '@nestjs/microservices';
 import type { Observable } from 'rxjs';
 
 /**
- * The remote transport adapter for {@link GameGatewayDriver} (#193, D1):
+ * The remote transport adapter for {@link DataGatewayDriver} (#193, D1):
  * wraps a verified gRPC channel to an external gateway service and exposes
  * the port by delegating to the ts-proto client.
  *
@@ -32,7 +32,7 @@ import type { Observable } from 'rxjs';
  * client accepts optional gRPC metadata, but no BGE call site supplies it —
  * if that changes, widen the delegation rather than bypassing the port.
  */
-export class RemoteGatewayDriver implements GameGatewayDriver {
+export class RemoteGatewayDriver implements DataGatewayDriver {
   private readonly logger = new Logger(RemoteGatewayDriver.name);
 
   constructor(

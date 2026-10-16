@@ -1,4 +1,4 @@
-import type { GameGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
+import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { concat, from, Observable, of, throwError } from 'rxjs';
 
@@ -20,7 +20,7 @@ export interface InMemoryGatewayFixtures {
 }
 
 /**
- * Fixture-backed in-process `GameGatewayDriver`.
+ * Fixture-backed in-process `DataGatewayDriver`.
  *
  * Dual purpose, mirroring the storage contract-testing pattern:
  *  1. Reference implementation the shared contract suite runs against —
@@ -30,7 +30,7 @@ export interface InMemoryGatewayFixtures {
  *     into an errored Observable so transport-agnostic failure tracking can
  *     be exercised without gRPC.
  */
-export class InMemoryGatewayDriver implements GameGatewayDriver {
+export class InMemoryGatewayDriver implements DataGatewayDriver {
   private failure: Error | undefined;
   private disposedFlag = false;
 
