@@ -1,6 +1,7 @@
 import { Action, parseTemplate, ResourceType, RiskLevel, SystemRole } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
+import { createMemberClient, membersPath } from '../household/household-request';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
@@ -297,7 +298,7 @@ describe('staff floor over the wire', () => {
     return { fixture, owner, admin, outsider, target: fixture.members[0] };
   };
 
-  const membersPath = (householdId: string) => `${HOUSEHOLDS_PATH}/${householdId}/members`;
+  const { transferOwnership } = createMemberClient(baseUrl);
 
   it('lets staff read a roster they are no member of, and refuses an outsider the same read', async () => {
     const { fixture, admin, outsider } = await foreignHousehold();
@@ -397,10 +398,9 @@ describe('staff floor over the wire', () => {
     // the owner's 200 below is what keeps the assertion from passing merely
     // because the route is broken.
     const { fixture, owner, admin, target } = await foreignHousehold();
-    const path = `${membersPath(fixture.household.id)}/${target.member.id}/transfer-ownership`;
 
-    await request(baseUrl).post(path).set(admin.headers).expect(403);
+    await transferOwnership(admin, fixture.household.id, target.member.id).expect(403);
 
-    await request(baseUrl).post(path).set(owner.headers).expect(200);
+    await transferOwnership(owner, fixture.household.id, target.member.id).expect(200);
   });
 });

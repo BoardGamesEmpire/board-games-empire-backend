@@ -1,8 +1,9 @@
 import { SystemRole } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { createMemberClient, membersPath } from './household-request';
 
 /**
  * The product half of #239: concurrent owner transitions issued as real HTTP
@@ -40,17 +41,7 @@ describe('concurrent household owner transitions', () => {
     await db.close();
   });
 
-  const membersPath = (householdId: string): string => `/api/households/${householdId}/members`;
-
-  const leave = (actor: SessionActor, householdId: string) =>
-    request(baseUrl)
-      .delete(`${membersPath(householdId)}/me`)
-      .set(actor.headers);
-
-  const transferOwnership = (actor: SessionActor, householdId: string, memberId: string) =>
-    request(baseUrl)
-      .post(`${membersPath(householdId)}/${memberId}/transfer-ownership`)
-      .set(actor.headers);
+  const { leave, transferOwnership } = createMemberClient(baseUrl);
 
   const ownerCount = (householdId: string): Promise<number> =>
     db.client.householdRole.count({
