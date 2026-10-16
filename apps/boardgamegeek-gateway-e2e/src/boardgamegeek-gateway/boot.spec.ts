@@ -33,7 +33,9 @@ describe('the BoardGameGeek gateway over gRPC', () => {
   });
 
   it('describes its operations, coverage and formats on Describe, and echoes the correlation id', async () => {
-    await expect(gateway().describe('e2e-describe')).resolves.toEqual({
+    const reply = await gateway().describe('e2e-describe');
+
+    expect(reply).toMatchObject({
       correlationId: 'e2e-describe',
       capabilities: [
         'CAPABILITY_SEARCH',
@@ -41,10 +43,6 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
       ],
-      coverage: {
-        platformTypes: ['PLATFORM_TYPE_TABLETOP'],
-        contentTypes: ['CONTENT_TYPE_BASE_GAME', 'CONTENT_TYPE_EXPANSION'],
-      },
       filterableAxes: [],
       languageCodeFormats: {
         acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
@@ -53,6 +51,12 @@ describe('the BoardGameGeek gateway over gRPC', () => {
       },
       contentFormat: 'CONTENT_FORMAT_PLAIN_TEXT',
     });
+
+    // Coverage's lists are sets: their order follows the thing types it asks for, and means nothing.
+    expect(new Set(reply.coverage?.platformTypes)).toEqual(new Set(['PLATFORM_TYPE_TABLETOP']));
+    expect(new Set(reply.coverage?.contentTypes)).toEqual(
+      new Set(['CONTENT_TYPE_BASE_GAME', 'CONTENT_TYPE_EXPANSION']),
+    );
   });
 
   it('lists its languages by English display name', async () => {
