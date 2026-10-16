@@ -65,6 +65,7 @@ describe('RemoteGatewayDriverFactory', () => {
       const serviceClient = {
         ping: jest.fn().mockReturnValue(of({})),
         check: jest.fn().mockReturnValue(of({})),
+        describe: jest.fn().mockReturnValue(of({})),
         searchGames: jest.fn().mockReturnValue(EMPTY),
         fetchGame: jest.fn().mockReturnValue(of({})),
         fetchExpansions: jest.fn().mockReturnValue(EMPTY),
@@ -78,11 +79,13 @@ describe('RemoteGatewayDriverFactory', () => {
 
       driver.ping({ correlationId: 'c' });
       driver.check({ service: '' });
+      driver.describe({ correlationId: 'c' });
       driver.searchGames({ correlationId: 'c', query: 'catan' });
       driver.fetchGame({ correlationId: 'c', externalId: 'x' });
       driver.fetchExpansions({ correlationId: 'c', baseExternalId: 'x' });
       driver.listLanguages({ correlationId: 'c' });
 
+      expect(serviceClient.describe).toHaveBeenCalledWith({ correlationId: 'c' });
       expect(serviceClient.searchGames).toHaveBeenCalledWith({ correlationId: 'c', query: 'catan' });
       expect(serviceClient.fetchGame).toHaveBeenCalledWith({ correlationId: 'c', externalId: 'x' });
       expect(serviceClient.fetchExpansions).toHaveBeenCalledWith({ correlationId: 'c', baseExternalId: 'x' });

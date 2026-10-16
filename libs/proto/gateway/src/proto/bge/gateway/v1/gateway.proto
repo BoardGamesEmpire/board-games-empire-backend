@@ -5,9 +5,16 @@ package bge.gateway.v1;
 import "bge/gateway/v1/common.proto";
 import "grpc/health/v1/health.proto";
 
+// What a DataGateway serves to the server.
+//
+// Every string a DataGateway sends is decoded Unicode text. It undoes its
+// upstream's encoding, such as HTML entities, before sending. The one
+// exception is markup in free text, which its content format declares: an
+// `&amp;` belongs in an HTML description, but never in a title.
 service GatewayService {
   rpc Ping(GatewayPingRequest) returns (GatewayPingResponse);
   rpc Check(grpc.health.v1.HealthCheckRequest) returns (grpc.health.v1.HealthCheckResponse);
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc SearchGames(GatewaySearchRequest) returns (stream GatewaySearchResult);
   rpc FetchGame(FetchGameRequest) returns (FetchGameResponse);
   rpc FetchExpansions(FetchExpansionsRequest) returns (stream GatewaySearchResult);
@@ -18,50 +25,122 @@ message GatewayPingRequest {
   optional string correlation_id = 1;
 }
 
-// Declares a gateway's language-code preferences. The coordinator uses
-// `accepted_request_formats` to translate the user's locale into a format
-// the gateway accepts before forwarding requests, and uses `response_format`
-// to translate gateway-emitted LanguageData into the canonical format.
-//
-// `passthrough_raw_locale = true` opts out of coordinator translation on
-// the request path — the user's raw locale string is forwarded unchanged.
-// Useful for gateways with locale-aware behavior beyond simple language
-// filtering (region-specific ranking, localized result content).
-message GatewayLanguagePreferences {
-  // Formats the gateway can accept on inbound requests, in order of
-  // preference. Coordinator picks the first one it can satisfy.
-  repeated LanguageCodeFormat accepted_request_formats = 1;
-
-  // Format the gateway emits in LanguageData on responses.
-  LanguageCodeFormat response_format = 2;
-
-  // When true, coordinator forwards the user's raw locale string on
-  // requests without translation. `accepted_request_formats` is ignored.
-  bool passthrough_raw_locale = 3;
-}
-
+// A liveness check: which DataGateway answered, at which version, and when.
+// What it can do is Describe's to say.
 message GatewayPingResponse {
   string correlation_id = 1;
   int64 timestamp_ms = 2;
   string gateway_name = 3;
   string gateway_version = 4;
-  repeated string supported_services = 5;
 
-  // Language-code preferences. Coordinator-side translation may be deferred;
-  // gateways should still declare accurate values so existing clients
-  // continue to work without changes when translation lands.
-  GatewayLanguagePreferences language_preferences = 6;
+  // Retired: supported_services, and language_preferences, which Describe
+  // now carries as language_code_formats.
+  reserved 5, 6;
+  reserved "supported_services", "language_preferences";
+}
+
+message DescribeRequest {
+  optional string correlation_id = 1;
+}
+
+// The answers to the server's interview that don't change between calls:
+// what the DataGateway can do, which kinds of game it covers, and the
+// formats it uses. Ping carries its name and version, so this doesn't.
+message DescribeResponse {
+  string correlation_id = 1;
+
+  // The operations it serves. Any subset is valid, even one without search
+  // or fetch. An operation left out may answer UNIMPLEMENTED. The server
+  // doesn't route by these yet, so until it does, it may still call one.
+  repeated Capability capabilities = 2;
+
+  // The kinds of game it can return.
+  Coverage coverage = 3;
+
+  // The coverage axes its search can filter by. A search request carries no
+  // filter yet, so declare none for now.
+  repeated CoverageAxis filterable_axes = 4;
+
+  // How it writes language codes.
+  LanguageCodeFormats language_code_formats = 5;
+
+  // The form its free text arrives in, such as a game's description.
+  ContentFormat content_format = 6;
+}
+
+// An operation a DataGateway can serve, named by the RPC it answers.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+
+  // SearchGames.
+  CAPABILITY_SEARCH = 1;
+
+  // FetchGame.
+  CAPABILITY_FETCH = 2;
+
+  // FetchExpansions.
+  CAPABILITY_FETCH_EXPANSIONS = 3;
+
+  // ListLanguages.
+  CAPABILITY_LIST_LANGUAGES = 4;
+}
+
+// The kinds of game a DataGateway can return: every combination of a
+// platform type and a content type listed here. Neither list holds an
+// UNSPECIFIED value. A game it can't classify may still come back, with
+// its content type unspecified.
+message Coverage {
+  repeated PlatformType platform_types = 1;
+  repeated ContentType content_types = 2;
+}
+
+// A coverage axis a search can be filtered by.
+enum CoverageAxis {
+  COVERAGE_AXIS_UNSPECIFIED = 0;
+  COVERAGE_AXIS_PLATFORM_TYPE = 1;
+  COVERAGE_AXIS_CONTENT_TYPE = 2;
+}
+
+// How a DataGateway writes language codes. Search and fetch requests carry
+// the search language in their `locale` field: the server translates it into
+// the first of `accepted_request_formats` it can produce, and reads the
+// language codes the DataGateway sends as `response_format`.
+//
+// The server doesn't translate yet. Declare accurate formats anyway, so that
+// nothing changes for the DataGateway when it does.
+message LanguageCodeFormats {
+  // The formats it accepts on requests, most preferred first.
+  repeated LanguageCodeFormat accepted_request_formats = 1;
+
+  // The format of the language codes in the LanguageData it sends.
+  LanguageCodeFormat response_format = 2;
+
+  // When true, the server sends the search language untranslated and
+  // ignores `accepted_request_formats`. For a DataGateway whose upstream
+  // does more with the language than filter by it, such as ranking results
+  // by region or localizing them.
+  bool passthrough_search_language = 3;
+}
+
+// The form a DataGateway's free text arrives in, such as a game's
+// description or summary.
+enum ContentFormat {
+  CONTENT_FORMAT_UNSPECIFIED = 0;
+  CONTENT_FORMAT_PLAIN_TEXT = 1;
+  CONTENT_FORMAT_HTML = 2;
+  CONTENT_FORMAT_BBCODE = 3;
+  CONTENT_FORMAT_MARKDOWN = 4;
 }
 
 message ListLanguagesRequest {
   optional string correlation_id = 1;
 }
 
-// One language a gateway supports, in the gateway's native vocabulary.
-// Returned by ListLanguages during the host's capabilities interview and
+// One language a DataGateway supports, in the DataGateway's native
+// vocabulary. Returned by ListLanguages during the server's interview and
 // upserted into LanguageGatewayLink rows.
 message GatewayLanguageEntry {
-  // The gateway-native value exactly as it appears in this gateway's
+  // The DataGateway's native value, exactly as it appears in its
   // LanguageData and accepted request parameters: "en-US" (IETF_BCP_47),
   // "eng" (ISO_639_3), "English" (NAME).
   string value = 1;
@@ -69,9 +148,9 @@ message GatewayLanguageEntry {
   // How to interpret `value`.
   LanguageCodeFormat format = 2;
 
-  // Optional enrichments — gateways fill only what they genuinely know.
-  // A valid ietf_tag lets the host auto-resolve (and, policy permitting,
-  // auto-add) the language without curation.
+  // Optional details. DataGateways fill only what they genuinely know.
+  // A valid ietf_tag lets the server auto-resolve (and, policy permitting,
+  // auto-add) the language without review.
   optional string ietf_tag = 3;
   optional string iso6393 = 4;
   optional string iso6391 = 5;

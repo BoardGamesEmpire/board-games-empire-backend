@@ -25,20 +25,34 @@ describe('the BoardGameGeek gateway over gRPC', () => {
     const sentAt = Date.now();
     const reply = await gateway().ping('e2e-ping');
 
-    expect(reply).toMatchObject({
-      correlationId: 'e2e-ping',
-      gatewayName: 'BoardGameGeekGateway',
-      supportedServices: ['GatewayService'],
-      languagePreferences: {
-        acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
-        responseFormat: 'LANGUAGE_CODE_FORMAT_NAME',
-        passthroughRawLocale: false,
-      },
-    });
+    expect(reply).toMatchObject({ correlationId: 'e2e-ping', gatewayName: 'BoardGameGeekGateway' });
 
     // An int64 on the wire: the server's clock reading, taken during the call.
     expect(Number(reply.timestampMs)).toBeGreaterThanOrEqual(sentAt);
     expect(Number(reply.timestampMs)).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('describes its operations, coverage and formats on Describe, and echoes the correlation id', async () => {
+    await expect(gateway().describe('e2e-describe')).resolves.toEqual({
+      correlationId: 'e2e-describe',
+      capabilities: [
+        'CAPABILITY_SEARCH',
+        'CAPABILITY_FETCH',
+        'CAPABILITY_FETCH_EXPANSIONS',
+        'CAPABILITY_LIST_LANGUAGES',
+      ],
+      coverage: {
+        platformTypes: ['PLATFORM_TYPE_TABLETOP'],
+        contentTypes: ['CONTENT_TYPE_BASE_GAME', 'CONTENT_TYPE_EXPANSION'],
+      },
+      filterableAxes: [],
+      languageCodeFormats: {
+        acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
+        responseFormat: 'LANGUAGE_CODE_FORMAT_NAME',
+        passthroughSearchLanguage: false,
+      },
+      contentFormat: 'CONTENT_FORMAT_PLAIN_TEXT',
+    });
   });
 
   it('lists its languages by English display name', async () => {

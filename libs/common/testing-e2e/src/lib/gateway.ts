@@ -64,18 +64,29 @@ interface LaunchedGateway {
   readonly address: string;
 }
 
-/** Ping's reply as the client decodes it: int64 as a decimal string, enums by name. */
+/** Ping's reply as the client decodes it: int64 as a decimal string. */
 export interface GatewayPingReply {
   readonly correlationId: string;
   readonly timestampMs: string;
   readonly gatewayName: string;
   readonly gatewayVersion: string;
-  readonly supportedServices: readonly string[];
-  readonly languagePreferences: {
+}
+
+/** Describe's reply as the client decodes it: enums by name, an unset message as null. */
+export interface GatewayDescribeReply {
+  readonly correlationId: string;
+  readonly capabilities: readonly string[];
+  readonly coverage: {
+    readonly platformTypes: readonly string[];
+    readonly contentTypes: readonly string[];
+  } | null;
+  readonly filterableAxes: readonly string[];
+  readonly languageCodeFormats: {
     readonly acceptedRequestFormats: readonly string[];
     readonly responseFormat: string;
-    readonly passthroughRawLocale: boolean;
+    readonly passthroughSearchLanguage: boolean;
   } | null;
+  readonly contentFormat: string;
 }
 
 export interface GatewayLanguage {
@@ -101,6 +112,7 @@ export interface GatewayHealthReply {
 export interface GatewayClient {
   ping(correlationId: string): Promise<GatewayPingReply>;
   check(): Promise<GatewayHealthReply>;
+  describe(correlationId: string): Promise<GatewayDescribeReply>;
   listLanguages(correlationId: string): Promise<GatewayLanguagesReply>;
   close(): void;
 }
@@ -160,6 +172,7 @@ function connectGateway(app: string, address: string): GatewayClient {
   return {
     ping: (correlationId) => call('Ping', { correlationId }),
     check: () => call('Check', { service: '' }),
+    describe: (correlationId) => call('Describe', { correlationId }),
     listLanguages: (correlationId) => call('ListLanguages', { correlationId }),
     close: () => client.close(),
   };

@@ -6,7 +6,7 @@ import { Observable, from, merge, of } from 'rxjs';
 import { catchError, endWith, filter, map, mergeMap, shareReplay, tap } from 'rxjs/operators';
 import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
 import { IGDBService } from '../igdb/igdb.service';
-import { toGameData, toGameSearchData } from '../mappers/game.mapper';
+import { IGDB_CONTENT_TYPES, IGDB_PLATFORM_TYPES, toGameData, toGameSearchData } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { IgdbGame } from '../types';
 
@@ -22,15 +22,32 @@ export class DataGatewayService implements GatewayServiceHost {
       timestampMs: BigInt(Date.now()),
       gatewayName: 'IgdbGateway',
       gatewayVersion: '1.0.0',
-      supportedServices: ['GatewayService'],
-      languagePreferences: {
+    };
+  }
+
+  describe(request: proto.DescribeRequest): proto.DescribeResponse {
+    return {
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      capabilities: [
+        proto.Capability.CAPABILITY_SEARCH,
+        proto.Capability.CAPABILITY_FETCH,
+        proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+        proto.Capability.CAPABILITY_LIST_LANGUAGES,
+      ],
+
+      coverage: { platformTypes: [...IGDB_PLATFORM_TYPES], contentTypes: [...IGDB_CONTENT_TYPES] },
+      filterableAxes: [],
+      languageCodeFormats: {
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_ISO_639_1,
         ],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
-        passthroughRawLocale: false,
+        passthroughSearchLanguage: false,
       },
+
+      /** IGDB's summaries, sent as descriptions too, are plain text. */
+      contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
     };
   }
 

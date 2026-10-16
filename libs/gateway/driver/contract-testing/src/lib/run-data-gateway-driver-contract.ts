@@ -2,9 +2,16 @@ import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contrac
 import * as proto from '@boardgamesempire/proto-gateway';
 import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { firstValueFrom, lastValueFrom, toArray } from 'rxjs';
+import { OPERATIONS } from './operations.js';
 
 export interface DataGatewayDriverContractContext {
   driver: DataGatewayDriver;
+
+  /**
+   * The operations the driver serves. Its `describe` must declare exactly
+   * these, and only their cases run.
+   */
+  capabilities: proto.Capability[];
 
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
@@ -16,6 +23,14 @@ export interface DataGatewayDriverContractContext {
   searchQuery: string;
 }
 
+/** Every form a DataGateway's free text can take. */
+const CONTENT_FORMATS: readonly proto.ContentFormat[] = [
+  proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+  proto.ContentFormat.CONTENT_FORMAT_HTML,
+  proto.ContentFormat.CONTENT_FORMAT_BBCODE,
+  proto.ContentFormat.CONTENT_FORMAT_MARKDOWN,
+];
+
 type Setup = () => DataGatewayDriverContractContext | Promise<DataGatewayDriverContractContext>;
 type Teardown = (ctx: DataGatewayDriverContractContext) => void | Promise<void>;
 
@@ -25,10 +40,16 @@ type Teardown = (ctx: DataGatewayDriverContractContext) => void | Promise<void>;
  * a stubbed transport), and the in-memory reference alike. Mirrors the
  * storage driver contract-testing pattern.
  *
+ * A DataGateway may declare any subset of the operations, so each run names
+ * the ones its driver serves, and only their cases run. A case checks that
+ * `describe` declares exactly those, so a driver that stops declaring one
+ * fails, rather than passing that operation's cases without running them.
+ *
  * Usage:
  * ```ts
  * runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
- *   driver: new InMemoryGatewayDriver({ games: [game], searchResults: [data] }),
+ *   driver: new InMemoryGatewayDriver({ games: [game], capabilities: [proto.Capability.CAPABILITY_FETCH] }),
+ *   capabilities: [proto.Capability.CAPABILITY_FETCH],
  *   knownExternalId: game.externalId,
  *   unknownExternalId: 'nope',
  *   searchQuery: 'catan',
@@ -47,6 +68,19 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
       await teardown?.(ctx);
     });
 
+    /**
+     * A case for one operation, which runs only when the run names it. Jest
+     * can't skip a test once it has started, so for any other operation the
+     * case passes without calling it.
+     */
+    const itWhenDeclared = (operation: proto.Capability, name: string, test: () => Promise<void>): void => {
+      it(name, async () => {
+        if (ctx.capabilities.includes(operation)) {
+          await test();
+        }
+      });
+    };
+
     it('ping emits a single response and completes', async () => {
       const response = await lastValueFrom(ctx.driver.ping({ correlationId: 'contract-ping' }));
 
@@ -59,49 +93,100 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
       expect(response.status).toBe(proto.HealthCheckResponse_ServingStatus.SERVING);
     });
 
-    it('searchGames streams at least one RESULT frame and terminates with SOURCE_DONE', async () => {
-      const frames = await lastValueFrom(
-        ctx.driver.searchGames({ correlationId: 'contract-search', query: ctx.searchQuery }).pipe(toArray()),
+    it('describe answers once, declaring only operations this contract defines', async () => {
+      const responses = await lastValueFrom(
+        ctx.driver.describe({ correlationId: 'contract-describe' }).pipe(toArray()),
       );
 
-      expect(frames.length).toBeGreaterThanOrEqual(2);
-      expect(frames.some((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT && frame.game)).toBe(true);
-      expect(frames[frames.length - 1]?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+      expect(responses).toHaveLength(1);
+      expect(responses[0].capabilities.filter((capability) => !OPERATIONS.includes(capability))).toEqual([]);
     });
 
-    it('fetchGame resolves a known externalId with game data', async () => {
-      const response = await firstValueFrom(
-        ctx.driver.fetchGame({ correlationId: 'contract-fetch', externalId: ctx.knownExternalId }),
+    it('describe declares exactly the operations the run names', async () => {
+      const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-capabilities' }));
+
+      expect(new Set(response.capabilities)).toEqual(new Set(ctx.capabilities));
+    });
+
+    it('describe declares its content format as plain text, HTML, BBCode or Markdown', async () => {
+      const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-content-format' }));
+
+      expect(CONTENT_FORMATS).toContain(response.contentFormat);
+    });
+
+    describe('when it declares search', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_SEARCH,
+        'searchGames streams at least one RESULT frame and terminates with SOURCE_DONE',
+        async () => {
+          const frames = await lastValueFrom(
+            ctx.driver.searchGames({ correlationId: 'contract-search', query: ctx.searchQuery }).pipe(toArray()),
+          );
+
+          expect(frames.length).toBeGreaterThanOrEqual(2);
+          expect(frames.some((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT && frame.game)).toBe(
+            true,
+          );
+          expect(frames[frames.length - 1]?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        },
+      );
+    });
+
+    describe('when it declares fetch', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH,
+        'fetchGame resolves a known externalId with game data',
+        async () => {
+          const response = await firstValueFrom(
+            ctx.driver.fetchGame({ correlationId: 'contract-fetch', externalId: ctx.knownExternalId }),
+          );
+
+          expect(response.game?.externalId).toBe(ctx.knownExternalId);
+        },
       );
 
-      expect(response.game?.externalId).toBe(ctx.knownExternalId);
-    });
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH,
+        'fetchGame answers a clean not-found as a response, never an errored stream',
+        async () => {
+          // Consumers exempt healthy not-found interactions from auto-disable
+          // tracking; a driver that throws here would let a handful of bad ids
+          // disable a perfectly healthy DataGateway.
+          const response = await firstValueFrom(
+            ctx.driver.fetchGame({ correlationId: 'contract-miss', externalId: ctx.unknownExternalId }),
+          );
 
-    it('fetchGame answers a clean not-found as a response, never an errored stream', async () => {
-      // Consumers exempt healthy not-found interactions from auto-disable
-      // tracking; a driver that throws here would let a handful of bad ids
-      // disable a perfectly healthy gateway.
-      const response = await firstValueFrom(
-        ctx.driver.fetchGame({ correlationId: 'contract-miss', externalId: ctx.unknownExternalId }),
+          expect(response.game).toBeUndefined();
+        },
       );
-
-      expect(response.game).toBeUndefined();
     });
 
-    it('fetchExpansions returns a terminating stream', async () => {
-      const frames = await lastValueFrom(
-        ctx.driver
-          .fetchExpansions({ correlationId: 'contract-expansions', baseExternalId: ctx.knownExternalId })
-          .pipe(toArray()),
+    describe('when it declares fetch expansions', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+        'fetchExpansions returns a terminating stream',
+        async () => {
+          const frames = await lastValueFrom(
+            ctx.driver
+              .fetchExpansions({ correlationId: 'contract-expansions', baseExternalId: ctx.knownExternalId })
+              .pipe(toArray()),
+          );
+
+          expect(Array.isArray(frames)).toBe(true);
+        },
       );
-
-      expect(Array.isArray(frames)).toBe(true);
     });
 
-    it('listLanguages resolves with an entry array', async () => {
-      const response = await firstValueFrom(ctx.driver.listLanguages({ correlationId: 'contract-langs' }));
+    describe('when it declares list languages', () => {
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_LIST_LANGUAGES,
+        'listLanguages resolves with an entry array',
+        async () => {
+          const response = await firstValueFrom(ctx.driver.listLanguages({ correlationId: 'contract-langs' }));
 
-      expect(Array.isArray(response.languages)).toBe(true);
+          expect(Array.isArray(response.languages)).toBe(true);
+        },
+      );
     });
 
     it('dispose is safe to call twice', async () => {

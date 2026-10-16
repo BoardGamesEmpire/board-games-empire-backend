@@ -12,12 +12,13 @@ import {
   searchGamesRequest,
 } from '../bgg-requests/game.requests';
 import { BggService } from '../bgg/bgg.service';
-import { BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
+import { BggThingType, DEFAULT_BGG_SEARCH_TYPES, MAX_THINGS_PER_BATCH } from '../constants';
 import {
   getOutboundExpansionIds,
   searchItemToGameSearchData,
   thingToGameData,
   thingToGameSearchData,
+  toContentTypes,
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import type { BggThing } from '../types';
@@ -37,18 +38,39 @@ export class DataGatewayService implements GatewayServiceHost {
       timestampMs: BigInt(Date.now()),
       gatewayName: 'BoardGameGeekGateway',
       gatewayVersion: '1.0.0',
-      supportedServices: ['GatewayService'],
+    } satisfies proto.GatewayPingResponse;
+  }
+
+  describe(request: proto.DescribeRequest): proto.DescribeResponse {
+    return {
+      correlationId: request.correlationId ?? crypto.randomUUID(),
+      capabilities: [
+        proto.Capability.CAPABILITY_SEARCH,
+        proto.Capability.CAPABILITY_FETCH,
+        proto.Capability.CAPABILITY_FETCH_EXPANSIONS,
+        proto.Capability.CAPABILITY_LIST_LANGUAGES,
+      ],
+
+      /** The kinds of thing search and fetch ask BGG for, as the game mapper types them. */
+      coverage: {
+        platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+        contentTypes: toContentTypes([...DEFAULT_BGG_SEARCH_TYPES, ...FETCH_GAME_TYPES, ...EXPANSION_BATCH_TYPES]),
+      },
+      filterableAxes: [],
 
       /**
-       * Language preferences advertised on Ping. BGG accepts and emits English
-       * language display names ("English", "Afrikaans"); not BCP 47 or ISO codes.
+       * BGG accepts and emits English language display names ("English",
+       * "Afrikaans"); not BCP 47 or ISO codes.
        */
-      languagePreferences: {
+      languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_NAME,
-        passthroughRawLocale: false,
+        passthroughSearchLanguage: false,
       },
-    } satisfies proto.GatewayPingResponse;
+
+      /** BGG's descriptions carry no markup. Their entities still arrive encoded; #716 decodes them. */
+      contentFormat: proto.ContentFormat.CONTENT_FORMAT_PLAIN_TEXT,
+    } satisfies proto.DescribeResponse;
   }
 
   listLanguages(request: proto.ListLanguagesRequest): proto.ListLanguagesResponse {

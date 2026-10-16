@@ -31,9 +31,9 @@ function toIsoDate(unixSeconds: number): string {
 /**
  * Maps IGDB `category` to the proto ContentType.
  *
- * IGDB values not covered (mod=5, episode=6, season=7, expanded_game=10,
- * port=11, fork=12) have no direct BGE equivalent and fall through to
- * CONTENT_TYPE_UNSPECIFIED.
+ * Types with no direct BGE equivalent take the nearest one: an episode or a
+ * pack/add-on is DLC, a season is a bundle, and a fork is a base game. Only
+ * update=14 is left out, and falls through to CONTENT_TYPE_UNSPECIFIED.
  */
 const IGDB_CONTENT_TYPE_MAP: Readonly<Partial<Record<IgdbGameType, proto.ContentType>>> = {
   [GameType.MainGame]: proto.ContentType.CONTENT_TYPE_BASE_GAME,
@@ -56,6 +56,15 @@ const IGDB_CONTENT_TYPE_MAP: Readonly<Partial<Record<IgdbGameType, proto.Content
 function toContentType(category: IgdbGameType | undefined): proto.ContentType {
   return (category !== undefined && IGDB_CONTENT_TYPE_MAP[category]) || proto.ContentType.CONTENT_TYPE_UNSPECIFIED;
 }
+
+/**
+ * Every content type the map names, which the DataGateway declares as its
+ * coverage. A game of a type it leaves out, an update or one IGDB adds later,
+ * can still come back, with its content type unspecified.
+ */
+export const IGDB_CONTENT_TYPES: readonly proto.ContentType[] = [
+  ...new Set(Object.values(IGDB_CONTENT_TYPE_MAP).filter((type): type is proto.ContentType => type !== undefined)),
+];
 
 /**
  * IGDB platform_type → proto PlatformType.
@@ -87,6 +96,19 @@ function toPlatformData(platform: IgdbPlatform): proto.PlatformData {
     platformType,
   };
 }
+
+/**
+ * Every platform type toPlatformData produces, which the DataGateway declares
+ * as its coverage: the map's, mobile for iOS and Android, and other for a
+ * platform type the map doesn't name.
+ */
+export const IGDB_PLATFORM_TYPES: readonly proto.PlatformType[] = [
+  ...new Set([
+    ...Object.values(IGDB_PLATFORM_TYPE_MAP),
+    proto.PlatformType.PLATFORM_TYPE_MOBILE,
+    proto.PlatformType.PLATFORM_TYPE_OTHER,
+  ]),
+];
 
 /**
  * IGDB game-level `status` → proto ReleaseStatus.
