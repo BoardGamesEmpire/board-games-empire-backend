@@ -32,11 +32,11 @@ BGE uses **three logical databases**, each with its own purpose and isolation
 guarantees. They can live on the same Redis server (default), on three
 different servers, or any combination.
 
-| Database | Default `db:` | Purpose                                                                          | Client library                |
-| -------- | ------------- | -------------------------------------------------------------------------------- | ----------------------------- |
-| Cache    | `0`           | App-level cache, gateway config events pub/sub, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
-| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                    | `node-redis`                  |
-| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                  | `iovalkey`                    |
+| Database | Default `db:` | Purpose                                                                                                                           | Client library                |
+| -------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Cache    | `0`           | App-level cache, pub/sub for DataGateway config, outbound HTTP policy and plugin config updates, health checks, **rate limiting** | `iovalkey` (via `@bge/redis`) |
+| Sockets  | `1`           | Socket.IO streams adapter for cross-instance WebSocket events                                                                     | `node-redis`                  |
+| Queue    | `2`           | BullMQ jobs (game imports, enrichment, fan-out)                                                                                   | `iovalkey`                    |
 
 Rate-limit counters share the cache connection rather than opening a fourth
 (#341). They are small, short-lived and namespaced under `bge:throttle:`, and a
@@ -362,12 +362,18 @@ cycles feel slow.
 
 Per-process connection counts depend on which connections are configured:
 
-| Process        | iovalkey (cache) | iovalkey (queue) | node-redis (sockets) | BullMQ workers                 |
-| -------------- | ---------------- | ---------------- | -------------------- | ------------------------------ |
-| Main API       | 1                | 1                | 1                    | 0                              |
-| Coordinator    | 1                | 1 producer       | 0                    | 0                              |
-| Worker         | 1                | 1 producer       | 0                    | 1 blocking per worker instance |
-| Gateway worker | 1                | 1 producer       | 0                    | 1 blocking per worker instance |
+| Process        | iovalkey (cache) | iovalkey (cache subscribers) | iovalkey (queue) | node-redis (sockets) | BullMQ workers                 |
+| -------------- | ---------------- | ---------------------------- | ---------------- | -------------------- | ------------------------------ |
+| Main API       | 1                | 2                            | 1                | 1                    | 0                              |
+| Coordinator    | 1                | 1                            | 1 producer       | 0                    | 0                              |
+| Worker         | 1                | 1                            | 1 producer       | 0                    | 1 blocking per worker instance |
+| Gateway worker | 1                | 1                            | 1 producer       | 0                    | 1 blocking per worker instance |
+
+A subscriber is a dedicated connection: a client in subscribe mode can run no
+other commands, so each update channel a process listens on gets its own
+duplicate of the cache connection. The api listens for outbound HTTP policy
+and plugin config updates, the worker for outbound HTTP policy updates, and
+the coordinator and gateway worker for DataGateway config events.
 
 Default Redis `maxclients` is 10000 — well above typical needs even with
 many worker replicas. Check `CLIENT LIST` to see who's connected; the BGE
