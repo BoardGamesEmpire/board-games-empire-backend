@@ -1,6 +1,9 @@
+import { authConfigValidationSchema } from '@bge/auth';
 import { coordinatorClientConfigValidationSchema } from '@bge/coordinator';
+import { healthConfigValidationSchema } from '@bge/health';
+import { prometheusConfigValidationSchema } from '@bge/metrics';
 import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
-import { bgeIdentityConfigValidationSchema } from '@bge/well-known';
+import { bgeIdentityConfigValidationSchema, securityTxtConfigValidationSchema } from '@bge/well-known';
 import Joi from 'joi';
 import cache, { cacheConfigValidationSchema } from './cache.config';
 import plugins, { pluginsConfigValidationSchema } from './plugins.config';
@@ -24,14 +27,23 @@ export const configuration = {
   throttle,
 };
 
+/**
+ * Every variable the api reads, from its own configs and from those its
+ * modules load with `forFeature`, which validates nothing. The database's are
+ * validated by the bootstrap's own `ConfigModule` (`BootstrapModule`).
+ */
 export const configurationValidationSchema = Joi.object({
+  ...authConfigValidationSchema,
   ...bgeIdentityConfigValidationSchema,
   ...cacheConfigValidationSchema,
   ...coordinatorClientConfigValidationSchema,
+  ...healthConfigValidationSchema,
   ...mediaConfigValidationSchema,
   ...pluginsConfigValidationSchema,
+  ...prometheusConfigValidationSchema,
   ...redisConfigValidationSchema,
   ...redisQueueConfigValidationSchema,
+  ...securityTxtConfigValidationSchema,
   ...systemConfigValidationSchema,
   ...swaggerConfigValidationSchema,
   ...throttleConfigValidationSchema,

@@ -27,7 +27,12 @@ export default registerAs('auth', () =>
     {
       keyTo: 'url',
       key: 'BETTER_AUTH_URL',
-      defaultValue: 'http://localhost',
+      // Sign-in fails at an address clients don't reach, so a server reachable
+      // from outside names its own.
+      defaultsFor: {
+        development: 'http://localhost',
+        test: 'http://localhost',
+      },
     },
     {
       keyTo: 'trustedOrigins',
@@ -74,14 +79,23 @@ export default registerAs('auth', () =>
   ]),
 );
 
+/**
+ * For the api's root schema: the auth module loads this config with
+ * `forFeature`, which validates nothing. The secret and the URL are not
+ * required here, because the config above defaults them in development and
+ * test, and Joi runs first: a required variable would stop a development boot
+ * that has no `.env`. Where the config has no default, it refuses to start
+ * without them. The rules still reject a value that is set but malformed.
+ * Each accepts `''`, which `@bge/env` reads as unset.
+ */
 export const authConfigValidationSchema = {
-  BETTER_AUTH_SECRET: Joi.string().min(10).required(),
-  BETTER_AUTH_URL: Joi.string().uri().required(),
+  BETTER_AUTH_SECRET: Joi.string().min(10).allow(''),
+  BETTER_AUTH_URL: Joi.string().uri().allow(''),
   OIDC_CLIENT_ID: Joi.string().optional().allow(''),
   OIDC_CLIENT_SECRET: Joi.string().optional().allow(''),
   OIDC_PROVIDER_ID: Joi.string().optional().allow(''),
   OIDC_WELL_KNOWN_URL: Joi.string().uri().optional().allow(''),
-  TRUSTED_ORIGINS: Joi.string().optional(),
-  DISABLE_ORIGIN_CHECK: Joi.boolean().optional(),
-  USE_EMAIL_PASSWORD_AUTH: Joi.boolean().optional(),
+  TRUSTED_ORIGINS: Joi.string().optional().allow(''),
+  DISABLE_ORIGIN_CHECK: Joi.boolean().optional().allow(''),
+  USE_EMAIL_PASSWORD_AUTH: Joi.boolean().optional().allow(''),
 };

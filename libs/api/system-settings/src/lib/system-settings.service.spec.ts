@@ -1,7 +1,6 @@
 import { Prisma } from '@bge/database';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { ConflictException, HttpStatus, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import type { SystemSettingsView } from './read-shapes';
 import { SystemSettingsService } from './system-settings.service';
 
@@ -16,13 +15,7 @@ describe('SystemSettingsService', () => {
 
   beforeEach(async () => {
     const ctx = await createTestingModuleWithDb({
-      providers: [
-        SystemSettingsService,
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn(), getOrThrow: jest.fn() },
-        },
-      ],
+      providers: [SystemSettingsService],
     });
 
     db = ctx.db;
