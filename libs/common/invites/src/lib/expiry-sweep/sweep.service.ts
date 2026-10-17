@@ -34,7 +34,11 @@ const SWEEP_BATCH_SIZE = 500;
  * At shutdown a run finishes the batch in flight and starts no other. The
  * audit listener detaches and the pool ends in `onApplicationShutdown`, which
  * Nest runs only after this class's `beforeApplicationShutdown` resolves, so
- * that last batch still commits on a live pool and is still audited.
+ * that last batch still commits on a live pool, and its announcements reach
+ * the audit listener while it is still attached. The listener saves its rows
+ * without being awaited, though, so a save that hasn't reached the pool by
+ * the time it ends is lost. That gap is every listener's, not the sweep's
+ * alone, and #738 tracks making the pool wait for those saves.
  */
 @Injectable()
 export class InviteExpirySweepService implements BeforeApplicationShutdown {
