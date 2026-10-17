@@ -27,6 +27,7 @@ import {
   UpdatePluginConfigDto,
 } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+import { canReadServerPlugins } from './policies/read-server-plugins.policy';
 
 const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, 'plugins');
 
@@ -39,7 +40,9 @@ const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, '
  * `purgeData` belongs in a body, which DELETE should not carry.
  *
  * The coarse `manage:plugin` CASL gate lives here; the service seam
- * re-verifies server-admin authority and owns every domain rule. Actor
+ * re-verifies server-admin authority and owns every domain rule. The reads
+ * gate on {@link canReadServerPlugins} rather than a bare type check, which
+ * every user's identity-column grant would pass. Actor
  * identity is resolved from CLS at this edge and passed into the runtime
  * input — never read from a request body.
  */
@@ -76,7 +79,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Ok, type: PaginatedPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: read immediately after the lifecycle
   // writes that change it, which must be visible on the re-read.
   @Get()
@@ -146,7 +149,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: it exists to be read right before a
   // decide POST, and the decide's write must be visible on the re-read.
   @Get(':slug/consent')
@@ -324,7 +327,7 @@ export class PluginsController {
     status: Http.UnprocessableEntity,
     description: 'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design)',
   })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // The approval screen must stay out of the response cache — it exists to be
   // read right before approve/reject, and the comparison is recomputed
   // against TODAY's decisions. Serving it from the response cache would hand
@@ -348,7 +351,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: consent decisions must be visible on
   // the next read (#60).
   @Get(':slug/features')
@@ -386,7 +389,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   @Get(':slug')
   getBySlug(@Param('slug') slug: string) {
     return from(this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined)).pipe(

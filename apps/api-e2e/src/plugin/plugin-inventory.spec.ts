@@ -8,7 +8,7 @@ import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 /**
  * The wire half of #354 — the only plugin reads that answer before a slug is
- * known. Pinned here: the `read:plugin` gate on the server surface (the one
+ * known. Pinned here: the column gate on the server surface (the one
  * that serves provenance), the household instance gate, the actor-kind floor
  * on the user surface, the #230 envelope, the D-CH tombstone asymmetry, the
  * D-CF orphan flag, the D-CG per-row degradation, and the privilege split
@@ -172,6 +172,57 @@ describe('installed-plugin inventory (#354)', () => {
         displayName: null,
         description: null,
         manifestUnreadable: true,
+      });
+    });
+  });
+
+  // Every user holds `read:plugin:installed` for the unit lists, and a bare
+  // type check would pass on it. The server reads serve what that grant's
+  // field list leaves out, so they gate on one of those columns instead.
+  describe('the server reads refuse the grant every user holds', () => {
+    const SERVER_READS: readonly { readonly name: string; readonly path: (slug: string) => string }[] = [
+      { name: 'GET /plugins', path: () => '/api/plugins' },
+      { name: 'GET /plugins/:slug', path: (slug) => `/api/plugins/${slug}` },
+      { name: 'GET /plugins/:slug/consent', path: (slug) => `/api/plugins/${slug}/consent` },
+      { name: 'GET /plugins/:slug/update/pending', path: (slug) => `/api/plugins/${slug}/update/pending` },
+      { name: 'GET /plugins/:slug/features', path: (slug) => `/api/plugins/${slug}/features` },
+    ];
+
+    const statuses = async (actor: SessionActor, slug: string): Promise<Record<string, number>> => {
+      const answered: Record<string, number> = {};
+
+      for (const route of SERVER_READS) {
+        answered[route.name] = (await request(baseUrl).get(route.path(slug)).set(actor.headers)).status;
+      }
+
+      return answered;
+    };
+
+    it('answers 403 to a plain user on all five', async () => {
+      const user = await actors.user();
+      const plugin = await arrangePlugin();
+
+      // The control: the user does hold a rule on Plugin, so the refusals below
+      // are the column gate's and not a missing grant's.
+      const own = await listUser(user, '?limit=100').expect(200);
+      expect(entryFor(own.body, plugin.slug)).toBeDefined();
+
+      await expect(statuses(user, plugin.slug)).resolves.toEqual(
+        Object.fromEntries(SERVER_READS.map((route) => [route.name, 403])),
+      );
+    });
+
+    it('lets Admin through on all five', async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangePlugin();
+
+      // Nothing is staged, so the pending read is the service's 409.
+      await expect(statuses(admin, plugin.slug)).resolves.toEqual({
+        'GET /plugins': 200,
+        'GET /plugins/:slug': 200,
+        'GET /plugins/:slug/consent': 200,
+        'GET /plugins/:slug/update/pending': 409,
+        'GET /plugins/:slug/features': 200,
       });
     });
   });

@@ -401,21 +401,31 @@ describe('PluginsController (delegation)', () => {
 
   // The controller specs instantiate the class directly, so a dropped
   // @CheckPolicies would change nothing they assert. These read the decorator
-  // metadata instead: without them, deleting the `read:plugin` gate from a
-  // route that serves installedSha256/installedFromUrl/installedAt would pass
-  // the whole suite.
+  // metadata instead: without them, deleting the read gate from a route that
+  // serves installedSha256/installedFromUrl/installedAt would pass the whole
+  // suite.
   describe('policy gates', () => {
     const policiesFor = (handler: keyof PluginsController) =>
       Reflect.getMetadata(CHECK_POLICIES_KEY, PluginsController.prototype[handler]) as
         | Array<(ability: AppAbility) => boolean>
         | undefined;
 
+    // A bare `can(read, Plugin)` would pass every user's identity-column grant,
+    // so each server read asks about a column that grant leaves out.
+    it.each(['list', 'getBySlug', 'featureStates', 'consentPresentation', 'pendingUpdate'] as const)(
+      '%s gates on read:Plugin for the server-only installedAt column',
+      (handler) => {
+        const handlers = policiesFor(handler);
+        expect(handlers).toHaveLength(1);
+
+        const can = jest.fn().mockReturnValue(true);
+        handlers?.[0]({ can } as unknown as AppAbility);
+
+        expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Plugin, 'installedAt');
+      },
+    );
+
     it.each([
-      ['list', Action.read],
-      ['getBySlug', Action.read],
-      ['featureStates', Action.read],
-      ['consentPresentation', Action.read],
-      ['pendingUpdate', Action.read],
       ['decideGrant', Action.manage],
       ['enable', Action.manage],
       ['disable', Action.manage],

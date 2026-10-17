@@ -93,6 +93,9 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   Plugin: {
     Admin: { 'manage:plugin': 'every row', 'read:plugin': 'every row' },
+    // Not the answer set anywhere. The two unit lists compose a scope of
+    // their own against it, and the server list's column gate refuses it.
+    User: { 'read:plugin:installed': 'fixed filter' },
   },
   PluginGrant: {},
   HouseholdPlugin: {
@@ -101,7 +104,11 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   UserPlugin: {},
   PluginLifecycleEvent: {},
-  User: {},
+  // User search composes its own scope against it: the name match, and the
+  // caller left out.
+  User: {
+    User: { 'read:user:searchable': 'fixed filter' },
+  },
   UserProfile: {
     User: { 'read:user:profile': 'every row' },
   },
