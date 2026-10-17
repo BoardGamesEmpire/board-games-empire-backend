@@ -297,7 +297,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         } catch (releaseError) {
           logger.warn(
             `The bootstrap lock could not be released after the sequence failed: ${messageOf(releaseError)}. ` +
-              'The session ends with this process, and the lock with it.',
+              'It ends with its connection, at the latest when this process exits.',
           );
           root.recordException(releaseError instanceof Error ? releaseError : messageOf(releaseError));
         }

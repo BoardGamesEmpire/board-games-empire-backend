@@ -14,6 +14,14 @@
 /** Escape hatch: point the suite at an existing Postgres instead of a container. */
 export const E2E_DATABASE_URL_VAR = 'BGE_E2E_DATABASE_URL';
 
+/**
+ * Where another container reaches the harness's Postgres, as `host:port`: the
+ * connection pooler the bootstrap spec starts (#596), for which the host in
+ * `DATABASE_URL` is its own container. `global-setup` sets it for the Postgres
+ * container it starts; with {@link E2E_DATABASE_URL_VAR}, set it by hand.
+ */
+export const E2E_DATABASE_CONTAINER_ADDRESS_VAR = 'BGE_E2E_DATABASE_CONTAINER_ADDRESS';
+
 /** Escape hatch: point the suite at an existing Redis instead of a container. */
 export const E2E_REDIS_URL_VAR = 'BGE_E2E_REDIS_URL';
 
