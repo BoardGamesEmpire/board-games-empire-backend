@@ -227,10 +227,8 @@ describe('e2e-env (pure logic)', () => {
 
   describe('workerEnvOverrides', () => {
     it('pins the same NODE_ENV the API child runs under', () => {
-      // The worker has no NODE_ENV schema of its own, so a wrong value does not
-      // fail validation outright. It fails one step later: `@bge/env` keys
-      // `defaultsFor` maps on it, and under a name it doesn't know the media
-      // root has no default and the worker exits during boot.
+      // `@bge/env` keys `defaultsFor` maps on it, so the worker resolves
+      // `DATA_ENCRYPTION_KEY` to the API's key only under the API's value.
       expect(workerEnvOverrides().NODE_ENV).toBe(API_NODE_ENV);
     });
 

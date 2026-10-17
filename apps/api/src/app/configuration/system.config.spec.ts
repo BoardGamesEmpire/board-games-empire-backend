@@ -1,5 +1,7 @@
-import { missingVariables, withEnvironment } from '@bge/testing';
+import { missingVariables, withEnvironment, WORKSPACE_ROOT } from '@bge/testing';
 import Joi from 'joi';
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import systemConfig, { systemConfigValidationSchema } from './system.config';
 
 const schema = Joi.object(systemConfigValidationSchema);
@@ -15,6 +17,15 @@ describe("the api's system config", () => {
 
   it('rejects NODE_ENV=testing, which no per-environment default is keyed on', () => {
     expect(validate({ NODE_ENV: 'testing' }).error?.message).toMatch(/NODE_ENV/);
+  });
+
+  // The suites start the api under these.
+  it('accepts every NODE_ENV the CI workflow runs under', () => {
+    const workflow = readFileSync(path.join(WORKSPACE_ROOT, '.github', 'workflows', 'ci.yml'), 'utf8');
+    const values = [...workflow.matchAll(/^\s*NODE_ENV:\s*['"]?([\w-]+)/gm)].map(([, value]) => value);
+
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.filter((value) => validate({ NODE_ENV: value }).error)).toEqual([]);
   });
 
   it.each(['development', 'test'])('resolves under NODE_ENV=%s with nothing set', (environment) => {

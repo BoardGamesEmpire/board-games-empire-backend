@@ -1,9 +1,11 @@
 import { authConfigValidationSchema } from '@bge/auth';
 import { coordinatorClientConfigValidationSchema } from '@bge/coordinator';
+import { env } from '@bge/env';
 import { healthConfigValidationSchema } from '@bge/health';
 import { prometheusConfigValidationSchema } from '@bge/metrics';
 import { mediaConfig, mediaConfigValidationSchema } from '@bge/storage';
 import { bgeIdentityConfigValidationSchema, securityTxtConfigValidationSchema } from '@bge/well-known';
+import type { ConfigModuleOptions } from '@nestjs/config';
 import Joi from 'joi';
 import cache, { cacheConfigValidationSchema } from './cache.config';
 import plugins, { pluginsConfigValidationSchema } from './plugins.config';
@@ -49,3 +51,20 @@ export const configurationValidationSchema = Joi.object({
   ...throttleConfigValidationSchema,
   ...redisWebsocketConfigValidationSchema,
 });
+
+/** The root module's `ConfigModule.forRoot` options, which `required-configuration.spec.ts` checks too. */
+export const configModuleOptions = {
+  load: Object.values(configuration),
+  envFilePath: env.isProduction ? undefined : '.env',
+  cache: true,
+  isGlobal: true,
+  expandVariables: true,
+  validationSchema: configurationValidationSchema,
+  validationOptions: {
+    // Names every invalid variable in one message.
+    abortEarly: false,
+    cache: !env.isProduction,
+    debug: !env.isProduction,
+    stack: !env.isProduction,
+  },
+} satisfies ConfigModuleOptions;

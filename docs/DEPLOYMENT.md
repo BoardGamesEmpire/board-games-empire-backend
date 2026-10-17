@@ -105,13 +105,13 @@ Every role reads its settings from the environment. `.env.example` lists them fo
 | `BOARDGAMEGEEK_API_KEY`                                | BoardGameGeek gateway | Required.                                                                                                                                                                                                                                                                          |
 | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET`                 | IGDB gateway          | Required.                                                                                                                                                                                                                                                                          |
 
-A required setting that is missing or malformed stops the role at boot, and its output names the setting.
+A required setting that is missing or malformed stops the role at boot, and its output names the setting. Every malformed one is named at once.
 
 ## Storage
 
 Two directories hold state that must outlive a container:
 
-- **`/var/lib/bge/media`** is where media is stored (the production default of `MEDIA_LOCAL_DISK_ROOT`). The api and the worker both read and write it, so they need the same volume: `ReadWriteMany` in Kubernetes. The api and the worker refuse to boot when it is missing, rather than write where nobody provisioned storage.
+- **`/var/lib/bge/media`** is where media is stored (the production default of `MEDIA_LOCAL_DISK_ROOT`, which staging has no default for). The api and the worker both read and write it, so they need the same volume: `ReadWriteMany` in Kubernetes. The api and the worker refuse to boot when it is missing, rather than write where nobody provisioned storage.
 - **`/var/lib/bge/plugins`** holds the plugins the api installs (`PLUGINS_ROOT`).
 
 The image creates both, owned by `node`, so a new named volume mounted on either starts out writable by the role. In Kubernetes, set `fsGroup: 1000` so a mounted volume is too. Without a volume, writes land in the container and are lost with it.

@@ -3,5 +3,7 @@ export * from './lib/fixtures/index.js';
 export * from './lib/missing-variables.helper.js';
 export * from './lib/mocks/ability-service.service.mock.js';
 export * from './lib/mocks/database.service.mock.js';
+export * from './lib/required-configuration.helper.js';
 export * from './lib/testing-module.helper.js';
 export * from './lib/validation-catalog-keys.helper.js';
+export * from './lib/workspace-root.js';

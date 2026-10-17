@@ -155,12 +155,9 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
  * inherits; unlike the API's, there is no port, origin or throttle to pin,
  * because the worker serves nothing.
  *
- * `NODE_ENV` is the API's value, for a reason of its own: the worker's schema
- * does not validate `NODE_ENV`, so a value outside the environments `@bge/env`
- * knows passes validation and fails one step later instead. `@bge/env` keys
- * `defaultsFor` maps on it, and under such a value the media root has no
- * default, so the worker exits during boot with
- * `Missing environment variable 'MEDIA_LOCAL_DISK_ROOT'`.
+ * `NODE_ENV` is the API's value: `@bge/env` keys its defaults on it. The
+ * worker's schema, like the API's, refuses a value outside the environments
+ * `@bge/env` knows.
  *
  * Everything else, `DATA_ENCRYPTION_KEY` included, resolves as it does for the
  * API: the same inherited environment, the same `.env` at the workspace root,

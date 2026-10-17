@@ -31,6 +31,9 @@
       "path": "../../libs/common/bootstrap/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/webhooks/tsconfig.lib.json"
     },
     {
@@ -46,9 +49,6 @@
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/common/env/tsconfig.lib.json"
-    },
-    {
       "path": "../../libs/database/tsconfig.lib.json"
     },
     {
@@ -59,6 +59,9 @@
     },
     {
       "path": "../../libs/common/redis/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/common/env/tsconfig.lib.json"
     }
   ]
 }

@@ -1,7 +1,6 @@
 import { AuditContextModule } from '@bge/actor-context';
 import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
-import { env } from '@bge/env';
 import { GameImportFetchModule } from '@bge/game-import';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
@@ -19,24 +18,12 @@ import Keyv from 'keyv';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
-import { configuration, configurationValidationSchema } from './configuration';
+import { configModuleOptions } from './configuration';
 import { baseLogger } from './lib/logger';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      load: [...Object.values(configuration)],
-      cache: true,
-      isGlobal: true,
-      expandVariables: true,
-      validationSchema: configurationValidationSchema,
-      validationOptions: {
-        abortEarly: true,
-        cache: !env.isProduction,
-        debug: !env.isProduction,
-        stack: !env.isProduction,
-      },
-    }),
+    ConfigModule.forRoot(configModuleOptions),
 
     EventEmitterModule.forRoot({
       global: true,
