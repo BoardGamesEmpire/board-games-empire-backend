@@ -60,12 +60,15 @@ export class LanguageLinkService {
   /**
    * Capabilities interview: upsert a link for every language the gateway
    * reports. Existing Resolved/Ignored links are left untouched; new and
-   * previously-unresolved values get a fresh resolution attempt.
+   * previously-unresolved values get a fresh resolution attempt. Once
+   * `signal` aborts, as when the interview is abandoned, no further language
+   * is linked and the abort's reason is thrown.
    */
-  async interview(gatewayId: string, entries: GatewayLanguageInput[]): Promise<InterviewSummary> {
+  async interview(gatewayId: string, entries: GatewayLanguageInput[], signal?: AbortSignal): Promise<InterviewSummary> {
     const summary: InterviewSummary = { resolved: 0, pending: 0, unresolved: 0, ignored: 0 };
 
     for (const entry of entries) {
+      signal?.throwIfAborted();
       const { status } = await this.registerEntry(gatewayId, entry, LanguageLinkOrigin.Interview);
       this.count(summary, status);
     }

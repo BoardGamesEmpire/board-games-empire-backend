@@ -273,4 +273,27 @@ describe('LanguageLinkService', () => {
       expect(db.languageGatewayLink.upsert).toHaveBeenCalled();
     });
   });
+
+  describe('interview — stopped', () => {
+    it('links no further language once its signal aborts, and throws the reason', async () => {
+      const stop = new AbortController();
+      db.languageGatewayLink.upsert.mockImplementationOnce((async () => {
+        stop.abort(new Error('abandoned'));
+        return {};
+      }) as never);
+
+      await expect(
+        service.interview(
+          GW,
+          [
+            { value: 'Klingon', format: LanguageCodeFormat.Name },
+            { value: 'Elvish', format: LanguageCodeFormat.Name },
+          ],
+          stop.signal,
+        ),
+      ).rejects.toThrow('abandoned');
+
+      expect(db.languageGatewayLink.upsert).toHaveBeenCalledTimes(1);
+    });
+  });
 });

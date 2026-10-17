@@ -17,7 +17,7 @@ import { status } from '@grpc/grpc-js';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import { setTimeout as delay } from 'node:timers/promises';
-import { concatMap, from, NEVER, of, throwError } from 'rxjs';
+import { concatMap, from, NEVER, of, tap, throwError } from 'rxjs';
 import { GatewayInterviewError } from './errors/gateway-interview.error';
 import { GatewayCapabilitiesChangedEvent } from './events/gateway-registry.events';
 import { GatewayInterviewService } from './gateway-interview.service';
@@ -245,17 +245,21 @@ describe('GatewayInterviewService', () => {
 
       await service.interview(GW, dataGateway({ languages: [ENGLISH] }));
 
-      expect(languageLinks.interview).toHaveBeenCalledWith(GW, [
-        {
-          value: 'en-US',
-          format: LanguageCodeFormat.IetfBcp47,
-          ietfTag: 'en-US',
-          iso6393: 'eng',
-          iso6391: 'en',
-          name: 'English (US)',
-          nativeName: undefined,
-        },
-      ]);
+      expect(languageLinks.interview).toHaveBeenCalledWith(
+        GW,
+        [
+          {
+            value: 'en-US',
+            format: LanguageCodeFormat.IetfBcp47,
+            ietfTag: 'en-US',
+            iso6393: 'eng',
+            iso6391: 'en',
+            name: 'English (US)',
+            nativeName: undefined,
+          },
+        ],
+        expect.any(AbortSignal),
+      );
     });
 
     it('leaves out a listed language it can’t read, and links the rest', async () => {
@@ -269,7 +273,11 @@ describe('GatewayInterviewService', () => {
 
       await service.interview(GW, dataGateway({ languages: [blank, unknownFormat, ENGLISH] }));
 
-      expect(languageLinks.interview).toHaveBeenCalledWith(GW, [expect.objectContaining({ value: 'en-US' })]);
+      expect(languageLinks.interview).toHaveBeenCalledWith(
+        GW,
+        [expect.objectContaining({ value: 'en-US' })],
+        expect.any(AbortSignal),
+      );
     });
 
     it('never asks a DataGateway that doesn’t declare ListLanguages for its languages', async () => {
@@ -504,6 +512,26 @@ describe('GatewayInterviewService', () => {
       expect(table.row(GW)?.capabilities).toEqual([DataGatewayCapability.Search, DataGatewayCapability.Fetch]);
     });
 
+    it('fails, storing nothing and recording no change, when another process stores first at every try', async () => {
+      table.seed({ id: GW, capabilities: [DataGatewayCapability.Search], firstInterviewedAt: new Date(0) });
+      const updateMany = table.delegate.updateMany;
+      let turn = 0;
+      jest.spyOn(table.delegate, 'updateMany').mockImplementation(async (args) => {
+        // Another process's interview, with another answer each time, lands just before each write.
+        table.patch(GW, {
+          capabilities: turn++ % 2 ? [DataGatewayCapability.Search] : [DataGatewayCapability.Fetch],
+        });
+        return updateMany(args);
+      });
+
+      await expect(
+        service.interview(GW, declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_FETCH)),
+      ).rejects.toThrow(/kept changing/);
+
+      expect(emitted).toEqual([]);
+      expect(table.row(GW)?.lastInterviewedAt).toBeNull();
+    });
+
     it('never touches the capabilities an admin switched off, even one the DataGateway no longer declares', async () => {
       table.seed({
         id: GW,
@@ -678,6 +706,54 @@ describe('GatewayInterviewService', () => {
       expect(table.row(GW)?.gatewayVersion).toBe('2.0.0');
     });
 
+    it.each([
+      ['disposes its driver', (driver: DataGatewayDriver) => service.abandon(GW, driver)],
+      ['invalidates the DataGateway', () => service.abandon(GW)],
+    ])('stops waiting on a ping that never answers when the gateway registry %s', async (_, letGo) => {
+      const row = interviewed(DAY + MINUTE);
+      const driver = Object.assign(dataGateway(), { ping: () => NEVER });
+      let stopped = false;
+      void service.refreshIfStale(GW, driver).then(() => (stopped = true));
+      await settle();
+
+      letGo(driver);
+      await settle();
+
+      expect(stopped).toBe(true);
+      expect(table.row(GW)).toEqual(row);
+    });
+
+    it('starts no interview when the gateway registry lets go of the driver as the ping answers', async () => {
+      const row = interviewed(HOUR, '1.3.0');
+      const driver = dataGateway({ version: '2.0.0' });
+      const ping = driver.ping.bind(driver);
+      // The driver is let go of once the answer is on its way, before the check reads it.
+      driver.ping = () => ping().pipe(tap(() => queueMicrotask(() => service.abandon(GW, driver))));
+      const describe = jest.spyOn(driver, 'describe');
+
+      await service.refreshIfStale(GW, driver);
+
+      expect(describe).not.toHaveBeenCalled();
+      expect(table.row(GW)).toEqual(row);
+    });
+
+    it('leaves alone a check asking through another driver', async () => {
+      interviewed(HOUR, '1.3.0');
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const driver = dataGateway({ version: '2.0.0' });
+      const ping = driver.ping.bind(driver);
+      driver.ping = () => from(answered).pipe(concatMap(() => ping()));
+      const checking = service.refreshIfStale(GW, driver);
+      await settle();
+
+      service.abandon(GW, dataGateway());
+      answer();
+
+      await checking;
+      expect(table.row(GW)?.gatewayVersion).toBe('2.0.0');
+    });
+
     it('never throws when the re-interview fails, and records the failure', async () => {
       interviewed(DAY + MINUTE);
       const driver = dataGateway();
@@ -709,6 +785,35 @@ describe('GatewayInterviewService', () => {
       await expect(service.interview(GW, dataGateway({ languages: [ENGLISH] }))).rejects.toThrow(/abandoned/);
 
       expect(table.row(GW)).toMatchObject({ capabilities: [], firstInterviewedAt: null, lastInterviewFailure: null });
+    });
+
+    it('stops its language section from linking further languages', async () => {
+      table.seed({ id: GW });
+      let section: AbortSignal | undefined;
+      languageLinks.interview.mockImplementation(async (_gatewayId: string, _entries: unknown, signal: AbortSignal) => {
+        section = signal;
+        service.abandon(GW);
+      });
+
+      await expect(service.interview(GW, dataGateway({ languages: [ENGLISH] }))).rejects.toThrow(/abandoned/);
+
+      expect(section?.aborted).toBe(true);
+    });
+
+    it('stops retrying a write that missed', async () => {
+      table.seed({ id: GW, capabilities: [DataGatewayCapability.Search] });
+      const updateMany = table.delegate.updateMany;
+      jest.spyOn(table.delegate, 'updateMany').mockImplementationOnce(async (args) => {
+        // Another process's interview lands first, and then the gateway registry lets go of the driver.
+        table.patch(GW, { capabilities: [DataGatewayCapability.Fetch] });
+        service.abandon(GW);
+        return updateMany(args);
+      });
+
+      await expect(service.interview(GW, dataGateway())).rejects.toThrow(/abandoned/);
+
+      expect(table.delegate.updateMany).toHaveBeenCalledTimes(1);
+      expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Fetch], firstInterviewedAt: null });
     });
 
     it('leaves alone an interview asking through another driver', async () => {
