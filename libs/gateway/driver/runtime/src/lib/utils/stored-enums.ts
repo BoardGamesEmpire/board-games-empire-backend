@@ -26,14 +26,12 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_LIST_LANGUAGES]: DataGatewayCapability.ListLanguages,
 };
 
-// The server stores neither portable nor arcade, so portable is stored as
-// console, and arcade as other. Imports and coverage both fold through here.
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {
   [proto.PlatformType.PLATFORM_TYPE_CONSOLE]: PlatformType.Console,
   [proto.PlatformType.PLATFORM_TYPE_PC]: PlatformType.PC,
-  [proto.PlatformType.PLATFORM_TYPE_PORTABLE]: PlatformType.Console,
+  [proto.PlatformType.PLATFORM_TYPE_PORTABLE]: PlatformType.Portable,
   [proto.PlatformType.PLATFORM_TYPE_MOBILE]: PlatformType.Mobile,
-  [proto.PlatformType.PLATFORM_TYPE_ARCADE]: PlatformType.Other,
+  [proto.PlatformType.PLATFORM_TYPE_ARCADE]: PlatformType.Arcade,
   [proto.PlatformType.PLATFORM_TYPE_TABLETOP]: PlatformType.Tabletop,
   [proto.PlatformType.PLATFORM_TYPE_OTHER]: PlatformType.Other,
 };

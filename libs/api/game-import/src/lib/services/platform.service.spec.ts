@@ -179,6 +179,22 @@ describe('PlatformUpsertService', () => {
     });
   });
 
+  describe('upsertPlatform', () => {
+    it.each([
+      [proto.PlatformType.PLATFORM_TYPE_PORTABLE, PlatformType.Portable],
+      [proto.PlatformType.PLATFORM_TYPE_ARCADE, PlatformType.Arcade],
+      [proto.PlatformType.PLATFORM_TYPE_UNSPECIFIED, PlatformType.Other],
+    ])('stores a new platform sent as %s as %s', async (sent, stored) => {
+      stubPlatformResolution('platform-new');
+
+      await service.upsertPlatform(consolePlatformData({ platformType: sent }), 'gw-igdb');
+
+      expect(db.platform.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ platformType: stored }) }),
+      );
+    });
+  });
+
   describe('inferCapabilities', () => {
     it('sets supportsLocal and hasRealtime for Tabletop', () => {
       const caps = service.inferCapabilities(PlatformType.Tabletop, minimalGameData());

@@ -152,7 +152,7 @@ describe('GatewayInterviewService', () => {
       expect(row?.lastInterviewedAt).toEqual(row?.firstInterviewedAt);
     });
 
-    it('stores coverage in the server’s platform types: portable as console, arcade as other', async () => {
+    it('stores each platform type in its coverage as itself, portable and arcade included', async () => {
       table.seed({ id: GW });
       const coverage: proto.Coverage = {
         platformTypes: [
@@ -167,7 +167,7 @@ describe('GatewayInterviewService', () => {
       await service.interview(GW, dataGateway({ description: { ...STUB_DESCRIPTION, coverage } }));
 
       expect(table.row(GW)).toMatchObject({
-        coveragePlatformTypes: [PlatformType.Console, PlatformType.PC, PlatformType.Other],
+        coveragePlatformTypes: [PlatformType.Console, PlatformType.Portable, PlatformType.PC, PlatformType.Arcade],
         coverageContentTypes: [ContentType.DLC],
       });
     });

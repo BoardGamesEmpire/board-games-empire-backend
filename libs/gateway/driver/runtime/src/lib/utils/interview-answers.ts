@@ -54,8 +54,7 @@ function translateInEnumOrder<T extends string>(
  * A DataGateway's answers in the server's terms. Over gRPC an unset field
  * arrives missing, and it's stored unset, as null or an empty list, rather
  * than guessed. A value with no stored equivalent is left out (see
- * `stored-enums`). Coverage folds into the server's platform types, so
- * portable is stored as console, and arcade as other.
+ * `stored-enums`).
  */
 export function toInterviewAnswers(description: DescribeResponse, ping: GatewayPingResponse): InterviewAnswers {
   const formats = description.languageCodeFormats;
