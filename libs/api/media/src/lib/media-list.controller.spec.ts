@@ -122,8 +122,8 @@ describe('media list envelopes (#372)', () => {
 
     // The service composes the `MediaContribution` scope; the envelope is where
     // the guard checks for it. Built inside a request with nothing composed,
-    // this envelope must fail — an `Unscoped` envelope, or a type still in
-    // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+    // this envelope must fail — an `Unscoped` envelope would pass and switch
+    // the guard off for the route.
     it('builds its envelope under the MediaContribution scope guard', async () => {
       const contributions = { list: jest.fn().mockResolvedValue({ rows: [contributionRow], total: 1 }) };
       const controller = new MediaContributionController(contributions as never);

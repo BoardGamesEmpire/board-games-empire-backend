@@ -66,7 +66,7 @@ describe('EventService', () => {
    * unchanged, so an event dropped from the list is narrowed out of it, not
    * withdrawn.
    *
-   * `Event` has left `PENDING_SCOPE_SWEEP`, so a regression that stops this read
+   * `Event`'s envelope is guarded, so a regression that stops this read
    * composing answers 500 at the envelope rather than returning too much. That
    * is why the first test pins the composer call itself.
    */

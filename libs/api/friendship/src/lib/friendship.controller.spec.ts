@@ -66,8 +66,8 @@ describe('FriendshipController (delegation)', () => {
 
   // The service composes the `Friendship` scope; the envelope is where the
   // guard checks for it. Built inside a request with nothing composed, each
-  // envelope must fail. An `Unscoped` envelope, or a type still in
-  // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+  // envelope must fail. An `Unscoped` envelope would pass and switch the
+  // guard off for the route.
   // The name is asserted too: an envelope naming another swept type would also
   // fail, for the wrong reason.
   it.each<[string, () => Observable<unknown>]>([

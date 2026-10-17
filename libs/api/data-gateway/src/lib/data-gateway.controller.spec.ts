@@ -53,9 +53,8 @@ describe('DataGatewayController', () => {
   // The service composes the `DataGateway` scope; the envelope is where the
   // guard checks for it, under the resource type the handler passes. Built
   // inside a request with nothing composed, a `DataGateway` envelope must fail.
-  // An envelope declaring `Unscoped` instead would pass here, and so would one
-  // passing a type still in `PENDING_SCOPE_SWEEP` — either switches the guard
-  // off for this route without a sound.
+  // An envelope declaring `Unscoped` instead would pass here, which switches
+  // the guard off for this route without a sound.
   it('getAll builds its envelope under the DataGateway scope guard', async () => {
     await expect(
       ClsServiceManager.getClsService().runWith({}, () =>

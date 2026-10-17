@@ -1,5 +1,12 @@
-import { Prisma } from '@bge/database';
-import { batchTransactionCall, createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
+import { Action, Prisma, ResourceType } from '@bge/database';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
+import {
+  batchTransactionCall,
+  createMockAbilityService,
+  createTestingModuleWithDb,
+  type MockAbilityService,
+  type MockDatabaseService,
+} from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { UserSearchQueryDto } from './dto';
 import { UserService } from './user.service';
@@ -12,13 +19,31 @@ import { UserService } from './user.service';
 const searchQuery = (init: Partial<UserSearchQueryDto> = {}) =>
   plainToInstance(UserSearchQueryDto, { q: 'ada', ...init }, { enableImplicitConversion: true });
 
+/** Stands in for the caller's `User` ceiling, so each assertion can tell it from the search's own clauses. */
+const COND = { id: 'within-the-ceiling' };
+
+/** Stands in for the caller's `UserProfile` ceiling. */
+const PROFILE_COND = { id: 'within-the-profile-ceiling' };
+
 describe('UserService', () => {
   let service: UserService;
   let db: MockDatabaseService;
+  let abilityService: MockAbilityService;
 
   beforeEach(async () => {
+    abilityService = createMockAbilityService();
+    abilityService.getCurrentResourceConditions.mockImplementation((resourceType) =>
+      resourceType === ResourceType.UserProfile ? [PROFILE_COND] : [COND],
+    );
+
     const ctx = await createTestingModuleWithDb({
-      providers: [UserService],
+      providers: [
+        UserService,
+        // The REAL composer over the mocked ability service, so the where-clause
+        // assertions below test the merge the search actually depends on.
+        ScopeComposer,
+        { provide: AbilityService, useValue: abilityService },
+      ],
     });
 
     db = ctx.db;
@@ -39,7 +64,11 @@ describe('UserService', () => {
 
       const where = db.user.findMany.mock.calls[0][0]?.where;
       expect(where?.AND).toEqual(
-        expect.arrayContaining([{ banned: false }, { id: { not: 'me' } }, { profile: { isSearchable: true } }]),
+        expect.arrayContaining([
+          { banned: false },
+          { id: { not: 'me' } },
+          { profile: { is: expect.objectContaining({ isSearchable: true }) } },
+        ]),
       );
     });
 
@@ -57,6 +86,30 @@ describe('UserService', () => {
             ],
           },
         ]),
+      );
+    });
+
+    // The search names its own set, and the caller's ceiling only clips it:
+    // an API key pinned to one user narrows the page to that user.
+    it("ANDs the caller's User read ceiling onto the search's own clauses", async () => {
+      await service.searchUsers('me', searchQuery());
+
+      const where = db.user.findMany.mock.calls[0][0]?.where;
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.User, Action.read);
+      expect(where?.AND).toHaveLength(5);
+      expect(where?.AND).toEqual(expect.arrayContaining([COND, { banned: false }, { id: { not: 'me' } }]));
+    });
+
+    // Each row carries its profile's name and avatar, so the profile is read
+    // too, and the caller's `UserProfile` ceiling clips the rows as well: a key
+    // pinned to one profile is not served the others'.
+    it("ANDs the caller's UserProfile read ceiling onto the profile each row carries", async () => {
+      await service.searchUsers('me', searchQuery());
+
+      const where = db.user.findMany.mock.calls[0][0]?.where;
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.UserProfile, Action.read);
+      expect(where?.AND).toEqual(
+        expect.arrayContaining([{ profile: { is: { isSearchable: true, AND: [PROFILE_COND] } } }]),
       );
     });
 

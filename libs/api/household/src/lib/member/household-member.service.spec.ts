@@ -247,8 +247,8 @@ describe('HouseholdMemberService', () => {
   /**
    * #515. The roster declares its own set, the path household's members, and
    * the ceiling only clips it. The read already filtered on `householdId`, so
-   * no actor's rows change; what changes is that `HouseholdMember` has left
-   * `PENDING_SCOPE_SWEEP`, so a later edit that stops composing answers 500 at
+   * no actor's rows change; what changes is that its envelope is guarded, so
+   * a later edit that stops composing answers 500 at
    * the envelope rather than widening silently. That is why the composer call
    * itself is pinned.
    */

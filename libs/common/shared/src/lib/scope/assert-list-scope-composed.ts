@@ -1,6 +1,5 @@
 import { wasScopeComposed } from './composed-scope-registry.js';
 import { isUnscoped, type ListScope } from './list-scope.js';
-import { PENDING_SCOPE_SWEEP } from './pending-scope-sweep.js';
 import { ListScopeNotComposedError } from './unscoped-list.error.js';
 
 /**
@@ -25,12 +24,6 @@ export function assertListScopeComposed(resourceKey: string, scope: ListScope): 
   }
 
   if (wasScopeComposed(scope)) {
-    return;
-  }
-
-  // Not yet swept onto the invariant. Pinned, enumerated and shrinking — see
-  // PENDING_SCOPE_SWEEP for why the guard ships live rather than inert.
-  if (PENDING_SCOPE_SWEEP.has(scope)) {
     return;
   }
 
