@@ -50,6 +50,16 @@ describe('PrismaSchemaLedger', () => {
     await expect(ledger.readApplied()).rejects.toBeInstanceOf(LedgerAccessDeniedError);
   });
 
+  it('still refuses when DATABASE_URL names no database role, and says the database role in it', async () => {
+    const denied = new Error(`Raw query failed. Code: \`42501\`. Message: \`${permissionDenied}\``);
+    const ledger = new PrismaSchemaLedger(failingWith(denied));
+
+    const read = ledger.readApplied();
+
+    await expect(read).rejects.toBeInstanceOf(LedgerAccessDeniedError);
+    await expect(read).rejects.toThrow(/the database role in DATABASE_URL may not read _prisma_migrations/);
+  });
+
   it('rethrows any other failure unchanged', async () => {
     const lost = new Error('Connection terminated unexpectedly');
     const ledger = new PrismaSchemaLedger(failingWith(lost), { databaseRole: 'bge_app' });
