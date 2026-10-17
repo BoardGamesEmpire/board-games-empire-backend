@@ -256,10 +256,13 @@ export class PgAdvisoryLock implements BootstrapLock {
       // server connection, with whichever client the pooler hands it to next.
       // Postgres's own timeouts are off for the lock: a statement_timeout
       // shorter than the attempt would cancel its wait as an error, and an
-      // idle-transaction timeout would end the lock while the sequence works.
+      // idle-transaction timeout, or Postgres 17's transaction_timeout, would
+      // end the lock while the sequence works. transaction_timeout is set
+      // through pg_settings because Postgres before 17 refuses its name.
       await client.query(
         `BEGIN; SET LOCAL lock_timeout = '${attemptMs}ms'; SET LOCAL statement_timeout = 0; ` +
           'SET LOCAL idle_in_transaction_session_timeout = 0; ' +
+          "SELECT set_config(name, '0', true) FROM pg_settings WHERE name = 'transaction_timeout'; " +
           `SELECT pg_advisory_xact_lock(hashtextextended(${client.escapeLiteral(BOOTSTRAP_LOCK_NAME)}, 0))`,
       );
       return true;
