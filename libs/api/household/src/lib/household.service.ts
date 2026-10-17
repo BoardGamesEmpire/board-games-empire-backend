@@ -54,6 +54,32 @@ const HOUSEHOLD_LIST_INCLUDE = {
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
 
+/**
+ * A deleted household as the restorable list returns it (#542): the list row,
+ * plus when the acting user's restore window for it ends, or `null` when their
+ * grant has no end date.
+ */
+export type RestorableHousehold = HouseholdWithRelations & { readonly restorableUntil: Date | null };
+
+/**
+ * The rows of one page of a household list: the list include, the order, and
+ * the page window. Each list counts over the same `where`, in the same
+ * snapshot as its rows.
+ *
+ * The order is total: `createdAt` alone would let rows created in the same
+ * transaction share a key and drift across page boundaries between requests —
+ * page 2 re-showing a row page 1 already had, and dropping another.
+ */
+function householdPageArgs(where: Prisma.HouseholdWhereInput, pagination: PaginationQueryDto) {
+  return {
+    where,
+    include: HOUSEHOLD_LIST_INCLUDE,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    skip: pagination.skip,
+    take: pagination.pageSize,
+  } satisfies Prisma.HouseholdFindManyArgs;
+}
+
 /** How many of each member's entries the household detail embeds. */
 const MEMBER_GAME_SAMPLE_SIZE = 5;
 
@@ -541,36 +567,132 @@ export class HouseholdService {
   }
 
   /**
+   * One page of the deleted households the acting user can restore (#542),
+   * each with when their restore window ends. It is how a household owner
+   * finds the undo `DELETE` offered again, from another device or after the
+   * response was lost.
+   *
+   * The set is the acting user's grants of the restore permission, each pinned
+   * to one household ({@link restoreWindows}). The scope over them is composed
+   * twice, and the two results are ANDed:
+   *
+   * - Under `update`: the ceiling the restore write is scoped by
+   *   ({@link restoreHousehold}). Denials, pinned or not, and an API key's key
+   *   scopes all apply there, so a household is listed only when the route
+   *   would restore it, and this read does not restate how the loader ranks
+   *   a denial against a grant.
+   * - Under `read`: only a `read` composition is recorded, and the envelope's
+   *   guard checks for one. It is also what entitles the actor to the roster
+   *   each row carries. For a household owner it removes nothing: memberships
+   *   of a deleted household are frozen, and `read:households` matches them.
+   *
+   * A grant pinned to no household is left out. It reaches every deleted
+   * household, which is the all-subject view #419 owns, as is staff's reach.
+   *
+   * The grants, the rows and the count share one REPEATABLE READ transaction.
+   * Read apart, staff restoring the household and deleting it again in
+   * between would list the new deletion with the window the restore revoked:
+   * a row that was never true. The ceilings would not catch it, since they
+   * come from the abilities loaded when the request came in, which still hold
+   * the revoked grant.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors,
+   * as for {@link getHouseholdsForUser}. PROVISIONAL — #395.
+   */
+  async getRestorableHouseholdsForUser(pagination: PaginationQueryDto): Promise<PaginatedRows<RestorableHousehold>> {
+    const userId = resolveScopeSubjectId(this.abilityService);
+
+    const { windows, rows, total } = await this.db.$transaction(
+      async (tx) => {
+        const windows = await this.restoreWindows(tx, userId);
+        const scope: Prisma.HouseholdWhereInput = { deletedAt: { not: null }, id: { in: [...windows.keys()] } };
+
+        const where: Prisma.HouseholdWhereInput = {
+          AND: [
+            this.scopeComposer.compose(ResourceType.Household, Action.read, scope),
+            this.scopeComposer.compose(ResourceType.Household, Action.update, scope),
+          ],
+        };
+
+        const rows = await tx.household.findMany(householdPageArgs(where, pagination));
+        const total = await tx.household.count({ where });
+
+        return { windows, rows, total };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    return {
+      rows: rows.map((row) => {
+        // `null` means a grant with no end date, so it is never the fallback
+        // for a row the scope let through without a window.
+        const restorableUntil = windows.get(row.id);
+        assert(restorableUntil !== undefined, `household ${row.id} was listed with no restore window`);
+
+        return { ...row, restorableUntil };
+      }),
+      total,
+    };
+  }
+
+  /**
+   * The acting user's live grants of the restore permission, each pinned to a
+   * household: when each one ends, keyed by household id. Never returned
+   * as-is; only the household ceilings decide what is listed.
+   *
+   * Filtered as the ability loader filters direct permissions: unexpired, and
+   * not of a retired permission. "Not a denial" is spelled as
+   * {@link restoreHousehold} spells it, since `inverted` is nullable. A grant
+   * with no end date is kept, since the restore route honours it.
+   *
+   * Read on the caller's transaction, so the windows come from the same
+   * snapshot as the rows they are paired with.
+   */
+  private async restoreWindows(
+    tx: Prisma.TransactionClient,
+    userId: string,
+  ): Promise<ReadonlyMap<string, Date | null>> {
+    const grants = await tx.userPermission.findMany({
+      where: {
+        userId,
+        resourceType: ResourceType.Household,
+        resourceId: { not: null },
+        permission: { slug: HOUSEHOLD_RESTORE_PERMISSION_SLUG, retiredAt: null },
+        AND: [
+          { OR: [{ inverted: null }, { inverted: false }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
+        ],
+      },
+      select: { resourceId: true, expiresAt: true },
+    });
+
+    // The `where` already excludes a null `resourceId`; the generated type
+    // cannot know that.
+    return new Map(
+      grants.flatMap(({ resourceId, expiresAt }) => (resourceId === null ? [] : [[resourceId, expiresAt] as const])),
+    );
+  }
+
+  /**
    * One page of households plus the total matching row count for the response
    * envelope (#230). Scope is the caller's business; everything below it holds
    * whatever the scope, so a household list that declares a different one
-   * (#485) would read through here rather than restate either invariant.
+   * (#485) would read through here rather than restate either invariant. A
+   * list whose scope comes from its own read, as
+   * {@link getRestorableHouseholdsForUser}'s does, makes that read in the same
+   * transaction instead, through the same {@link householdPageArgs}.
    *
    * Rows and count share a REPEATABLE READ transaction: Prisma's default batch
    * isolation is the database default (READ COMMITTED on Postgres), where each
    * statement takes its own snapshot and a concurrent create or delete between
    * the two makes `hasMore` disagree with the rows actually sent.
-   *
-   * The order is total: `createdAt` alone would let rows created in the same
-   * transaction share a key and drift across page boundaries between requests —
-   * page 2 re-showing a row page 1 already had, and dropping another.
    */
   private async paginateHouseholds(
     where: Prisma.HouseholdWhereInput,
     pagination: PaginationQueryDto,
   ): Promise<PaginatedRows<HouseholdWithRelations>> {
     const [rows, total] = await this.db.$transaction(
-      [
-        this.db.household.findMany({
-          where,
-          include: HOUSEHOLD_LIST_INCLUDE,
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          skip: pagination.skip,
-          take: pagination.pageSize,
-        }),
-
-        this.db.household.count({ where }),
-      ],
+      [this.db.household.findMany(householdPageArgs(where, pagination)), this.db.household.count({ where })],
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
     );
 
@@ -580,9 +702,11 @@ export class HouseholdService {
   /**
    * Soft-delete: the row is retained (`deletedAt` stamped) and hidden from every
    * read — `getHouseholdById`, `getHouseholdsForUser` and `updateHousehold` all
-   * filter `deletedAt: null`. Outstanding invites to the household are revoked
-   * in the same transaction so a stale token can never be accepted into a dead
-   * household. Members and game-collection shares are intentionally left in
+   * filter `deletedAt: null` — except {@link getRestorableHouseholdsForUser},
+   * which lists it to the household owners who can still restore it (not to
+   * staff, who can restore any). Outstanding invites to the household are
+   * revoked in the same transaction so a stale token can never be accepted into
+   * a dead household. Members and game-collection shares are intentionally left in
    * place — a soft delete is reversible ({@link restoreHousehold}) and reads
    * already exclude the household; hard cascade/cleanup is deferred to the
    * purge path (#543).

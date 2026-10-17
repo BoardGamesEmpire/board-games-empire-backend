@@ -20,6 +20,7 @@ describe('HouseholdController (no-Session delegation)', () => {
     Pick<
       HouseholdService,
       | 'getHouseholdsForUser'
+      | 'getRestorableHouseholdsForUser'
       | 'getHouseholdById'
       | 'create'
       | 'updateHousehold'
@@ -30,6 +31,7 @@ describe('HouseholdController (no-Session delegation)', () => {
   beforeEach(() => {
     service = {
       getHouseholdsForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
+      getRestorableHouseholdsForUser: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
       getHouseholdById: jest.fn().mockResolvedValue({ id: 'hh-1' }),
       create: jest.fn().mockResolvedValue({ id: 'hh-1', createdById: 'user-1' }),
       updateHousehold: jest.fn().mockResolvedValue({ id: 'hh-1' }),
@@ -108,6 +110,63 @@ describe('HouseholdController (no-Session delegation)', () => {
     service.deleteHousehold.mockResolvedValue({ household: { id: 'hh-1' }, restorableUntil: null } as never);
 
     await expect(firstValueFrom(controller.delete('hh-1'))).resolves.toHaveProperty('restorableUntil', null);
+  });
+
+  describe('getRestorableHouseholdsForUser (#542)', () => {
+    it('forwards only pagination and wraps the rows in the households envelope', async () => {
+      const restorableUntil = new Date('2026-11-15T12:00:00Z');
+      service.getRestorableHouseholdsForUser.mockResolvedValue({
+        rows: [{ id: 'hh-1', restorableUntil }],
+        total: 1,
+      } as never);
+
+      const response = await firstValueFrom(controller.getRestorableHouseholdsForUser(PAGINATION));
+
+      expect(service.getRestorableHouseholdsForUser).toHaveBeenCalledWith(PAGINATION);
+      expect(response).toEqual({
+        households: [{ id: 'hh-1', restorableUntil }],
+        pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+      });
+    });
+
+    it('builds its envelope under the Household scope guard', async () => {
+      await expect(
+        ClsServiceManager.getClsService().runWith({}, () =>
+          firstValueFrom(controller.getRestorableHouseholdsForUser(PAGINATION)),
+        ),
+      ).rejects.toThrow(ListScopeNotComposedError);
+    });
+
+    it('binds GET /households/restorable', () => {
+      const handler = HouseholdController.prototype.getRestorableHouseholdsForUser;
+
+      expect(Reflect.getMetadata('path', handler)).toBe('restorable');
+      expect(Reflect.getMetadata('method', handler)).toBe(RequestMethod.GET);
+    });
+
+    // Routes match in the order they are declared. Below `GET :id`, a request
+    // for `restorable` would reach `getById` as an id, and the liveness guard
+    // would answer 404.
+    it('is declared above GET /households/:id', () => {
+      const handlers = Object.getOwnPropertyNames(HouseholdController.prototype);
+
+      expect(handlers.indexOf('getRestorableHouseholdsForUser')).toBeGreaterThanOrEqual(0);
+      expect(handlers.indexOf('getRestorableHouseholdsForUser')).toBeLessThan(handlers.indexOf('getById'));
+    });
+
+    it('asks the guard for read, so a household owner with no update rule gets an empty page', () => {
+      const handlers = Reflect.getMetadata(
+        CHECK_POLICIES_KEY,
+        HouseholdController.prototype.getRestorableHouseholdsForUser,
+      ) as Array<(ability: AppAbility) => boolean>;
+      const can = jest.fn().mockReturnValue(true);
+
+      expect(handlers).toHaveLength(1);
+      handlers[0]({ can } as unknown as AppAbility);
+
+      expect(can).toHaveBeenCalledTimes(1);
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Household);
+    });
   });
 
   describe('restore (#175)', () => {

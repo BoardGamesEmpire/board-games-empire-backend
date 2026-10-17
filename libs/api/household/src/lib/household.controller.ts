@@ -72,6 +72,47 @@ export class HouseholdController {
   }
 
   @ApiOperation({
+    summary: 'List the deleted households the acting user can restore',
+    description:
+      'The deleted households the acting user holds an open restore window for. A household owner’s delete ' +
+      `opens one for every household owner, for ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days (\`DELETE /households/:id\`, ` +
+      '#175). Each row is the `GET /households` row, with the roster as it stood at the delete, plus ' +
+      '`restorableUntil`: when the acting user’s window ends (ISO timestamp), or `null` when their grant has ' +
+      'no end date. That `null` is not DELETE’s, which means the delete opened no window. Restore a row ' +
+      'through `POST /households/:id/restore`. A household leaves this list when its window ends, when anyone ' +
+      'restores it, and when the acting user is denied the restore. A delete by server staff who are not among ' +
+      'its household owners is moderation and opens no window, so that household is never listed; staff ' +
+      'among its household owners delete as household owners, and it is. Staff’s own reach over deleted ' +
+      'households is #419. Read on demand, for instance by the screen that offers the undo: it is not part of ' +
+      'the client’s hydrate. Nor is it a membership list, so a client never purges a household because it ' +
+      'is missing here. An **API key** is floored by its key scopes (effective access is what both the key and ' +
+      'its key owner may do): a key lists nothing unless its key scopes also allow updating households. ' +
+      'Paginated: `?page=` (1-based) and `?limit=`, with the `pagination` envelope `GET /households` carries. ' +
+      'See #542.',
+  })
+  @ApiPaginatedEnvelope('households')
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description:
+      'Insufficient permissions, or an actor kind with no acting user (plugin, system, external), ' +
+      'provisionally: see #395',
+  })
+  // `read`, for the restore route's reason: a household owner whose window
+  // has lapsed, and who holds no other household, has no `update` rule on
+  // Household. They get an empty page, not a 403. The service clips the rows
+  // by the `update` rules.
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Household))
+  // Above `GET :id`: routes match in the order they are declared, so below
+  // it `restorable` would reach `getById` as an id.
+  @Get('restorable')
+  getRestorableHouseholdsForUser(@Query() pagination: DefaultPaginationQueryDto) {
+    return from(this.householdService.getRestorableHouseholdsForUser(pagination)).pipe(
+      map((page) => paginated('households', page, pagination, ResourceType.Household)),
+    );
+  }
+
+  @ApiOperation({
     summary: 'Create a household',
     description:
       'Idempotent when `clientRequestId` is supplied: a repeat submission with the same key (per user) ' +
@@ -125,7 +166,8 @@ export class HouseholdController {
   @ApiOperation({
     summary: 'Delete a household (soft)',
     description:
-      'Stamps `deletedAt` and hides the household from every read; the roster and game shares are kept, and ' +
+      'Stamps `deletedAt` and hides the household from every read but `GET /households/restorable`, which ' +
+      'lists it to the household owners who can still restore it; the roster and game shares are kept, and ' +
       'pending invites are revoked. When one of the household’s owners deletes it, every owner can restore it ' +
       `until \`restorableUntil\` (ISO timestamp, ${HOUSEHOLD_RESTORE_WINDOW_DAYS} days on) through ` +
       '`POST /households/:id/restore`, and server staff can at any time. `restorableUntil` is `null` when the ' +

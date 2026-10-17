@@ -7,6 +7,7 @@ import {
   memberEnvelope,
   memberGameSampleIds,
   readEnvelope,
+  restorableListEnvelope,
   type HttpResponseLike,
 } from './household-wire';
 
@@ -349,6 +350,44 @@ describe('household wire parsers (pure logic)', () => {
       expect(() =>
         listEnvelope(response({ households: [], pagination: { ...PAGINATION, total: '3' } }), 'GET'),
       ).toThrow(/no 'pagination' envelope/);
+    });
+  });
+
+  describe('restorableListEnvelope', () => {
+    const PAGINATION = { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false };
+    const list = (row: Record<string, unknown>) => response({ households: [row], pagination: PAGINATION });
+
+    it('returns each row’s window end, or null for a grant with no end date', () => {
+      const until = '2026-11-15T12:00:00.000Z';
+
+      expect(
+        restorableListEnvelope(list({ id: 'h1', members: [], restorableUntil: until }), 'GET').households[0]
+          .restorableUntil,
+      ).toBe(until);
+      expect(
+        restorableListEnvelope(list({ id: 'h1', members: [], restorableUntil: null }), 'GET').households[0]
+          .restorableUntil,
+      ).toBeNull();
+    });
+
+    it('rejects a row with no roster', () => {
+      expect(() => restorableListEnvelope(list({ id: 'h1', restorableUntil: null }), 'GET')).toThrow(
+        /household 'h1' carried no 'members' array/,
+      );
+    });
+
+    it('rejects a missing restorableUntil rather than reading it as a window with no end', () => {
+      expect(() => restorableListEnvelope(list({ id: 'h1', members: [] }), 'GET')).toThrow(
+        /household 'h1' carried no 'restorableUntil' key/,
+      );
+    });
+
+    it('rejects a restorableUntil that is not a timestamp', () => {
+      for (const restorableUntil of ['soon', 1_700_000_000_000, {}]) {
+        expect(() => restorableListEnvelope(list({ id: 'h1', members: [], restorableUntil }), 'GET')).toThrow(
+          /household 'h1' carried a 'restorableUntil' that is neither null nor a timestamp/,
+        );
+      }
     });
   });
 
