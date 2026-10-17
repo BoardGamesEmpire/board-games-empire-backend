@@ -580,6 +580,24 @@ describe('GatewayInterviewService', () => {
       expect(describe).not.toHaveBeenCalled();
     });
 
+    it.each([
+      ['disables', { enabled: false }],
+      ['deletes', { deletedAt: new Date() }],
+    ])('keeps its row as it was when an admin %s it during an interview that then fails', async (_, change) => {
+      table.seed({ id: GW });
+      const driver = dataGateway();
+      driver.describe = () => {
+        // The admin's change lands while the interview waits on Describe.
+        table.patch(GW, change);
+        return throwError(() => new Error('14 UNAVAILABLE'));
+      };
+
+      await expect(service.interview(GW, driver)).rejects.toMatchObject({
+        failure: DataGatewayInterviewFailure.DescribeFailed,
+      });
+      expect(table.row(GW)).toMatchObject({ lastInterviewFailure: null, lastInterviewFailedAt: null });
+    });
+
     it('isn’t pinged or interviewed by the backstop, though its process may still hold the driver', async () => {
       const stale = new Date(Date.now() - 2 * DAY);
       table.seed({ id: 'disabled', enabled: false, firstInterviewedAt: stale, lastInterviewedAt: stale });

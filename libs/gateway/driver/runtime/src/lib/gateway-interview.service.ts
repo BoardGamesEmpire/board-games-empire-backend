@@ -107,8 +107,9 @@ interface PendingStart {
  * stale check asking through a driver the gateway registry lets go of is
  * abandoned ({@link abandon}). A DataGateway an admin disabled or deleted isn't
  * interviewed, though the gateway worker may still hold its driver (dropping
- * that is #701's), and an interview under way when that happens stores
- * nothing. The coordinator and the gateway worker both host the
+ * that is #701's). An interview under way when that happens leaves the row
+ * as it is, though its language section may still link the languages the
+ * DataGateway lists. The coordinator and the gateway worker both host the
  * gateway registry, so either may interview, and a repeated interview just
  * writes the same answers.
  */
@@ -366,7 +367,8 @@ export class GatewayInterviewService {
   /**
    * One question the interview can't go on without. When it fails, the row
    * records why and keeps its last good answers, and the interview throws.
-   * An abandoned interview records nothing.
+   * An abandoned interview records nothing, nor does one whose DataGateway
+   * an admin disabled or deleted meanwhile.
    */
   private async ask<T>(
     gatewayId: string,
@@ -387,8 +389,10 @@ export class GatewayInterviewService {
 
   private async recordFailure(gatewayId: string, failure: DataGatewayInterviewFailure): Promise<void> {
     try {
-      await this.db.dataGateway.update({
-        where: { id: gatewayId },
+      // A row an admin disabled or deleted meanwhile is left as it is, as
+      // when the answers are stored.
+      await this.db.dataGateway.updateMany({
+        where: { id: gatewayId, enabled: true, deletedAt: null },
         data: { lastInterviewFailedAt: new Date(), lastInterviewFailure: failure },
       });
     } catch (err) {
@@ -459,7 +463,8 @@ export class GatewayInterviewService {
    *
    * The row must also still be enabled and not deleted. An admin who
    * disables a DataGateway leaves its connection as it was, so the interview
-   * under way isn't abandoned: it fails here instead, and stores nothing.
+   * under way isn't abandoned (#701): it fails here instead, and stores no
+   * answers.
    * `disabledCapabilities` is never written here, so an admin's switch-off
    * outlasts every interview.
    */

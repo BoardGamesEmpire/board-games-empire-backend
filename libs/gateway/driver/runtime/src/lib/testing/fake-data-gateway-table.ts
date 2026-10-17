@@ -128,15 +128,6 @@ export class FakeDataGatewayTable {
     findFirst: async ({ where, select }: Query = {}) => this.findAll(where, select)[0] ?? null,
     findMany: async ({ where, select }: Query = {}) => this.findAll(where, select),
 
-    update: async ({ where, data }: Update) => {
-      const [row] = this.matching(where);
-      if (!row) {
-        throw new Error('Record to update not found.');
-      }
-
-      return { ...this.apply(row, data) };
-    },
-
     updateMany: async ({ where, data }: Update) => {
       const rows = this.matching(where);
       rows.forEach((row) => this.apply(row, data));
