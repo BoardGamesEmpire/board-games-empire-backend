@@ -1,3 +1,4 @@
+import { environments } from '@bge/env';
 import {
   API_NODE_ENV,
   API_PORT_VAR,
@@ -166,13 +167,12 @@ describe('e2e-env (pure logic)', () => {
     });
 
     it('pins NODE_ENV to a value system.config.ts accepts', () => {
-      // CI exports NODE_ENV=test and Jest's CLI assigns 'test' when unset;
-      // neither is in the schema's valid set, so an inherited value exits the
-      // API during ConfigModule validation and surfaces only as a readiness
-      // timeout. Pinning here makes the child's boot contract independent of
-      // whatever the runner, Jest, or a developer's shell happens to hold.
+      // A value outside the valid set exits the API during ConfigModule
+      // validation and surfaces only as a readiness timeout. Pinning here makes
+      // the child's boot contract independent of whatever the runner, Jest, or
+      // a developer's shell happens to hold.
       expect(apiEnvOverrides(baseUrl, 41234).NODE_ENV).toBe(API_NODE_ENV);
-      expect(['development', 'testing', 'staging', 'production']).toContain(API_NODE_ENV);
+      expect(environments).toContain(API_NODE_ENV);
     });
 
     it('points BetterAuth at the ephemeral origin rather than the .env default', () => {
@@ -227,10 +227,8 @@ describe('e2e-env (pure logic)', () => {
 
   describe('workerEnvOverrides', () => {
     it('pins the same NODE_ENV the API child runs under', () => {
-      // The worker has no NODE_ENV schema of its own, so a wrong value does not
-      // fail validation outright. It fails one step later: `@bge/env` keys
-      // `defaultsFor` maps on it, and under Jest's `test` the media root has no
-      // default and the worker exits during boot.
+      // `@bge/env` keys `defaultsFor` maps on it, so the worker resolves
+      // `DATA_ENCRYPTION_KEY` to the API's key only under the API's value.
       expect(workerEnvOverrides().NODE_ENV).toBe(API_NODE_ENV);
     });
 

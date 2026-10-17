@@ -2,7 +2,6 @@ import { AuditContextModule } from '@bge/actor-context';
 import { GrpcInternalActorInterceptor } from '@bge/actor-context-transport';
 import { AuditLogModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
-import { env } from '@bge/env';
 import { GatewayRegistryModule } from '@bge/gateway-registry';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { QUEUE_REDIS_CLIENT, RedisModule } from '@bge/redis';
@@ -15,25 +14,13 @@ import type { RedisClient } from 'bullmq';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
-import { configuration, configurationValidationSchema } from './configuration';
+import { configModuleOptions } from './configuration';
 import { CoordinatorModule } from './coordinator/coordinator.module';
 import { baseLogger } from './lib/logger';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      load: [...Object.values(configuration)],
-      cache: true,
-      isGlobal: true,
-      expandVariables: true,
-      validationSchema: configurationValidationSchema,
-      validationOptions: {
-        abortEarly: true,
-        cache: !env.isProduction,
-        debug: !env.isProduction,
-        stack: !env.isProduction,
-      },
-    }),
+    ConfigModule.forRoot(configModuleOptions),
 
     EventEmitterModule.forRoot({
       wildcard: true,

@@ -1,7 +1,6 @@
 import { Action, ResourceType } from '@bge/database';
 import { CHECK_POLICIES_KEY, PoliciesGuard, type AppAbility } from '@bge/permissions';
 import { createTestingModuleWithDb } from '@bge/testing';
-import { ConfigService } from '@nestjs/config';
 import { SystemSettingsController } from './system-settings.controller';
 import { SystemSettingsService } from './system-settings.service';
 
@@ -10,13 +9,7 @@ describe('SystemSettingsController', () => {
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
-      providers: [
-        SystemSettingsService,
-        {
-          provide: ConfigService,
-          useValue: { get: jest.fn(), getOrThrow: jest.fn() },
-        },
-      ],
+      providers: [SystemSettingsService],
       controllers: [SystemSettingsController],
       overrideGuards: [PoliciesGuard],
     });

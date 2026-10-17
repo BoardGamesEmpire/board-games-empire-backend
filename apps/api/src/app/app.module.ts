@@ -10,7 +10,6 @@ import { AuthModule } from '@bge/auth';
 import { GatewayCoordinatorClientModule } from '@bge/coordinator';
 import { DataGatewayModule } from '@bge/data-gateway';
 import { DatabaseModule } from '@bge/database';
-import { env } from '@bge/env';
 import { EventModule } from '@bge/event';
 import { FeedbackModule } from '@bge/feedback';
 import { FriendshipModule } from '@bge/friendship';
@@ -57,7 +56,7 @@ import { ClsMiddleware, ClsModule } from 'nestjs-cls';
 import { I18nValidationExceptionFilter } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
-import { API_CACHE_NAMESPACE, configuration, configurationValidationSchema } from './configuration';
+import { API_CACHE_NAMESPACE, configModuleOptions } from './configuration';
 import { WsFrameScope } from './gateways/base/ws-frame-scope';
 import { WsTranslator } from './gateways/base/ws-translator';
 import { GameSearchGateway } from './gateways/game/search.gateway';
@@ -69,20 +68,7 @@ import { createThrottlers } from './lib/throttlers';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      load: [...Object.values(configuration)],
-      envFilePath: env.isProduction ? undefined : '.env',
-      cache: true,
-      isGlobal: true,
-      expandVariables: true,
-      validationSchema: configurationValidationSchema,
-      validationOptions: {
-        abortEarly: true,
-        cache: !env.isProduction,
-        debug: !env.isProduction,
-        stack: !env.isProduction,
-      },
-    }),
+    ConfigModule.forRoot(configModuleOptions),
 
     EventEmitterModule.forRoot({
       global: true,

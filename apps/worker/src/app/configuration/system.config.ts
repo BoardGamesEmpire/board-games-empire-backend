@@ -13,8 +13,7 @@ export default registerAs('system', () =>
       key: 'DATA_ENCRYPTION_KEY',
       defaultsFor: {
         development: 'development-secret',
-        testing: 'testing-secret',
-        staging: 'staging-secret',
+        test: 'test-secret',
       },
     },
   ]),
@@ -22,12 +21,13 @@ export default registerAs('system', () =>
 
 /**
  * `DATA_ENCRYPTION_KEY` is optional here because `defaultsFor` supplies it
- * outside production, and Joi runs first. When it was `required()`, a missing
+ * in development and test, and Joi runs first. When it was `required()`, a missing
  * key was rejected before that default could apply, so the worker could not
  * boot without a `.env` (CI, a fresh checkout) although the API, which shares
- * the key, could. Production has no default, so `@bge/env` still refuses to
- * start without a key there. `min(10)` still rejects a key that is set but short.
+ * the key, could. Production and staging have no default, so `@bge/env` still
+ * refuses to start without a key there. `min(10)` still rejects a key that is set but short.
+ * An empty key is accepted, since `@bge/env` reads it as unset.
  */
 export const systemConfigValidationSchema = {
-  DATA_ENCRYPTION_KEY: Joi.string().min(10),
+  DATA_ENCRYPTION_KEY: Joi.string().min(10).allow(''),
 };

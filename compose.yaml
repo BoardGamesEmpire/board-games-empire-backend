@@ -81,7 +81,7 @@ services:
     environment:
       <<: *bge-environment
       BGE_ROLES: api
-      SERVER_PORT: '33333'
+      PORT: '33333'
       REDIS_WEBSOCKET_HOST: redis
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-}

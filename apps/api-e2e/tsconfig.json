@@ -11,22 +11,25 @@
       "path": "../../libs/common/shared"
     },
     {
-      "path": "../../libs/common/webhooks"
-    },
-    {
       "path": "../../libs/queue/webhooks"
     },
     {
       "path": "../../libs/api/game-import"
     },
     {
+      "path": "../../libs/common/env"
+    },
+    {
       "path": "../../libs/plugin/manifest"
+    },
+    {
+      "path": "../../libs/common/i18n"
     },
     {
       "path": "../../libs/common/notifications"
     },
     {
-      "path": "../../libs/common/i18n"
+      "path": "../../libs/common/webhooks"
     },
     {
       "path": "../../libs/queue/actor-context"

@@ -46,11 +46,9 @@ jobs:
   main:
     runs-on: ubuntu-latest
     env:
-      # `testing`, not the ecosystem-default `test`: the valid set is
-      # development|testing|staging|production, declared in
-      # apps/api/src/app/configuration/system.config.ts. `test` fails that
-      # validation, so nothing here can boot the app under it (#286).
-      NODE_ENV: testing
+      # One of the environments `@bge/env` knows, which the api's config
+      # validates `NODE_ENV` against (#290).
+      NODE_ENV: test
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -191,9 +189,8 @@ jobs:
       # Same value and reasoning as the `main` job. Covers the Jest process,
       # prisma migrate, and prisma db seed — NOT the API, worker and gateway
       # children, which the harness pins separately (apiEnvOverrides,
-      # workerEnvOverrides, useGateway) because Jest's CLI assigns `test`
-      # whenever the variable is unset.
-      NODE_ENV: testing
+      # workerEnvOverrides, useGateway) so a developer's shell can't change it.
+      NODE_ENV: test
       # Stream every child's full output (API, worker, gateways) into the
       # job log so a mid-run assertion failure is diagnosable without a
       # local repro (#259). Failure-scoped alternative tracked as #274.

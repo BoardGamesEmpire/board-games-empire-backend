@@ -103,6 +103,8 @@ export const securityTxtConfigValidationSchema = {
   SECURITY_POLICY_URL: Joi.string().uri().optional().allow(''),
   SECURITY_ENCRYPTION_URL: Joi.string().uri().optional().allow(''),
   SECURITY_ACKNOWLEDGMENTS_URL: Joi.string().uri().optional().allow(''),
-  SECURITY_PREFERRED_LANGUAGES: Joi.string().optional().default('en'),
+  // No default: a schema's default is written into the environment and beats
+  // the config's (#626).
+  SECURITY_PREFERRED_LANGUAGES: Joi.string().optional().allow(''),
   SECURITY_HIRING_URL: Joi.string().uri().optional().allow(''),
 };

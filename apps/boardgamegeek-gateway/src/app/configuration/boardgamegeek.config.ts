@@ -11,9 +11,6 @@ export default registerAs('boardgamegeek', () =>
     {
       key: 'BOARDGAMEGEEK_API_KEY',
       keyTo: 'apiKey',
-      defaultsFor: {
-        test: 'test-api-key',
-      },
     },
   ]),
 );

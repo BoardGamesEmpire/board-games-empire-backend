@@ -21,10 +21,10 @@ const gatewayAddress = (port: number): string => `${GATEWAY_HOST}:${port}`;
 
 /**
  * The `NODE_ENV` a gateway child runs under, the value CI runs the suites
- * with. Pinned rather than inherited because Jest's CLI assigns `test` when
- * the variable is unset, and `@bge/env` keys its `defaultsFor` maps on it.
+ * with. Pinned rather than inherited, because `@bge/env` keys its
+ * `defaultsFor` maps on it and a developer's shell may hold anything.
  */
-export const GATEWAY_NODE_ENV = 'testing';
+export const GATEWAY_NODE_ENV = 'test';
 
 const READINESS_TIMEOUT_MS = 30_000;
 const READINESS_POLL_MS = 250;

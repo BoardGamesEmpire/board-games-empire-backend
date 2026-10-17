@@ -32,13 +32,23 @@ describe('igdbConfigValidationSchema — IGDB_TOKEN_URL', () => {
 });
 
 describe('igdb config — token URL', () => {
-  const original = process.env['IGDB_TOKEN_URL'];
+  const credentials = { IGDB_CLIENT_ID: 'test-client-id', IGDB_CLIENT_SECRET: 'test-secret' };
+  const original = Object.fromEntries(
+    ['IGDB_TOKEN_URL', ...Object.keys(credentials)].map((key) => [key, process.env[key]]),
+  );
+
+  // The credentials have no default in any environment.
+  beforeEach(() => {
+    Object.assign(process.env, credentials);
+  });
 
   afterEach(() => {
-    if (original === undefined) {
-      delete process.env['IGDB_TOKEN_URL'];
-    } else {
-      process.env['IGDB_TOKEN_URL'] = original;
+    for (const [key, value] of Object.entries(original)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
     }
   });
 

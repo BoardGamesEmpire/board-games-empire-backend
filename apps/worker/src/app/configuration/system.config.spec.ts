@@ -1,5 +1,6 @@
+import { missingVariables } from '@bge/testing';
 import Joi from 'joi';
-import { systemConfigValidationSchema } from './system.config';
+import systemConfig, { systemConfigValidationSchema } from './system.config';
 
 const schema = Joi.object<{ DATA_ENCRYPTION_KEY?: string }>(systemConfigValidationSchema);
 
@@ -14,7 +15,7 @@ describe('systemConfigValidationSchema', () => {
   });
 
   it('accepts a key of at least ten characters', () => {
-    const { error } = schema.validate({ DATA_ENCRYPTION_KEY: 'testing-secret' });
+    const { error } = schema.validate({ DATA_ENCRYPTION_KEY: 'test-secret' });
 
     expect(error).toBeUndefined();
   });
@@ -23,5 +24,23 @@ describe('systemConfigValidationSchema', () => {
     const { error } = schema.validate({ DATA_ENCRYPTION_KEY: 'short' });
 
     expect(error?.message).toMatch(/DATA_ENCRYPTION_KEY/);
+  });
+
+  // `@bge/env` reads an empty variable as unset, as the api's schema accepts.
+  it('accepts an empty key, for the config to read as unset', () => {
+    const { error } = schema.validate({ DATA_ENCRYPTION_KEY: '' });
+
+    expect(error).toBeUndefined();
+  });
+});
+
+describe("the worker's system config", () => {
+  it.each(['development', 'test'])('resolves under NODE_ENV=%s with nothing set', (environment) => {
+    expect(missingVariables(systemConfig, { NODE_ENV: environment })).toEqual([]);
+  });
+
+  // The api shares the key, and requires it in the same environments.
+  it.each(['staging', 'production'])('requires DATA_ENCRYPTION_KEY under NODE_ENV=%s', (environment) => {
+    expect(missingVariables(systemConfig, { NODE_ENV: environment })).toEqual(['DATA_ENCRYPTION_KEY']);
   });
 });

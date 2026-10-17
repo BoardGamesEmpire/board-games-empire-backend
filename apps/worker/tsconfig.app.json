@@ -61,6 +61,9 @@
       "path": "../../libs/common/actor-context/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/testing/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/common/redis/tsconfig.lib.json"
     },
     {

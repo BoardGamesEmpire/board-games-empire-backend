@@ -100,8 +100,10 @@ describe('the IGDB gateway, when its client credentials are missing', () => {
 
       expect(outcome.kind).toBe('exited');
       expect(outcome.child.exitCode).toBe(1);
-      // Validation stops at the first failure, and the client id comes first.
+      // Validation names every invalid variable at once: both credentials,
+      // and not the address, which has a default.
       expect(outcome.outputTail).toContainEqual(expect.stringContaining('IGDB_CLIENT_ID'));
+      expect(outcome.outputTail).toContainEqual(expect.stringContaining('IGDB_CLIENT_SECRET'));
       expect(outcome.outputTail).not.toContainEqual(expect.stringContaining('IGDB_GATEWAY_GRPC_HOST'));
     },
     BOOT_TIMEOUT_MS * 2,
