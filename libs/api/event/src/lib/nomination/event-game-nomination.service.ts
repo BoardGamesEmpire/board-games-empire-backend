@@ -31,7 +31,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
-import { lockSupplier, type LockedSupplier } from '../attendee/attendance';
+import { lockEventDates, lockSupplier, type LockedSupplier } from '../attendee/attendance';
 import { NOT_REMOVED } from '../constants/not-removed.constant';
 import { PLATFORM_GAME_SUMMARY_SELECT } from '../constants/platform-game-summary.constant';
 import { CastVoteDto } from '../dto/cast-vote.dto';
@@ -429,18 +429,18 @@ export class EventGameNominationService {
       new BadRequestException(t('errors.nomination.cannot_resolve_status', { status: nomination.status })),
     );
 
-    const policy = await this.getEffectivePolicy(eventId, nomination.occurrenceId ?? undefined);
-
     try {
       const { updated, elevated, decision } = await this.settle(
         eventId,
         nomination,
         NominationStatus.Open,
-        async (tx) => {
+        async (tx, occurrenceId) => {
+          const policy = await this.getEffectivePolicy(eventId, occurrenceId ?? undefined, tx);
           const resolution = await this.countVotes(tx, eventId, nomination.id, policy);
           return {
             outcome: resolution.thresholdMet ? NominationStatus.Passed : NominationStatus.Failed,
             resolution,
+            voteEligibility: policy.voteEligibility,
           };
         },
       );
@@ -460,7 +460,7 @@ export class EventGameNominationService {
       }
 
       return {
-        nomination: await this.withVoteEligibilityOf(eventId, updated, policy.voteEligibility),
+        nomination: await this.withVoteEligibilityOf(eventId, updated, decision.voteEligibility),
         resolution: { ...decision.resolution, status: decision.outcome },
       };
     } catch (error) {
@@ -658,19 +658,29 @@ export class EventGameNominationService {
    * checked again. One that has since paused, or been withdrawn, answers as
    * the first check would have.
    *
-   * `decide` runs under the nomination's lock, so an outcome it reads from the
-   * votes is the one the nomination settles on ({@link countVotes}).
+   * The event's dates are locked between the two (`lockEventDates`), as every
+   * write to them locks the event first. Removing a date clears it from the
+   * nominations that name it while holding the date's row, and adding the
+   * game to that date's lineup waits on the same row: with only the
+   * nomination locked, each could wait on the other. The date the nomination
+   * names is read again under its lock: if the date was removed in the
+   * meantime, the nomination is the event's now, and so is the game it adds.
+   *
+   * `decide` runs under the nomination's lock and is given that date, so an
+   * outcome it reads from the votes is the one the nomination settles on
+   * ({@link countVotes}), under the rule of the date it names.
    */
   private async settle<Decision extends { outcome: NominationStatus }>(
     eventId: string,
-    nomination: Pick<NominationRow, 'id' | 'platformGameId' | 'suppliedFromId' | 'occurrenceId'>,
+    nomination: Pick<NominationRow, 'id' | 'platformGameId' | 'suppliedFromId'>,
     expected: NominationStatus,
-    decide: (tx: Prisma.TransactionClient) => Promise<Decision>,
+    decide: (tx: Prisma.TransactionClient, occurrenceId: string | null) => Promise<Decision>,
   ): Promise<{ updated: NominationRow; elevated: LineupAddition | null; decision: Decision }> {
     return this.db.$transaction(async (tx) => {
       const supplier = await lockSupplier(tx, nomination.suppliedFromId);
-      const [current] = await tx.$queryRaw<{ status: NominationStatus }[]>(Prisma.sql`
-        SELECT status FROM event_game_nominations WHERE id = ${nomination.id} FOR UPDATE
+      await lockEventDates(tx, eventId);
+      const [current] = await tx.$queryRaw<{ status: NominationStatus; occurrenceId: string | null }[]>(Prisma.sql`
+        SELECT status, occurrence_id AS "occurrenceId" FROM event_game_nominations WHERE id = ${nomination.id} FOR UPDATE
       `);
 
       if (current?.status !== expected) {
@@ -682,7 +692,7 @@ export class EventGameNominationService {
         );
       }
 
-      const decision = await decide(tx);
+      const decision = await decide(tx, current.occurrenceId);
       const elevates = decision.outcome === NominationStatus.Passed || decision.outcome === NominationStatus.Approved;
 
       if (elevates) {
@@ -700,7 +710,7 @@ export class EventGameNominationService {
       });
 
       const elevated = elevates
-        ? await this.elevateToEventGame(tx, nomination, eventId, nomination.occurrenceId ?? undefined)
+        ? await this.elevateToEventGame(tx, nomination, eventId, current.occurrenceId ?? undefined)
         : null;
 
       return { updated, elevated, decision };
@@ -810,13 +820,17 @@ export class EventGameNominationService {
     };
   }
 
-  private async getEffectivePolicy(eventId: string, occurrenceId?: string): Promise<EffectivePolicy> {
-    const eventPolicy = await this.db.eventPolicy.findUnique({
+  private async getEffectivePolicy(
+    eventId: string,
+    occurrenceId?: string,
+    client: Prisma.TransactionClient = this.db,
+  ): Promise<EffectivePolicy> {
+    const eventPolicy = await client.eventPolicy.findUnique({
       where: { eventId },
     });
 
     const occPolicy = occurrenceId
-      ? await this.db.eventOccurrencePolicy.findUnique({
+      ? await client.eventOccurrencePolicy.findUnique({
           where: { occurrenceId },
         })
       : null;

@@ -25,6 +25,7 @@ import {
   createMockAbilityService,
   createTestingModuleWithDb,
   paginationQuery,
+  rawQueryText,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
@@ -211,9 +212,7 @@ describe('EventGameNominationService', () => {
       { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
       { id: 'att-left', ...voter(EventParticipationStatus.NotAttending) },
     ] as never);
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier()] as never)
-      .mockResolvedValueOnce([{ status: 'Open' }] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
     db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Failed }));
 
     const { resolution } = await service.resolveNomination('event-1', 'nom-1');
@@ -235,14 +234,12 @@ describe('EventGameNominationService', () => {
     db.eventAttendee.findMany.mockResolvedValue([
       { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
     ] as never);
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier()] as never)
-      .mockResolvedValueOnce([{ status: NominationStatus.Open }] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
     db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Failed }));
 
     await service.resolveNomination('event-1', 'nom-1');
 
-    const [, nominationLock] = db.$queryRaw.mock.invocationCallOrder;
+    const [, , nominationLock] = db.$queryRaw.mock.invocationCallOrder;
     const [votesRead] = db.eventGameVote.findMany.mock.invocationCallOrder;
     const [poolRead] = db.eventAttendee.findMany.mock.invocationCallOrder;
     const [settled] = db.eventGameNomination.update.mock.invocationCallOrder;
@@ -261,9 +258,7 @@ describe('EventGameNominationService', () => {
     db.eventAttendee.findMany.mockResolvedValue([
       { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
     ] as never);
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier()] as never)
-      .mockResolvedValueOnce([{ status: NominationStatus.Open }] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.Open });
     db.eventGameNomination.update.mockResolvedValue(
       nominationRow({ nominatedById: 'att-nominator', status: NominationStatus.Passed }),
     );
@@ -296,15 +291,128 @@ describe('EventGameNominationService', () => {
   // before anything is counted.
   it('resolveNomination answers 400 for a nomination that paused after it was read, and counts and writes nothing', async () => {
     db.eventGameNomination.findUnique.mockResolvedValue(openNomination());
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier({ status: EventParticipationStatus.NotAttending })] as never)
-      .mockResolvedValueOnce([{ status: NominationStatus.Paused }] as never);
+    mockSettleLocks(db, lockedSupplier({ status: EventParticipationStatus.NotAttending }), {
+      status: NominationStatus.Paused,
+    });
 
     await expect(service.resolveNomination('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
     expect(db.eventGameVote.findMany).not.toHaveBeenCalled();
     expect(db.eventGameNomination.update).not.toHaveBeenCalled();
     expect(db.eventGame.create).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
+  });
+
+  // Removing a date clears it from the nominations that name it while
+  // holding the date's row, and a settle adding the game to that date waits
+  // on the same row. Both lock the event's dates first, so they take turns,
+  // and a settle that comes second reads the date as the removal left it.
+  describe("settling a nomination, against a write to the event's dates", () => {
+    const settles = [
+      {
+        caller: 'resolveNomination',
+        status: NominationStatus.Open,
+        settle: () => service.resolveNomination('event-1', 'nom-1'),
+      },
+      {
+        caller: 'hostApprove',
+        status: NominationStatus.AwaitingApproval,
+        settle: () => service.hostApprove('event-1', 'nom-1'),
+      },
+    ];
+
+    /**
+     * A nomination of a date, occ-1, as first read, that passes when it
+     * settles, and names `lockedOccurrenceId` when read under its lock.
+     */
+    const arrange = (status: NominationStatus, lockedOccurrenceId: string | null) => {
+      db.eventGameNomination.findUnique.mockResolvedValue({
+        id: 'nom-1',
+        status,
+        platformGameId: 'pg-1',
+        occurrenceId: 'occ-1',
+        suppliedFromId: 'gl-1',
+      } as EventGameNomination);
+      db.eventGameVote.findMany.mockResolvedValue([{ voteType: VoteType.For, attendeeId: 'att-in' }] as never);
+      db.eventAttendee.findMany.mockResolvedValue([
+        { id: 'att-in', ...voter(EventParticipationStatus.Attending) },
+      ] as never);
+      mockSettleLocks(db, lockedSupplier(), { status, occurrenceId: lockedOccurrenceId });
+      db.eventGameNomination.update.mockResolvedValue(
+        nominationRow({ status: NominationStatus.Passed, occurrenceId: lockedOccurrenceId }),
+      );
+      db.eventGame.create.mockResolvedValue({ id: 'eg-1' } as EventGame);
+      db.eventOccurrencePolicy.findMany.mockResolvedValue([]);
+    };
+
+    it.each(settles)(
+      "$caller locks the event's dates after the supplier, before the nomination",
+      async ({ status, settle }) => {
+        arrange(status, 'occ-1');
+
+        await settle();
+
+        expect(db.$queryRaw).toHaveBeenCalledTimes(3);
+        const [[supplierLock], [datesLock], [nominationLock]] = db.$queryRaw.mock.calls;
+        expect(rawQueryText(supplierLock)).toMatch(/FROM attendee_game_lists/);
+        expect(rawQueryText(datesLock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR SHARE$/);
+        expect((datesLock as unknown as Prisma.Sql).values).toEqual(['event-1']);
+        expect(rawQueryText(nominationLock)).toMatch(/FROM event_game_nominations WHERE id = \? FOR UPDATE$/);
+      },
+    );
+
+    it.each(settles)(
+      'adds the game to the lineup of the date the nomination names under its lock, through $caller',
+      async ({ status, settle }) => {
+        arrange(status, 'occ-1');
+
+        await settle();
+
+        expect(db.eventGame.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ occurrence: { connect: { id: 'occ-1' } }, event: undefined }),
+        });
+      },
+    );
+
+    it.each(settles)(
+      "adds the game to the event's own lineup when the nomination's date was removed after it was read, through $caller",
+      async ({ status, settle }) => {
+        arrange(status, null);
+
+        await settle();
+
+        expect(db.eventGame.create).toHaveBeenCalledWith({
+          data: expect.objectContaining({ event: { connect: { id: 'event-1' } }, occurrence: undefined }),
+        });
+      },
+    );
+
+    // The date's rule counts an invited attendee's vote, and the event's does
+    // not, so the outcome shows whose rule counted it.
+    it.each([
+      { rule: 'the rule of the date it still names', lockedOccurrenceId: 'occ-1', outcome: NominationStatus.Passed },
+      {
+        rule: "the event's rule when its date was removed after it was read",
+        lockedOccurrenceId: null,
+        outcome: NominationStatus.Failed,
+      },
+    ])('resolveNomination counts the votes under $rule', async ({ lockedOccurrenceId, outcome }) => {
+      db.eventPolicy.findUnique.mockResolvedValue({ voteEligibility: VoteEligibility.ConfirmedOnly } as EventPolicy);
+      db.eventOccurrencePolicy.findUnique.mockResolvedValue({
+        occurrenceId: 'occ-1',
+        voteEligibility: VoteEligibility.AllAttendees,
+      } as EventOccurrencePolicy);
+      arrange(NominationStatus.Open, lockedOccurrenceId);
+      db.eventAttendee.findMany.mockResolvedValue([
+        { id: 'att-in', ...voter(EventParticipationStatus.Invited) },
+      ] as never);
+
+      const { resolution } = await service.resolveNomination('event-1', 'nom-1');
+
+      expect(resolution.status).toBe(outcome);
+      const [, , nominationLock] = db.$queryRaw.mock.invocationCallOrder;
+      const [policyRead] = db.eventPolicy.findUnique.mock.invocationCallOrder;
+      expect(policyRead).toBeGreaterThan(nominationLock);
+    });
   });
 
   it('withdraw → update', async () => {
@@ -384,9 +492,7 @@ describe('EventGameNominationService', () => {
     });
 
     it('→ update', async () => {
-      db.$queryRaw
-        .mockResolvedValueOnce([lockedSupplier()] as never)
-        .mockResolvedValueOnce([{ status: NominationStatus.AwaitingApproval }] as never);
+      mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.AwaitingApproval });
       db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Approved }));
       db.eventGame.create.mockResolvedValue({ id: 'eg-1' } as EventGame);
 
@@ -401,9 +507,9 @@ describe('EventGameNominationService', () => {
     // The status was read before the transaction; the supplier leaving in
     // between pauses the nomination, so it is checked again under its lock.
     it('answers 400 for a nomination that paused after it was read, and writes nothing', async () => {
-      db.$queryRaw
-        .mockResolvedValueOnce([lockedSupplier({ status: EventParticipationStatus.NotAttending })] as never)
-        .mockResolvedValueOnce([{ status: NominationStatus.Paused }] as never);
+      mockSettleLocks(db, lockedSupplier({ status: EventParticipationStatus.NotAttending }), {
+        status: NominationStatus.Paused,
+      });
 
       await expect(service.hostApprove('event-1', 'nom-1')).rejects.toThrow(BadRequestException);
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
@@ -411,9 +517,9 @@ describe('EventGameNominationService', () => {
     });
 
     it('refuses to add the game of a supplier who is not attending to the lineup, and writes nothing', async () => {
-      db.$queryRaw
-        .mockResolvedValueOnce([lockedSupplier({ status: EventParticipationStatus.NotAttending })] as never)
-        .mockResolvedValueOnce([{ status: NominationStatus.AwaitingApproval }] as never);
+      mockSettleLocks(db, lockedSupplier({ status: EventParticipationStatus.NotAttending }), {
+        status: NominationStatus.AwaitingApproval,
+      });
 
       await expect(service.hostApprove('event-1', 'nom-1')).rejects.toThrow(ConflictException);
       expect(db.eventGameNomination.update).not.toHaveBeenCalled();
@@ -429,9 +535,7 @@ describe('EventGameNominationService', () => {
       occurrenceId: null,
       suppliedFromId: 'gl-1',
     } as EventGameNomination);
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier()] as never)
-      .mockResolvedValueOnce([{ status: NominationStatus.AwaitingApproval }] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.AwaitingApproval });
     db.eventGameNomination.update.mockResolvedValue(
       nominationRow({ nominatedById: 'att-nominator', status: NominationStatus.Approved }),
     );
@@ -480,9 +584,7 @@ describe('EventGameNominationService', () => {
       occurrenceId: null,
       suppliedFromId: 'gl-1',
     } as EventGameNomination);
-    db.$queryRaw
-      .mockResolvedValueOnce([lockedSupplier()] as never)
-      .mockResolvedValueOnce([{ status: NominationStatus.AwaitingApproval }] as never);
+    mockSettleLocks(db, lockedSupplier(), { status: NominationStatus.AwaitingApproval });
     db.eventGameNomination.update.mockResolvedValue(nominationRow({ status: NominationStatus.Rejected }));
 
     await service.hostReject('event-1', 'nom-1');
@@ -958,6 +1060,22 @@ function lockedSupplier(overrides: Partial<LockedSupplier> = {}): LockedSupplier
     entryRemovedAt: null,
     ...overrides,
   };
+}
+
+/**
+ * The locks a settle takes, in order, as each reads: the supplier's, the
+ * event's dates, then the nomination's. The nomination names no date unless
+ * one is given.
+ */
+function mockSettleLocks(
+  db: MockDatabaseService,
+  supplier: LockedSupplier,
+  nomination: { status: NominationStatus; occurrenceId?: string | null },
+): void {
+  db.$queryRaw
+    .mockResolvedValueOnce([supplier] as never)
+    .mockResolvedValueOnce([{ id: 'event-1' }] as never)
+    .mockResolvedValueOnce([{ occurrenceId: null, ...nomination }] as never);
 }
 
 /** A voter as the reads select them: what decides whether their vote counts. */

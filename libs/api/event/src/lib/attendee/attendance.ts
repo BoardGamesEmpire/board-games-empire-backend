@@ -148,9 +148,12 @@ export async function lockSupplier(tx: Prisma.TransactionClient, gameListId: str
  * event, so the lineup would end up ahead, holding a game nobody is
  * bringing.
  *
- * Adding a game to a lineup waits for neither. Its supplier is in the event
- * when it is added ({@link lockSupplier}), and whichever of the two runs when
- * they leave judges it then.
+ * Adding a game to a lineup need not wait for either. Its supplier is in the
+ * event when it is added ({@link lockSupplier}), and whichever of the two runs
+ * when they leave judges it then. A direct add takes no lock on the event.
+ * Settling a nomination takes this one before the nomination's, for another
+ * reason: removing a date writes to the nominations that name it while
+ * holding this row, so a nomination is locked only after it.
  */
 export async function lockEventDates(tx: Prisma.TransactionClient, eventId: string): Promise<void> {
   await tx.$queryRaw(Prisma.sql`SELECT id FROM events WHERE id = ${eventId} FOR SHARE`);
