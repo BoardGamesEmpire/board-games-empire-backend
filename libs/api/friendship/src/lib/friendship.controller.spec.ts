@@ -1,9 +1,10 @@
-import { FriendshipStatus } from '@bge/database';
-import { DefaultPaginationQueryDto } from '@bge/shared';
+import { FriendshipStatus, ResourceType } from '@bge/database';
+import { DefaultPaginationQueryDto, ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { firstValueFrom } from 'rxjs';
+import { ClsServiceManager } from 'nestjs-cls';
+import { firstValueFrom, type Observable } from 'rxjs';
 import { ListFriendshipsQueryDto } from './dto';
 import { FriendshipController } from './friendship.controller';
 import { FriendshipService } from './friendship.service';
@@ -61,6 +62,22 @@ describe('FriendshipController (delegation)', () => {
       requests: [{ id: 'f-2' }],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
     });
+  });
+
+  // The service composes the `Friendship` scope; the envelope is where the
+  // guard checks for it. Built inside a request with nothing composed, each
+  // envelope must fail. An `Unscoped` envelope, or a type still in
+  // `PENDING_SCOPE_SWEEP`, would pass and switch the guard off for the route.
+  // The name is asserted too: an envelope naming another swept type would also
+  // fail, for the wrong reason.
+  it.each<[string, () => Observable<unknown>]>([
+    ['list', () => controller.list(PAGINATION)],
+    ['listRequests', () => controller.listRequests(PAGINATION)],
+  ])('%s builds its envelope under the Friendship scope guard', async (_name, handler) => {
+    const envelope = ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(handler()));
+
+    await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+    await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Friendship}'`);
   });
 
   /**

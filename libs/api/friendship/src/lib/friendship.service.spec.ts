@@ -1,7 +1,8 @@
 import type { Friendship } from '@bge/database';
 import { Action, FriendshipStatus, Prisma, ResourceType } from '@bge/database';
 import { uniqueViolationWithoutMeta } from '@bge/database/testing';
-import { AbilityService } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
   createTestingModuleWithDb,
@@ -42,6 +43,7 @@ describe('FriendshipService', () => {
   let service: FriendshipService;
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
+  let compose: jest.SpyInstance;
 
   beforeEach(async () => {
     abilityService = {
@@ -50,11 +52,18 @@ describe('FriendshipService', () => {
     };
 
     const ctx = await createTestingModuleWithDb({
-      providers: [FriendshipService, { provide: AbilityService, useValue: abilityService }],
+      providers: [
+        FriendshipService,
+        // The REAL composer, over the mocked ability service, so the where
+        // clauses asserted below are the merge the lists actually run.
+        ScopeComposer,
+        { provide: AbilityService, useValue: abilityService },
+      ],
     });
 
     db = ctx.db;
     service = ctx.module.get(FriendshipService);
+    compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -239,31 +248,77 @@ describe('FriendshipService', () => {
     });
   });
 
+  /**
+   * #515. Both reads declare their own set, the acting user's friendships, and
+   * the ceiling only clips it. Staff and the Owner read every friendship on the
+   * server through their wildcard rules, so before this the wide list showed
+   * them everyone's. `Friendship` has left `PENDING_SCOPE_SWEEP`, so a read
+   * that stops composing answers 500 at the envelope rather than widening
+   * again. That is why the composer call itself is pinned.
+   */
   describe('reads', () => {
+    const MINE = { OR: [{ requesterId: ME }, { addresseeId: ME }] };
+
     beforeEach(() => {
       db.friendship.findMany.mockResolvedValue([]);
       db.friendship.count.mockResolvedValue(0);
     });
 
-    it('listForUser scopes by read conditions and applies the status filter', async () => {
+    it("listForUser asks the composer for its where clause, declaring the acting user's friendships", async () => {
+      await service.listForUser(paginationQuery({ limit: 10 }));
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.Friendship, Action.read, MINE);
+    });
+
+    // The status filter is a query parameter, not scope, so it sits beside the
+    // composed clause rather than inside it.
+    it('listForUser queries with the composed clause and the status filter beside it', async () => {
       await service.listForUser(Object.assign(paginationQuery({ limit: 10 }), { status: FriendshipStatus.Accepted }));
 
-      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Friendship, Action.read);
       expect(db.friendship.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ AND: [COND], status: FriendshipStatus.Accepted }),
+          where: { AND: [{ ...MINE, AND: [COND] }, { status: FriendshipStatus.Accepted }] },
         }),
       );
     });
 
-    it('listIncomingRequests filters to pending requests addressed to the acting user', async () => {
+    it('listForUser applies no status filter when none is asked for', async () => {
+      await service.listForUser(paginationQuery({ limit: 10 }));
+
+      expect(db.friendship.findMany.mock.calls[0][0]?.where).toEqual({ AND: [{ ...MINE, AND: [COND] }, {}] });
+    });
+
+    it("listIncomingRequests asks the composer for its where clause, declaring the acting user's pending requests", async () => {
       await service.listIncomingRequests(paginationQuery({ limit: 10 }));
 
+      expect(compose).toHaveBeenCalledWith(ResourceType.Friendship, Action.read, {
+        addresseeId: ME,
+        status: FriendshipStatus.Pending,
+      });
       expect(db.friendship.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: expect.objectContaining({ addresseeId: ME, status: FriendshipStatus.Pending, AND: [COND] }),
+          where: { addresseeId: ME, status: FriendshipStatus.Pending, AND: [COND] },
         }),
       );
+    });
+
+    // PROVISIONAL (#395). "My friendships" has no meaning for an actor with no
+    // user behind it, and the refusal must not soften into an empty page. The
+    // wide list used to ask for no user at all, and answered such an actor
+    // with whatever its ceiling admitted.
+    it.each([
+      ['listForUser', (q: ReturnType<typeof paginationQuery>) => service.listForUser(q)],
+      ['listIncomingRequests', (q: ReturnType<typeof paginationQuery>) => service.listIncomingRequests(q)],
+    ])('%s refuses an actor kind with no user behind it, with a message about reading', async (_name, read) => {
+      abilityService.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await read(paginationQuery({ limit: 10 })).catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.friendship.findMany).not.toHaveBeenCalled();
     });
 
     // #372: both reads go through one shared paginate helper, so the snapshot
@@ -292,7 +347,7 @@ describe('FriendshipService', () => {
       );
 
       expect(db.friendship.count).toHaveBeenCalledWith({
-        where: { AND: [COND], status: FriendshipStatus.Accepted },
+        where: { AND: [{ ...MINE, AND: [COND] }, { status: FriendshipStatus.Accepted }] },
       });
       expect(page).toEqual({ rows: [], total: 5 });
     });
@@ -306,7 +361,7 @@ describe('FriendshipService', () => {
       await service.listIncomingRequests(paginationQuery({ limit: 10 }));
 
       expect(db.friendship.count).toHaveBeenCalledWith({
-        where: { AND: [COND], addresseeId: ME, status: FriendshipStatus.Pending },
+        where: { addresseeId: ME, status: FriendshipStatus.Pending, AND: [COND] },
       });
     });
   });

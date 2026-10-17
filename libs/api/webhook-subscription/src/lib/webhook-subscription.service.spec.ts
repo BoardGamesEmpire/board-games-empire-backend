@@ -1,9 +1,11 @@
 import { Action, Prisma, ResourceType, WebhookSubscriptionEventType, WebhookSubscriptionStatus } from '@bge/database';
-import { AbilityService, type AppAbility } from '@bge/permissions';
+import { t } from '@bge/i18n';
+import { AbilityService, ScopeComposer, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   createMockAbilityService,
   createTestingModuleWithDb,
+  MOCK_RESOURCE_CONDITION,
   MockAbilityService,
   MockDatabaseService,
   rawQueryText,
@@ -62,6 +64,7 @@ describe('WebhookSubscriptionService', () => {
   let visibility: jest.Mocked<Pick<WebhookVisibilityService, 'isVisibleTo'>>;
   let encryption: jest.Mocked<Pick<EncryptionService, 'encrypt' | 'decrypt'>>;
   let ability: MockAbilityService;
+  let compose: jest.SpyInstance;
 
   const allowAll = createPrismaAbility([{ action: Action.manage, subject: 'all' }]) as AppAbility;
   const denyAll = createPrismaAbility([]) as AppAbility;
@@ -87,6 +90,9 @@ describe('WebhookSubscriptionService', () => {
       providers: [
         WebhookSubscriptionService,
         WebhookEventRegistry,
+        // The REAL composer, over the mocked ability service, so the list's
+        // where clause asserted below is the merge the read actually runs.
+        ScopeComposer,
         { provide: WebhookVisibilityService, useValue: visibility },
         { provide: EncryptionService, useValue: encryption },
         { provide: AbilityService, useValue: ability },
@@ -96,6 +102,7 @@ describe('WebhookSubscriptionService', () => {
 
     service = module.get(WebhookSubscriptionService);
     registry = module.get(WebhookEventRegistry);
+    compose = jest.spyOn(module.get(ScopeComposer), 'compose');
     db = mockDb;
     // Create writes inside a transaction (#552). The household share lock is
     // its one raw statement, and it finds the household live unless a case
@@ -311,23 +318,141 @@ describe('WebhookSubscriptionService', () => {
       const result = await service.list();
       expect(result.map((s) => s.secret)).toEqual([WEBHOOK_SECRET_REDACTED, WEBHOOK_SECRET_REDACTED]);
     });
+  });
 
-    it('scopes the list to the acting user', async () => {
+  /**
+   * #515. The list declares its own set, the acting user's live
+   * subscriptions, and the ceiling clips it. It used to filter on the owner
+   * and ask for no ceiling at all, so an API key scoped to one subscription
+   * listed every subscription its owner had.
+   */
+  describe('list', () => {
+    it("asks the composer for its where clause, declaring the acting user's live subscriptions", async () => {
       db.webhookSubscription.findMany.mockResolvedValue([]);
+
       await service.list();
+
+      expect(compose).toHaveBeenCalledWith(ResourceType.WebhookSubscription, Action.read, {
+        createdById: ACTING_USER_ID,
+        deletedAt: null,
+      });
       expect(db.webhookSubscription.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { createdById: ACTING_USER_ID, deletedAt: null } }),
+        expect.objectContaining({
+          where: { createdById: ACTING_USER_ID, deletedAt: null, AND: [MOCK_RESOURCE_CONDITION] },
+        }),
       );
+    });
+
+    // PROVISIONAL (#395). "My subscriptions" has no meaning for an actor with
+    // no user behind it, and the refusal must not soften into an empty list.
+    it('refuses an actor kind with no user behind it, with a message about reading', async () => {
+      ability.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await service.list().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.webhookSubscription.findMany).not.toHaveBeenCalled();
     });
   });
 
   describe('getById', () => {
-    it('scopes by the acting user and throws NotFound when absent', async () => {
+    it('scopes by the acting user and the read ceiling, and throws NotFound when absent', async () => {
       db.webhookSubscription.findFirst.mockResolvedValue(null);
       await expect(service.getById('sub-x')).rejects.toThrow(NotFoundException);
+      expect(ability.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.WebhookSubscription, Action.read);
       expect(db.webhookSubscription.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { id: 'sub-x', createdById: ACTING_USER_ID, deletedAt: null } }),
+        expect.objectContaining({
+          where: { id: 'sub-x', createdById: ACTING_USER_ID, deletedAt: null, AND: [MOCK_RESOURCE_CONDITION] },
+        }),
       );
+    });
+
+    // PROVISIONAL (#395), and the list's refusal: the by-id routes, writes
+    // included, read through here, so they refuse a userless actor as it does.
+    it('refuses an actor kind with no user behind it, as the list does', async () => {
+      ability.getActingUserId.mockImplementation(() => {
+        throw new ForbiddenException(t('errors.actor_context.not_user_attributable', { kind: 'plugin' }));
+      });
+
+      const rejection: unknown = await service.getById('sub-x').catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t('common.forbidden.access'));
+      expect(db.webhookSubscription.findFirst).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * #590. Each write used to read the row through `getById` and then write
+   * `where: { id }`, so a restriction held at the ability layer never reached
+   * it: an API key with `read` on every subscription and `manage` on one could
+   * still PATCH another. Each write now carries its own action's ceiling, and
+   * a refused write is a 403. The ceilings are told apart by action so the
+   * test can see which one reached the write.
+   */
+  describe('writes carry their own ceiling', () => {
+    const ceilingFor = (action: Action) => ({ ceiling: action });
+
+    beforeEach(() => {
+      ability.getCurrentResourceConditions.mockImplementation((_type, action) => [ceilingFor(action as Action)]);
+      db.webhookSubscription.findFirst.mockResolvedValue(
+        makeWebhookSub({ eventTypes: [makeEventType({ eventType: WebhookEventType.EventCreated })] }),
+      );
+      db.webhookSubscription.update.mockResolvedValue(makeWebhookSub());
+    });
+
+    type Refusal = 'common.forbidden.update' | 'common.forbidden.delete';
+    const writes: [string, Action, () => Promise<unknown>, Refusal][] = [
+      [
+        'update',
+        Action.update,
+        () => service.update('sub-1', { url: 'https://new.example.com/hook' }),
+        'common.forbidden.update',
+      ],
+      ['disable', Action.update, () => service.disable('sub-1'), 'common.forbidden.update'],
+      ['reactivate', Action.update, () => service.reactivate('sub-1'), 'common.forbidden.update'],
+      ['remove', Action.delete, () => service.remove('sub-1'), 'common.forbidden.delete'],
+    ];
+
+    it.each(writes)(
+      '%s writes through the %s ceiling, after reading through the read one',
+      async (_name, action, write) => {
+        await write();
+
+        expect(db.webhookSubscription.findFirst).toHaveBeenCalledWith(
+          expect.objectContaining({ where: expect.objectContaining({ id: 'sub-1', AND: [ceilingFor(Action.read)] }) }),
+        );
+        expect(db.webhookSubscription.update).toHaveBeenCalledWith(
+          expect.objectContaining({ where: { id: 'sub-1', AND: [ceilingFor(action)] } }),
+        );
+      },
+    );
+
+    // The pre-read passed, so the row exists and the actor may read it. A
+    // write that then matches nothing was refused by the ceiling: that is a
+    // 403, not a 500 and not a 404.
+    it.each(writes)('%s answers 403 when its ceiling refuses the row', async (_name, _action, write, message) => {
+      db.webhookSubscription.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('No record was found for an update.', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      const rejection: unknown = await write().catch((error: unknown) => error);
+
+      expect(rejection).toBeInstanceOf(ForbiddenException);
+      expect((rejection as ForbiddenException).getResponse()).toEqual(t(message));
+    });
+
+    it.each(writes)('%s passes any other failure through unchanged', async (_name, _action, write) => {
+      const failure = new Error('connection reset');
+      db.webhookSubscription.update.mockRejectedValue(failure);
+
+      await expect(write()).rejects.toBe(failure);
     });
   });
 
@@ -414,7 +539,7 @@ describe('WebhookSubscriptionService', () => {
 
       expect(db.webhookSubscription.update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: 'sub-1' },
+          where: { id: 'sub-1', AND: [MOCK_RESOURCE_CONDITION] },
           data: expect.objectContaining({ status: WebhookSubscriptionStatus.Disabled, disabledAt: expect.any(Date) }),
         }),
       );

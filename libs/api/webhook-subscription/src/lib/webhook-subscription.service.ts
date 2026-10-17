@@ -1,6 +1,14 @@
-import { DatabaseService, lockLiveHousehold, Prisma, ResourceType, WebhookSubscriptionStatus } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  isPrismaDependentRecordNotFoundError,
+  lockLiveHousehold,
+  Prisma,
+  ResourceType,
+  WebhookSubscriptionStatus,
+} from '@bge/database';
 import { I18nMessage, t } from '@bge/i18n';
-import { AbilityService, type AppAbility } from '@bge/permissions';
+import { AbilityService, resolveScopeSubjectId, ScopeComposer, type AppAbility } from '@bge/permissions';
 import { EncryptionService } from '@bge/services';
 import {
   CreateWebhookSubscriptionDto,
@@ -36,6 +44,7 @@ export class WebhookSubscriptionService {
     private readonly visibility: WebhookVisibilityService,
     private readonly encryption: EncryptionService,
     private readonly abilityService: AbilityService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   /**
@@ -102,21 +111,52 @@ export class WebhookSubscriptionService {
     return this.reveal(created, plaintextSecret);
   }
 
-  /** Lists the caller's own subscriptions (excluding soft-deleted), secrets redacted. */
+  /**
+   * Lists the acting user's own subscriptions (excluding soft-deleted),
+   * secrets redacted.
+   *
+   * The scope is the acting user's live subscriptions, and the ceiling clips
+   * it (#515). For a session the two coincide. For an API key they don't: a
+   * key scoped to one subscription carries a ceiling of that one row, and
+   * without it the list answered with every subscription the key's owner has.
+   *
+   * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
+   * "my subscriptions" has no meaning without a user, and the refusal must
+   * never soften into an empty list. PROVISIONAL — #395.
+   */
   async list(): Promise<WebhookSubscriptionWithEventTypes[]> {
-    const userId = this.abilityService.getActingUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
     const subscriptions = await this.db.webhookSubscription.findMany({
-      where: { createdById: userId, deletedAt: null },
+      where: this.scopeComposer.compose(ResourceType.WebhookSubscription, Action.read, {
+        createdById: userId,
+        deletedAt: null,
+      }),
       include: { eventTypes: true },
       orderBy: { createdAt: 'desc' },
     });
     return subscriptions.map((subscription) => this.redact(subscription));
   }
 
+  /**
+   * One of the acting user's live subscriptions, clipped by the `read` ceiling
+   * (#590), so an API key reads only the subscriptions its scope names. Every
+   * write reads through here first, which makes a refused write's 403 mean the
+   * row exists and the actor may read it.
+   *
+   * The subject comes from `resolveScopeSubjectId`, as the list's does, so the
+   * by-id routes refuse a userless actor exactly as the list does and #395
+   * moves both at once.
+   */
   async getById(id: string): Promise<WebhookSubscriptionWithEventTypes> {
-    const userId = this.abilityService.getActingUserId();
+    const userId = resolveScopeSubjectId(this.abilityService);
     const subscription = await this.db.webhookSubscription.findFirst({
-      where: { id, createdById: userId, deletedAt: null },
+      where: {
+        id,
+        createdById: userId,
+        deletedAt: null,
+        // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.WebhookSubscription, Action.read),
+      },
       include: { eventTypes: true },
     });
 
@@ -154,16 +194,12 @@ export class WebhookSubscriptionService {
     }
 
     const rotatedSecret = dto.secret;
-    const updated = await this.db.webhookSubscription.update({
-      where: { id },
-      data: {
-        url: dto.url,
-        secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
-        eventTypes: dto.eventTypes
-          ? { deleteMany: {}, create: dto.eventTypes.map((eventType) => ({ eventType })) }
-          : undefined,
-      },
-      include: { eventTypes: true },
+    const updated = await this.writeScoped(id, Action.update, {
+      url: dto.url,
+      secret: rotatedSecret !== undefined ? this.encryption.encrypt(rotatedSecret) : undefined,
+      eventTypes: dto.eventTypes
+        ? { deleteMany: {}, create: dto.eventTypes.map((eventType) => ({ eventType })) }
+        : undefined,
     });
 
     return rotatedSecret !== undefined ? this.reveal(updated, rotatedSecret) : this.redact(updated);
@@ -175,10 +211,9 @@ export class WebhookSubscriptionService {
   async disable(id: string): Promise<WebhookSubscriptionWithEventTypes> {
     await this.getById(id);
 
-    const updated = await this.db.webhookSubscription.update({
-      where: { id },
-      data: { status: WebhookSubscriptionStatus.Disabled, disabledAt: new Date() },
-      include: { eventTypes: true },
+    const updated = await this.writeScoped(id, Action.update, {
+      status: WebhookSubscriptionStatus.Disabled,
+      disabledAt: new Date(),
     });
 
     return this.redact(updated);
@@ -208,10 +243,10 @@ export class WebhookSubscriptionService {
       await this.assertCanReceiveFromInstance(types, existing.resourceType, existing.resourceId, abilities);
     }
 
-    const updated = await this.db.webhookSubscription.update({
-      where: { id },
-      data: { status: WebhookSubscriptionStatus.Active, consecutiveFailures: 0, disabledAt: null },
-      include: { eventTypes: true },
+    const updated = await this.writeScoped(id, Action.update, {
+      status: WebhookSubscriptionStatus.Active,
+      consecutiveFailures: 0,
+      disabledAt: null,
     });
 
     return this.redact(updated);
@@ -220,13 +255,47 @@ export class WebhookSubscriptionService {
   /** Soft delete. */
   async remove(id: string): Promise<WebhookSubscriptionWithEventTypes> {
     await this.getById(id);
-    const updated = await this.db.webhookSubscription.update({
-      where: { id },
-      data: { deletedAt: new Date(), status: WebhookSubscriptionStatus.Disabled },
-      include: { eventTypes: true },
+    const updated = await this.writeScoped(id, Action.delete, {
+      deletedAt: new Date(),
+      status: WebhookSubscriptionStatus.Disabled,
     });
 
     return this.redact(updated);
+  }
+
+  /**
+   * Writes one subscription through `action`'s ceiling (#590). The type gate
+   * on the route and the read in `getById` both pass for an actor who may read
+   * the row but not change it, such as an API key with `read` on every
+   * subscription and `manage` on one, so the write has to carry the ceiling
+   * itself. A write it refuses matches no row, and that P2025 is a 403: the
+   * read before it already showed the row exists.
+   */
+  private async writeScoped(
+    id: string,
+    action: typeof Action.update | typeof Action.delete,
+    data: Prisma.WebhookSubscriptionUpdateInput,
+  ): Promise<WebhookSubscriptionWithEventTypes> {
+    try {
+      return await this.db.webhookSubscription.update({
+        where: {
+          id,
+          // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
+          AND: this.abilityService.getCurrentResourceConditions(ResourceType.WebhookSubscription, action),
+        },
+        data,
+        include: { eventTypes: true },
+      });
+    } catch (error) {
+      if (isPrismaDependentRecordNotFoundError(error)) {
+        this.logger.warn(`Refused ${action} on webhook subscription ${id}: outside the actor's ceiling`);
+        throw new ForbiddenException(
+          t(action === Action.delete ? 'common.forbidden.delete' : 'common.forbidden.update'),
+        );
+      }
+
+      throw error;
+    }
   }
 
   /**

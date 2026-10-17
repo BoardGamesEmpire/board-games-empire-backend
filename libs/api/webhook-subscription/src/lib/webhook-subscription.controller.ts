@@ -52,6 +52,7 @@ export class WebhookSubscriptionController {
   @ApiOperation({ summary: 'Update a webhook subscription' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription updated' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateWebhookSubscriptionDto) {
@@ -63,6 +64,7 @@ export class WebhookSubscriptionController {
   @ApiOperation({ summary: 'Disable a webhook subscription' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription disabled' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Post(':id/disable')
   disable(@Param('id') id: string) {
@@ -74,6 +76,7 @@ export class WebhookSubscriptionController {
   @ApiOperation({ summary: 'Re-activate a disabled or failed subscription' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription re-activated' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to update this subscription' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Post(':id/reactivate')
   reactivate(@Param('id') id: string) {
@@ -85,6 +88,7 @@ export class WebhookSubscriptionController {
   @ApiOperation({ summary: 'Delete a webhook subscription' })
   @ApiParam({ name: 'id', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Subscription deleted' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not permitted to delete this subscription' })
   @CheckPolicies((ability) => ability.can(Action.manage, ResourceType.WebhookSubscription))
   @Delete(':id')
   remove(@Param('id') id: string) {

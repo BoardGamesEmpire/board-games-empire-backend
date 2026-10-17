@@ -11,8 +11,9 @@ import { map } from 'rxjs/operators';
 /**
  * Admin surface for operational caps. Server admins manage any row; household
  * admins are narrowed by CASL to their own household's `HouseholdMember` rows
- * (manage) and may read their household's caps. A `:scopeId` of `*` addresses
- * the type-level default for the scope.
+ * (manage). A household's quotas are read on `GET /households/:householdId/quotas`
+ * (`HouseholdQuotaController`), not here. A `:scopeId` of `*` addresses the
+ * type-level default for the scope.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -22,8 +23,17 @@ import { map } from 'rxjs/operators';
 export class QuotasController {
   constructor(private readonly quotas: QuotaService) {}
 
-  @ApiOperation({ summary: 'List quotas you can read' })
+  @ApiOperation({
+    summary: 'List server, user and default quotas you can read',
+    description:
+      'Every quota that belongs to no household: server quotas, per-user quotas and the default ' +
+      'quotas (`scopeId` of `null`). A household\u2019s own and per-member quotas are listed on ' +
+      '`GET /households/{householdId}/quotas` instead, so a household owner or admin gets an empty ' +
+      'list here. Not paginated: one row per scope, target and resource.',
+  })
   @ApiResponse({ status: Http.Ok, description: 'Quotas retrieved' })
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Quota))
   @Get()
   list() {

@@ -74,7 +74,9 @@ export class GameImportController {
     summary: 'List your import batches',
     description:
       'Returns the import batches started by the authenticated user, most ' +
-      'recent first, each with per-job states and the derived rollup. Use ' +
+      'recently started first, each with per-job states and the derived ' +
+      'rollup. An API key sees only the batches, and the jobs, its scope ' +
+      'admits. Use ' +
       'this to recover batch/job ids no longer held client-side (page ' +
       'refresh, reinstall) — they are otherwise only returned when the ' +
       'import is started. Paginated: `?page=` (1-based) and `?limit=`, with a ' +
@@ -87,7 +89,7 @@ export class GameImportController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Job))
   @Get()
   listImports(@Query() pagination: DefaultPaginationQueryDto) {
-    return from(this.importStatus.listBatchesForUser(this.abilityService.getActingUserId(), pagination)).pipe(
+    return from(this.importStatus.listBatchesForUser(pagination)).pipe(
       map((page) => paginated('batches', page, pagination, ResourceType.Job)),
     );
   }
@@ -105,7 +107,7 @@ export class GameImportController {
   @ApiResponse({ status: Http.BadRequest, description: 'Malformed batchId (not a UUID)' })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @ApiResponse({ status: Http.NotFound, description: 'Unknown batchId' })
+  @ApiResponse({ status: Http.NotFound, description: 'Unknown batchId, or none of its jobs is readable by the actor' })
   // Deliberately NOT owner-scoped: imported games are public content, so any
   // authenticated reader may poll any batch by id (mirrors the public
   // ImportActivity feed; batch ids are unguessable UUIDs). The user-scoped

@@ -66,17 +66,17 @@ export const restrictedImportPaths = {
 // use it; this is what stops a newly written list from reaching past it. The
 // runtime half (the keyed `paginated()` assertion) covers paginated reads —
 // this one reaches reads that never build an envelope at all, of which one
-// carries the ceiling-only shape today: `GET /quotas`.
+// carried the ceiling-only shape until #515: `GET /quotas`.
 //
 // It catches ONE of the two omissions, and only that one. A ceiling used as
 // the answer set is a CALL this selector can name. The inverse — an intrinsic
 // filter with no ceiling ANDed onto it — is an ABSENT call, and no
 // `no-restricted-syntax` selector can match the absence of something across a
-// method body. `GET /webhook-subscriptions` is that second shape today (the
-// ScopeComposer class doc walks through what it leaks), and neither half
-// reaches it: it returns a bare array, so the runtime guard never runs for it
-// either. What closes that one is 418 converting the read — not a wider
-// selector, which cannot be written with this rule.
+// method body. `GET /webhooks/subscriptions` was that second shape until #515
+// converted it (the ScopeComposer class doc walks through what it leaked), and
+// neither half reached it: it returns a bare array, so the runtime guard never
+// runs for it either. What closes that shape is converting the read — not a
+// wider selector, which cannot be written with this rule.
 //
 // Opt-in PER LIB, exactly like the i18n selectors below: a lib's own
 // `eslint.config.mjs` pulls this in once #417/#418 have swept its reads, so the

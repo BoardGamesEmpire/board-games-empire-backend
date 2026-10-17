@@ -27,7 +27,9 @@ export interface ApiKeyScope {
 /**
  * A key `owner` mints through better-auth's own route, as they would mint it
  * themselves, holding the grants in `scope` and nothing else. With no scope
- * it holds none, and every policy-checked route denies it.
+ * it holds none, and every policy-checked route denies it. Several scopes give
+ * a key grants that differ by resource: `read` on every subscription beside
+ * `manage` on one, say.
  *
  * No route writes a key's scope rows yet (#266), so they are arranged
  * directly. Moving this into `@bge/testing-e2e` as an actor factory is #270.
@@ -36,7 +38,7 @@ export const mintApiKey = async (
   baseUrl: string,
   prisma: PrismaClient,
   owner: SessionActor,
-  scope?: ApiKeyScope,
+  scope?: ApiKeyScope | readonly ApiKeyScope[],
 ): Promise<ApiKeyCaller> => {
   const response = await request(baseUrl)
     .post('/api/auth/api-key/create')
@@ -48,16 +50,18 @@ export const mintApiKey = async (
     throw new Error(`minting a key failed: ${response.status} ${JSON.stringify(response.body)}`);
   }
 
-  if (scope !== undefined) {
-    for (const slug of scope.slugs) {
+  const scopes: readonly ApiKeyScope[] = scope === undefined ? [] : 'slugs' in scope ? [scope] : scope;
+
+  for (const { slugs, resourceType, resourceId } of scopes) {
+    for (const slug of slugs) {
       const permission = await prisma.permission.findUniqueOrThrow({ where: { slug } });
 
       await prisma.apiKeyScope.create({
         data: {
           apiKeyId: response.body.id,
           permissionId: permission.id,
-          resourceType: scope.resourceType,
-          resourceId: scope.resourceId ?? null,
+          resourceType,
+          resourceId: resourceId ?? null,
         },
       });
     }
