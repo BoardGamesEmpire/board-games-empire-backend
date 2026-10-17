@@ -47,7 +47,7 @@ export const E2E_BASE_URL_VAR = 'BGE_E2E_BASE_URL';
  * inlined because getting it wrong is invisible: the server boots happily on
  * its 33333 default and the readiness probe just times out.
  */
-export const API_PORT_VAR = 'SERVER_PORT';
+export const API_PORT_VAR = 'PORT';
 
 export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REDIS_IMAGE = 'redis:7-alpine';
@@ -122,12 +122,13 @@ export const API_THROTTLE_TTL_MS = 60_000;
  * is not the one under test.
  *
  * `TRUSTED_ORIGINS` is overridden for a narrower reason. `.env.example` ships
- * `http://localhost:{PORT}`, and `authFactory` does expand `{PORT}` itself
- * (from `system.port`) — so the inherited value would in fact resolve to the
- * right port. What it would NOT cover is the host: the harness serves on
- * `127.0.0.1`, and an `Origin: http://127.0.0.1:<port>` does not match a
- * trusted `http://localhost:<port>`. Both spellings are listed so a spec may
- * address the server either way.
+ * both spellings of this machine, `http://localhost:{PORT}` and
+ * `http://127.0.0.1:{PORT}`, and `authFactory` expands `{PORT}` itself (from
+ * `system.port`), so the template's value would resolve. A developer's `.env`
+ * may list only one, though, and the harness serves on `127.0.0.1`: an
+ * `Origin: http://127.0.0.1:<port>` does not match a trusted
+ * `http://localhost:<port>`. Both spellings are pinned so a spec may address
+ * the server either way.
  *
  * `DISABLE_ORIGIN_CHECK` is pinned off, as CI and `.env.example` have it. A
  * developer's `.env` may turn it on, and then every cookie is accepted from

@@ -108,7 +108,8 @@ export const mediaConfig = registerAs('media', () =>
       mutators: (v: unknown) => Number(v),
       defaultValue: DEFAULT_MEDIA_TTL_SECONDS,
     },
-    { keyTo: 'baseUrl', key: 'MEDIA_BASE_URL', defaultValue: 'http://localhost:3000' },
+    // A development api: its default port and its route prefix.
+    { keyTo: 'baseUrl', key: 'MEDIA_BASE_URL', defaultValue: 'http://localhost:33333/api' },
     { keyTo: 'streamPath', key: 'MEDIA_STREAM_PATH', defaultValue: '/media-stream' },
     {
       keyTo: 'mountCheck',
@@ -134,9 +135,12 @@ export const mediaConfig = registerAs('media', () =>
 
 export const mediaConfigValidationSchema = {
   MEDIA_STORAGE_DRIVER: Joi.string().valid('localdisk').default('localdisk'),
-  MEDIA_LOCAL_DISK_ROOT: Joi.string(),
+  // `''` is accepted, since `@bge/env` reads it as unset.
+  MEDIA_LOCAL_DISK_ROOT: Joi.string().allow(''),
   MEDIA_SIGNED_URL_TTL_SECONDS: Joi.number().integer().positive().default(DEFAULT_MEDIA_TTL_SECONDS),
-  MEDIA_BASE_URL: Joi.string().uri().default('http://localhost:3000'),
+  // No default: a schema's default is written into the environment and beats
+  // the config's (#625). `''` is accepted, since `@bge/env` reads it as unset.
+  MEDIA_BASE_URL: Joi.string().uri().allow(''),
   MEDIA_STREAM_PATH: Joi.string().default('/media-stream'),
   MEDIA_LOCAL_DISK_MOUNT_CHECK: Joi.string().valid('auto', 'st_dev', 'sentinel', 'off').default('auto'),
   MEDIA_LOCAL_DISK_SENTINEL_FILE: Joi.string()

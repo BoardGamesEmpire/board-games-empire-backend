@@ -26,7 +26,8 @@ export default registerAs('system', () =>
  * boot without a `.env` (CI, a fresh checkout) although the API, which shares
  * the key, could. Production and staging have no default, so `@bge/env` still
  * refuses to start without a key there. `min(10)` still rejects a key that is set but short.
+ * An empty key is accepted, since `@bge/env` reads it as unset.
  */
 export const systemConfigValidationSchema = {
-  DATA_ENCRYPTION_KEY: Joi.string().min(10),
+  DATA_ENCRYPTION_KEY: Joi.string().min(10).allow(''),
 };

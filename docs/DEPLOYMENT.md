@@ -70,12 +70,12 @@ GHCR creates a package private. Once an org owner has made these public, after t
 
 `BGE_ROLES` names the role a container runs: exactly one, for now. Running several roles in one process is #200. An unset, empty or unknown value, or more than one role, stops the container at once with a message naming the accepted roles.
 
-| Role            | App                        | Listens on                            | Ready when                             | Volumes        |
-| --------------- | -------------------------- | ------------------------------------- | -------------------------------------- | -------------- |
-| `api`           | `apps/api`                 | HTTP on `SERVER_PORT` (default 33333) | `GET /health/ready` answers 200        | media, plugins |
-| `worker`        | `apps/worker`              | nothing                               | no probe: it logs `Bootstrap complete` | media          |
-| `gateway-fetch` | `apps/gateway-worker`      | nothing                               | no probe: it logs `Bootstrap complete` |                |
-| `coordinator`   | `apps/gateway-coordinator` | gRPC on `COORDINATOR_GRPC_PORT`       | a TCP connection to that port succeeds |                |
+| Role            | App                        | Listens on                      | Ready when                             | Volumes        |
+| --------------- | -------------------------- | ------------------------------- | -------------------------------------- | -------------- |
+| `api`           | `apps/api`                 | HTTP on `PORT` (default 33333)  | `GET /health/ready` answers 200        | media, plugins |
+| `worker`        | `apps/worker`              | nothing                         | no probe: it logs `Bootstrap complete` | media          |
+| `gateway-fetch` | `apps/gateway-worker`      | nothing                         | no probe: it logs `Bootstrap complete` |                |
+| `coordinator`   | `apps/gateway-coordinator` | gRPC on `COORDINATOR_GRPC_PORT` | a TCP connection to that port succeeds |                |
 
 The DataGateway images listen on gRPC too, each on its `*_GATEWAY_GRPC_PORT`, and are ready on the same TCP check.
 
@@ -97,7 +97,7 @@ Every role reads its settings from the environment. `.env.example` lists them fo
 | `REDIS_HOST`, `REDIS_BULLMQ_HOST`                      | all four roles        | The cache and queue connections. The api also needs `REDIS_WEBSOCKET_HOST`. Ports, credentials and TLS are in [REDIS.md](REDIS.md).                                                                                                                                                |
 | `BETTER_AUTH_SECRET`                                   | `api`                 | Required; the api exits without it.                                                                                                                                                                                                                                                |
 | `BETTER_AUTH_URL`, `TRUSTED_ORIGINS`                   | `api`                 | The URL clients reach the api at. `BETTER_AUTH_URL` is required: the api exits without it.                                                                                                                                                                                         |
-| `MEDIA_BASE_URL`                                       | `api`                 | The api's public URL followed by `/api`: the media links it signs point at `<MEDIA_BASE_URL>/media-stream`. The default, `http://localhost:3000`, matches neither the api's port nor its prefix, so leaving it unset breaks every link.                                            |
+| `MEDIA_BASE_URL`                                       | `api`                 | The api's public URL followed by `/api`: the media links it signs point at `<MEDIA_BASE_URL>/media-stream`. The default, `http://localhost:33333/api`, is a development api's, so leaving it unset breaks every link clients follow from elsewhere.                                |
 | `DATA_ENCRYPTION_KEY`                                  | `api`, `worker`       | Required, at least 10 characters, and the same value in both: the worker decrypts what the api encrypted.                                                                                                                                                                          |
 | `GATEWAY_COORDINATOR_HOST`, `GATEWAY_COORDINATOR_PORT` | `api`                 | Where the coordinator listens. The host defaults to `localhost`, so set it when the coordinator runs in a container of its own. The port defaults to the coordinator's.                                                                                                            |
 | `COORDINATOR_GRPC_HOST`, `COORDINATOR_GRPC_PORT`       | `coordinator`         | Where it listens. The host defaults to `0.0.0.0`, which accepts connections from other containers, and the port to 50051 in production, gRPC's conventional port.                                                                                                                  |

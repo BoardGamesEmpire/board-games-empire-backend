@@ -15,7 +15,7 @@ export default registerAs('system', () =>
     [
       {
         keyTo: 'port',
-        key: 'SERVER_PORT',
+        key: 'PORT',
         defaultValue: 33333,
         mutators: [(value: string) => parseInt(value, 10)],
       },
@@ -45,10 +45,16 @@ export default registerAs('system', () =>
   ),
 );
 
+/**
+ * `DATA_ENCRYPTION_KEY` is optional here for the reason the worker's is: the
+ * config above defaults it in development and test, and Joi runs first.
+ * `min(10)` is the worker's too, since the two must share the key. `PORT` and
+ * the key accept `''`, which `@bge/env` reads as unset.
+ */
 export const systemConfigValidationSchema = {
-  SERVER_PORT: Joi.number().default(33333),
+  PORT: Joi.number().port().allow(''),
   API_BASE_URL: Joi.string().default('http://localhost'),
-  DATA_ENCRYPTION_KEY: Joi.string().default(''),
+  DATA_ENCRYPTION_KEY: Joi.string().min(10).allow(''),
   NODE_ENV: Joi.string()
     .valid(...environments)
     .default('development'),

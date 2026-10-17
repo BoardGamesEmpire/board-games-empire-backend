@@ -87,11 +87,23 @@ Each block also supports authentication and TLS:
 REDIS_USERNAME=bge
 REDIS_PASSWORD=secret
 REDIS_TLS_ENABLED=true
-REDIS_TLS_CA=/etc/ssl/redis-ca.pem
-REDIS_TLS_CERT=/etc/ssl/redis-cert.pem
-REDIS_TLS_KEY=/etc/ssl/redis-key.pem
+REDIS_TLS_CA="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+REDIS_TLS_CERT="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
+REDIS_TLS_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 REDIS_REJECT_UNAUTHORIZED=true
 ```
+
+The certificates and the key are the PEM text itself, not paths to files.
+Reading them from mounted files is planned (#466). The PEM needs its line
+breaks, and how to write them depends on where the variable is set:
+
+- **In a `.env` file**, write it on one line in double quotes, with `\n` for
+  each line break, as above. The double quotes are what turn `\n` into a line
+  break; without them it stays two characters.
+- **In Compose's `environment:` or a Kubernetes manifest**, YAML decides. A
+  double-quoted string turns `\n` into a line break, as a `.env` file does, and
+  a block scalar (`|`) takes the PEM's lines as they are. A Kubernetes Secret
+  holding the PEM file works too.
 
 Replace the `REDIS_` prefix with `REDIS_WEBSOCKET_` or `REDIS_BULLMQ_` for the
 other connections.

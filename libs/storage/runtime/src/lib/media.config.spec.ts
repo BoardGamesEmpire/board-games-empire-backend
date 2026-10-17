@@ -1,3 +1,4 @@
+import { withEnvironment } from '@bge/testing';
 import { MissingEnvironmentError } from '@status/envirator';
 import Joi from 'joi';
 import { MEDIA_LOCAL_DISK_ROOT_DEFAULTS, mediaConfig, mediaConfigValidationSchema } from './media.config.js';
@@ -67,4 +68,32 @@ describe('media config — MEDIA_LOCAL_DISK_ROOT', () => {
     expect(thrown).toBeInstanceOf(MissingEnvironmentError);
     expect(thrown).toMatchObject({ keys: ['MEDIA_LOCAL_DISK_ROOT'] });
   });
+});
+
+describe('media config — MEDIA_BASE_URL', () => {
+  // The api's default port and its route prefix, so a development api's
+  // signed links resolve with nothing set (#625).
+  it("defaults to a development api's address", () => {
+    expect(withEnvironment({ NODE_ENV: 'development' }, mediaConfig).baseUrl).toBe('http://localhost:33333/api');
+  });
+
+  // A schema's default is written into the environment and beats the config's.
+  it('leaves MEDIA_BASE_URL unset in the schema, for the config to default', () => {
+    const { value } = Joi.object(mediaConfigValidationSchema).validate({}, { allowUnknown: true });
+
+    expect(value).not.toHaveProperty('MEDIA_BASE_URL');
+  });
+});
+
+describe('mediaConfigValidationSchema — an empty value', () => {
+  // `@bge/env` reads an empty variable as unset, so the config defaults it, or
+  // refuses to start where it has no default.
+  it.each(['MEDIA_LOCAL_DISK_ROOT', 'MEDIA_BASE_URL'])(
+    'accepts an empty %s, for the config to read as unset',
+    (variable) => {
+      const { error } = Joi.object(mediaConfigValidationSchema).validate({ [variable]: '' }, { allowUnknown: true });
+
+      expect(error).toBeUndefined();
+    },
+  );
 });

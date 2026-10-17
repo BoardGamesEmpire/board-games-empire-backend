@@ -25,6 +25,13 @@ describe('systemConfigValidationSchema', () => {
 
     expect(error?.message).toMatch(/DATA_ENCRYPTION_KEY/);
   });
+
+  // `@bge/env` reads an empty variable as unset, as the api's schema accepts.
+  it('accepts an empty key, for the config to read as unset', () => {
+    const { error } = schema.validate({ DATA_ENCRYPTION_KEY: '' });
+
+    expect(error).toBeUndefined();
+  });
 });
 
 describe("the worker's system config", () => {
