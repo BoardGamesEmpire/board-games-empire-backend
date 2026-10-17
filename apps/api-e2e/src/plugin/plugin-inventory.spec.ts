@@ -204,6 +204,27 @@ describe('installed-plugin inventory (#354)', () => {
       expect(slugsOf(response.body)).toEqual([scoped.slug]);
       expect(response.body.pagination.total).toBe(1);
     });
+
+    // The pinned grant passes the gate, and the identity-column grant beside
+    // it reads every row once a key's conditions are dropped. The ceiling
+    // comes from the rules that read the gate's column, so the second adds
+    // nothing.
+    it('keeps a key to its pinned plugin when it also holds the identity-column grant', async () => {
+      const admin = await actors.admin();
+      const [scoped, other] = await Promise.all([arrangePlugin(), arrangePlugin()]);
+      const key = await mintApiKey(baseUrl, db.client, admin, [
+        { slugs: ['read:plugin'], resourceType: ResourceType.Plugin, resourceId: scoped.id },
+        { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin },
+      ]);
+
+      // The control: the key's owner lists both.
+      const own = await listServer(admin, '?limit=100').expect(200);
+      expect(slugsOf(own.body)).toEqual(expect.arrayContaining([scoped.slug, other.slug]));
+
+      const response = await listServer(key, '?limit=100').expect(200);
+      expect(slugsOf(response.body)).toEqual([scoped.slug]);
+      expect(response.body.pagination.total).toBe(1);
+    });
   });
 
   // Every user holds `read:plugin:installed` for the unit lists, and a bare

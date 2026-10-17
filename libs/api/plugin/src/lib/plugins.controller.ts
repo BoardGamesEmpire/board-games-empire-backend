@@ -27,7 +27,7 @@ import {
   UpdatePluginConfigDto,
 } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
-import { canReadServerPlugins } from './policies/read-server-plugins.policy';
+import { canReadServerPlugins, SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 
 const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, 'plugins');
 
@@ -35,10 +35,16 @@ const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, '
  * The server list's set is every installed plugin, so it names no scope of
  * its own. The reason is a claim about the catalog, checked beside the
  * controller's spec: a reach that is neither of these two would make it false.
+ *
+ * Its ceiling is built from the rules that read {@link SERVER_PLUGIN_COLUMN},
+ * the column its gate asks about. A caller can pass the gate on one rule and
+ * hold `read:plugin:installed` beside it: a key with `read:plugin` pinned to
+ * one plugin, say. Built from every rule, the ceiling would admit every
+ * plugin's server columns through the grant the gate refuses.
  */
 export const SERVER_PLUGIN_LIST_SCOPE = Unscoped(
   'every installed plugin: the roles past the column gate read every row, and the one fixed filter, ' +
-    "read:plugin:installed, is every user's and the gate refuses it",
+    "read:plugin:installed, is every user's and leaves out the column the gate and the ceiling ask about",
 );
 
 /**
@@ -98,7 +104,8 @@ export class PluginsController {
     return from(
       this.inventory.listForServer(
         query,
-        () => this.scopeComposer.compose(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE),
+        () =>
+          this.scopeComposer.compose(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE, SERVER_PLUGIN_COLUMN),
         {
           includeUninstalled: query.includeUninstalled,
           locale: this.auditContext.getLocale() ?? undefined,

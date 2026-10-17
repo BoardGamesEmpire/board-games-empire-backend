@@ -1949,7 +1949,9 @@ export const PERMISSION_CATALOG = [
   // it, never served as it. A server-only column added here opens the server
   // reads to every user, which `role-permission.catalog.spec.ts` pins against.
   // An API key holding this grant keeps its field list, so the gate refuses
-  // the key whoever owns it.
+  // the key whoever owns it. The server list builds its ceiling only from the
+  // rules that read `installedAt`, so a caller who passes the gate on another
+  // rule gets no extra rows from this one.
   permission({
     action: Action.read,
     subject: ResourceType.Plugin,

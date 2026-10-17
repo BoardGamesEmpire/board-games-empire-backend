@@ -56,13 +56,18 @@ export class ScopeComposer {
    * `action` is required and never defaulted, mirroring
    * `AbilityService.getCurrentResourceConditions`: defaulting to `read` reads
    * as a convenience right up until a mutation path inherits it.
+   *
+   * `field` names a column the read serves that some grants leave out, the
+   * one its gate asks about. The ceiling is then built only from the rules
+   * that read it, so a grant limited to other columns widens no rows.
    */
   compose<TResource extends ModelResourceType>(
     resourceType: TResource,
     action: Action,
     intrinsicScope: WhereInput<TResource> | UnscopedList,
+    field?: string,
   ): WhereInput<TResource> {
-    const conditions = this.abilityService.getCurrentResourceConditions(resourceType, action);
+    const conditions = this.abilityService.getCurrentResourceConditions(resourceType, action, field);
 
     // Recorded before the return so `paginated()` can tell a composed read from
     // one that reached the database on its ceiling alone. Only `read` is

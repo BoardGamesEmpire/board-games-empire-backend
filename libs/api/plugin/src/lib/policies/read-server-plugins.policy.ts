@@ -2,6 +2,12 @@ import { Action, ResourceType } from '@bge/database';
 import type { AppAbility } from '@bge/permissions';
 
 /**
+ * The column only the server's own plugin reads serve. Their gate asks about
+ * it, and the server list builds its ceiling from the rules that read it.
+ */
+export const SERVER_PLUGIN_COLUMN = 'installedAt';
+
+/**
  * The gate on the server's own plugin reads: the server list, the detail
  * read, the server consent surface, the staged update and the server feature
  * state. They serve provenance, install history and consent topology.
@@ -20,4 +26,4 @@ import type { AppAbility } from '@bge/permissions';
  * `read:plugin:installed` is refused whoever owns it.
  */
 export const canReadServerPlugins = (ability: AppAbility): boolean =>
-  ability.can(Action.read, ResourceType.Plugin, 'installedAt');
+  ability.can(Action.read, ResourceType.Plugin, SERVER_PLUGIN_COLUMN);

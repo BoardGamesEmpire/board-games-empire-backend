@@ -34,6 +34,7 @@ import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { PluginsController, SERVER_PLUGIN_LIST_SCOPE } from './plugins.controller';
+import { SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 
 const PLUGIN = { id: 'plugin-1', slug: 'demo-sink', enabled: true } as never;
 const AFFECTED_UNITS = [{ scopeType: 'Household', householdId: 'hh-1' }] as never[];
@@ -398,7 +399,12 @@ describe('PluginsController (delegation)', () => {
       const ceiling = inventory.listForServer.mock.calls[0]?.[1];
 
       expect(ceiling?.()).toEqual({ AND: [{ id: 'p-1' }] });
-      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE);
+      expect(compose).toHaveBeenCalledWith(
+        ResourceType.Plugin,
+        Action.read,
+        SERVER_PLUGIN_LIST_SCOPE,
+        SERVER_PLUGIN_COLUMN,
+      );
     });
 
     // The runtime calls the ceiling, and composing it is what the envelope's
