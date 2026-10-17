@@ -4,7 +4,7 @@ The invite lifecycle for Board Games Empire, as primitives a context owner drive
 
 The lib ships:
 
-- `InviteService` — `findForParty`, `findPartyScopeWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, and `emit`.
+- `InviteService` — `findForParty`, `findPartyScopeWithin`, `createWithin`, `acceptWithin`, `declineWithin`, `withdrawWithin`, `revokeWithin`, `approveWithin`, `revokeOutstandingWithin`, `expireOutstandingWithin`, and `emit`.
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
@@ -134,13 +134,15 @@ Expiry is lazy. Nothing stamps `Expired` the moment `expiresAt` passes:
 - **Reads compute it.** `findForParty` and `effectiveInviteStatus(row, now)` report an outstanding row past its date as `Expired` without touching it. Reads never write through. A listing filters the same way with `unexpiredInviteWhere(now)` beside its status filter, as the household detail embed does, so a list and a read never disagree about the same row.
 - **Transitions persist it as their failure path.** A transition that meets an expired outstanding row stamps `Expired`, announces `invite.expired`, and refuses with 410.
 - **A create persists it for the rows in its way.** An expired-but-unstamped invite is still inside the partial unique index, so `createWithin` first stamps `Expired` any outstanding invite to the same invitee (by id or address) under the same context whose window has closed, on the caller's transaction, and hands their `invite.expired` events back as `expired` beside the created event. A re-invite after expiry therefore never waits on the sweep.
-- **The sweep persists the rest** (#165).
+- **The sweep persists the rest** (#165). `expireOutstandingWithin(tx, { limit })` stamps `Expired` on outstanding invites of every type whose window has closed, at most `limit` from each outstanding status, and hands back `{ count, events, drained }`. It writes the status only, as the other two stamps do: nobody responded. A caller drains a backlog in batches, one transaction each, emitting each batch's events after its commit and stopping at the first batch that comes back `drained`.
 
 The transition's stamp is written on the lib's own connection, **not** the caller's transaction, on purpose: the refusal that follows is thrown, which rolls the caller's transaction back, and the stamp has to outlive it. It is started and not awaited: the caller's transaction holds one pool connection and the stamp needs another, and a refusal that waited for the second while holding the first would, under a pool full of such requests, wait on itself until the pool timeout. The statement is guarded on the status and date the row was read in, so a rival landing first leaves nothing for it to do, and the domain event goes out only when this statement moved the row. A failure in the stamp is logged and changes nothing about the 410 already given.
 
 `revokeOutstandingWithin` is the one exception: a context being closed revokes its expired-but-unstamped rows with the rest. The context is gone, and there is nobody left to tell "expired" instead.
 
-Both bulk statements (`revokeOutstandingWithin`, and the create's stamp above) visit one status at a time so each domain event carries the status its row left, and they visit `AwaitingApproval` **before** `Pending`. The only transition between the two is approve, and it only goes that way, so a row a rival approve moves in between is `Pending` by the second statement and still caught.
+The bulk statements (`revokeOutstandingWithin`, `expireOutstandingWithin`, and the create's stamp above) visit one status at a time so each domain event carries the status its row left, and they visit `AwaitingApproval` **before** `Pending`. The only transition between the two is approve, and it only goes that way, so a row a rival approve moves in between is `Pending` by the second statement and still caught.
+
+`expireOutstandingWithin`'s `limit` reads that many ids per status and then updates them with the guard restated beside the ids. It never uses `updateManyAndReturn`'s own `limit`, which leaves the guard out of the update's outer `where` and so can overwrite a rival's committed transition; `settleOutstandingWithin`'s doc comment gives the mechanism. `drained` comes from those reads, not from the count: it is true only when every status's read came back under the limit. A rival that settles part of a full read leaves the count short with more still overdue, so a caller that stopped on the count would leave the rest of a backlog for the next run.
 
 ---
 

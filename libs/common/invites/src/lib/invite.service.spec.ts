@@ -1449,6 +1449,201 @@ describe('InviteService', () => {
     });
   });
 
+  describe('expireOutstandingWithin', () => {
+    const LIMIT = 500;
+    const expiredRow = (overrides: Partial<InviteTransitionRow>) => ({
+      ...rowWithToken({ expiresAt: PAST, ...overrides }),
+      status: InviteStatus.Expired,
+    });
+
+    it('expires overdue AwaitingApproval rows and then Pending rows of every type, each read capped at the limit', async () => {
+      const awaiting = expiredRow({ id: 'inv-a' });
+      const system = expiredRow({ id: 'inv-s', type: InviteType.System, householdId: null });
+      tx.invite.findMany
+        .mockResolvedValueOnce([{ id: 'inv-a' }] as never)
+        .mockResolvedValueOnce([{ id: 'inv-s' }] as never);
+      tx.invite.updateManyAndReturn.mockResolvedValueOnce([awaiting] as never).mockResolvedValueOnce([system] as never);
+
+      const startedAt = Date.now();
+      const { count, events, drained } = await service.expireOutstandingWithin(asTx(tx), { limit: LIMIT });
+      const boundary = events[0].initiatedAt;
+
+      // `lte`, as effectiveInviteStatus calls a row at exactly `expiresAt`
+      // expired, measured at the moment of the call. No context or type in the
+      // `where`: the sweep covers System and Campaign invites too.
+      expect(boundary.getTime()).toBeGreaterThanOrEqual(startedAt);
+      expect(boundary.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(tx.invite.findMany).toHaveBeenNthCalledWith(1, {
+        where: { expiresAt: { lte: boundary }, status: InviteStatus.AwaitingApproval },
+        select: { id: true },
+        take: LIMIT,
+      });
+      expect(tx.invite.findMany).toHaveBeenNthCalledWith(2, {
+        where: { expiresAt: { lte: boundary }, status: InviteStatus.Pending },
+        select: { id: true },
+        take: LIMIT,
+      });
+      // Status only: nobody responded.
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(1, {
+        where: { expiresAt: { lte: boundary }, status: InviteStatus.AwaitingApproval, id: { in: ['inv-a'] } },
+        data: { status: InviteStatus.Expired },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+      expect(tx.invite.updateManyAndReturn).toHaveBeenNthCalledWith(2, {
+        where: { expiresAt: { lte: boundary }, status: InviteStatus.Pending, id: { in: ['inv-s'] } },
+        data: { status: InviteStatus.Expired },
+        select: INVITE_SNAPSHOT_SELECT,
+      });
+      // AwaitingApproval first, for the reason revokeOutstandingWithin gives.
+      const [readAwaiting, readPending] = tx.invite.findMany.mock.invocationCallOrder;
+      const [writeAwaiting, writePending] = tx.invite.updateManyAndReturn.mock.invocationCallOrder;
+      expect([readAwaiting, writeAwaiting, readPending, writePending]).toEqual(
+        [readAwaiting, writeAwaiting, readPending, writePending].sort((a, b) => a - b),
+      );
+      // All of it on the caller's transaction.
+      expect(db.invite.findMany).not.toHaveBeenCalled();
+      expect(db.invite.updateManyAndReturn).not.toHaveBeenCalled();
+
+      expect(count).toBe(2);
+      // Both reads came back under the limit, so nothing overdue was left.
+      expect(drained).toBe(true);
+      expect(events.map((event) => event.subjectId)).toEqual(['inv-a', 'inv-s']);
+      expect(events[0].before.status).toBe(InviteStatus.AwaitingApproval);
+      expect(events[1].before.status).toBe(InviteStatus.Pending);
+      expect(events.every((event) => event instanceof InviteExpiredEvent)).toBe(true);
+      expect(events.every((event) => event.after.status === InviteStatus.Expired)).toBe(true);
+      expect(events.every((event) => event.after.respondedAt === null)).toBe(true);
+      events.forEach(expectNoToken);
+
+      // Handed back, not announced: the caller emits after commit.
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it("re-states the guard on the write rather than using Prisma's own limit, so a row a rival settled is left alone", async () => {
+      // Prisma's own `limit` keeps the guard out of the write's outer `where`
+      // (settleOutstandingWithin says why that loses a rival's transition).
+      tx.invite.findMany
+        .mockResolvedValueOnce([] as never)
+        .mockResolvedValueOnce([{ id: 'inv-1' }, { id: 'inv-raced' }] as never);
+      tx.invite.updateManyAndReturn.mockResolvedValueOnce([expiredRow({ id: 'inv-1' })] as never);
+
+      const { count, events } = await service.expireOutstandingWithin(asTx(tx), { limit: LIMIT });
+
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledTimes(1);
+      const [{ where, ...rest }] = tx.invite.updateManyAndReturn.mock.calls[0] as [
+        Prisma.InviteUpdateManyAndReturnArgs,
+      ];
+      expect(where).toEqual({
+        expiresAt: { lte: expect.any(Date) },
+        status: InviteStatus.Pending,
+        id: { in: ['inv-1', 'inv-raced'] },
+      });
+      expect(rest).not.toHaveProperty('limit');
+
+      expect(count).toBe(1);
+      expect(events.map((event) => event.subjectId)).toEqual(['inv-1']);
+    });
+
+    it('reports more to come when a read came back full, even though a rival left the write short', async () => {
+      // A count under the limit would read as "ran out" here, and a caller
+      // stopping on it would leave the rest of a backlog for another hour.
+      tx.invite.findMany
+        .mockResolvedValueOnce([{ id: 'inv-1' }, { id: 'inv-raced' }] as never)
+        .mockResolvedValueOnce([] as never);
+      tx.invite.updateManyAndReturn.mockResolvedValueOnce([expiredRow({ id: 'inv-1' })] as never);
+
+      const { count, drained } = await service.expireOutstandingWithin(asTx(tx), { limit: 2 });
+
+      expect(count).toBe(1);
+      expect(drained).toBe(false);
+    });
+
+    it('writes nothing for a status with nothing overdue', async () => {
+      tx.invite.findMany.mockResolvedValue([] as never);
+
+      await expect(service.expireOutstandingWithin(asTx(tx), { limit: LIMIT })).resolves.toEqual({
+        count: 0,
+        events: [],
+        drained: true,
+      });
+      expect(tx.invite.findMany).toHaveBeenCalledTimes(2);
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+
+    /**
+     * A stand-in table both statements really read and write, so what a later
+     * call finds follows from the earlier calls' writes rather than from a
+     * stubbed answer.
+     */
+    const useTable = <Row extends { id: string; status: InviteStatus; expiresAt: Date }>(table: Row[]) => {
+      type Where = { status: InviteStatus; expiresAt: { lte: Date }; id?: { in: string[] } };
+      const matching = (where: Where) =>
+        table.filter(
+          (row) =>
+            row.status === where.status &&
+            row.expiresAt <= where.expiresAt.lte &&
+            (!where.id || where.id.in.includes(row.id)),
+        );
+      tx.invite.findMany.mockImplementation((async ({ where, take }: { where: Where; take: number }) =>
+        matching(where)
+          .slice(0, take)
+          .map(({ id }) => ({ id }))) as never);
+      tx.invite.updateManyAndReturn.mockImplementation((async ({ where, data }: { where: Where; data: object }) =>
+        matching(where).map((row) => ({ ...Object.assign(row, data) }))) as never);
+
+      return table;
+    };
+
+    it('matches nothing on a second run, and leaves live and settled rows alone', async () => {
+      const table = useTable([
+        rowWithToken({ id: 'inv-overdue', expiresAt: PAST }),
+        { ...rowWithToken({ id: 'inv-awaiting', expiresAt: PAST }), status: InviteStatus.AwaitingApproval },
+        rowWithToken({ id: 'inv-live', expiresAt: FUTURE }),
+        { ...rowWithToken({ id: 'inv-declined', expiresAt: PAST }), status: InviteStatus.Declined },
+      ]);
+
+      const first = await service.expireOutstandingWithin(asTx(tx), { limit: LIMIT });
+      const second = await service.expireOutstandingWithin(asTx(tx), { limit: LIMIT });
+
+      expect(first.events.map((event) => event.subjectId)).toEqual(['inv-awaiting', 'inv-overdue']);
+      expect(first.drained).toBe(true);
+      expect(second).toEqual({ count: 0, events: [], drained: true });
+      expect(Object.fromEntries(table.map((row) => [row.id, row.status]))).toEqual({
+        'inv-overdue': InviteStatus.Expired,
+        'inv-awaiting': InviteStatus.Expired,
+        'inv-live': InviteStatus.Pending,
+        'inv-declined': InviteStatus.Declined,
+      });
+    });
+
+    it('drains a backlog over several calls, saying drained only once a read comes back short', async () => {
+      useTable([
+        rowWithToken({ id: 'inv-1', expiresAt: PAST }),
+        rowWithToken({ id: 'inv-2', expiresAt: PAST }),
+        rowWithToken({ id: 'inv-3', expiresAt: PAST }),
+      ]);
+      const call = async () => {
+        const { count, drained } = await service.expireOutstandingWithin(asTx(tx), { limit: 2 });
+
+        return { count, drained };
+      };
+
+      // The second call's read is short, so a caller stops there; a third
+      // would find nothing.
+      expect(await call()).toEqual({ count: 2, drained: false });
+      expect(await call()).toEqual({ count: 1, drained: true });
+      expect(await call()).toEqual({ count: 0, drained: true });
+    });
+
+    it.each([0, -1, 1.5, Number.NaN])('refuses a limit of %s, which would stop no batch loop', async (limit) => {
+      await expect(service.expireOutstandingWithin(asTx(tx), { limit })).rejects.toThrow(
+        'The expiry limit must be a positive integer',
+      );
+      expect(tx.invite.findMany).not.toHaveBeenCalled();
+      expect(tx.invite.updateManyAndReturn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('emit', () => {
     const created = () => new InviteCreatedEvent({ ...transitionRow() }, PAST);
     const revoked = () =>

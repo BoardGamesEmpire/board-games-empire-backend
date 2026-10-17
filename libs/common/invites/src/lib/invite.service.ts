@@ -48,6 +48,7 @@ import type {
   ApproveInviteParams,
   ContextualInviteType,
   CreateInviteParams,
+  ExpireOutstandingInvitesParams,
   InviteAcceptance,
   InviteApproval,
   InviteContextScope,
@@ -59,6 +60,7 @@ import type {
   InviteScopeOf,
   InviteTarget,
   InviteWithdrawal,
+  OutstandingInviteExpiry,
   OutstandingInviteRevocation,
   RespondToInviteParams,
   RevokeInviteParams,
@@ -242,7 +244,8 @@ type TransitionSpec<Select extends Prisma.InviteSelect, Event extends InviteTran
  * because the refusal is thrown and rolls the caller's transaction back, and
  * the refusal never waits on it. A create stamps the expired rivals the new
  * row would otherwise collide with, inside the caller's transaction, ahead
- * of its insert. #165's sweep persists the rows nobody touched.
+ * of its insert. `expireOutstandingWithin` persists the rows nobody touched,
+ * for #165's sweep.
  */
 @Injectable()
 export class InviteService {
@@ -513,7 +516,7 @@ export class InviteService {
     scope: InviteContextScope,
   ): Promise<OutstandingInviteRevocation> {
     const now = new Date();
-    const events = await this.settleOutstandingWithin(
+    const { events } = await this.settleOutstandingWithin(
       tx,
       scope,
       { status: InviteStatus.Revoked, respondedAt: now },
@@ -522,6 +525,40 @@ export class InviteService {
     );
 
     return { count: events.length, events };
+  }
+
+  /**
+   * Stamps `Expired` on outstanding invites of every type whose window has
+   * closed, at most `limit` from each outstanding status: the rows no read,
+   * transition or create has stamped, for #165's sweep. Status only, as the
+   * other two stamps write it: nobody responded.
+   *
+   * Bounded so the caller can keep each transaction, and the row locks it
+   * holds, short. A caller draining a backlog stops on `drained`, not on a
+   * count below `limit`: a rival that settles part of a full read leaves the
+   * count short with more still overdue.
+   */
+  async expireOutstandingWithin(
+    tx: Prisma.TransactionClient,
+    { limit }: ExpireOutstandingInvitesParams,
+  ): Promise<OutstandingInviteExpiry> {
+    // A consumer's mistake, so a bare 500. `take: 0` reads nothing, so no read
+    // would ever come back under the limit and a batch loop would never stop.
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new Error('The expiry limit must be a positive integer');
+    }
+
+    const now = new Date();
+    const { events, drained } = await this.settleOutstandingWithin(
+      tx,
+      { expiresAt: { lte: now } },
+      { status: InviteStatus.Expired },
+      InviteExpiredEvent,
+      now,
+      limit,
+    );
+
+    return { count: events.length, events, drained };
   }
 
   /**
@@ -654,13 +691,15 @@ export class InviteService {
       parties.push({ inviteeEmail: party.inviteeEmail });
     }
 
-    return this.settleOutstandingWithin(
+    const { events } = await this.settleOutstandingWithin(
       tx,
       { ...context, OR: parties, expiresAt: { lte: now } },
       { status: InviteStatus.Expired },
       InviteExpiredEvent,
       now,
     );
+
+    return events;
   }
 
   /**
@@ -673,6 +712,16 @@ export class InviteService {
    * constant explains: `AwaitingApproval` first, because a rival approve only
    * ever moves a row the other way, and the `Pending` statement then still
    * meets it. The other order let such a row through.
+   *
+   * A `limit` caps each statement. It is applied by reading that many ids and
+   * restating the guard beside them, never through `updateManyAndReturn`'s
+   * own `limit`: Prisma puts the `where` only inside the
+   * `id IN (SELECT … LIMIT n)` it generates for that. Under read committed, a
+   * row a rival settles while the statement waits on its lock is rechecked
+   * against the outer `where`, which names only the id, so the rival's
+   * committed transition would be overwritten, and a row an overlapping run
+   * already moved would be announced again. `drained` says whether every read
+   * came back under the limit; without one it is always true.
    */
   private async settleOutstandingWithin<Event extends InviteTransitionEvent>(
     tx: Prisma.TransactionClient,
@@ -680,17 +729,16 @@ export class InviteService {
     data: Prisma.InviteUncheckedUpdateManyInput,
     event: InviteTransitionEventClass<Event>,
     now: Date,
-  ): Promise<Event[]> {
+    limit?: number,
+  ): Promise<{ events: Event[]; drained: boolean }> {
     const events: Event[] = [];
+    let drained = true;
 
     for (const from of OUTSTANDING_INVITE_STATUSES) {
-      const settled = await tx.invite.updateManyAndReturn({
-        where: { ...where, status: from },
-        data,
-        select: INVITE_SNAPSHOT_SELECT,
-      });
+      const settled = await this.settleFromWithin(tx, { ...where, status: from }, data, limit);
+      drained &&= settled.drained;
 
-      for (const row of settled) {
+      for (const row of settled.rows) {
         // Through the projection, like every other domain event, so a widened
         // select could never carry an extra column onto the payload.
         const after = toInviteSnapshot(row);
@@ -699,7 +747,37 @@ export class InviteService {
       }
     }
 
-    return events;
+    return { events, drained };
+  }
+
+  /** One guarded statement of {@link settleOutstandingWithin}, capped at `limit` rows when one is given. */
+  private async settleFromWithin(
+    tx: Prisma.TransactionClient,
+    guard: Prisma.InviteWhereInput,
+    data: Prisma.InviteUncheckedUpdateManyInput,
+    limit: number | undefined,
+  ) {
+    if (limit === undefined) {
+      const rows = await tx.invite.updateManyAndReturn({ where: guard, data, select: INVITE_SNAPSHOT_SELECT });
+
+      return { rows, drained: true };
+    }
+
+    const batch = await tx.invite.findMany({ where: guard, select: { id: true }, take: limit });
+    // From the read, not the write: the write skips a row a rival settled.
+    const drained = batch.length < limit;
+
+    if (batch.length === 0) {
+      return { rows: [], drained };
+    }
+
+    const rows = await tx.invite.updateManyAndReturn({
+      where: { ...guard, id: { in: batch.map(({ id }) => id) } },
+      data,
+      select: INVITE_SNAPSHOT_SELECT,
+    });
+
+    return { rows, drained };
   }
 
   /**
