@@ -4,6 +4,7 @@ import {
   attemptWithin,
   describeHolder,
   LockConnectionTimeoutError,
+  LockLostError,
   LockNotAcquiredError,
   PgAdvisoryLock,
 } from './advisory-lock';
@@ -16,8 +17,56 @@ import type { BootstrapLogger } from './ports';
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
 
+/** One backend message: its type, then a length that counts itself and the body. */
+function backendMessage(type: string, body: Buffer = Buffer.alloc(0)): Buffer {
+  const header = Buffer.alloc(5);
+  header.write(type, 0, 'latin1');
+  header.writeInt32BE(body.length + 4, 1);
+  return Buffer.concat([header, body]);
+}
+
 /** The backend's half of a startup that asks for no password: AuthenticationOk, then ReadyForQuery (idle). */
-const STARTUP_ANSWERED = Buffer.from([0x52, 0, 0, 0, 8, 0, 0, 0, 0, 0x5a, 0, 0, 0, 5, 0x49]);
+const STARTUP_ANSWERED = Buffer.concat([backendMessage('R', Buffer.alloc(4)), backendMessage('Z', Buffer.from('I'))]);
+
+/** A statement's end, then ReadyForQuery in a transaction. */
+const QUERY_ANSWERED = Buffer.concat([
+  backendMessage('C', Buffer.from('SELECT 1\0')),
+  backendMessage('Z', Buffer.from('T')),
+]);
+
+/**
+ * Answers the startup and every query, until the first simple query whose text
+ * includes `silentFrom`; nothing after it. An extended query is answered at its
+ * Sync: ParseComplete, BindComplete, NoData, then the statement's end.
+ */
+function answersUntil(silentFrom: string) {
+  return (socket: Socket) => {
+    let started = false;
+    let silent = false;
+    let pending = Buffer.alloc(0);
+    socket.on('data', (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      // The startup message has no type byte, only its length.
+      if (!started) {
+        if (pending.length < 4 || pending.length < pending.readInt32BE(0)) return;
+        pending = pending.subarray(pending.readInt32BE(0));
+        started = true;
+        socket.write(STARTUP_ANSWERED);
+      }
+      while (pending.length >= 5 && pending.length >= pending.readInt32BE(1) + 1) {
+        const type = String.fromCharCode(pending[0]);
+        const text = pending.subarray(5, pending.readInt32BE(1) + 1).toString();
+        pending = pending.subarray(pending.readInt32BE(1) + 1);
+        silent ||= type === 'Q' && text.includes(silentFrom);
+        if (silent) continue;
+        if (type === 'Q') socket.write(QUERY_ANSWERED);
+        if (type === 'S') {
+          socket.write(Buffer.concat([backendMessage('1'), backendMessage('2'), backendMessage('n'), QUERY_ANSWERED]));
+        }
+      }
+    });
+  };
+}
 
 /** A local TCP server; `onConnection` decides what each socket hears. */
 async function fakeDatabase(onConnection: (socket: Socket) => void) {
@@ -125,6 +174,31 @@ describe('the advisory lock', () => {
         expect(performance.now() - started).toBeLessThan(2_000);
         expect(database.connections()).toBeGreaterThan(1);
         expect(lines.some((line) => /trying again on a new connection/.test(line))).toBe(true);
+      } finally {
+        await lock.close();
+        await database.close();
+      }
+    });
+  });
+
+  describe('the COMMIT that releases the lock', () => {
+    it('is given up when the database does not answer it, and the release refuses', async () => {
+      // The lock is taken, then nothing more is answered: a connection that died
+      // without a reset while its transaction sat idle, as when a load balancer
+      // drops an idle connection. Unbounded, the COMMIT waits out TCP's retries.
+      const database = await fakeDatabase(answersUntil('COMMIT'));
+      const lock = new PgAdvisoryLock({
+        connectionString: database.url,
+        logger: silent,
+        applicationName: 'bge-bootstrap:test',
+        attemptGraceMs: 200,
+      });
+
+      try {
+        await lock.acquire();
+        const started = performance.now();
+        await expect(lock.release()).rejects.toBeInstanceOf(LockLostError);
+        expect(performance.now() - started).toBeLessThan(2_000);
       } finally {
         await lock.close();
         await database.close();

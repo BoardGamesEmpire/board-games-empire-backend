@@ -51,7 +51,12 @@ class FakeLock implements BootstrapLock {
   releaseBlockedFor: number[] = [];
   /** When set, every release rejects with it: the dedicated connection dropped. */
   releaseError: Error | undefined;
+  /** When set, `assertHeld` throws it: the lock's connection failed while it was held. */
+  lost: Error | undefined;
   constructor(private readonly clock?: FakeClock) {}
+  assertHeld(): void {
+    if (this.lost) throw this.lost;
+  }
   async acquire(options?: LockAcquireOptions): Promise<void> {
     this.events.push('acquire');
     this.acquireOptions.push(options);
@@ -489,6 +494,7 @@ describe('the boot sequence', () => {
       acquire: async () => {
         throw new Error('lock held by a dead session');
       },
+      assertHeld: () => undefined,
       release: async () => void lock.events.push('release'),
     };
 
@@ -525,6 +531,7 @@ describe('the boot sequence', () => {
       acquire: async () => {
         throw new Error('lock held by a dead session');
       },
+      assertHeld: () => undefined,
       release: async () => undefined,
     };
 
@@ -639,6 +646,65 @@ describe('the boot sequence', () => {
         'bootstrap',
       ]);
       expect(statuses).toEqual({ bootstrap: SpanStatusCode.ERROR });
+    });
+  });
+
+  describe('when the lock is lost while it is held', () => {
+    const lost = new Error("the bootstrap lock's connection failed");
+
+    it('while migrating: refuses the boot before the seeds, which another boot may already be running', async () => {
+      const ledger = new FakeLedger([finished('20260109_init')]);
+      const migrator: Migrator = {
+        apply: async (pending) => {
+          ledger.rows.push(...pending.map(finished));
+          lock.lost = lost;
+        },
+      };
+
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      });
+
+      await expect(run).rejects.toBe(lost);
+      expect(seeder.runs).toBe(0);
+    });
+
+    it('while seeding: refuses the boot before the data migrations', async () => {
+      const ledger = new FakeLedger(CHAIN.map(finished));
+      const seeding: SeedsPhase = {
+        run: async () => {
+          lock.lost = lost;
+          return NO_WRITES;
+        },
+      };
+      let dataMigrationRuns = 0;
+      const dataMigrations: DataMigrationsPhase = {
+        run: async () => {
+          dataMigrationRuns += 1;
+          return NO_DATA_MIGRATIONS;
+        },
+      };
+
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger,
+        lock,
+        seeder: seeding,
+        dataMigrations,
+        logger,
+        clock,
+        migrator: new FakeMigrator(ledger),
+      });
+
+      await expect(run).rejects.toBe(lost);
+      expect(dataMigrationRuns).toBe(0);
     });
   });
 });
