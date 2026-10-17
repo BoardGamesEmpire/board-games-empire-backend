@@ -1,8 +1,13 @@
 import { AuditContextService, type HouseholdPluginUnit } from '@bge/actor-context';
-import { Action, PluginGrantScope, ResourceType } from '@bge/database';
-import { HouseholdLivenessGuard, HouseholdPathParam } from '@bge/household';
+import { Action, DatabaseService, PluginGrantScope, ResourceType } from '@bge/database';
+import {
+  alreadyTellsHouseholdsApart,
+  householdExists,
+  HouseholdLivenessGuard,
+  HouseholdPathParam,
+} from '@bge/household';
 import { t } from '@bge/i18n';
-import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
@@ -11,7 +16,19 @@ import {
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseFilters,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -51,7 +68,9 @@ const PaginatedHouseholdPluginsResponse = PaginatedResponseDto(PluginHouseholdIn
  * takes no lock; the writes re-check under the household's share lock inside
  * their transactions (#548), and the exception filter answers that re-check's
  * refusal by the guard's rule, so losing the race tells no one more than the
- * guard would.
+ * guard would. The list has no write to re-check in, so it checks liveness
+ * itself for an actor the guard let through, after its instance check, and
+ * answers 403.
  */
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -69,6 +88,8 @@ export class HouseholdPluginsController {
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
+    private readonly db: DatabaseService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   // ─── Installed-plugin inventory for this household (#354) ─────────────────
@@ -90,7 +111,14 @@ export class HouseholdPluginsController {
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Not a member with read access to this household' })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found, or deleted' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.HouseholdPlugin))
+  // The rows are plugins, so the read composes the caller's `Plugin` ceiling,
+  // and an actor with no rule on `Plugin` is refused here rather than served
+  // an empty page: an API key scoped to the household plugin routes alone,
+  // say. Every user holds one through `read:plugin:installed`.
+  @CheckPolicies(
+    (ability) => ability.can(Action.read, ResourceType.HouseholdPlugin),
+    (ability) => ability.can(Action.read, ResourceType.Plugin),
+  )
   // Must stay out of the response cache: the writes on this controller change
   // these rows, and must be visible on the re-read.
   @Get()
@@ -100,11 +128,9 @@ export class HouseholdPluginsController {
     // household's enablement states to another household's admin.
     this.abilityService.assertCurrentActorCan(Action.read, ResourceType.HouseholdPlugin, { householdId });
 
-    return from(
-      this.inventory.listForHousehold(householdId, query, {
-        locale: this.auditContext.getLocale() ?? undefined,
-      }),
-    ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
+    return from(this.listInventory(householdId, query)).pipe(
+      map((page) => paginated('plugins', page, query, ResourceType.Plugin)),
+    );
   }
 
   @ApiOperation({
@@ -330,6 +356,39 @@ export class HouseholdPluginsController {
 
     return from(this.featureState.resolveForUnitBySlug(slug, unit, this.auditContext.getLocale() ?? undefined)).pipe(
       map((featureState) => ({ featureState })),
+    );
+  }
+
+  /**
+   * The household's plugins, once it is known to be live.
+   *
+   * The guard answers liveness only for an actor every one of whose abilities
+   * reads households, and lets anyone else through untouched, such as a staff
+   * member's API key scoped to the plugin routes. Its owner reads every
+   * household's plugins, and a soft delete leaves them in place, so without a
+   * check here the key would list a deleted household's plugins. The list
+   * checks for that actor alone, so one the guard answered is not probed
+   * twice. It runs after the instance check, so only an actor who may read the
+   * list is answered at all.
+   *
+   * The answer is the instance check's 403, the one this route gives any
+   * actor it refuses: a 404 would tell a key scoped away from households which
+   * household was deleted, or that an id never existed. The writes answer by
+   * the same rule (`PluginExceptionFilter.asTheActorSeesIt`).
+   */
+  private async listInventory(householdId: string, query: DefaultPaginationQueryDto) {
+    if (
+      !alreadyTellsHouseholdsApart(this.abilityService.getCurrentAbilities()) &&
+      !(await householdExists(this.db, householdId))
+    ) {
+      throw new ForbiddenException(t('common.forbidden.action'));
+    }
+
+    return this.inventory.listForHousehold(
+      householdId,
+      query,
+      (scope) => this.scopeComposer.compose(ResourceType.Plugin, Action.read, scope),
+      { locale: this.auditContext.getLocale() ?? undefined },
     );
   }
 }

@@ -1,7 +1,7 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
@@ -30,6 +30,16 @@ import { PluginExceptionFilter } from './filters/plugin-exception.filter';
 import { canReadServerPlugins } from './policies/read-server-plugins.policy';
 
 const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, 'plugins');
+
+/**
+ * The server list's set is every installed plugin, so it names no scope of
+ * its own. The reason is a claim about the catalog, checked beside the
+ * controller's spec: a reach that is neither of these two would make it false.
+ */
+export const SERVER_PLUGIN_LIST_SCOPE = Unscoped(
+  'every installed plugin: the roles past the column gate read every row, and the one fixed filter, ' +
+    "read:plugin:installed, is every user's and the gate refuses it",
+);
 
 /**
  * Server-level plugin lifecycle (#59 Phase C4, #320): the admin's
@@ -62,6 +72,7 @@ export class PluginsController {
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   // ─── Installed-plugin inventory (#354) ────────────────────────────────────
@@ -85,10 +96,14 @@ export class PluginsController {
   @Get()
   list(@Query() query: ListPluginsQueryDto) {
     return from(
-      this.inventory.listForServer(query, {
-        includeUninstalled: query.includeUninstalled,
-        locale: this.auditContext.getLocale() ?? undefined,
-      }),
+      this.inventory.listForServer(
+        query,
+        () => this.scopeComposer.compose(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE),
+        {
+          includeUninstalled: query.includeUninstalled,
+          locale: this.auditContext.getLocale() ?? undefined,
+        },
+      ),
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 

@@ -1,6 +1,6 @@
 import type { Actor, AuditContextService } from '@bge/actor-context';
-import { PluginGrantScope, PluginGrantStatus } from '@bge/database';
-import { CHECK_POLICIES_KEY } from '@bge/permissions';
+import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
+import { CHECK_POLICIES_KEY, PoliciesGuard, ScopeComposer, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
@@ -10,7 +10,10 @@ import type {
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
+import { ListScopeNotComposedError } from '@bge/shared';
+import { createMockAbilityService, type MockAbilityService } from '@bge/testing';
 import { ForbiddenException, RequestMethod } from '@nestjs/common';
+import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { UserPluginsController } from './user-plugins.controller';
@@ -45,6 +48,8 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
   let featureState: jest.Mocked<Pick<PluginFeatureStateService, 'resolveForUnitBySlug'>>;
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForUser'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale' | 'getActor'>>;
+  let abilityService: MockAbilityService;
+  let scopeComposer: ScopeComposer;
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
@@ -59,6 +64,10 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       getLocale: jest.fn().mockReturnValue(null),
       getActor: jest.fn().mockReturnValue({ kind: 'user', userId: USER_ID } as Actor),
     };
+    abilityService = createMockAbilityService();
+    // The REAL composer over the mocked ability service, so the list's ceiling
+    // is composed and recorded as it is in a request.
+    scopeComposer = new ScopeComposer(abilityService as never);
     controller = new UserPluginsController(
       grants as never,
       presentation as never,
@@ -66,6 +75,7 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
       featureState as never,
       inventory as never,
       auditContext as never,
+      scopeComposer,
     );
   });
 
@@ -154,8 +164,8 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
   });
 
   /**
-   * The actor-kind floor: no permission seed exists for this axis (D-BA
-   * seeded server + household pairs only), so there is no ability for
+   * The actor-kind floor: no permission seed exists for deciding on this axis
+   * (#59's C4 seeded server + household pairs only), so there is no ability for
    * PoliciesGuard to AND an API key against — the kind check is the floor.
    * An API key resolves to its OWNER's id everywhere else; here that would
    * let a key of ANY scope consent to third-party code on the owner's
@@ -214,19 +224,42 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
 
       const result = await firstValueFrom(controller.list(query()));
 
-      expect(inventory.listForUser).toHaveBeenCalledWith(USER_ID, expect.objectContaining({ skip: 0, pageSize: 25 }), {
-        includeUninstalled: undefined,
-        locale: 'de',
-      });
+      expect(inventory.listForUser).toHaveBeenCalledWith(
+        USER_ID,
+        expect.objectContaining({ skip: 0, pageSize: 25 }),
+        expect.any(Function),
+        { includeUninstalled: undefined, locale: 'de' },
+      );
       expect(result).toEqual({
         plugins: INVENTORY_PAGE.rows,
         pagination: { page: 1, limit: 25, total: 1, totalPages: 1, hasMore: false },
       });
     });
 
-    // The actor-KIND floor, not a permission check: with no seed for this
-    // axis there is nothing for PoliciesGuard to clamp an API key against, so
-    // a key acting as its owner must not read the owner's consent surface.
+    it("hands the runtime the caller's Plugin ceiling to compose the user scope with", async () => {
+      const compose = jest.spyOn(scopeComposer, 'compose');
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+      await firstValueFrom(controller.list(query()));
+      const ceiling = inventory.listForUser.mock.calls[0]?.[2];
+
+      expect(ceiling?.({ uninstalledAt: null })).toEqual({ uninstalledAt: null, AND: [{ id: 'p-1' }] });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.read, { uninstalledAt: null });
+    });
+
+    // The runtime calls the ceiling, and composing it is what the envelope's
+    // guard checks for. Built inside a request where nothing calls it, the
+    // envelope must fail, naming the type.
+    it('builds its envelope under the Plugin scope guard', async () => {
+      const envelope = ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.list(query())));
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Plugin}'`);
+    });
+
+    // The actor-KIND floor holds on the list too. Its policy gate checks the
+    // key's ceiling, but the list exists to decide consent, which a key acting
+    // as its owner cannot give.
     it('refuses a non-user actor before touching the service', () => {
       auditContext.getActor.mockReturnValue({ kind: 'apiKey', apiKeyId: 'key-1' } as unknown as Actor);
 
@@ -235,10 +268,13 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
     });
   });
 
-  // This axis has no permission seed (D-BA seeded only the server and
-  // household pairs), so PoliciesGuard is deliberately absent and the gate is
-  // the actor KIND. Pinned both ways: no route may quietly acquire a CASL gate
-  // that would have nothing to clamp, and none may skip the kind check.
+  // Deciding on this axis has no permission seed (#59's C4 seeded only the server
+  // and household pairs), so the gate is the actor KIND. The list alone reads
+  // through a seed, `read:plugin:installed`, and composes a `Plugin` ceiling,
+  // so it alone carries a policy gate: an actor with no rule on `Plugin` is
+  // refused rather than served an empty page. Pinned both ways: no other route
+  // may quietly acquire a CASL gate that would have nothing to clamp, and none
+  // may skip the kind check.
   describe('gate shape', () => {
     const routes = () =>
       Object.getOwnPropertyNames(UserPluginsController.prototype).filter(
@@ -247,10 +283,19 @@ describe('UserPluginsController (delegation + actor-kind floor)', () => {
           Reflect.getMetadata('path', UserPluginsController.prototype[name as never]) !== undefined,
       );
 
-    it('declares no CASL policies and no class-level PoliciesGuard', () => {
+    it('gates the list alone, on read:Plugin, with a guard of its own and none on the class', () => {
       expect(Reflect.getMetadata('__guards__', UserPluginsController)).toBeUndefined();
+      expect(Reflect.getMetadata('__guards__', UserPluginsController.prototype.list)).toEqual([PoliciesGuard]);
 
-      for (const name of routes()) {
+      const handlers = Reflect.getMetadata(CHECK_POLICIES_KEY, UserPluginsController.prototype.list) as
+        | Array<(ability: AppAbility) => boolean>
+        | undefined;
+      expect(handlers).toHaveLength(1);
+      const can = jest.fn().mockReturnValue(true);
+      handlers?.[0]({ can } as unknown as AppAbility);
+      expect(can).toHaveBeenCalledWith(Action.read, ResourceType.Plugin);
+
+      for (const name of routes().filter((route) => route !== 'list')) {
         expect(Reflect.getMetadata(CHECK_POLICIES_KEY, UserPluginsController.prototype[name as never])).toBeUndefined();
       }
     });

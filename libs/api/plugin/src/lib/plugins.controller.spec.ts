@@ -1,7 +1,15 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { SERVER_PLUGIN_UNIT } from '@bge/actor-context';
-import { Action, PluginGrantScope, PluginGrantStatus, ResourceType } from '@bge/database';
-import { CHECK_POLICIES_KEY, type AppAbility } from '@bge/permissions';
+import {
+  Action,
+  deriveReadCeilings,
+  PERMISSION_CATALOG,
+  PluginGrantScope,
+  PluginGrantStatus,
+  ResourceType,
+  ROLE_PERMISSION_CATALOG,
+} from '@bge/database';
+import { CHECK_POLICIES_KEY, ScopeComposer, type AppAbility } from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
@@ -14,11 +22,18 @@ import type {
   UpdateEscalationComparison,
 } from '@bge/plugin';
 import { PluginUpdateNoPendingError } from '@bge/plugin';
-import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
+import { ListScopeNotComposedError } from '@bge/shared';
+import {
+  createMockAbilityService,
+  MOCK_ACTING_USER_ID,
+  shippedReadReaches,
+  type MockAbilityService,
+} from '@bge/testing';
 import { RequestMethod } from '@nestjs/common';
+import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
-import { PluginsController } from './plugins.controller';
+import { PluginsController, SERVER_PLUGIN_LIST_SCOPE } from './plugins.controller';
 
 const PLUGIN = { id: 'plugin-1', slug: 'demo-sink', enabled: true } as never;
 const AFFECTED_UNITS = [{ scopeType: 'Household', householdId: 'hh-1' }] as never[];
@@ -87,6 +102,7 @@ describe('PluginsController (delegation)', () => {
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForServer' | 'getBySlug'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
+  let scopeComposer: ScopeComposer;
 
   beforeEach(() => {
     lifecycle = {
@@ -123,6 +139,9 @@ describe('PluginsController (delegation)', () => {
     };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
+    // The REAL composer over the mocked ability service, so the list's ceiling
+    // is composed and recorded as it is in a request.
+    scopeComposer = new ScopeComposer(abilityService as never);
     controller = new PluginsController(
       lifecycle as never,
       abilityService as never,
@@ -132,6 +151,7 @@ describe('PluginsController (delegation)', () => {
       featureState as never,
       inventory as never,
       auditContext as never,
+      scopeComposer,
     );
   });
 
@@ -365,8 +385,52 @@ describe('PluginsController (delegation)', () => {
 
       expect(inventory.listForServer).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 50, pageSize: 25 }),
+        expect.any(Function),
         expect.anything(),
       );
+    });
+
+    it("hands the runtime the caller's ceiling, composed as an unscoped Plugin read", async () => {
+      const compose = jest.spyOn(scopeComposer, 'compose');
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+      await firstValueFrom(controller.list(query()));
+      const ceiling = inventory.listForServer.mock.calls[0]?.[1];
+
+      expect(ceiling?.()).toEqual({ AND: [{ id: 'p-1' }] });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE);
+    });
+
+    // The runtime calls the ceiling, and composing it is what the envelope's
+    // guard checks for. Built inside a request where nothing calls it, the
+    // envelope must fail, naming the type.
+    it('builds its envelope under the Plugin scope guard', async () => {
+      const envelope = ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.list(query())));
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Plugin}'`);
+    });
+
+    // The reason is a claim about the catalog, and this is where it is checked:
+    // a reach granted later that is neither of these fails here, beside the
+    // declaration it would falsify.
+    it('stays unscoped only while each reader of Plugin reads every row or holds the fixed filter the gate refuses', () => {
+      expect(new Set(shippedReadReaches(ResourceType.Plugin))).toEqual(new Set(['every row', 'fixed filter']));
+
+      const ceilings = deriveReadCeilings(PERMISSION_CATALOG, ROLE_PERMISSION_CATALOG, [
+        'all',
+        ...Object.values(ResourceType),
+      ]);
+      const fixedFilters = Object.values(ceilings[ResourceType.Plugin]).flatMap((bySlug) =>
+        Object.entries(bySlug)
+          .filter(([, reach]) => reach === 'fixed filter')
+          .map(([slug]) => slug),
+      );
+      expect(fixedFilters).toEqual(['read:plugin:installed']);
+
+      const fields = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:plugin:installed')?.fields;
+      expect(fields?.length).toBeGreaterThan(0);
+      expect(fields).not.toContain('installedAt');
     });
 
     it('forwards the tombstone opt-in and the CLS locale (D-CH)', async () => {
@@ -374,7 +438,7 @@ describe('PluginsController (delegation)', () => {
 
       await firstValueFrom(controller.list(query({ includeUninstalled: true })));
 
-      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), {
+      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
         includeUninstalled: true,
         locale: 'de',
       });
@@ -383,7 +447,7 @@ describe('PluginsController (delegation)', () => {
     it('an omitted opt-in stays undefined — the service owns the default', async () => {
       await firstValueFrom(controller.list(query()));
 
-      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), {
+      expect(inventory.listForServer).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
         includeUninstalled: undefined,
         locale: undefined,
       });

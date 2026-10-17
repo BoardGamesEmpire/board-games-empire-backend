@@ -1,6 +1,6 @@
 import { AuditContextService } from '@bge/actor-context';
 import { DatabaseService } from '@bge/database';
-import { AbilityService } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
@@ -20,7 +20,7 @@ import { PluginsApiModule } from './plugins-api.module';
 /**
  * Stand-ins for the app's global modules, visible everywhere exactly as the
  * real ones are: `I18nService` (nestjs-i18n's `@Global` I18nModule),
- * `AbilityService` (the `@Global` PermissionsModule), and the `@Global`
+ * `AbilityService` and `ScopeComposer` (the `@Global` PermissionsModule), and the `@Global`
  * plugin runtime's controller-injected services (configured once by the
  * host's forRootAsync). This test asserts DI wiring, not behavior — the
  * wiring under guard is still PluginsApiModule's own AuditContextModule
@@ -31,6 +31,7 @@ import { PluginsApiModule } from './plugins-api.module';
   providers: [
     { provide: I18nService, useValue: { translate: () => '' } },
     { provide: AbilityService, useValue: {} },
+    { provide: ScopeComposer, useValue: {} },
     { provide: PluginLifecycleService, useValue: {} },
     { provide: PluginUpdateService, useValue: {} },
     { provide: PluginGrantService, useValue: {} },
@@ -42,6 +43,7 @@ import { PluginsApiModule } from './plugins-api.module';
   exports: [
     I18nService,
     AbilityService,
+    ScopeComposer,
     PluginLifecycleService,
     PluginUpdateService,
     PluginGrantService,

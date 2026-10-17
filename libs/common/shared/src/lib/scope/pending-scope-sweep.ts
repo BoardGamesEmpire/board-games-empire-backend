@@ -18,7 +18,8 @@
  *
  * DELETING an entry converts EVERY route that lists that resource, in one
  * change — 417 converted both household reads for this reason, not just the
- * one it named. See the note on `Plugin` below for what goes wrong otherwise.
+ * one it named. Convert one route of several and the others serialize a list
+ * whose scope was never composed, which is a 500 on a route nobody touched.
  *
  * Empty means the sweep is complete and this file should be deleted along with
  * the branch in `assertListScopeComposed` that reads it.
@@ -29,13 +30,6 @@
 export const PENDING_SCOPE_SWEEP: ReadonlySet<string> = Object.freeze(
   new Set([
     // Swept by 418, in the groups the intrinsic-scope table names.
-    // THREE routes read this one, across two libs: the server list, the
-    // per-household inventory and the per-user inventory. All three query
-    // `db.plugin` — the household/user axis is a filtered `select`, not a
-    // different table — so all three must be converted in the change that
-    // deletes this entry. Convert one and the other two serialize a list whose
-    // scope was never composed, which is a 500 on a route nobody touched.
-    'Plugin',
     'User',
   ]),
 );
