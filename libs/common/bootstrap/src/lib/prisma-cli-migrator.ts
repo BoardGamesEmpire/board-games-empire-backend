@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import * as path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import type { MigratorContext } from './bootstrap-options';
+import { MIGRATION_URL_VARIABLE } from './migration-credential';
 import type { Migrator } from './ports';
 
 /**
@@ -140,7 +141,12 @@ export function createPrismaCliMigrator(options: PrismaCliMigratorOptions): Migr
 
         const child = spawn(process.execPath, [cli, 'migrate', 'deploy'], {
           cwd: projectRoot,
-          env: { ...process.env, DATABASE_URL: options.databaseUrl },
+          // `prisma.config.ts` prefers this variable to `DATABASE_URL`, as
+          // the bootstrap does, so a hand-run `prisma migrate resolve` reaches
+          // the same database as the same database role. Set even when it
+          // equals `DATABASE_URL`: a `.env` beside the config cannot then
+          // supply another.
+          env: { ...process.env, [MIGRATION_URL_VARIABLE]: options.migrationUrl },
           stdio: ['ignore', 'pipe', 'pipe'],
         });
 

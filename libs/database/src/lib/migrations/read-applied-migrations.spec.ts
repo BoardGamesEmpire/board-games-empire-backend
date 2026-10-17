@@ -23,6 +23,12 @@ describe('readAppliedMigrations', () => {
       'Raw query failed. Code: `42P01`. Message: `relation "e2e._prisma_migrations" does not exist`',
     );
     await expect(readAppliedMigrations(failingWith(inMessage))).resolves.toEqual([]);
+
+    const fromAdapter = Object.assign(new Error('Raw query failed'), {
+      code: 'P2010',
+      meta: { driverAdapterError: { cause: { kind: 'postgres', originalCode: '42P01' } } },
+    });
+    await expect(readAppliedMigrations(failingWith(fromAdapter))).resolves.toEqual([]);
   });
 
   it('rethrows a ledger error that merely mentions the table, such as a missing column', async () => {

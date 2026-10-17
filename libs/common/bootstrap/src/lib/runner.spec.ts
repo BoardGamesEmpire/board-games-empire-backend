@@ -1,5 +1,6 @@
 import type { AppliedMigrationRow } from '@bge/database';
 import { SpanStatusCode, type Span, type Tracer } from '@opentelemetry/api';
+import type { MigrationCredential } from './migration-credential';
 import type {
   BootstrapLock,
   BootstrapLogger,
@@ -752,5 +753,72 @@ describe('the data-migrations phase', () => {
     await expect(run).rejects.toBe(boom);
     expect(events).toEqual(['seeds', 'data-migrations']);
     expect(lock.events).toEqual(['acquire', 'release']);
+  });
+});
+
+describe('the migration credential', () => {
+  const credential: MigrationCredential = {
+    variable: 'DATABASE_MIGRATION_URL',
+    user: 'bge_migrator',
+    host: 'postgres-rw:5432',
+  };
+
+  const sequence = (ledger: FakeLedger, migrator: Migrator, migrationCredential: MigrationCredential) =>
+    runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock: new FakeLock(),
+      seeder: new FakeSeeder(),
+      dataMigrations: noDataMigrations,
+      logger: recordingLogger(),
+      clock: new FakeClock(),
+      migrator,
+      migrationCredential,
+    });
+
+  it('is named in the summary when migrations were applied, so the log shows where they reached Postgres', async () => {
+    const ledger = new FakeLedger([finished('20260109_init')]);
+
+    const summary = await sequence(ledger, new FakeMigrator(ledger), credential);
+
+    expect(summary.migrationCredential).toEqual({
+      variable: 'DATABASE_MIGRATION_URL',
+      user: 'bge_migrator',
+      host: 'postgres-rw:5432',
+    });
+  });
+
+  it('is left out of the summary when the schema was already in sync, since nothing reached Postgres through it', async () => {
+    const ledger = new FakeLedger(CHAIN.map(finished));
+
+    const summary = await sequence(ledger, new FakeMigrator(ledger), credential);
+
+    expect(summary.migrationsApplied).toEqual([]);
+    expect(summary).not.toHaveProperty('migrationCredential');
+  });
+
+  // A migration URL naming another database migrates that one cleanly, so
+  // Prisma's output shows nothing wrong; only the read that follows can tell.
+  // So does a schema the database role in DATABASE_URL may not use: Postgres
+  // skips it when looking the ledger up, and the table reads as absent.
+  it('from DATABASE_MIGRATION_URL: a run that leaves migrations pending is refused with the likely causes, the two URLs naming different databases or the schema hidden from the reader', async () => {
+    const ledger = new FakeLedger([finished('20260109_init')]);
+    const elsewhere: Migrator = { apply: async () => undefined };
+
+    const run = sequence(ledger, elsewhere, credential);
+
+    await expect(run).rejects.toBeInstanceOf(MigrationsStillPendingError);
+    await expect(run).rejects.toThrow(/DATABASE_MIGRATION_URL and DATABASE_URL name different databases or schemas/);
+    await expect(run).rejects.toThrow(/database role in DATABASE_URL lacks USAGE on the schema/);
+  });
+
+  it('from DATABASE_URL: the refusal suggests no mismatch, since there is only one URL', async () => {
+    const ledger = new FakeLedger([finished('20260109_init')]);
+    const elsewhere: Migrator = { apply: async () => undefined };
+
+    const run = sequence(ledger, elsewhere, { variable: 'DATABASE_URL', user: 'bge', host: 'postgres:5432' });
+
+    await expect(run).rejects.toBeInstanceOf(MigrationsStillPendingError);
+    await expect(run).rejects.not.toThrow(/different databases/);
   });
 });

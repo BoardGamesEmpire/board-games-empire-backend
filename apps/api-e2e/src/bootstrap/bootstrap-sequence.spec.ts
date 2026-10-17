@@ -2,15 +2,19 @@ import {
   BOOTSTRAP_LOCK_NAME,
   createPrismaCliMigrator,
   FailedMigrationError,
+  LedgerAccessDeniedError,
   LockNotAcquiredError,
+  MigrateDeployFailedError,
   PgAdvisoryLock,
   PrismaSchemaLedger,
   RegistryDataMigrations,
+  runBootstrap,
   runBootstrapSequence,
   RunSeedsSeeder,
   SchemaNotReadyError,
   systemClock,
   type BootstrapLogger,
+  type BootstrapSummary,
   type DataMigrationsPhase,
   type Migrator,
   type ReconcileSummary,
@@ -23,7 +27,7 @@ import {
   readAppliedMigrations,
   type PrismaClient,
 } from '@bge/database';
-import type { Logger } from '@nestjs/common';
+import type { Logger, LoggerService } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -364,7 +368,7 @@ describe('the boot sequence against Postgres', () => {
     });
 
     it('two simultaneous api boots: one is witnessed blocked, the chain is applied exactly once, and the real seeds run one after the other', async () => {
-      const real = createPrismaCliMigrator({ databaseUrl: sandboxUrl(), logger: silent, projectRoot: WORKSPACE_ROOT });
+      const real = createPrismaCliMigrator({ migrationUrl: sandboxUrl(), logger: silent, projectRoot: WORKSPACE_ROOT });
       const migrator = new CountingMigrator(real);
       const seeder = new CountingSeeder(realSeeds(sandbox.client));
       const locks = [lockOn(sandboxUrl(), 'boot-a'), lockOn(sandboxUrl(), 'boot-b')];
@@ -585,5 +589,217 @@ describe('the boot sequence against Postgres', () => {
         }
       });
     });
+  });
+});
+
+/**
+ * The migration credential (#445): the migrations apply as one database role,
+ * and every process role runs as another that holds only what it was granted.
+ *
+ * Booted through `runBootstrap`, configuration and all, against a database of
+ * its own: the migration database role must own it, which the shared sandbox
+ * above does not allow. Database roles belong to the whole Postgres server, so the
+ * names are this block's own and are dropped at the end. Like the sandbox, it
+ * needs a Postgres server where the harness may create roles and databases.
+ */
+describe('the migration credential against Postgres', () => {
+  const DATABASE = 'bge_migration_credential_e2e';
+  const MIGRATION_ROLE = 'bge_e2e_migrator';
+  const APP_ROLE = 'bge_e2e_app';
+  const PASSWORD = 'e2e-password';
+
+  let admin: Client;
+
+  /** The harness's Postgres server, inside this block's database, in the default schema the grants name. */
+  const inDatabase = (credentials?: { user: string; password: string }): string => {
+    const url = new URL(requireDatabaseUrl());
+    if (credentials) {
+      url.username = credentials.user;
+      url.password = credentials.password;
+    }
+    url.pathname = `/${DATABASE}`;
+    url.searchParams.delete('schema');
+    return url.toString();
+  };
+  const urlAs = (user: string, password = PASSWORD) => inDatabase({ user, password });
+
+  /** Empty and owned by the migration database role; with the grants docs/BOOTSTRAP.md gives, unless told otherwise. */
+  async function freshDatabase(options: { grants: boolean }): Promise<void> {
+    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
+    await admin.query(`CREATE DATABASE "${DATABASE}" OWNER "${MIGRATION_ROLE}"`);
+    if (!options.grants) return;
+
+    // Default privileges belong to one database, so they are set inside it.
+    const inside = new Client({ connectionString: inDatabase() });
+    await inside.connect();
+    try {
+      await inside.query(`GRANT USAGE ON SCHEMA public TO "${APP_ROLE}"`);
+      await inside.query(
+        `ALTER DEFAULT PRIVILEGES FOR ROLE "${MIGRATION_ROLE}" IN SCHEMA public ` +
+          `GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "${APP_ROLE}"`,
+      );
+      await inside.query(
+        `ALTER DEFAULT PRIVILEGES FOR ROLE "${MIGRATION_ROLE}" IN SCHEMA public ` +
+          `GRANT USAGE, SELECT ON SEQUENCES TO "${APP_ROLE}"`,
+      );
+    } finally {
+      await inside.end();
+    }
+  }
+
+  function recordingNestLogger(): LoggerService & { readonly lines: string[] } {
+    const lines: string[] = [];
+    // The bootstrap's structured lines arrive as objects carrying `msg`.
+    const text = (message: unknown) =>
+      typeof message === 'object' && message !== null && 'msg' in message ? String(message.msg) : String(message);
+    const push = (level: string) => (message: unknown) => void lines.push(`${level}: ${text(message)}`);
+    return {
+      lines,
+      log: push('log'),
+      warn: push('warn'),
+      error: push('error'),
+      debug: push('debug'),
+      verbose: push('verbose'),
+    };
+  }
+
+  /**
+   * One process's bootstrap, configured through the environment as a
+   * container's is. The api is the process given the real CLI migrator.
+   */
+  async function boot(options: {
+    readonly applicationName: string;
+    readonly databaseUrl: string;
+    readonly migrationUrl: string;
+    readonly logger?: LoggerService;
+  }): Promise<BootstrapSummary> {
+    const saved = {
+      DATABASE_URL: process.env['DATABASE_URL'],
+      DATABASE_MIGRATION_URL: process.env['DATABASE_MIGRATION_URL'],
+    };
+    process.env['DATABASE_URL'] = options.databaseUrl;
+    process.env['DATABASE_MIGRATION_URL'] = options.migrationUrl;
+
+    try {
+      return await runBootstrap({
+        applicationName: options.applicationName,
+        logger: options.logger ?? recordingNestLogger(),
+        migrator:
+          options.applicationName === 'api'
+            ? (context) => createPrismaCliMigrator({ ...context, projectRoot: WORKSPACE_ROOT })
+            : undefined,
+        waitMs: 5_000,
+        schemaPollMs: 500,
+      });
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  beforeAll(async () => {
+    admin = new Client({ connectionString: requireDatabaseUrl() });
+    await admin.connect();
+    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
+    for (const role of [MIGRATION_ROLE, APP_ROLE]) {
+      await admin.query(`DROP ROLE IF EXISTS "${role}"`);
+      await admin.query(`CREATE ROLE "${role}" LOGIN PASSWORD '${PASSWORD}'`);
+    }
+  });
+
+  afterAll(async () => {
+    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
+    for (const role of [MIGRATION_ROLE, APP_ROLE]) {
+      await admin.query(`DROP ROLE IF EXISTS "${role}"`);
+    }
+    await admin.end();
+  });
+
+  describe('with the default privileges granted before the first boot', () => {
+    beforeAll(async () => {
+      await freshDatabase({ grants: true });
+    });
+
+    // DATABASE_URL names a database role that may not create a table, so the
+    // migrations apply only if both the migrator and the Prisma CLI it runs
+    // took DATABASE_MIGRATION_URL.
+    it('the api migrates as the migration database role, seeds as the database role in DATABASE_URL, and names the credential in its summary', async () => {
+      const summary = await boot({
+        applicationName: 'api',
+        databaseUrl: urlAs(APP_ROLE),
+        migrationUrl: urlAs(MIGRATION_ROLE),
+      });
+
+      expect(summary.migrationsApplied).toEqual([...MIGRATION_NAMES]);
+      expect(summary.seedsRun).toBe(true);
+      expect(summary.migrationCredential).toEqual({
+        variable: 'DATABASE_MIGRATION_URL',
+        user: MIGRATION_ROLE,
+        host: new URL(requireDatabaseUrl()).host,
+      });
+      expect(JSON.stringify(summary)).not.toContain(PASSWORD);
+
+      const app = createTestDatabase(urlAs(APP_ROLE));
+      const raw = new Client({ connectionString: urlAs(APP_ROLE) });
+      await raw.connect();
+      try {
+        const owners = await raw.query<{ tableowner: string }>(
+          "SELECT DISTINCT tableowner FROM pg_tables WHERE schemaname = 'public'",
+        );
+        expect(owners.rows.map((row) => row.tableowner)).toEqual([MIGRATION_ROLE]);
+        expect(await app.client.permission.count()).toBe(CATALOG_MANIFEST.permissions.length);
+        expect(await app.client.gameLength.count()).toBeGreaterThan(0);
+
+        await expect(raw.query('CREATE TABLE intruder (id integer)')).rejects.toMatchObject({ code: '42501' });
+      } finally {
+        await raw.end();
+        await app.close();
+      }
+    });
+
+    it('a process that applies no migrations warns when it is given the migration credential, naming the variable and its process role', async () => {
+      const logger = recordingNestLogger();
+
+      const summary = await boot({
+        applicationName: 'worker',
+        databaseUrl: urlAs(APP_ROLE),
+        migrationUrl: urlAs(MIGRATION_ROLE),
+        logger,
+      });
+
+      expect(summary.state).toBe('in-sync');
+      expect(logger.lines.filter((line) => line.includes('DATABASE_MIGRATION_URL'))).toEqual([
+        expect.stringMatching(/^warn: DATABASE_MIGRATION_URL is set for the worker process role/),
+      ]);
+    });
+  });
+
+  it('a wrong password in DATABASE_MIGRATION_URL refuses the boot', async () => {
+    await freshDatabase({ grants: true });
+
+    const run = boot({
+      applicationName: 'api',
+      databaseUrl: urlAs(APP_ROLE),
+      migrationUrl: urlAs(MIGRATION_ROLE, 'not-the-password'),
+    });
+
+    await expect(run).rejects.toBeInstanceOf(MigrateDeployFailedError);
+  });
+
+  it('without the default privileges: the read after migrating is refused naming the database role in DATABASE_URL, and so is the next boot', async () => {
+    await freshDatabase({ grants: false });
+    const configured = { applicationName: 'api', databaseUrl: urlAs(APP_ROLE), migrationUrl: urlAs(MIGRATION_ROLE) };
+
+    const first = boot(configured);
+    await expect(first).rejects.toBeInstanceOf(LedgerAccessDeniedError);
+    await expect(first).rejects.toThrow(
+      `the database role '${APP_ROLE}' in DATABASE_URL may not read _prisma_migrations`,
+    );
+
+    // The migrations did apply; on the next boot the same read comes first.
+    const next = boot(configured);
+    await expect(next).rejects.toBeInstanceOf(LedgerAccessDeniedError);
   });
 });

@@ -1,0 +1,52 @@
+import { resolveMigrationCredential } from './migration-credential';
+
+// What the api migrates with, and what its boot summary says about it. The
+// summary is logged, so the password must never reach it.
+
+describe('resolveMigrationCredential', () => {
+  const databaseUrl = 'postgresql://bge_app:app-secret@bge-pooler-rw:5432/bge';
+  const migrationUrl = 'postgresql://bge_migrator:migrator-secret@bge-rw:5432/bge';
+
+  it('migrates with DATABASE_MIGRATION_URL when it is set, and names its user and host', () => {
+    const resolved = resolveMigrationCredential({ databaseUrl, migrationUrl });
+
+    expect(resolved.url).toBe(migrationUrl);
+    expect(resolved.credential).toEqual({
+      variable: 'DATABASE_MIGRATION_URL',
+      user: 'bge_migrator',
+      host: 'bge-rw:5432',
+    });
+  });
+
+  it('falls back to DATABASE_URL when DATABASE_MIGRATION_URL is unset or empty', () => {
+    for (const unset of [undefined, '']) {
+      const resolved = resolveMigrationCredential({ databaseUrl, migrationUrl: unset });
+
+      expect(resolved.url).toBe(databaseUrl);
+      expect(resolved.credential).toEqual({ variable: 'DATABASE_URL', user: 'bge_app', host: 'bge-pooler-rw:5432' });
+    }
+  });
+
+  it('never carries the password', () => {
+    const { credential } = resolveMigrationCredential({ databaseUrl, migrationUrl });
+
+    expect(JSON.stringify(credential)).not.toContain('secret');
+  });
+
+  it('decodes a percent-encoded user, as Postgres receives it', () => {
+    const { credential } = resolveMigrationCredential({
+      databaseUrl,
+      migrationUrl: 'postgresql://bge%40migrations:pw@bge-rw/bge',
+    });
+
+    expect(credential.user).toBe('bge@migrations');
+    expect(credential.host).toBe('bge-rw');
+  });
+
+  it('describes a URL it cannot parse as unknown rather than failing the boot over a log field', () => {
+    const resolved = resolveMigrationCredential({ databaseUrl, migrationUrl: 'not a url' });
+
+    expect(resolved.url).toBe('not a url');
+    expect(resolved.credential).toEqual({ variable: 'DATABASE_MIGRATION_URL', user: 'unknown', host: 'unknown' });
+  });
+});
