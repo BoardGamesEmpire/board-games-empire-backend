@@ -6,8 +6,8 @@ import Joi from 'joi';
  * Host configuration for the plugin runtime (`PluginModule`, #59 Phase B),
  * wired into this app per #212: the two plugin roots. The other
  * `PluginModuleOptions` values are not environment-sourced — `bgeVersion` is
- * a build-time codegen constant (`generated/bge-version.ts`) and
- * `defaultLocale` is the i18n catalog fallback.
+ * a build-time codegen constant (`@bge/version`) and `defaultLocale` is the
+ * i18n catalog fallback.
  */
 export interface PluginsConfig {
   /**

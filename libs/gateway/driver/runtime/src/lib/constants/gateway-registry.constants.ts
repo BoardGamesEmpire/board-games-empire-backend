@@ -25,3 +25,10 @@ export const FAILURE_WINDOW_MS = 5 * 60 * 1000;
  * to repeated failures. Listeners should create admin-facing notifications.
  */
 export const GATEWAY_DISABLED_EVENT = 'gateway.disabled';
+
+/**
+ * EventEmitter2 event name emitted when an interview stores capabilities that
+ * differ from the ones before it, such as a DataGateway no longer serving
+ * search.
+ */
+export const GATEWAY_CAPABILITIES_CHANGED_EVENT = 'gateway.capabilities_changed';

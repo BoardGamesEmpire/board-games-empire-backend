@@ -20,7 +20,6 @@ describe('CoordinatorService', () => {
           useValue: {
             connect: jest.fn(),
             disconnect: jest.fn(),
-            getServiceClient: jest.fn(),
             isConnected: jest.fn(),
             connectedGatewayIds: jest.fn().mockReturnValue([]),
             reportSuccess: jest.fn(),

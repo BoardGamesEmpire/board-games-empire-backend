@@ -1,5 +1,5 @@
-import { DatabaseService } from '@bge/database';
-import { GatewayRegistryService } from '@bge/gateway-registry';
+import { DatabaseService, DataGatewayCapability } from '@bge/database';
+import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
@@ -68,9 +68,10 @@ export class GatewayGameSearchService {
   ) {}
 
   /**
-   * Fan-out search across the requested gateways (or all connected if none
-   * specified). Streams SearchGameResult frames as they arrive, with
-   * deduplication metadata resolved against GameSource for each RESULT frame.
+   * Searches the requested DataGateways, or, when none is named, every one
+   * this process has connected that may search. Streams SearchGameResult
+   * frames as they arrive, with deduplication metadata resolved against
+   * GameSource for each RESULT frame.
    */
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     this.logger.debug(
@@ -79,19 +80,23 @@ export class GatewayGameSearchService {
 
     // Filter blank/invalid ids: a targeted request searches only the valid
     // ids among those given (never resolves '' or a non-string leaked from a
-    // hand-built request); an untargeted request (no gatewayIds) fans out to
-    // all connected. Distinguishing on the raw array keeps ['bgg',''] a
-    // targeted search of ['bgg'], and [''] an empty targeted search (→ EMPTY)
-    // rather than silently widening to "all connected".
+    // hand-built request); an untargeted request (no gatewayIds) goes to every
+    // connected DataGateway that may search. Distinguishing on the raw array
+    // keeps ['bgg',''] a targeted search of ['bgg'], and [''] an empty
+    // targeted search (→ EMPTY) rather than silently widening to "all".
     const rawIds = request.gatewayIds ?? [];
     const targeted = rawIds.length > 0;
     const requestedIds = rawIds.filter((id): id is string => typeof id === 'string' && id.length > 0);
-    const targetIds = targeted ? requestedIds : this.registry.connectedGatewayIds();
-    if (targetIds.length === 0) {
-      return EMPTY;
-    }
 
-    return from(targetIds).pipe(
+    // A named DataGateway that may not search is still asked for, so its
+    // refusal comes back as an UNAVAILABLE frame that says why. One this
+    // process hasn't connected yet isn't reached by an untargeted search (#722).
+    const targetIds$ = targeted
+      ? of(requestedIds)
+      : defer(() => from(this.registry.routableGatewayIds(DataGatewayCapability.Search)));
+
+    return targetIds$.pipe(
+      mergeMap((ids) => from(ids)),
       tap((id) => this.logger.debug(`Initiating search on gateway ${id} for query '${request.query}'`)),
       mergeMap((id) => this.searchGateway(id, request)),
     );
@@ -102,7 +107,7 @@ export class GatewayGameSearchService {
    * Used by the import worker — bypasses the search cache.
    */
   fetchGame(request: proto.CoordinatorFetchGameRequest): Observable<proto.CoordinatorFetchGameResponse> {
-    return defer(() => from(this.registry.resolve(request.gatewayId))).pipe(
+    return defer(() => from(this.registry.resolve(request.gatewayId, DataGatewayCapability.Fetch))).pipe(
       tap(() =>
         this.logger.debug(`Fetching game from gateway ${request.gatewayId} with externalId ${request.externalId}`),
       ),
@@ -199,13 +204,25 @@ export class GatewayGameSearchService {
         return of(undefined);
       }),
       mergeMap((cached) => {
-        if (cached !== undefined) {
-          this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
-          return this.emitCachedResults(gatewayId, request.correlationId, cached);
+        if (cached === undefined) {
+          this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
+          return this.fetchFromGateway(gatewayId, request, cacheKey);
         }
 
-        this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
-        return this.fetchFromGateway(gatewayId, request, cacheKey);
+        // A cached search is replayed only while the DataGateway may still
+        // search. Otherwise the live path answers: the gateway registry
+        // refuses it, saying why, or connects and interviews one never
+        // interviewed.
+        return from(this.registry.isRoutable(gatewayId, DataGatewayCapability.Search)).pipe(
+          mergeMap((routable) => {
+            if (!routable) {
+              return this.fetchFromGateway(gatewayId, request, cacheKey);
+            }
+
+            this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
+            return this.emitCachedResults(gatewayId, request.correlationId, cached);
+          }),
+        );
       }),
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
@@ -221,7 +238,7 @@ export class GatewayGameSearchService {
     request: proto.SearchGamesRequest,
     cacheKey: string,
   ): Observable<proto.SearchGameResult> {
-    return from(this.registry.resolve(gatewayId)).pipe(
+    return from(this.registry.resolve(gatewayId, DataGatewayCapability.Search)).pipe(
       mergeMap((driver) => {
         const accumulator: SearchAccumulator = { games: [], partial: false };
 
@@ -250,8 +267,9 @@ export class GatewayGameSearchService {
             }),
           );
       }),
-      // Resolve/lazy-connect failure → the gateway is unavailable, distinct
-      // from a mid-stream gRPC error (handled above as ERROR).
+      // Resolve/lazy-connect failure, or a refusal to route the search → the
+      // DataGateway is unavailable, distinct from a mid-stream gRPC error
+      // (handled above as ERROR).
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Gateway ${gatewayId} unavailable: ${message}`);
@@ -259,7 +277,7 @@ export class GatewayGameSearchService {
         return this.errorGameSearchResult(
           gatewayId,
           request.correlationId,
-          `Gateway ${gatewayId} is not connected`,
+          this.unavailableMessage(gatewayId, err),
           proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
         );
       }),
@@ -385,7 +403,7 @@ export class GatewayGameSearchService {
     correlationId: string,
     locale?: string,
   ): Observable<proto.SearchGameResult> {
-    return from(this.registry.resolve(gatewayId)).pipe(
+    return from(this.registry.resolve(gatewayId, DataGatewayCapability.FetchExpansions)).pipe(
       mergeMap((driver) =>
         driver.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
           // Same ordering rationale as fetchFromGateway: async RESULT frames
@@ -408,7 +426,7 @@ export class GatewayGameSearchService {
           }),
         ),
       ),
-      // Resolve/lazy-connect failure → gateway unavailable.
+      // Resolve/lazy-connect failure, or a refusal to route → DataGateway unavailable.
       catchError((err) => {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(`Gateway ${gatewayId} unavailable: ${message}`);
@@ -416,11 +434,20 @@ export class GatewayGameSearchService {
         return this.errorGameSearchResult(
           gatewayId,
           correlationId,
-          `Gateway ${gatewayId} is not connected`,
+          this.unavailableMessage(gatewayId, err),
           proto.ResultStatus.RESULT_STATUS_UNAVAILABLE,
         );
       }),
     );
+  }
+
+  /**
+   * An UNAVAILABLE frame's message. A refusal to route says why, since it
+   * names nothing about the DataGateway's own errors. Any other failure to
+   * reach it stays a bare "not connected", and its detail goes to the log.
+   */
+  private unavailableMessage(gatewayId: string, err: unknown): string {
+    return err instanceof GatewayRoutingRefusedError ? err.message : `DataGateway ${gatewayId} is not connected`;
   }
 
   /**

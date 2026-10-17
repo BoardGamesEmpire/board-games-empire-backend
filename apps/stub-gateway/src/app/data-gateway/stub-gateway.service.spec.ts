@@ -1,3 +1,4 @@
+import { BGE_VERSION } from '@bge/version';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { lastValueFrom, toArray, type Observable } from 'rxjs';
 import { STUB_BASE_GAME, STUB_EXPANSION, STUB_GAMES, STUB_LANGUAGES } from '../fixtures/catalog';
@@ -26,6 +27,10 @@ describe('StubGatewayService', () => {
 
     it('makes up a correlation id when the request carries none', () => {
       expect(service.ping({}).correlationId).toEqual(expect.any(String));
+    });
+
+    it('reports the product version it was built at', () => {
+      expect(service.ping({}).gatewayVersion).toBe(BGE_VERSION);
     });
   });
 

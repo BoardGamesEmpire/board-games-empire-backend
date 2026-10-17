@@ -21,9 +21,6 @@
       "path": "../contract-testing/tsconfig.lib.json"
     },
     {
-      "path": "../../../common/testing/tsconfig.lib.json"
-    },
-    {
       "path": "../../../api/language/tsconfig.lib.json"
     },
     {

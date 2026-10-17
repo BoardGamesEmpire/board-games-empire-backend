@@ -60,13 +60,17 @@ export class LanguageLinkService {
   /**
    * Capabilities interview: upsert a link for every language the gateway
    * reports. Existing Resolved/Ignored links are left untouched; new and
-   * previously-unresolved values get a fresh resolution attempt.
+   * previously-unresolved values get a fresh resolution attempt. Once
+   * `signal` aborts, as when the interview is abandoned, no further write
+   * starts, even for the language under way, and the abort's reason is
+   * thrown.
    */
-  async interview(gatewayId: string, entries: GatewayLanguageInput[]): Promise<InterviewSummary> {
+  async interview(gatewayId: string, entries: GatewayLanguageInput[], signal?: AbortSignal): Promise<InterviewSummary> {
     const summary: InterviewSummary = { resolved: 0, pending: 0, unresolved: 0, ignored: 0 };
 
     for (const entry of entries) {
-      const { status } = await this.registerEntry(gatewayId, entry, LanguageLinkOrigin.Interview);
+      signal?.throwIfAborted();
+      const { status } = await this.registerEntry(gatewayId, entry, LanguageLinkOrigin.Interview, signal);
       this.count(summary, status);
     }
 
@@ -189,12 +193,14 @@ export class LanguageLinkService {
 
   /**
    * Upsert the link row for one entry and attempt resolution per policy.
-   * Returns the link's (possibly pre-existing) resolution.
+   * Returns the link's (possibly pre-existing) resolution. Starts no write
+   * once `signal` aborts.
    */
   private async registerEntry(
     gatewayId: string,
     entry: GatewayLanguageInput,
     origin: LanguageLinkOrigin,
+    signal?: AbortSignal,
   ): Promise<Resolution> {
     // (gatewayId, value, format) is unique, so structured values must be
     // canonicalized before they key a row. Resolution runs on the normalized
@@ -213,7 +219,7 @@ export class LanguageLinkService {
       return { status: existing.status, tagId: existing.tagId };
     }
 
-    const resolution = await this.resolveEntry(normalized);
+    const resolution = await this.resolveEntry(normalized, signal);
     const supplied = {
       suppliedIso6393: entry.iso6393 ?? null,
       suppliedIso6391: entry.iso6391 ?? null,
@@ -221,6 +227,7 @@ export class LanguageLinkService {
       suppliedNativeName: entry.nativeName ?? null,
     };
 
+    signal?.throwIfAborted();
     await this.db.languageGatewayLink.upsert({
       where: { gatewayId_value_format: { gatewayId, value, format: entry.format } },
       create: {
@@ -246,14 +253,15 @@ export class LanguageLinkService {
    * Resolution core. Tries the entry's representations in order of
    * trustworthiness: canonical BCP 47 tag, then ISO codes, then display-name
    * matching. Structured misses may auto-add vocabulary (policy-gated);
-   * free-text misses never do.
+   * free-text misses never do. An auto-add doesn't start once `signal`
+   * aborts.
    */
-  private async resolveEntry(entry: GatewayLanguageInput): Promise<Resolution> {
+  private async resolveEntry(entry: GatewayLanguageInput, signal?: AbortSignal): Promise<Resolution> {
     // 1. BCP 47 — from the value itself (IetfBcp47 format) or enrichment.
     const rawTag = entry.format === LanguageCodeFormat.IetfBcp47 ? entry.value : entry.ietfTag;
     const canonical = canonicalizeTag(rawTag);
     if (canonical) {
-      return this.resolveCanonicalTag(canonical, entry);
+      return this.resolveCanonicalTag(canonical, entry, signal);
     }
 
     if (entry.format === LanguageCodeFormat.IetfBcp47) {
@@ -267,7 +275,7 @@ export class LanguageLinkService {
     const iso6393 = this.normalizeIso(entry.format === LanguageCodeFormat.Iso6393 ? entry.value : entry.iso6393);
     const iso6391 = this.normalizeIso(entry.format === LanguageCodeFormat.Iso6391 ? entry.value : entry.iso6391);
     if (iso6393 || iso6391) {
-      return this.resolveIsoCodes(iso6393, iso6391, entry);
+      return this.resolveIsoCodes(iso6393, iso6391, entry, signal);
     }
 
     // 3. Free-text display name.
@@ -278,7 +286,11 @@ export class LanguageLinkService {
    * A valid canonical tag resolves directly, or auto-adds the tag (and its
    * language when new) — parked as Pending instead when review is enabled.
    */
-  private async resolveCanonicalTag(canonical: string, entry: GatewayLanguageInput): Promise<Resolution> {
+  private async resolveCanonicalTag(
+    canonical: string,
+    entry: GatewayLanguageInput,
+    signal?: AbortSignal,
+  ): Promise<Resolution> {
     const tag = await this.db.languageTag.findUnique({ where: { tag: canonical }, select: { id: true } });
     if (tag) {
       return { status: LanguageLinkStatus.Resolved, tagId: tag.id };
@@ -294,6 +306,7 @@ export class LanguageLinkService {
       return { status: LanguageLinkStatus.Pending, tagId: null };
     }
 
+    signal?.throwIfAborted();
     const languageId = await this.ensureLanguage(iso6393, entry);
     const createdTag = await this.createTag(canonical, languageId, entry);
     return { status: LanguageLinkStatus.Resolved, tagId: createdTag };
@@ -306,6 +319,7 @@ export class LanguageLinkService {
     iso6393: string | undefined,
     iso6391: string | undefined,
     entry: GatewayLanguageInput,
+    signal?: AbortSignal,
   ): Promise<Resolution> {
     const registryEntry = iso6393Registry.find(
       (candidate) =>
@@ -330,6 +344,7 @@ export class LanguageLinkService {
       return { status: LanguageLinkStatus.Pending, tagId: null };
     }
 
+    signal?.throwIfAborted();
     const languageId = await this.ensureLanguage(registryEntry.iso6393, entry);
     const createdTag = await this.createTag(bareTag, languageId, entry);
     return { status: LanguageLinkStatus.Resolved, tagId: createdTag };

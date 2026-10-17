@@ -21,11 +21,10 @@ import type { GatewayInboundEvent } from './types.js';
  *
  *  - `describe` declares the operations the driver serves, any subset of
  *    search, fetch, fetch expansions and list languages, and a content format
- *    of plain text, HTML, BBCode or Markdown. An operation left out may
- *    answer UNIMPLEMENTED. The server doesn't route by the declarations yet,
- *    so until it does, it may still call one. Each run of the suite names
- *    the operations its driver serves: the suite checks that `describe`
- *    declares exactly those, and runs only their cases.
+ *    of plain text, HTML, BBCode or Markdown. The server calls only the
+ *    operations declared, so one left out may answer UNIMPLEMENTED. Each run
+ *    of the suite names the operations its driver serves: the suite checks
+ *    that `describe` declares exactly those, and runs only their cases.
  *  - Streaming RPCs (`searchGames`, `fetchExpansions`) emit zero or more
  *    RESULT frames and terminate the stream; search streams end with a
  *    SOURCE_DONE frame.

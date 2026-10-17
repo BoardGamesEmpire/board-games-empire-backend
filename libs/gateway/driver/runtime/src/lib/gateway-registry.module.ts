@@ -5,8 +5,8 @@ import { Global, Module } from '@nestjs/common';
 import { GatewayCredentialsFactory } from './credentials/gateway-credentials.factory';
 import { RemoteGatewayDriverFactory } from './drivers/remote-gateway-driver.factory';
 import { GatewayConfigEventsModule } from './gateway-config-events.module';
-import { GatewayLanguageSyncScheduler } from './gateway-language-sync.scheduler';
-import { GatewayLanguageSyncService } from './gateway-language-sync.service';
+import { GatewayInterviewScheduler } from './gateway-interview.scheduler';
+import { GatewayInterviewService } from './gateway-interview.service';
 import { GatewayRegistryBootstrapService } from './gateway-registry.bootstrap.service';
 import { GatewayRegistryService } from './gateway-registry.service';
 
@@ -15,6 +15,8 @@ import { GatewayRegistryService } from './gateway-registry.service';
  * (coordinator, gateway-worker) import this. Internally composes the
  * `GatewayConfigEventsModule` for pub/sub primitives and adds:
  *   - `GatewayRegistryService`: driver routing + failure tracking
+ *   - `GatewayInterviewService`: the interview, whose answers routing reads
+ *   - `GatewayInterviewScheduler`: the interview's hourly backstop
  *   - `RemoteGatewayDriverFactory`: ping-verified gRPC transport adapter
  *   - `GatewayCredentialsFactory`: auth-type-based ChannelCredentials
  *   - `GatewayRegistryBootstrapService`: eager-connect at app startup
@@ -29,12 +31,12 @@ import { GatewayRegistryService } from './gateway-registry.service';
 @Global()
 @Module({
   // AuditContextModule supplies SystemActorScope for the auto-disable path
-  // (#57 emit-site migration).
+  // (#57 emit-site migration) and the interview's capability changes.
   imports: [AuditContextModule, DatabaseModule, GatewayConfigEventsModule, LanguageLinkModule],
   providers: [
     GatewayCredentialsFactory,
-    GatewayLanguageSyncScheduler,
-    GatewayLanguageSyncService,
+    GatewayInterviewScheduler,
+    GatewayInterviewService,
     GatewayRegistryBootstrapService,
     GatewayRegistryService,
     RemoteGatewayDriverFactory,

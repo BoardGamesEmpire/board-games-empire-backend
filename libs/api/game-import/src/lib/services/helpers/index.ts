@@ -1,19 +1,15 @@
 import { PlatformType, ReleaseRegion, ReleaseStatus } from '@bge/database';
+import { toStoredPlatformType } from '@bge/gateway-registry';
 import type { LocalizationData } from '@boardgamesempire/proto-gateway';
 import * as proto from '@boardgamesempire/proto-gateway';
 
-const PROTO_TO_DB_PLATFORM_TYPE: Record<string, PlatformType> = {
-  [proto.PlatformType.PLATFORM_TYPE_CONSOLE]: PlatformType.Console,
-  [proto.PlatformType.PLATFORM_TYPE_PC]: PlatformType.PC,
-  [proto.PlatformType.PLATFORM_TYPE_PORTABLE]: PlatformType.Console,
-  [proto.PlatformType.PLATFORM_TYPE_MOBILE]: PlatformType.Mobile,
-  [proto.PlatformType.PLATFORM_TYPE_ARCADE]: PlatformType.Other,
-  [proto.PlatformType.PLATFORM_TYPE_TABLETOP]: PlatformType.Tabletop,
-  [proto.PlatformType.PLATFORM_TYPE_OTHER]: PlatformType.Other,
-};
-
+/**
+ * Folds portable into console and arcade into other, as a DataGateway's
+ * coverage is stored, through the same map. A type with no stored
+ * equivalent is stored as other.
+ */
 export function toPlatformType(proto: string | undefined): PlatformType {
-  return (proto && PROTO_TO_DB_PLATFORM_TYPE[proto]) || PlatformType.Other;
+  return toStoredPlatformType(proto) ?? PlatformType.Other;
 }
 
 /**

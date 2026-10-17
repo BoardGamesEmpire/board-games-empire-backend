@@ -1,8 +1,8 @@
-import { DatabaseService, JobStatus, Prisma } from '@bge/database';
+import { DatabaseService, DataGatewayCapability, JobStatus, Prisma } from '@bge/database';
 import { GatewayRegistryService } from '@bge/gateway-registry';
 import { ActorAwareWorkerHost } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
-import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
+import { webhookEnvelope, WebhookEventType } from '@bge/webhooks';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { OnWorkerEvent, Processor } from '@nestjs/bullmq';
 import { Logger, NotFoundException } from '@nestjs/common';
@@ -93,10 +93,13 @@ export class GameFetchProcessor extends ActorAwareWorkerHost<
 
     // Resolve (lazily connecting on a cache miss) outside the try below:
     // connect() already feeds failure tracking on connection errors, so this
-    // must not also be reported as a call failure. A missing/disabled gateway
-    // or failed connect throws here, failing the job for BullMQ to retry — by
-    // which time a newly-added gateway may have become connectable.
-    const driver = await this.gatewayRegistry.resolve(gatewayId);
+    // must not also be reported as a call failure. A missing or disabled
+    // DataGateway, a failed connect or first interview, or a DataGateway the
+    // gateway registry won't route a fetch to throws here, failing the job
+    // for BullMQ to retry — by which time a newly added DataGateway may have
+    // become connectable. A refusal never counts toward auto-disable: the
+    // DataGateway did nothing wrong.
+    const driver = await this.gatewayRegistry.resolve(gatewayId, DataGatewayCapability.Fetch);
 
     try {
       const response = await firstValueFrom(driver.fetchGame({ correlationId, externalId, locale }));
