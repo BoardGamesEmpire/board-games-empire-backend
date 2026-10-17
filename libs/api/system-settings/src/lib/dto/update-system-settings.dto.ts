@@ -27,12 +27,12 @@ const MAX_DAYS = 36_500;
 const MAX_NAME_LENGTH = 100;
 
 /**
- * The levels the server's household invitee policy takes (#278).
- * `FriendsOfFriends` waits for the second-degree rule (#496). `Household`
- * names no group an invitee could belong to, and `Private` would turn every
- * household invite off.
+ * The levels the server's invitee policies take, for households (#278) and
+ * events (#546). `FriendsOfFriends` waits for the second-degree rule (#496).
+ * `Household` names no group an invitee could belong to, and `Private` would
+ * turn every invite of that kind off.
  */
-const HOUSEHOLD_INVITEE_POLICIES = [Visibility.Public, Visibility.Friends] as const;
+const INVITEE_POLICIES = [Visibility.Public, Visibility.Friends] as const;
 
 /**
  * Partial update for the `SystemSetting` singleton row. A property the body
@@ -141,9 +141,18 @@ export class UpdateSystemSettingsDto {
   @ApiPropertyOptional({
     description:
       "Who may be invited to a household. Public: anyone. Friends: only the inviter's friends, invited from their account; every invite by email address is refused. A user's own preference can narrow this, never widen it.",
-    enum: HOUSEHOLD_INVITEE_POLICIES,
+    enum: INVITEE_POLICIES,
   })
   @ValidateIf((_, value) => value !== undefined)
-  @IsIn(HOUSEHOLD_INVITEE_POLICIES, { message: i18nValidationMessage('validation.isIn') })
-  householdInviteePolicy?: (typeof HOUSEHOLD_INVITEE_POLICIES)[number];
+  @IsIn(INVITEE_POLICIES, { message: i18nValidationMessage('validation.isIn') })
+  householdInviteePolicy?: (typeof INVITEE_POLICIES)[number];
+
+  @ApiPropertyOptional({
+    description:
+      "Who may be placed on an event by id, at its creation or later. Public: anyone. Friends: only the inviter's friends. A user's own preference can narrow this, never widen it.",
+    enum: INVITEE_POLICIES,
+  })
+  @ValidateIf((_, value) => value !== undefined)
+  @IsIn(INVITEE_POLICIES, { message: i18nValidationMessage('validation.isIn') })
+  eventInviteePolicy?: (typeof INVITEE_POLICIES)[number];
 }

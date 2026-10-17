@@ -20,8 +20,10 @@ import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundEx
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import assert from 'node:assert';
 import { isDeepStrictEqual } from 'node:util';
+import { assertInvitable } from './attendee/invitable';
 import { ATTENDEE_ORDER } from './constants/attendee-order.constant';
 import { ATTENDEE_USER_AND_ROLE_INCLUDE } from './constants/attendee-user-and-role.constant';
+import { NOT_REMOVED } from './constants/not-removed.constant';
 import { OCCURRENCE_ORDER } from './constants/occurrence-order.constant';
 import type { CreateEventDto } from './dto/create-event.dto';
 import type { UpdateEventDto } from './dto/update-event.dto';
@@ -49,7 +51,9 @@ export class EventService {
    * attendee (#512, #365). The row counts whatever its RSVP status, so an
    * invitation or a declined event is listed too. An RSVP changes only the
    * row's status, not any event role attached to it, so filtering on status
-   * here would hide events the caller can still read and answer. Before this the caller's ceiling WAS the scope, so
+   * here would hide events the caller can still read and answer. A row a host
+   * removed does not count: it keeps no role, so the event is no longer the
+   * caller's to answer (#551). Before this the caller's ceiling WAS the scope, so
    * the one route returned a plain user their events, a household member every
    * event in their households, a friend their friends' `Friends`-visible events
    * and staff every event on the server. The ceiling is still ANDed in, as the
@@ -76,7 +80,7 @@ export class EventService {
 
     const where = this.scopeComposer.compose(ResourceType.Event, Action.read, {
       deletedAt: null,
-      attendees: { some: { userId } },
+      attendees: { some: { userId, ...NOT_REMOVED } },
     });
 
     const [rows, total] = await this.db.$transaction(
@@ -146,7 +150,7 @@ export class EventService {
         }),
 
         this.db.eventAttendee.findMany({
-          where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId: id }),
+          where: this.scopeComposer.compose(ResourceType.EventAttendee, Action.read, { eventId: id, ...NOT_REMOVED }),
           include: ATTENDEE_USER_AND_ROLE_INCLUDE,
           orderBy: ATTENDEE_ORDER,
         }),
@@ -193,6 +197,8 @@ export class EventService {
       if (householdId !== null) {
         await lockExistingHousehold(tx, householdId);
       }
+
+      await assertInvitable(tx, userId, uniqueInviteIds);
 
       const created = await tx.event.create({
         data: {

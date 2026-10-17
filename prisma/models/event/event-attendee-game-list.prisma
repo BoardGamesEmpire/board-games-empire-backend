@@ -21,6 +21,11 @@ model EventAttendeeGameList {
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
+  // Set when the attendee takes the game off their list. The row stays,
+  // because closed nominations still name it as their supplier; adding the
+  // same game again clears it (#551).
+  removedAt DateTime? @map("removed_at") @db.Timestamptz(3)
+
   @@unique([attendeeId, collectionId])
   @@index([attendeeId])
   @@map("attendee_game_lists")

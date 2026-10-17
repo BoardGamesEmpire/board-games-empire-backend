@@ -33,6 +33,12 @@ model SystemSetting {
   /// address is refused. The settings PATCH accepts no other level.
   householdInviteePolicy Visibility @default(Public) @map("household_invitee_policy")
 
+  /// Who may be invited to an event (#546), on the same terms as
+  /// `householdInviteePolicy` but for events: a user placed on an event by id,
+  /// at its creation or later. Set apart because joining a household shares
+  /// its collection, while an event is one evening.
+  eventInviteePolicy Visibility @default(Public) @map("event_invitee_policy")
+
   // The three day counts (feedbackReportRetentionDays, contributionReclaimDays
   // and auditLogRetentionDays) are held to 1..36500 by CHECK constraints in
   // hand-written migration SQL (20261005000000_system_setting_day_bounds),

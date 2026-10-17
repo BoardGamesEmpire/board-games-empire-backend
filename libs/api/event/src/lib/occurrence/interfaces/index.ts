@@ -2,7 +2,7 @@ import type { AvailabilityResponse, OccurrenceStatus } from '@bge/database';
 
 /** Event-level attendee context shared across all occurrences. */
 export interface AttendeeContext {
-  /** Total EventAttendee records (registered + guests) */
+  /** Total EventAttendee records (registered + guests), without the ones a host removed */
   total: number;
   /** Attendees with a userId — can cast availability votes */
   registered: number;
@@ -27,10 +27,11 @@ export interface AvailabilitySummaryEntry {
   available: number;
   maybe: number;
   unavailable: number;
+  /** Votes that count: from attendees who are in the event */
   totalVotes: number;
 
   /**
-   * Registered attendees who have not yet voted on this occurrence
+   * Eligible voters who have not yet cast a vote that counts on this occurrence
    */
   pendingVotes: number;
 
@@ -39,16 +40,19 @@ export interface AvailabilitySummaryEntry {
    */
   participationRate: number;
 
+  /** Every vote, the ones that do not count included, each marked (#551) */
   voters: {
     attendeeId: string;
     response: AvailabilityResponse;
+    /** False when the voter is not attending; the counts above leave the vote out */
+    eligible: boolean;
   }[];
 }
 
 /** Full availability summary returned by getAvailabilitySummary. */
 export interface AvailabilitySummary {
   attendees: AttendeeContext;
-  /** Registered attendees who are able to cast votes (= attendees.registered) */
+  /** Registered attendees whose votes count: the ones not marked NotAttending */
   eligibleVoters: number;
   occurrences: AvailabilitySummaryEntry[];
 }

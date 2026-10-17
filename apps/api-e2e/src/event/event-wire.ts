@@ -3,6 +3,8 @@ import type {
   EventAttendee,
   EventAvailabilityVote,
   EventGame,
+  EventGameNomination,
+  EventGameVote,
   EventOccurrence,
   EventPolicy,
   Game,
@@ -40,10 +42,33 @@ export type OccurrenceGameWire = Pick<EventGameWire, 'id' | 'platformGameId' | '
   };
 };
 
-/** One availability vote on an occurrence, as the occurrence routes embed it, with the voter's user. */
+/**
+ * One availability vote on an occurrence, as the occurrence routes embed it,
+ * with the voter's user and whether the vote counts (#551).
+ */
 export type OccurrenceVoteWire = Pick<Wire<EventAvailabilityVote>, 'id' | 'attendeeId' | 'response'> & {
   readonly attendee: { readonly userId: string | null };
+  readonly eligible: boolean;
 };
+
+/** One vote on a nomination, as the nomination routes embed it, marked with whether it counts (#551). */
+export type NominationVoteWire = Pick<Wire<EventGameVote>, 'id' | 'attendeeId' | 'voteType'> & {
+  readonly eligible: boolean;
+};
+
+/** A nomination as its routes serve it: who made it, whose list supplies it, and its votes. */
+export type NominationWire = Wire<EventGameNomination> & {
+  readonly nominatedBy: { readonly id: string; readonly user: { readonly id: string } | null };
+  readonly suppliedFrom: { readonly id: string };
+  readonly votes: readonly NominationVoteWire[];
+};
+
+/** `POST /api/events/:eventId/nominations/:nominationId/resolve`'s outcome, restated to the fields a spec asserts on. */
+export interface ResolutionWire {
+  readonly status: string;
+  readonly tally: { readonly forCount: number; readonly againstCount: number; readonly totalVotes: number };
+  readonly eligibleVoterCount: number;
+}
 
 /** An occurrence as its routes serve it, with its votes and games. */
 export type EventOccurrenceWire = Wire<EventOccurrence> & {
@@ -79,7 +104,7 @@ export interface AvailabilitySummaryEntryWire {
   readonly totalVotes: number;
   readonly pendingVotes: number;
   readonly participationRate: number;
-  readonly voters: readonly { readonly attendeeId: string; readonly response: string }[];
+  readonly voters: readonly { readonly attendeeId: string; readonly response: string; readonly eligible: boolean }[];
 }
 
 /**
@@ -269,4 +294,29 @@ export function eventGameEnvelope(response: HttpResponseLike, request: RequestDe
   const eventGame = isRecord(response.body) ? withId<EventGameWire>(response.body['eventGame']) : undefined;
 
   return eventGame ?? fail("it carried no 'eventGame' object with a string id", request, response);
+}
+
+/** The nomination routes, the list excepted: `{ nomination }`, beside a `message` on the writes. */
+export function nominationEnvelope(response: HttpResponseLike, request: RequestDescription): NominationWire {
+  const nomination = isRecord(response.body) ? withId<NominationWire>(response.body['nomination']) : undefined;
+
+  if (!nomination || !Array.isArray(nomination.votes)) {
+    return fail("it carried no 'nomination' object with a string id and a 'votes' array", request, response);
+  }
+
+  return nomination;
+}
+
+/** `POST /api/events/:eventId/nominations/:nominationId/resolve`: `{ message, nomination, resolution }`. */
+export function resolutionEnvelope(
+  response: HttpResponseLike,
+  request: RequestDescription,
+): { nomination: NominationWire; resolution: ResolutionWire } {
+  const resolution = isRecord(response.body) ? response.body['resolution'] : undefined;
+
+  if (!isRecord(resolution) || !isRecord(resolution['tally'])) {
+    return fail("it carried no 'resolution' object with a 'tally' object", request, response);
+  }
+
+  return { nomination: nominationEnvelope(response, request), resolution: resolution as unknown as ResolutionWire };
 }

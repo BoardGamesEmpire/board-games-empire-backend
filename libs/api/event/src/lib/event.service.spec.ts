@@ -1,5 +1,5 @@
 import type { Event } from '@bge/database';
-import { Action, Prisma, ResourceType } from '@bge/database';
+import { Action, FriendshipStatus, HUMAN_USER_WHERE, Prisma, ResourceType, Visibility } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -52,6 +52,12 @@ describe('EventService', () => {
     db = ctx.db;
     service = ctx.module.get(EventService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
+
+    // Every invitee is a person unless a test says otherwise. The invite
+    // checks' other reads find no row: the default policy and preference,
+    // and no friendship.
+    db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
+      Promise.resolve({ id: args.where.id })) as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -81,9 +87,10 @@ describe('EventService', () => {
     it('asks the composer for its where clause, declaring the events the caller is an attendee of', async () => {
       await read();
 
+      // A row a host removed keeps no role, so its event is not the caller's.
       expect(compose).toHaveBeenCalledWith(ResourceType.Event, Action.read, {
         deletedAt: null,
-        attendees: { some: { userId: MOCK_ACTING_USER_ID } },
+        attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
       });
     });
 
@@ -97,7 +104,11 @@ describe('EventService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Event, Action.read);
       expect(db.event.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { deletedAt: null, attendees: { some: { userId: MOCK_ACTING_USER_ID } }, AND: [COND] },
+          where: {
+            deletedAt: null,
+            attendees: { some: { userId: MOCK_ACTING_USER_ID, removedAt: null } },
+            AND: [COND],
+          },
         }),
       );
     });
@@ -185,9 +196,13 @@ describe('EventService', () => {
         orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
       });
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      // Without the attendees a host removed.
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        eventId: 'event-1',
+        removedAt: null,
+      });
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith({
-        where: { eventId: 'event-1', AND: [COND] },
+        where: { eventId: 'event-1', removedAt: null, AND: [COND] },
         include: {
           user: { select: { id: true, username: true, profile: { select: { avatarUrl: true, displayName: true } } } },
           role: { include: { role: { select: { id: true, name: true } } } },
@@ -424,6 +439,65 @@ describe('EventService', () => {
     );
     expect(db.$transaction).not.toHaveBeenCalled();
     expect(db.event.create).not.toHaveBeenCalled();
+  });
+
+  describe('whom createEvent may invite (#546)', () => {
+    beforeEach(() => {
+      db.$transaction.mockImplementation(async (cb: (tx: MockDatabaseService) => unknown) => cb(db));
+      db.event.create.mockResolvedValue(makeEvent({ id: 'event-1', createdById: 'user-1' }));
+      abilityService.getActingUserId.mockReturnValue('user-1');
+    });
+
+    it('answers 404 for an invitee id that names no person, and writes nothing', async () => {
+      db.user.findUnique.mockImplementation(((args: { where: { id: string } }) =>
+        Promise.resolve(args.where.id === 'ghost' ? null : { id: args.where.id })) as never);
+
+      await expect(
+        service.createEvent({ title: 'X', inviteUserIds: ['user-2', 'ghost'] } as CreateEventDto),
+      ).rejects.toThrow(NotFoundException);
+      expect(db.user.findUnique).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'ghost', ...HUMAN_USER_WHERE } }),
+      );
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    it("answers 403 for an invitee the server's event policy keeps out, and writes nothing", async () => {
+      db.systemSetting.findUnique.mockResolvedValue({
+        householdInviteePolicy: Visibility.Public,
+        eventInviteePolicy: Visibility.Friends,
+      } as never);
+
+      await expect(service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(db.event.create).not.toHaveBeenCalled();
+    });
+
+    it("lets in an invitee the server's household policy alone would keep out", async () => {
+      db.systemSetting.findUnique.mockResolvedValue({
+        householdInviteePolicy: Visibility.Friends,
+        eventInviteePolicy: Visibility.Public,
+      } as never);
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+      expect(db.event.create).toHaveBeenCalled();
+    });
+
+    it("lets in a friend under the server's Friends policy", async () => {
+      db.systemSetting.findUnique.mockResolvedValue({ eventInviteePolicy: Visibility.Friends } as never);
+      db.friendship.findFirst.mockResolvedValue({ status: FriendshipStatus.Accepted } as never);
+
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
+
+      expect(db.event.create).toHaveBeenCalled();
+    });
+
+    it('asks nothing about the creator listed among the invitees', async () => {
+      await service.createEvent({ title: 'X', inviteUserIds: ['user-1'] } as CreateEventDto);
+
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+    });
   });
 
   // The creator's graph was cached by this very request, before the host row

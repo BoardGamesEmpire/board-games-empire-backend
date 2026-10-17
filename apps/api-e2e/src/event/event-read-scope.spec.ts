@@ -256,6 +256,7 @@ describe('event read scope', () => {
       expect(own.occurrences[0]?.voters).toContainEqual({
         attendeeId: guestAttendee.id,
         response: AvailabilityResponse.Unavailable,
+        eligible: true,
       });
 
       // Control: the outsider passes the route's check, which asks only whether

@@ -17,35 +17,52 @@ type AttendeeAddedSnapshot = Readonly<
   Pick<EventAttendee, 'id' | 'eventId' | 'userId' | 'guestName' | 'status' | 'invitedById'>
 >;
 
+/** The removed row an add revived (#551). */
+type AttendeeRevivedSnapshot = Readonly<Pick<EventAttendee, 'id' | 'status' | 'invitedById' | 'removedAt'>>;
+
+/**
+ * An attendee was added: create-shaped for a new row, update-shaped when the
+ * add revived the row of a user a host had removed (#551).
+ */
 export class AttendeeAddedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeAdded;
 
-  declare readonly before: null;
-  declare readonly after: AttendeeAddedSnapshot;
+  declare readonly before: AttendeeRevivedSnapshot | null;
+  declare readonly after: AttendeeAddedSnapshot & Partial<Pick<EventAttendee, 'removedAt'>>;
 
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
-  constructor(after: AttendeeAddedSnapshot, initiatedAt: Date) {
-    super(null, after, initiatedAt);
+  constructor(
+    before: AttendeeRevivedSnapshot | null,
+    after: AttendeeAddedSnapshot & Partial<Pick<EventAttendee, 'removedAt'>>,
+    initiatedAt: Date,
+  ) {
+    super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
 }
 
-type AttendeeRemovedSnapshot = Readonly<Pick<EventAttendee, 'id' | 'eventId' | 'userId' | 'guestName' | 'status'>>;
+type AttendeeRemovedSnapshot = Readonly<
+  Pick<EventAttendee, 'id' | 'eventId' | 'userId' | 'guestName' | 'status' | 'removedAt'>
+>;
 
+/**
+ * A host removed an attendee. The row stays, marked removed, so this is an
+ * update of `removedAt` (#551).
+ */
 export class AttendeeRemovedEvent extends MutationEvent<EventAttendee> {
   static readonly eventName = AttendeeEvents.AttendeeRemoved;
 
   declare readonly before: AttendeeRemovedSnapshot;
-  declare readonly after: null;
+  declare readonly after: AttendeeRemovedSnapshot;
 
   readonly subject = ResourceType.EventAttendee;
   readonly subjectId: string;
 
-  constructor(before: AttendeeRemovedSnapshot, initiatedAt: Date) {
-    super(before, null, initiatedAt);
-    this.subjectId = before.id;
+  constructor(before: AttendeeRemovedSnapshot, after: AttendeeRemovedSnapshot, initiatedAt: Date) {
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
   }
 }
 
@@ -67,51 +84,59 @@ export class AttendeeStatusUpdatedEvent extends MutationEvent<EventAttendee> {
   }
 }
 
-type GameListEntrySnapshot = Readonly<Pick<EventAttendeeGameList, 'id' | 'attendeeId' | 'collectionId'>>;
+type GameListEntrySnapshot = Readonly<Pick<EventAttendeeGameList, 'id' | 'attendeeId' | 'collectionId' | 'removedAt'>>;
 
 /**
- * A specific EventAttendeeGameList row was created — the row mutation (not an
- * aggregate "list changed" signal) is the auditable fact. Carries its own
- * event name, distinct from {@link GameRemovedFromListEvent}, so the audit
- * notifier's per-name dedupe can't mask one path behind the other.
+ * A game went on an attendee's list — the row mutation (not an aggregate
+ * "list changed" signal) is the auditable fact. Create-shaped for a new row,
+ * update-shaped when the game had been taken off the list and its row is
+ * revived (#551). Carries its own event name, distinct from
+ * {@link GameRemovedFromListEvent}, so the audit notifier's per-name dedupe
+ * can't mask one path behind the other.
  */
 export class GameAddedToListEvent extends MutationEvent<EventAttendeeGameList> {
   static readonly eventName = AttendeeEvents.GameAddedToList;
 
-  declare readonly before: null;
+  declare readonly before: GameListEntrySnapshot | null;
   declare readonly after: GameListEntrySnapshot;
 
   readonly subject = ResourceType.EventAttendeeGameList;
   readonly subjectId: string;
 
   constructor(
+    before: GameListEntrySnapshot | null,
     after: GameListEntrySnapshot,
     /** Parent event id — context for listeners; the row only stores attendeeId. */
     public readonly eventId: string,
     initiatedAt: Date,
   ) {
-    super(null, after, initiatedAt);
+    super(before, after, initiatedAt);
     this.subjectId = after.id;
   }
 }
 
-/** A specific EventAttendeeGameList row was deleted. See {@link GameAddedToListEvent}. */
+/**
+ * A game came off an attendee's list. The row stays, marked removed, because
+ * closed nominations still name it as their supplier, so this is an update of
+ * `removedAt` (#551). See {@link GameAddedToListEvent}.
+ */
 export class GameRemovedFromListEvent extends MutationEvent<EventAttendeeGameList> {
   static readonly eventName = AttendeeEvents.GameRemovedFromList;
 
   declare readonly before: GameListEntrySnapshot;
-  declare readonly after: null;
+  declare readonly after: GameListEntrySnapshot;
 
   readonly subject = ResourceType.EventAttendeeGameList;
   readonly subjectId: string;
 
   constructor(
     before: GameListEntrySnapshot,
+    after: GameListEntrySnapshot,
     /** Parent event id — context for listeners; the row only stores attendeeId. */
     public readonly eventId: string,
     initiatedAt: Date,
   ) {
-    super(before, null, initiatedAt);
-    this.subjectId = before.id;
+    super(before, after, initiatedAt);
+    this.subjectId = after.id;
   }
 }

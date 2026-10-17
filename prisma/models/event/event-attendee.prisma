@@ -37,6 +37,12 @@ model EventAttendee {
   notes    String?
   rsvpDate DateTime? @map("rsvp_date") @db.Timestamptz(3)
 
+  // Set when a host removes the attendee. The row stays, with its last RSVP,
+  // so the nominations and votes it made keep their author; its role is
+  // deleted, so it holds no grant on the event. Adding the same user again
+  // clears it (#551).
+  removedAt DateTime? @map("removed_at") @db.Timestamptz(3)
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

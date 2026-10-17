@@ -8,6 +8,7 @@ The lib ships:
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
+- `gateInvitee`, the checks that decide who may be invited, run in the caller's transaction before anything is written: the server's invitee policy, a block between the two, and the invitee's own preference (#278). Households and events each read settings of their own, `householdInviteePolicy` and `allowHouseholdInvitesFrom` or `eventInviteePolicy` and `allowEventInvitesFrom`, named by the `InviteType` the caller passes (#546). The event routes ask it of every user they place on an event by id.
 
 > The lib is the only writer of `Invite.status`. A consumer that writes the column directly is a bug.
 

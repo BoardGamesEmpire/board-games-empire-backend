@@ -61,11 +61,15 @@ export class EventAttendeeController {
     );
   }
 
-  @ApiOperation({ summary: 'Remove an attendee from an event' })
+  @ApiOperation({
+    summary: 'Remove an attendee from an event',
+    description:
+      'Marks the attendee removed and deletes their event role. Their votes are kept and stop counting; the nominations of games they offered pause, and the games they supply leave the lineup. Adding the same user again revives the row.',
+  })
   @ApiParam({ name: 'eventId', type: String })
   @ApiParam({ name: 'attendeeId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Attendee removed' })
-  @ApiResponse({ status: Http.NotFound, description: 'Attendee not found' })
+  @ApiResponse({ status: Http.NotFound, description: 'Attendee not found, or already removed' })
   @ApiResponse({
     status: Http.Forbidden,
     description:
@@ -136,6 +140,10 @@ export class EventAttendeeController {
   @ApiParam({ name: 'gameListId', type: String })
   @ApiResponse({ status: Http.Ok, description: 'Game removed from list' })
   @ApiResponse({ status: Http.NotFound, description: 'Game list entry not found' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The game supplies a nomination awaiting an outcome, or a game in the lineup',
+  })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.EventAttendeeGameList))
   @Delete(':attendeeId/games/:gameListId')
   removeGameFromList(
