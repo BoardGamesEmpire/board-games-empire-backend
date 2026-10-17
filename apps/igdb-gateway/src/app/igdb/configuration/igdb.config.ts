@@ -20,16 +20,10 @@ export default registerAs('igdb', () =>
     {
       key: 'IGDB_CLIENT_ID',
       keyTo: 'clientId',
-      defaultsFor: {
-        test: 'test-client-id',
-      },
     },
     {
       key: 'IGDB_CLIENT_SECRET',
       keyTo: 'clientSecret',
-      defaultsFor: {
-        test: 'test-secret',
-      },
     },
     {
       key: 'IGDB_TOKEN_URL',

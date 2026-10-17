@@ -12,10 +12,8 @@ const DEFAULT_SENTINEL_FILE = '.bge-storage-sentinel';
  * `defaultValue`, so an environment absent from this map has no fallback at
  * all: the factory throws `MissingEnvironmentError` and the app fails to boot.
  *
- * `testing` was missing until #259: nothing set `NODE_ENV=testing` until the
- * e2e harness pinned it, so the gap stayed invisible. It mirrors `development`
- * — automated runs are still expected to pin an explicit ephemeral root, but
- * failing to do so is no longer fatal.
+ * `test` mirrors `development`: automated runs are still expected to pin an
+ * explicit ephemeral root, but failing to do so is not fatal.
  *
  * `staging` is deliberately absent: a staging deployment should configure real
  * storage rather than silently inherit a temp directory.
@@ -25,7 +23,7 @@ const DEFAULT_SENTINEL_FILE = '.bge-storage-sentinel';
 export const MEDIA_LOCAL_DISK_ROOT_DEFAULTS: Record<string, string> = {
   production: '/var/lib/bge/media',
   development: '/tmp',
-  testing: '/tmp',
+  test: '/tmp',
 };
 
 /**

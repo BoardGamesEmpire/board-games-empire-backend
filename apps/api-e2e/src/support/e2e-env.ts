@@ -53,22 +53,20 @@ export const POSTGRES_IMAGE = 'postgres:17-alpine';
 export const REDIS_IMAGE = 'redis:7-alpine';
 
 /**
- * The `NODE_ENV` the API child runs under. Pinned by the harness rather than
- * inherited, because every layer above disagrees about the spelling: the CI
- * workflow exports `test`, Jest's CLI assigns `test` when the variable is
- * unset, and a developer's shell may hold anything at all. `system.config.ts`
- * validates against `development | testing | staging | production`, so an
- * inherited `test` fails ConfigModule validation and the API exits during
- * boot — visible only as a readiness timeout unless you read the child's log.
+ * The `NODE_ENV` the API child runs under: the value CI and Jest's CLI set.
+ * Pinned by the harness rather than inherited, because a developer's shell
+ * may hold anything at all, and a value outside the environments `@bge/env`
+ * knows fails ConfigModule validation, so the API exits during boot: visible
+ * only as a readiness timeout unless you read the child's log.
  *
- * `testing` (not `development`) is the correct member: it is what
- * `DATA_ENCRYPTION_KEY`'s `defaultsFor` map keys off, and it keeps
+ * `test` (not `development`) is the correct member: the per-environment
+ * defaults, such as `DATA_ENCRYPTION_KEY`'s, are keyed on it, and it keeps
  * `env.isDevelopment` false so the suite does not silently exercise
  * development-only branches such as Swagger auto-enablement.
  *
  * The worker child runs under the same value (see {@link workerEnvOverrides}).
  */
-export const API_NODE_ENV = 'testing';
+export const API_NODE_ENV = 'test';
 
 /**
  * The IP-tier throttle limit the API child runs under. Pinned high rather than
@@ -102,7 +100,7 @@ export const API_THROTTLE_LIMIT = 1_000_000;
 
 /**
  * The IP-tier window the API child runs under, pinned for the same reason as
- * the limit beside it. A developer's `.env` is read at `NODE_ENV=testing`, so
+ * the limit beside it. A developer's `.env` is read at `NODE_ENV=test`, so
  * an unpinned window is the one throttle knob that could differ between a local
  * run and CI — and #293 is the standing proof that a wrong window is silent.
  */
@@ -157,14 +155,15 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
  * because the worker serves nothing.
  *
  * `NODE_ENV` is the API's value, for a reason of its own: the worker's schema
- * does not validate `NODE_ENV`, so an inherited `test` passes validation and
- * fails one step later instead. `@bge/env` keys `defaultsFor` maps on it, and
- * under `test` the media root has no default, so the worker exits during boot
- * with `Missing environment variable 'MEDIA_LOCAL_DISK_ROOT'`.
+ * does not validate `NODE_ENV`, so a value outside the environments `@bge/env`
+ * knows passes validation and fails one step later instead. `@bge/env` keys
+ * `defaultsFor` maps on it, and under such a value the media root has no
+ * default, so the worker exits during boot with
+ * `Missing environment variable 'MEDIA_LOCAL_DISK_ROOT'`.
  *
  * Everything else, `DATA_ENCRYPTION_KEY` included, resolves as it does for the
  * API: the same inherited environment, the same `.env` at the workspace root,
- * and the same `testing` defaults. That is what keeps the two on one key, which
+ * and the same `test` defaults. That is what keeps the two on one key, which
  * matters because the worker decrypts what the API encrypted (webhook signing
  * secrets).
  */

@@ -27,9 +27,7 @@ describe('mediaConfigValidationSchema — MEDIA_LOCAL_DISK_SENTINEL_FILE', () =>
 describe('MEDIA_LOCAL_DISK_ROOT_DEFAULTS', () => {
   // MEDIA_LOCAL_DISK_ROOT has no plain `defaultValue`, so an environment
   // missing from this map has no fallback and the app fails to boot.
-  // `testing` was absent until #259 because nothing set NODE_ENV=testing
-  // until the e2e harness pinned it.
-  it.each(['production', 'development', 'testing'])('covers NODE_ENV=%s', (environment) => {
+  it.each(['production', 'development', 'test'])('covers NODE_ENV=%s', (environment) => {
     expect(MEDIA_LOCAL_DISK_ROOT_DEFAULTS[environment]).toBeTruthy();
   });
 

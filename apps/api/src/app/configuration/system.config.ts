@@ -1,4 +1,4 @@
-import { env } from '@bge/env';
+import { env, environments } from '@bge/env';
 import { registerAs } from '@nestjs/config';
 import Joi from 'joi';
 
@@ -34,8 +34,7 @@ export default registerAs('system', () =>
         key: 'DATA_ENCRYPTION_KEY',
         defaultsFor: {
           development: 'development-secret',
-          testing: 'testing-secret',
-          staging: 'staging-secret',
+          test: 'test-secret',
         },
       },
     ],
@@ -50,5 +49,7 @@ export const systemConfigValidationSchema = {
   SERVER_PORT: Joi.number().default(33333),
   API_BASE_URL: Joi.string().default('http://localhost'),
   DATA_ENCRYPTION_KEY: Joi.string().default(''),
-  NODE_ENV: Joi.string().valid('development', 'testing', 'staging', 'production').default('development'),
+  NODE_ENV: Joi.string()
+    .valid(...environments)
+    .default('development'),
 };

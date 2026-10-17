@@ -21,8 +21,7 @@ export default registerAs('auth', () =>
       key: 'BETTER_AUTH_SECRET',
       defaultsFor: {
         development: 'development-secret',
-        testing: 'testing-secret',
-        staging: 'staging-secret',
+        test: 'test-secret',
       },
     },
     {
