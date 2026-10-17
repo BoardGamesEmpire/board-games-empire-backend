@@ -126,6 +126,13 @@ export interface SearchHit {
 export interface SearchResponse {
   readonly resultsBySource: Readonly<Record<string, readonly SearchHit[]>>;
   readonly errors?: Readonly<Record<string, { readonly message: string }>>;
+  readonly unavailableSources?: readonly string[];
+}
+
+/** A search's filter as the HTTP route takes it: comma-separated stored names. */
+export interface SearchFilterParams {
+  readonly platformTypes?: string;
+  readonly contentTypes?: string;
 }
 
 /** A search of one gateway only, over HTTP. The api caches the answer per URL for a few minutes. */
@@ -134,8 +141,9 @@ export async function searchGateway(
   session: Session,
   gatewayId: string,
   query: string,
+  filter: SearchFilterParams = {},
 ): Promise<SearchResponse> {
-  const params = new URLSearchParams({ query, gatewayIds: gatewayId, includeLocal: 'false' });
+  const params = new URLSearchParams({ query, gatewayIds: gatewayId, includeLocal: 'false', ...filter });
   const response = await fetch(`${baseUrl}/api/games/search?${params}`, { headers: bearer(session) });
 
   return expectOk(response, 'Searching');

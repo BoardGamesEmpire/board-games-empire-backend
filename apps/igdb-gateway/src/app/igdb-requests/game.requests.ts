@@ -2,7 +2,7 @@ import { GameType } from '../constants';
 import type { IgdbRequest } from '../igdb/igdb.service';
 import type { IGDBClient } from '../igdb/interfaces';
 import { resolveLanguageIds } from '../mappers/language.mapper';
-import type { IgdbGame } from '../types';
+import type { IgdbGame, IgdbSearchNarrowing } from '../types';
 
 const GAMES_ENDPOINT = '/games';
 
@@ -79,16 +79,33 @@ function escapeSearchQuery(query: string): string {
 }
 
 /**
- * Search IGDB for games matching a query string.
+ * Search IGDB for games matching a query string, narrowed to the game types
+ * and platform types `narrowing` names.
  *
  * `version_parent = null` excludes alternate versions (regional, GOTY, etc.)
  * from search results — they clutter results without adding meaningful
  * information at the search stage.
  */
-export function searchGamesRequest(query: string, limit = 20, offset = 0, locale?: string): IgdbRequest<IgdbGame[]> {
+export function searchGamesRequest(
+  query: string,
+  limit = 20,
+  offset = 0,
+  locale?: string,
+  narrowing: IgdbSearchNarrowing = {},
+): IgdbRequest<IgdbGame[]> {
+  const clauses = [`version_parent = null & game_type != ${GameType.Update}`];
+
+  if (narrowing.gameTypes) {
+    clauses.push(`game_type = (${narrowing.gameTypes.join(',')})`);
+  }
+
+  if (narrowing.platformTypes) {
+    clauses.push(`platforms.platform_type = (${narrowing.platformTypes.join(',')})`);
+  }
+
   return (client: IGDBClient) => {
     const builder = client.fields(GAME_SEARCH_FIELDS).search(escapeSearchQuery(query));
-    return includeLanguageFilter(builder, locale, `version_parent = null & game_type != ${GameType.Update}`)
+    return includeLanguageFilter(builder, locale, clauses.join(' & '))
       .limit(limit)
       .offset(offset)
       .request<IgdbGame>(GAMES_ENDPOINT)

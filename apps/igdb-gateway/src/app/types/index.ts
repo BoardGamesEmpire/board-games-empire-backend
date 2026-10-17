@@ -7,6 +7,18 @@ import { AgeRatingOrganization, PlatformType } from '../constants';
  * inline; the full reference is at https://api-docs.igdb.com
  */
 
+/**
+ * What a search asks IGDB for beyond its query, in IGDB's own types. A list
+ * left unset doesn't narrow, and a list set is never empty.
+ */
+export interface IgdbSearchNarrowing {
+  /** The game types to ask for. */
+  gameTypes?: readonly IgdbGameType[];
+
+  /** The platform types a game must have a platform of. */
+  platformTypes?: readonly IgdbPlatformType[];
+}
+
 export interface IgdbCover {
   id: number;
 

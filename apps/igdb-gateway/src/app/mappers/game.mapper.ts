@@ -9,6 +9,7 @@ import type {
   IgdbNamedEntity,
   IgdbPlatform,
   IgdbReleaseDate,
+  IgdbSearchNarrowing,
 } from '../types';
 import { resolveLanguageIds, toLanguageData } from './language.mapper';
 
@@ -109,6 +110,57 @@ export const IGDB_PLATFORM_TYPES: readonly proto.PlatformType[] = [
     proto.PlatformType.PLATFORM_TYPE_OTHER,
   ]),
 ];
+
+/** The IGDB keys of a map whose value is one of `values`, in IGDB's order. */
+const igdbKeysOf = <T>(map: Readonly<Partial<Record<number, T>>>, values: readonly T[]): number[] =>
+  Object.entries(map)
+    .filter(([, value]) => value !== undefined && values.includes(value))
+    .map(([key]) => Number(key))
+    .sort((left, right) => left - right);
+
+/**
+ * The IGDB platform types a game on a platform of one of `platformTypes` may
+ * have, or undefined when IGDB can't be asked for them. Narrowing may be
+ * loose, since the server removes what the filter excludes, but it must not
+ * leave a matching game out:
+ * - Mobile asks for operating systems and computers, which is how IGDB types
+ *   iOS and Android, so it returns PC games too, and PC returns iOS and
+ *   Android ones.
+ * - Other stands for any platform type the map doesn't name, or none at all,
+ *   so a filter naming it isn't narrowed.
+ */
+function toIgdbPlatformTypes(platformTypes: readonly proto.PlatformType[]): PlatformType[] | undefined {
+  if (platformTypes.includes(proto.PlatformType.PLATFORM_TYPE_OTHER)) {
+    return undefined;
+  }
+
+  const mobile = platformTypes.includes(proto.PlatformType.PLATFORM_TYPE_MOBILE)
+    ? [PlatformType.OperatingSystem, PlatformType.Computer]
+    : [];
+
+  return [...new Set([...igdbKeysOf(IGDB_PLATFORM_TYPE_MAP, platformTypes), ...mobile])].sort(
+    (left, right) => left - right,
+  );
+}
+
+/**
+ * A search's filter in IGDB's terms, or null when nothing IGDB has can match
+ * it, so IGDB needn't be asked. A content type asks for every game type that
+ * maps to it, so a base game asks for main games and forks.
+ */
+export function toSearchNarrowing(filter: proto.SearchFilter | undefined): IgdbSearchNarrowing | null {
+  const contentTypes = filter?.contentTypes ?? [];
+  const platformTypes = filter?.platformTypes ?? [];
+
+  const gameTypes = contentTypes.length > 0 ? igdbKeysOf(IGDB_CONTENT_TYPE_MAP, contentTypes) : undefined;
+  const igdbPlatformTypes = platformTypes.length > 0 ? toIgdbPlatformTypes(platformTypes) : undefined;
+
+  if (gameTypes?.length === 0 || igdbPlatformTypes?.length === 0) {
+    return null;
+  }
+
+  return { ...(gameTypes && { gameTypes }), ...(igdbPlatformTypes && { platformTypes: igdbPlatformTypes }) };
+}
 
 /**
  * IGDB game-level `status` → proto ReleaseStatus.

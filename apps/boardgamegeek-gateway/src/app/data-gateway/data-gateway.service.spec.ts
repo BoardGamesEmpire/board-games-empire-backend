@@ -3,7 +3,7 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
-import { BggService } from '../bgg/bgg.service';
+import { BggService, type BggRequest } from '../bgg/bgg.service';
 import { BggLinkType, BggNameType, BggThingType, MAX_THINGS_PER_BATCH } from '../constants';
 import type { BggSearchItem, BggThing } from '../types';
 import { DataGatewayService } from './data-gateway.service';
@@ -88,8 +88,8 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares no filterable axes, since a search request carries no filter', () => {
-      expect(service.describe({}).filterableAxes).toEqual([]);
+    it('declares that its search narrows by content type alone', () => {
+      expect(service.describe({}).filterableAxes).toEqual([proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE]);
     });
 
     it('declares English language names, on requests and responses alike', () => {
@@ -187,6 +187,58 @@ describe('DataGatewayService', () => {
       await firstValueFrom(service.searchGames(request).pipe(toArray()));
 
       expect(bggService.call).toHaveBeenCalledTimes(1);
+    });
+
+    describe('filtered by content type', () => {
+      /** The thing types the search asked BGG for, by running its request against a stand-in client. */
+      const typesAskedFor = async (filter: proto.SearchFilter | undefined): Promise<unknown> => {
+        bggService.call.mockReturnValue(of([]));
+        await firstValueFrom(service.searchGames({ correlationId: 'c', query: 'catan', filter }).pipe(toArray()));
+
+        const search = jest.fn().mockResolvedValue([]);
+        const [bggRequest] = bggService.call.mock.calls.at(-1) as unknown as [BggRequest<BggSearchItem[]>];
+        await firstValueFrom(bggRequest({ search: { query: search } } as never));
+
+        return search.mock.calls[0]?.[0]?.type;
+      };
+
+      it('asks BGG for base games and expansions when the search isn’t filtered', async () => {
+        await expect(typesAskedFor(undefined)).resolves.toEqual([
+          BggThingType.BoardGame,
+          BggThingType.BoardGameExpansion,
+        ]);
+        await expect(typesAskedFor({ platformTypes: [], contentTypes: [] })).resolves.toEqual([
+          BggThingType.BoardGame,
+          BggThingType.BoardGameExpansion,
+        ]);
+      });
+
+      it('asks BGG only for the thing types of the content types named', async () => {
+        await expect(
+          typesAskedFor({ platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_EXPANSION] }),
+        ).resolves.toBe(BggThingType.BoardGameExpansion);
+        await expect(
+          typesAskedFor({
+            platformTypes: [],
+            contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_DLC],
+          }),
+        ).resolves.toBe(BggThingType.BoardGame);
+      });
+
+      it('ends at once, without asking BGG, when it names nothing BGG search has', async () => {
+        const frames = await firstValueFrom(
+          service
+            .searchGames({
+              correlationId: 'c',
+              query: 'catan',
+              filter: { platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_DLC] },
+            })
+            .pipe(toArray()),
+        );
+
+        expect(frames).toEqual([{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE }]);
+        expect(bggService.call).not.toHaveBeenCalled();
+      });
     });
   });
 

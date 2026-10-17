@@ -40,7 +40,11 @@ export class StubGatewayService implements GatewayServiceHost {
     };
   }
 
-  /** Declares what its fixtures hold: tabletop base games and expansions, tagged in BCP 47. */
+  /**
+   * Declares what its fixtures hold: tabletop base games and expansions,
+   * tagged in BCP 47. Its search narrows by content type, so a DataGateway
+   * the server sends a filter to runs in the e2e suites.
+   */
   describe(request: proto.DescribeRequest): proto.DescribeResponse {
     return {
       correlationId: request.correlationId ?? crypto.randomUUID(),
@@ -54,7 +58,7 @@ export class StubGatewayService implements GatewayServiceHost {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
       },
-      filterableAxes: [],
+      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
       languageCodeFormats: {
         acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
         responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -75,11 +79,20 @@ export class StubGatewayService implements GatewayServiceHost {
     };
   }
 
-  /** Each game whose title contains the query, ignoring case, paged by `offset` and `limit`. */
+  /**
+   * Each game whose title contains the query, ignoring case, and whose
+   * content type the filter names, if it names any; paged by `offset` and
+   * `limit`.
+   */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const query = request.query.trim().toLowerCase();
     const offset = request.offset ?? 0;
-    const matches = STUB_GAMES.filter((game) => game.title.toLowerCase().includes(query));
+    const contentTypes = request.filter?.contentTypes ?? [];
+    const matches = STUB_GAMES.filter(
+      (game) =>
+        game.title.toLowerCase().includes(query) &&
+        (contentTypes.length === 0 || contentTypes.includes(game.contentType)),
+    );
     const page = matches.slice(offset, request.limit === undefined ? undefined : offset + request.limit);
 
     return this.stream(request.correlationId, page);

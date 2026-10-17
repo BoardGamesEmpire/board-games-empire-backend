@@ -3,7 +3,7 @@ import * as proto from '@boardgamesempire/proto-gateway';
 import { Test, TestingModule } from '@nestjs/testing';
 import { firstValueFrom, of, throwError } from 'rxjs';
 import { toArray } from 'rxjs/operators';
-import { IGDBService } from '../igdb/igdb.service';
+import { IGDBService, type IgdbRequest } from '../igdb/igdb.service';
 import { IgdbGame } from '../types';
 import { DataGatewayService } from './data-gateway.service';
 
@@ -107,8 +107,11 @@ describe('DataGatewayService', () => {
       );
     });
 
-    it('declares no filterable axes, since a search request carries no filter', () => {
-      expect(service.describe({}).filterableAxes).toEqual([]);
+    it('declares that its search narrows by platform type and content type', () => {
+      expect(service.describe({}).filterableAxes).toEqual([
+        proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE,
+        proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE,
+      ]);
     });
 
     it('accepts BCP 47 tags before ISO 639-1 codes, sends BCP 47 tags, and wants the search language translated', () => {
@@ -135,6 +138,51 @@ describe('DataGatewayService', () => {
   });
 
   describe('searchGames', () => {
+    it('narrows the IGDB query by the request’s filter', async () => {
+      igdbService.call.mockReturnValue(of([]));
+      await firstValueFrom(
+        service
+          .searchGames({
+            correlationId: 'c',
+            query: 'Hades',
+            filter: {
+              platformTypes: [proto.PlatformType.PLATFORM_TYPE_CONSOLE],
+              contentTypes: [proto.ContentType.CONTENT_TYPE_EXPANSION],
+            },
+          })
+          .pipe(toArray()),
+      );
+
+      const where = jest.fn().mockReturnThis();
+      const client = {
+        fields: jest.fn().mockReturnThis(),
+        search: jest.fn().mockReturnThis(),
+        where,
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        request: jest.fn().mockResolvedValue({ data: [] }),
+      };
+      const [igdbRequest] = igdbService.call.mock.calls[0] as unknown as [IgdbRequest<IgdbGame[]>];
+      await igdbRequest(client as never);
+
+      expect(where).toHaveBeenCalledWith(expect.stringContaining('game_type = (2) & platforms.platform_type = (1)'));
+    });
+
+    it('ends at once, without asking IGDB, when the filter names nothing IGDB has', async () => {
+      const frames = await firstValueFrom(
+        service
+          .searchGames({
+            correlationId: 'c',
+            query: 'Catan',
+            filter: { platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP], contentTypes: [] },
+          })
+          .pipe(toArray()),
+      );
+
+      expect(frames).toEqual([{ correlationId: 'c', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE }]);
+      expect(igdbService.call).not.toHaveBeenCalled();
+    });
+
     it('emits one RESULT frame per game followed by a single SOURCE_DONE', async () => {
       igdbService.call.mockReturnValue(of([BASE_GAME, DLC_GAME]));
 

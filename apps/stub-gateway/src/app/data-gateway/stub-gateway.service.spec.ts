@@ -6,8 +6,8 @@ import { StubGatewayService } from './stub-gateway.service';
 
 const collect = <T>(source: Observable<T>) => lastValueFrom(source.pipe(toArray()));
 
-const search = (query: string, page: { limit?: number; offset?: number } = {}) =>
-  collect(new StubGatewayService().searchGames({ correlationId: 'search-1', query, ...page }));
+const search = (query: string, options: { limit?: number; offset?: number; filter?: proto.SearchFilter } = {}) =>
+  collect(new StubGatewayService().searchGames({ correlationId: 'search-1', query, ...options }));
 
 const titlesOf = (frames: readonly proto.GatewaySearchResult[]) =>
   frames.filter((frame) => frame.status === proto.ResultStatus.RESULT_STATUS_RESULT).map((frame) => frame.game?.title);
@@ -48,7 +48,7 @@ describe('StubGatewayService', () => {
           platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
           contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME, proto.ContentType.CONTENT_TYPE_EXPANSION],
         },
-        filterableAxes: [],
+        filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
         languageCodeFormats: {
           acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
           responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -108,6 +108,24 @@ describe('StubGatewayService', () => {
     it('answers a search that matches nothing with SOURCE_DONE alone', async () => {
       await expect(search('no such game')).resolves.toEqual([
         { correlationId: 'search-1', status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE },
+      ]);
+    });
+
+    it('narrows the matches to the content types its filter names, before paging', async () => {
+      const expansions = { platformTypes: [], contentTypes: [proto.ContentType.CONTENT_TYPE_EXPANSION] };
+
+      await expect(search('island', { filter: expansions }).then(titlesOf)).resolves.toEqual([STUB_EXPANSION.title]);
+      await expect(search('island', { filter: expansions, limit: 1 }).then(titlesOf)).resolves.toEqual([
+        STUB_EXPANSION.title,
+      ]);
+    });
+
+    it('ignores platform types, which it doesn’t narrow by', async () => {
+      const pc = { platformTypes: [proto.PlatformType.PLATFORM_TYPE_PC], contentTypes: [] };
+
+      await expect(search('island', { filter: pc }).then(titlesOf)).resolves.toEqual([
+        STUB_BASE_GAME.title,
+        STUB_EXPANSION.title,
       ]);
     });
 

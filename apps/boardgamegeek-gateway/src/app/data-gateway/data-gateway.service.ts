@@ -20,6 +20,7 @@ import {
   thingToGameData,
   thingToGameSearchData,
   toContentTypes,
+  toThingTypes,
 } from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import type { BggThing } from '../types';
@@ -57,7 +58,12 @@ export class DataGatewayService implements GatewayServiceHost {
         platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
         contentTypes: toContentTypes([...DEFAULT_BGG_SEARCH_TYPES, ...FETCH_GAME_TYPES, ...EXPANSION_BATCH_TYPES]),
       },
-      filterableAxes: [],
+
+      /**
+       * Search narrows by content type through the thing types it asks BGG
+       * for. Its coverage is tabletop alone, which settles platform type.
+       */
+      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
 
       /**
        * BGG accepts and emits English language display names ("English",
@@ -89,11 +95,27 @@ export class DataGatewayService implements GatewayServiceHost {
     } satisfies proto.HealthCheckResponse;
   }
 
+  /**
+   * Searches BGG for the request's query. A filter on content types narrows
+   * the thing types asked for. One naming nothing BGG has ends the search at
+   * once, without asking BGG, since an empty type list would ask it for
+   * every type.
+   */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
     const limit = request.limit ?? undefined;
     const offset = request.offset ?? undefined;
+    const contentTypes = request.filter?.contentTypes ?? [];
+    const types =
+      contentTypes.length > 0 ? toThingTypes(contentTypes, DEFAULT_BGG_SEARCH_TYPES) : DEFAULT_BGG_SEARCH_TYPES;
 
-    return this.bggService.call(searchGamesRequest(request.query, limit, offset)).pipe(
+    if (types.length === 0) {
+      return of({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
+      } satisfies proto.GatewaySearchResult);
+    }
+
+    return this.bggService.call(searchGamesRequest(request.query, limit, offset, types)).pipe(
       tap((items) => this.logger.log(`searchGames found ${items.length} results for query '${request.query}'`)),
 
       mergeMap((items) => items),

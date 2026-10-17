@@ -1,3 +1,4 @@
+import { GameType, PlatformType } from '../constants';
 import type { IGDBClient } from '../igdb/interfaces';
 import type { IgdbGame } from '../types';
 import {
@@ -87,6 +88,18 @@ describe('GameRequests', () => {
       await searchGamesRequest('Hades', 20, 0, 'fr-CA')(client);
       // An unmapped locale must not drop the mandatory version_parent/game_type filter.
       expect(client.where).toHaveBeenCalledWith('version_parent = null & game_type != 14');
+    });
+
+    it('narrows to the game types and platform types it is given, before the language filter', async () => {
+      const client = buildMockClient();
+      await searchGamesRequest('Hades', 20, 0, 'en-US', {
+        gameTypes: [GameType.MainGame, GameType.Fork],
+        platformTypes: [PlatformType.Console, PlatformType.PortableConsole],
+      })(client);
+      expect(client.where).toHaveBeenCalledWith(
+        'version_parent = null & game_type != 14 & game_type = (0,12) & platforms.platform_type = (1,5)' +
+          ' & (language_supports.language = (7) | language_supports.language = null)',
+      );
     });
   });
 

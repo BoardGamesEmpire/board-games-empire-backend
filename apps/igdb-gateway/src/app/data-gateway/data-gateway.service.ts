@@ -7,7 +7,13 @@ import { Observable, from, merge, of } from 'rxjs';
 import { catchError, endWith, filter, map, mergeMap, shareReplay, tap } from 'rxjs/operators';
 import { fetchExpansionsRequest, fetchGameRequest, searchGamesRequest } from '../igdb-requests/game.requests';
 import { IGDBService } from '../igdb/igdb.service';
-import { IGDB_CONTENT_TYPES, IGDB_PLATFORM_TYPES, toGameData, toGameSearchData } from '../mappers/game.mapper';
+import {
+  IGDB_CONTENT_TYPES,
+  IGDB_PLATFORM_TYPES,
+  toGameData,
+  toGameSearchData,
+  toSearchNarrowing,
+} from '../mappers/game.mapper';
 import { toGatewayLanguageEntries } from '../mappers/language.mapper';
 import { IgdbGame } from '../types';
 
@@ -37,7 +43,9 @@ export class DataGatewayService implements GatewayServiceHost {
       ],
 
       coverage: { platformTypes: [...IGDB_PLATFORM_TYPES], contentTypes: [...IGDB_CONTENT_TYPES] },
-      filterableAxes: [],
+
+      /** Search narrows by both, through IGDB's game types and platform types (see toSearchNarrowing). */
+      filterableAxes: [proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE, proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE],
       languageCodeFormats: {
         acceptedRequestFormats: [
           proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -67,9 +75,22 @@ export class DataGatewayService implements GatewayServiceHost {
     };
   }
 
+  /**
+   * Searches IGDB for the request's query, narrowed by its filter. A filter
+   * nothing IGDB has can match ends the search at once, without asking IGDB.
+   */
   searchGames(request: proto.GatewaySearchRequest): Observable<proto.GatewaySearchResult> {
+    const narrowing = toSearchNarrowing(request.filter);
+
+    if (!narrowing) {
+      return of({
+        correlationId: request.correlationId,
+        status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
+      } satisfies proto.GatewaySearchResult);
+    }
+
     return this.igdbService
-      .call(searchGamesRequest(request.query, request.limit ?? 20, request.offset ?? 0, request.locale))
+      .call(searchGamesRequest(request.query, request.limit ?? 20, request.offset ?? 0, request.locale, narrowing))
       .pipe(
         tap((games) => this.logger.log(`searchGames found ${games.length} results for query '${request.query}'`)),
 

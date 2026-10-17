@@ -43,7 +43,7 @@ describe('the BoardGameGeek gateway over gRPC', () => {
         'CAPABILITY_FETCH_EXPANSIONS',
         'CAPABILITY_LIST_LANGUAGES',
       ],
-      filterableAxes: [],
+      filterableAxes: ['COVERAGE_AXIS_CONTENT_TYPE'],
       languageCodeFormats: {
         acceptedRequestFormats: ['LANGUAGE_CODE_FORMAT_NAME'],
         responseFormat: 'LANGUAGE_CODE_FORMAT_NAME',
