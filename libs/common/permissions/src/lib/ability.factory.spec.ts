@@ -1091,6 +1091,33 @@ describe('AbilityFactory', () => {
     });
   });
 
+  describe('an attendee answering their own RSVP (#568)', () => {
+    // Every role that attends an event, the spectator included, answers for
+    // itself there, on its own row in that event and no other (#458).
+    const ATTENDING_ROLES = [SystemRole.EventParticipant, SystemRole.EventGuest, SystemRole.EventSpectator];
+    const attendingAs = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          eventsAttended: [
+            {
+              eventId: 'ev-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const rowOf = (userId: string, eventId: string) => subject(ResourceType.EventAttendee, { userId, eventId });
+
+    it.each(ATTENDING_ROLES)("lets an %s answer on its own row in its event, and on no one else's", (roleName) => {
+      const ability = attendingAs(roleName);
+
+      expect(ability.can(Action.update, rowOf('user-1', 'ev-1'), 'status')).toBe(true);
+      expect(ability.can(Action.update, rowOf('user-2', 'ev-1'), 'status')).toBe(false);
+      expect(ability.can(Action.update, rowOf('user-1', 'ev-2'), 'status')).toBe(false);
+    });
+  });
+
   describe('event creation (#454)', () => {
     // Real catalog entries, composed the way a signed-in member is: `User`
     // through the roles pass, plus one household role through the household

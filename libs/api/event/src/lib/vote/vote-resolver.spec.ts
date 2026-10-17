@@ -8,7 +8,7 @@ import {
   VoteType,
 } from '@bge/database';
 import type { VotingPolicy } from '../interfaces/vote.interface';
-import { VoteResolver } from './vote-resolver';
+import { VoteResolver, type AttendeeStub } from './vote-resolver';
 
 describe('VoteResolver', () => {
   describe('tally', () => {
@@ -72,6 +72,41 @@ describe('VoteResolver', () => {
 
     it('PoolParticipants counts only those with available games', () => {
       expect(VoteResolver.countEligibleVoters(attendees, VoteEligibility.PoolParticipants)).toBe(2);
+    });
+
+    // #551: an attendee who is out of the event, removed by a host or not
+    // attending, is no voter under any rule.
+    it.each(Object.values(VoteEligibility))('%s counts no one who is out of the event', (eligibility) => {
+      const out = [
+        makeAttendee(EventParticipationStatus.NotAttending, 1),
+        { ...makeAttendee(EventParticipationStatus.Attending, 1), removedAt: new Date() },
+      ];
+
+      expect(VoteResolver.countEligibleVoters([...attendees, ...out], eligibility)).toBe(
+        VoteResolver.countEligibleVoters(attendees, eligibility),
+      );
+    });
+  });
+
+  describe('isEligibleVoter', () => {
+    it.each([
+      [VoteEligibility.AllAttendees, EventParticipationStatus.Invited, 0, true],
+      [VoteEligibility.AllAttendees, EventParticipationStatus.Maybe, 0, true],
+      [VoteEligibility.AllAttendees, EventParticipationStatus.NotAttending, 0, false],
+      [VoteEligibility.ConfirmedOnly, EventParticipationStatus.Attending, 0, true],
+      [VoteEligibility.ConfirmedOnly, EventParticipationStatus.Invited, 0, false],
+      [VoteEligibility.ConfirmedOnly, EventParticipationStatus.Maybe, 0, false],
+      [VoteEligibility.PoolParticipants, EventParticipationStatus.Maybe, 1, true],
+      [VoteEligibility.PoolParticipants, EventParticipationStatus.Attending, 0, false],
+      [VoteEligibility.PoolParticipants, EventParticipationStatus.NotAttending, 1, false],
+    ])('%s: status %s, %i listed games → eligible %s', (eligibility, status, gameCount, expected) => {
+      expect(VoteResolver.isEligibleVoter(makeAttendee(status, gameCount), eligibility)).toBe(expected);
+    });
+
+    it.each(Object.values(VoteEligibility))('%s: an attendee a host removed is not eligible', (eligibility) => {
+      const removed = { ...makeAttendee(EventParticipationStatus.Attending, 1), removedAt: new Date() };
+
+      expect(VoteResolver.isEligibleVoter(removed, eligibility)).toBe(false);
     });
   });
 
@@ -309,20 +344,64 @@ describe('VoteResolver', () => {
     });
 
     it('uses PoolParticipants eligibility', () => {
+      const participant = makeAttendee(EventParticipationStatus.Attending, 2); // eligible
       const result = VoteResolver.resolve(
-        votes(VoteType.For),
+        [vote(VoteType.For, participant)],
         makePolicy({
           voteEligibility: VoteEligibility.PoolParticipants,
           voteThresholdType: VoteThresholdType.Unanimous,
         }),
         [
-          makeAttendee(EventParticipationStatus.Attending, 2), // eligible
+          participant,
           makeAttendee(EventParticipationStatus.Attending, 0), // not eligible (no games)
         ],
       );
 
       expect(result.eligibleVoterCount).toBe(1);
       expect(result.status).toBe(NominationStatus.Passed);
+    });
+
+    // #551. The votes were counted whoever cast them, while quorum counted
+    // only the eligible: under ConfirmedOnly a voter who had since declined
+    // still swung the result.
+    it('counts no vote from a voter who is not eligible, and keeps the tally to the votes it counted', () => {
+      const result = VoteResolver.resolve(
+        [
+          vote(VoteType.For, makeAttendee(EventParticipationStatus.Attending)),
+          vote(VoteType.Against, makeAttendee(EventParticipationStatus.Attending)),
+          vote(VoteType.For, makeAttendee(EventParticipationStatus.NotAttending)),
+          vote(VoteType.For, makeAttendee(EventParticipationStatus.Invited)),
+        ],
+        makePolicy({ voteEligibility: VoteEligibility.ConfirmedOnly }),
+        [makeAttendee(), makeAttendee()],
+      );
+
+      expect(result.tally).toEqual({ forCount: 1, againstCount: 1, interestedCount: 0, totalVotes: 2 });
+      expect(result.status).toBe(NominationStatus.Failed);
+    });
+
+    it('counts no vote from a voter a host removed', () => {
+      const removed = { ...makeAttendee(), removedAt: new Date() };
+      const result = VoteResolver.resolve(
+        [vote(VoteType.Against, makeAttendee()), vote(VoteType.For, removed), vote(VoteType.For, removed)],
+        makePolicy(),
+        [makeAttendee()],
+      );
+
+      expect(result.tally.totalVotes).toBe(1);
+      expect(result.status).toBe(NominationStatus.Failed);
+    });
+
+    it('counts the same vote once its voter is back in', () => {
+      const voter = makeAttendee(EventParticipationStatus.NotAttending);
+      const ballot = [vote(VoteType.For, voter)];
+      const policy = makePolicy({ voteQuorumType: VoteQuorumType.FixedCount, voteQuorumValue: 1 });
+
+      expect(VoteResolver.resolve(ballot, policy, [voter]).status).toBe(NominationStatus.QuorumNotMet);
+
+      voter.status = EventParticipationStatus.Attending;
+
+      expect(VoteResolver.resolve(ballot, policy, [voter]).status).toBe(NominationStatus.Passed);
     });
   });
 });
@@ -339,15 +418,24 @@ function makePolicy(overrides: Partial<VotingPolicy> = {}): VotingPolicy {
   };
 }
 
-function makeAttendee(status: EventParticipationStatus = EventParticipationStatus.Attending, gameCount = 0) {
+function makeAttendee(
+  status: EventParticipationStatus = EventParticipationStatus.Attending,
+  gameCount = 0,
+): AttendeeStub {
   return {
     status,
+    removedAt: null,
     availableGames: Array.from({ length: gameCount }, (_, i) => ({
       id: `gl-${i}`,
     })),
   };
 }
 
+function vote(voteType: VoteType, voter: AttendeeStub) {
+  return { voteType, voter };
+}
+
+/** Votes cast by attendees who are in and eligible under every rule but PoolParticipants. */
 function votes(...types: VoteType[]) {
-  return types.map((voteType) => ({ voteType }));
+  return types.map((voteType) => vote(voteType, makeAttendee()));
 }

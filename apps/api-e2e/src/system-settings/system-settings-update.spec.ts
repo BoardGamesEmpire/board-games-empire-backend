@@ -40,6 +40,7 @@ describe('system settings update', () => {
     auditLogRetentionDays: true,
     reviewGatewayLanguages: true,
     householdInviteePolicy: true,
+    eventInviteePolicy: true,
   } as const;
 
   const NOT_NULLABLE = Object.keys(WRITABLE).filter((key) => key !== 'auditLogRetentionDays');
@@ -124,6 +125,7 @@ describe('system settings update', () => {
         auditLogRetentionDays: differentFrom(original.auditLogRetentionDays, 7, 8),
         reviewGatewayLanguages: !original.reviewGatewayLanguages,
         householdInviteePolicy: differentFrom(original.householdInviteePolicy, Visibility.Friends, Visibility.Public),
+        eventInviteePolicy: differentFrom(original.eventInviteePolicy, Visibility.Friends, Visibility.Public),
       };
 
       const { body } = await patch(admin, changed).expect(200);
@@ -207,6 +209,8 @@ describe('system settings update', () => {
       ['an invitee policy of FriendsOfFriends', { householdInviteePolicy: Visibility.FriendsOfFriends }],
       ['an invitee policy of Household', { householdInviteePolicy: Visibility.Household }],
       ['an invitee policy of Private', { householdInviteePolicy: Visibility.Private }],
+      ['an event invitee policy of FriendsOfFriends', { eventInviteePolicy: Visibility.FriendsOfFriends }],
+      ['an event invitee policy of Private', { eventInviteePolicy: Visibility.Private }],
     ])('answers 400 to %s and writes nothing', async (_, body) => {
       await expectRefused(await actors.admin(), body);
     });

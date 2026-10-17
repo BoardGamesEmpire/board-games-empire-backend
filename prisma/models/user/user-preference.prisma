@@ -20,6 +20,10 @@ model UserPreferences {
   // narrow it.
   allowHouseholdInvitesFrom Visibility @default(Public) @map("allow_household_invites_from")
 
+  // Who may place this user on an event (#546), on the same terms as
+  // `allowHouseholdInvitesFrom`.
+  allowEventInvitesFrom Visibility @default(Public) @map("allow_event_invites_from")
+
   // Notification preferences
   emailNotifications Json? @map("email_notifications") // Structured notification preferences
   pushNotifications  Json? @map("push_notifications")

@@ -1,11 +1,12 @@
-import { OccurrenceStatus, PlatformType, ScheduledGameRole } from '@bge/database';
+import { GameAdditionMode, NominationStatus, OccurrenceStatus, PlatformType, ScheduledGameRole } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
+import { expectBackendsQueuedBehind, expectLockWaiter, withBarrier, type Barrier } from '../support/lock-barrier';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 import { arrangeListEntry } from './event-fixtures';
 import { createEventClient, EVENTS_PATH } from './event-request';
-import { eventGameEnvelope, listOccurrencesEnvelope, occurrenceEnvelope } from './event-wire';
+import { eventGameEnvelope, listOccurrencesEnvelope, nominationEnvelope, occurrenceEnvelope } from './event-wire';
 
 /**
  * What the occurrence routes serve, over the real routes (#558).
@@ -238,5 +239,187 @@ describe('event occurrences', () => {
     // Checked in the database: a read answering 404 would pass just as well
     // if the read scope left cancelled occurrences out.
     expect(await db.client.eventOccurrence.count({ where: { id: occurrence.id } })).toBe(0);
+  });
+
+  /**
+   * A date removed while a nomination of a game for it is approved (#551).
+   *
+   * Removing a date clears it from the nominations that name it while holding
+   * the date's row, and approving a nomination adds its game to that date's
+   * lineup, which waits on the same row. With only the nomination locked,
+   * each could wait on the other until Postgres broke the deadlock and one
+   * answered 409. Both lock the event's dates first, so whichever comes second
+   * waits for the first.
+   *
+   * The barrier holds one row so the first request queues inside its
+   * transaction, then the second is fired and seen queued on the event's row.
+   */
+  describe('removed while a nomination of a game for it is approved', () => {
+    /** Generous for the reason `household-write-tombstone.spec.ts` gives: a cold request clears several guards first. */
+    const REQUEST_REACHES_LOCK_MS = 20_000;
+
+    /** The barrier's own backends, which are never the request under test. */
+    const barrierPids = (barrier: Barrier): number[] => [barrier.waiter.pid, barrier.observer.pid];
+
+    /**
+     * Fires a request that is expected to block, and keeps hold of it
+     * safely. Same shape as the helper in `household-write-tombstone.spec.ts`.
+     */
+    const fire = (send: () => request.Test) => {
+      let outcome: string | undefined;
+      const settled = send().then(
+        (response) => {
+          outcome = `HTTP ${response.status}`;
+
+          return response;
+        },
+        (error: unknown) => {
+          outcome = `it failed: ${error instanceof Error ? error.message : String(error)}`;
+          throw error;
+        },
+      );
+
+      settled.catch(() => undefined);
+
+      return { settled, settledEarly: () => outcome };
+    };
+
+    /** An event whose host approves each game nominated, with a date, and the host's nomination of a game for it. */
+    const arrange = async () => {
+      const host = await actors.user();
+      const eventId = await createdEventId(host, { policy: { gameAdditionMode: GameAdditionMode.HostApproval } });
+      const { id: occurrenceId } = await addedOccurrence(host, eventId);
+      const entry = await arrangeListEntry(db.client, eventId, host.user.id);
+      const nomination = nominationEnvelope(
+        await request(baseUrl)
+          .post(`${EVENTS_PATH}/${eventId}/nominations`)
+          .set(host.headers)
+          .send({ platformGameId: entry.platformGameId, suppliedFromId: entry.suppliedById, occurrenceId })
+          .expect(201),
+        'POST /api/events/:eventId/nominations',
+      );
+      expect(nomination.status).toBe(NominationStatus.AwaitingApproval);
+
+      return { host, eventId, occurrenceId, nominationId: nomination.id };
+    };
+
+    const approve = (actor: AuthenticatedActor, eventId: string, nominationId: string) =>
+      request(baseUrl).post(`${EVENTS_PATH}/${eventId}/nominations/${nominationId}/approve`).set(actor.headers);
+
+    const removeDate = (actor: AuthenticatedActor, eventId: string, occurrenceId: string) =>
+      request(baseUrl)
+        .delete(`${occurrencesPath(eventId)}/${occurrenceId}`)
+        .set(actor.headers);
+
+    it("the approval waits for the removal, then adds the game to the event's own lineup", async () => {
+      const { host, eventId, occurrenceId, nominationId } = await arrange();
+
+      const { removed, approved } = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await expect(
+          holder.query('SELECT id FROM event_occurrences WHERE id = $1 FOR NO KEY UPDATE', [occurrenceId]),
+        ).resolves.toHaveLength(1);
+
+        // Deliberately not awaited: it is supposed to be stuck.
+        const removal = fire(() => removeDate(host, eventId, occurrenceId));
+
+        const removing = await expectLockWaiter(barrier, {
+          heldBy: holder.pid,
+          description: 'the removal of the date',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+          exclude: barrierPids(barrier),
+          settledEarly: removal.settledEarly,
+        });
+        expect(removing.query).toMatch(/DELETE[\s\S]*event_occurrences/);
+
+        const approval = fire(() => approve(host, eventId, nominationId));
+
+        // Queued on the event's row behind the removal, which is queued behind
+        // the barrier.
+        const queued = await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the removal, and the approval behind it',
+        });
+        expect(queued.map(({ query }) => query)).toContainEqual(
+          expect.stringMatching(/FROM events WHERE id = \$1 FOR SHARE/),
+        );
+
+        // Released before anything else is asked of the database: both
+        // requests are inside interactive transactions on the default 5s
+        // budget, and an expired budget surfaces as a 500.
+        await holder.rollback();
+
+        return { removed: await removal.settled, approved: await approval.settled };
+      });
+
+      expect(removed.status).toBe(200);
+      expect(approved.status).toBe(201);
+      expect(nominationEnvelope(approved, 'POST /api/events/:eventId/nominations/:nominationId/approve')).toMatchObject(
+        { status: NominationStatus.Approved, occurrenceId: null },
+      );
+      expect(
+        await db.client.eventGame.findMany({ where: { nominationId }, select: { eventId: true, occurrenceId: true } }),
+      ).toEqual([{ eventId, occurrenceId: null }]);
+    });
+
+    it('the removal waits for the approval, then takes the game off with the date', async () => {
+      const { host, eventId, occurrenceId, nominationId } = await arrange();
+
+      const { removed, approved } = await withBarrier(async (barrier) => {
+        const { holder } = barrier;
+
+        await holder.begin();
+        await expect(
+          holder.query('SELECT id FROM event_game_nominations WHERE id = $1 FOR UPDATE', [nominationId]),
+        ).resolves.toHaveLength(1);
+
+        // Deliberately not awaited: it is supposed to be stuck.
+        const approval = fire(() => approve(host, eventId, nominationId));
+
+        const approving = await expectLockWaiter(barrier, {
+          heldBy: holder.pid,
+          description: 'the approval of the nomination',
+          timeoutMs: REQUEST_REACHES_LOCK_MS,
+          exclude: barrierPids(barrier),
+          settledEarly: approval.settledEarly,
+        });
+        expect(approving.query).toMatch(/FROM event_game_nominations WHERE id = \$1 FOR UPDATE/);
+
+        const removal = fire(() => removeDate(host, eventId, occurrenceId));
+
+        // Queued on the event's row behind the approval, which is queued
+        // behind the barrier.
+        const queued = await expectBackendsQueuedBehind(barrier, {
+          heldBy: holder.pid,
+          count: 2,
+          description: 'the approval, and the removal behind it',
+        });
+        expect(queued.map(({ query }) => query)).toContainEqual(
+          expect.stringMatching(/FROM events WHERE id = \$1 FOR NO KEY UPDATE/),
+        );
+
+        // Released promptly, for the reason the test above gives.
+        await holder.rollback();
+
+        return { removed: await removal.settled, approved: await approval.settled };
+      });
+
+      expect(removed.status).toBe(200);
+      expect(approved.status).toBe(201);
+      expect(nominationEnvelope(approved, 'POST /api/events/:eventId/nominations/:nominationId/approve')).toMatchObject(
+        { status: NominationStatus.Approved, occurrenceId },
+      );
+      // The date's lineup went with it, and the nomination is the event's now.
+      expect(await db.client.eventGame.count({ where: { nominationId } })).toBe(0);
+      expect(
+        await db.client.eventGameNomination.findUniqueOrThrow({
+          where: { id: nominationId },
+          select: { status: true, occurrenceId: true },
+        }),
+      ).toEqual({ status: NominationStatus.Approved, occurrenceId: null });
+    });
   });
 });

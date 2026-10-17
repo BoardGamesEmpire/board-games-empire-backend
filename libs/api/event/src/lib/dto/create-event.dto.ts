@@ -2,9 +2,25 @@ import { EventSchedulingMode, EventType, Visibility } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsEnum, IsNotEmpty, IsOptional, IsString, IsUrl, ValidateNested } from 'class-validator';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  ValidateNested,
+} from 'class-validator';
 import { CreateEventOccurrenceDto } from '../occurrence/dto/create-event-occurrence.dto';
 import { CreateEventPolicyDto } from './create-event-policy.dto';
+
+/**
+ * How many users one create may invite (#546). Each is checked in the create's
+ * transaction before anything is written, so the list was a request-sized
+ * amount of work with no bound.
+ */
+export const MAX_INVITE_USER_IDS = 50;
 
 export class CreateEventDto {
   @ApiProperty()
@@ -60,12 +76,15 @@ export class CreateEventDto {
 
   @ApiPropertyOptional({
     type: [String],
+    maxItems: MAX_INVITE_USER_IDS,
     description:
       'User IDs to invite to the event at creation time. ' +
-      'Each user is added as an EventParticipant with Invited status.',
+      'Each user is added as an EventParticipant with Invited status. ' +
+      "An id that names no person answers 404, and one the server's or the user's invite settings refuse answers 403; either way nothing is written.",
   })
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
+  @ArrayMaxSize(MAX_INVITE_USER_IDS, { message: i18nValidationMessage('validation.arrayMaxSize') })
   @IsOptional()
   inviteUserIds?: string[];
 

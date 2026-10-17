@@ -6,5 +6,6 @@ export * from './lib/expiry-sweep/sweep.service';
 export * from './lib/interfaces';
 export * from './lib/invite-expiry';
 export * from './lib/invite.service';
+export * from './lib/invitee-gate';
 export * from './lib/invites.module';
 export * from './lib/read-shapes';

@@ -18,11 +18,15 @@ import {
   makeEventAttendee,
   makeEventOccurrence,
   paginationQuery,
+  rawQueryText,
+  unwrapTransaction,
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { lineupStillAhead } from '../attendee/attendance';
+import { GameRemovedFromEventEvent } from '../nomination/events/nomination.events';
 import { OccurrenceEvents } from './constants';
 import { EventOccurrenceService } from './event-occurrence.service';
 import {
@@ -34,13 +38,29 @@ import {
 
 const COND = { id: 'sentinel-condition' };
 
-/** A vote as the vote read selects it, with the occurrence it is matched back to. */
-const vote = (id: string, occurrenceId: string) => ({
+/**
+ * A vote as the vote read selects it, with the occurrence it is matched back
+ * to, cast by an attendee who is attending unless `attendee` says otherwise.
+ */
+const vote = (
+  id: string,
+  occurrenceId: string,
+  attendee: { status?: EventParticipationStatus; removedAt?: Date | null } = {},
+) => ({
   id,
   occurrenceId,
   attendeeId: `att-${id}`,
   response: AvailabilityResponse.Available,
+  attendee: { userId: `user-${id}`, status: EventParticipationStatus.Attending, removedAt: null, ...attendee },
+});
+
+/** A vote as the occurrence routes serve it: the voter's user alone, and whether the vote counts. */
+const servedVote = (id: string, eligible = true) => ({
+  id,
+  attendeeId: `att-${id}`,
+  response: AvailabilityResponse.Available,
   attendee: { userId: `user-${id}` },
+  eligible,
 });
 
 /** A game as the game read selects it, with the occurrence it is matched back to. */
@@ -76,6 +96,7 @@ describe('EventOccurrenceService', () => {
     });
 
     db = ctx.db;
+    unwrapTransaction(db);
     service = ctx.module.get(EventOccurrenceService);
     compose = jest.spyOn(ctx.module.get(ScopeComposer), 'compose');
 
@@ -250,20 +271,7 @@ describe('EventOccurrenceService', () => {
       expect(rows.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
         {
           id: 'occ-1',
-          availabilityVotes: [
-            {
-              id: 'v1',
-              attendeeId: 'att-v1',
-              response: AvailabilityResponse.Available,
-              attendee: { userId: 'user-v1' },
-            },
-            {
-              id: 'v2',
-              attendeeId: 'att-v2',
-              response: AvailabilityResponse.Available,
-              attendee: { userId: 'user-v2' },
-            },
-          ],
+          availabilityVotes: [servedVote('v1'), servedVote('v2')],
           games: [],
         },
         {
@@ -274,6 +282,25 @@ describe('EventOccurrenceService', () => {
           ],
         },
       ]);
+    });
+
+    // A voter who left keeps their vote. It is served, marked as not
+    // counting, and what marks it is not served.
+    it('marks the vote of a voter who is not attending, or was removed, as not counting', async () => {
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        vote('v1', 'occ-1'),
+        vote('v2', 'occ-1', { status: EventParticipationStatus.NotAttending }),
+        vote('v3', 'occ-1', { removedAt: new Date() }),
+      ] as never);
+
+      const { rows } = await service.getOccurrences('event-1', paginationQuery({ limit: 10 }));
+
+      expect(rows[0].availabilityVotes).toEqual([servedVote('v1'), servedVote('v2', false), servedVote('v3', false)]);
+      expect(db.eventAvailabilityVote.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          select: expect.objectContaining({ attendee: { select: { userId: true, status: true, removedAt: true } } }),
+        }),
+      );
     });
 
     it('reads no votes or games for an empty page', async () => {
@@ -329,7 +356,10 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.update.mockResolvedValue(row);
       db.eventOccurrence.delete.mockResolvedValue(row);
       db.eventAvailabilityVote.findMany.mockResolvedValue([vote('v1', 'occ-1')] as never);
-      db.eventGame.findMany.mockResolvedValue([game('g1', 'occ-1')] as never);
+      // The answer's read finds the game. A date write's read after the
+      // write, for the games nobody is bringing, finds none.
+      db.eventGame.findMany.mockImplementation(((args: { where: object }) =>
+        Promise.resolve('suppliedBy' in args.where ? [] : [game('g1', 'occ-1')])) as never);
     });
 
     it.each(writes)('$name embeds the policy alone in its write', async ({ name, op, status }) => {
@@ -355,14 +385,7 @@ describe('EventOccurrenceService', () => {
         expect(answer).toEqual(
           expect.objectContaining({
             id: 'occ-1',
-            availabilityVotes: [
-              {
-                id: 'v1',
-                attendeeId: 'att-v1',
-                response: AvailabilityResponse.Available,
-                attendee: { userId: 'user-v1' },
-              },
-            ],
+            availabilityVotes: [servedVote('v1')],
             games: [
               { id: 'g1', platformGameId: 'pg-g1', role: ScheduledGameRole.Primary, platformGame: { id: 'pg-g1' } },
             ],
@@ -375,7 +398,7 @@ describe('EventOccurrenceService', () => {
       const answer = await service.addOccurrence('event-1', { label: 'Day 1' });
 
       expect(db.eventAvailabilityVote.findMany).not.toHaveBeenCalled();
-      expect(db.eventGame.findMany).not.toHaveBeenCalled();
+      expect(compose).not.toHaveBeenCalledWith(ResourceType.EventGame, Action.read, expect.anything());
       expect(answer).toEqual(expect.objectContaining({ id: 'occ-1', availabilityVotes: [], games: [] }));
     });
 
@@ -518,6 +541,152 @@ describe('EventOccurrenceService', () => {
         ResourceType.EventOccurrence,
         Action.delete,
       );
+    });
+  });
+
+  /**
+   * A game stays on a date that has started when its supplier leaves, or when
+   * its entry comes off their offered games (#551). Moving that date's start
+   * to one still to come, adding a date, or removing the last one puts the
+   * lineup ahead again, holding a game nobody is bringing, and no route takes
+   * a game off a lineup. Each of those writes takes such games off in its own
+   * transaction.
+   */
+  describe('a lineup a date write puts ahead again', () => {
+    const NEXT_WEEK = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+
+    const dateWrites = [
+      { name: 'addOccurrence', op: 'create' },
+      { name: 'updateOccurrence', op: 'update' },
+      { name: 'removeOccurrence', op: 'delete' },
+    ] as const;
+
+    const run = (name: (typeof dateWrites)[number]['name']) => {
+      switch (name) {
+        case 'addOccurrence':
+          return service.addOccurrence('event-1', { startDate: NEXT_WEEK });
+        case 'updateOccurrence':
+          return service.updateOccurrence('event-1', 'occ-1', { startDate: NEXT_WEEK });
+        case 'removeOccurrence':
+          return service.removeOccurrence('event-1', 'occ-1');
+      }
+    };
+
+    /** The lineup game the write takes off, as its domain event reports it. */
+    const takenOff = {
+      id: 'eg-off',
+      eventId: null,
+      occurrenceId: 'occ-2',
+      platformGameId: 'pg-off',
+      suppliedById: 'gl-not-attending',
+      nominationId: null,
+      addedById: null,
+      role: ScheduledGameRole.Primary,
+    };
+
+    beforeEach(() => {
+      const row = makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' });
+      db.event.findUnique.mockResolvedValue({
+        id: 'event-1',
+        schedulingMode: EventSchedulingMode.MultiDay,
+        householdId: null,
+      } as never);
+      db.eventOccurrence.findUnique.mockResolvedValue(row);
+      db.eventOccurrence.create.mockResolvedValue(row);
+      db.eventOccurrence.update.mockResolvedValue(row);
+      db.eventOccurrence.delete.mockResolvedValue(row);
+    });
+
+    // FOR NO KEY UPDATE conflicts with the FOR SHARE a supplier leaving, or
+    // an entry coming off, takes on the same row, and not with the FOR KEY
+    // SHARE a game added to the lineup takes through its key.
+    it.each(dateWrites)("$name locks the event's row before it writes", async ({ name, op }) => {
+      await run(name);
+
+      const [[lock]] = db.$queryRaw.mock.calls;
+      expect(rawQueryText(lock)).toMatch(/^SELECT id FROM events WHERE id = \? FOR NO KEY UPDATE$/);
+      expect((lock as unknown as Prisma.Sql).values).toEqual(['event-1']);
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(db.eventOccurrence[op].mock.invocationCallOrder[0]);
+      expect(db.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(dateWrites)(
+      '$name takes off each game still ahead whose supplier is out of the event, or whose entry came off their offered games',
+      async ({ name, op }) => {
+        db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+
+        await run(name);
+
+        expect(db.eventGame.findMany).toHaveBeenLastCalledWith({
+          where: {
+            suppliedBy: {
+              is: {
+                attendee: { is: { eventId: 'event-1' } },
+                OR: [
+                  { removedAt: { not: null } },
+                  {
+                    attendee: {
+                      is: {
+                        OR: [{ removedAt: { not: null } }, { status: EventParticipationStatus.NotAttending }],
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            ...lineupStillAhead(expect.any(Date)),
+          },
+          select: expect.any(Object),
+        });
+        expect(db.eventGame.findMany.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+        expect(db.eventGame.deleteMany).toHaveBeenCalledWith({ where: { id: { in: ['eg-off'] } } });
+        expect(db.eventGame.deleteMany.mock.invocationCallOrder[0]).toBeGreaterThan(
+          db.eventOccurrence[op].mock.invocationCallOrder[0],
+        );
+      },
+    );
+
+    it.each(dateWrites)('$name reports each game it took off, after the date itself', async ({ name }) => {
+      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+
+      await run(name);
+
+      const [eventName, removed] = emitter.emit.mock.calls.at(-1) ?? [];
+      expect(eventName).toBe(GameRemovedFromEventEvent.eventName);
+      expect(removed).toBeInstanceOf(GameRemovedFromEventEvent);
+      expect(removed.subjectId).toBe('eg-off');
+      expect(removed.eventId).toBe('event-1');
+    });
+
+    it.each(dateWrites)('$name takes nothing off when every game ahead has someone bringing it', async ({ name }) => {
+      await run(name);
+
+      expect(db.eventGame.deleteMany).not.toHaveBeenCalled();
+      expect(emitter.emit.mock.calls.map(([eventName]) => eventName)).not.toContain(
+        GameRemovedFromEventEvent.eventName,
+      );
+    });
+
+    it.each(dateWrites)('$name reports nothing when its transaction fails', async ({ name }) => {
+      db.eventGame.findMany.mockResolvedValue([takenOff] as never);
+      db.eventGame.deleteMany.mockRejectedValue(new Error('deadlock detected'));
+
+      await expect(run(name)).rejects.toThrow('deadlock detected');
+
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('updateOccurrence answers without the games it took off', async () => {
+      db.eventGame.findMany
+        .mockResolvedValueOnce([game('eg-off', 'occ-1'), game('eg-kept', 'occ-1')] as never)
+        .mockResolvedValueOnce([{ ...takenOff, occurrenceId: 'occ-1' }] as never);
+
+      const answer = await service.updateOccurrence('event-1', 'occ-1', { startDate: NEXT_WEEK });
+
+      expect(answer.games.map(({ id }) => id)).toEqual(['eg-kept']);
     });
   });
 
@@ -674,10 +843,14 @@ describe('EventOccurrenceService', () => {
     it('composes the attendee half too, so its counts are clipped by the caller’s attendee ceiling', async () => {
       await service.getAvailabilitySummary('event-1');
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, { eventId: 'event-1' });
+      // Without the attendees a host removed: they count toward nothing.
+      expect(compose).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read, {
+        eventId: 'event-1',
+        removedAt: null,
+      });
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.EventAttendee, Action.read);
       expect(db.eventAttendee.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { eventId: 'event-1', AND: [COND] } }),
+        expect.objectContaining({ where: { eventId: 'event-1', removedAt: null, AND: [COND] } }),
       );
     });
 
@@ -730,7 +903,40 @@ describe('EventOccurrenceService', () => {
           totalVotes: 1,
           pendingVotes: 0,
           participationRate: 1,
-          voters: [{ attendeeId: 'att-1', response: AvailabilityResponse.Available }],
+          voters: [{ attendeeId: 'att-1', response: AvailabilityResponse.Available, eligible: true }],
+        }),
+      ]);
+    });
+
+    // A voter not attending keeps their vote, listed and marked as not
+    // counting; no count includes it, and they are no eligible voter.
+    it('lists the vote of an attendee not attending without counting it', async () => {
+      db.eventAttendee.findMany.mockResolvedValue([
+        makeEventAttendee({ id: 'att-1', eventId: 'event-1', status: EventParticipationStatus.Attending }),
+        makeEventAttendee({ id: 'att-2', eventId: 'event-1', status: EventParticipationStatus.NotAttending }),
+        makeEventAttendee({ id: 'att-3', eventId: 'event-1', status: EventParticipationStatus.Maybe }),
+      ]);
+      db.eventOccurrence.findMany.mockResolvedValue([makeEventOccurrence({ id: 'occ-1', eventId: 'event-1' })]);
+      db.eventAvailabilityVote.findMany.mockResolvedValue([
+        { occurrenceId: 'occ-1', attendeeId: 'att-1', response: AvailabilityResponse.Available },
+        { occurrenceId: 'occ-1', attendeeId: 'att-2', response: AvailabilityResponse.Unavailable },
+      ] as EventAvailabilityVote[]);
+
+      const summary = await service.getAvailabilitySummary('event-1');
+
+      expect(summary.eligibleVoters).toBe(2);
+      expect(summary.attendees.byStatus).toEqual({ attending: 1, invited: 0, maybe: 1, notAttending: 1 });
+      expect(summary.occurrences).toEqual([
+        expect.objectContaining({
+          available: 1,
+          unavailable: 0,
+          totalVotes: 1,
+          pendingVotes: 1,
+          participationRate: 0.5,
+          voters: [
+            { attendeeId: 'att-1', response: AvailabilityResponse.Available, eligible: true },
+            { attendeeId: 'att-2', response: AvailabilityResponse.Unavailable, eligible: false },
+          ],
         }),
       ]);
     });
