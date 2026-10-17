@@ -47,8 +47,11 @@ export const AllowsDeletedHousehold = () => SetMetadata(ALLOWS_DELETED_HOUSEHOLD
  *   session: `GET /households/:id` already told that actor 404 for a missing
  *   household and 403 for a hidden live one. Anyone else — an API key scoped
  *   away from households, a plugin with no household grant, an actor with no
- *   abilities — is passed through untouched, and `PoliciesGuard` refuses them
- *   403 whatever the id, exactly as it did before this guard.
+ *   abilities — is passed through untouched. On a route gated on `Household`,
+ *   `PoliciesGuard` then refuses them 403 whatever the id, exactly as it did
+ *   before this guard. A route gated on another type (members, invites,
+ *   quotas) may admit them, and a soft delete keeps the household's rows of
+ *   that type, so its service has to check that the household is live itself.
  *
  * A route with no household in its path (the list, create) passes untouched.
  * A route whose target IS a deleted household opts out with
