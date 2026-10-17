@@ -142,6 +142,23 @@ describe('the BGE images, run as the split profile', () => {
       ]);
     });
 
+    // The filter crosses every hop as the server sends it: the api's stored
+    // names, the coordinator's proto values, and the stub's own narrowing by
+    // content type, the axis it declares (#713).
+    it('narrows a search by content type, and answers one its coverage can’t match with nothing', async () => {
+      const id = required(gatewayId, 'gateway');
+      const current = required(session, 'session');
+
+      const expansions = await searchGateway(stack.baseUrl, current, id, STUB.query, { contentTypes: 'Expansion' });
+      const onPc = await searchGateway(stack.baseUrl, current, id, STUB.query, { platformTypes: 'PC' });
+
+      expect(expansions.errors).toBeUndefined();
+      expect(expansions.resultsBySource[id]).toEqual([expect.objectContaining(STUB.expansion)]);
+      expect(onPc.resultsBySource).toEqual({});
+      expect(onPc.errors).toBeUndefined();
+      expect(onPc.unavailableSources).toBeUndefined();
+    });
+
     it('imports a game: gateway-fetch fetches it, and the worker stores it', async () => {
       const current = required(session, 'session');
       const { batchId } = await startImport(

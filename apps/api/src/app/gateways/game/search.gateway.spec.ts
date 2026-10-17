@@ -1,7 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, ResourceType, Visibility } from '@bge/database';
+import { Action, PlatformType, ResourceType, ContentType as StoredContentType, Visibility } from '@bge/database';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -31,6 +31,7 @@ import {
 import {
   ContentType,
   GameSearchData,
+  PlatformType as ProtoPlatformType,
   ResultStatus,
   SearchGameResult,
   SearchGamesRequest,
@@ -253,9 +254,63 @@ describe('GameSearchGateway', () => {
           }),
         );
       });
+
+      it('forwards the frame’s filter to the coordinator in proto terms', async () => {
+        const client = makeSocket(gateway);
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+
+        await gateway.handleSearchStart(
+          client,
+          makeStartDto({
+            includeLocal: false,
+            platformTypes: [PlatformType.Tabletop],
+            contentTypes: [StoredContentType.Expansion, StoredContentType.BaseGame],
+          }),
+        );
+
+        expect(coordinator.searchGames).toHaveBeenCalledWith(
+          expect.objectContaining<Partial<SearchGamesRequest>>({
+            filter: {
+              platformTypes: [ProtoPlatformType.PLATFORM_TYPE_TABLETOP],
+              contentTypes: [ContentType.CONTENT_TYPE_EXPANSION, ContentType.CONTENT_TYPE_BASE_GAME],
+            },
+          }),
+        );
+      });
+
+      it('searches both halves unfiltered when the frame’s lists are null', async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+        coordinator.searchGames.mockReturnValue(of(makeSourceDone()));
+
+        await gateway.handleSearchStart(
+          client,
+          makeStartDto({ includeLocal: true, platformTypes: null, contentTypes: null }),
+        );
+
+        expect(countEmissionsFor(SearchEvents.SearchError)).toBe(0);
+        expect(coordinator.searchGames).toHaveBeenCalledTimes(1);
+        expect(coordinator.searchGames.mock.calls[0][0].filter).toBeUndefined();
+      });
     });
 
     describe('local DB path', () => {
+      it('narrows the local half by the frame’s filter', async () => {
+        const client = makeSocket(gateway);
+        db.game.findMany.mockResolvedValue([]);
+
+        await gateway.handleSearchStart(
+          client,
+          makeStartDto({ includeLocal: true, includeExternal: false, contentTypes: [StoredContentType.DLC] }),
+        );
+
+        expect(db.game.findMany).toHaveBeenCalledWith(
+          expect.objectContaining({
+            where: { AND: expect.arrayContaining([{ contentType: { in: [StoredContentType.DLC] } }]) },
+          }),
+        );
+      });
+
       it('does not query the DB when includeLocal is false', async () => {
         const client = makeSocket(gateway);
         coordinator.searchGames.mockReturnValue(of(makeSourceDone()));

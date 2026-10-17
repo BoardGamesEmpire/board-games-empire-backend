@@ -60,8 +60,11 @@ message DescribeResponse {
   // The kinds of game it can return.
   Coverage coverage = 3;
 
-  // The coverage axes its search can filter by. A search request carries no
-  // filter yet, so declare none for now.
+  // The coverage axes its search can narrow by. A search request's filter
+  // carries only these, and declaring one means narrowing the upstream search
+  // by it, so pages fill with games that match. The server removes games the
+  // filter excludes from every DataGateway's results, so the narrowing may be
+  // loose, but it must never leave out a game the filter matches.
   repeated CoverageAxis filterable_axes = 4;
 
   // How it writes language codes.
@@ -172,6 +175,12 @@ message GatewaySearchRequest {
   optional string locale = 3;
   optional int32 limit = 4;
   optional int32 offset = 5;
+
+  // What to narrow the search to, on the axes the DataGateway declared in
+  // `filterable_axes` alone. Unset when the search isn't narrowed on any of
+  // them. It may name values outside the DataGateway's coverage, which match
+  // nothing it has.
+  optional SearchFilter filter = 6;
 }
 
 message GatewaySearchResult {

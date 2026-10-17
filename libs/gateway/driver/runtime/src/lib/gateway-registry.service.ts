@@ -1,5 +1,11 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { DatabaseService, DataGatewayCapability } from '@bge/database';
+import {
+  DatabaseService,
+  DataGatewayCapability,
+  type ContentType,
+  type CoverageAxis,
+  type PlatformType,
+} from '@bge/database';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -10,6 +16,7 @@ import { GatewayDisabledEvent, type GatewayAutoDisableReason } from './events/ga
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
 import type { GatewayConfigEvent, GatewayConnectionOptions } from './interfaces';
+import type { CoverageFilter } from './utils/coverage-filter';
 import { hashGatewayConfig } from './utils/hash-config';
 
 /**
@@ -41,6 +48,9 @@ interface RoutingRow {
   firstInterviewedAt: Date | null;
   capabilities: DataGatewayCapability[];
   disabledCapabilities: DataGatewayCapability[];
+  coveragePlatformTypes: PlatformType[];
+  coverageContentTypes: ContentType[];
+  filterableAxes: CoverageAxis[];
 }
 
 const ROUTING_FIELDS = {
@@ -48,7 +58,42 @@ const ROUTING_FIELDS = {
   firstInterviewedAt: true,
   capabilities: true,
   disabledCapabilities: true,
+  coveragePlatformTypes: true,
+  coverageContentTypes: true,
+  filterableAxes: true,
 } as const;
+
+/** A DataGateway's coverage, as its row stores it. */
+export type StoredCoverage = Pick<RoutingRow, 'coveragePlatformTypes' | 'coverageContentTypes'>;
+
+/**
+ * How a search reaches one DataGateway now, by its row. One that may not
+ * search is left to {@link GatewayRegistryService.resolveSearch}, which
+ * refuses it, saying why, or interviews it first when it never was.
+ */
+export type SearchRoute =
+  | { readonly routable: false }
+  | {
+      readonly routable: true;
+
+      /** Whether its coverage overlaps the search's filter. One that doesn't isn't asked. */
+      readonly covers: boolean;
+
+      /** The coverage axes its search narrows by. The filter it's sent carries only these. */
+      readonly filterableAxes: readonly CoverageAxis[];
+
+      /**
+       * Its driver, connecting it first if this process hasn't, for a search
+       * that must ask it after all. Its row isn't read again.
+       */
+      readonly driver: () => Promise<DataGatewayDriver>;
+    };
+
+/** A DataGateway a search will ask, and the coverage axes its search narrows by. */
+export interface SearchResolution {
+  readonly driver: DataGatewayDriver;
+  readonly filterableAxes: readonly CoverageAxis[];
+}
 
 /**
  * The routing rule, the one place it's written: why a DataGateway may not
@@ -82,6 +127,22 @@ function routingRefusal(row: RoutingRow | null, capability?: DataGatewayCapabili
   }
 
   return null;
+}
+
+/**
+ * The coverage rule for a search, beside the routing rule: whether a
+ * DataGateway's coverage overlaps the search's filter. It does when, on each
+ * axis the filter names, it covers a value named there (#713). Coverage empty
+ * on an axis covers nothing on it, so overlaps no filter that names it.
+ */
+export function coverageOverlaps(coverage: StoredCoverage, filter: CoverageFilter): boolean {
+  const covers = <T>(covered: readonly T[], named: ReadonlySet<T> | undefined): boolean =>
+    named === undefined || covered.some((value) => named.has(value));
+
+  return (
+    covers(coverage.coveragePlatformTypes, filter.platformTypes) &&
+    covers(coverage.coverageContentTypes, filter.contentTypes)
+  );
 }
 
 /** Max time to wait for all driver dispose() calls during shutdown. */
@@ -385,28 +446,49 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * failed interaction.
    */
   async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
-    let row = await this.routingRow(gatewayId);
-
-    if (row?.enabled && !row.firstInterviewedAt) {
-      await this.ensureConnected(gatewayId);
-      row = await this.routingRow(gatewayId);
-    }
-
-    const refusal = routingRefusal(row, capability);
-    if (refusal) {
-      throw new GatewayRoutingRefusedError(gatewayId, refusal, capability);
-    }
+    await this.routedRow(gatewayId, capability);
 
     return this.driverFor(gatewayId);
   }
 
   /**
-   * Whether the DataGateway may serve the capability now, by its row,
-   * without connecting it: for a caller that can answer without the driver,
-   * such as a search served from its cache.
+   * {@link resolve} for a search narrowed by `filter`: the driver, with the
+   * coverage axes its search narrows by, or null when its coverage doesn't
+   * overlap the filter, so it needn't be asked. Refuses as resolve does, and
+   * first, so a DataGateway that may not search says why whatever its
+   * coverage. One never interviewed is interviewed before its coverage is
+   * read, since its coverage isn't known until then.
    */
-  async isRoutable(gatewayId: string, capability: DataGatewayCapability): Promise<boolean> {
-    return routingRefusal(await this.routingRow(gatewayId), capability) === null;
+  async resolveSearch(gatewayId: string, filter: CoverageFilter): Promise<SearchResolution | null> {
+    const row = await this.routedRow(gatewayId, DataGatewayCapability.Search);
+
+    if (!coverageOverlaps(row, filter)) {
+      return null;
+    }
+
+    return { driver: await this.driverFor(gatewayId), filterableAxes: row.filterableAxes };
+  }
+
+  /**
+   * How a search narrowed by `filter` reaches the DataGateway now, by one
+   * read of its row, without connecting it: for a caller that may answer
+   * without the driver, such as a search served from its cache, or one the
+   * DataGateway's coverage can't match. One that must ask it after all takes
+   * the route's driver.
+   */
+  async searchRoute(gatewayId: string, filter: CoverageFilter): Promise<SearchRoute> {
+    const row = await this.routingRow(gatewayId);
+
+    if (!row || routingRefusal(row, DataGatewayCapability.Search)) {
+      return { routable: false };
+    }
+
+    return {
+      routable: true,
+      covers: coverageOverlaps(row, filter),
+      filterableAxes: row.filterableAxes,
+      driver: () => this.driverFor(gatewayId),
+    };
   }
 
   /**
@@ -414,9 +496,10 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * capability now: enabled, past their first interview, declaring it, and
    * without an admin's switch-off. A search that names no DataGateway goes
    * to these; one this process hasn't connected yet isn't reached that way
-   * (#722).
+   * (#722). A search narrowed by `filter` goes only to those whose coverage
+   * overlaps it.
    */
-  async routableGatewayIds(capability: DataGatewayCapability): Promise<string[]> {
+  async routableGatewayIds(capability: DataGatewayCapability, filter: CoverageFilter = {}): Promise<string[]> {
     const connected = this.connectedGatewayIds();
     if (connected.length === 0) {
       return [];
@@ -427,7 +510,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       select: { id: true, ...ROUTING_FIELDS },
     });
 
-    const routable = new Set(rows.filter((row) => routingRefusal(row, capability) === null).map((row) => row.id));
+    const routable = new Set(
+      rows
+        .filter((row) => routingRefusal(row, capability) === null && coverageOverlaps(row, filter))
+        .map((row) => row.id),
+    );
     return connected.filter((gatewayId) => routable.has(gatewayId));
   }
 
@@ -463,6 +550,28 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
     if (cached) {
       await this.interviews.refreshIfStale(gatewayId, cached.driver);
     }
+  }
+
+  /**
+   * The row of a DataGateway that may serve the capability now, connecting
+   * and so interviewing it first when it never was. Throws a
+   * {@link GatewayRoutingRefusedError} when it may not.
+   */
+  private async routedRow(gatewayId: string, capability: DataGatewayCapability): Promise<RoutingRow> {
+    let row = await this.routingRow(gatewayId);
+
+    if (row?.enabled && !row.firstInterviewedAt) {
+      await this.ensureConnected(gatewayId);
+      row = await this.routingRow(gatewayId);
+    }
+
+    const refusal = routingRefusal(row, capability);
+    if (refusal) {
+      throw new GatewayRoutingRefusedError(gatewayId, refusal, capability);
+    }
+
+    // routingRefusal refuses an absent row, so there is one.
+    return row as RoutingRow;
   }
 
   private routingRow(gatewayId: string): Promise<RoutingRow | null> {

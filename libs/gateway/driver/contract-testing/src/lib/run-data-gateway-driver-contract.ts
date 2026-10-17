@@ -13,6 +13,12 @@ export interface DataGatewayDriverContractContext {
    */
   capabilities: proto.Capability[];
 
+  /**
+   * The coverage axes its search narrows by. Its `describe` must declare
+   * exactly these, and a search is filtered on each.
+   */
+  filterableAxes: proto.CoverageAxis[];
+
   /** An externalId the driver can resolve via fetchGame. */
   knownExternalId: string;
 
@@ -22,6 +28,28 @@ export interface DataGatewayDriverContractContext {
   /** A query expected to stream at least one RESULT frame. */
   searchQuery: string;
 }
+
+/**
+ * A filter naming one value on `axis`: the first its coverage lists there,
+ * or, when it lists none, tabletop or a base game. Undefined for an axis the
+ * contract doesn't know.
+ */
+const filterOn = (axis: proto.CoverageAxis, coverage: proto.Coverage | undefined): proto.SearchFilter | undefined => {
+  switch (axis) {
+    case proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE:
+      return {
+        platformTypes: [coverage?.platformTypes[0] ?? proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+        contentTypes: [],
+      };
+    case proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE:
+      return {
+        platformTypes: [],
+        contentTypes: [coverage?.contentTypes[0] ?? proto.ContentType.CONTENT_TYPE_BASE_GAME],
+      };
+    default:
+      return undefined;
+  }
+};
 
 /** Every form a DataGateway's free text can take. */
 const CONTENT_FORMATS: readonly proto.ContentFormat[] = [
@@ -50,6 +78,7 @@ type Teardown = (ctx: DataGatewayDriverContractContext) => void | Promise<void>;
  * runDataGatewayDriverContract('InMemoryGatewayDriver', () => ({
  *   driver: new InMemoryGatewayDriver({ games: [game], capabilities: [proto.Capability.CAPABILITY_FETCH] }),
  *   capabilities: [proto.Capability.CAPABILITY_FETCH],
+ *   filterableAxes: [],
  *   knownExternalId: game.externalId,
  *   unknownExternalId: 'nope',
  *   searchQuery: 'catan',
@@ -108,6 +137,12 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
       expect(new Set(response.capabilities)).toEqual(new Set(ctx.capabilities));
     });
 
+    it('describe declares exactly the filterable axes the run names', async () => {
+      const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-filterable-axes' }));
+
+      expect(new Set(response.filterableAxes)).toEqual(new Set(ctx.filterableAxes));
+    });
+
     it('describe declares its content format as plain text, HTML, BBCode or Markdown', async () => {
       const response = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-content-format' }));
 
@@ -128,6 +163,31 @@ export function runDataGatewayDriverContract(description: string, setup: Setup, 
             true,
           );
           expect(frames[frames.length - 1]?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+        },
+      );
+
+      // Narrowing isn't checked: a DataGateway may return games the filter
+      // excludes, since the server removes them. A filter on one of its axes
+      // must still end the search cleanly.
+      itWhenDeclared(
+        proto.Capability.CAPABILITY_SEARCH,
+        'searchGames filtered on each declared axis terminates with SOURCE_DONE',
+        async () => {
+          const { coverage } = await firstValueFrom(ctx.driver.describe({ correlationId: 'contract-coverage' }));
+
+          for (const axis of ctx.filterableAxes) {
+            // An axis the contract doesn't know fails here, rather than passing untried.
+            const filter = filterOn(axis, coverage);
+            expect(filter).toBeDefined();
+
+            const frames = await lastValueFrom(
+              ctx.driver
+                .searchGames({ correlationId: `contract-search-${axis}`, query: ctx.searchQuery, filter })
+                .pipe(toArray()),
+            );
+
+            expect(frames[frames.length - 1]?.status).toBe(proto.ResultStatus.RESULT_STATUS_SOURCE_DONE);
+          }
         },
       );
     });

@@ -4,9 +4,8 @@ import type { LocalizationData } from '@boardgamesempire/proto-gateway';
 import * as proto from '@boardgamesempire/proto-gateway';
 
 /**
- * Folds portable into console and arcade into other, as a DataGateway's
- * coverage is stored, through the same map. A type with no stored
- * equivalent is stored as other.
+ * A platform type as the server stores it, through the same map as a
+ * DataGateway's coverage. A type with no stored equivalent is stored as other.
  */
 export function toPlatformType(proto: string | undefined): PlatformType {
   return toStoredPlatformType(proto) ?? PlatformType.Other;

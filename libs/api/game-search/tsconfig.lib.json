@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../gateway/driver/runtime/tsconfig.lib.json"
+    },
+    {
       "path": "../../proto/gateway/tsconfig.lib.json"
     },
     {
@@ -27,16 +30,16 @@
       "path": "../gateway-coordinator-client/tsconfig.lib.json"
     },
     {
-      "path": "../../database/tsconfig.lib.json"
+      "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
-      "path": "../../common/permissions/tsconfig.lib.json"
+      "path": "../../common/shared/tsconfig.lib.json"
     },
     {
       "path": "../../common/i18n/tsconfig.lib.json"
     },
     {
-      "path": "../../common/shared/tsconfig.lib.json"
+      "path": "../../database/tsconfig.lib.json"
     },
     {
       "path": "../../common/testing/tsconfig.lib.json"

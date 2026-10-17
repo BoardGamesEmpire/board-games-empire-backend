@@ -14,10 +14,23 @@ export interface InMemoryGatewayFixtures {
    */
   capabilities?: proto.Capability[];
 
+  /** The coverage describe declares, none unless set. */
+  coverage?: proto.Coverage;
+
+  /**
+   * The coverage axes describe declares its search narrows by, none unless
+   * set. searchGames narrows by a request's filter on these alone.
+   */
+  filterableAxes?: proto.CoverageAxis[];
+
   /** fetchGame resolves against these by `externalId`. */
   games?: proto.GameData[];
 
-  /** searchGames streams these (as RESULT frames) for ANY query, then SOURCE_DONE. */
+  /**
+   * searchGames streams these (as RESULT frames) for ANY query, then
+   * SOURCE_DONE, leaving out those its filter excludes on an axis it
+   * declares.
+   */
   searchResults?: proto.GameSearchData[];
 
   /** fetchExpansions streams these per base externalId, then completes. */
@@ -29,6 +42,14 @@ export interface InMemoryGatewayFixtures {
 
 /** gRPC's status code for an operation a DataGateway doesn't implement. */
 const UNIMPLEMENTED = 12;
+
+/**
+ * Whether a list in a search's filter lets a game through: it names nothing,
+ * or it names one of the game's values. A game's unspecified value matches
+ * no list, even one that names it.
+ */
+const listMatches = <T>(named: readonly T[] | undefined, values: readonly T[], unspecified: T): boolean =>
+  !named?.length || values.some((value) => value !== unspecified && named.includes(value));
 
 /**
  * Fixture-backed in-process `DataGatewayDriver`.
@@ -78,15 +99,15 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
     return this.failed() ?? of<proto.HealthCheckResponse>({ status: proto.HealthCheckResponse_ServingStatus.SERVING });
   }
 
-  /** Declares its fixtures' capabilities, no coverage, BCP 47 language codes and plain text. */
+  /** Declares its fixtures' capabilities, coverage and filterable axes, BCP 47 language codes and plain text. */
   describe(request: proto.DescribeRequest): Observable<proto.DescribeResponse> {
     return (
       this.failed<proto.DescribeResponse>() ??
       of<proto.DescribeResponse>({
         correlationId: request.correlationId ?? 'in-memory',
         capabilities: [...this.capabilities],
-        coverage: { platformTypes: [], contentTypes: [] },
-        filterableAxes: [],
+        coverage: this.fixtures.coverage ?? { platformTypes: [], contentTypes: [] },
+        filterableAxes: [...this.filterableAxes],
         languageCodeFormats: {
           acceptedRequestFormats: [proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47],
           responseFormat: proto.LanguageCodeFormat.LANGUAGE_CODE_FORMAT_IETF_BCP_47,
@@ -103,13 +124,15 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
       return refused;
     }
 
-    const results = (this.fixtures.searchResults ?? []).map(
-      (game): proto.GatewaySearchResult => ({
-        correlationId: request.correlationId,
-        status: proto.ResultStatus.RESULT_STATUS_RESULT,
-        game,
-      }),
-    );
+    const results = (this.fixtures.searchResults ?? [])
+      .filter((game) => this.matchesFilter(game, request.filter))
+      .map(
+        (game): proto.GatewaySearchResult => ({
+          correlationId: request.correlationId,
+          status: proto.ResultStatus.RESULT_STATUS_RESULT,
+          game,
+        }),
+      );
 
     return concat(
       from(results),
@@ -181,6 +204,26 @@ export class InMemoryGatewayDriver implements DataGatewayDriver {
 
   private get capabilities(): readonly proto.Capability[] {
     return this.fixtures.capabilities ?? OPERATIONS;
+  }
+
+  private get filterableAxes(): readonly proto.CoverageAxis[] {
+    return this.fixtures.filterableAxes ?? [];
+  }
+
+  /** Whether a game matches a filter, judged on the axes this driver declares alone. */
+  private matchesFilter(game: proto.GameSearchData, filter: proto.SearchFilter | undefined): boolean {
+    const declares = (axis: proto.CoverageAxis): boolean => this.filterableAxes.includes(axis);
+
+    return (
+      (!declares(proto.CoverageAxis.COVERAGE_AXIS_CONTENT_TYPE) ||
+        listMatches(filter?.contentTypes, [game.contentType], proto.ContentType.CONTENT_TYPE_UNSPECIFIED)) &&
+      (!declares(proto.CoverageAxis.COVERAGE_AXIS_PLATFORM_TYPE) ||
+        listMatches(
+          filter?.platformTypes,
+          (game.availablePlatforms ?? []).map((platform) => platform.platformType),
+          proto.PlatformType.PLATFORM_TYPE_UNSPECIFIED,
+        ))
+    );
   }
 
   private failed<T>(): Observable<T> | undefined {

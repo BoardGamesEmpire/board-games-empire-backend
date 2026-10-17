@@ -1,5 +1,13 @@
 import { SystemActorScope } from '@bge/actor-context';
-import { AuthType, DatabaseService, DataGatewayCapability, DataGatewayInterviewFailure } from '@bge/database';
+import {
+  AuthType,
+  ContentType,
+  CoverageAxis,
+  DatabaseService,
+  DataGatewayCapability,
+  DataGatewayInterviewFailure,
+  PlatformType,
+} from '@bge/database';
 import { LanguageLinkService } from '@bge/language';
 import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
@@ -17,12 +25,25 @@ import { GatewayRoutingRefusedError } from './errors/gateway-routing-refused.err
 import { GatewayDisabledEvent } from './events/gateway-registry.events';
 import { GatewayConfigEventsService } from './gateway-config-events.service';
 import { GatewayInterviewService } from './gateway-interview.service';
-import { GatewayRegistryService } from './gateway-registry.service';
+import { coverageOverlaps, GatewayRegistryService, type StoredCoverage } from './gateway-registry.service';
 import type { GatewayConfigEvent } from './interfaces';
 import { FakeDataGatewayTable } from './testing/fake-data-gateway-table';
 
 const { Search, Fetch, FetchExpansions, ListLanguages } = DataGatewayCapability;
 const EVERY_CAPABILITY = [Search, Fetch, FetchExpansions, ListLanguages];
+const { Tabletop } = PlatformType;
+
+/** What a board-game DataGateway covers. */
+const TABLETOP_GAMES: StoredCoverage = {
+  coveragePlatformTypes: [Tabletop],
+  coverageContentTypes: [ContentType.BaseGame, ContentType.Expansion],
+};
+
+/** What a video-game DataGateway covers. */
+const VIDEO_GAMES: StoredCoverage = {
+  coveragePlatformTypes: [PlatformType.Console, PlatformType.PC],
+  coverageContentTypes: [ContentType.BaseGame, ContentType.DLC],
+};
 
 /** The version the in-memory driver reports on Ping. */
 const IN_MEMORY_VERSION = '0.0.0-test';
@@ -65,6 +86,12 @@ describe('GatewayRegistryService', () => {
       firstInterviewedAt: new Date(),
       lastInterviewedAt: new Date(),
     });
+
+  /** An interviewed row that declared `coverage`, and that its search narrows by `filterableAxes`. */
+  const coveringRow = (id: string, coverage: StoredCoverage, filterableAxes: CoverageAxis[] = []) => {
+    interviewedRow(id);
+    table.patch(id, { ...coverage, filterableAxes });
+  };
 
   const connectOpts = {
     gatewayId: 'bgg',
@@ -326,18 +353,142 @@ describe('GatewayRegistryService', () => {
 
       await expect(service.routableGatewayIds(Search)).resolves.toEqual([]);
     });
+
+    it('lists, for a filtered search, only those whose coverage overlaps the filter', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
+      coveringRow('igdb', VIDEO_GAMES);
+      coveringRow('unanswered', { coveragePlatformTypes: [], coverageContentTypes: [] });
+
+      for (const id of ['bgg', 'igdb', 'unanswered']) {
+        await service.register(id, makeDriver());
+      }
+
+      await expect(service.routableGatewayIds(Search, { platformTypes: new Set([Tabletop]) })).resolves.toEqual([
+        'bgg',
+      ]);
+      await expect(service.routableGatewayIds(Search, { contentTypes: new Set([ContentType.DLC]) })).resolves.toEqual([
+        'igdb',
+      ]);
+      await expect(service.routableGatewayIds(Search, {})).resolves.toEqual(['bgg', 'igdb', 'unanswered']);
+    });
   });
 
-  describe('isRoutable', () => {
-    it('says by the row whether a DataGateway may serve a capability, without connecting it', async () => {
-      interviewedRow('bgg', [Fetch, Search]);
+  describe('searchRoute', () => {
+    it('reads by the row how a search reaches a DataGateway, without connecting it', async () => {
+      coveringRow('bgg', TABLETOP_GAMES, [CoverageAxis.ContentType]);
+
+      await expect(service.searchRoute('bgg', { platformTypes: new Set([Tabletop]) })).resolves.toEqual({
+        routable: true,
+        covers: true,
+        filterableAxes: [CoverageAxis.ContentType],
+        driver: expect.any(Function),
+      });
+      await expect(service.searchRoute('bgg', { platformTypes: new Set([PlatformType.PC]) })).resolves.toEqual({
+        routable: true,
+        covers: false,
+        filterableAxes: [CoverageAxis.ContentType],
+        driver: expect.any(Function),
+      });
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+
+    it('gives a search that must ask the connected driver, without reading the row again', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
+      const driver = stubFactory(makeDriver());
+      await service.connect(connectOpts);
+      await settle();
+      const route = await service.searchRoute('bgg', {});
+      const reads = jest.spyOn(table.delegate, 'findFirst');
+
+      await expect(route.routable && route.driver()).resolves.toBe(driver);
+      expect(reads).not.toHaveBeenCalled();
+    });
+
+    it('connects a DataGateway this process hasn’t when a search asks for its route’s driver', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
+      const driver = stubFactory(makeDriver());
+      const route = await service.searchRoute('bgg', {});
+
+      await expect(route.routable && route.driver()).resolves.toBe(driver);
+      expect(service.isConnected('bgg')).toBe(true);
+    });
+
+    it('marks a DataGateway that may not search unroutable, whatever its coverage', async () => {
+      coveringRow('switched-off', TABLETOP_GAMES);
+      table.patch('switched-off', { disabledCapabilities: [Search] });
+      table.seed({ id: 'never-interviewed' });
+
+      await expect(service.searchRoute('switched-off', {})).resolves.toEqual({ routable: false });
+      await expect(service.searchRoute('never-interviewed', {})).resolves.toEqual({ routable: false });
+      await expect(service.searchRoute('gone', {})).resolves.toEqual({ routable: false });
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resolveSearch', () => {
+    it('resolves a DataGateway whose coverage overlaps the filter, with the axes its search narrows by', async () => {
+      coveringRow('bgg', TABLETOP_GAMES, [CoverageAxis.ContentType]);
+      const driver = stubFactory(makeDriver());
+
+      await expect(service.resolveSearch('bgg', { contentTypes: new Set([ContentType.Expansion]) })).resolves.toEqual({
+        driver,
+        filterableAxes: [CoverageAxis.ContentType],
+      });
+    });
+
+    it('answers null for one whose coverage doesn’t overlap the filter, without connecting it', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
+
+      await expect(
+        service.resolveSearch('bgg', { platformTypes: new Set([PlatformType.Console]) }),
+      ).resolves.toBeNull();
+      expect(factory.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses a DataGateway that may not search before reading its coverage', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
       table.patch('bgg', { disabledCapabilities: [Search] });
 
-      await expect(service.isRoutable('bgg', Fetch)).resolves.toBe(true);
-      await expect(service.isRoutable('bgg', Search)).resolves.toBe(false);
-      await expect(service.isRoutable('bgg', FetchExpansions)).resolves.toBe(false);
-      await expect(service.isRoutable('gone', Fetch)).resolves.toBe(false);
-      expect(factory.create).not.toHaveBeenCalled();
+      await expect(
+        service.resolveSearch('bgg', { platformTypes: new Set([PlatformType.Console]) }),
+      ).rejects.toMatchObject({ name: GatewayRoutingRefusedError.name, reason: 'switched_off' });
+    });
+
+    it('interviews a DataGateway never interviewed, and reads the coverage it declared', async () => {
+      table.seed({ id: 'bgg' });
+      stubFactory(
+        makeDriver({
+          coverage: {
+            platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP],
+            contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME],
+          },
+        }),
+      );
+
+      await expect(service.resolveSearch('bgg', { platformTypes: new Set([Tabletop]) })).resolves.toMatchObject({
+        filterableAxes: [],
+      });
+      await expect(service.resolveSearch('bgg', { platformTypes: new Set([PlatformType.PC]) })).resolves.toBeNull();
+    });
+  });
+
+  describe('coverageOverlaps', () => {
+    it('overlaps a filter on each axis it names by a value covered there', () => {
+      expect(coverageOverlaps(TABLETOP_GAMES, {})).toBe(true);
+      expect(coverageOverlaps(TABLETOP_GAMES, { platformTypes: new Set([PlatformType.PC, Tabletop]) })).toBe(true);
+      expect(
+        coverageOverlaps(TABLETOP_GAMES, {
+          platformTypes: new Set([Tabletop]),
+          contentTypes: new Set([ContentType.DLC]),
+        }),
+      ).toBe(false);
+    });
+
+    it('covers nothing on an axis whose coverage is empty, or for a filter naming nothing it knows there', () => {
+      const unanswered = { coveragePlatformTypes: [], coverageContentTypes: [ContentType.BaseGame] };
+
+      expect(coverageOverlaps(unanswered, { platformTypes: new Set([Tabletop]) })).toBe(false);
+      expect(coverageOverlaps(TABLETOP_GAMES, { contentTypes: new Set() })).toBe(false);
     });
   });
 

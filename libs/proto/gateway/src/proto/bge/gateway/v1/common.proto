@@ -39,6 +39,19 @@ enum PlatformType {
   PLATFORM_TYPE_TABLETOP = 7;
 }
 
+// What a search is narrowed to. A game matches a list when it has any value
+// the list names, and it matches the filter when it matches every list that
+// names one. An empty list doesn't narrow. A value that's unspecified, or
+// that the reader doesn't know, never matches, so a game whose content type
+// is unspecified matches no list of content types.
+message SearchFilter {
+  // Matched against the platform types of a game's available platforms.
+  repeated PlatformType platform_types = 1;
+
+  // Matched against a game's content type.
+  repeated ContentType content_types = 2;
+}
+
 enum AgeRatingAuthority {
   AGE_RATING_AUTHORITY_UNSPECIFIED = 0;
   AGE_RATING_AUTHORITY_ESRB = 1;
@@ -275,8 +288,8 @@ message GameSearchData {
   optional string base_game_external_id = 10;
   optional string summary = 11;
 
-  // Platform chips — populated by DataGateways that expose platform data.
-  // BGG DataGateways leave this empty; IGDB / Steam DataGateways populate it.
+  // The platforms the game is on. A search filtered by platform type matches
+  // a game by these alone, so a game sent without platforms matches none.
   repeated PlatformData available_platforms = 12;
 
   // Platform-specific releases at search granularity. DataGateways populate

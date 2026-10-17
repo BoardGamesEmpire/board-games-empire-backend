@@ -26,14 +26,12 @@ const CAPABILITIES: ByProtoName<DataGatewayCapability> = {
   [proto.Capability.CAPABILITY_LIST_LANGUAGES]: DataGatewayCapability.ListLanguages,
 };
 
-// The server stores neither portable nor arcade, so portable is stored as
-// console, and arcade as other. Imports and coverage both fold through here.
 const PLATFORM_TYPES: ByProtoName<PlatformType> = {
   [proto.PlatformType.PLATFORM_TYPE_CONSOLE]: PlatformType.Console,
   [proto.PlatformType.PLATFORM_TYPE_PC]: PlatformType.PC,
-  [proto.PlatformType.PLATFORM_TYPE_PORTABLE]: PlatformType.Console,
+  [proto.PlatformType.PLATFORM_TYPE_PORTABLE]: PlatformType.Portable,
   [proto.PlatformType.PLATFORM_TYPE_MOBILE]: PlatformType.Mobile,
-  [proto.PlatformType.PLATFORM_TYPE_ARCADE]: PlatformType.Other,
+  [proto.PlatformType.PLATFORM_TYPE_ARCADE]: PlatformType.Arcade,
   [proto.PlatformType.PLATFORM_TYPE_TABLETOP]: PlatformType.Tabletop,
   [proto.PlatformType.PLATFORM_TYPE_OTHER]: PlatformType.Other,
 };
@@ -89,3 +87,21 @@ export const toStoredLanguageCodeFormat = (value: unknown): LanguageCodeFormat |
   lookup(LANGUAGE_CODE_FORMATS, value);
 
 export const toStoredContentFormat = (value: unknown): ContentFormat | undefined => lookup(CONTENT_FORMATS, value);
+
+/*
+ * The other way: the proto value a stored one is sent as, for a search the
+ * server asks in its own terms. Each map above is one to one, so each stored
+ * value has one proto name at most. ContentType.Unknown has none.
+ */
+
+const byStoredValue = <T extends string, P extends string>(byName: ByProtoName<T>): ReadonlyMap<T, P> =>
+  new Map(Object.entries(byName).map(([name, stored]) => [stored, name as P]));
+
+const PROTO_PLATFORM_TYPES = byStoredValue<PlatformType, proto.PlatformType>(PLATFORM_TYPES);
+
+const PROTO_CONTENT_TYPES = byStoredValue<ContentType, proto.ContentType>(CONTENT_TYPES);
+
+export const toProtoPlatformType = (value: PlatformType): proto.PlatformType | undefined =>
+  PROTO_PLATFORM_TYPES.get(value);
+
+export const toProtoContentType = (value: ContentType): proto.ContentType | undefined => PROTO_CONTENT_TYPES.get(value);

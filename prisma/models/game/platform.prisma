@@ -44,8 +44,10 @@ model PlatformGatewayLink {
 enum PlatformType {
   Tabletop
   Console
+  Portable
   PC
   Mobile
+  Arcade
   Other
 
   @@map("platform_types")

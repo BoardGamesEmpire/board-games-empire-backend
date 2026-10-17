@@ -532,7 +532,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       socket.emit(SearchEvents.SearchStart, frame);
 
       expect(await outcome).toEqual({ errors: [] });
-      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0);
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0, expect.anything());
     });
 
     // #564. The pipe let a null offset through and wrote it over the DTO's
@@ -548,7 +548,7 @@ describe('AuthenticatedGateway (over a real socket)', () => {
       socket.emit(SearchEvents.SearchStart, frame);
 
       expect(await outcome).toEqual({ errors: [] });
-      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0);
+      expect(queryLocalGames).toHaveBeenCalledWith(frame.query, scopeOf(USER_A), 20, 0, expect.anything());
       expect(searchGames).toHaveBeenCalledWith(expect.objectContaining({ offset: 0 }));
     });
 

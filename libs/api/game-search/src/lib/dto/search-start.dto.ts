@@ -1,6 +1,8 @@
+import { PlatformType } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
-import { IsArray, IsBoolean, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsOptional, IsString, IsUUID } from 'class-validator';
+import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
 
 export class SearchStartDto extends CappedOffsetPaginationQueryDto(100, 20) {
   @IsUUID(undefined, { message: i18nValidationMessage('validation.isUUID') })
@@ -16,6 +18,26 @@ export class SearchStartDto extends CappedOffsetPaginationQueryDto(100, 20) {
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
   @IsOptional()
   gatewayIds?: string[];
+
+  /**
+   * Platform types to narrow the search to: only games on a platform of one
+   * of them are found, so a page can come back shorter than the limit. Null,
+   * which validation lets through as it does a missing list, doesn't narrow.
+   */
+  @IsOptional()
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsIn(Object.values(PlatformType), { each: true, message: i18nValidationMessage('validation.each.isIn') })
+  platformTypes?: PlatformType[] | null;
+
+  /**
+   * Content types to narrow the search to: only games of one of them are
+   * found, so a page can come back shorter than the limit. Null doesn't
+   * narrow either.
+   */
+  @IsOptional()
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsIn(SEARCHABLE_CONTENT_TYPES, { each: true, message: i18nValidationMessage('validation.each.isIn') })
+  contentTypes?: SearchableContentType[] | null;
 
   /**
    * Whether to include the local DB in the search.

@@ -22,6 +22,21 @@ export function toContentTypes(thingTypes: readonly BggThingType[]): proto.Conte
   return [...new Set(thingTypes.flatMap((type) => BGG_CONTENT_TYPE_MAP[type] ?? []))];
 }
 
+/**
+ * The BGG thing types among `thingTypes` whose content type is one of
+ * `contentTypes`: what a search narrowed to those content types asks BGG
+ * for. A content type no BGG thing type maps to adds none.
+ */
+export function toThingTypes(
+  contentTypes: readonly proto.ContentType[],
+  thingTypes: readonly BggThingType[],
+): BggThingType[] {
+  return thingTypes.filter((type) => {
+    const contentType = BGG_CONTENT_TYPE_MAP[type];
+    return contentType !== undefined && contentTypes.includes(contentType);
+  });
+}
+
 const COMPLEXITY_WEIGHT_SCALE = 1000;
 
 const TABLETOP_PLATFORM: proto.PlatformData = {

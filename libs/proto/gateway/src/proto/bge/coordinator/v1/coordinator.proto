@@ -19,7 +19,7 @@ service CoordinatorService {
   rpc ConnectGateway(ConnectGatewayRequest) returns (ConnectGatewayResponse);
   rpc DisconnectGateway(DisconnectGatewayRequest) returns (DisconnectGatewayResponse);
 
-  // Fan-out across selected (or all active) gateways. Streams lean
+  // Fan-out across selected gateways (see SearchGamesRequest). Streams lean
   // GameSearchData frames as they arrive. Terminates when all selected
   // gateways have emitted SOURCE_DONE or ERROR.
   rpc SearchGames(SearchGamesRequest) returns (stream SearchGameResult);
@@ -74,13 +74,20 @@ message DisconnectGatewayResponse {
 message SearchGamesRequest {
   string correlation_id = 1;
   string query = 2;
-  // Empty = fan out to all active gateways
+  // The DataGateways to search. Empty = every DataGateway the coordinator has
+  // connected that may search and whose coverage overlaps the filter. One
+  // named here that may not search answers UNAVAILABLE, saying why, and one
+  // whose coverage doesn't overlap the filter answers SOURCE_DONE without
+  // being asked.
   repeated string gateway_ids = 3;
   // e.g. "en", "de", used for locale-specific search optimizations in gateways
   // that support it;
   optional string locale = 4;
   optional int32 limit = 5;
   optional int32 offset = 6;
+  // What to narrow the search to. Every DataGateway's results are narrowed
+  // to games that match, so a page can come back shorter than `limit`.
+  optional bge.gateway.v1.SearchFilter filter = 7;
 }
 
 message SearchGameResult {

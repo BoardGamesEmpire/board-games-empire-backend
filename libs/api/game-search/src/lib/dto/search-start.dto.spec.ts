@@ -56,6 +56,8 @@ describe('SearchStartDto', () => {
         locale: 42,
         limit: 'x',
         offset: 'x',
+        platformTypes: 42,
+        contentTypes: ['Unknown'],
       });
 
       expect(validationCatalogKeys(await validate(dto))).toEqual({
@@ -63,6 +65,9 @@ describe('SearchStartDto', () => {
         'query.isString': 'validation.isString',
         'gatewayIds.isArray': 'validation.isArray',
         'gatewayIds.isString': 'validation.each.isString',
+        'platformTypes.isArray': 'validation.isArray',
+        'platformTypes.isIn': 'validation.each.isIn',
+        'contentTypes.isIn': 'validation.each.isIn',
         'includeLocal.isBoolean': 'validation.isBoolean',
         'includeExternal.isBoolean': 'validation.isBoolean',
         'locale.isString': 'validation.isString',

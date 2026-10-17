@@ -1,5 +1,13 @@
-import { DataGatewayCapability } from '@bge/database';
-import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import { ContentType, CoverageAxis, DataGatewayCapability, PlatformType } from '@bge/database';
+import {
+  coverageOverlaps,
+  GatewayRegistryService,
+  GatewayRoutingRefusedError,
+  type CoverageFilter,
+  type SearchResolution,
+  type SearchRoute,
+  type StoredCoverage,
+} from '@bge/gateway-registry';
 import { createTestingModuleWithDb, type CacheMock, type MockDatabaseService } from '@bge/testing';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver } from '@boardgamesempire/gateway-driver-contract-testing';
@@ -30,6 +38,30 @@ const catan = searchHit('13', 'Catan');
 const brass = searchHit('224517', 'Brass: Birmingham');
 const halo = searchHit('740', 'Halo: Combat Evolved');
 
+const { PLATFORM_TYPE_TABLETOP: TABLETOP, PLATFORM_TYPE_PC: PC } = proto.PlatformType;
+const { CONTENT_TYPE_BASE_GAME: BASE_GAME, CONTENT_TYPE_EXPANSION: EXPANSION } = proto.ContentType;
+
+/** A search hit on a single platform of `platformType`. */
+const hitOn = (
+  externalId: string,
+  contentType: proto.ContentType,
+  platformType: proto.PlatformType,
+): proto.GameSearchData => ({
+  ...searchHit(externalId, externalId),
+  contentType,
+  availablePlatforms: [{ externalId: platformType, name: platformType, platformType }],
+});
+
+const tabletopCatan = hitOn('catan', BASE_GAME, TABLETOP);
+const seafarers = hitOn('seafarers', EXPANSION, TABLETOP);
+const catanOnPc = hitOn('catan-pc', BASE_GAME, PC);
+
+/** A hit whose content type its DataGateway couldn't tell, on no platform it named. */
+const unclassified: proto.GameSearchData = {
+  ...searchHit('unclassified', 'Unclassified'),
+  contentType: proto.ContentType.CONTENT_TYPE_UNSPECIFIED,
+};
+
 interface ScriptedStreams {
   searchGames?: proto.GatewaySearchResult[];
   fetchExpansions?: proto.GatewaySearchResult[];
@@ -44,32 +76,96 @@ const scriptedDriver = ({ searchGames = [], fetchExpansions = [] }: ScriptedStre
 
 const EVERY_CAPABILITY = Object.values(DataGatewayCapability);
 
+/** Covers every kind of game, so a filter never skips it. */
+const EVERYTHING: StoredCoverage = {
+  coveragePlatformTypes: Object.values(PlatformType),
+  coverageContentTypes: Object.values(ContentType),
+};
+
+const TABLETOP_GAMES: StoredCoverage = {
+  coveragePlatformTypes: [PlatformType.Tabletop],
+  coverageContentTypes: [ContentType.BaseGame, ContentType.Expansion],
+};
+
+const VIDEO_GAMES: StoredCoverage = {
+  coveragePlatformTypes: [PlatformType.Console, PlatformType.PC],
+  coverageContentTypes: [ContentType.BaseGame, ContentType.DLC],
+};
+
+interface Registration {
+  driver: DataGatewayDriver;
+  capabilities: DataGatewayCapability[];
+  coverage: StoredCoverage;
+  filterableAxes: CoverageAxis[];
+}
+
 /**
  * Stands in for GatewayRegistryService with the calls the service makes,
- * typed against the real ones so the two cannot drift apart. Like the real
- * gateway registry, `resolve` rejects for a DataGateway it cannot produce a
- * driver for, and refuses a capability the DataGateway may not serve; only
- * registered DataGateways count as connected.
+ * typed against the real ones so the two cannot drift apart, and judging
+ * coverage by the real rule. Like the real gateway registry, `resolve` and
+ * `resolveSearch` reject for a DataGateway it cannot produce a driver for,
+ * and refuse a capability the DataGateway may not serve before reading its
+ * coverage; only registered DataGateways count as connected. `resolved`
+ * lists each DataGateway whose driver was taken, however it was.
  */
-class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'routableGatewayIds' | 'isRoutable'> {
+class FakeRegistry implements Pick<
+  GatewayRegistryService,
+  'resolve' | 'resolveSearch' | 'routableGatewayIds' | 'searchRoute'
+> {
   readonly resolved: string[] = [];
-  private readonly drivers = new Map<string, { driver: DataGatewayDriver; capabilities: DataGatewayCapability[] }>();
+  private readonly drivers = new Map<string, Registration>();
 
-  /** Connects a DataGateway that may serve `capabilities`, every one unless given. */
-  register(gatewayId: string, driver: DataGatewayDriver, capabilities = EVERY_CAPABILITY): this {
-    this.drivers.set(gatewayId, { driver, capabilities });
+  /**
+   * Connects a DataGateway that may serve `capabilities`, every one unless
+   * given, and that covers every kind of game and narrows by no axis, unless
+   * its answers say otherwise.
+   */
+  register(
+    gatewayId: string,
+    driver: DataGatewayDriver,
+    capabilities = EVERY_CAPABILITY,
+    answers: Partial<Pick<Registration, 'coverage' | 'filterableAxes'>> = {},
+  ): this {
+    this.drivers.set(gatewayId, { driver, capabilities, coverage: EVERYTHING, filterableAxes: [], ...answers });
     return this;
   }
 
-  async routableGatewayIds(capability: DataGatewayCapability): Promise<string[]> {
-    return [...this.drivers].filter(([, { capabilities }]) => capabilities.includes(capability)).map(([id]) => id);
+  async routableGatewayIds(capability: DataGatewayCapability, filter: CoverageFilter = {}): Promise<string[]> {
+    return [...this.drivers]
+      .filter(
+        ([, { capabilities, coverage }]) => capabilities.includes(capability) && coverageOverlaps(coverage, filter),
+      )
+      .map(([id]) => id);
   }
 
-  async isRoutable(gatewayId: string, capability: DataGatewayCapability): Promise<boolean> {
-    return this.drivers.get(gatewayId)?.capabilities.includes(capability) ?? false;
+  async searchRoute(gatewayId: string, filter: CoverageFilter): Promise<SearchRoute> {
+    const connected = this.drivers.get(gatewayId);
+    if (!connected?.capabilities.includes(DataGatewayCapability.Search)) {
+      return { routable: false };
+    }
+
+    return {
+      routable: true,
+      covers: coverageOverlaps(connected.coverage, filter),
+      filterableAxes: connected.filterableAxes,
+      driver: async () => {
+        this.resolved.push(gatewayId);
+        return connected.driver;
+      },
+    };
   }
 
   async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
+    return this.routed(gatewayId, capability).driver;
+  }
+
+  async resolveSearch(gatewayId: string, filter: CoverageFilter): Promise<SearchResolution | null> {
+    const { driver, coverage, filterableAxes } = this.routed(gatewayId, DataGatewayCapability.Search);
+
+    return coverageOverlaps(coverage, filter) ? { driver, filterableAxes } : null;
+  }
+
+  private routed(gatewayId: string, capability: DataGatewayCapability): Registration {
     this.resolved.push(gatewayId);
 
     const connected = this.drivers.get(gatewayId);
@@ -81,7 +177,7 @@ class FakeRegistry implements Pick<GatewayRegistryService, 'resolve' | 'routable
       throw new GatewayRoutingRefusedError(gatewayId, 'not_declared', capability);
     }
 
-    return connected.driver;
+    return connected;
   }
 }
 
@@ -235,6 +331,35 @@ describe('GatewayGameSearchService', () => {
       expect(frames).toContainEqual(expect.objectContaining({ gatewayId: 'bgg', status: SOURCE_DONE }));
     });
 
+    it('searches live when its route can’t be read, and answers UNAVAILABLE without the database’s error when that fails too', async () => {
+      const outage = new Error("Can't reach database server at db:5432");
+      registry
+        .register('bgg', new InMemoryGatewayDriver({ searchResults: [catan] }))
+        .register('igdb', new InMemoryGatewayDriver({ searchResults: [halo] }));
+      jest.spyOn(registry, 'searchRoute').mockRejectedValue(outage);
+      jest.spyOn(registry, 'resolveSearch').mockImplementation(async (gatewayId, filter) => {
+        if (gatewayId === 'igdb') {
+          throw outage;
+        }
+        return FakeRegistry.prototype.resolveSearch.call(registry, gatewayId, filter);
+      });
+
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['bgg', 'igdb'] })));
+
+      expect(frames.filter((frame) => frame.gatewayId === 'bgg')).toEqual([
+        expect.objectContaining({ status: RESULT, game: catan }),
+        { correlationId: 'corr-1', gatewayId: 'bgg', status: SOURCE_DONE },
+      ]);
+      expect(frames.filter((frame) => frame.gatewayId === 'igdb')).toEqual([
+        {
+          correlationId: 'corr-1',
+          gatewayId: 'igdb',
+          status: UNAVAILABLE,
+          message: 'DataGateway igdb is not connected',
+        },
+      ]);
+    });
+
     it('reports a gateway whose stream fails as ERROR with the failure, distinct from unreachable', async () => {
       const failing = new InMemoryGatewayDriver({ searchResults: [catan] });
       failing.failWith(new Error('upstream exploded'));
@@ -348,6 +473,117 @@ describe('GatewayGameSearchService', () => {
     });
   });
 
+  describe('searchGames filter', () => {
+    const tabletopOnly: proto.SearchFilter = { platformTypes: [TABLETOP], contentTypes: [] };
+
+    /** The searches a driver was sent. */
+    const sentTo = (driver: InMemoryGatewayDriver) => jest.spyOn(driver, 'searchGames');
+
+    const games = (frames: proto.SearchGameResult[]) => frames.flatMap((frame) => (frame.game ? [frame.game] : []));
+
+    it('leaves a DataGateway whose coverage doesn’t overlap the filter out of an untargeted search', async () => {
+      registry
+        .register('bgg', new InMemoryGatewayDriver({ searchResults: [tabletopCatan] }), EVERY_CAPABILITY, {
+          coverage: TABLETOP_GAMES,
+        })
+        .register('igdb', new InMemoryGatewayDriver({ searchResults: [catanOnPc] }), EVERY_CAPABILITY, {
+          coverage: VIDEO_GAMES,
+        });
+
+      const frames = await collect(service.searchGames(searchRequest({ filter: tabletopOnly })));
+
+      expect(registry.resolved).toEqual(['bgg']);
+      expect(new Set(frames.map((frame) => frame.gatewayId))).toEqual(new Set(['bgg']));
+    });
+
+    it('answers a named DataGateway whose coverage doesn’t overlap the filter with SOURCE_DONE alone, without asking it', async () => {
+      const igdb = new InMemoryGatewayDriver({ searchResults: [catanOnPc] });
+      registry.register('igdb', igdb, EVERY_CAPABILITY, { coverage: VIDEO_GAMES });
+      const searched = sentTo(igdb);
+
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['igdb'], filter: tabletopOnly })));
+
+      expect(frames).toEqual([{ correlationId: 'corr-1', gatewayId: 'igdb', status: SOURCE_DONE }]);
+      expect(searched).not.toHaveBeenCalled();
+    });
+
+    it('answers a named DataGateway that may not search as UNAVAILABLE, saying why, whatever its coverage', async () => {
+      registry.register('igdb', new InMemoryGatewayDriver(), [DataGatewayCapability.Fetch], { coverage: VIDEO_GAMES });
+
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['igdb'], filter: tabletopOnly })));
+
+      expect(frames).toEqual([
+        {
+          correlationId: 'corr-1',
+          gatewayId: 'igdb',
+          status: UNAVAILABLE,
+          message: `DataGateway igdb doesn't declare Search`,
+        },
+      ]);
+    });
+
+    it('sends a DataGateway the filter on the axes its search narrows by alone, each value once', async () => {
+      const bgg = new InMemoryGatewayDriver({ searchResults: [tabletopCatan] });
+      registry.register('bgg', bgg, EVERY_CAPABILITY, {
+        coverage: TABLETOP_GAMES,
+        filterableAxes: [CoverageAxis.ContentType],
+      });
+      const searched = sentTo(bgg);
+
+      await collect(
+        service.searchGames(
+          searchRequest({ filter: { platformTypes: [TABLETOP], contentTypes: [EXPANSION, BASE_GAME, EXPANSION] } }),
+        ),
+      );
+
+      expect(searched).toHaveBeenCalledWith(
+        expect.objectContaining({ filter: { platformTypes: [], contentTypes: [BASE_GAME, EXPANSION] } }),
+      );
+    });
+
+    it('sends no filter to a DataGateway whose search narrows by none of the filter’s axes', async () => {
+      const bgg = new InMemoryGatewayDriver({ searchResults: [tabletopCatan] });
+      registry.register('bgg', bgg, EVERY_CAPABILITY, {
+        coverage: TABLETOP_GAMES,
+        filterableAxes: [CoverageAxis.ContentType],
+      });
+      const searched = sentTo(bgg);
+
+      await collect(service.searchGames(searchRequest({ filter: tabletopOnly })));
+
+      expect(searched.mock.calls[0]?.[0]).not.toHaveProperty('filter');
+    });
+
+    it('removes every result the filter excludes, however the DataGateway narrowed', async () => {
+      // It declares content type but ignores the filter, as a loose upstream might.
+      registry.register(
+        'loose',
+        new InMemoryGatewayDriver({ searchResults: [tabletopCatan, seafarers, catanOnPc, unclassified] }),
+        EVERY_CAPABILITY,
+        { filterableAxes: [CoverageAxis.ContentType] },
+      );
+
+      const frames = await collect(
+        service.searchGames(searchRequest({ filter: { platformTypes: [TABLETOP], contentTypes: [BASE_GAME] } })),
+      );
+
+      expect(games(frames)).toEqual([tabletopCatan]);
+      expect(frames.at(-1)).toEqual({ correlationId: 'corr-1', gatewayId: 'loose', status: SOURCE_DONE });
+    });
+
+    it('never matches a value the DataGateway left unknown, nor a game sent without platforms', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [tabletopCatan, unclassified] }));
+
+      const byContent = await collect(
+        service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [BASE_GAME] } })),
+      );
+      const byPlatform = await collect(service.searchGames(searchRequest({ filter: tabletopOnly })));
+
+      expect(games(byContent)).toEqual([tabletopCatan]);
+      expect(games(byPlatform)).toEqual([tabletopCatan]);
+    });
+  });
+
   describe('searchGames cache', () => {
     beforeEach(() => {
       registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [catan, brass] }));
@@ -400,6 +636,41 @@ describe('GatewayGameSearchService', () => {
       expect(replay).toContainEqual(expect.objectContaining({ game: catan, inSystem: true, gameId: 'game-catan' }));
     });
 
+    it('caches what the DataGateway answered and filters it again on replay, so searches it would answer alike share the entry', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [tabletopCatan, seafarers] }));
+
+      const live = await collect(
+        service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [BASE_GAME] } })),
+      );
+      registry.resolved.length = 0;
+      const replay = await collect(
+        service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [EXPANSION] } })),
+      );
+
+      expect(registry.resolved).toEqual([]);
+      expect(live.filter((frame) => frame.status === RESULT)).toEqual([
+        expect.objectContaining({ game: tabletopCatan }),
+      ]);
+      expect(replay).toEqual([
+        expect.objectContaining({ status: RESULT, game: seafarers }),
+        { correlationId: 'corr-1', gatewayId: 'bgg', status: SOURCE_DONE },
+      ]);
+    });
+
+    it('asks a DataGateway again for a filter it narrows by that differs from the one it was asked', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [tabletopCatan, seafarers] }), undefined, {
+        filterableAxes: [CoverageAxis.ContentType],
+      });
+
+      await collect(service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [BASE_GAME] } })));
+      await collect(service.searchGames(searchRequest({ filter: { platformTypes: [], contentTypes: [EXPANSION] } })));
+      await collect(
+        service.searchGames(searchRequest({ filter: { platformTypes: [TABLETOP], contentTypes: [EXPANSION] } })),
+      );
+
+      expect(registry.resolved).toEqual(['bgg', 'bgg']);
+    });
+
     it('does not serve one query from another query’s cached results', async () => {
       await collect(service.searchGames(searchRequest({ query: 'catan' })));
       registry.resolved.length = 0;
@@ -443,6 +714,31 @@ describe('GatewayGameSearchService', () => {
           status: ERROR,
           message: 'connection pool exhausted',
         },
+      ]);
+    });
+
+    it('asks a DataGateway its cache misses through the route it read, without resolving it again', async () => {
+      const resolveSearch = jest.spyOn(registry, 'resolveSearch');
+
+      const frames = await collect(service.searchGames(searchRequest()));
+
+      expect(resolveSearch).not.toHaveBeenCalled();
+      expect(registry.resolved).toEqual(['bgg']);
+      expect(frames.filter((frame) => frame.status === RESULT)).toHaveLength(2);
+    });
+
+    it('answers UNAVAILABLE when a DataGateway its cache misses can’t be connected', async () => {
+      jest.spyOn(registry, 'searchRoute').mockResolvedValue({
+        routable: true,
+        covers: true,
+        filterableAxes: [],
+        driver: () => Promise.reject(new Error('connect ECONNREFUSED 10.0.0.7:50051')),
+      });
+
+      const frames = await collect(service.searchGames(searchRequest({ gatewayIds: ['bgg'] })));
+
+      expect(frames).toEqual([
+        { correlationId: 'corr-1', gatewayId: 'bgg', status: UNAVAILABLE, message: 'DataGateway bgg is not connected' },
       ]);
     });
 

@@ -1,6 +1,7 @@
-import { PlatformType, Region } from '../constants';
+import * as proto from '@boardgamesempire/proto-gateway';
+import { GameType, PlatformType, Region } from '../constants';
 import type { IgdbGame } from '../types';
-import { toGameData } from './game.mapper';
+import { toGameData, toSearchNarrowing } from './game.mapper';
 
 // The proto GameReleaseData.release_date field is contractually an ISO 8601 date
 // string ("2007-09-25"). Assert shape rather than an exact value so the tests
@@ -81,6 +82,57 @@ describe('game.mapper', () => {
       expect(release.releaseDate).toMatch(ISO_DATE);
       const europe = release.localizations.find((l) => l.region?.regionCode === 'eu');
       expect(europe?.releaseDate).toBeUndefined();
+    });
+  });
+
+  describe('toSearchNarrowing', () => {
+    const filter = (overrides: Partial<proto.SearchFilter>): proto.SearchFilter => ({
+      platformTypes: [],
+      contentTypes: [],
+      ...overrides,
+    });
+
+    it('narrows nothing for a search without a filter, or with empty lists', () => {
+      expect(toSearchNarrowing(undefined)).toEqual({});
+      expect(toSearchNarrowing(filter({}))).toEqual({});
+    });
+
+    it('asks for every game type a content type maps from', () => {
+      expect(toSearchNarrowing(filter({ contentTypes: [proto.ContentType.CONTENT_TYPE_BASE_GAME] }))).toEqual({
+        gameTypes: [GameType.MainGame, GameType.Fork],
+      });
+      expect(toSearchNarrowing(filter({ contentTypes: [proto.ContentType.CONTENT_TYPE_DLC] }))).toEqual({
+        gameTypes: [GameType.DLC, GameType.Episode, GameType.PackAddon],
+      });
+    });
+
+    it('asks for the platform types each platform type maps from, operating systems and computers for mobile', () => {
+      expect(
+        toSearchNarrowing(
+          filter({
+            platformTypes: [proto.PlatformType.PLATFORM_TYPE_PORTABLE, proto.PlatformType.PLATFORM_TYPE_CONSOLE],
+          }),
+        ),
+      ).toEqual({ platformTypes: [PlatformType.Console, PlatformType.PortableConsole] });
+      expect(toSearchNarrowing(filter({ platformTypes: [proto.PlatformType.PLATFORM_TYPE_MOBILE] }))).toEqual({
+        platformTypes: [PlatformType.OperatingSystem, PlatformType.Computer],
+      });
+    });
+
+    it('leaves platform types unnarrowed when the filter names other, which stands for types IGDB can’t be asked for', () => {
+      expect(
+        toSearchNarrowing(
+          filter({
+            platformTypes: [proto.PlatformType.PLATFORM_TYPE_OTHER, proto.PlatformType.PLATFORM_TYPE_PC],
+            contentTypes: [proto.ContentType.CONTENT_TYPE_MOD],
+          }),
+        ),
+      ).toEqual({ gameTypes: [GameType.Mod] });
+    });
+
+    it('answers null when an axis names nothing IGDB has, so IGDB isn’t asked', () => {
+      expect(toSearchNarrowing(filter({ platformTypes: [proto.PlatformType.PLATFORM_TYPE_TABLETOP] }))).toBeNull();
+      expect(toSearchNarrowing(filter({ contentTypes: [proto.ContentType.CONTENT_TYPE_ACCESSORY] }))).toBeNull();
     });
   });
 });
