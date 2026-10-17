@@ -16,6 +16,7 @@ import {
   apiEnvOverrides,
   decideProvisioning,
   E2E_BASE_URL_VAR,
+  E2E_DATABASE_CONTAINER_ADDRESS_VAR,
   parseRedisUrl,
   POSTGRES_IMAGE,
   REDIS_IMAGE,
@@ -28,6 +29,9 @@ import { sweepThrottleBuckets } from './redis-reset';
 
 /** The deployable artifact under test — built by the e2e target's `api:build` dependency. */
 const API_BUNDLE = path.join(WORKSPACE_ROOT, 'apps', 'api', 'dist', 'main.js');
+
+/** The port Postgres listens on inside its container; the testcontainers module does not export it. */
+const POSTGRES_PORT = 5432;
 
 const READINESS_TIMEOUT_MS = 90_000;
 const READINESS_POLL_MS = 250;
@@ -116,8 +120,9 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *  1. Postgres and Redis testcontainers (or the `BGE_E2E_*` escape-hatch
  *     endpoints — treated as DISPOSABLE: they are migrated, seeded, and
  *     swept exactly like a container).
- *  2. `process.env` overrides for `DATABASE_URL`, `DATABASE_MIGRATION_URL`
- *     and all three Redis connection prefixes. Jest spawns its workers AFTER globalSetup
+ *  2. `process.env` overrides for `DATABASE_URL`, `DATABASE_MIGRATION_URL`,
+ *     the address other containers reach the Postgres container at, and all
+ *     three Redis connection prefixes. Jest spawns its workers AFTER globalSetup
  *     resolves, so the workers inherit these values; the API child process
  *     receives them explicitly. `.env` (gitignored, developer-owned) is
  *     never written, and dotenv semantics mean it never overrides an
@@ -149,6 +154,9 @@ export default async function globalSetup(): Promise<void> {
       console.log(`[e2e] starting ${POSTGRES_IMAGE} (testcontainers)...`);
       postgres = await new PostgreSqlContainer(POSTGRES_IMAGE).start();
       databaseUrl = postgres.getConnectionUri();
+      // Container to container, over the network both join by default.
+      process.env[E2E_DATABASE_CONTAINER_ADDRESS_VAR] =
+        `${postgres.getIpAddress(postgres.getNetworkNames()[0])}:${POSTGRES_PORT}`;
     } else {
       databaseUrl = decision.database.url;
       console.warn(

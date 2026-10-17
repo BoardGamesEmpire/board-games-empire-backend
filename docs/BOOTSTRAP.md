@@ -4,7 +4,7 @@ Every Postgres-connected process (`api`, `worker`, `gateway-coordinator`, `gatew
 
 ## What happens at boot
 
-1. Take the advisory lock `bge:bootstrap` (a Postgres session lock on a dedicated connection). Concurrent boots serialise here; a waiting process logs who holds the lock every few seconds.
+1. Take the advisory lock `bge:bootstrap`: a Postgres transaction lock, held in a transaction its own connection keeps open until the sequence ends. Concurrent boots serialise here; a waiting process logs who holds the lock every few seconds.
 2. Read `_prisma_migrations` and compare it with the migration list this build was generated from.
 3. Act on what was found:
 
@@ -28,7 +28,7 @@ Only the schema step needs DDL; the lock, the reads of `_prisma_migrations`, the
 `DATABASE_MIGRATION_URL` is optional, and set for the api only. Empty counts as unset.
 
 - **The Prisma CLI follows the same rule.** `prisma.config.ts` uses `DATABASE_MIGRATION_URL` when it is set and `DATABASE_URL` otherwise, so a `prisma migrate resolve` run by hand after a refused boot reaches the same database, as the same database role. Set the variable in the shell you run it from.
-- **It must be a direct connection or session pooling.** Prisma Migrate needs one session for its whole run, and transaction pooling does not keep one: Prisma's documentation sends migrations to a direct connection, since through a transaction pooler they fail on locks and session state.
+- **It must be a direct connection or session pooling.** Prisma Migrate needs one session for its whole run, and transaction pooling does not keep one: Prisma's documentation sends migrations to a direct connection, since through a transaction pooler they fail on locks and session state. With `DATABASE_URL` through a transaction pooler, this variable is therefore required ("The database connection", below).
 - **The boot summary names it.** When migrations were applied, `Bootstrap complete` carries `migrationCredential`: the variable the URL came from, and its user and host, never its password. The host tells whether the migrations reached Postgres directly.
 - **Other processes warn.** A process that applies no migrations (the worker, the coordinator, a gateway worker) logs a warning when it is given `DATABASE_MIGRATION_URL`, and boots. Remove the variable from its configuration.
 
@@ -78,12 +78,16 @@ ALTER DEFAULT PRIVILEGES FOR ROLE bge_migrator IN SCHEMA public
 
 ## The database connection
 
-The lock is a Postgres session lock: it belongs to the server connection that took it. Every role takes it on its own `DATABASE_URL`, so for every role that URL must be a direct connection or a pool in session mode. Through a pooler in transaction mode (PgBouncer's `pool_mode = transaction`, a common default in per-application pooler templates), a client's statements are not pinned to one server connection, PgBouncer does not support session locks, and a boot goes wrong in one of two ways (#596):
+`DATABASE_URL` may be a direct connection or go through a connection pooler in any pooling mode, for every process role: transaction pooling (PgBouncer's `pool_mode = transaction`, the default of many per-application pooler templates) included. The bootstrap lock is a transaction lock, and a pooler keeps a server connection with its client for as long as the client's transaction is open (#596). A waiting process holds a server connection only while it tries for the lock, and sets its `lock_timeout` for that attempt's transaction alone, so nothing it set stays behind on a server connection the pooler hands to another client.
 
-- It lands on the server connection that already holds the lock and takes it again, since a session may hold one lock more than once. Its migrations and seeds then run beside another boot's instead of after them.
-- It lands on another connection and waits on a lock whose release was sent to a different connection, where it did nothing (`pg_advisory_unlock` returns false). It waits until its ten-minute budget runs out, and the boot fails.
+The migrations cannot go through transaction pooling. The migration credential, `DATABASE_MIGRATION_URL` or `DATABASE_URL` when it is unset, must be a direct connection or session pooling, because Prisma Migrate needs one session for its whole run. So when `DATABASE_URL` goes through a transaction pooler, give the api `DATABASE_MIGRATION_URL` with a direct connection ("The migration credential", above). Without it, `prisma migrate deploy` goes through the pooler, and what happens depends on which server connections its statements land on. Prisma's documentation reports errors on its locks, its session state and its prepared statements; the api then refuses its boot with that output. A run that fails partway can leave a migration started and not finished, which the next boot refuses. A quiet pooler may let a run through, so one success proves nothing.
 
-The migration credential does not change this: it covers only the migrations, while every process role still takes the lock on `DATABASE_URL`. It must itself be a direct connection or session pooling ("The migration credential", above).
+Through a connection pooler, two settings matter:
+
+- **How many server connections it has.** The lock's transaction keeps one for the whole boot, and a waiting process uses one while it tries for the lock, for up to five seconds at a time. Give the pooler more server connections than the processes that boot at once, so the holder's own queries find one free. An attempt the pooler queues for want of a server connection is given up a second after its `lock_timeout` would have ended it, and tried again on a new connection. A boot that waits out its ten minutes this way is refused, saying the database did not answer, as when a pooler has no server connection free.
+- **Timeouts on idle transactions.** While the sequence works, the lock's transaction sits idle, for minutes on a first boot. Postgres's `idle_in_transaction_session_timeout` and PgBouncer's `idle_transaction_timeout` (both off by default) end such a transaction, and the lock with it. The boot then goes on, possibly beside another, and is refused when it comes to release the lock. Leave both off, Postgres's at least for the database role in `DATABASE_URL`, or set them longer than a first boot takes.
+
+A process that dies while it holds the lock loses it with its connection: Postgres ends the transaction, and a pooler closes a server connection whose client left mid-transaction.
 
 ## Forward only
 
