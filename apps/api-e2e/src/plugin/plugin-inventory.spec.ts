@@ -218,7 +218,7 @@ describe('installed-plugin inventory (#354)', () => {
       { name: 'GET /plugins/:slug/features', path: (slug) => `/api/plugins/${slug}/features` },
     ];
 
-    const statuses = async (actor: SessionActor, slug: string): Promise<Record<string, number>> => {
+    const statuses = async (actor: Caller, slug: string): Promise<Record<string, number>> => {
       const answered: Record<string, number> = {};
 
       for (const route of SERVER_READS) {
@@ -242,18 +242,38 @@ describe('installed-plugin inventory (#354)', () => {
       );
     });
 
+    // Nothing is staged, so the pending read is the service's 409.
+    const PASSED = {
+      'GET /plugins': 200,
+      'GET /plugins/:slug': 200,
+      'GET /plugins/:slug/consent': 200,
+      'GET /plugins/:slug/update/pending': 409,
+      'GET /plugins/:slug/features': 200,
+    };
+
     it('lets Admin through on all five', async () => {
       const admin = await actors.admin();
       const plugin = await arrangePlugin();
 
-      // Nothing is staged, so the pending read is the service's 409.
-      await expect(statuses(admin, plugin.slug)).resolves.toEqual({
-        'GET /plugins': 200,
-        'GET /plugins/:slug': 200,
-        'GET /plugins/:slug/consent': 200,
-        'GET /plugins/:slug/update/pending': 409,
-        'GET /plugins/:slug/features': 200,
-      });
+      await expect(statuses(admin, plugin.slug)).resolves.toEqual(PASSED);
+    });
+
+    // An API key is held to its grant's field list as a user is. Without that,
+    // a staff member's key holding only the grant every user holds passed on
+    // its owner's say, and read what the grant leaves out.
+    it("answers 403 to an Admin's key that holds only the grant every user holds", async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangePlugin();
+      const keyFor = (slug: string) =>
+        mintApiKey(baseUrl, db.client, admin, { slugs: [slug], resourceType: ResourceType.Plugin });
+
+      // The control: a key on the unfielded grant passes, so the refusals below
+      // are the field list's and not every key's.
+      await expect(statuses(await keyFor('read:plugin'), plugin.slug)).resolves.toEqual(PASSED);
+
+      await expect(statuses(await keyFor('read:plugin:installed'), plugin.slug)).resolves.toEqual(
+        Object.fromEntries(SERVER_READS.map((route) => [route.name, 403])),
+      );
     });
   });
 

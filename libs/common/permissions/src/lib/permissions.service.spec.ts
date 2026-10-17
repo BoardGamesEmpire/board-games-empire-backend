@@ -65,7 +65,7 @@ describe('PermissionsService', () => {
             scopes: expect.objectContaining({
               // A scope over a retired catalog row confers nothing (#235).
               where: { permission: { retiredAt: null } },
-              include: { permission: { select: { action: true, subject: true, inverted: true } } },
+              include: { permission: { select: { action: true, subject: true, inverted: true, fields: true } } },
             }),
           }),
         }),

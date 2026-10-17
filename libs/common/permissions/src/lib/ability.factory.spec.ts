@@ -135,6 +135,58 @@ describe('AbilityFactory', () => {
         expect(ability.cannot(Action.delete, 'Household')).toBe(true);
       });
     });
+
+    // A key's rule is held to its grant's field list, as a user's is, so a
+    // check that names a field sees the slug's reach and not only the owner's.
+    describe("a grant's field list", () => {
+      it('holds an allow rule to the fields its grant names', () => {
+        const ability = factory.createForApiKey(
+          makeApiKey([makeScope(Action.read, 'Plugin', null, false, ['id', 'slug'])]),
+        );
+
+        expect(ability.can(Action.read, 'Plugin')).toBe(true);
+        expect(ability.can(Action.read, 'Plugin', 'slug')).toBe(true);
+        expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(false);
+      });
+
+      it('keeps the pin beside the field list', () => {
+        const ability = factory.createForApiKey(
+          makeApiKey([makeScope(Action.read, 'Plugin', 'plugin-1', false, ['slug'])]),
+        );
+
+        expect(ability.rules[0]).toMatchObject({ fields: ['slug'], conditions: { id: 'plugin-1' } });
+        expect(ability.can(Action.read, subject('Plugin', { id: 'plugin-1' }), 'slug')).toBe(true);
+        expect(ability.can(Action.read, subject('Plugin', { id: 'plugin-2' }), 'slug')).toBe(false);
+      });
+
+      it('reads an empty field list as every field', () => {
+        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Plugin', null, false, [])]));
+
+        expect(ability.rules[0].fields).toBeUndefined();
+        expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(true);
+      });
+
+      // CASL skips a field-bound denial on any check that names no field, and
+      // almost none does, so bound to its fields the denial would stop denying.
+      it('keeps a denial whole, whatever fields its grant names', () => {
+        const ability = factory.createForApiKey(
+          makeApiKey([
+            makeScope(Action.update, 'Household'),
+            makeScope(Action.update, 'Household', null, true, ['name']),
+          ]),
+        );
+
+        expect(ability.rules[1].fields).toBeUndefined();
+        expect(ability.can(Action.update, 'Household')).toBe(false);
+      });
+
+      // A graph cached before the loader selected `fields` has none.
+      it('reads a permission without a field list as every field', () => {
+        const ability = factory.createForApiKey(makeApiKey([makeScope(Action.read, 'Plugin', null, false, undefined)]));
+
+        expect(ability.can(Action.read, 'Plugin', 'installedAt')).toBe(true);
+      });
+    });
   });
 
   describe('createForSystem', () => {
@@ -1862,8 +1914,9 @@ function makePermissionStub(
   action: Action,
   subject: string,
   inverted = false,
+  fields?: string[],
 ): ApiKeyScopeWithPermission['permission'] {
-  return { action, subject, inverted };
+  return { action, subject, inverted, fields };
 }
 
 function makeScope(
@@ -1871,6 +1924,7 @@ function makeScope(
   subject: string,
   resourceId: string | null = null,
   inverted = false,
+  fields: string[] | undefined = [],
 ): ApiKeyScopeWithPermission {
   return {
     id: `scope-${Math.random()}`,
@@ -1879,7 +1933,7 @@ function makeScope(
     resourceType: subject as ApiKeyScopeWithPermission['resourceType'], // ResourceType enum value when real
     resourceId,
     createdAt: new Date(),
-    permission: makePermissionStub(action, subject, inverted),
+    permission: makePermissionStub(action, subject, inverted, fields),
   };
 }
 

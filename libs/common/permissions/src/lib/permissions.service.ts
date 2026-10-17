@@ -222,8 +222,8 @@ export class PermissionsService {
   }
 
   /**
-   * Loads an API key with its scopes and each scope's permission triple
-   * (action/subject/inverted) — the shape `AbilityFactory.createForApiKey`
+   * Loads an API key with its scopes and each scope's permission
+   * (action/subject/inverted/fields) — the shape `AbilityFactory.createForApiKey`
    * consumes. The actor only carries the key id, so the scope graph must be
    * resolved here.
    *
@@ -657,7 +657,7 @@ export class PermissionsService {
           where: { permission: { retiredAt: null } },
           include: {
             permission: {
-              select: { action: true, subject: true, inverted: true },
+              select: { action: true, subject: true, inverted: true, fields: true },
             },
           },
         },

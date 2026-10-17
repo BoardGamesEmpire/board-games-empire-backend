@@ -12,12 +12,12 @@ import type { AppAbility } from '@bge/permissions';
  * grant is limited to the identity columns, so asking about a column it leaves
  * out is what tells it apart. `installedAt` is one: only the server reads
  * serve it. `read:plugin` and staff's wildcard carry no field list and pass,
- * and so does an API key's rule pinned to one plugin's id.
+ * and so does an API key's `read:plugin` pinned to one plugin's id.
  *
- * An API key's rules carry no field list at all, whatever its slugs, so for a
- * key this gate checks its owner: PoliciesGuard asks every ability, and a
- * plain user's key is refused because its owner is. A staff member's key
- * passes on any `Plugin` slug, as its owner would.
+ * An API key's rule keeps its grant's field list, and PoliciesGuard asks the
+ * key and its owner both. So a key passes only on a slug that reads every
+ * column, and only when its owner passes too: a key holding
+ * `read:plugin:installed` is refused whoever owns it.
  */
 export const canReadServerPlugins = (ability: AppAbility): boolean =>
   ability.can(Action.read, ResourceType.Plugin, 'installedAt');

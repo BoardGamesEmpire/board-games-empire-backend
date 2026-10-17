@@ -108,18 +108,29 @@ export class AbilityFactory {
     return ability.build({ detectSubjectType: detectAppSubjectType });
   }
 
+  /**
+   * An API key's own ability, which `PoliciesGuard` and the ceilings AND with
+   * its owner's. Each scope becomes one rule, pinned to `resourceId` when it
+   * names one. The permission's conditions are dropped (#266), so the owner's
+   * ability bounds the rows.
+   *
+   * An allow keeps its grant's field list, so a check that names a field sees
+   * the slug's reach. Without it, a staff member's key holding only
+   * `read:plugin:installed` passed the server plugin reads' column gate on its
+   * owner's say. A denial is kept whole: CASL skips a field-bound denial on any
+   * check that names no field, and almost none does, so bound to its fields the
+   * denial would stop denying.
+   */
   createForApiKey(apiKey: ApikeyWithScopes): AppAbility {
     const ability = new AbilityBuilder<AppAbility>(createPrismaAbility);
 
     for (const scope of apiKey.scopes) {
-      const access: RuleApplier = scope.permission.inverted ? ability.cannot : ability.can;
-      const { action, subject } = scope.permission;
+      const { action, subject, inverted, fields } = scope.permission;
+      const access: RuleApplier = inverted ? ability.cannot : ability.can;
+      const fieldList = !inverted && fields?.length ? fields : undefined;
+      const pin = scope.resourceId ? { id: scope.resourceId } : undefined;
 
-      if (scope.resourceId) {
-        access.call(ability, action, subject as ExtractSubjectType<Subjects>, { id: scope.resourceId });
-      } else {
-        access.call(ability, action, subject as ExtractSubjectType<Subjects>);
-      }
+      access.call(ability, action, subject as ExtractSubjectType<Subjects>, ...[fieldList, pin].filter(Boolean));
     }
 
     return ability.build();

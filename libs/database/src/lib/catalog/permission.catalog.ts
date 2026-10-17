@@ -1948,8 +1948,8 @@ export const PERMISSION_CATALOG = [
   // serve, and `manifestJson` stays out: the localized names are derived from
   // it, never served as it. A server-only column added here opens the server
   // reads to every user, which `role-permission.catalog.spec.ts` pins against.
-  // The boundary is a user's: an API key's rules carry no fields, so a key is
-  // held to the gate by its owner's ability alone.
+  // An API key holding this grant keeps its field list, so the gate refuses
+  // the key whoever owns it.
   permission({
     action: Action.read,
     subject: ResourceType.Plugin,
