@@ -232,6 +232,12 @@ describe('e2e-env (pure logic)', () => {
       expect(workerEnvOverrides().NODE_ENV).toBe(API_NODE_ENV);
     });
 
+    it('blanks the migration credential global-setup gives the api, as a server leaves it out of a worker', () => {
+      // Inherited, it would make every worker the suite starts warn that it
+      // was given a credential it does not use.
+      expect(workerEnvOverrides()).toHaveProperty('DATABASE_MIGRATION_URL', '');
+    });
+
     it('emits every override as a string, since process env carries no other type', () => {
       for (const value of Object.values(workerEnvOverrides())) {
         expect(typeof value).toBe('string');

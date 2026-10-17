@@ -25,6 +25,14 @@ The one container image that every process role runs from, with each remote Data
 The work a process does at start, before it serves anything, such as applying migrations and seeding reference data. Connecting to DataGateways at start is not part of it.
 _Avoid_: boot sequence, init
 
+**Database role**:
+A login on the database a server keeps its data in, holding only the privileges granted to it. Every process role connects as one.
+_Avoid_: role on its own, database user
+
+**Migration credential**:
+The database role, and the way to reach it, that bootstrap applies migrations with: the one every process role connects as, unless a server gives its migrations one of their own.
+_Avoid_: migration user, admin connection
+
 **Gateway worker**:
 The process role that does a server's DataGateway work in the background, such as fetching games to import.
 _Avoid_: gateway-fetch, fetcher
@@ -192,7 +200,7 @@ _Avoid_: visibility
 
 **Role**:
 A named set of permissions held on a server, in a household or at an event.
-_Avoid_: role for the part of a server a process runs (say process role)
+_Avoid_: role for the part of a server a process runs (say process role), or for a database login (say database role)
 
 **Role scope**:
 Where a role applies: the whole server, one household or one event.
