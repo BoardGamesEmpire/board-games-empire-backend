@@ -483,6 +483,27 @@ describe('the boot sequence against Postgres', () => {
       expect(await bootstrapLocks(db, true)).toBe(0);
     });
 
+    it("keeps the lock through Postgres 17's transaction timeout, however long the sequence holds its transaction", async () => {
+      const lock = new PgAdvisoryLock({
+        connectionString: withSetting(requireDatabaseUrl(), 'transaction_timeout', '200'),
+        logger: silent,
+        applicationName: 'bge-bootstrap:transaction-timeout',
+      });
+
+      try {
+        await lock.acquire();
+        // Three times the timeout since the lock's transaction began, as while the sequence migrates.
+        await sleep(600);
+        expect(await bootstrapLocks(db, true)).toBe(1);
+        expect(() => lock.assertHeld()).not.toThrow();
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
     it('waits on a held lock over a slow link without taking the round trips for a database that did not answer', async () => {
       await withBarrier(async (barrier) => {
         await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
