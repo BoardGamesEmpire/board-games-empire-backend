@@ -15,11 +15,19 @@ export const LOCK_ATTEMPT_MS = 5_000;
 
 /**
  * How much longer than its `lock_timeout` an attempt may go unanswered before
- * it is abandoned with its connection. `lock_timeout` runs in Postgres, so it
+ * it is abandoned with its connection, and how long a read of the holder or the
+ * COMMIT that releases the lock may. `lock_timeout` runs in Postgres, so it
  * cannot bound a wait to reach Postgres: a connection pooler queues an attempt
  * until a server connection is free.
  */
 export const LOCK_ATTEMPT_GRACE_MS = 1_000;
+
+/**
+ * How long the lock's connection sits idle before TCP probes it. Below the
+ * idle timeouts of common load balancers and NAT gateways, which would
+ * otherwise drop it while the sequence works.
+ */
+export const LOCK_KEEP_ALIVE_MS = 30_000;
 
 /** What an attempt nobody answered most likely means. */
 const POOLER_QUEUE_HINT = 'as when a connection pooler has no server connection free';
@@ -76,9 +84,8 @@ export class LockLostError extends Error {
   constructor(readonly reason: string) {
     super(
       `Refusing to boot: the bootstrap lock's connection failed while it held the lock (${reason}), so the lock may ` +
-        'not have covered the whole sequence. Boot again. If this recurs, look for a setting that ends idle ' +
-        "transactions shorter than a boot: Postgres's idle_in_transaction_session_timeout, or PgBouncer's " +
-        'idle_transaction_timeout.',
+        'not have covered the whole sequence. Boot again. If this recurs, look for what ends an idle transaction ' +
+        "sooner than a boot takes, such as PgBouncer's idle_transaction_timeout.",
     );
     this.name = 'LockLostError';
   }
@@ -117,8 +124,8 @@ const UNANSWERED = Symbol('unanswered');
  * what turns "still behind" into the error that names the migration.
  *
  * A step the database does not answer in time (an attempt within its
- * `lock_timeout` and {@link LOCK_ATTEMPT_GRACE_MS}, a read of the holder within
- * the grace) is abandoned with its connection, and the next attempt opens
+ * `lock_timeout` and {@link LOCK_ATTEMPT_GRACE_MS}, a read of the holder or the
+ * releasing COMMIT within the grace) is abandoned with its connection, and the next attempt opens
  * another. A connection pooler queues a step until a server connection is
  * free, and `lock_timeout` cannot start before one is. Such a step can overrun
  * the deadline by up to the grace, and the holder's read after it by as much
@@ -132,9 +139,11 @@ const UNANSWERED = Symbol('unanswered');
  *
  * A holder that dies loses the lock with its connection: Postgres ends its
  * transaction, and a pooler closes a server connection whose client left
- * mid-transaction. While the sequence works, the transaction is idle, so
- * Postgres or a pooler set to end idle transactions ends the lock too;
- * `release` then refuses with a {@link LockLostError}.
+ * mid-transaction. While the sequence works, the transaction is idle.
+ * Postgres's own timeouts are turned off for it, but a pooler set to end idle
+ * transactions, or a connection that fails, ends the lock too; `assertHeld`
+ * then refuses before the next write, and `release` at the end, with a
+ * {@link LockLostError}.
  */
 export class PgAdvisoryLock implements BootstrapLock {
   private client: Client | undefined;
@@ -197,13 +206,34 @@ export class PgAdvisoryLock implements BootstrapLock {
     this.held = false;
     const lost = this.lost;
     this.lost = undefined;
-    if (lost || !this.client) throw new LockLostError(lost?.message ?? 'the connection is gone');
+    const client = this.client;
+    if (lost || !client) throw new LockLostError(lost?.message ?? 'the connection is gone');
 
+    // Bounded like every other step: a connection that died without a reset
+    // would otherwise hold the COMMIT for as long as TCP retries.
+    const graceMs = this.options.attemptGraceMs ?? LOCK_ATTEMPT_GRACE_MS;
+    let committed: unknown;
     try {
-      await this.client.query('COMMIT');
+      committed = await this.abandonUnlessAnswered(client, graceMs, () => client.query('COMMIT'));
     } catch (error) {
       throw new LockLostError(error instanceof Error ? error.message : String(error));
     }
+    if (committed === UNANSWERED) {
+      throw new LockLostError(`the database did not answer the COMMIT within ${graceMs}ms`);
+    }
+  }
+
+  /**
+   * Throws a {@link LockLostError} when the lock's connection has reported a
+   * failure since `acquire` took the lock; one it has not reported is found by
+   * `release`. A loss reported here leaves `release` nothing to give back.
+   */
+  assertHeld(): void {
+    const lost = this.lost;
+    if (!lost) return;
+    this.held = false;
+    this.lost = undefined;
+    throw new LockLostError(lost.message);
   }
 
   /**
@@ -220,13 +250,18 @@ export class PgAdvisoryLock implements BootstrapLock {
 
   /** One attempt: true when the lock was taken, false when `lock_timeout` ran out first. */
   private async attempt(client: Client, attemptMs: number): Promise<boolean> {
-    await client.query('BEGIN');
     try {
-      // For this transaction alone. A session setting would stay on a pooled
-      // server connection and cut short the lock waits of whichever client
-      // the pooler hands it to next.
-      await client.query(`SET LOCAL lock_timeout = '${attemptMs}ms'`);
-      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+      // One round trip, so a slow link spends little of the grace. Each setting
+      // is for this transaction alone: a session setting would stay on a pooled
+      // server connection, with whichever client the pooler hands it to next.
+      // Postgres's own timeouts are off for the lock: a statement_timeout
+      // shorter than the attempt would cancel its wait as an error, and an
+      // idle-transaction timeout would end the lock while the sequence works.
+      await client.query(
+        `BEGIN; SET LOCAL lock_timeout = '${attemptMs}ms'; SET LOCAL statement_timeout = 0; ` +
+          'SET LOCAL idle_in_transaction_session_timeout = 0; ' +
+          `SELECT pg_advisory_xact_lock(hashtextextended(${client.escapeLiteral(BOOTSTRAP_LOCK_NAME)}, 0))`,
+      );
       return true;
     } catch (error) {
       // Either way the transaction is aborted; ending it hands back the server connection.
@@ -274,6 +309,10 @@ export class PgAdvisoryLock implements BootstrapLock {
       application_name: this.options.applicationName,
       // Whole milliseconds and never zero: zero is the driver's "no timeout".
       connectionTimeoutMillis: Math.max(1, Math.ceil(budgetMs)),
+      // Idle for the whole sequence: probes keep a load balancer from dropping
+      // it, and fail one that died without a reset, which the listener records.
+      keepAlive: true,
+      keepAliveInitialDelayMillis: LOCK_KEEP_ALIVE_MS,
     });
     // node-postgres emits a failure that no query is waiting on, such as
     // Postgres ending an idle connection; unheard, it would end the process.

@@ -30,6 +30,7 @@ import {
 } from '@bge/database';
 import type { Logger, LoggerService } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import * as path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Client } from 'pg';
@@ -133,6 +134,45 @@ function lockOn(connectionString: string, name: string, logger: BootstrapLogger 
     attemptMs: 500,
     waitMs: 20_000,
   });
+}
+
+/** `connectionString` with a Postgres setting given at connect, as `ALTER ROLE ... SET` would give it. */
+function withSetting(connectionString: string, name: string, value: string): string {
+  const url = new URL(connectionString);
+  url.searchParams.set('options', `-c ${name}=${value}`);
+  return url.toString();
+}
+
+/** A relay to `connectionString`'s Postgres that holds every chunk `delayMs` in each direction. */
+async function slowLink(connectionString: string, delayMs: number) {
+  const target = new URL(connectionString);
+  const sockets = new Set<Socket>();
+  let connections = 0;
+  const relay = (from: Socket, to: Socket) => {
+    from.on('data', (chunk) => void setTimeout(() => to.writable && to.write(chunk), delayMs));
+    from.on('close', () => void setTimeout(() => to.destroy(), delayMs));
+    from.on('error', () => to.destroy());
+  };
+  const server = createServer((client) => {
+    connections += 1;
+    const database = connect(Number(target.port || 5432), target.hostname);
+    sockets.add(client).add(database);
+    relay(client, database);
+    relay(database, client);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const url = new URL(connectionString);
+  url.hostname = '127.0.0.1';
+  url.port = String((server.address() as AddressInfo).port);
+  return {
+    url: url.toString(),
+    connections: () => connections,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 /**
@@ -328,7 +368,7 @@ describe('the boot sequence against Postgres', () => {
 
       try {
         await lock.acquire();
-        // What Postgres set to end idle transactions does to the lock's connection mid-boot.
+        // What a pooler set to end idle transactions, or a failed connection, does to the lock mid-boot.
         const ended = await admin.query<{ ended: boolean }>(
           `SELECT pg_terminate_backend(pid) AS ended FROM pg_stat_activity WHERE application_name = 'bge-bootstrap:terminated'`,
         );
@@ -366,6 +406,107 @@ describe('the boot sequence against Postgres', () => {
           expect(systemClock.now() - started).toBeLessThan(2_000);
         } finally {
           await lock.close();
+          await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        }
+      });
+    });
+
+    it("reports a lost lock from assertHeld as soon as its connection's failure arrives, and release then has nothing to give back", async () => {
+      const lock = lockOn(requireDatabaseUrl(), 'assert-held');
+
+      try {
+        await lock.acquire();
+        expect(() => lock.assertHeld()).not.toThrow();
+        await admin.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'bge-bootstrap:assert-held'`,
+        );
+
+        const deadline = Date.now() + 5_000;
+        let reported: unknown;
+        while (reported === undefined) {
+          try {
+            lock.assertHeld();
+          } catch (error) {
+            reported = error;
+          }
+          if (Date.now() > deadline) throw new Error('assertHeld never reported the terminated connection');
+          await sleep(25);
+        }
+        expect(reported).toBeInstanceOf(LockLostError);
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+    });
+
+    it('waits out a held lock under a statement_timeout shorter than an attempt, and names the holder', async () => {
+      await withBarrier(async (barrier) => {
+        await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        // A database role with a short statement_timeout, as some managed Postgres
+        // services give their roles: it would cancel the 500ms wait at 200ms.
+        const lock = new PgAdvisoryLock({
+          connectionString: withSetting(requireDatabaseUrl(), 'statement_timeout', '200'),
+          logger: silent,
+          applicationName: 'bge-bootstrap:statement-timeout',
+          attemptMs: 500,
+        });
+
+        try {
+          const run = lock.acquire({ deadlineAt: systemClock.now() + 1_200 });
+          await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+          await expect(run).rejects.toThrow(`pid ${barrier.holder.pid}`);
+        } finally {
+          await lock.close();
+          await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        }
+      });
+    });
+
+    it("keeps the lock through Postgres's idle-transaction timeout, however long the sequence leaves its transaction idle", async () => {
+      const lock = new PgAdvisoryLock({
+        connectionString: withSetting(requireDatabaseUrl(), 'idle_in_transaction_session_timeout', '200'),
+        logger: silent,
+        applicationName: 'bge-bootstrap:idle-timeout',
+      });
+
+      try {
+        await lock.acquire();
+        // Three times the timeout, idle in the lock's transaction, as while the sequence migrates.
+        await sleep(600);
+        expect(await bootstrapLocks(db, true)).toBe(1);
+        expect(() => lock.assertHeld()).not.toThrow();
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
+    it('waits on a held lock over a slow link without taking the round trips for a database that did not answer', async () => {
+      await withBarrier(async (barrier) => {
+        await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        // 150ms each way. An attempt's own round trips must fit the grace, or every
+        // attempt is abandoned as unanswered and the holder is never named.
+        const link = await slowLink(requireDatabaseUrl(), 150);
+        const logger = recordingLogger();
+        const lock = new PgAdvisoryLock({
+          connectionString: link.url,
+          logger,
+          applicationName: 'bge-bootstrap:slow-link',
+          attemptMs: 500,
+          attemptGraceMs: 900,
+        });
+
+        try {
+          const run = lock.acquire({ deadlineAt: systemClock.now() + 4_000 });
+          await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+          await expect(run).rejects.toThrow(`held by pid ${barrier.holder.pid}`);
+          expect(logger.lines.filter((line) => /did not answer/.test(line))).toEqual([]);
+          expect(link.connections()).toBe(1);
+        } finally {
+          await lock.close();
+          await link.close();
           await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
         }
       });
