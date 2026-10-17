@@ -60,4 +60,39 @@ describe('UserNotificationsService', () => {
       );
     });
   });
+
+  // #649: an API key scoped to one notification marked every notification of
+  // its owner's. Each write now ANDs the caller's `update` ceiling into its
+  // filter, so an id outside it is skipped.
+  describe('the writes', () => {
+    beforeEach(() => {
+      db.notification.updateMany.mockResolvedValue({ count: 1 });
+    });
+
+    it("markRead keeps to the named ids of the user's own, within the caller's update ceiling", async () => {
+      await service.markRead('user-1', ['n-1', 'n-2']);
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.Notification,
+        Action.update,
+      );
+      expect(db.notification.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['n-1', 'n-2'] }, userId: 'user-1', AND: [COND] },
+        data: { read: true, readAt: expect.any(Date) },
+      });
+    });
+
+    it("markAllRead keeps to the user's own unread notifications, within the caller's update ceiling", async () => {
+      await service.markAllRead('user-1');
+
+      expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+        ResourceType.Notification,
+        Action.update,
+      );
+      expect(db.notification.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', read: false, AND: [COND] },
+        data: { read: true, readAt: expect.any(Date) },
+      });
+    });
+  });
 });

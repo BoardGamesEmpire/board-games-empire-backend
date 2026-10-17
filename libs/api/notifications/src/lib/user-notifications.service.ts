@@ -1,6 +1,6 @@
 import { Action, DatabaseService, ResourceType } from '@bge/database';
 import type { NotificationPayload, UnreadNotificationDto } from '@bge/notifications-service';
-import { ScopeComposer } from '@bge/permissions';
+import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { Injectable, Logger } from '@nestjs/common';
 
 /**
@@ -27,6 +27,7 @@ export class UserNotificationsService {
 
   constructor(
     private readonly db: DatabaseService,
+    private readonly abilityService: AbilityService,
     private readonly scopeComposer: ScopeComposer,
   ) {}
 
@@ -58,18 +59,37 @@ export class UserNotificationsService {
     })) as UnreadNotificationDto[];
   }
 
+  /**
+   * Marks the named notifications read, of those that are the user's own and
+   * that the caller may update. Both writes AND the caller's `update` ceiling
+   * into their filter, as a read composes its own: without it an API key
+   * scoped to one notification marked every notification of its owner's
+   * (#649). An id outside the ceiling is skipped, not refused, as an id that
+   * is not the user's is.
+   */
   async markRead(userId: string, notificationIds: string[]): Promise<void> {
     this.logger.debug(`Marking ${notificationIds.length} notifications as read for user ${userId}`);
     await this.db.notification.updateMany({
-      where: { id: { in: notificationIds }, userId },
+      where: {
+        id: { in: notificationIds },
+        userId,
+        // eslint-disable-next-line no-restricted-syntax -- a write's filter by the caller's ids, not a collection read
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Notification, Action.update),
+      },
       data: { read: true, readAt: new Date() },
     });
   }
 
+  /** Marks every unread notification of the user's read, within the caller's `update` ceiling. */
   async markAllRead(userId: string): Promise<void> {
     this.logger.debug(`Marking all notifications as read for user ${userId}`);
     await this.db.notification.updateMany({
-      where: { userId, read: false },
+      where: {
+        userId,
+        read: false,
+        // eslint-disable-next-line no-restricted-syntax -- a write's filter, not a collection read
+        AND: this.abilityService.getCurrentResourceConditions(ResourceType.Notification, Action.update),
+      },
       data: { read: true, readAt: new Date() },
     });
   }
