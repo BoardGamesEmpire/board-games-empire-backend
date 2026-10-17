@@ -176,3 +176,21 @@ export interface OutstandingInviteRevocation {
   readonly count: number;
   readonly events: readonly InviteRevokedEvent[];
 }
+
+export interface ExpireOutstandingInvitesParams {
+  /** The most rows expired from each outstanding status, so one call moves at most twice this many. */
+  readonly limit: number;
+}
+
+/** A bulk expiry: how many rows moved, and one domain event per row for the caller to emit after commit. */
+export interface OutstandingInviteExpiry {
+  readonly count: number;
+  readonly events: readonly InviteExpiredEvent[];
+  /**
+   * Whether every status's read came back under the limit, so nothing overdue
+   * was left when it ran. `false` means another call may find more, even when
+   * fewer than the limit moved: a rival can settle a row between the read and
+   * the update.
+   */
+  readonly drained: boolean;
+}
