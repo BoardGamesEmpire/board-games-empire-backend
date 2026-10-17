@@ -8,6 +8,7 @@ The lib ships:
 - `receivedInviteWhere`, the filter a listing of the invites a user has received is built on.
 - The read shapes every invite render goes through: `CONTEXT_INVITE_SELECT` (a context reader's view) and `PARTY_INVITE_SELECT` (a party's view).
 - The domain events a consumer announces after commit, and `effectiveInviteStatus` for lazy expiry on reads.
+- `InviteExpirySweepModule`, the worker's recurring job that stamps the expiries nothing else did (#165).
 
 > The lib is the only writer of `Invite.status`. A consumer that writes the column directly is a bug.
 
@@ -144,6 +145,8 @@ The bulk statements (`revokeOutstandingWithin`, `expireOutstandingWithin`, and t
 
 `expireOutstandingWithin`'s `limit` reads that many ids per status and then updates them with the guard restated beside the ids. It never uses `updateManyAndReturn`'s own `limit`, which leaves the guard out of the update's outer `where` and so can overwrite a rival's committed transition; `settleOutstandingWithin`'s doc comment gives the mechanism. `drained` comes from those reads, not from the count: it is true only when every status's read came back under the limit. A rival that settles part of a full read leaves the count short with more still overdue, so a caller that stopped on the count would leave the rest of a backlog for the next run.
 
+**Where the sweep runs.** `InviteExpirySweepModule` hosts it as an hourly recurring job, in the worker only. The api registers `ScheduleModule` too, so the interval stays off `InvitesModule`, which the api imports. The sweep runs as the system actor, so its audit rows name `invite-expiry-sweep`, and it works in batches of 500 per status. At shutdown it finishes the batch in flight and starts no other, before the audit listener detaches and the pool ends. `invite.expired` comes from two process roles: the worker announces the sweep's, and the api a refused transition's and a create's. A listener for it has to be registered in both. None needs the stamp to be prompt, since reads, transitions and creates all judge expiry by the clock.
+
 ---
 
 ## Duplicates
@@ -213,3 +216,5 @@ export class HouseholdModule {}
 ```
 
 `InvitesModule` provides and exports `InviteService`. It imports `DatabaseModule` for the party read and for the one write that must not share the caller's transaction (the refused transition's expiry stamp above). `EventEmitter2` is expected from the app's global `EventEmitterModule`.
+
+The worker also imports `InviteExpirySweepModule`, and nothing else should, since it schedules the sweep (see Expiry). Besides those, it needs `ScheduleModule.forRoot()` and a global `ClsModule` from its host.

@@ -3,6 +3,7 @@ import { AuditLogModule, AuditRetentionModule } from '@bge/audit-log';
 import { DatabaseModule } from '@bge/database';
 import { env } from '@bge/env';
 import { GameImportConsumerModule } from '@bge/game-import';
+import { InviteExpirySweepModule } from '@bge/invites';
 import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { FeedbackQueueConsumerModule } from '@bge/queue-feedback';
@@ -132,6 +133,10 @@ import { baseLogger } from './lib/logger';
     // so the @Interval runs in exactly one process.
     AuditLogModule,
     AuditRetentionModule,
+
+    // Periodic stamp of `Expired` on outstanding invites past their window
+    // that nothing else stamped (#165). Worker-only for the same reason.
+    InviteExpirySweepModule,
 
     // Add more consumer modules here as the worker gains capabilities
     GameImportConsumerModule,

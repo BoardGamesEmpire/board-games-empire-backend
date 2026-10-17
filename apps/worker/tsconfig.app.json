@@ -43,6 +43,9 @@
       "path": "../../libs/api/media/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/common/invites/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/api/game-import/tsconfig.lib.json"
     },
     {
