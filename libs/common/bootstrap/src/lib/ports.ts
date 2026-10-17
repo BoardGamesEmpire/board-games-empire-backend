@@ -52,11 +52,15 @@ export interface LockAcquireOptions {
 /**
  * The advisory lock around the whole sequence (#236). `acquire` waits, is
  * bounded by `deadlineAt` when given and by {@link DEFAULT_WAIT_MS} otherwise,
- * and throws when the bound is reached. `release` unlocks only what `acquire`
- * took, so it can sit in a `finally` after a failed acquire and run twice.
+ * and throws when the bound is reached. `assertHeld` throws when the lock is
+ * known to have been lost since `acquire` took it, so a process stops before it
+ * writes beside another boot; a loss it reports leaves `release` nothing to do.
+ * `release` unlocks only what `acquire` took, so it can sit in a `finally`
+ * after a failed acquire and run twice.
  */
 export interface BootstrapLock {
   acquire(options?: LockAcquireOptions): Promise<void>;
+  assertHeld(): void;
   release(): Promise<void>;
 }
 

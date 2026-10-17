@@ -275,8 +275,12 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
             'Seeds and data migrations skipped: the database is ahead of this build, so the newer build owns the data.',
           );
         } else {
+          // Each write phase only under a lock still held: one lost while
+          // migrating or seeding may already be another boot's.
+          lock.assertHeld();
           reconcile = await phase('seeds', () => seeder.run());
           seedsRun = true;
+          lock.assertHeld();
           dataMigrations = await phase('data-migrations', () => dataMigrationsPhase.run());
         }
       }
@@ -297,7 +301,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         } catch (releaseError) {
           logger.warn(
             `The bootstrap lock could not be released after the sequence failed: ${messageOf(releaseError)}. ` +
-              'The session ends with this process, and the lock with it.',
+              'It ends with its connection, at the latest when this process exits.',
           );
           root.recordException(releaseError instanceof Error ? releaseError : messageOf(releaseError));
         }

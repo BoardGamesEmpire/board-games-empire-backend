@@ -3,6 +3,7 @@ import {
   createPrismaCliMigrator,
   FailedMigrationError,
   LedgerAccessDeniedError,
+  LockLostError,
   LockNotAcquiredError,
   MigrateDeployFailedError,
   PgAdvisoryLock,
@@ -29,11 +30,13 @@ import {
 } from '@bge/database';
 import type { Logger, LoggerService } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { connect, createServer, type AddressInfo, type Socket } from 'node:net';
 import * as path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Client } from 'pg';
 import { schemaFromDatabaseUrl } from '../support/e2e-env';
 import { expectAdvisoryWaiter, withBarrier } from '../support/lock-barrier';
+import { startPgBouncer, type PgBouncer } from '../support/pgbouncer';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
 /**
@@ -131,6 +134,45 @@ function lockOn(connectionString: string, name: string, logger: BootstrapLogger 
     attemptMs: 500,
     waitMs: 20_000,
   });
+}
+
+/** `connectionString` with a Postgres setting given at connect, as `ALTER ROLE ... SET` would give it. */
+function withSetting(connectionString: string, name: string, value: string): string {
+  const url = new URL(connectionString);
+  url.searchParams.set('options', `-c ${name}=${value}`);
+  return url.toString();
+}
+
+/** A relay to `connectionString`'s Postgres that holds every chunk `delayMs` in each direction. */
+async function slowLink(connectionString: string, delayMs: number) {
+  const target = new URL(connectionString);
+  const sockets = new Set<Socket>();
+  let connections = 0;
+  const relay = (from: Socket, to: Socket) => {
+    from.on('data', (chunk) => void setTimeout(() => to.writable && to.write(chunk), delayMs));
+    from.on('close', () => void setTimeout(() => to.destroy(), delayMs));
+    from.on('error', () => to.destroy());
+  };
+  const server = createServer((client) => {
+    connections += 1;
+    const database = connect(Number(target.port || 5432), target.hostname);
+    sockets.add(client).add(database);
+    relay(client, database);
+    relay(database, client);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  const url = new URL(connectionString);
+  url.hostname = '127.0.0.1';
+  url.port = String((server.address() as AddressInfo).port);
+  return {
+    url: url.toString(),
+    connections: () => connections,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 /**
@@ -302,7 +344,7 @@ describe('the boot sequence against Postgres', () => {
             settledEarly: () => settled,
             timeoutMs: 5_000,
           });
-          expect(waiter.query).toContain('pg_advisory_lock');
+          expect(waiter.query).toContain('pg_advisory_xact_lock');
 
           // One attempt is 500ms here; the progress line names the holder after it.
           const deadline = Date.now() + 5_000;
@@ -319,6 +361,30 @@ describe('the boot sequence against Postgres', () => {
           await lock.close();
         }
       });
+    });
+
+    it("refuses at release when the lock's connection ended while it was held, and leaves no lock behind", async () => {
+      const lock = lockOn(requireDatabaseUrl(), 'terminated');
+
+      try {
+        await lock.acquire();
+        // What a pooler set to end idle transactions, or a failed connection, does to the lock mid-boot.
+        const ended = await admin.query<{ ended: boolean }>(
+          `SELECT pg_terminate_backend(pid) AS ended FROM pg_stat_activity WHERE application_name = 'bge-bootstrap:terminated'`,
+        );
+        expect(ended.rows.map((row) => row.ended)).toEqual([true]);
+
+        await expect(lock.release()).rejects.toBeInstanceOf(LockLostError);
+      } finally {
+        await lock.close();
+      }
+
+      // The backend gives its locks up as it exits, just after it reports the end.
+      const deadline = Date.now() + 5_000;
+      while ((await bootstrapLocks(db, true)) > 0) {
+        if (Date.now() > deadline) throw new Error('the terminated connection still holds the bootstrap lock');
+        await sleep(25);
+      }
     });
 
     it('gives up at the shared deadline even when a single lock attempt is longer than the time left', async () => {
@@ -340,6 +406,128 @@ describe('the boot sequence against Postgres', () => {
           expect(systemClock.now() - started).toBeLessThan(2_000);
         } finally {
           await lock.close();
+          await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        }
+      });
+    });
+
+    it("reports a lost lock from assertHeld as soon as its connection's failure arrives, and release then has nothing to give back", async () => {
+      const lock = lockOn(requireDatabaseUrl(), 'assert-held');
+
+      try {
+        await lock.acquire();
+        expect(() => lock.assertHeld()).not.toThrow();
+        await admin.query(
+          `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'bge-bootstrap:assert-held'`,
+        );
+
+        const deadline = Date.now() + 5_000;
+        let reported: unknown;
+        while (reported === undefined) {
+          try {
+            lock.assertHeld();
+          } catch (error) {
+            reported = error;
+          }
+          if (Date.now() > deadline) throw new Error('assertHeld never reported the terminated connection');
+          await sleep(25);
+        }
+        expect(reported).toBeInstanceOf(LockLostError);
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+    });
+
+    it('waits out a held lock under a statement_timeout shorter than an attempt, and names the holder', async () => {
+      await withBarrier(async (barrier) => {
+        await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        // A database role with a short statement_timeout, as some managed Postgres
+        // services give their roles: it would cancel the 500ms wait at 200ms.
+        const lock = new PgAdvisoryLock({
+          connectionString: withSetting(requireDatabaseUrl(), 'statement_timeout', '200'),
+          logger: silent,
+          applicationName: 'bge-bootstrap:statement-timeout',
+          attemptMs: 500,
+        });
+
+        try {
+          const run = lock.acquire({ deadlineAt: systemClock.now() + 1_200 });
+          await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+          await expect(run).rejects.toThrow(`pid ${barrier.holder.pid}`);
+        } finally {
+          await lock.close();
+          await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        }
+      });
+    });
+
+    it("keeps the lock through Postgres's idle-transaction timeout, however long the sequence leaves its transaction idle", async () => {
+      const lock = new PgAdvisoryLock({
+        connectionString: withSetting(requireDatabaseUrl(), 'idle_in_transaction_session_timeout', '200'),
+        logger: silent,
+        applicationName: 'bge-bootstrap:idle-timeout',
+      });
+
+      try {
+        await lock.acquire();
+        // Three times the timeout, idle in the lock's transaction, as while the sequence migrates.
+        await sleep(600);
+        expect(await bootstrapLocks(db, true)).toBe(1);
+        expect(() => lock.assertHeld()).not.toThrow();
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
+    it("keeps the lock through Postgres 17's transaction timeout, however long the sequence holds its transaction", async () => {
+      const lock = new PgAdvisoryLock({
+        connectionString: withSetting(requireDatabaseUrl(), 'transaction_timeout', '200'),
+        logger: silent,
+        applicationName: 'bge-bootstrap:transaction-timeout',
+      });
+
+      try {
+        await lock.acquire();
+        // Three times the timeout since the lock's transaction began, as while the sequence migrates.
+        await sleep(600);
+        expect(await bootstrapLocks(db, true)).toBe(1);
+        expect(() => lock.assertHeld()).not.toThrow();
+        await expect(lock.release()).resolves.toBeUndefined();
+      } finally {
+        await lock.close();
+      }
+
+      expect(await bootstrapLocks(db, true)).toBe(0);
+    });
+
+    it('waits on a held lock over a slow link without taking the round trips for a database that did not answer', async () => {
+      await withBarrier(async (barrier) => {
+        await barrier.holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+        // 150ms each way. An attempt's own round trips must fit the grace, or every
+        // attempt is abandoned as unanswered and the holder is never named.
+        const link = await slowLink(requireDatabaseUrl(), 150);
+        const logger = recordingLogger();
+        const lock = new PgAdvisoryLock({
+          connectionString: link.url,
+          logger,
+          applicationName: 'bge-bootstrap:slow-link',
+          attemptMs: 500,
+          attemptGraceMs: 900,
+        });
+
+        try {
+          const run = lock.acquire({ deadlineAt: systemClock.now() + 4_000 });
+          await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+          await expect(run).rejects.toThrow(`held by pid ${barrier.holder.pid}`);
+          expect(logger.lines.filter((line) => /did not answer/.test(line))).toEqual([]);
+          expect(link.connections()).toBe(1);
+        } finally {
+          await lock.close();
+          await link.close();
           await barrier.holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
         }
       });
@@ -801,5 +989,188 @@ describe('the migration credential against Postgres', () => {
     // The migrations did apply; on the next boot the same read comes first.
     const next = boot(configured);
     await expect(next).rejects.toBeInstanceOf(LedgerAccessDeniedError);
+  });
+});
+
+/**
+ * The bootstrap lock through PgBouncer in transaction pooling (#596), where a
+ * server whose `DATABASE_URL` names a connection pooler takes it.
+ *
+ * Three server connections behind the pooler, fewer than its clients, so it
+ * shares them: one for the lock's holder, one for a waiter's attempts, and one
+ * left for the boots' own queries. The ledger reads, the seeds and the data
+ * migrations go through the pooler too, as on a server whose `DATABASE_URL`
+ * names one; the migrator takes a direct URL, as Prisma Migrate needs, and so
+ * does the client that watches `pg_locks`, which the pooler could keep
+ * waiting. A database of its own, empty at the start, so the first boot has
+ * the whole chain to apply.
+ */
+describe('the bootstrap lock through a transaction pooler', () => {
+  const DATABASE = 'bge_pooler_e2e';
+  const SERVER_CONNECTIONS = 3;
+
+  let admin: Client;
+  let pooler: PgBouncer;
+  /** Direct: the observer, and the arrangements around a boot. */
+  let database: TestDatabase;
+  /** Through the pooler: what a boot reads and writes with. */
+  let pooledDatabase: TestDatabase;
+  let direct: string;
+  let pooled: string;
+
+  /** Clients of the pooler, each holding a server connection in a transaction of its own until `end`. */
+  async function pinnedServerConnections(count: number): Promise<{ clients: Client[]; end: () => Promise<void> }> {
+    const clients: Client[] = [];
+    const end = async () => {
+      for (const client of clients) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        await client.end();
+      }
+    };
+    try {
+      for (let i = 0; i < count; i += 1) {
+        const client = new Client({ connectionString: pooled });
+        await client.connect();
+        clients.push(client);
+        await client.query('BEGIN');
+      }
+    } catch (error) {
+      await end();
+      throw error;
+    }
+    return { clients, end };
+  }
+
+  beforeAll(async () => {
+    admin = new Client({ connectionString: requireDatabaseUrl() });
+    await admin.connect();
+    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
+    await admin.query(`CREATE DATABASE "${DATABASE}"`);
+
+    const url = new URL(requireDatabaseUrl());
+    url.pathname = `/${DATABASE}`;
+    direct = url.toString();
+    database = createTestDatabase(direct);
+    pooler = await startPgBouncer({ databaseUrl: requireDatabaseUrl(), serverConnections: SERVER_CONNECTIONS });
+    pooled = pooler.pooled(direct);
+    pooledDatabase = createTestDatabase(pooled);
+  });
+
+  afterAll(async () => {
+    await pooledDatabase?.close();
+    await database?.close();
+    await pooler?.stop();
+    await admin.query(`DROP DATABASE IF EXISTS "${DATABASE}" WITH (FORCE)`);
+    await admin.end();
+  });
+
+  it('two api boots: the second waits behind the first on another server connection, the chain is applied once, and the seeds run one after the other', async () => {
+    const real = createPrismaCliMigrator({ migrationUrl: direct, logger: silent, projectRoot: WORKSPACE_ROOT });
+    let migrating!: () => void;
+    const firstMigrates = new Promise<void>((resolve) => (migrating = resolve));
+    let proceed!: () => void;
+    const gate = new Promise<void>((resolve) => (proceed = resolve));
+    // The first boot holds the lock until the second is seen waiting for it.
+    const migrator = new CountingMigrator({
+      apply: async (pending) => {
+        migrating();
+        await gate;
+        await real.apply(pending);
+      },
+    });
+    const seeder = new CountingSeeder(realSeeds(pooledDatabase.client));
+    const locks = [lockOn(pooled, 'pooled-a'), lockOn(pooled, 'pooled-b')];
+    const boot = (lock: PgAdvisoryLock) =>
+      runBootstrapSequence({
+        expected: MIGRATION_NAMES,
+        ledger: new PrismaSchemaLedger(pooledDatabase.client),
+        lock,
+        seeder,
+        dataMigrations: realDataMigrations(pooledDatabase.client),
+        migrator,
+        logger: silent,
+      });
+
+    const first = boot(locks[0]);
+    let second: Promise<BootstrapSummary> | undefined;
+
+    try {
+      await Promise.race([
+        firstMigrates,
+        first.then(() => Promise.reject(new Error('the first boot finished without migrating'))),
+      ]);
+      second = boot(locks[1]);
+
+      // A session lock goes back to the pooler with its server connection: the
+      // second boot, handed that connection, takes the lock again and reaches
+      // the migrator too.
+      const deadline = Date.now() + 10_000;
+      while ((await bootstrapLocks(database, false)) === 0) {
+        if (migrator.calls > 1) throw new Error('the second boot took the lock the first one holds');
+        if (Date.now() > deadline) throw new Error('the second boot never queued behind the bootstrap lock');
+        await sleep(25);
+      }
+      proceed();
+
+      const [a, b] = await Promise.all([first, second]);
+
+      expect(migrator.calls).toBe(1);
+      expect(a.migrationsApplied).toEqual([...MIGRATION_NAMES]);
+      expect(b.state).toBe('in-sync');
+      expect(seeder.spans).toHaveLength(2);
+      const [[, firstEnd], [secondStart]] = [...seeder.spans].sort((x, y) => x[0] - y[0]);
+      expect(secondStart).toBeGreaterThanOrEqual(firstEnd);
+    } finally {
+      proceed();
+      await Promise.allSettled([first, second]);
+      await Promise.all(locks.map((lock) => lock.close()));
+    }
+  });
+
+  it('leaves no lock_timeout on the server connections its attempts ran on', async () => {
+    // An attempt that waits out its timeout, then one that takes the lock.
+    const holder = new Client({ connectionString: direct });
+    await holder.connect();
+    const lock = lockOn(pooled, 'pooled-timeout');
+
+    try {
+      await holder.query('SELECT pg_advisory_lock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+      await expect(lock.acquire({ deadlineAt: systemClock.now() + 700 })).rejects.toBeInstanceOf(LockNotAcquiredError);
+      await holder.query('SELECT pg_advisory_unlock(hashtextextended($1::text, 0))', [BOOTSTRAP_LOCK_NAME]);
+      await lock.acquire();
+      await lock.release();
+    } finally {
+      await lock.close();
+      await holder.end();
+    }
+
+    // Every server connection at once, each held by a transaction of its own.
+    const pinned = await pinnedServerConnections(SERVER_CONNECTIONS);
+    try {
+      const settings = await Promise.all(
+        pinned.clients.map((client) => client.query<{ lock_timeout: string }>('SHOW lock_timeout')),
+      );
+      expect(settings.map((result) => result.rows[0].lock_timeout)).toEqual(Array(SERVER_CONNECTIONS).fill('0'));
+    } finally {
+      await pinned.end();
+    }
+  });
+
+  it('gives up at the deadline while the pooler has no server connection free for its attempt', async () => {
+    // The attempt then waits in the pooler's queue, where lock_timeout cannot reach it.
+    const pinned = await pinnedServerConnections(SERVER_CONNECTIONS);
+    const lock = lockOn(pooled, 'pooled-starved');
+
+    try {
+      const started = systemClock.now();
+      const run = lock.acquire({ deadlineAt: started + 1_000 });
+
+      await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+      await expect(run).rejects.toThrow(/no server connection free/);
+      expect(systemClock.now() - started).toBeLessThan(5_000);
+    } finally {
+      await lock.close();
+      await pinned.end();
+    }
   });
 });

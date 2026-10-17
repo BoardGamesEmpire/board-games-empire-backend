@@ -1,13 +1,92 @@
 import { createServer, type AddressInfo, type Socket } from 'node:net';
 import { performance } from 'node:perf_hooks';
-import { attemptWithin, describeHolder, LockConnectionTimeoutError, PgAdvisoryLock } from './advisory-lock';
+import {
+  attemptWithin,
+  describeHolder,
+  LockConnectionTimeoutError,
+  LockLostError,
+  LockNotAcquiredError,
+  PgAdvisoryLock,
+} from './advisory-lock';
 import type { BootstrapLogger } from './ports';
 
 // The lock itself needs Postgres and is exercised in apps/api-e2e. What can be
 // pinned without a database is how an attempt is cut to the deadline, how a
-// holder is named, and that connecting gives up inside the budget.
+// holder is named, and that connecting, and an attempt nobody answers, give up
+// inside the budget.
 
 const silent: BootstrapLogger = { log: () => undefined, warn: () => undefined };
+
+/** One backend message: its type, then a length that counts itself and the body. */
+function backendMessage(type: string, body: Buffer = Buffer.alloc(0)): Buffer {
+  const header = Buffer.alloc(5);
+  header.write(type, 0, 'latin1');
+  header.writeInt32BE(body.length + 4, 1);
+  return Buffer.concat([header, body]);
+}
+
+/** The backend's half of a startup that asks for no password: AuthenticationOk, then ReadyForQuery (idle). */
+const STARTUP_ANSWERED = Buffer.concat([backendMessage('R', Buffer.alloc(4)), backendMessage('Z', Buffer.from('I'))]);
+
+/** A statement's end, then ReadyForQuery in a transaction. */
+const QUERY_ANSWERED = Buffer.concat([
+  backendMessage('C', Buffer.from('SELECT 1\0')),
+  backendMessage('Z', Buffer.from('T')),
+]);
+
+/**
+ * Answers the startup and every query, until the first simple query whose text
+ * includes `silentFrom`; nothing after it. An extended query is answered at its
+ * Sync: ParseComplete, BindComplete, NoData, then the statement's end.
+ */
+function answersUntil(silentFrom: string) {
+  return (socket: Socket) => {
+    let started = false;
+    let silent = false;
+    let pending = Buffer.alloc(0);
+    socket.on('data', (chunk: Buffer) => {
+      pending = Buffer.concat([pending, chunk]);
+      // The startup message has no type byte, only its length.
+      if (!started) {
+        if (pending.length < 4 || pending.length < pending.readInt32BE(0)) return;
+        pending = pending.subarray(pending.readInt32BE(0));
+        started = true;
+        socket.write(STARTUP_ANSWERED);
+      }
+      while (pending.length >= 5 && pending.length >= pending.readInt32BE(1) + 1) {
+        const type = String.fromCharCode(pending[0]);
+        const text = pending.subarray(5, pending.readInt32BE(1) + 1).toString();
+        pending = pending.subarray(pending.readInt32BE(1) + 1);
+        silent ||= type === 'Q' && text.includes(silentFrom);
+        if (silent) continue;
+        if (type === 'Q') socket.write(QUERY_ANSWERED);
+        if (type === 'S') {
+          socket.write(Buffer.concat([backendMessage('1'), backendMessage('2'), backendMessage('n'), QUERY_ANSWERED]));
+        }
+      }
+    });
+  };
+}
+
+/** A local TCP server; `onConnection` decides what each socket hears. */
+async function fakeDatabase(onConnection: (socket: Socket) => void) {
+  const sockets = new Set<Socket>();
+  const server = createServer((socket) => {
+    sockets.add(socket);
+    onConnection(socket);
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+
+  return {
+    url: `postgres://bge:bge@127.0.0.1:${port}/bge`,
+    connections: () => sockets.size,
+    close: async () => {
+      for (const socket of sockets) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
 
 describe('the advisory lock', () => {
   describe('attemptWithin', () => {
@@ -53,12 +132,9 @@ describe('the advisory lock', () => {
     it('gives up inside the sequence deadline when the database accepts the connection and never answers', async () => {
       // A socket that accepts and stays silent: a black-holed endpoint, a proxy
       // with nothing behind it. node-postgres alone would wait on it forever.
-      const sockets = new Set<Socket>();
-      const server = createServer((socket) => void sockets.add(socket));
-      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-      const { port } = server.address() as AddressInfo;
+      const database = await fakeDatabase(() => undefined);
       const lock = new PgAdvisoryLock({
-        connectionString: `postgres://bge:bge@127.0.0.1:${port}/bge`,
+        connectionString: database.url,
         logger: silent,
         applicationName: 'bge-bootstrap:test',
       });
@@ -69,8 +145,63 @@ describe('the advisory lock', () => {
         expect(performance.now() - started).toBeLessThan(2_000);
       } finally {
         await lock.close();
-        for (const socket of sockets) socket.destroy();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await database.close();
+      }
+    });
+  });
+
+  describe('an attempt the database does not answer', () => {
+    it('is abandoned with its connection, tried again on a new one, and given up at the deadline', async () => {
+      // The startup is answered and nothing after it, as from a connection
+      // pooler with no server connection free: the attempt waits in its queue,
+      // and lock_timeout, which runs on the server, never starts.
+      const database = await fakeDatabase((socket) => socket.once('data', () => socket.write(STARTUP_ANSWERED)));
+      const lines: string[] = [];
+      const lock = new PgAdvisoryLock({
+        connectionString: database.url,
+        logger: { log: (message) => void lines.push(message), warn: (message) => void lines.push(message) },
+        applicationName: 'bge-bootstrap:test',
+        attemptMs: 100,
+        attemptGraceMs: 100,
+      });
+
+      try {
+        const started = performance.now();
+        const run = lock.acquire({ deadlineAt: started + 500 });
+
+        await expect(run).rejects.toBeInstanceOf(LockNotAcquiredError);
+        await expect(run).rejects.toThrow(/did not answer the last attempt, as when a connection pooler has no server/);
+        expect(performance.now() - started).toBeLessThan(2_000);
+        expect(database.connections()).toBeGreaterThan(1);
+        expect(lines.some((line) => /trying again on a new connection/.test(line))).toBe(true);
+      } finally {
+        await lock.close();
+        await database.close();
+      }
+    });
+  });
+
+  describe('the COMMIT that releases the lock', () => {
+    it('is given up when the database does not answer it, and the release refuses', async () => {
+      // The lock is taken, then nothing more is answered: a connection that died
+      // without a reset while its transaction sat idle, as when a load balancer
+      // drops an idle connection. Unbounded, the COMMIT waits out TCP's retries.
+      const database = await fakeDatabase(answersUntil('COMMIT'));
+      const lock = new PgAdvisoryLock({
+        connectionString: database.url,
+        logger: silent,
+        applicationName: 'bge-bootstrap:test',
+        attemptGraceMs: 200,
+      });
+
+      try {
+        await lock.acquire();
+        const started = performance.now();
+        await expect(lock.release()).rejects.toBeInstanceOf(LockLostError);
+        expect(performance.now() - started).toBeLessThan(2_000);
+      } finally {
+        await lock.close();
+        await database.close();
       }
     });
   });
