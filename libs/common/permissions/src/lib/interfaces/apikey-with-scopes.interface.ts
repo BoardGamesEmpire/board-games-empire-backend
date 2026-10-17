@@ -5,5 +5,6 @@ export interface ApikeyWithScopes extends Apikey {
 }
 
 export interface ApiKeyScopeWithPermission extends ApiKeyScope {
-  permission: Pick<Permission, 'action' | 'subject' | 'inverted'>;
+  // `fields` is optional: a graph cached before the loader selected it has none.
+  permission: Pick<Permission, 'action' | 'subject' | 'inverted'> & Partial<Pick<Permission, 'fields'>>;
 }

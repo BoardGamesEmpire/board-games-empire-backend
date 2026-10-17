@@ -218,6 +218,20 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.High,
     reason: 'View user profiles',
   }),
+  // The ceiling user search composes against. `banned: false` matches the
+  // search's own filter, and `profile` is an optional relation, so its clause
+  // takes the operator form the in-memory matcher accepts. `fields` is the
+  // columns search serves: no route checks `read User` yet, and without them a
+  // later one that served `email` would serve it to every user on this grant.
+  permission({
+    action: Action.read,
+    subject: ResourceType.User,
+    conditions: { banned: false, profile: { is: { isSearchable: true } } },
+    fields: ['id', 'username', 'firstName', 'lastName', 'image'],
+    slug: 'read:user:searchable',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Find other users who have made their profile searchable',
+  }),
   permission({
     action: Action.update,
     subject: ResourceType.UserProfile,
@@ -1919,6 +1933,33 @@ export const PERMISSION_CATALOG = [
     slug: 'read:plugin',
     riskLevel: RiskLevel.Medium,
     reason: 'View installed plugins, their manifests, pending updates, and server consent state',
+  }),
+  // Every user's ceiling on the two unit lists, `GET /users/me/plugins` and
+  // `GET /households/:householdId/plugins`. Both list every installed plugin
+  // their axis admits, so a user can see what they could enable, and each
+  // composes its own scope against this. One grant covers both: every
+  // household role also holds `User`.
+  //
+  // `fields` is the privilege boundary, not a narrowing. A type check passes
+  // on any rule whatever its conditions, so this grant alone would pass
+  // `can(read, Plugin)` and open the server's own plugin reads, which serve
+  // provenance and install history. Those gate on `installedAt`, a column
+  // this grant leaves out. The list is the identity columns the unit lists
+  // serve, and `manifestJson` stays out: the localized names are derived from
+  // it, never served as it. A server-only column added here opens the server
+  // reads to every user, which `role-permission.catalog.spec.ts` pins against.
+  // An API key holding this grant keeps its field list, so the gate refuses
+  // the key whoever owns it. The server list builds its ceiling only from the
+  // rules that read `installedAt`, so a caller who passes the gate on another
+  // rule gets no extra rows from this one.
+  permission({
+    action: Action.read,
+    subject: ResourceType.Plugin,
+    conditions: { uninstalledAt: null },
+    fields: ['id', 'slug', 'category', 'scope', 'enabled'],
+    slug: 'read:plugin:installed',
+    riskLevel: RiskLevel.Low,
+    reason: 'View which plugins are installed, to decide your own and your households’ participation',
   }),
   // Household-scope pair: conditioned on the CLS household like the other
   // household permissions (`read:household`) — HouseholdPlugin carries the

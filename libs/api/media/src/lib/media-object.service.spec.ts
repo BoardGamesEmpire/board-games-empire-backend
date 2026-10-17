@@ -559,7 +559,7 @@ describe('MediaObjectService', () => {
    * it. Another user's media stays readable by id for whoever could read it
    * before. It is narrowed out of the list, not withdrawn.
    *
-   * `MediaObject` has left `PENDING_SCOPE_SWEEP`, so a regression that stops
+   * `MediaObject`'s envelope is guarded, so a regression that stops
    * this read composing answers 500 at the envelope rather than returning too
    * much. That is why the first test pins the composer call itself.
    */

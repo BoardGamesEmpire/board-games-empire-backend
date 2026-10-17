@@ -1,6 +1,7 @@
 import { AuditContextService, requireSessionUserId, type UserPluginUnit } from '@bge/actor-context';
-import { PluginGrantScope, ResourceType } from '@bge/database';
+import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
+import { CheckPolicies, PoliciesGuard, ScopeComposer } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
@@ -9,7 +10,7 @@ import {
   PluginUnitLifecycleService,
 } from '@bge/plugin';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
-import { Body, Controller, Get, HttpCode, Param, Post, Query, UseFilters } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
@@ -24,11 +25,15 @@ const PaginatedUserPluginsResponse = PaginatedResponseDto(PluginUnitInventoryEnt
  * decisions and the consent surface they decide from. #323 adds the unit
  * enable/disable endpoints to this class. Self-addressed under `/users/me`
  * per D-AX — the acting user from CLS is BOTH the decider and the consent
- * unit, so no one else's unit is addressable, and no permission seed exists
- * for this axis (D-BA seeded only the server and household pairs).
+ * unit, so no one else's unit is addressable. No permission seed exists for
+ * deciding on this axis (#59's C4 seeded only the server and household pairs).
+ * The list is the one read with a seed: it composes the caller's ceiling on
+ * `Plugin`, which every user holds through `read:plugin:installed`, so it
+ * alone carries a policy gate.
  *
- * With no seed, PoliciesGuard has nothing to clamp an API key's floor on —
- * so the gate here is the actor KIND: user-scope consent is "decided by the
+ * With no seed for the rest, PoliciesGuard has nothing to clamp an API key's
+ * floor on — so the gate here is the actor KIND, on every route, the list's
+ * too: user-scope consent is "decided by the
  * user themself" (#225's predicate taken literally), and an API key is an
  * agent acting AS its owner, not the owner. Without this, a key minted with
  * any unrelated scope could record consent to third-party code and create
@@ -46,6 +51,7 @@ export class UserPluginsController {
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   // ─── Installed-plugin inventory for the acting user (#354) ────────────────
@@ -62,15 +68,25 @@ export class UserPluginsController {
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedUserPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
-  @ApiResponse({ status: Http.Forbidden, description: 'API keys cannot read a user consent surface' })
+  @ApiResponse({
+    status: Http.Forbidden,
+    description: 'API keys cannot read a user consent surface, and nor can an actor with no read on plugins',
+  })
+  // The read composes the caller's `Plugin` ceiling, so an actor with no rule
+  // on `Plugin` is refused rather than served an empty page.
+  @UseGuards(PoliciesGuard)
+  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
   // Must stay out of the response cache: the grant, enable and disable writes
   // on this controller change these rows, and must be visible on the re-read.
   @Get()
   list(@Query() query: DefaultPaginationQueryDto) {
     return from(
-      this.inventory.listForUser(this.selfUserId(), query, {
-        locale: this.auditContext.getLocale() ?? undefined,
-      }),
+      this.inventory.listForUser(
+        this.selfUserId(),
+        query,
+        (scope) => this.scopeComposer.compose(ResourceType.Plugin, Action.read, scope),
+        { locale: this.auditContext.getLocale() ?? undefined },
+      ),
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 

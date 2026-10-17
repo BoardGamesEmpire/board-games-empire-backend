@@ -64,8 +64,8 @@ describe('HouseholdController (no-Session delegation)', () => {
   // The service composes the `Household` scope; the envelope is where the
   // guard checks for it, under the resource type the handler passes. Built
   // inside a request with nothing composed, a `Household` envelope must fail.
-  // A handler passing a type still in `PENDING_SCOPE_SWEEP` would pass here
-  // instead, which switches the guard off for that route without a sound.
+  // A handler declaring `Unscoped` would pass here instead, which switches the
+  // guard off for that route without a sound.
   it('getHouseholdsForUser builds its envelope under the Household scope guard', async () => {
     await expect(
       ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.getHouseholdsForUser(PAGINATION))),

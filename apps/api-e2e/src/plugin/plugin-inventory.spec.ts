@@ -1,14 +1,22 @@
-import { PluginCategory, PluginScope, PluginUnitDormantReason, RiskLevel, type Plugin } from '@bge/database';
+import {
+  PluginCategory,
+  PluginScope,
+  PluginUnitDormantReason,
+  ResourceType,
+  RiskLevel,
+  type Plugin,
+} from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { buildPluginManifest } from '@boardgamesempire/plugin-manifest';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { mintApiKey, type Caller } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
 /**
  * The wire half of #354 — the only plugin reads that answer before a slug is
- * known. Pinned here: the `read:plugin` gate on the server surface (the one
+ * known. Pinned here: the column gate on the server surface (the one
  * that serves provenance), the household instance gate, the actor-kind floor
  * on the user surface, the #230 envelope, the D-CH tombstone asymmetry, the
  * D-CF orphan flag, the D-CG per-row degradation, and the privilege split
@@ -82,11 +90,10 @@ describe('installed-plugin inventory (#354)', () => {
     return plugin;
   };
 
-  const listServer = (actor: SessionActor, query = '') =>
-    request(baseUrl).get(`/api/plugins${query}`).set(actor.headers);
+  const listServer = (actor: Caller, query = '') => request(baseUrl).get(`/api/plugins${query}`).set(actor.headers);
   const readOne = (actor: SessionActor, slug: string) =>
     request(baseUrl).get(`/api/plugins/${slug}`).set(actor.headers);
-  const listHousehold = (actor: SessionActor, householdId: string, query = '') =>
+  const listHousehold = (actor: Caller, householdId: string, query = '') =>
     request(baseUrl).get(`/api/households/${householdId}/plugins${query}`).set(actor.headers);
   const listUser = (actor: SessionActor, query = '') =>
     request(baseUrl).get(`/api/users/me/plugins${query}`).set(actor.headers);
@@ -94,6 +101,9 @@ describe('installed-plugin inventory (#354)', () => {
   /** The entry for a specific slug — these reads enumerate, so never index by position. */
   const entryFor = (body: { plugins: Array<Record<string, unknown>> }, slug: string) =>
     body.plugins.find((entry) => entry['slug'] === slug);
+
+  const slugsOf = (body: { plugins: Array<Record<string, unknown>> }) =>
+    body.plugins.map((entry) => entry['slug'] as string).sort();
 
   describe('GET /plugins — the server surface', () => {
     it('requires read:plugin, and is 401 unauthenticated', async () => {
@@ -173,6 +183,118 @@ describe('installed-plugin inventory (#354)', () => {
         description: null,
         manifestUnreadable: true,
       });
+    });
+
+    // The list is every installed plugin, and the caller's ceiling clips it.
+    // Admin's reaches every row, so the key's scope is all that narrows it.
+    it("narrows the list to the one plugin an API key's scope names", async () => {
+      const admin = await actors.admin();
+      const [scoped, other] = await Promise.all([arrangePlugin(), arrangePlugin()]);
+      const key = await mintApiKey(baseUrl, db.client, admin, {
+        slugs: ['read:plugin'],
+        resourceType: ResourceType.Plugin,
+        resourceId: scoped.id,
+      });
+
+      // The control: the key's owner lists both.
+      const own = await listServer(admin, '?limit=100').expect(200);
+      expect(slugsOf(own.body)).toEqual(expect.arrayContaining([scoped.slug, other.slug]));
+
+      const response = await listServer(key, '?limit=100').expect(200);
+      expect(slugsOf(response.body)).toEqual([scoped.slug]);
+      expect(response.body.pagination.total).toBe(1);
+    });
+
+    // The pinned grant passes the gate, and the identity-column grant beside
+    // it reads every row once a key's conditions are dropped. The ceiling
+    // comes from the rules that read the gate's column, so the second adds
+    // nothing.
+    it('keeps a key to its pinned plugin when it also holds the identity-column grant', async () => {
+      const admin = await actors.admin();
+      const [scoped, other] = await Promise.all([arrangePlugin(), arrangePlugin()]);
+      const key = await mintApiKey(baseUrl, db.client, admin, [
+        { slugs: ['read:plugin'], resourceType: ResourceType.Plugin, resourceId: scoped.id },
+        { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin },
+      ]);
+
+      // The control: the key's owner lists both.
+      const own = await listServer(admin, '?limit=100').expect(200);
+      expect(slugsOf(own.body)).toEqual(expect.arrayContaining([scoped.slug, other.slug]));
+
+      const response = await listServer(key, '?limit=100').expect(200);
+      expect(slugsOf(response.body)).toEqual([scoped.slug]);
+      expect(response.body.pagination.total).toBe(1);
+    });
+  });
+
+  // Every user holds `read:plugin:installed` for the unit lists, and a bare
+  // type check would pass on it. The server reads serve what that grant's
+  // field list leaves out, so they gate on one of those columns instead.
+  describe('the server reads refuse the grant every user holds', () => {
+    const SERVER_READS: readonly { readonly name: string; readonly path: (slug: string) => string }[] = [
+      { name: 'GET /plugins', path: () => '/api/plugins' },
+      { name: 'GET /plugins/:slug', path: (slug) => `/api/plugins/${slug}` },
+      { name: 'GET /plugins/:slug/consent', path: (slug) => `/api/plugins/${slug}/consent` },
+      { name: 'GET /plugins/:slug/update/pending', path: (slug) => `/api/plugins/${slug}/update/pending` },
+      { name: 'GET /plugins/:slug/features', path: (slug) => `/api/plugins/${slug}/features` },
+    ];
+
+    const statuses = async (actor: Caller, slug: string): Promise<Record<string, number>> => {
+      const answered: Record<string, number> = {};
+
+      for (const route of SERVER_READS) {
+        answered[route.name] = (await request(baseUrl).get(route.path(slug)).set(actor.headers)).status;
+      }
+
+      return answered;
+    };
+
+    it('answers 403 to a plain user on all five', async () => {
+      const user = await actors.user();
+      const plugin = await arrangePlugin();
+
+      // The control: the user does hold a rule on Plugin, so the refusals below
+      // are the column gate's and not a missing grant's.
+      const own = await listUser(user, '?limit=100').expect(200);
+      expect(entryFor(own.body, plugin.slug)).toBeDefined();
+
+      await expect(statuses(user, plugin.slug)).resolves.toEqual(
+        Object.fromEntries(SERVER_READS.map((route) => [route.name, 403])),
+      );
+    });
+
+    // Nothing is staged, so the pending read is the service's 409.
+    const PASSED = {
+      'GET /plugins': 200,
+      'GET /plugins/:slug': 200,
+      'GET /plugins/:slug/consent': 200,
+      'GET /plugins/:slug/update/pending': 409,
+      'GET /plugins/:slug/features': 200,
+    };
+
+    it('lets Admin through on all five', async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangePlugin();
+
+      await expect(statuses(admin, plugin.slug)).resolves.toEqual(PASSED);
+    });
+
+    // An API key is held to its grant's field list as a user is. Without that,
+    // a staff member's key holding only the grant every user holds passed on
+    // its owner's say, and read what the grant leaves out.
+    it("answers 403 to an Admin's key that holds only the grant every user holds", async () => {
+      const admin = await actors.admin();
+      const plugin = await arrangePlugin();
+      const keyFor = (slug: string) =>
+        mintApiKey(baseUrl, db.client, admin, { slugs: [slug], resourceType: ResourceType.Plugin });
+
+      // The control: a key on the unfielded grant passes, so the refusals below
+      // are the field list's and not every key's.
+      await expect(statuses(await keyFor('read:plugin'), plugin.slug)).resolves.toEqual(PASSED);
+
+      await expect(statuses(await keyFor('read:plugin:installed'), plugin.slug)).resolves.toEqual(
+        Object.fromEntries(SERVER_READS.map((route) => [route.name, 403])),
+      );
     });
   });
 
@@ -306,6 +428,78 @@ describe('installed-plugin inventory (#354)', () => {
 
       await listHousehold(owner, fixture.household.id, '?includeUninstalled=true').expect(400);
     });
+
+    // A plugin whose scope has no household axis is listed by THIS
+    // household's row of it. Another household's row must not list it here.
+    it('leaves out a server-scope plugin that only another household holds a row for', async () => {
+      const [owner, otherOwner] = await Promise.all([actors.user(), actors.user()]);
+      const [fixture, otherFixture] = await Promise.all([
+        actors.householdWithMembers({ owner }),
+        actors.householdWithMembers({ owner: otherOwner }),
+      ]);
+      const plugin = await arrangePlugin({ scope: PluginScope.Server });
+      await db.client.householdPlugin.create({
+        data: { householdId: otherFixture.household.id, pluginId: plugin.id, enabled: true },
+      });
+
+      const response = await listHousehold(owner, fixture.household.id, '?limit=100').expect(200);
+      expect(entryFor(response.body, plugin.slug)).toBeUndefined();
+
+      // The control: the household that holds the row lists it.
+      const others = await listHousehold(otherOwner, otherFixture.household.id, '?limit=100').expect(200);
+      expect(entryFor(others.body, plugin.slug)).toBeDefined();
+    });
+
+    /**
+     * Owned by Admin, so the instance check admits the household whatever its
+     * state: a deleted household drops out of a member's graph and a member's
+     * key would meet 403 there instead. The key reads no households, so the
+     * route's liveness guard lets it through, and the list checks liveness
+     * itself. It answers such a key 403, as the writes' re-check does, so the
+     * key is not told which household was deleted.
+     */
+    describe("through a staff member's API key", () => {
+      const keyOf = (owner: SessionActor, pluginId?: string) =>
+        mintApiKey(baseUrl, db.client, owner, [
+          { slugs: ['read:plugin:household'], resourceType: ResourceType.HouseholdPlugin },
+          { slugs: ['read:plugin:installed'], resourceType: ResourceType.Plugin, resourceId: pluginId },
+        ]);
+
+      it('narrows the list to the one plugin its scope names, and refuses it once the household is deleted', async () => {
+        const admin = await actors.admin();
+        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+        const [scoped, other] = await Promise.all([
+          arrangePlugin({ scope: PluginScope.Household }),
+          arrangePlugin({ scope: PluginScope.Household }),
+        ]);
+
+        // The control: unpinned, the key lists both.
+        const unpinned = await listHousehold(await keyOf(admin), household.id, '?limit=100').expect(200);
+        expect(slugsOf(unpinned.body)).toEqual(expect.arrayContaining([scoped.slug, other.slug]));
+
+        const key = await keyOf(admin, scoped.id);
+        const pinned = await listHousehold(key, household.id, '?limit=100').expect(200);
+        expect(slugsOf(pinned.body)).toEqual([scoped.slug]);
+        expect(pinned.body.pagination.total).toBe(1);
+
+        await db.client.household.update({ where: { id: household.id }, data: { deletedAt: new Date() } });
+
+        await listHousehold(key, household.id).expect(403);
+      });
+
+      // The rows are plugins. A key with no rule on them is refused, not served
+      // an empty page.
+      it('refuses a key that reads household plugins but not plugins', async () => {
+        const admin = await actors.admin();
+        const { household } = await actors.householdWithMembers({ owner: await actors.user() });
+        const key = await mintApiKey(baseUrl, db.client, admin, {
+          slugs: ['read:plugin:household'],
+          resourceType: ResourceType.HouseholdPlugin,
+        });
+
+        await listHousehold(key, household.id).expect(403);
+      });
+    });
   });
 
   describe('GET /users/me/plugins', () => {
@@ -332,6 +526,16 @@ describe('installed-plugin inventory (#354)', () => {
       const response = await listUser(user, '?limit=100').expect(200);
 
       expect(entryFor(response.body, plugin.slug)?.['unit']).toMatchObject({ anchored: true, enabled: false });
+    });
+
+    it("does not report another user's anchor as the caller's", async () => {
+      const [user, other] = await Promise.all([actors.user(), actors.user()]);
+      const plugin = await arrangePlugin();
+      await db.client.userPlugin.create({ data: { userId: other.user.id, pluginId: plugin.id, enabled: true } });
+
+      const response = await listUser(user, '?limit=100').expect(200);
+
+      expect(entryFor(response.body, plugin.slug)?.['unit']).toMatchObject({ anchored: false, enabled: false });
     });
 
     it('serves no provenance, version or install history, and accepts no tombstone flag', async () => {

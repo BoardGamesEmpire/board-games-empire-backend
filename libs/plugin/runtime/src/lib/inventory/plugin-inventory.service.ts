@@ -39,6 +39,29 @@ export interface PluginInventoryRows<T> {
   readonly total: number;
 }
 
+/**
+ * The caller's half of a unit list: it takes the scope the list names, ANDs the
+ * caller's permission ceiling onto it, and returns the result. The API edge
+ * supplies it with the scope composer, which also records that the read was
+ * composed, so the envelope's guard can tell.
+ *
+ * The runtime cannot build the ceiling itself, because it stays off the
+ * permissions lib (#409). It still names the scope, which is a domain rule
+ * and not the edge's to re-derive. Taking a function rather than a finished
+ * `where` keeps it that way: the edge sees the scope only to compose it, and
+ * one that skips composing records nothing and the envelope fails. The list
+ * runs its own scope beside what comes back, so an edge that dropped it could
+ * not widen the list either.
+ */
+export type PluginInventoryCeiling = (scope: Prisma.PluginWhereInput) => Prisma.PluginWhereInput;
+
+/**
+ * The server list's ceiling. It takes no scope: the server list is every
+ * installed plugin, so the edge composes an unscoped read and says why, and
+ * the tombstone filter goes beside what it returns.
+ */
+export type PluginServerInventoryCeiling = () => Prisma.PluginWhereInput;
+
 export interface PluginInventoryOptions {
   /** Requester's resolved catalog locale; falls back to the host default. */
   readonly locale?: string;
@@ -92,10 +115,11 @@ export interface PluginInventoryPendingUpdate {
  * which plugin it is, what it is called, and whether it is still installed.
  *
  * The split below is a privilege boundary, not tidiness. The server list is
- * gated on `read:plugin`; the two unit lists are not — the household axis
- * gates on household membership and the user axis only on the actor being a
- * session user, because a user reading their own consent surface needs no
- * server-admin permission. So the operational picture (provenance, install
+ * gated on a server-only column of `Plugin`, which `read:plugin` and staff
+ * pass; the two unit lists are not — they read through
+ * `read:plugin:installed`, which every user holds and which reaches the
+ * identity columns alone, because a user reading their own consent surface
+ * needs no server-admin permission. So the operational picture (provenance, install
  * time, restart-required, staged updates) belongs to
  * {@link PluginInventoryEntry} alone, and the unit shapes extend THIS type
  * rather than that one — a field added to the server entry cannot reach an
@@ -285,6 +309,10 @@ type UnitStateRow = { enabled: boolean; suspendedForConsent: boolean; suspendedA
  *
  * **No caching.** These bodies are read immediately after the lifecycle
  * writes that change them.
+ *
+ * **Ceilings (#517).** Each list takes the caller's ceiling as a required
+ * function and runs the `where` it returns for both the rows and the count;
+ * see {@link PluginInventoryCeiling}.
  */
 @Injectable()
 export class PluginInventoryService {
@@ -300,9 +328,10 @@ export class PluginInventoryService {
    */
   async listForServer(
     paging: PluginInventoryPaging,
+    ceiling: PluginServerInventoryCeiling,
     options: PluginServerInventoryOptions = {},
   ): Promise<PluginInventoryRows<PluginInventoryEntry>> {
-    const where = this.tombstoneFilter(options);
+    const where: Prisma.PluginWhereInput = { AND: [ceiling(), this.tombstoneFilter(options)] };
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -332,9 +361,10 @@ export class PluginInventoryService {
   async listForHousehold(
     householdId: string,
     paging: PluginInventoryPaging,
+    ceiling: PluginInventoryCeiling,
     options: PluginInventoryOptions = {},
   ): Promise<PluginInventoryRows<PluginHouseholdInventoryEntry>> {
-    const where: Prisma.PluginWhereInput = {
+    const scope: Prisma.PluginWhereInput = {
       // Unconditional, unlike the server list: no unit read serves tombstones.
       uninstalledAt: null,
       // The D-CF arm is the second one. A plain `scope: Household` filter
@@ -344,6 +374,7 @@ export class PluginInventoryService {
       // holds a row for whatever its scope says today.
       OR: [{ scope: PluginScope.Household }, { householdPlugins: { some: { householdId } } }],
     };
+    const where: Prisma.PluginWhereInput = { AND: [scope, ceiling(scope)] };
 
     const [rows, total] = await this.db.$transaction(
       [
@@ -406,9 +437,11 @@ export class PluginInventoryService {
   async listForUser(
     userId: string,
     paging: PluginInventoryPaging,
+    ceiling: PluginInventoryCeiling,
     options: PluginInventoryOptions = {},
   ): Promise<PluginInventoryRows<PluginUnitInventoryEntry>> {
-    const where: Prisma.PluginWhereInput = { uninstalledAt: null };
+    const scope: Prisma.PluginWhereInput = { uninstalledAt: null };
+    const where: Prisma.PluginWhereInput = { AND: [scope, ceiling(scope)] };
 
     const [rows, total] = await this.db.$transaction(
       [

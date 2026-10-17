@@ -6,7 +6,7 @@ export {
   HouseholdPathParam,
   alreadyTellsHouseholdsApart,
 } from './lib/guards/household-liveness.guard';
-export { lockExistingHousehold } from './lib/household-access.helpers';
+export { householdExists, lockExistingHousehold } from './lib/household-access.helpers';
 export * from './lib/household.controller';
 export * from './lib/household.module';
 export * from './lib/household.service';

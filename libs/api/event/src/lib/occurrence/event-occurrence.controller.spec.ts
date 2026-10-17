@@ -94,8 +94,8 @@ describe('EventOccurrenceController', () => {
     // The service composes the `EventOccurrence` scope; the envelope is where
     // the guard checks for it, under the resource type the handler passes.
     // Built inside a request with nothing composed, it must fail. A handler
-    // passing a type still in `PENDING_SCOPE_SWEEP` would pass here instead,
-    // which switches the guard off for that route without a sound.
+    // declaring `Unscoped` would pass here instead, which switches the guard
+    // off for that route without a sound.
     //
     // The failure has to name `EventOccurrence` itself. The three event lists
     // left the sweep together, so a handler passing a sibling's type fails

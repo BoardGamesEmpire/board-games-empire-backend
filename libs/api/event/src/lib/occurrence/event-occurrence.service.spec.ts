@@ -112,8 +112,8 @@ describe('EventOccurrenceService', () => {
       db.eventOccurrence.count.mockResolvedValue(0);
     });
 
-    // #512. `EventOccurrence` has left `PENDING_SCOPE_SWEEP`, so the envelope
-    // fails with a 500 unless this read composes. The rows do not change: the
+    // #512. The `EventOccurrence` envelope fails with a 500 unless this read
+    // composes. The rows do not change: the
     // path's event was already the filter, and the ceiling still clips it.
     it('asks the composer for its where clause, declaring the path event as its scope', async () => {
       db.event.count.mockResolvedValue(1);

@@ -192,7 +192,8 @@ export interface CreateNotificationInput<T extends NotificationType = Notificati
 }
 
 /**
- * One unread notification as `getUnread` returns it — a discriminated union on
+ * One unread notification as `UserNotificationsService.getUnread` (`@bge/notifications`)
+ * returns it — a discriminated union on
  * `type`, so a consumer that narrows `type` gets the exact `payload` shape. A
  * `t()` marker in a payload (`ImportFailedPayload.error`) is still a marker
  * here; `I18nResponseInterceptor` renders it to a string on the way to the client.

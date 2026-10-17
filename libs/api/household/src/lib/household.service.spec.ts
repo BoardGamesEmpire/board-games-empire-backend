@@ -787,8 +787,7 @@ describe('HouseholdService', () => {
   /**
    * #417. The `paginated()` guard reads a CLS registry keyed per resource type
    * per REQUEST, not per call: a read that reaches the database on its ceiling
-   * alone records nothing, and now that `Household` has left
-   * `PENDING_SCOPE_SWEEP` the envelope built over it throws
+   * alone records nothing, and the envelope built over it throws
    * `ListScopeNotComposedError`. A regression that stops this read composing
    * its scope therefore answers 500 rather than merely returning too much,
    * which is why the first test pins the composer call itself.

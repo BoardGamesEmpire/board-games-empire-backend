@@ -3,7 +3,6 @@ import { paginated } from '../dto/paginated-response.dto.js';
 import { assertListScopeComposed } from './assert-list-scope-composed.js';
 import { recordComposedScope, wasScopeComposed } from './composed-scope-registry.js';
 import { Unscoped } from './list-scope.js';
-import { PENDING_SCOPE_SWEEP } from './pending-scope-sweep.js';
 import { ListScopeNotComposedError } from './unscoped-list.error.js';
 
 /** Runs `fn` inside a fresh CLS scope, as a request would. */
@@ -49,38 +48,19 @@ describe('the composed-scope registry', () => {
 });
 
 describe('assertListScopeComposed', () => {
-  // Chosen so the test does not silently become vacuous as 418 empties the
-  // pin: if this resource is ever added to PENDING_SCOPE_SWEEP the guard would
-  // stop firing and these assertions would pass for the wrong reason.
-  const UNPINNED = 'Quota';
-
-  // Taken FROM the pin rather than named, which is the same guard the line
-  // above applies in the other direction. Naming one (this was 'Household'
-  // until 417 swept it) makes the test fail on the unrelated change that
-  // converts that resource, and the reader cannot tell a real regression from
-  // an example that simply moved on.
-  const [PINNED] = [...PENDING_SCOPE_SWEEP];
-
-  beforeAll(() => {
-    expect(PENDING_SCOPE_SWEEP.has(UNPINNED)).toBe(false);
-
-    // The sweep is finished when this fails. That is the point at which
-    // `pending-scope-sweep.ts`, its spec, the branch in
-    // `assertListScopeComposed` and this test are all deleted together.
-    expect(PENDING_SCOPE_SWEEP.size).toBeGreaterThan(0);
-  });
+  const RESOURCE = 'Quota';
 
   it('throws when a declared scope was never composed', () => {
     inRequest(() => {
-      expect(() => assertListScopeComposed('quotas', UNPINNED)).toThrow(ListScopeNotComposedError);
+      expect(() => assertListScopeComposed('quotas', RESOURCE)).toThrow(ListScopeNotComposedError);
     });
   });
 
   it('passes once the scope has been composed', () => {
     inRequest(() => {
-      recordComposedScope(UNPINNED);
+      recordComposedScope(RESOURCE);
 
-      expect(() => assertListScopeComposed('quotas', UNPINNED)).not.toThrow();
+      expect(() => assertListScopeComposed('quotas', RESOURCE)).not.toThrow();
     });
   });
 
@@ -100,23 +80,17 @@ describe('assertListScopeComposed', () => {
     });
   });
 
-  it('passes a resource still pinned as unswept', () => {
-    inRequest(() => {
-      expect(() => assertListScopeComposed('a pinned envelope', PINNED)).not.toThrow();
-    });
-  });
-
   it('names the resource and the envelope key, so the fix is obvious from the log', () => {
     inRequest(() => {
-      expect(() => assertListScopeComposed('quotas', UNPINNED)).toThrow(/quotas/);
-      expect(() => assertListScopeComposed('quotas', UNPINNED)).toThrow(new RegExp(UNPINNED));
+      expect(() => assertListScopeComposed('quotas', RESOURCE)).toThrow(/quotas/);
+      expect(() => assertListScopeComposed('quotas', RESOURCE)).toThrow(new RegExp(RESOURCE));
     });
   });
 
   it('surfaces as a 500, not a 403 — it is a programmer error, not a denial', () => {
     inRequest(() => {
       try {
-        assertListScopeComposed('quotas', UNPINNED);
+        assertListScopeComposed('quotas', RESOURCE);
         throw new Error('expected assertListScopeComposed to throw');
       } catch (error) {
         expect((error as ListScopeNotComposedError).getStatus()).toBe(500);
@@ -126,7 +100,7 @@ describe('assertListScopeComposed', () => {
 });
 
 describe('paginated() enforces the guard', () => {
-  it('refuses to build an envelope for an unscoped, unpinned read', () => {
+  it('refuses to build an envelope for a read whose scope was never composed', () => {
     inRequest(() => {
       expect(() => paginated('quotas', rows, paging, 'Quota')).toThrow(ListScopeNotComposedError);
     });
@@ -144,11 +118,6 @@ describe('paginated() enforces the guard', () => {
   });
 
   it('cannot be satisfied for two lists by scoping only one of them', () => {
-    // Both resources must be unpinned, or the pin rather than the registry is
-    // what lets the first call through and the test proves nothing.
-    expect(PENDING_SCOPE_SWEEP.has('Quota')).toBe(false);
-    expect(PENDING_SCOPE_SWEEP.has('WebhookSubscription')).toBe(false);
-
     inRequest(() => {
       recordComposedScope('Quota');
 

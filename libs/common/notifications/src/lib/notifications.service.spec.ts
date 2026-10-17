@@ -68,18 +68,4 @@ describe('NotificationsService', () => {
       }),
     );
   });
-
-  it('caps getUnread to the most-recent 100 unread rows', async () => {
-    db.notification.findMany.mockResolvedValue([]);
-
-    await service.getUnread('user-1');
-
-    expect(db.notification.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { userId: 'user-1', read: false },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      }),
-    );
-  });
 });

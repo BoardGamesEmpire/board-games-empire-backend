@@ -1,7 +1,13 @@
 import type { AuditContextService } from '@bge/actor-context';
 import { Action, PluginGrantScope, PluginGrantStatus, ResourceType, type DatabaseService } from '@bge/database';
 import { HouseholdLivenessGuard } from '@bge/household';
-import { CHECK_POLICIES_KEY, PoliciesGuard, type AbilityService, type AppAbility } from '@bge/permissions';
+import {
+  CHECK_POLICIES_KEY,
+  PoliciesGuard,
+  ScopeComposer,
+  type AbilityService,
+  type AppAbility,
+} from '@bge/permissions';
 import type {
   PluginConsentPresentation,
   PluginConsentPresentationService,
@@ -11,9 +17,11 @@ import type {
   PluginInventoryService,
   PluginUnitLifecycleService,
 } from '@bge/plugin';
+import { ListScopeNotComposedError } from '@bge/shared';
 import { createMockAbilityService, MOCK_ACTING_USER_ID, type MockAbilityService } from '@bge/testing';
 import { ForbiddenException, NotFoundException, RequestMethod, type ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { ClsServiceManager } from 'nestjs-cls';
 import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import { HouseholdPluginsController } from './household-plugins.controller';
@@ -49,6 +57,8 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
   let inventory: jest.Mocked<Pick<PluginInventoryService, 'listForHousehold'>>;
   let auditContext: jest.Mocked<Pick<AuditContextService, 'getLocale'>>;
   let abilityService: MockAbilityService;
+  let householdCount: jest.Mock;
+  let scopeComposer: ScopeComposer;
 
   beforeEach(() => {
     grants = { decide: jest.fn().mockResolvedValue({ grant: GRANT, changed: true }) };
@@ -62,6 +72,12 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
     inventory = { listForHousehold: jest.fn().mockResolvedValue(INVENTORY_PAGE as never) };
     auditContext = { getLocale: jest.fn().mockReturnValue(null) };
     abilityService = createMockAbilityService();
+    // The list's liveness probe; every household here is live unless a test
+    // says otherwise.
+    householdCount = jest.fn().mockResolvedValue(1);
+    // The REAL composer over the mocked ability service, so the list's ceiling
+    // is composed and recorded as it is in a request.
+    scopeComposer = new ScopeComposer(abilityService as never);
     controller = new HouseholdPluginsController(
       grants as never,
       abilityService as never,
@@ -70,6 +86,8 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       featureState as never,
       inventory as never,
       auditContext as never,
+      { household: { count: householdCount } } as unknown as DatabaseService,
+      scopeComposer,
     );
   });
 
@@ -245,6 +263,7 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
       expect(inventory.listForHousehold).toHaveBeenCalledWith(
         'hh-1',
         expect.objectContaining({ skip: 0, pageSize: 25 }),
+        expect.any(Function),
         { includeUninstalled: undefined, locale: 'de' },
       );
       expect(result).toEqual({
@@ -263,6 +282,66 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
 
       expect(() => controller.list('hh-2', query())).toThrow(ForbiddenException);
       expect(inventory.listForHousehold).not.toHaveBeenCalled();
+      // Liveness comes second, so an actor refused here learns nothing about
+      // whether the household exists.
+      expect(householdCount).not.toHaveBeenCalled();
+    });
+
+    // The route's liveness guard lets through an actor that cannot read
+    // households, such as a staff member's key scoped to the plugin routes,
+    // and a soft delete leaves the plugin rows in place. The list checks for
+    // that actor itself, and answers 403, as the routes do whatever the id.
+    it('answers 403 for a household that is gone to an actor who does not read households', async () => {
+      householdCount.mockResolvedValue(0);
+      abilityService.getCurrentAbilities.mockReturnValue([{ can: () => true }, { can: () => false }] as never);
+
+      await expect(firstValueFrom(controller.list('hh-gone', query()))).rejects.toBeInstanceOf(ForbiddenException);
+      expect(householdCount).toHaveBeenCalledWith({ where: { id: 'hh-gone', deletedAt: null } });
+      expect(inventory.listForHousehold).not.toHaveBeenCalled();
+    });
+
+    it('lists a live household for an actor who does not read households', async () => {
+      abilityService.getCurrentAbilities.mockReturnValue([{ can: () => false }] as never);
+
+      await firstValueFrom(controller.list('hh-1', query()));
+
+      expect(householdCount).toHaveBeenCalledTimes(1);
+      expect(inventory.listForHousehold).toHaveBeenCalled();
+    });
+
+    // The guard has already answered an actor who reads households, 404 for a
+    // household that is gone, so a second probe would only repeat its query.
+    it('leaves an actor who reads households to the liveness guard', async () => {
+      abilityService.getCurrentAbilities.mockReturnValue([{ can: () => true }] as never);
+
+      await firstValueFrom(controller.list('hh-1', query()));
+
+      expect(householdCount).not.toHaveBeenCalled();
+      expect(inventory.listForHousehold).toHaveBeenCalled();
+    });
+
+    it("hands the runtime the caller's Plugin ceiling to compose the household scope with", async () => {
+      const compose = jest.spyOn(scopeComposer, 'compose');
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+      const scope = { uninstalledAt: null, OR: [{ householdPlugins: { some: { householdId: 'hh-1' } } }] };
+
+      await firstValueFrom(controller.list('hh-1', query()));
+      const ceiling = inventory.listForHousehold.mock.calls[0]?.[2];
+
+      expect(ceiling?.(scope)).toEqual({ ...scope, AND: [{ id: 'p-1' }] });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Plugin, Action.read, scope);
+    });
+
+    // The runtime calls the ceiling, and composing it is what the envelope's
+    // guard checks for. Built inside a request where nothing calls it, the
+    // envelope must fail, naming the type.
+    it('builds its envelope under the Plugin scope guard', async () => {
+      const envelope = ClsServiceManager.getClsService().runWith({}, () =>
+        firstValueFrom(controller.list('hh-1', query())),
+      );
+
+      await expect(envelope).rejects.toThrow(ListScopeNotComposedError);
+      await expect(envelope).rejects.toThrow(`intrinsic scope for '${ResourceType.Plugin}'`);
     });
 
     it('checks the instance gate against THIS household as a HouseholdPlugin subject', async () => {
@@ -320,8 +399,24 @@ describe('HouseholdPluginsController (delegation + household instance gate)', ()
         | Array<(ability: AppAbility) => boolean>
         | undefined;
 
+    // The rows are plugins, so the list composes a `Plugin` ceiling and an
+    // actor with no rule on `Plugin` is refused here, not served an empty page.
+    it('list gates on read:HouseholdPlugin and read:Plugin', () => {
+      const handlers = policiesFor('list');
+      expect(handlers).toHaveLength(2);
+
+      const can = jest.fn().mockReturnValue(true);
+      for (const handler of handlers ?? []) {
+        handler({ can } as unknown as AppAbility);
+      }
+
+      expect(can.mock.calls).toEqual([
+        [Action.read, ResourceType.HouseholdPlugin],
+        [Action.read, ResourceType.Plugin],
+      ]);
+    });
+
     it.each([
-      ['list', Action.read],
       ['consentPresentation', Action.read],
       ['featureStates', Action.read],
       ['decideGrant', Action.manage],
