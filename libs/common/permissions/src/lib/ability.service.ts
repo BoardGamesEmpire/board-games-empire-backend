@@ -376,9 +376,13 @@ function assertNeverActor(actor: never): never {
  * allows that read the column, and denials bound to it or to no field. CASL
  * hands them back highest priority first, and a built ability takes its last
  * rule as the highest, so they are reversed to keep a later denial winning.
+ *
+ * Their fields are dropped once the selection is made. The clause is built
+ * with no field named, and CASL skips a field-bound denial in that form, so a
+ * conditioned denial of the column would otherwise leave its rows in.
  */
 function rulesAdmittingField(ability: AppAbility, action: Action, resourceType: ModelResourceType, field: string) {
-  const rules = ability.rulesFor(action, resourceType, field).map((rule) => rule.origin);
+  const rules = ability.rulesFor(action, resourceType, field).map((rule) => ({ ...rule.origin, fields: undefined }));
 
   return createPrismaAbility(rules.reverse()) as AppAbility;
 }

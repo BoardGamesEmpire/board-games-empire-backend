@@ -177,6 +177,42 @@ describe('AbilityService', () => {
           service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
         ).toEqual([{ AND: [{ NOT: { id: 'p-2' } }] }]);
       });
+
+      // A conditioned denial of the column leaves the check on it passing, so
+      // the clause is all that keeps its rows out.
+      it('keeps a denial bound to the field', () => {
+        const denied = ability([
+          { action: Action.read, subject: 'Plugin' },
+          {
+            action: Action.read,
+            subject: 'Plugin',
+            fields: ['installedAt'],
+            conditions: { id: 'p-2' },
+            inverted: true,
+          },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ AND: [{ NOT: { id: 'p-2' } }] }]);
+      });
+
+      it('ignores a denial bound to other fields', () => {
+        const denied = ability([
+          { action: Action.read, subject: 'Plugin' },
+          {
+            action: Action.read,
+            subject: 'Plugin',
+            fields: IDENTITY_COLUMNS,
+            conditions: { id: 'p-2' },
+            inverted: true,
+          },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{}]);
+      });
     });
   });
 
