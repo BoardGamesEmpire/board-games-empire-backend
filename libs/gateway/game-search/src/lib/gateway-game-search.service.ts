@@ -1,11 +1,19 @@
-import { DatabaseService, DataGatewayCapability } from '@bge/database';
-import { GatewayRegistryService, GatewayRoutingRefusedError } from '@bge/gateway-registry';
+import { type CoverageAxis, DatabaseService, DataGatewayCapability } from '@bge/database';
+import {
+  type CoverageFilter,
+  GatewayRegistryService,
+  GatewayRoutingRefusedError,
+  type SearchResolution,
+  type SearchRoute,
+  toCoverageFilter,
+} from '@bge/gateway-registry';
 import * as proto from '@boardgamesempire/proto-gateway';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import type { Cache } from 'cache-manager';
 import { defer, EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, concatMap, endWith, filter, map, mergeMap, tap, throwIfEmpty } from 'rxjs/operators';
+import { filterFor, matchesFilter } from './search-filter';
 
 /**
  * Cap for concurrent per-game dedup lookups on the cache-replay path. Live
@@ -57,7 +65,7 @@ export class GatewayGameSearchService {
   private readonly searchCachePrefix = 'bge:search';
 
   /**
-   * TTL for cached search results per (gatewayId, query, limit, offset) — 5 minutes
+   * TTL for cached search results per DataGateway and request sent to it — 5 minutes
    */
   private readonly searchCacheTTL = 5 * 60 * 1000;
 
@@ -69,14 +77,22 @@ export class GatewayGameSearchService {
 
   /**
    * Searches the requested DataGateways, or, when none is named, every one
-   * this process has connected that may search. Streams SearchGameResult
-   * frames as they arrive, with deduplication metadata resolved against
-   * GameSource for each RESULT frame.
+   * this process has connected that may search and whose coverage overlaps
+   * the request's filter. Streams SearchGameResult frames as they arrive,
+   * with deduplication metadata resolved against GameSource for each RESULT
+   * frame.
+   *
+   * A filtered search sends each DataGateway the filter on the axes its
+   * search narrows by, and removes every result the filter excludes, however
+   * the DataGateway narrowed (#713). A named DataGateway whose coverage
+   * doesn't overlap the filter isn't asked, and answers SOURCE_DONE alone.
    */
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     this.logger.debug(
       `Received search request with query '${request.query}' for gateways [${request.gatewayIds?.join(', ')}]`,
     );
+
+    const coverageFilter = toCoverageFilter(request.filter);
 
     // Filter blank/invalid ids: a targeted request searches only the valid
     // ids among those given (never resolves '' or a non-string leaked from a
@@ -93,12 +109,12 @@ export class GatewayGameSearchService {
     // process hasn't connected yet isn't reached by an untargeted search (#722).
     const targetIds$ = targeted
       ? of(requestedIds)
-      : defer(() => from(this.registry.routableGatewayIds(DataGatewayCapability.Search)));
+      : defer(() => from(this.registry.routableGatewayIds(DataGatewayCapability.Search, coverageFilter)));
 
     return targetIds$.pipe(
       mergeMap((ids) => from(ids)),
       tap((id) => this.logger.debug(`Initiating search on gateway ${id} for query '${request.query}'`)),
-      mergeMap((id) => this.searchGateway(id, request)),
+      mergeMap((id) => this.searchGateway(id, request, coverageFilter)),
     );
   }
 
@@ -191,36 +207,58 @@ export class GatewayGameSearchService {
     );
   }
 
-  private searchGateway(gatewayId: string, request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
-    const cacheKey = this.buildSearchCacheKey(gatewayId, request);
-
-    return from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(
+  private searchGateway(
+    gatewayId: string,
+    request: proto.SearchGamesRequest,
+    coverageFilter: CoverageFilter,
+  ): Observable<proto.SearchGameResult> {
+    return defer(() => from(this.registry.searchRoute(gatewayId, coverageFilter))).pipe(
+      // A route that can't be read leaves the search to the live path, as a
+      // cache miss does. It reads the row again, and if that fails too it
+      // answers UNAVAILABLE, keeping the failure's detail for the log.
       catchError((err) => {
         this.logger.warn(
-          `Search cache read failed for gateway ${gatewayId}; falling through to live fetch: ${
+          `Search route read failed for gateway ${gatewayId}; falling through to live fetch: ${
             err instanceof Error ? err.message : err
           }`,
         );
-        return of(undefined);
+        return of<SearchRoute>({ routable: false });
       }),
-      mergeMap((cached) => {
-        if (cached === undefined) {
-          this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
-          return this.fetchFromGateway(gatewayId, request, cacheKey);
+      mergeMap((route) => {
+        // One that may not search now gets the live path, never its cache:
+        // the gateway registry refuses it, saying why, or connects and
+        // interviews one never interviewed, whose coverage it then reads.
+        if (!route.routable) {
+          return this.fetchFromGateway(gatewayId, request, coverageFilter);
         }
 
-        // A cached search is replayed only while the DataGateway may still
-        // search. Otherwise the live path answers: the gateway registry
-        // refuses it, saying why, or connects and interviews one never
-        // interviewed.
-        return from(this.registry.isRoutable(gatewayId, DataGatewayCapability.Search)).pipe(
-          mergeMap((routable) => {
-            if (!routable) {
-              return this.fetchFromGateway(gatewayId, request, cacheKey);
+        if (!route.covers) {
+          return this.uncoveredSearch(gatewayId, request.correlationId);
+        }
+
+        const cacheKey = this.buildSearchCacheKey(gatewayId, this.gatewayRequest(request, route.filterableAxes));
+
+        return from(this.cache.get<proto.GameSearchData[]>(cacheKey)).pipe(
+          catchError((err) => {
+            this.logger.warn(
+              `Search cache read failed for gateway ${gatewayId}; falling through to live fetch: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+            return of(undefined);
+          }),
+          mergeMap((cached) => {
+            if (cached === undefined) {
+              this.logger.debug(`Cache miss for gateway ${gatewayId} and query '${request.query}'`);
+              // Asked by the route already read, so its row isn't read again.
+              return this.fetchFromGateway(gatewayId, request, coverageFilter, async () => ({
+                driver: await route.driver(),
+                filterableAxes: route.filterableAxes,
+              }));
             }
 
             this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
-            return this.emitCachedResults(gatewayId, request.correlationId, cached);
+            return this.emitCachedResults(gatewayId, request.correlationId, cached, coverageFilter);
           }),
         );
       }),
@@ -233,39 +271,44 @@ export class GatewayGameSearchService {
     );
   }
 
+  /**
+   * Asks the DataGateway live, by `resolution`: by default the gateway
+   * registry's, which refuses one that may not search, saying why, and
+   * interviews one never interviewed. A caller that has read its route
+   * passes that route's driver instead.
+   */
   private fetchFromGateway(
     gatewayId: string,
     request: proto.SearchGamesRequest,
-    cacheKey: string,
+    coverageFilter: CoverageFilter,
+    resolution: () => Promise<SearchResolution | null> = () => this.registry.resolveSearch(gatewayId, coverageFilter),
   ): Observable<proto.SearchGameResult> {
-    return from(this.registry.resolve(gatewayId, DataGatewayCapability.Search)).pipe(
-      mergeMap((driver) => {
+    return defer(resolution).pipe(
+      mergeMap((resolved) => {
+        if (!resolved) {
+          return this.uncoveredSearch(gatewayId, request.correlationId);
+        }
+
+        const gatewayRequest = this.gatewayRequest(request, resolved.filterableAxes);
+        const cacheKey = this.buildSearchCacheKey(gatewayId, gatewayRequest);
         const accumulator: SearchAccumulator = { games: [], partial: false };
 
-        return driver
-          .searchGames({
-            correlationId: request.correlationId,
-            query: request.query,
-            limit: request.limit,
-            offset: request.offset,
-            locale: request.locale,
-          })
-          .pipe(
-            // concatMap, not mergeMap: RESULT frames resolve dedup against the
-            // DB while SOURCE_DONE maps synchronously — merged, the completion
-            // frame overtakes still-pending RESULTs and consumers finalize the
-            // source early. Serializing preserves gateway emission order (and
-            // caps dedup concurrency on the live path as a side effect).
-            concatMap((result: proto.GatewaySearchResult) =>
-              this.mapGatewayResult(gatewayId, result, accumulator, cacheKey),
-            ),
-            catchError((err) => {
-              const message = err instanceof Error ? err.message : String(err);
-              this.logger.error(`gRPC stream error from gateway ${gatewayId}: ${message}`);
+        return resolved.driver.searchGames(gatewayRequest).pipe(
+          // concatMap, not mergeMap: RESULT frames resolve dedup against the
+          // DB while SOURCE_DONE maps synchronously — merged, the completion
+          // frame overtakes still-pending RESULTs and consumers finalize the
+          // source early. Serializing preserves gateway emission order (and
+          // caps dedup concurrency on the live path as a side effect).
+          concatMap((result: proto.GatewaySearchResult) =>
+            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, coverageFilter),
+          ),
+          catchError((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            this.logger.error(`gRPC stream error from gateway ${gatewayId}: ${message}`);
 
-              return this.errorGameSearchResult(gatewayId, request.correlationId, message);
-            }),
-          );
+            return this.errorGameSearchResult(gatewayId, request.correlationId, message);
+          }),
+        );
       }),
       // Resolve/lazy-connect failure, or a refusal to route the search → the
       // DataGateway is unavailable, distinct from a mid-stream gRPC error
@@ -289,6 +332,7 @@ export class GatewayGameSearchService {
     result: proto.GatewaySearchResult,
     accumulator: SearchAccumulator,
     cacheKey: string,
+    coverageFilter: CoverageFilter,
   ): Observable<proto.SearchGameResult> {
     this.logger.debug(`Received search result from gateway ${gatewayId} with status ${result.status}`);
     const base = { correlationId: result.correlationId, gatewayId };
@@ -308,8 +352,15 @@ export class GatewayGameSearchService {
           return EMPTY;
         }
 
+        // The cache holds whatever the DataGateway answered, so the filter
+        // applies again on replay, and two searches it would have answered
+        // alike share the entry.
         this.logger.debug(`Accumulating game with externalId ${result.game.externalId} from gateway ${gatewayId}`);
         accumulator.games.push(result.game);
+
+        if (!matchesFilter(result.game, coverageFilter)) {
+          return EMPTY;
+        }
 
         // Async dedup check
         return this.toResultFrame(gatewayId, result.correlationId, result.game);
@@ -372,15 +423,19 @@ export class GatewayGameSearchService {
   }
 
   /**
-   * Emit cached GameSearchData frames followed by SOURCE_DONE, running
-   * dedup fresh for each (cache doesn't store inSystem — it changes over time).
+   * Emit the cached GameSearchData frames the filter matches, followed by
+   * SOURCE_DONE, running dedup fresh for each (cache doesn't store inSystem
+   * — it changes over time).
    */
   private emitCachedResults(
     gatewayId: string,
     correlationId: string,
     cached: proto.GameSearchData[],
+    coverageFilter: CoverageFilter,
   ): Observable<proto.SearchGameResult> {
-    const resultFrames$ = from(cached).pipe(
+    const matching = cached.filter((game) => matchesFilter(game, coverageFilter));
+
+    const resultFrames$ = from(matching).pipe(
       // Bounded: an unbounded fan-out here issues one findUnique per cached
       // game simultaneously and can saturate the Prisma pool on hot queries.
       // endWith keeps SOURCE_DONE last regardless (appended on completion).
@@ -393,7 +448,9 @@ export class GatewayGameSearchService {
         gatewayId,
         status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
       }),
-      tap(() => this.logger.debug(`Emitted ${cached.length} cached results for gateway ${gatewayId}`)),
+      tap(() =>
+        this.logger.debug(`Emitted ${matching.length} of ${cached.length} cached results for gateway ${gatewayId}`),
+      ),
     );
   }
 
@@ -516,7 +573,47 @@ export class GatewayGameSearchService {
     );
   }
 
-  private buildSearchCacheKey(gatewayId: string, request: proto.SearchGamesRequest): string {
+  /**
+   * What a DataGateway is asked: the search, with its filter cut to the axes
+   * the DataGateway's search narrows by.
+   */
+  private gatewayRequest(
+    request: proto.SearchGamesRequest,
+    filterableAxes: readonly CoverageAxis[],
+  ): proto.GatewaySearchRequest {
+    const sentFilter = filterFor(request.filter, filterableAxes);
+
+    return {
+      correlationId: request.correlationId,
+      query: request.query,
+      limit: request.limit,
+      offset: request.offset,
+      locale: request.locale,
+      ...(sentFilter && { filter: sentFilter }),
+    };
+  }
+
+  /**
+   * The answer of a DataGateway whose coverage doesn't overlap the search's
+   * filter: nothing it has can match, so it isn't asked, and its part of the
+   * search ends at once.
+   */
+  private uncoveredSearch(gatewayId: string, correlationId: string): Observable<proto.SearchGameResult> {
+    this.logger.debug(`Gateway ${gatewayId} covers nothing the search's filter names; not asking it`);
+
+    return of<proto.SearchGameResult>({
+      correlationId,
+      gatewayId,
+      status: proto.ResultStatus.RESULT_STATUS_SOURCE_DONE,
+    });
+  }
+
+  /**
+   * Keyed by what the DataGateway was asked, so a filter on an axis it
+   * doesn't narrow by shares the entry with the unfiltered search: the
+   * filter applies to the entry on the way out instead.
+   */
+  private buildSearchCacheKey(gatewayId: string, request: proto.GatewaySearchRequest): string {
     return [
       this.searchCachePrefix,
       gatewayId,
@@ -524,6 +621,8 @@ export class GatewayGameSearchService {
       encodeURIComponent(request.locale ?? ''),
       request.limit ?? '',
       request.offset ?? '',
+      request.filter?.platformTypes.join(',') ?? '',
+      request.filter?.contentTypes.join(',') ?? '',
     ].join(':');
   }
 }

@@ -87,3 +87,21 @@ export const toStoredLanguageCodeFormat = (value: unknown): LanguageCodeFormat |
   lookup(LANGUAGE_CODE_FORMATS, value);
 
 export const toStoredContentFormat = (value: unknown): ContentFormat | undefined => lookup(CONTENT_FORMATS, value);
+
+/*
+ * The other way: the proto value a stored one is sent as, for a search the
+ * server asks in its own terms. Each map above is one to one, so each stored
+ * value has one proto name at most. ContentType.Unknown has none.
+ */
+
+const byStoredValue = <T extends string, P extends string>(byName: ByProtoName<T>): ReadonlyMap<T, P> =>
+  new Map(Object.entries(byName).map(([name, stored]) => [stored, name as P]));
+
+const PROTO_PLATFORM_TYPES = byStoredValue<PlatformType, proto.PlatformType>(PLATFORM_TYPES);
+
+const PROTO_CONTENT_TYPES = byStoredValue<ContentType, proto.ContentType>(CONTENT_TYPES);
+
+export const toProtoPlatformType = (value: PlatformType): proto.PlatformType | undefined =>
+  PROTO_PLATFORM_TYPES.get(value);
+
+export const toProtoContentType = (value: ContentType): proto.ContentType | undefined => PROTO_CONTENT_TYPES.get(value);

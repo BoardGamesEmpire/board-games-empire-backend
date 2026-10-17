@@ -11,5 +11,6 @@ export * from './lib/gateway-registry.bootstrap.service';
 export * from './lib/gateway-registry.module';
 export * from './lib/gateway-registry.service';
 export * from './lib/interfaces';
+export * from './lib/utils/coverage-filter';
 export * from './lib/utils/hash-config';
 export * from './lib/utils/stored-enums';

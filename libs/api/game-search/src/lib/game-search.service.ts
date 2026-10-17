@@ -11,6 +11,7 @@ import type { WsGameSearchResult } from './dto/search-outbound.dto';
 import type { SearchQueryDto } from './dto/search-query.dto';
 import type { SearchResponseDto } from './dto/search-response.dto';
 import type { SearchGamesResponse } from './interfaces';
+import { type GameSearchFilter, localFilterConditions, toProtoSearchFilter } from './search-filter';
 
 /**
  * Marks a `where` as {@link GameSearchService.localSearchScope}'s. Declared and
@@ -69,7 +70,7 @@ export class GameSearchService {
   }
 
   private searchLocal(dto: SearchQueryDto, scope: LocalSearchScope): Observable<WsGameSearchResult[]> {
-    return from(this.queryLocalGames(dto.query, scope, dto.pageSize, dto.offset)).pipe(
+    return from(this.queryLocalGames(dto.query, scope, dto.pageSize, dto.offset, dto)).pipe(
       catchError((err) => {
         this.logger.error('Local search failed', err);
         return of([]);
@@ -92,18 +93,22 @@ export class GameSearchService {
    *
    * `limit` and `offset` are required too: each caller passes its DTO's
    * resolved `pageSize` and `offset`, so the default page size is the DTO's,
-   * not a fallback here (#403).
+   * not a fallback here (#403). So is `filter`, each caller's DTO, which the
+   * local half honors as the DataGateways' results do (#713).
    */
   async queryLocalGames(
     query: string,
     scope: LocalSearchScope,
     limit: number,
     offset: number,
+    filter: GameSearchFilter,
   ): Promise<WsGameSearchResult[]> {
     this.logger.debug(`Performing local search for query="${query}" with limit=${limit} and offset=${offset}`);
 
     const games = await this.db.game.findMany({
-      where: { AND: [scope, { title: { contains: query, mode: 'insensitive' } }] },
+      where: {
+        AND: [scope, { title: { contains: query, mode: 'insensitive' } }, ...localFilterConditions(filter)],
+      },
 
       take: limit,
       skip: offset,
@@ -226,6 +231,7 @@ export class GameSearchService {
         limit: dto.limit,
         offset: dto.offset,
         locale: dto.locale,
+        filter: toProtoSearchFilter(dto),
       })
       .pipe(
         takeUntil(timer(15000)),

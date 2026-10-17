@@ -61,6 +61,55 @@ describe('SearchQueryDto', () => {
     });
   });
 
+  describe('platformTypes and contentTypes', () => {
+    const errorsOn = async (property: string, plain: Record<string, unknown>) =>
+      (await validate(toDto({ query: 'test', ...plain }))).filter((e) => e.property === property);
+
+    it('transform comma-separated stored names into lists', () => {
+      const dto = toDto({ query: 'test', platformTypes: 'Tabletop,Portable,', contentTypes: 'BaseGame' });
+
+      expect(dto.platformTypes).toEqual(['Tabletop', 'Portable']);
+      expect(dto.contentTypes).toEqual(['BaseGame']);
+    });
+
+    it('take repeated parameters, splitting any that are comma-separated themselves', () => {
+      expect(toDto({ query: 'test', platformTypes: ['PC', 'Arcade'] }).platformTypes).toEqual(['PC', 'Arcade']);
+      expect(toDto({ query: 'test', platformTypes: ['Tabletop,PC', 'Mobile'] }).platformTypes).toEqual([
+        'Tabletop',
+        'PC',
+        'Mobile',
+      ]);
+    });
+
+    it('take values with spaces around them, as a hand-typed list has', async () => {
+      const plain = { platformTypes: 'PC, Console', contentTypes: ['BaseGame ', ' DLC'] };
+
+      expect(toDto({ query: 'test', ...plain })).toMatchObject({
+        platformTypes: ['PC', 'Console'],
+        contentTypes: ['BaseGame', 'DLC'],
+      });
+      await expect(errorsOn('platformTypes', plain)).resolves.toHaveLength(0);
+      await expect(errorsOn('contentTypes', plain)).resolves.toHaveLength(0);
+    });
+
+    it('accept every stored platform type, and every content type but unknown', async () => {
+      await expect(
+        errorsOn('platformTypes', { platformTypes: 'Tabletop,Console,Portable,PC,Mobile,Arcade,Other' }),
+      ).resolves.toHaveLength(0);
+      await expect(errorsOn('contentTypes', { contentTypes: 'BaseGame,Expansion,DLC,Mod' })).resolves.toHaveLength(0);
+    });
+
+    it('refuse unknown, which names no kind of game, and a name the server does not store', async () => {
+      await expect(errorsOn('contentTypes', { contentTypes: 'BaseGame,Unknown' })).resolves.toHaveLength(1);
+      await expect(errorsOn('platformTypes', { platformTypes: 'PLATFORM_TYPE_TABLETOP' })).resolves.toHaveLength(1);
+    });
+
+    it('are optional', async () => {
+      await expect(errorsOn('platformTypes', {})).resolves.toHaveLength(0);
+      await expect(errorsOn('contentTypes', {})).resolves.toHaveLength(0);
+    });
+  });
+
   describe('includeLocal', () => {
     it('defaults to true', () => {
       const dto = new SearchQueryDto();
@@ -185,12 +234,18 @@ describe('SearchQueryDto', () => {
         includeLocal: 'yes',
         includeExternal: 'yes',
         locale: 42,
+        platformTypes: 42,
+        contentTypes: 42,
       });
 
       expect(validationCatalogKeys(await validate(dto))).toEqual({
         'query.isString': 'validation.isString',
         'gatewayIds.isArray': 'validation.isArray',
         'gatewayIds.isString': 'validation.each.isString',
+        'platformTypes.isArray': 'validation.isArray',
+        'platformTypes.isIn': 'validation.each.isIn',
+        'contentTypes.isArray': 'validation.isArray',
+        'contentTypes.isIn': 'validation.each.isIn',
         'includeLocal.isBoolean': 'validation.isBoolean',
         'includeExternal.isBoolean': 'validation.isBoolean',
         'locale.isString': 'validation.isString',

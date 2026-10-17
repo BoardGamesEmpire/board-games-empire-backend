@@ -11,7 +11,13 @@ import type {
   WsSourceDonePayload,
   WsSourceUnavailablePayload,
 } from '@bge/game-search';
-import { GameSearchService, SearchCancelDto, SearchEvents, SearchStartDto } from '@bge/game-search';
+import {
+  GameSearchService,
+  SearchCancelDto,
+  SearchEvents,
+  SearchStartDto,
+  toProtoSearchFilter,
+} from '@bge/game-search';
 import { t } from '@bge/i18n';
 import { CheckPolicies } from '@bge/permissions';
 import { ResultStatus } from '@boardgamesempire/proto-gateway';
@@ -185,7 +191,13 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
     };
 
     try {
-      const results = await this.gameSearch.queryLocalGames(options.query, scope, options.pageSize, options.offset);
+      const results = await this.gameSearch.queryLocalGames(
+        options.query,
+        scope,
+        options.pageSize,
+        options.offset,
+        options,
+      );
 
       emit<WsSearchResultPayload>(SearchEvents.SearchResult, {
         correlationId: options.correlationId,
@@ -224,6 +236,7 @@ export class GameSearchGateway extends AuthenticatedGateway implements OnGateway
         limit: dto.limit,
         offset: dto.offset,
         locale: dto.locale,
+        filter: toProtoSearchFilter(dto),
       });
 
       const sub = stream$.subscribe({

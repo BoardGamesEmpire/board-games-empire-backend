@@ -8,7 +8,7 @@ api ──gRPC──▶ coordinator ──gRPC──▶ remote DataGateways (Boa
                    └──BullMQ──▶ import flow, run by the gateway worker and the worker
 ```
 
-- **Searches** go to every connected DataGateway, or to the ones the request names, and each DataGateway's results stream back as they arrive.
+- **Searches** go to every connected DataGateway, or to the ones the request names, and each DataGateway's results stream back as they arrive. A search can be filtered by platform type and content type (#713). Then it goes only to the DataGateways whose coverage overlaps the filter: one named that doesn't answers SOURCE_DONE without being asked. Each DataGateway is sent the filter on the axes it declared it narrows by, and the coordinator removes every result the filter excludes, so a page can come back short.
 - **Fetching one game** asks one DataGateway for that game's full data.
 - **Starting an import** enqueues the import flow and returns the job ids at once. The coordinator fetches nothing for it: the gateway worker calls the DataGateways itself, and the worker writes the games.
 
@@ -18,6 +18,5 @@ The api, not the coordinator, keeps the DataGateway records. Admins add, change,
 
 ## Planned
 
-- Routing searches by what each DataGateway covers, instead of asking every connected DataGateway (#713, part of DataGateway onboarding, #709).
 - Deadlines on DataGateway calls, and a circuit breaker that recovers without an admin, in front of auto-disable (#722).
 - A Steam DataGateway (#651).

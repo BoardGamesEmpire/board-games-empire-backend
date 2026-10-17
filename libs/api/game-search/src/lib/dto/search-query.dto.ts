@@ -1,8 +1,9 @@
+import { PlatformType } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { CappedOffsetPaginationQueryDto, TransformBoolean } from '@bge/shared';
+import { CappedOffsetPaginationQueryDto, TransformBoolean, TransformList } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
-import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsOptional, IsString } from 'class-validator';
+import { SEARCHABLE_CONTENT_TYPES, type SearchableContentType } from '../search-filter';
 
 export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
   @ApiProperty({ description: 'Search query string' })
@@ -16,8 +17,34 @@ export class SearchQueryDto extends CappedOffsetPaginationQueryDto(100, 20) {
   @IsOptional()
   @IsArray({ message: i18nValidationMessage('validation.isArray') })
   @IsString({ each: true, message: i18nValidationMessage('validation.each.isString') })
-  @Transform(({ value }) => (typeof value === 'string' ? value.split(',').filter(Boolean) : value))
+  @TransformList()
   gatewayIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Comma-separated platform types. Only games on a platform of one of them are found, ' +
+      'so a page can come back shorter than the limit.',
+    enum: PlatformType,
+    isArray: true,
+  })
+  @IsOptional()
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsIn(Object.values(PlatformType), { each: true, message: i18nValidationMessage('validation.each.isIn') })
+  @TransformList()
+  platformTypes?: PlatformType[];
+
+  @ApiPropertyOptional({
+    description:
+      'Comma-separated content types. Only games of one of them are found, ' +
+      'so a page can come back shorter than the limit.',
+    enum: SEARCHABLE_CONTENT_TYPES,
+    isArray: true,
+  })
+  @IsOptional()
+  @IsArray({ message: i18nValidationMessage('validation.isArray') })
+  @IsIn(SEARCHABLE_CONTENT_TYPES, { each: true, message: i18nValidationMessage('validation.each.isIn') })
+  @TransformList()
+  contentTypes?: SearchableContentType[];
 
   @ApiPropertyOptional({ description: 'Include local DB results', default: true })
   @IsOptional()

@@ -1,5 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, ResourceType, Visibility } from '@bge/database';
+import { Action, ContentType, PlatformType, ResourceType, Visibility } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -9,9 +9,10 @@ import {
   type MockAbilityService,
   type MockDatabaseService,
 } from '@bge/testing';
+import * as proto from '@boardgamesempire/proto-gateway';
 import { ForbiddenException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
-import { firstValueFrom } from 'rxjs';
+import { EMPTY, firstValueFrom } from 'rxjs';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { GameSearchService } from './game-search.service';
 
@@ -39,10 +40,12 @@ describe('GameSearchService', () => {
   let db: MockDatabaseService;
   let abilityService: MockAbilityService;
   let compose: jest.SpyInstance;
+  let coordinator: { searchGames: jest.Mock };
 
   beforeEach(async () => {
     abilityService = createMockAbilityService();
     abilityService.getCurrentResourceConditions.mockReturnValue([READ]);
+    coordinator = { searchGames: jest.fn() };
 
     const ctx = await createTestingModuleWithDb({
       providers: [
@@ -51,7 +54,7 @@ describe('GameSearchService', () => {
         // clauses asserted below are the merge the search actually runs.
         ScopeComposer,
         { provide: AbilityService, useValue: abilityService },
-        { provide: GatewayCoordinatorClientService, useValue: { searchGames: jest.fn() } },
+        { provide: GatewayCoordinatorClientService, useValue: coordinator },
       ],
     });
 
@@ -104,10 +107,45 @@ describe('GameSearchService', () => {
   describe('queryLocalGames', () => {
     it('matches the title only within the scope it is given', async () => {
       // The title filter narrows the scope; it never widens it.
-      await service.queryLocalGames('brass', service.localSearchScope(), 10, 5);
+      await service.queryLocalGames('brass', service.localSearchScope(), 10, 5, {});
 
       expect(db.game.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: { AND: [COMPOSED, TITLE_BRASS] }, take: 10, skip: 5 }),
+      );
+    });
+
+    it('narrows within the scope by the filter: content type, and the platform types of the game’s platforms', async () => {
+      await service.queryLocalGames('brass', service.localSearchScope(), 10, 5, {
+        platformTypes: [PlatformType.Tabletop, PlatformType.Portable],
+        contentTypes: [ContentType.Expansion],
+      });
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            AND: [
+              COMPOSED,
+              TITLE_BRASS,
+              { contentType: { in: [ContentType.Expansion] } },
+              {
+                platformGames: {
+                  some: { platform: { platformType: { in: [PlatformType.Tabletop, PlatformType.Portable] } } },
+                },
+              },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('leaves an axis whose list is empty unfiltered', async () => {
+      await service.queryLocalGames('brass', service.localSearchScope(), 10, 5, {
+        platformTypes: [],
+        contentTypes: [],
+      });
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { AND: [COMPOSED, TITLE_BRASS] } }),
       );
     });
 
@@ -117,7 +155,7 @@ describe('GameSearchService', () => {
       // hand-built `where` reads outside the scope; `{}` reads every game,
       // private and deleted alike (#472).
       // @ts-expect-error -- a plain `where` is not a LocalSearchScope
-      await service.queryLocalGames('brass', {}, 10, 5);
+      await service.queryLocalGames('brass', {}, 10, 5, {});
     });
   });
 
@@ -168,6 +206,38 @@ describe('GameSearchService', () => {
 
       expect(compose).not.toHaveBeenCalled();
       expect(abilityService.getActingUserId).not.toHaveBeenCalled();
+    });
+
+    it('narrows the local half by the filter the caller sent', async () => {
+      await firstValueFrom(service.search(localOnly({ contentTypes: [ContentType.BaseGame] })));
+
+      expect(db.game.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { AND: [COMPOSED, TITLE_BRASS, { contentType: { in: [ContentType.BaseGame] } }] },
+        }),
+      );
+    });
+
+    it('sends the coordinator the filter in proto terms, and none when the caller sent none', async () => {
+      coordinator.searchGames.mockReturnValue(EMPTY);
+      const external = (overrides: Partial<SearchQueryDto>) =>
+        plainToInstance(SearchQueryDto, { query: 'brass', includeLocal: false, ...overrides });
+
+      await firstValueFrom(
+        service.search(external({ platformTypes: [PlatformType.Portable], contentTypes: [ContentType.DLC] })),
+      );
+      await firstValueFrom(service.search(external({})));
+
+      expect(coordinator.searchGames).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          filter: {
+            platformTypes: [proto.PlatformType.PLATFORM_TYPE_PORTABLE],
+            contentTypes: [proto.ContentType.CONTENT_TYPE_DLC],
+          },
+        }),
+      );
+      expect(coordinator.searchGames).toHaveBeenNthCalledWith(2, expect.objectContaining({ filter: undefined }));
     });
   });
 });
