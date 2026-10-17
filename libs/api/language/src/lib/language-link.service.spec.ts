@@ -295,5 +295,37 @@ describe('LanguageLinkService', () => {
 
       expect(db.languageGatewayLink.upsert).toHaveBeenCalledTimes(1);
     });
+
+    it('writes no link for the language under way once its signal aborts', async () => {
+      const stop = new AbortController();
+      db.languageGatewayLink.findUnique.mockImplementationOnce((async () => {
+        stop.abort(new Error('abandoned'));
+        return null;
+      }) as never);
+      db.languageTag.findUnique.mockResolvedValue({ id: 'tag-en-us' } as never);
+
+      await expect(
+        service.interview(GW, [{ value: 'en-US', format: LanguageCodeFormat.IetfBcp47 }], stop.signal),
+      ).rejects.toThrow('abandoned');
+
+      expect(db.languageGatewayLink.upsert).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a BCP 47 tag', { value: 'kk', format: LanguageCodeFormat.IetfBcp47 }],
+      ['an ISO 639-3 code', { value: 'kaz', format: LanguageCodeFormat.Iso6393 }],
+    ])('adds no vocabulary for %s under way once its signal aborts', async (_, entry) => {
+      const stop = new AbortController();
+      db.languageTag.findUnique.mockImplementationOnce((async () => {
+        stop.abort(new Error('abandoned'));
+        return null;
+      }) as never);
+
+      await expect(service.interview(GW, [entry], stop.signal)).rejects.toThrow('abandoned');
+
+      expect(db.language.upsert).not.toHaveBeenCalled();
+      expect(db.languageTag.upsert).not.toHaveBeenCalled();
+      expect(db.languageGatewayLink.upsert).not.toHaveBeenCalled();
+    });
   });
 });

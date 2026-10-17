@@ -532,6 +532,28 @@ describe('GatewayInterviewService', () => {
       expect(table.row(GW)?.lastInterviewedAt).toBeNull();
     });
 
+    it.each([
+      ['disables', { enabled: false }],
+      ['deletes', { deletedAt: new Date() }],
+    ])(
+      'fails, storing nothing and recording no change, when an admin %s the DataGateway during it',
+      async (_, change) => {
+        table.seed({ id: GW, capabilities: [DataGatewayCapability.Search], firstInterviewedAt: new Date(0) });
+        const driver = declaring(proto.Capability.CAPABILITY_SEARCH, proto.Capability.CAPABILITY_FETCH);
+        const describe = driver.describe.bind(driver);
+        driver.describe = () => {
+          // The admin's change lands while the interview waits on Describe.
+          table.patch(GW, change);
+          return describe();
+        };
+
+        await expect(service.interview(GW, driver)).rejects.toThrow(/disabled or deleted during its interview/);
+
+        expect(emitted).toEqual([]);
+        expect(table.row(GW)).toMatchObject({ capabilities: [DataGatewayCapability.Search], lastInterviewedAt: null });
+      },
+    );
+
     it('never touches the capabilities an admin switched off, even one the DataGateway no longer declares', async () => {
       table.seed({
         id: GW,
@@ -599,6 +621,38 @@ describe('GatewayInterviewService', () => {
       driver.describe = () => throwError(() => new Error('boom'));
 
       await expect(service.interviewUnlessDone(GW, driver)).rejects.toBeInstanceOf(GatewayInterviewError);
+    });
+
+    it.each([
+      ['disposes its driver', (driver: DataGatewayDriver) => service.abandon(GW, driver)],
+      ['invalidates the DataGateway', () => service.abandon(GW)],
+    ])('doesn’t start when the gateway registry %s while the row is read', async (_, letGo) => {
+      table.seed({ id: GW });
+      const driver = dataGateway();
+      const describe = jest.spyOn(driver, 'describe');
+      const findUnique = table.delegate.findUnique;
+      jest.spyOn(table.delegate, 'findUnique').mockImplementationOnce(async (args) => {
+        letGo(driver);
+        return findUnique(args);
+      });
+
+      await expect(service.interviewUnlessDone(GW, driver)).rejects.toThrow(/abandoned/);
+
+      expect(describe).not.toHaveBeenCalled();
+      expect(table.row(GW)?.firstInterviewedAt).toBeNull();
+    });
+
+    it('still starts when the gateway registry lets go of another driver while the row is read', async () => {
+      table.seed({ id: GW });
+      const findUnique = table.delegate.findUnique;
+      jest.spyOn(table.delegate, 'findUnique').mockImplementationOnce(async (args) => {
+        service.abandon(GW, dataGateway());
+        return findUnique(args);
+      });
+
+      await expect(service.interviewUnlessDone(GW, dataGateway())).resolves.toBe(true);
+
+      expect(table.row(GW)?.firstInterviewedAt).toBeInstanceOf(Date);
     });
 
     it('keeps its time when later interviews come', async () => {

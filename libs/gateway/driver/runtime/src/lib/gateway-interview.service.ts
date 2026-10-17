@@ -75,9 +75,14 @@ interface InterviewAttempt {
   readonly done: Promise<void>;
 }
 
-/** A stale check under way: the DataGateway it pings, and how to abandon it. */
-interface StaleCheck {
+/**
+ * A wait before an interview starts: a stale check's ping, or the first
+ * interview's look at the row. The DataGateway and driver it would
+ * interview through, and how to abandon it.
+ */
+interface PendingStart {
   readonly gatewayId: string;
+  readonly driver: DataGatewayDriver;
   readonly abandonment: AbortController;
 }
 
@@ -102,7 +107,8 @@ interface StaleCheck {
  * stale check asking through a driver the gateway registry lets go of is
  * abandoned ({@link abandon}). A DataGateway an admin disabled or deleted isn't
  * interviewed, though the gateway worker may still hold its driver (dropping
- * that is #701's). The coordinator and the gateway worker both host the
+ * that is #701's), and an interview under way when that happens stores
+ * nothing. The coordinator and the gateway worker both host the
  * gateway registry, so either may interview, and a repeated interview just
  * writes the same answers.
  */
@@ -117,7 +123,11 @@ export class GatewayInterviewService {
   // Stale checks under way, by driver, so a DataGateway that never answers is
   // left with one check waiting on it, not one more every hour, and so
   // abandon() can stop them.
-  private readonly checks = new Map<DataGatewayDriver, StaleCheck>();
+  private readonly checks = new Map<DataGatewayDriver, PendingStart>();
+
+  // First interviews still reading the row, so abandon() can stop one before
+  // its interview starts.
+  private readonly lookups = new Set<PendingStart>();
 
   constructor(
     private readonly db: DatabaseService,
@@ -129,17 +139,26 @@ export class GatewayInterviewService {
   /**
    * The first interview, unless the DataGateway's row shows it already: the
    * coordinator and the gateway worker both connect it, and whichever comes
-   * second skips it. Throws when the interview fails. Resolves to whether it
-   * interviewed.
+   * second skips it. Throws when the interview fails, and when the gateway
+   * registry lets go of the driver while the row is read ({@link abandon}).
+   * Resolves to whether it interviewed.
    */
   async interviewUnlessDone(gatewayId: string, driver: DataGatewayDriver): Promise<boolean> {
-    const row = await this.db.dataGateway.findUnique({
-      where: { id: gatewayId },
-      select: { firstInterviewedAt: true },
-    });
+    const lookup: PendingStart = { gatewayId, driver, abandonment: new AbortController() };
+    this.lookups.add(lookup);
+    try {
+      const row = await this.db.dataGateway.findUnique({
+        where: { id: gatewayId },
+        select: { firstInterviewedAt: true },
+      });
 
-    if (row?.firstInterviewedAt) {
-      return false;
+      if (row?.firstInterviewedAt) {
+        return false;
+      }
+
+      lookup.abandonment.signal.throwIfAborted();
+    } finally {
+      this.lookups.delete(lookup);
     }
 
     await this.startOrJoin(gatewayId, driver);
@@ -152,23 +171,25 @@ export class GatewayInterviewService {
   }
 
   /**
-   * Abandons the DataGateway's interview and stale checks under way, or only
-   * those asking through `driver`. The gateway registry calls this when it
-   * disposes a driver, and when a config event invalidates the DataGateway.
-   * The interview stops waiting on the DataGateway, starts no further write,
-   * and fails for its callers, so it records no failure of a connection that
-   * was closed under it. The next caller starts a new interview rather than
-   * joining it. A stale check stops waiting on its ping, so a late answer
-   * starts no interview through the driver.
+   * Abandons the DataGateway's interview and stale checks under way, and a
+   * first interview still reading its row, or only those asking through
+   * `driver`. The gateway registry calls this when it disposes a driver, and
+   * when a config event invalidates the DataGateway. The interview stops
+   * waiting on the DataGateway, starts no further write, and fails for its
+   * callers, so it records no failure of a connection that was closed under
+   * it. The next caller starts a new interview rather than joining it. A
+   * stale check stops waiting on its ping, so a late answer starts no
+   * interview through the driver, and a first interview reading the row
+   * fails without starting.
    */
   abandon(gatewayId: string, driver?: DataGatewayDriver): void {
     const reason = new Error(
       `The interview of DataGateway ${gatewayId} was abandoned: its connection was closed or replaced`,
     );
 
-    for (const [checked, check] of this.checks) {
-      if (check.gatewayId === gatewayId && (!driver || checked === driver)) {
-        check.abandonment.abort(reason);
+    for (const pending of [...this.checks.values(), ...this.lookups]) {
+      if (pending.gatewayId === gatewayId && (!driver || pending.driver === driver)) {
+        pending.abandonment.abort(reason);
       }
     }
 
@@ -197,7 +218,7 @@ export class GatewayInterviewService {
       return;
     }
 
-    const check: StaleCheck = { gatewayId, abandonment: new AbortController() };
+    const check: PendingStart = { gatewayId, driver, abandonment: new AbortController() };
     const { signal } = check.abandonment;
     this.checks.set(driver, check);
     try {
@@ -435,6 +456,10 @@ export class GatewayInterviewService {
    * interview's answers match what it read. After {@link STORE_ATTEMPTS}
    * misses the interview fails, and the row keeps what the other processes
    * stored. An abandoned interview stops before its next try.
+   *
+   * The row must also still be enabled and not deleted. An admin who
+   * disables a DataGateway leaves its connection as it was, so the interview
+   * under way isn't abandoned: it fails here instead, and stores nothing.
    * `disabledCapabilities` is never written here, so an admin's switch-off
    * outlasts every interview.
    */
@@ -456,10 +481,12 @@ export class GatewayInterviewService {
 
       const current = await this.db.dataGateway.findUnique({
         where: { id: gatewayId },
-        select: { capabilities: true, firstInterviewedAt: true },
+        select: { enabled: true, deletedAt: true, capabilities: true, firstInterviewedAt: true },
       });
-      if (!current) {
-        throw new Error(`DataGateway ${gatewayId}'s row is gone; its interview can't be stored`);
+      if (!current?.enabled || current.deletedAt) {
+        throw new Error(
+          `DataGateway ${gatewayId} was disabled or deleted during its interview; its answers weren't stored`,
+        );
       }
       before = current;
     }
@@ -479,6 +506,8 @@ export class GatewayInterviewService {
       const written = await this.db.dataGateway.updateMany({
         where: {
           id: gatewayId,
+          enabled: true,
+          deletedAt: null,
           capabilities: { equals: before.capabilities },
           ...(before.firstInterviewedAt === null && { firstInterviewedAt: null }),
         },
