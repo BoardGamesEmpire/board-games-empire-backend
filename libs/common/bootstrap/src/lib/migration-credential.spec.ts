@@ -43,6 +43,21 @@ describe('resolveMigrationCredential', () => {
     expect(credential.host).toBe('bge-rw');
   });
 
+  it('describes a user or host the URL leaves to the environment as unknown, as it does an unparseable URL', () => {
+    expect(
+      resolveMigrationCredential({ databaseUrl, migrationUrl: 'postgresql://bge-rw:5432/bge' }).credential,
+    ).toEqual({
+      variable: 'DATABASE_MIGRATION_URL',
+      user: 'unknown',
+      host: 'bge-rw:5432',
+    });
+    expect(resolveMigrationCredential({ databaseUrl, migrationUrl: 'postgresql:///bge' }).credential).toEqual({
+      variable: 'DATABASE_MIGRATION_URL',
+      user: 'unknown',
+      host: 'unknown',
+    });
+  });
+
   it('describes a URL it cannot parse as unknown rather than failing the boot over a log field', () => {
     const resolved = resolveMigrationCredential({ databaseUrl, migrationUrl: 'not a url' });
 

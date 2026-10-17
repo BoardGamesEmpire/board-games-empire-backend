@@ -167,10 +167,16 @@ export function apiEnvOverrides(baseUrl: string, port: number): Record<string, s
  * and the same `testing` defaults. That is what keeps the two on one key, which
  * matters because the worker decrypts what the API encrypted (webhook signing
  * secrets).
+ *
+ * `DATABASE_MIGRATION_URL` is blanked: `global-setup` sets it for the API, and
+ * a server gives it to the API alone, so a worker that inherited it would warn
+ * on every start. Empty counts as unset. Nest's variable expansion still fills
+ * it from a `.env` that sets one, and that worker then warns, rightly.
  */
 export function workerEnvOverrides(): Record<string, string> {
   return {
     NODE_ENV: API_NODE_ENV,
+    DATABASE_MIGRATION_URL: '',
   };
 }
 

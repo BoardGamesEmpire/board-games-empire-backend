@@ -35,7 +35,10 @@ export function resolveMigrationCredential(urls: {
     ? ({ url: urls.migrationUrl, variable: MIGRATION_URL_VARIABLE } as const)
     : ({ url: urls.databaseUrl, variable: DATABASE_URL_VARIABLE } as const);
 
-  return { url, credential: { variable, ...(userAndHost(url) ?? { user: 'unknown', host: 'unknown' }) } };
+  // A URL may leave the user or host to libpq's defaults, which this process
+  // cannot see; unknown says so, where an empty field would read as a blank.
+  const named = userAndHost(url);
+  return { url, credential: { variable, user: named?.user || 'unknown', host: named?.host || 'unknown' } };
 }
 
 /** The database role a URL connects as, when it names one. */

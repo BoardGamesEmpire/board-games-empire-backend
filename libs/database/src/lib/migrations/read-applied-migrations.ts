@@ -1,10 +1,6 @@
+import { PG } from '@status/codes';
 import type { Prisma, PrismaClient } from '../client';
 import type { AppliedMigrationRow } from './migration-state';
-
-/** Postgres `undefined_table`: the ledger does not exist yet. */
-const UNDEFINED_TABLE = '42P01';
-/** Postgres `insufficient_privilege`. */
-const INSUFFICIENT_PRIVILEGE = '42501';
 /**
  * Postgres's `undefined_table` text for the ledger, schema-qualified or not.
  * The lookbehind keeps `undefined_column` out, whose text is `column "x" of
@@ -41,12 +37,15 @@ export async function readAppliedMigrations(client: Queryable): Promise<AppliedM
  * another database role, the one that migrated, created and owns.
  */
 export function isInsufficientPrivilege(error: unknown): boolean {
-  return carriesSqlState(error, INSUFFICIENT_PRIVILEGE);
+  return carriesSqlState(error, PG.InsufficientPrivilege);
 }
 
-/** Also by Postgres's wording of "that table is not there", which carries no SQLSTATE. */
+/**
+ * `undefined_table`: the ledger does not exist yet. Also by Postgres's wording
+ * of "that table is not there", which carries no SQLSTATE.
+ */
 function isUndefinedTable(error: unknown): boolean {
-  return carriesSqlState(error, UNDEFINED_TABLE, (message) => LEDGER_MISSING.test(message));
+  return carriesSqlState(error, PG.UndefinedTable, (message) => LEDGER_MISSING.test(message));
 }
 
 /**

@@ -821,4 +821,34 @@ describe('the migration credential', () => {
     await expect(run).rejects.toBeInstanceOf(MigrationsStillPendingError);
     await expect(run).rejects.not.toThrow(/different databases/);
   });
+
+  // A process without a migrator meets the hidden schema too, but only as a
+  // ledger that never appears, which is also what an api that never started
+  // looks like; its refusal cannot tell the two apart, so it names both.
+  const waitingFor = (ledger: FakeLedger) =>
+    runBootstrapSequence({
+      expected: CHAIN,
+      ledger,
+      lock: new FakeLock(),
+      seeder: new FakeSeeder(),
+      dataMigrations: noDataMigrations,
+      logger: recordingLogger(),
+      clock: new FakeClock(),
+      waitMs: 0,
+    });
+
+  it('without a migrator: a wait for a ledger that never appears is refused naming a schema hidden from the reader as well', async () => {
+    const run = waitingFor(new FakeLedger([]));
+
+    await expect(run).rejects.toBeInstanceOf(SchemaNotReadyError);
+    await expect(run).rejects.toThrow(/Start the api/);
+    await expect(run).rejects.toThrow(/database role in DATABASE_URL may lack USAGE on the schema/);
+  });
+
+  it('without a migrator: a wait that read some migrations applied does not suggest it, since the ledger was visible', async () => {
+    const run = waitingFor(new FakeLedger([finished('20260109_init')]));
+
+    await expect(run).rejects.toBeInstanceOf(SchemaNotReadyError);
+    await expect(run).rejects.not.toThrow(/USAGE/);
+  });
 });
