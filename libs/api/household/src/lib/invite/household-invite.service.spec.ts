@@ -764,6 +764,15 @@ describe('HouseholdInviteService', () => {
         expect(steps).toEqual(['cap', 'insert']);
       });
 
+      it("takes only the inviter's for an invite that waits for approval, leaving the household's to the approval", async () => {
+        abilityService.currentActorCan.mockReturnValue(false);
+
+        await service.createInvite('hh-1', byId());
+
+        expect(createdWith()?.needsApproval).toBe(true);
+        expect(quotas.consume).toHaveBeenCalledWith('household_invite_daily_count', 1n, { userId: 'owner-1' }, db);
+      });
+
       it('takes a slot for an invite by address as well', async () => {
         inviterAddress('owner@example.test');
 
@@ -982,6 +991,10 @@ describe('HouseholdInviteService', () => {
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         steps.push('check');
       });
+      quotas.consume.mockImplementation(() => {
+        steps.push('cap');
+        return Promise.resolve(UNCONSTRAINED);
+      });
       invites.approveWithin.mockImplementation(() => {
         steps.push('approve');
         return Promise.resolve(approval);
@@ -989,7 +1002,7 @@ describe('HouseholdInviteService', () => {
 
       await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toBe(approval.invite);
 
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'approve']);
+      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
       // Asked about `approvedById`, the column only an approval writes, so the
       // revoke permission does not pass for it.
       const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
@@ -1017,6 +1030,67 @@ describe('HouseholdInviteService', () => {
       expect(expiresAt).toBeLessThanOrEqual(Date.now() + week);
     });
 
+    describe("the household's invites for the day (#279)", () => {
+      it("takes one of the household's, and none of the approver's or the inviter's", async () => {
+        await service.approveInvite('hh-1', 'invite-1');
+
+        expect(quotas.consume).toHaveBeenCalledWith('household_invite_daily_count', 1n, { householdId: 'hh-1' }, db);
+      });
+
+      it('refuses with 402 past the cap, and approves and announces nothing', async () => {
+        quotas.consume.mockResolvedValue({
+          ...UNCONSTRAINED,
+          allowed: false,
+          scope: QuotaScope.Household,
+          currentUsage: 20n,
+          limit: 20n,
+        });
+
+        const error = await service.approveInvite('hh-1', 'invite-1').then(
+          () => undefined,
+          (reason: unknown) => reason,
+        );
+
+        expect(error).toBeInstanceOf(QuotaExceededException);
+        expect((error as QuotaExceededException).getResponse()).toMatchObject({
+          resource: 'household_invite_daily_count',
+          scope: QuotaScope.Household,
+          limit: '20',
+          currentUsage: '20',
+        });
+        expect(invites.approveWithin).not.toHaveBeenCalled();
+        expect(invites.emit).not.toHaveBeenCalled();
+        expect(quotas.emitSoftOverages).not.toHaveBeenCalled();
+      });
+
+      it("warns of a soft cap after the transaction, after the approval's event", async () => {
+        const overage: QuotaSoftOverageEvent = {
+          scope: QuotaScope.Household,
+          scopeId: 'hh-1',
+          resource: 'household_invite_daily_count',
+          currentUsage: '5',
+          attemptedAmount: '1',
+          limit: '5',
+        };
+        quotas.consume.mockResolvedValue({ ...UNCONSTRAINED, softOverages: [overage] });
+        let warnedInside: boolean | undefined;
+        db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+          const result = await work(db);
+          warnedInside = quotas.emitSoftOverages.mock.calls.length > 0;
+
+          return result;
+        }) as never);
+
+        await service.approveInvite('hh-1', 'invite-1');
+
+        expect(warnedInside).toBe(false);
+        expect(quotas.emitSoftOverages).toHaveBeenCalledWith([overage]);
+        expect(invites.emit.mock.invocationCallOrder[0]).toBeLessThan(
+          quotas.emitSoftOverages.mock.invocationCallOrder[0] as number,
+        );
+      });
+    });
+
     it('refuses an actor with no say here with 403 before taking the lock, and approves nothing', async () => {
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         throw new ForbiddenException();
@@ -1025,6 +1099,7 @@ describe('HouseholdInviteService', () => {
       await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
 
       expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(quotas.consume).not.toHaveBeenCalled();
       expect(invites.approveWithin).not.toHaveBeenCalled();
       expect(invites.emit).not.toHaveBeenCalled();
     });

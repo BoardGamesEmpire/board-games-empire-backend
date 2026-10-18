@@ -409,7 +409,10 @@ export class QuotaService {
         }
 
         case QuotaScope.User: {
-          targets.push({ scope, scopeId: ctx.userId });
+          if (ctx.userId) {
+            targets.push({ scope, scopeId: ctx.userId });
+          }
+
           break;
         }
 

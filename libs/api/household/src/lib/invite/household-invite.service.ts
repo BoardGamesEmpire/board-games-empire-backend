@@ -16,7 +16,7 @@ import {
   type StoredInvitee,
 } from '@bge/invites';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService } from '@bge/quota';
+import { QuotaExceededException, QuotaService, type QuotaCheckContext, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
@@ -117,9 +117,11 @@ export class HouseholdInviteService {
    *    store the invite withheld, and it answers like any other.
    * 6. The invite takes one of the inviter's and the household's invites for
    *    the day (#279), under the cap's advisory lock, so two invites at once
-   *    cannot both take the last one. A refused invite never gets here and
-   *    takes none; a withheld one takes one like any other. Past a hard cap
-   *    the answer is 402.
+   *    cannot both take the last one. One that waits for approval takes only
+   *    the inviter's: the household's is taken when it is approved, so a
+   *    member's proposals cannot spend the household's day. A refused invite
+   *    never gets here and takes none; a withheld one takes one like any
+   *    other. Past a hard cap the answer is 402.
    * 7. The lib inserts. A second outstanding invite to the same id, or to the
    *    same address, is the database's 409, through the lib.
    *
@@ -153,23 +155,10 @@ export class HouseholdInviteService {
 
       const { withheld } = await gateInvitee(tx, InviteType.Household, inviterId, invitee);
 
-      const decision = await this.quotas.consume(
-        'household_invite_daily_count',
-        1n,
-        { userId: inviterId, householdId },
+      const softOverages = await this.takeDailyInvite(
         tx,
+        needsApproval ? { userId: inviterId } : { userId: inviterId, householdId },
       );
-
-      if (!decision.allowed) {
-        throw new QuotaExceededException(
-          // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
-          'household_invite_daily_count',
-          decision.scope!,
-          decision.limit!,
-          decision.currentUsage!,
-          1n,
-        );
-      }
 
       const created = await this.invites.createWithin(tx, {
         type: InviteType.Household,
@@ -182,7 +171,7 @@ export class HouseholdInviteService {
         needsApproval,
       });
 
-      return { ...created, softOverages: decision.softOverages };
+      return { ...created, softOverages };
     });
 
     this.invites.emit([...expired, event]);
@@ -212,7 +201,7 @@ export class HouseholdInviteService {
    *    once expired, 409 once settled.
    *
    * The revoked invite is announced after commit. The row stays, so it still
-   * counts against the day's invite quota (#279).
+   * counts against the day's invite quotas it was counted against (#279).
    */
   async revokeInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
     const revokerId = this.abilityService.getActingUserId();
@@ -234,7 +223,11 @@ export class HouseholdInviteService {
    *    answer below and the approval.
    * 3. The question is asked again of the roster read under the lock, and that
    *    answer decides.
-   * 4. The lib approves, bound to this household: 404 for an id from another
+   * 4. The invite takes one of the household's invites for the day (#279),
+   *    the one it did not take when it was sent: 402 past a hard cap. The
+   *    inviter's was taken then. A full cap answers ahead of the invite's own
+   *    state below.
+   * 5. The lib approves, bound to this household: 404 for an id from another
    *    one, 410 once expired, 409 unless it is awaiting approval.
    *
    * The invitee gets the full window a direct invite opens with, counted from
@@ -246,19 +239,23 @@ export class HouseholdInviteService {
    * approvable after a switch to `Direct` or to `Off`. An approver may approve
    * an invite they sent themselves, as a member promoted since.
    *
-   * The approved invite is announced after commit.
+   * The approved invite is announced after commit, and any soft cap it went
+   * past is warned of after it.
    */
   async approveInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
     const approverId = this.abilityService.getActingUserId();
 
-    return this.transitionAsAuthority(householdId, inviteId, APPROVE_FIELD, (tx, scope) =>
-      this.invites.approveWithin(tx, {
+    return this.transitionAsAuthority(householdId, inviteId, APPROVE_FIELD, async (tx, scope) => {
+      const softOverages = await this.takeDailyInvite(tx, { householdId });
+      const approval = await this.invites.approveWithin(tx, {
         inviteId,
         approverId,
         scope,
         expiresAt: new Date(Date.now() + DEFAULT_INVITE_TTL_MS),
-      }),
-    );
+      });
+
+      return { ...approval, softOverages };
+    });
   }
 
   /**
@@ -266,7 +263,8 @@ export class HouseholdInviteService {
    * approve move one, in one transaction: asked of the instance about the
    * column the transition changes, the household row share-locked, asked again
    * of the roster read under the lock, then the lib's transition, bound to this
-   * household. Its domain event is announced after commit.
+   * household. Its domain event is announced after commit, then any soft cap
+   * the transition went past.
    */
   private async transitionAsAuthority(
     householdId: string,
@@ -275,9 +273,13 @@ export class HouseholdInviteService {
     transition: (
       tx: Prisma.TransactionClient,
       scope: { readonly householdId: string },
-    ) => Promise<{ readonly invite: InviteContextView; readonly event: InviteDomainEvent }>,
+    ) => Promise<{
+      readonly invite: InviteContextView;
+      readonly event: InviteDomainEvent;
+      readonly softOverages?: readonly QuotaSoftOverageEvent[];
+    }>,
   ): Promise<InviteContextView> {
-    const { invite, event } = await this.db.$transaction(async (tx) => {
+    const { invite, event, softOverages } = await this.db.$transaction(async (tx) => {
       await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
       await lockExistingHousehold(tx, householdId);
       await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
@@ -286,8 +288,36 @@ export class HouseholdInviteService {
     });
 
     this.invites.emit([event]);
+    this.quotas.emitSoftOverages(softOverages ?? []);
 
     return invite;
+  }
+
+  /**
+   * Takes one invite from the day's allowance of each scope `charged` names
+   * (#279), on the caller's transaction and under the cap's advisory lock, so
+   * the write that follows in it cannot overshoot a hard cap: 402 past one.
+   * Hands back the soft caps it went past, for the caller to warn of after
+   * commit.
+   */
+  private async takeDailyInvite(
+    tx: Prisma.TransactionClient,
+    charged: QuotaCheckContext,
+  ): Promise<readonly QuotaSoftOverageEvent[]> {
+    const decision = await this.quotas.consume('household_invite_daily_count', 1n, charged, tx);
+
+    if (!decision.allowed) {
+      throw new QuotaExceededException(
+        // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
+        'household_invite_daily_count',
+        decision.scope!,
+        decision.limit!,
+        decision.currentUsage!,
+        1n,
+      );
+    }
+
+    return decision.softOverages;
   }
 
   /**

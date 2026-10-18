@@ -2,16 +2,16 @@ import type { QuotaScope } from '@bge/database';
 import type { QuotaSoftOverageEvent } from './quota-events.interface';
 
 /**
- * Scope targets a `check()` should consider beyond the ambient ones.
- *
- * The `User` scope is taken from actor-context/CLS (the acting user) and
- * `Server` is implicit, so neither appears here. Supply `householdId` /
- * `householdMemberId` when the write is attributed to a household or a specific
- * membership. A scope the resource declares applicable but whose id is absent
- * here is simply not evaluated.
+ * The scope targets a check is charged to. `Server` is implicit, so it does
+ * not appear here. Supply `userId` for the user the write is charged to, and
+ * `householdId` / `householdMemberId` when the write is attributed to a
+ * household or a specific membership. A scope the resource declares
+ * applicable but whose id is absent here is simply not evaluated, so a write
+ * charged to a household alone, such as an invite's approval (#166), names no
+ * user.
  */
 export interface QuotaCheckContext {
-  readonly userId: string;
+  readonly userId?: string;
   readonly householdId?: string;
   readonly householdMemberId?: string;
 }

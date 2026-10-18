@@ -16,8 +16,8 @@ import { HouseholdQuotaController } from './quota/household-quota.controller';
 @Module({
   // QuotaModule supplies QuotaService to the member-creation seam, which gates
   // `household_member_count` inside the caller's transaction (#159), and to
-  // the invite create, which gates `household_invite_daily_count` in its own
-  // (#279), and to the household's quota list (#515).
+  // the invite create and approve, which gate `household_invite_daily_count`
+  // in their own (#279, #166), and to the household's quota list (#515).
   // InvitesModule supplies InviteService, the only writer of an invite's
   // status; the soft delete revokes a household's outstanding invites through
   // it (#161), and the invite routes create and accept through it (#162,
