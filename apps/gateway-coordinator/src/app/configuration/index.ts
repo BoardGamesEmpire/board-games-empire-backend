@@ -1,7 +1,6 @@
 import { env, environments } from '@bge/env';
 import type { ConfigModuleOptions } from '@nestjs/config';
 import Joi from 'joi';
-import cache, { cacheConfigValidationSchema } from './cache.config';
 import coordinatorConfig, { coordinatorConfigValidationSchema } from './coordinator.config';
 import redisQueueConfig, { redisQueueConfigValidationSchema } from './redis-queue.config';
 import redisConfig, { redisConfigValidationSchema } from './redis.config';
@@ -10,13 +9,11 @@ export const configuration = {
   coordinator: coordinatorConfig,
   redisQueue: redisQueueConfig,
   redis: redisConfig,
-  cache: cache,
 };
 
 export const configurationValidationSchema = Joi.object({
   ...coordinatorConfigValidationSchema,
   ...redisQueueConfigValidationSchema,
-  ...cacheConfigValidationSchema,
   ...redisConfigValidationSchema,
   // Only the environments `@bge/env` knows: under any other name, no
   // per-environment default applies (#290).

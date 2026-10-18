@@ -40,26 +40,26 @@ function fakeClient(batches: Record<string, string[][] | Error>) {
   };
 }
 
-const USERS = 'api:cache:bge:user:permissions:*';
-const KEYS = 'api:cache:bge:apikey:scopes:*';
+const USERS = 'namespace:api:cache:bge:user:permissions:*';
+const KEYS = 'namespace:api:cache:bge:apikey:scopes:*';
 
 describe('RedisKeyFlush', () => {
   it('scans each pattern in turn and unlinks every batch the scan yields, reporting how many keys went', async () => {
     const client = fakeClient({
       [USERS]: [
-        ['api:cache:bge:user:permissions:u1', 'api:cache:bge:user:permissions:u2'],
-        ['api:cache:bge:user:permissions:u3'],
+        ['namespace:api:cache:bge:user:permissions:u1', 'namespace:api:cache:bge:user:permissions:u2'],
+        ['namespace:api:cache:bge:user:permissions:u3'],
       ],
-      [KEYS]: [['api:cache:bge:apikey:scopes:k1']],
+      [KEYS]: [['namespace:api:cache:bge:apikey:scopes:k1']],
     });
 
     await expect(new RedisKeyFlush(client, [USERS, KEYS]).flush()).resolves.toBe(4);
 
     expect(client.scans.map((scan) => scan.match)).toEqual([USERS, KEYS]);
     expect(client.unlinked).toEqual([
-      ['api:cache:bge:user:permissions:u1', 'api:cache:bge:user:permissions:u2'],
-      ['api:cache:bge:user:permissions:u3'],
-      ['api:cache:bge:apikey:scopes:k1'],
+      ['namespace:api:cache:bge:user:permissions:u1', 'namespace:api:cache:bge:user:permissions:u2'],
+      ['namespace:api:cache:bge:user:permissions:u3'],
+      ['namespace:api:cache:bge:apikey:scopes:k1'],
     ]);
   });
 
@@ -74,7 +74,11 @@ describe('RedisKeyFlush', () => {
   it('fails naming the pattern it stopped on and how many keys had already gone, so the log can say which half is still there', async () => {
     const client = fakeClient({
       [USERS]: [
-        ['api:cache:bge:user:permissions:u1', 'api:cache:bge:user:permissions:u2', 'api:cache:bge:user:permissions:u3'],
+        [
+          'namespace:api:cache:bge:user:permissions:u1',
+          'namespace:api:cache:bge:user:permissions:u2',
+          'namespace:api:cache:bge:user:permissions:u3',
+        ],
       ],
       [KEYS]: new Error('Connection is closed.'),
     });
@@ -91,7 +95,7 @@ describe('RedisKeyFlush', () => {
     await new RedisKeyFlush(unused, [USERS]).close();
     expect(unused.closed).toEqual(['disconnect']);
 
-    const finished = fakeClient({ [USERS]: [['api:cache:bge:user:permissions:u1']] });
+    const finished = fakeClient({ [USERS]: [['namespace:api:cache:bge:user:permissions:u1']] });
     const flush = new RedisKeyFlush(finished, [USERS]);
     await flush.flush();
     await flush.close();

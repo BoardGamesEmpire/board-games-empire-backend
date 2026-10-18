@@ -1,6 +1,5 @@
 import { DatabaseModule } from '@bge/database';
-import { CACHE_REDIS_CLIENT, type Redis } from '@bge/redis';
-import KeyvValkey from '@keyv/valkey';
+import { CACHE_REDIS_CLIENT, createCacheStore, type Redis } from '@bge/redis';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
 import { GatewayGameSearchService } from './gateway-game-search.service';
@@ -22,11 +21,10 @@ import { GatewayGameSearchService } from './gateway-game-search.service';
     CacheModule.registerAsync({
       inject: [CACHE_REDIS_CLIENT],
       useFactory: (redis: Redis) => ({
-        stores: [new KeyvValkey(redis)],
-        // cache-manager v7 interprets ttl in MILLISECONDS. The coordinator's
-        // original block said `300 // seconds`, which actually configured a
-        // 300ms default — every consumer here passes an explicit ms TTL, but
-        // the default should not be a trap for the next caller.
+        stores: [createCacheStore(redis, 'search:cache')],
+        // cache-manager v7 interprets ttl in MILLISECONDS, so a `300` meant as
+        // seconds is a 300ms default. Every consumer here passes an explicit
+        // ms TTL, but the default should not be a trap for the next caller.
         ttl: 5 * 60 * 1000,
       }),
     }),

@@ -35,7 +35,7 @@ describe('BootstrapModule.forRoot', () => {
   it('loads the Redis config and registers the flush when the entrypoint passes a cache', () => {
     const module = BootstrapModule.forRoot({
       applicationName: 'api',
-      cache: { redis, flushPatterns: ['api:cache:bge:user:permissions:*'] },
+      cache: { redis, flushPatterns: ['namespace:api:cache:bge:user:permissions:*'] },
     });
 
     expect(providerTokens(module)).toContain(CACHE_FLUSH);
@@ -45,7 +45,7 @@ describe('BootstrapModule.forRoot', () => {
   it('gives the flush a client that connects lazily, so a boot that never flushes closes it without a round trip', async () => {
     const module = BootstrapModule.forRoot({
       applicationName: 'api',
-      cache: { redis, flushPatterns: ['api:cache:bge:user:permissions:*'] },
+      cache: { redis, flushPatterns: ['namespace:api:cache:bge:user:permissions:*'] },
     });
     const provider = (module.providers ?? []).find(
       (candidate) => typeof candidate === 'object' && 'provide' in candidate && candidate.provide === CACHE_FLUSH,

@@ -1,42 +1,19 @@
-import { PermissionsService } from '@bge/permissions';
-import Keyv from 'keyv';
 import { bootstrapCacheFlushPatterns } from './cache-flush';
-import { API_CACHE_NAMESPACE } from './cache.config';
 
-// The boot flush SCANs physical keys; the CacheModule writes them through Keyv
-// under API_CACHE_NAMESPACE. Writing through Keyv here pins the joint: a change
-// to the namespace, to Keyv's separator, or to a PermissionsService key format
-// either keeps the two aligned or fails this spec.
+// The boot flush SCANs physical keys. The api's store writes each key under
+// `cacheStoreKey(API_CACHE_NAMESPACE, key)`, and `@bge/redis` pins that against
+// the adapter; this pins the patterns to the same names, spelled out because
+// docs/BOOTSTRAP.md gives them to operators. A change to the namespace, the
+// store's prefix or a PermissionsService key format moves the keys, and fails
+// here before it moves them unannounced.
 
-const globToRegExp = (glob: string) =>
-  new RegExp(
-    `^${glob
-      .split('*')
-      .map((literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .join('.*')}$`,
-  );
-
-describe('bootstrapCacheFlushPatterns', () => {
-  it('names the physical keys Keyv writes under the api cache namespace, for both permission graphs, their version tokens and nothing else', async () => {
-    const store = new Map<string, string>();
-    const keyv = new Keyv({ store, namespace: API_CACHE_NAMESPACE });
-    const patterns = bootstrapCacheFlushPatterns().map(globToRegExp);
-    const matched = (key: string) => patterns.some((pattern) => pattern.test(key));
-
-    for (const key of [
-      PermissionsService.userGraphCacheKey('user-1'),
-      PermissionsService.apiKeyScopeCacheKey('key-1'),
-    ]) {
-      await keyv.set(key, {});
-      await keyv.set(PermissionsService.cacheVersionKey(key), 'token');
-    }
-    const graphs = [...store.keys()];
-    await keyv.set('bge:session:other', {});
-    const bystander = [...store.keys()].find((key) => !graphs.includes(key));
-
-    expect(graphs).toHaveLength(4);
-    expect(graphs.every(matched)).toBe(true);
-    expect(bystander).toBeDefined();
-    expect(matched(bystander as string)).toBe(false);
+describe('bootstrapCacheFlushPatterns (#236, #449)', () => {
+  it('names the physical keys of both permission graphs and their version tokens, and nothing else', () => {
+    expect(bootstrapCacheFlushPatterns()).toEqual([
+      'namespace:api:cache:bge:user:permissions:*',
+      'namespace:api:cache:bge:cache-version:bge:user:permissions:*',
+      'namespace:api:cache:bge:apikey:scopes:*',
+      'namespace:api:cache:bge:cache-version:bge:apikey:scopes:*',
+    ]);
   });
 });

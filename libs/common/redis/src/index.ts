@@ -1,4 +1,5 @@
 export type { Redis } from 'iovalkey';
+export * from './lib/cache-store';
 export * from './lib/make-redis-config';
 export * from './lib/redis-client.factory';
 export * from './lib/redis-connection.config';

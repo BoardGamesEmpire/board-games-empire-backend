@@ -9,5 +9,6 @@ describeRequiredConfiguration('api', {
     production: ['BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'DATA_ENCRYPTION_KEY'],
     staging: ['BETTER_AUTH_SECRET', 'BETTER_AUTH_URL', 'DATA_ENCRYPTION_KEY', 'MEDIA_LOCAL_DISK_ROOT'],
   },
-  malformed: { REDIS_PORT: 'not a port', REDIS_BULLMQ_PORT: 'not a port' },
+  // A CACHE_TTL of 0 would keep every entry whose write sets no TTL forever (#537).
+  malformed: { REDIS_PORT: 'not a port', REDIS_BULLMQ_PORT: 'not a port', CACHE_TTL: '0' },
 });
