@@ -2,6 +2,12 @@
   "language": {
     "not_found": "Language with id {id} not found"
   },
+  "language_link": {
+    "not_found": "Language link with ID {id} not found.",
+    "tag_not_found": "Language tag with ID {tagId} not found.",
+    "not_pending": "Only a Pending language link can be accepted.",
+    "not_acceptable": "Language link {id} names no registered language, so it can't be accepted. Link it to a language tag instead."
+  },
   "game": {
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
