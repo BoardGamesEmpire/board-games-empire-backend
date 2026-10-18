@@ -34,12 +34,20 @@ const QUERY_ANSWERED = Buffer.concat([
   backendMessage('Z', Buffer.from('T')),
 ]);
 
+/** A FATAL error, as Postgres sends before it closes a connection it ends. */
+const CONNECTION_ENDED = backendMessage(
+  'E',
+  Buffer.from('SFATAL\0VFATAL\0C57P01\0Mterminating connection due to administrator command\0\0'),
+);
+
 /**
  * Answers the startup and every query, until the first simple query whose text
- * includes `silentFrom`; nothing after it. An extended query is answered at its
- * Sync: ParseComplete, BindComplete, NoData, then the statement's end.
+ * includes `silentFrom`; nothing after it. With `last`, that query is answered
+ * with `last`, in one write, and the connection closed. An extended query is
+ * answered at its Sync: ParseComplete, BindComplete, NoData, then the
+ * statement's end.
  */
-function answersUntil(silentFrom: string) {
+function answersUntil(silentFrom: string, last?: Buffer) {
   return (socket: Socket) => {
     let started = false;
     let silent = false;
@@ -57,7 +65,10 @@ function answersUntil(silentFrom: string) {
         const type = String.fromCharCode(pending[0]);
         const text = pending.subarray(5, pending.readInt32BE(1) + 1).toString();
         pending = pending.subarray(pending.readInt32BE(1) + 1);
-        silent ||= type === 'Q' && text.includes(silentFrom);
+        if (!silent && type === 'Q' && text.includes(silentFrom)) {
+          silent = true;
+          if (last) socket.end(last);
+        }
         if (silent) continue;
         if (type === 'Q') socket.write(QUERY_ANSWERED);
         if (type === 'S') {
@@ -174,6 +185,28 @@ describe('the advisory lock', () => {
         expect(performance.now() - started).toBeLessThan(2_000);
         expect(database.connections()).toBeGreaterThan(1);
         expect(lines.some((line) => /trying again on a new connection/.test(line))).toBe(true);
+      } finally {
+        await lock.close();
+        await database.close();
+      }
+    });
+  });
+
+  describe('a connection that fails as the lock is granted', () => {
+    it('refuses the acquire, since the lock ended with the connection', async () => {
+      // The grant and the failure arrive in one read. node-postgres settles the
+      // attempt, then reports the failure before the attempt's caller resumes.
+      const database = await fakeDatabase(
+        answersUntil('pg_advisory_xact_lock', Buffer.concat([QUERY_ANSWERED, CONNECTION_ENDED])),
+      );
+      const lock = new PgAdvisoryLock({
+        connectionString: database.url,
+        logger: silent,
+        applicationName: 'bge-bootstrap:test',
+      });
+
+      try {
+        await expect(lock.acquire()).rejects.toBeInstanceOf(LockLostError);
       } finally {
         await lock.close();
         await database.close();

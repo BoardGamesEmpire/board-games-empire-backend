@@ -170,6 +170,9 @@ export class PgAdvisoryLock implements BootstrapLock {
 
       const taken = await this.abandonUnlessAnswered(client, attempt + graceMs, () => this.attempt(client, attempt));
       if (taken === true) {
+        // A failure read with the grant reaches the error listener before this
+        // line, while the lock is not yet held, and only clears the client.
+        if (this.client !== client) throw new LockLostError('as the lock was granted');
         this.held = true;
         return;
       }

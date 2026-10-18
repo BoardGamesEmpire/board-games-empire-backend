@@ -76,6 +76,10 @@ export async function startPgBouncer(options: PgBouncerOptions): Promise<PgBounc
       const pooled = new URL(databaseUrl);
       pooled.hostname = container.getHost();
       pooled.port = String(container.getMappedPort(PGBOUNCER_PORT));
+      // The pooler offers its clients no TLS, so a URL that asks for it would
+      // fail there. The pooler asks the database for TLS itself, by default,
+      // without checking its certificate.
+      pooled.searchParams.set('sslmode', 'disable');
       return pooled.toString();
     },
     stop: async () => {
