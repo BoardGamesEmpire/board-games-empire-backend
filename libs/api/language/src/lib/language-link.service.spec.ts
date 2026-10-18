@@ -17,7 +17,11 @@ describe('LanguageLinkService', () => {
     // Defaults: review off, no existing links/tags/languages, writes succeed.
     db.systemSetting.findFirst.mockResolvedValue({ reviewGatewayLanguages: false } as never);
     db.languageGatewayLink.findUnique.mockResolvedValue(null);
-    db.languageGatewayLink.upsert.mockResolvedValue({} as never);
+    // As Prisma answers a create: the row as written.
+    db.languageGatewayLink.upsert.mockImplementation((async (args: {
+      create: { status: LanguageLinkStatus; tagId: string | null };
+    }) => ({ status: args.create.status, tagId: args.create.tagId })) as never);
+    db.languageGatewayLink.updateMany.mockResolvedValue({ count: 1 } as never);
     db.languageTag.findUnique.mockResolvedValue(null);
     db.languageTag.findFirst.mockResolvedValue(null);
     db.language.findUnique.mockResolvedValue(null);
@@ -270,7 +274,204 @@ describe('LanguageLinkService', () => {
       const summary = await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
 
       expect(summary.resolved).toBe(1);
-      expect(db.languageGatewayLink.upsert).toHaveBeenCalled();
+    });
+
+    // #715: an admin may link or ignore an Unresolved link while an interview
+    // re-resolves the same value. The interview's write applies only while
+    // the link is still Unresolved, so the admin's decision survives.
+    it('writes a re-resolved link only while it is still Unresolved', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue({
+        status: LanguageLinkStatus.Unresolved,
+        tagId: null,
+      } as never);
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+
+      await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
+
+      expect(db.languageGatewayLink.upsert).not.toHaveBeenCalled();
+      expect(db.languageGatewayLink.updateMany).toHaveBeenCalledWith({
+        where: {
+          gatewayId: GW,
+          value: 'Czech',
+          format: LanguageCodeFormat.Name,
+          status: LanguageLinkStatus.Unresolved,
+        },
+        data: expect.objectContaining({ status: LanguageLinkStatus.Resolved, tagId: 'tag-cs' }),
+      });
+    });
+
+    it("counts the admin's decision when the link was settled meanwhile", async () => {
+      db.languageGatewayLink.findUnique
+        .mockResolvedValueOnce({ status: LanguageLinkStatus.Unresolved, tagId: null } as never)
+        .mockResolvedValueOnce({ status: LanguageLinkStatus.Ignored, tagId: null } as never);
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+      db.languageGatewayLink.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      const summary = await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
+
+      expect(summary).toEqual({ resolved: 0, pending: 0, unresolved: 0, ignored: 1 });
+    });
+
+    it('creates a value it has never seen, and overwrites nothing if the row appeared meanwhile', async () => {
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+
+      await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
+
+      expect(db.languageGatewayLink.upsert).toHaveBeenCalledWith(expect.objectContaining({ update: {} }));
+      expect(db.languageGatewayLink.updateMany).not.toHaveBeenCalled();
+    });
+
+    // An import may create the link while this interview resolves it, and an
+    // admin may settle it before the interview writes.
+    it("keeps an admin's decision on a link another writer created meanwhile", async () => {
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+      db.languageGatewayLink.upsert.mockResolvedValue({ status: LanguageLinkStatus.Ignored, tagId: null } as never);
+
+      const summary = await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
+
+      expect(summary).toEqual({ resolved: 0, pending: 0, unresolved: 0, ignored: 1 });
+      expect(db.languageGatewayLink.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('settles a link another writer created Unresolved meanwhile, while it is still Unresolved', async () => {
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+      db.languageGatewayLink.upsert.mockResolvedValue({ status: LanguageLinkStatus.Unresolved, tagId: null } as never);
+
+      const summary = await service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }]);
+
+      expect(summary.resolved).toBe(1);
+      expect(db.languageGatewayLink.updateMany).toHaveBeenCalledWith({
+        where: {
+          gatewayId: GW,
+          value: 'Czech',
+          format: LanguageCodeFormat.Name,
+          status: LanguageLinkStatus.Unresolved,
+        },
+        data: expect.objectContaining({ status: LanguageLinkStatus.Resolved, tagId: 'tag-cs' }),
+      });
+    });
+  });
+
+  // The supplied tag is kept with the others, so a Pending link can be
+  // resolved later as the DataGateway meant it (#715).
+  describe('interview — supplied metadata', () => {
+    it('keeps the supplied BCP 47 tag beside the ISO codes and names', async () => {
+      db.systemSetting.findFirst.mockResolvedValue({ reviewGatewayLanguages: true } as never);
+
+      await service.interview(GW, [
+        { value: 'zho', format: LanguageCodeFormat.Iso6393, ietfTag: 'zh-Hant', name: 'Chinese (Traditional)' },
+      ]);
+
+      expect(db.languageGatewayLink.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({
+            status: LanguageLinkStatus.Pending,
+            suppliedIetfTag: 'zh-Hant',
+            suppliedIso6393: null,
+            suppliedName: 'Chinese (Traditional)',
+          }),
+        }),
+      );
+    });
+  });
+
+  // #715: an admin accepts a Pending link, which settles it as the
+  // unknown-language policy would have without review.
+  describe('acceptPending', () => {
+    const pending = {
+      id: 'link-1',
+      gatewayId: GW,
+      value: 'pt-BR',
+      format: LanguageCodeFormat.IetfBcp47,
+      status: LanguageLinkStatus.Pending,
+      suppliedIetfTag: 'pt-BR',
+      suppliedIso6393: null,
+      suppliedIso6391: null,
+      suppliedName: 'Portuguese (Brazil)',
+      suppliedNativeName: null,
+    };
+
+    beforeEach(() => {
+      db.systemSetting.findFirst.mockResolvedValue({ reviewGatewayLanguages: true } as never);
+      db.language.upsert.mockResolvedValue({ id: 'lang-por' } as never);
+      db.languageTag.upsert.mockResolvedValue({ id: 'tag-pt-br' } as never);
+    });
+
+    it('adds the language and tag with review on, and resolves the link to the tag', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue(pending as never);
+
+      await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: true, tagId: 'tag-pt-br' });
+
+      expect(db.language.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { iso6393: 'por' } }));
+      expect(db.languageTag.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { tag: 'pt-BR' },
+          create: expect.objectContaining({ source: LanguageTagSource.Gateway }),
+        }),
+      );
+      expect(db.languageGatewayLink.updateMany).toHaveBeenCalledWith({
+        where: { id: 'link-1', status: LanguageLinkStatus.Pending },
+        data: { status: LanguageLinkStatus.Resolved, tagId: 'tag-pt-br' },
+      });
+    });
+
+    it('resolves to the tag when it exists by now, and adds nothing', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue(pending as never);
+      db.languageTag.findUnique.mockResolvedValue({ id: 'tag-pt-br-existing' } as never);
+
+      await expect(service.acceptPending('link-1')).resolves.toEqual({
+        accepted: true,
+        tagId: 'tag-pt-br-existing',
+      });
+      expect(db.language.upsert).not.toHaveBeenCalled();
+      expect(db.languageTag.upsert).not.toHaveBeenCalled();
+    });
+
+    it('resolves an ISO value to the tag the DataGateway supplied beside it', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue({
+        ...pending,
+        value: 'zho',
+        format: LanguageCodeFormat.Iso6393,
+        suppliedIetfTag: 'zh-Hant',
+      } as never);
+      db.languageTag.findUnique.mockImplementation((async (args: { where: { tag: string } }) =>
+        args.where.tag === 'zh-Hant' ? { id: 'tag-zh-hant' } : { id: 'tag-zh' }) as never);
+
+      await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: true, tagId: 'tag-zh-hant' });
+    });
+
+    it.each([[LanguageLinkStatus.Resolved], [LanguageLinkStatus.Unresolved], [LanguageLinkStatus.Ignored]])(
+      'refuses a link that is %s, and writes nothing',
+      async (status) => {
+        db.languageGatewayLink.findUnique.mockResolvedValue({ ...pending, status } as never);
+
+        await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: false, reason: 'not_pending' });
+        expect(db.languageGatewayLink.updateMany).not.toHaveBeenCalled();
+        expect(db.languageTag.upsert).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses a link that no longer exists', async () => {
+      await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: false, reason: 'not_pending' });
+    });
+
+    it('refuses a link settled between the read and the write', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue(pending as never);
+      db.languageGatewayLink.updateMany.mockResolvedValue({ count: 0 } as never);
+
+      await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: false, reason: 'not_pending' });
+    });
+
+    it('refuses a link that names no registered language, and writes nothing', async () => {
+      db.languageGatewayLink.findUnique.mockResolvedValue({
+        ...pending,
+        value: 'xq-XX',
+        suppliedIetfTag: null,
+      } as never);
+
+      await expect(service.acceptPending('link-1')).resolves.toEqual({ accepted: false, reason: 'not_acceptable' });
+      expect(db.languageGatewayLink.updateMany).not.toHaveBeenCalled();
+      expect(db.language.upsert).not.toHaveBeenCalled();
     });
   });
 

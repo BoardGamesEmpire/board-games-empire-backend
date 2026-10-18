@@ -4,6 +4,7 @@ import {
   LanguageLinkOrigin,
   LanguageLinkStatus,
   LanguageTagSource,
+  Prisma,
 } from '@bge/database';
 import { canonicalizeTag, displayName, nativeDisplayName, parseTag } from '@bge/locale';
 import { Injectable, Logger } from '@nestjs/common';
@@ -36,6 +37,18 @@ interface Resolution {
   tagId: string | null;
 }
 
+/** How an admin's accept of a Pending link went (#715). */
+export type AcceptOutcome =
+  | { readonly accepted: true; readonly tagId: string }
+  | { readonly accepted: false; readonly reason: 'not_pending' | 'not_acceptable' };
+
+interface ResolveOptions {
+  /** Whether SystemSetting.reviewGatewayLanguages may park a miss as Pending. An admin's accept turns it off. */
+  review: boolean;
+}
+
+const WITH_REVIEW: ResolveOptions = { review: true };
+
 /**
  * Resolves gateway-native language values to canonical LanguageTag rows via
  * LanguageGatewayLink, applying the hybrid unknown-language policy:
@@ -48,8 +61,8 @@ interface Resolution {
  *    match case-insensitively against tag and language display names;
  *    misses park as Unresolved links. Free text never creates vocabulary.
  *  - Every encounter is persisted — nothing is silently dropped. Rows with
- *    tagId = null (Pending/Unresolved) are the curation worklist; Ignored
- *    rows are explicitly dismissed and stay quiet.
+ *    tagId = null (Pending/Unresolved) are the review worklist (#715);
+ *    Ignored rows are explicitly dismissed and stay quiet.
  */
 @Injectable()
 export class LanguageLinkService {
@@ -84,12 +97,67 @@ export class LanguageLinkService {
   }
 
   /**
+   * An admin's accept of a Pending link (#715): settles it as the
+   * unknown-language policy would without review, adding the language and
+   * tag when they're missing. It resolves again from what the DataGateway
+   * supplied, so a link that names no registered language is refused, and so
+   * is one an admin or an interview settled first: the write applies only
+   * while the link is still Pending.
+   */
+  async acceptPending(linkId: string): Promise<AcceptOutcome> {
+    const link = await this.db.languageGatewayLink.findUnique({
+      where: { id: linkId },
+      select: {
+        value: true,
+        format: true,
+        status: true,
+        suppliedIetfTag: true,
+        suppliedIso6393: true,
+        suppliedIso6391: true,
+        suppliedName: true,
+        suppliedNativeName: true,
+      },
+    });
+
+    if (link?.status !== LanguageLinkStatus.Pending) {
+      return { accepted: false, reason: 'not_pending' };
+    }
+
+    const entry: GatewayLanguageInput = {
+      value: link.value,
+      format: link.format,
+      ietfTag: link.suppliedIetfTag ?? undefined,
+      iso6393: link.suppliedIso6393 ?? undefined,
+      iso6391: link.suppliedIso6391 ?? undefined,
+      name: link.suppliedName ?? undefined,
+      nativeName: link.suppliedNativeName ?? undefined,
+    };
+
+    const resolution = await this.resolveEntry(entry, undefined, { review: false });
+    if (resolution.status !== LanguageLinkStatus.Resolved || !resolution.tagId) {
+      return { accepted: false, reason: 'not_acceptable' };
+    }
+
+    const { count } = await this.db.languageGatewayLink.updateMany({
+      where: { id: linkId, status: LanguageLinkStatus.Pending },
+      data: { status: LanguageLinkStatus.Resolved, tagId: resolution.tagId },
+    });
+
+    if (count === 0) {
+      return { accepted: false, reason: 'not_pending' };
+    }
+
+    this.logger.log(`Accepted Pending language link ${linkId} ('${link.value}') as tag ${resolution.tagId}`);
+    return { accepted: true, tagId: resolution.tagId };
+  }
+
+  /**
    * Import-path resolution: map a LanguageData-shaped payload to a tag id.
    * Consults links for each candidate representation (most specific first);
    * when none exist, attempts resolution and persists the encounter as an
    * Import-origin link. Returns null when the value is pending, unresolved,
    * or ignored — callers skip the association and re-syncs pick it up once
-   * the link is curated.
+   * the link is reviewed.
    */
   async resolveLanguageData(
     gatewayId: string,
@@ -165,7 +233,7 @@ export class LanguageLinkService {
    * ('EN-us' vs 'en-US') reuse the same link row instead of spawning
    * duplicates. Free-text NAME/NATIVE_NAME values keep the gateway's literal
    * spelling: they are matched case-insensitively at resolution time and
-   * shown verbatim on the curation worklist.
+   * shown verbatim on the review worklist.
    */
   private normalizeValue(value: string, format: LanguageCodeFormat): string {
     switch (format) {
@@ -195,6 +263,12 @@ export class LanguageLinkService {
    * Upsert the link row for one entry and attempt resolution per policy.
    * Returns the link's (possibly pre-existing) resolution. Starts no write
    * once `signal` aborts.
+   *
+   * An Unresolved link is written again only while it's still Unresolved: an
+   * admin may link or ignore it while this resolves, and their decision wins
+   * (#715). The link's current resolution is returned then. A new value is
+   * created without overwriting a row another writer made meanwhile, which
+   * is then settled the same way.
    */
   private async registerEntry(
     gatewayId: string,
@@ -221,6 +295,7 @@ export class LanguageLinkService {
 
     const resolution = await this.resolveEntry(normalized, signal);
     const supplied = {
+      suppliedIetfTag: entry.ietfTag ?? null,
       suppliedIso6393: entry.iso6393 ?? null,
       suppliedIso6391: entry.iso6391 ?? null,
       suppliedName: entry.name ?? null,
@@ -228,25 +303,61 @@ export class LanguageLinkService {
     };
 
     signal?.throwIfAborted();
-    await this.db.languageGatewayLink.upsert({
-      where: { gatewayId_value_format: { gatewayId, value, format: entry.format } },
+
+    const key = { gatewayId, value, format: entry.format };
+    if (existing) {
+      return this.writeWhileUnresolved(key, resolution, supplied);
+    }
+
+    // `update: {}` leaves a row another writer created meanwhile as it is,
+    // and answers with it.
+    const row = await this.db.languageGatewayLink.upsert({
+      where: { gatewayId_value_format: key },
       create: {
-        gatewayId,
-        value,
-        format: entry.format,
+        ...key,
         origin,
         status: resolution.status,
         tagId: resolution.tagId,
         ...supplied,
       },
-      update: {
-        status: resolution.status,
-        tagId: resolution.tagId,
-        ...supplied,
-      },
+      update: {},
+      select: { status: true, tagId: true },
     });
 
-    return resolution;
+    // Created here, or settled by whoever created it.
+    if (row.status !== LanguageLinkStatus.Unresolved || resolution.status === LanguageLinkStatus.Unresolved) {
+      return row;
+    }
+
+    return this.writeWhileUnresolved(key, resolution, supplied);
+  }
+
+  /**
+   * Writes a resolution onto a link only while it's still Unresolved, and
+   * otherwise answers with the link's current resolution.
+   */
+  private async writeWhileUnresolved(
+    key: { gatewayId: string; value: string; format: LanguageCodeFormat },
+    resolution: Resolution,
+    supplied: Prisma.LanguageGatewayLinkUpdateManyMutationInput,
+  ): Promise<Resolution> {
+    const { count } = await this.db.languageGatewayLink.updateMany({
+      where: { ...key, status: LanguageLinkStatus.Unresolved },
+      data: { status: resolution.status, tagId: resolution.tagId, ...supplied },
+    });
+
+    if (count > 0) {
+      return resolution;
+    }
+
+    const settled = await this.db.languageGatewayLink.findUnique({
+      where: { gatewayId_value_format: key },
+      select: { status: true, tagId: true },
+    });
+
+    // Deleted meanwhile: nothing holds a decision, so report what this
+    // resolution found.
+    return settled ?? resolution;
   }
 
   /**
@@ -256,12 +367,16 @@ export class LanguageLinkService {
    * free-text misses never do. An auto-add doesn't start once `signal`
    * aborts.
    */
-  private async resolveEntry(entry: GatewayLanguageInput, signal?: AbortSignal): Promise<Resolution> {
+  private async resolveEntry(
+    entry: GatewayLanguageInput,
+    signal?: AbortSignal,
+    options: ResolveOptions = WITH_REVIEW,
+  ): Promise<Resolution> {
     // 1. BCP 47 — from the value itself (IetfBcp47 format) or enrichment.
     const rawTag = entry.format === LanguageCodeFormat.IetfBcp47 ? entry.value : entry.ietfTag;
     const canonical = canonicalizeTag(rawTag);
     if (canonical) {
-      return this.resolveCanonicalTag(canonical, entry, signal);
+      return this.resolveCanonicalTag(canonical, entry, signal, options);
     }
 
     if (entry.format === LanguageCodeFormat.IetfBcp47) {
@@ -275,7 +390,7 @@ export class LanguageLinkService {
     const iso6393 = this.normalizeIso(entry.format === LanguageCodeFormat.Iso6393 ? entry.value : entry.iso6393);
     const iso6391 = this.normalizeIso(entry.format === LanguageCodeFormat.Iso6391 ? entry.value : entry.iso6391);
     if (iso6393 || iso6391) {
-      return this.resolveIsoCodes(iso6393, iso6391, entry, signal);
+      return this.resolveIsoCodes(iso6393, iso6391, entry, signal, options);
     }
 
     // 3. Free-text display name.
@@ -289,7 +404,8 @@ export class LanguageLinkService {
   private async resolveCanonicalTag(
     canonical: string,
     entry: GatewayLanguageInput,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    options: ResolveOptions,
   ): Promise<Resolution> {
     const tag = await this.db.languageTag.findUnique({ where: { tag: canonical }, select: { id: true } });
     if (tag) {
@@ -302,7 +418,7 @@ export class LanguageLinkService {
       return { status: LanguageLinkStatus.Unresolved, tagId: null };
     }
 
-    if (await this.reviewRequired()) {
+    if (options.review && (await this.reviewRequired())) {
       return { status: LanguageLinkStatus.Pending, tagId: null };
     }
 
@@ -319,7 +435,8 @@ export class LanguageLinkService {
     iso6393: string | undefined,
     iso6391: string | undefined,
     entry: GatewayLanguageInput,
-    signal?: AbortSignal,
+    signal: AbortSignal | undefined,
+    options: ResolveOptions,
   ): Promise<Resolution> {
     const registryEntry = iso6393Registry.find(
       (candidate) =>
@@ -340,7 +457,7 @@ export class LanguageLinkService {
       return { status: LanguageLinkStatus.Resolved, tagId: tag.id };
     }
 
-    if (await this.reviewRequired()) {
+    if (options.review && (await this.reviewRequired())) {
       return { status: LanguageLinkStatus.Pending, tagId: null };
     }
 
