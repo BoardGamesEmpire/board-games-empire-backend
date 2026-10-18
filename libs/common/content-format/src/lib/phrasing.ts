@@ -1,5 +1,17 @@
 import type { PhrasingContent } from 'mdast';
 
+// Each pattern for a run of spaces starts only where the run starts, by the
+// lookbehind. Without it, a long run with something other than a space after
+// it is tried again from each of its spaces, in time in the square of its
+// length: 2 s for 64,000.
+const TRAILING_SPACE = /(?<![ \t\n])[ \t\n]*$/;
+const SPACE_AROUND_NEWLINE = /(?<![ \t])[ \t]*\n[ \t\n]*/g;
+
+/** Text without the spaces, tabs and newlines it ends with. */
+export function trimEndSpace(text: string): string {
+  return text.replace(TRAILING_SPACE, '');
+}
+
 /**
  * Drops what Markdown can't write: a break at either end of a paragraph, and
  * a break straight after another, since a hard break needs text after it on
@@ -27,7 +39,7 @@ export function trimPhrasing(nodes: readonly PhrasingContent[]): PhrasingContent
   }
   const last = kept.at(-1);
   if (last?.type === 'text') {
-    kept[kept.length - 1] = { ...last, value: last.value.replace(/[ \t\n]+$/, '') };
+    kept[kept.length - 1] = { ...last, value: trimEndSpace(last.value) };
   }
 
   return kept;
@@ -57,7 +69,7 @@ export function joinText(nodes: readonly PhrasingContent[]): PhrasingContent[] {
   }
 
   return joined.map((node) =>
-    node.type === 'text' ? { ...node, value: node.value.replace(/[ \t]*\n[ \t\n]*/g, '\n') } : node,
+    node.type === 'text' ? { ...node, value: node.value.replace(SPACE_AROUND_NEWLINE, '\n') } : node,
   );
 }
 
@@ -127,7 +139,7 @@ function leadingSpace(text: string): string {
 }
 
 function trailingSpace(text: string): string {
-  return /[ \t\n]*$/.exec(text)?.[0] ?? '';
+  return TRAILING_SPACE.exec(text)?.[0] ?? '';
 }
 
 function isBreakOrBlank(node: PhrasingContent | undefined): boolean {

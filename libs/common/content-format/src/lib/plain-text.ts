@@ -1,6 +1,6 @@
 import type { Paragraph, PhrasingContent, Root } from 'mdast';
 import { serializeMarkdown } from './markdown';
-import { trimPhrasing } from './phrasing';
+import { trimEndSpace, trimPhrasing } from './phrasing';
 
 /** A line holding nothing but spaces or tabs, between two others. */
 const BLANK_LINE = /\n[ \t]*\n/;
@@ -104,7 +104,7 @@ function trimLine(line: string, first: boolean, last: boolean): string {
     value = value.replace(/^[ \t]+/, '');
   }
   if (!last) {
-    value = value.replace(/[ \t]+$/, '');
+    value = trimEndSpace(value);
   }
   return value;
 }

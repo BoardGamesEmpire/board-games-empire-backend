@@ -329,14 +329,55 @@ Next`,
       expect(shownText(convertToMarkdown(overLimit, format))).toBe(overLimit);
     });
 
-    it('converts plain text of any length, in time in proportion to it', () => {
-      // Writing a paragraph out took time in the square of its lines: 8 s for
-      // 128,000. In proportion, it's well under a second.
+    it('converts plain text of any length', () => {
       const text = 'line\n'.repeat(120_000);
-      const started = performance.now();
 
       expect(convertToMarkdown(text, null)).toBe(Array.from({ length: 120_000 }, () => 'line').join('\\\n'));
-      expect(performance.now() - started).toBeLessThan(3_000);
+    });
+  });
+
+  describe('time to convert', () => {
+    /**
+     * How many times longer converting takes when the text is four times as
+     * long: about 4 when time grows in proportion to length, about 16 when it
+     * grows with its square. A ratio rather than a time, so a slow or busy
+     * machine doesn't decide it; each side is the fastest of three runs.
+     */
+    function growth(convert: (length: number) => unknown, length: number): number {
+      const fastest = (n: number) =>
+        Math.min(
+          ...[1, 2, 3].map(() => {
+            const started = performance.now();
+            convert(n);
+            return performance.now() - started;
+          }),
+        );
+
+      return fastest(length * 4) / fastest(length);
+    }
+
+    // Each case once took time in the square of its length. Writing a paragraph
+    // out searched for each line among its siblings: 8 s for 128,000 lines.
+    // Trimming a long run of spaces with a regex retried it from every space:
+    // 2 s for 64,000.
+    it.each([
+      ['plain text of many lines', null, (n: number) => 'line\n'.repeat(n / 5), 40_000],
+      ['plain text with a long run of spaces', null, (n: number) => 'A' + ' '.repeat(n) + 'B', 16_000],
+      ['the same run on a line before another', null, (n: number) => 'A' + ' '.repeat(n) + 'B\nC', 16_000],
+      [
+        'BBCode with a long run of spaces in bold',
+        ContentFormat.BBCode,
+        (n: number) => `[b]A${' '.repeat(n)}B[/b]`,
+        4_000,
+      ],
+      [
+        'Markdown with a long run of spaces before HTML',
+        ContentFormat.Markdown,
+        (n: number) => `A${' '.repeat(n)}B <b>x</b>`,
+        4_000,
+      ],
+    ])('converts %s in time in proportion to its length', (_, format, text, length) => {
+      expect(growth((n) => convertToMarkdown(text(n), format), length)).toBeLessThan(8);
     });
   });
 
