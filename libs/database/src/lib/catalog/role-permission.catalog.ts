@@ -364,6 +364,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'read:platform_game',
     'read:platform',
 
+    // plugin
+    'read:plugin:installed',
+
     // rule variant
     'create:rule_variant',
     'update:rule_variant',
@@ -373,6 +376,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:user_game_customization',
     'delete:user_game_customization',
     'read:user:profile',
+    'read:user:searchable',
     'update:user_game_customization',
     'update:user:profile:own',
 

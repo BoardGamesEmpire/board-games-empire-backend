@@ -1,6 +1,6 @@
 import { AuthService } from '@bge/auth';
 import { Action, ResourceType } from '@bge/database';
-import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, resolveScopeSubjectId } from '@bge/permissions';
 import { paginated, PaginatedResponseDto } from '@bge/shared';
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
@@ -42,13 +42,20 @@ export class UserController {
   })
   @ApiResponse({ status: Http.Ok, type: PaginatedUsersResponse })
   @UseGuards(PoliciesGuard)
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.UserProfile))
+  // Both types, because the response serves both: the rows are users, and each
+  // carries its profile's display name and avatar. The read composes the
+  // caller's ceiling on each, so a caller with no rule on either is refused
+  // here rather than served an empty page.
+  @CheckPolicies(
+    (ability) => ability.can(Action.read, ResourceType.User),
+    (ability) => ability.can(Action.read, ResourceType.UserProfile),
+  )
   @Get('search')
   search(@Query() query: UserSearchQueryDto) {
     // No `search: query.q` alongside the rows any more (D-372-5): the caller
     // sent `q`, and a per-endpoint third field is how a shared envelope stops
     // being shared.
-    return from(this.userService.searchUsers(this.abilityService.getActingUserId(), query)).pipe(
+    return from(this.userService.searchUsers(resolveScopeSubjectId(this.abilityService), query)).pipe(
       map((page) => paginated('users', page, query, ResourceType.User)),
     );
   }

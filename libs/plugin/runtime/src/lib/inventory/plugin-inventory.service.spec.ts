@@ -14,7 +14,11 @@ import {
   PluginInventoryNotFoundError,
   PluginInventoryTombstonedError,
 } from './inventory.errors';
-import { PluginInventoryService } from './plugin-inventory.service';
+import {
+  PluginInventoryService,
+  type PluginInventoryCeiling,
+  type PluginServerInventoryCeiling,
+} from './plugin-inventory.service';
 
 describe('PluginInventoryService', () => {
   const options: PluginModuleOptions = {
@@ -48,12 +52,23 @@ describe('PluginInventoryService', () => {
     ...overrides,
   });
 
+  /**
+   * Stands in for the caller's permission ceiling. Distinct from any scope a
+   * list names, so each assertion can tell which half of a `where` came from
+   * the caller.
+   */
+  const CEILING: Prisma.PluginWhereInput = { id: { in: ['within-the-ceiling'] } };
+
   let db: MockDatabaseService;
   let service: PluginInventoryService;
+  let unitCeiling: jest.MockedFunction<PluginInventoryCeiling>;
+  let serverCeiling: jest.MockedFunction<PluginServerInventoryCeiling>;
 
   beforeEach(() => {
     db = createMockDatabaseService();
     service = new PluginInventoryService(db as unknown as DatabaseService, options);
+    unitCeiling = jest.fn((scope: Prisma.PluginWhereInput) => ({ AND: [scope, CEILING] }));
+    serverCeiling = jest.fn(() => CEILING);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -63,7 +78,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const result = await service.listForServer({ skip: 0, pageSize: 25 });
+      const result = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       const { operations, options: txOptions } = batchTransactionCall(db);
       expect(operations).toHaveLength(2);
@@ -75,7 +90,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForServer({ skip: 50, pageSize: 25 });
+      await service.listForServer({ skip: 50, pageSize: 25 }, serverCeiling);
 
       expect(db.plugin.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ skip: 50, take: 25, orderBy: { slug: 'asc' } }),
@@ -86,26 +101,44 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForServer({ skip: 0, pageSize: 25 });
+      await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { uninstalledAt: null } }));
-      expect(db.plugin.count).toHaveBeenCalledWith({ where: { uninstalledAt: null } });
+      const where = { AND: [CEILING, { uninstalledAt: null }] };
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.plugin.count).toHaveBeenCalledWith({ where });
     });
 
     it('includes tombstones only when explicitly asked (D-CH)', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForServer({ skip: 0, pageSize: 25 }, { includeUninstalled: true });
+      await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling, { includeUninstalled: true });
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: {} }));
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { AND: [CEILING, {}] } }));
+    });
+
+    // The opt-in admits tombstones; it must not admit what the caller's
+    // ceiling leaves out, so the filter goes beside the ceiling and never
+    // replaces it.
+    it("keeps the caller's ceiling on the rows and the count whatever the tombstone opt-in says", async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+
+      for (const includeUninstalled of [true, false, undefined]) {
+        await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling, { includeUninstalled });
+      }
+
+      expect(serverCeiling).toHaveBeenCalledTimes(3);
+      for (const [args] of [...db.plugin.findMany.mock.calls, ...db.plugin.count.mock.calls]) {
+        expect((args?.where as { AND: unknown[] }).AND[0]).toBe(CEILING);
+      }
     });
 
     it('localizes displayName/description for the requested locale', async () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, { locale: 'de' });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling, { locale: 'de' });
 
       expect(rows[0].displayName).toBe('Demo-Senke');
       expect(rows[0].manifestUnreadable).toBe(false);
@@ -115,7 +148,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].displayName).toBe('Demo Sink');
     });
@@ -124,7 +157,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].provenance).toEqual({
         kind: 'installed',
@@ -140,7 +173,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].provenance).toEqual({ kind: 'bundled' });
     });
@@ -150,7 +183,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row({ pendingVersion: '1.3.0', pendingSince: since })] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].pendingUpdate).toEqual({ version: '1.3.0', since });
     });
@@ -159,7 +192,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       expect(rows[0].pendingUpdate).toBeNull();
     });
@@ -169,7 +202,7 @@ describe('PluginInventoryService', () => {
         db.plugin.findMany.mockResolvedValue([row({ manifestJson: { nonsense: true } })] as never);
         db.plugin.count.mockResolvedValue(1 as never);
 
-        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
         expect(rows[0]).toEqual(
           expect.objectContaining({
@@ -190,7 +223,7 @@ describe('PluginInventoryService', () => {
         ] as never);
         db.plugin.count.mockResolvedValue(2 as never);
 
-        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
         expect(rows.map((entry) => entry.manifestUnreadable)).toEqual([true, false]);
         expect(rows[1].displayName).toBe('Demo Sink');
@@ -204,7 +237,7 @@ describe('PluginInventoryService', () => {
         db.plugin.findMany.mockResolvedValue([row({ slug: 'other-sink' })] as never);
         db.plugin.count.mockResolvedValue(1 as never);
 
-        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+        const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
         expect(rows[0]).toEqual(
           expect.objectContaining({ slug: 'other-sink', displayName: null, manifestUnreadable: true }),
@@ -272,23 +305,53 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: {
+      expect(unitCeiling).toHaveBeenCalledWith({
+        uninstalledAt: null,
+        OR: [{ scope: PluginScope.Household }, { householdPlugins: { some: { householdId: 'hh-1' } } }],
+      });
+    });
+
+    it('runs its scope beside the where the ceiling returns, for the rows and the count', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+
+      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      const where = { AND: [unitCeiling.mock.calls[0]?.[0], unitCeiling.mock.results[0]?.value] };
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.plugin.count).toHaveBeenCalledWith({ where });
+    });
+
+    // The edge is handed the scope only to compose it. The list keeps its own
+    // copy beside what comes back, so an edge that dropped it could not widen
+    // the list past it.
+    it('keeps its scope whatever the ceiling returns', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+      unitCeiling.mockReturnValue({});
+
+      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      const where = {
+        AND: [
+          {
             uninstalledAt: null,
             OR: [{ scope: PluginScope.Household }, { householdPlugins: { some: { householdId: 'hh-1' } } }],
           },
-        }),
-      );
+          {},
+        ],
+      };
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.plugin.count).toHaveBeenCalledWith({ where });
     });
 
     it('joins only THIS household enablement row', async () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(db.plugin.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -303,7 +366,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([householdRow({ scope: PluginScope.Household })] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].unit).toEqual({
         anchored: false,
@@ -321,7 +384,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].unit).toEqual({ anchored: true, enabled: true, suspendedForConsent: true, suspendedAt });
     });
@@ -339,7 +402,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].dormantReason).toBe(PluginUnitDormantReason.ScopeOrphaned);
       // Dormancy is not a disable: the admin's own switch is untouched, which
@@ -360,7 +423,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       // The replaced boolean could not have said this: the scope admits
       // households, so `scope === Server && anchored` was false here.
@@ -371,7 +434,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([householdRow({ scope: PluginScope.Server })] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].dormantReason).toBeNull();
     });
@@ -387,16 +450,39 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
-      await service.listForUser('user-1', { skip: 0, pageSize: 25 });
+      await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
-      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: { uninstalledAt: null } }));
+      expect(unitCeiling).toHaveBeenCalledWith({ uninstalledAt: null });
+    });
+
+    it('runs the where the ceiling returns, for the rows and the count', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+
+      await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      const where = { AND: [{ uninstalledAt: null }, { AND: [{ uninstalledAt: null }, CEILING] }] };
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.plugin.count).toHaveBeenCalledWith({ where });
+    });
+
+    it('keeps its scope whatever the ceiling returns', async () => {
+      db.plugin.findMany.mockResolvedValue([] as never);
+      db.plugin.count.mockResolvedValue(0 as never);
+      unitCeiling.mockReturnValue({});
+
+      await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
+
+      const where = { AND: [{ uninstalledAt: null }, {}] };
+      expect(db.plugin.findMany).toHaveBeenCalledWith(expect.objectContaining({ where }));
+      expect(db.plugin.count).toHaveBeenCalledWith({ where });
     });
 
     it('a user who has consented to nothing still sees the plugins, unanchored (D-CE)', async () => {
       db.plugin.findMany.mockResolvedValue([userRow()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows).toHaveLength(1);
       expect(rows[0].unit.anchored).toBe(false);
@@ -409,7 +495,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       expect(rows[0].unit).toEqual({
         anchored: true,
@@ -445,7 +531,7 @@ describe('PluginInventoryService', () => {
       ] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       for (const field of SERVER_ONLY) {
         expect(rows[0]).not.toHaveProperty(field);
@@ -476,7 +562,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([{ ...row(), userPlugins: [] }] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 });
+      const { rows } = await service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling);
 
       for (const field of SERVER_ONLY) {
         expect(rows[0]).not.toHaveProperty(field);
@@ -488,16 +574,19 @@ describe('PluginInventoryService', () => {
     });
 
     it.each([
-      ['household', () => service.listForHousehold('hh-1', { skip: 0, pageSize: 25 })],
-      ['user', () => service.listForUser('user-1', { skip: 0, pageSize: 25 })],
+      ['household', () => service.listForHousehold('hh-1', { skip: 0, pageSize: 25 }, unitCeiling)],
+      ['user', () => service.listForUser('user-1', { skip: 0, pageSize: 25 }, unitCeiling)],
     ] as const)('the %s read filters tombstones unconditionally — there is no flag to pass', async (_axis, read) => {
       db.plugin.findMany.mockResolvedValue([] as never);
       db.plugin.count.mockResolvedValue(0 as never);
 
       await read();
 
-      const where = db.plugin.findMany.mock.calls[0]?.[0]?.where as Record<string, unknown>;
-      expect(where['uninstalledAt']).toBeNull();
+      // Inside the scope the list names, which it keeps beside the ceiling, so
+      // no ceiling can drop it.
+      expect(unitCeiling.mock.calls[0]?.[0]).toMatchObject({ uninstalledAt: null });
+      const where = db.plugin.findMany.mock.calls[0]?.[0]?.where;
+      expect(where?.AND).toEqual(expect.arrayContaining([expect.objectContaining({ uninstalledAt: null })]));
       expect(db.plugin.count).toHaveBeenCalledWith({ where });
     });
 
@@ -505,7 +594,7 @@ describe('PluginInventoryService', () => {
       db.plugin.findMany.mockResolvedValue([row()] as never);
       db.plugin.count.mockResolvedValue(1 as never);
 
-      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 });
+      const { rows } = await service.listForServer({ skip: 0, pageSize: 25 }, serverCeiling);
 
       for (const field of SERVER_ONLY) {
         expect(rows[0]).toHaveProperty(field);

@@ -65,7 +65,7 @@ describe('GameService', () => {
    * and the ceiling only clips it. The by-id read is unchanged, so a game
    * dropped from staff's list stays readable by id.
    *
-   * `Game` has left `PENDING_SCOPE_SWEEP`, so a regression that stops this read
+   * `Game`'s envelope is guarded, so a regression that stops this read
    * composing answers 500 at the envelope rather than returning too much. That
    * is why the first test pins the composer call itself.
    */

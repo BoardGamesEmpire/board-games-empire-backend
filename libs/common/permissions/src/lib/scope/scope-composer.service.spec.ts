@@ -144,4 +144,17 @@ describe('ScopeComposer', () => {
 
     expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
   });
+
+  it('asks for the ceiling on the field the read names', () => {
+    abilityService.getCurrentResourceConditions.mockReturnValue([{ id: 'p-1' }]);
+
+    const where = composer.compose(ResourceType.Plugin, Action.read, Unscoped('every installed plugin'), 'installedAt');
+
+    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
+      ResourceType.Plugin,
+      Action.read,
+      'installedAt',
+    );
+    expect(where).toEqual({ AND: [{ id: 'p-1' }] });
+  });
 });

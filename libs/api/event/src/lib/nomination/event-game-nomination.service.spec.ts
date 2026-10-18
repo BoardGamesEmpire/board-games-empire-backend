@@ -89,8 +89,8 @@ describe('EventGameNominationService', () => {
       db.eventGameNomination.count.mockResolvedValue(0);
     });
 
-    // #512. `EventGameNomination` has left `PENDING_SCOPE_SWEEP`, so the
-    // envelope fails with a 500 unless this read composes. The rows do not
+    // #512. The `EventGameNomination` envelope fails with a 500 unless this
+    // read composes. The rows do not
     // change: the path's event was already the filter, and the ceiling still
     // clips it.
     it('asks the composer for its where clause, declaring the path event as its scope', async () => {

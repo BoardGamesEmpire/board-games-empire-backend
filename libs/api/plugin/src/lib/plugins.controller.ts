@@ -1,7 +1,7 @@
 import { AuditContextService, SERVER_PLUGIN_UNIT } from '@bge/actor-context';
 import { Action, PluginGrantScope, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
-import { AbilityService, CheckPolicies, PoliciesGuard } from '@bge/permissions';
+import { AbilityService, CheckPolicies, PoliciesGuard, ScopeComposer, Unscoped } from '@bge/permissions';
 import {
   PluginConsentPresentationService,
   PluginFeatureStateService,
@@ -27,8 +27,25 @@ import {
   UpdatePluginConfigDto,
 } from './dto';
 import { PluginExceptionFilter } from './filters/plugin-exception.filter';
+import { canReadServerPlugins, SERVER_PLUGIN_COLUMN } from './policies/read-server-plugins.policy';
 
 const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, 'plugins');
+
+/**
+ * The server list's set is every installed plugin, so it names no scope of
+ * its own. The reason is a claim about the catalog, checked beside the
+ * controller's spec: a reach that is neither of these two would make it false.
+ *
+ * Its ceiling is built from the rules that read {@link SERVER_PLUGIN_COLUMN},
+ * the column its gate asks about. A caller can pass the gate on one rule and
+ * hold `read:plugin:installed` beside it: a key with `read:plugin` pinned to
+ * one plugin, say. Built from every rule, the ceiling would admit every
+ * plugin's server columns through the grant the gate refuses.
+ */
+export const SERVER_PLUGIN_LIST_SCOPE = Unscoped(
+  'every installed plugin: the roles past the column gate read every row, and the one fixed filter, ' +
+    "read:plugin:installed, is every user's and leaves out the column the gate and the ceiling ask about",
+);
 
 /**
  * Server-level plugin lifecycle (#59 Phase C4, #320): the admin's
@@ -39,7 +56,9 @@ const PaginatedPluginsResponse = PaginatedResponseDto(PluginInventoryEntryDto, '
  * `purgeData` belongs in a body, which DELETE should not carry.
  *
  * The coarse `manage:plugin` CASL gate lives here; the service seam
- * re-verifies server-admin authority and owns every domain rule. Actor
+ * re-verifies server-admin authority and owns every domain rule. The reads
+ * gate on {@link canReadServerPlugins} rather than a bare type check, which
+ * every user's identity-column grant would pass. Actor
  * identity is resolved from CLS at this edge and passed into the runtime
  * input — never read from a request body.
  */
@@ -59,6 +78,7 @@ export class PluginsController {
     private readonly featureState: PluginFeatureStateService,
     private readonly inventory: PluginInventoryService,
     private readonly auditContext: AuditContextService,
+    private readonly scopeComposer: ScopeComposer,
   ) {}
 
   // ─── Installed-plugin inventory (#354) ────────────────────────────────────
@@ -76,16 +96,21 @@ export class PluginsController {
   @ApiResponse({ status: Http.Ok, type: PaginatedPluginsResponse })
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: read immediately after the lifecycle
   // writes that change it, which must be visible on the re-read.
   @Get()
   list(@Query() query: ListPluginsQueryDto) {
     return from(
-      this.inventory.listForServer(query, {
-        includeUninstalled: query.includeUninstalled,
-        locale: this.auditContext.getLocale() ?? undefined,
-      }),
+      this.inventory.listForServer(
+        query,
+        () =>
+          this.scopeComposer.compose(ResourceType.Plugin, Action.read, SERVER_PLUGIN_LIST_SCOPE, SERVER_PLUGIN_COLUMN),
+        {
+          includeUninstalled: query.includeUninstalled,
+          locale: this.auditContext.getLocale() ?? undefined,
+        },
+      ),
     ).pipe(map((page) => paginated('plugins', page, query, ResourceType.Plugin)));
   }
 
@@ -146,7 +171,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: it exists to be read right before a
   // decide POST, and the decide's write must be visible on the re-read.
   @Get(':slug/consent')
@@ -324,7 +349,7 @@ export class PluginsController {
     status: Http.UnprocessableEntity,
     description: 'Stored PENDING manifest failed re-validation (a corrupt ACTIVE manifest renders as 500 by design)',
   })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // The approval screen must stay out of the response cache — it exists to be
   // read right before approve/reject, and the comparison is recomputed
   // against TODAY's decisions. Serving it from the response cache would hand
@@ -348,7 +373,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   // Must stay out of the response cache: consent decisions must be visible on
   // the next read (#60).
   @Get(':slug/features')
@@ -386,7 +411,7 @@ export class PluginsController {
   @ApiResponse({ status: Http.Forbidden, description: 'Insufficient permissions' })
   @ApiResponse({ status: Http.NotFound, description: 'Plugin not installed' })
   @ApiResponse({ status: Http.Gone, description: 'Plugin was uninstalled (tombstoned)' })
-  @CheckPolicies((ability) => ability.can(Action.read, ResourceType.Plugin))
+  @CheckPolicies(canReadServerPlugins)
   @Get(':slug')
   getBySlug(@Param('slug') slug: string) {
     return from(this.inventory.getBySlug(slug, this.auditContext.getLocale() ?? undefined)).pipe(

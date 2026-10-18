@@ -116,6 +116,104 @@ describe('AbilityService', () => {
         ForbiddenException,
       );
     });
+
+    describe('with a field', () => {
+      const IDENTITY_COLUMNS = ['id', 'slug'];
+
+      // A rule pinned to one plugin passes a check on installedAt, and an
+      // identity-column grant beside it does not. Built from both, the clause
+      // is `{}`: the key's conditions are dropped, so the identity grant reads
+      // every row.
+      it('builds the clause only from the rules that read the field', () => {
+        const key = ability([
+          { action: Action.read, subject: 'Plugin', conditions: { id: 'p-1' } },
+          { action: Action.read, subject: 'Plugin', fields: IDENTITY_COLUMNS },
+        ]);
+
+        expect(service.getResourceConditionsForAbilities([key], ResourceType.Plugin, Action.read)).toEqual([{}]);
+        expect(
+          service.getResourceConditionsForAbilities([key], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ OR: [{ id: 'p-1' }] }]);
+      });
+
+      it("drops a user's conditioned identity grant from the clause too", () => {
+        const user = ability([
+          { action: Action.read, subject: 'Plugin', fields: IDENTITY_COLUMNS, conditions: { uninstalledAt: null } },
+          { action: Action.read, subject: 'Plugin', conditions: { id: 'p-1' } },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([user], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ OR: [{ id: 'p-1' }] }]);
+      });
+
+      it('denies every row to an ability whose only rule leaves the field out', () => {
+        const user = ability([
+          { action: Action.read, subject: 'Plugin', fields: IDENTITY_COLUMNS, conditions: { uninstalledAt: null } },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([user], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ OR: [] }]);
+      });
+
+      it('keeps a wildcard permissive', () => {
+        const staff = ability([{ action: Action.manage, subject: 'all' }]);
+
+        expect(
+          service.getResourceConditionsForAbilities([staff], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{}]);
+      });
+
+      // The rules are rebuilt in their original order, so a denial defined
+      // after an allow still wins.
+      it('keeps a denial that binds no field', () => {
+        const denied = ability([
+          { action: Action.read, subject: 'Plugin' },
+          { action: Action.read, subject: 'Plugin', conditions: { id: 'p-2' }, inverted: true },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ AND: [{ NOT: { id: 'p-2' } }] }]);
+      });
+
+      // A conditioned denial of the column leaves the check on it passing, so
+      // the clause is all that keeps its rows out.
+      it('keeps a denial bound to the field', () => {
+        const denied = ability([
+          { action: Action.read, subject: 'Plugin' },
+          {
+            action: Action.read,
+            subject: 'Plugin',
+            fields: ['installedAt'],
+            conditions: { id: 'p-2' },
+            inverted: true,
+          },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{ AND: [{ NOT: { id: 'p-2' } }] }]);
+      });
+
+      it('ignores a denial bound to other fields', () => {
+        const denied = ability([
+          { action: Action.read, subject: 'Plugin' },
+          {
+            action: Action.read,
+            subject: 'Plugin',
+            fields: IDENTITY_COLUMNS,
+            conditions: { id: 'p-2' },
+            inverted: true,
+          },
+        ]);
+
+        expect(
+          service.getResourceConditionsForAbilities([denied], ResourceType.Plugin, Action.read, 'installedAt'),
+        ).toEqual([{}]);
+      });
+    });
   });
 
   describe('getCurrentResourceConditions', () => {
@@ -127,6 +225,20 @@ describe('AbilityService', () => {
       const explicit = service.getResourceConditionsForAbilities(abilities, ResourceType.Household, Action.read);
 
       expect(current).toEqual(explicit);
+    });
+
+    it('passes a field through to the primed abilities', () => {
+      const abilities = [
+        ability([
+          { action: Action.read, subject: 'Plugin', conditions: { id: 'p-1' } },
+          { action: Action.read, subject: 'Plugin', fields: ['id'] },
+        ]),
+      ];
+      abilityContext.peek.mockReturnValue(abilities);
+
+      expect(service.getCurrentResourceConditions(ResourceType.Plugin, Action.read, 'installedAt')).toEqual([
+        { OR: [{ id: 'p-1' }] },
+      ]);
     });
 
     it('throws ForbiddenException when the primed array is empty', () => {

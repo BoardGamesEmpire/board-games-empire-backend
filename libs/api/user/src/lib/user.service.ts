@@ -1,4 +1,5 @@
-import { DatabaseService, Prisma } from '@bge/database';
+import { Action, DatabaseService, Prisma, ResourceType } from '@bge/database';
+import { ScopeComposer } from '@bge/permissions';
 import type { PaginatedRows } from '@bge/shared';
 import { Injectable } from '@nestjs/common';
 import { UserSearchQueryDto } from './dto/user-search-query.dto';
@@ -6,7 +7,10 @@ import type { UserSearchResult } from './interfaces/user-search-results.interfac
 
 @Injectable()
 export class UserService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly scopeComposer: ScopeComposer,
+  ) {}
 
   async findById(id: string) {
     return this.db.user.findUnique({ where: { id } });
@@ -34,13 +38,22 @@ export class UserService {
    * Both statements share a REPEATABLE READ snapshot, so a user turning
    * searchable — or being banned — between them cannot make `hasMore` promise a
    * page the next request answers differently.
+   *
+   * The scope is the search itself: the opted-in, unbanned users the term
+   * matches, the caller left out. The caller's ceilings only clip it (#517).
+   * Each row carries its profile's name and avatar, so both `User` and
+   * `UserProfile` are composed, the second on the profile the row carries.
+   * Every user's `User` ceiling is `read:user:searchable`, which repeats the
+   * opt-in and ban clauses, and their `UserProfile` one is every row, so for a
+   * session neither changes a row. An API key scoped to one user or one
+   * profile narrows the page to that user.
    */
   async searchUsers(requestingUserId: string, query: UserSearchQueryDto): Promise<PaginatedRows<UserSearchResult>> {
-    const where: Prisma.UserWhereInput = {
+    const where = this.scopeComposer.compose(ResourceType.User, Action.read, {
       AND: [
         { banned: false },
         { id: { not: requestingUserId } },
-        { profile: { isSearchable: true } },
+        { profile: { is: this.scopeComposer.compose(ResourceType.UserProfile, Action.read, { isSearchable: true }) } },
         {
           OR: [
             { username: { contains: query.q, mode: 'insensitive' } },
@@ -49,7 +62,7 @@ export class UserService {
           ],
         },
       ],
-    };
+    });
 
     const [rows, total] = await this.db.$transaction(
       [

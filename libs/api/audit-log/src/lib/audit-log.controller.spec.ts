@@ -34,9 +34,8 @@ describe('AuditLogController', () => {
   // The service composes the `AuditLog` scope; the envelope is where the guard
   // checks for it, under the resource type the handler passes. Built inside a
   // request with nothing composed, an `AuditLog` envelope must fail. An
-  // envelope declaring `Unscoped` instead would pass here, and so would one
-  // passing a type still in `PENDING_SCOPE_SWEEP` — either switches the guard
-  // off for this route without a sound.
+  // envelope declaring `Unscoped` instead would pass here, which switches the
+  // guard off for this route without a sound.
   it('builds its envelope under the AuditLog scope guard', async () => {
     await expect(
       ClsServiceManager.getClsService().runWith({}, () => firstValueFrom(controller.list(auditQuery()))),

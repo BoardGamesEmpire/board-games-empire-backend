@@ -252,7 +252,7 @@ describe('FriendshipService', () => {
    * #515. Both reads declare their own set, the acting user's friendships, and
    * the ceiling only clips it. Staff and the Owner read every friendship on the
    * server through their wildcard rules, so before this the wide list showed
-   * them everyone's. `Friendship` has left `PENDING_SCOPE_SWEEP`, so a read
+   * them everyone's. `Friendship`'s envelope is guarded, so a read
    * that stops composing answers 500 at the envelope rather than widening
    * again. That is why the composer call itself is pinned.
    */

@@ -73,8 +73,8 @@ describe('GameCollectionService', () => {
    * #514. `GET /game-collections` declares its own set, the acting user's
    * entries, and the ceiling only clips it. It already filtered on `userId`, so
    * no caller's rows change; what changes is that a later edit cannot drop the
-   * scope without the envelope noticing. `GameCollection` has left
-   * `PENDING_SCOPE_SWEEP`, so a read that stops composing answers 500 at the
+   * scope without the envelope noticing. `GameCollection`'s envelope is
+   * guarded, so a read that stops composing answers 500 at the
    * envelope rather than widening to whatever the ceiling admits, which for
    * staff is every entry on the server. That is why the first test pins the
    * composer call itself.
@@ -194,8 +194,7 @@ describe('GameCollectionService', () => {
    * entries, and the viewer's ceiling decides which of them they may see:
    * household-shared, friend-shared and public for a signed-in viewer, public
    * only for a guest. Composing changes no rows, since the read already
-   * filtered on `userId`; it is the guard's precondition now that
-   * `GameCollection` has left `PENDING_SCOPE_SWEEP`.
+   * filtered on `userId`; it is the envelope guard's precondition.
    */
   describe('listForUser', () => {
     it("asks the composer for its where clause, declaring the path user's live entries", async () => {

@@ -250,6 +250,30 @@ describe('the shipped catalogs', () => {
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:job');
     });
 
+    // The server's own plugin reads gate on `installedAt`, a column this grant
+    // leaves out, because a type check would pass on it whatever its
+    // conditions. So the field list is what keeps every user out of them.
+    // Pinned exactly: a server-only column joining it opens those reads, and
+    // `installedAt` joining it opens them outright.
+    it('let User read installed plugins by their identity columns alone', () => {
+      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:plugin:installed');
+
+      expect(entry?.conditions).toStrictEqual({ uninstalledAt: null });
+      expect(entry?.fields).toStrictEqual(['id', 'slug', 'category', 'scope', 'enabled']);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:plugin:installed');
+    });
+
+    // Every signed-in user holds it, so a column joining the list is served to
+    // every user by the first route that checks `read User` and serves it.
+    it('let User read searchable users by the columns search serves, and let no guest read them', () => {
+      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:user:searchable');
+
+      expect(entry?.conditions).toStrictEqual({ banned: false, profile: { is: { isSearchable: true } } });
+      expect(entry?.fields).toStrictEqual(['id', 'username', 'firstName', 'lastName', 'image']);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:user:searchable');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:searchable');
+    });
+
     it.each(
       Object.entries(ROLE_SCOPE)
         .filter(([, scope]) => scope !== 'global')

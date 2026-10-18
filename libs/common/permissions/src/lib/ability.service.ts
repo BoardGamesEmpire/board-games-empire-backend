@@ -11,7 +11,7 @@ import {
 import { Action } from '@bge/database';
 import { t } from '@bge/i18n';
 import { subject } from '@casl/ability';
-import { accessibleBy, type WhereInput } from '@casl/prisma';
+import { accessibleBy, createPrismaAbility, type WhereInput } from '@casl/prisma';
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { AbilityFactory } from './ability.factory';
 import { AbilityContextNotPrimedError } from './errors/ability-context-not-primed.error';
@@ -92,12 +92,16 @@ export class AbilityService {
    *
    * `action` is required and never defaulted: defaulting to `read` (the CASL
    * convenience) silently mis-authorizes mutation paths.
+   *
+   * `field` is for a read that serves a column some grants leave out. See
+   * {@link getResourceConditionsForAbilities}.
    */
   getCurrentResourceConditions<TResource extends ModelResourceType>(
     resourceType: TResource,
     action: Action,
+    field?: string,
   ): WhereInput<TResource>[] {
-    return this.getResourceConditionsForAbilities(this.getCurrentAbilities(), resourceType, action);
+    return this.getResourceConditionsForAbilities(this.getCurrentAbilities(), resourceType, action, field);
   }
 
   /**
@@ -111,18 +115,32 @@ export class AbilityService {
    * `{ OR: [...] }`, or a deny-all `{ OR: [] }`), so a non-empty array never
    * collapses to `AND: []`. Guarding the empty case is what prevents the
    * unfiltered-query regression by construction.
+   *
+   * With a `field`, each ability's clause is built only from its rules that
+   * admit that column. A rule's field list says which columns it reads, but
+   * `accessibleBy` reads rows and ignores it, so a grant limited to a few
+   * columns would otherwise widen a read that serves one it leaves out. A
+   * route gated on `can(action, type, field)` may pass on one narrow rule, and
+   * its rows must come from the rules that could pass it, not from every rule
+   * on the type. Denials that bind no field still apply.
    */
   getResourceConditionsForAbilities<TResource extends ModelResourceType>(
     abilities: AppAbility[],
     resourceType: TResource,
     action: Action,
+    field?: string,
   ): WhereInput<TResource>[] {
     if (abilities.length === 0) {
       throw new ForbiddenException(t('common.forbidden.access'));
     }
 
     try {
-      return abilities.map((ability) => accessibleBy(ability, action).ofType(resourceType));
+      return abilities.map((ability) =>
+        accessibleBy(
+          field === undefined ? ability : rulesAdmittingField(ability, action, resourceType, field),
+          action,
+        ).ofType(resourceType),
+      );
     } catch (error) {
       this.logger.error(
         `Failed to build '${action}' conditions for ${resourceType}; treating as denied.`,
@@ -351,4 +369,20 @@ export function isResolvableActor(actor: Actor): boolean {
  */
 function assertNeverActor(actor: never): never {
   throw new Error(`Unhandled actor kind: ${JSON.stringify(actor)}`);
+}
+
+/**
+ * An ability holding only `ability`'s rules that a check on `field` consults:
+ * allows that read the column, and denials bound to it or to no field. CASL
+ * hands them back highest priority first, and a built ability takes its last
+ * rule as the highest, so they are reversed to keep a later denial winning.
+ *
+ * Their fields are dropped once the selection is made. The clause is built
+ * with no field named, and CASL skips a field-bound denial in that form, so a
+ * conditioned denial of the column would otherwise leave its rows in.
+ */
+function rulesAdmittingField(ability: AppAbility, action: Action, resourceType: ModelResourceType, field: string) {
+  const rules = ability.rulesFor(action, resourceType, field).map((rule) => ({ ...rule.origin, fields: undefined }));
+
+  return createPrismaAbility(rules.reverse()) as AppAbility;
 }
