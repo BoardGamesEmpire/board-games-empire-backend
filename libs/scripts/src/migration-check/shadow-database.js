@@ -1,6 +1,7 @@
 'use strict';
 /**
- * Is SHADOW_DATABASE_URL safe to hand `prisma migrate diff --from-migrations`?
+ * Is SHADOW_DATABASE_URL safe to hand `prisma migrate diff --from-migrations`,
+ * and in which schema does the check compare (migrateDiffEnv, below)?
  *
  * Prisma empties the shadow database on every run, and Prisma 7.8 does so
  * without a word when it is the main database: on a throwaway database, a diff
@@ -108,4 +109,31 @@ function shadowDatabaseProblem(env) {
   return null;
 }
 
-module.exports = { shadowDatabaseProblem };
+/**
+ * The environment to run `prisma migrate diff` in, so the migrations and the
+ * models are compared in one schema. Call it once shadowDatabaseProblem has
+ * passed the same environment.
+ *
+ * The migrations replay into the schema SHADOW_DATABASE_URL names, `public`
+ * when it names none, while Prisma places the models in the schema of the URL
+ * prisma.config.ts reads. `.env.example`'s DATABASE_URL names
+ * `board_games_empire`, so against CI's shadow URL every table differed by its
+ * schema alone. `migrate diff` doesn't connect to that URL, so this sets only
+ * its `schema`, to the shadow URL's. The migrations replay only into `public`
+ * until #624.
+ */
+function migrateDiffEnv(env) {
+  const schema = new URL(env['SHADOW_DATABASE_URL']).searchParams.get('schema') || 'public';
+
+  const result = { ...env };
+  for (const variable of MAIN_VARIABLES) {
+    if (!env[variable]) continue;
+
+    const url = new URL(env[variable]);
+    url.searchParams.set('schema', schema);
+    result[variable] = url.toString();
+  }
+  return result;
+}
+
+module.exports = { migrateDiffEnv, shadowDatabaseProblem };

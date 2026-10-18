@@ -75,7 +75,8 @@ externals it can read, which it reports instead of passing. The header of
 one of its own, and the main database under every spelling Prisma reads as the
 same: scheme, port, database role, loopback address, socket directory, `host`
 parameter, and no database named. It also covers a URL it can't read, which it
-refuses rather than guess at. The header of
+refuses rather than guess at, and the schema the comparison runs in: the shadow
+URL's, whatever `DATABASE_URL` names. The header of
 `src/migration-check/shadow-database.js` explains why Prisma 7.8 needs it (#586).
 
 `src/eslint-rules/no-nested-ceiling.spec.js` tests a rule that lives in the
