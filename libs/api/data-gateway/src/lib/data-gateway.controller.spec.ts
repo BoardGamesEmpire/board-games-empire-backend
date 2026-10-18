@@ -6,7 +6,7 @@ import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
 import { Logger } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 import { DataGatewayController } from './data-gateway.controller';
 import { DataGatewayService } from './data-gateway.service';
 import { CreateDataGatewayDto } from './dto';
@@ -91,6 +91,81 @@ describe('DataGatewayController', () => {
 
       expect(response['dataGateway']).toEqual(expect.objectContaining({ id: 'gw-1' }));
       expect(response).not.toHaveProperty('gateway');
+    });
+  });
+
+  // #753: no answer carries the stored credentials, only whether there are
+  // any. Every answer also carries the derived interview status (#715).
+  describe('the row each answer carries', () => {
+    const stored = { apiKey: 'secret' };
+
+    afterEach(() => jest.restoreAllMocks());
+
+    beforeEach(() => {
+      const row = makeGateway({ authParameters: stored });
+      const disabled = makeGateway({ authParameters: stored, enabled: false });
+      const mocked = service as unknown as jest.Mocked<DataGatewayService>;
+
+      mocked.getAll.mockResolvedValue({ rows: [row], total: 1 });
+      mocked.getById.mockResolvedValue(row);
+      mocked.create.mockImplementation(async (dto) => (dto.enabled === false ? disabled : row));
+      mocked.update.mockImplementation(async (_id, dto) => (dto.enabled === false ? disabled : row));
+      mocked.delete.mockResolvedValue(row);
+    });
+
+    it.each([
+      ['getAll', (c: DataGatewayController) => c.getAll(paginationQuery({ limit: 20 }))],
+      ['getById', (c: DataGatewayController) => c.getById('gw-1')],
+      ['create, enabled', (c: DataGatewayController) => c.create({ name: 'Test Gateway' } as CreateDataGatewayDto)],
+      [
+        'create, disabled',
+        (c: DataGatewayController) => c.create({ name: 'Test Gateway', enabled: false } as CreateDataGatewayDto),
+      ],
+      ['update, enabled left alone', (c: DataGatewayController) => c.update('gw-1', { description: 'Updated' })],
+      ['update, enabled', (c: DataGatewayController) => c.update('gw-1', { enabled: true })],
+      ['update, disabled', (c: DataGatewayController) => c.update('gw-1', { enabled: false })],
+      ['delete', (c: DataGatewayController) => c.delete('gw-1')],
+      ['connect', (c: DataGatewayController) => c.connect('gw-1')],
+      ['disconnect', (c: DataGatewayController) => c.disconnect('gw-1')],
+    ] as const)('has no authParameters, from %s', async (_action, call) => {
+      const response = await firstValueFrom<Record<string, unknown>>(
+        call(controller) as Observable<Record<string, unknown>>,
+      );
+
+      const rows = (response['dataGateways'] as unknown[] | undefined) ?? [response['dataGateway']];
+
+      expect(rows).toHaveLength(1);
+      for (const row of rows) {
+        expect(row).not.toHaveProperty('authParameters');
+        expect(row).toEqual(
+          expect.objectContaining({
+            hasAuthParameters: true,
+            interview: { interviewed: false, firstInterviewedAt: null, lastInterviewedAt: null, failure: null },
+          }),
+        );
+      }
+    });
+
+    it.each([
+      ['connect', 'connectGateway'],
+      ['disconnect', 'disconnectGateway'],
+    ] as const)('has no authParameters when the %s fails', async (action, rpc) => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      coordinator[rpc].mockReturnValue(of({ success: false, error: 'raw detail' }));
+
+      const response = await firstValueFrom<Record<string, unknown>>(controller[action]('gw-1'));
+
+      expect(response['dataGateway']).not.toHaveProperty('authParameters');
+      expect(response['dataGateway']).toEqual(expect.objectContaining({ hasAuthParameters: true }));
+    });
+
+    // The server still reads the credentials where it uses them.
+    it('still sends the stored credentials to the coordinator on connect', async () => {
+      await firstValueFrom(controller.connect('gw-1'));
+
+      expect(coordinator.connectGateway).toHaveBeenCalledWith(
+        expect.objectContaining({ authParametersJson: '{"apiKey":"secret"}' }),
+      );
     });
   });
 

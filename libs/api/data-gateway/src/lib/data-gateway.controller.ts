@@ -2,14 +2,33 @@ import { GatewayCoordinatorClientService } from '@bge/coordinator';
 import { Action, DataGateway, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
-import { ApiPaginatedEnvelope, DefaultPaginationQueryDto, paginated } from '@bge/shared';
+import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
 import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiExtraModels,
+  ApiOperation,
+  ApiResponse,
+  ApiSecurity,
+  ApiTags,
+  getSchemaPath,
+} from '@nestjs/swagger';
+import { Http } from '@status/codes';
 import { from, of } from 'rxjs';
 import { catchError, concatMap, map, tap } from 'rxjs/operators';
 import { DataGatewayService } from './data-gateway.service';
-import { CreateDataGatewayDto, UpdateDataGatewayDto } from './dto';
+import { toDataGatewayView } from './data-gateway.view';
+import {
+  CreateDataGatewayDto,
+  DataGatewayConnectAnswerDto,
+  DataGatewayDisconnectAnswerDto,
+  DataGatewayEnvelopeDto,
+  DataGatewayResponseDto,
+  UpdateDataGatewayDto,
+} from './dto';
+
+const PaginatedDataGatewaysResponse = PaginatedResponseDto(DataGatewayResponseDto, 'dataGateways');
 
 @ApiBearerAuth()
 @ApiSecurity('api_key')
@@ -28,27 +47,38 @@ export class DataGatewayController {
     summary: 'List configured DataGateways',
     description:
       'Alphabetical by name. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope ' +
-      'carrying `total`, `totalPages` and `hasMore`. See #230; the row shape is modelled in #402.',
+      'carrying `total`, `totalPages` and `hasMore`. See #230. Rows carry no stored credentials (#753).',
   })
-  @ApiPaginatedEnvelope('dataGateways')
+  @ApiResponse({ status: Http.Ok, type: PaginatedDataGatewaysResponse })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.DataGateway))
   @Get()
   getAll(@Query() pagination: DefaultPaginationQueryDto) {
     return from(this.dataGatewayService.getAll(pagination)).pipe(
-      map((page) => paginated('dataGateways', page, pagination, ResourceType.DataGateway)),
+      map((page) =>
+        paginated(
+          'dataGateways',
+          { rows: page.rows.map(toDataGatewayView), total: page.total },
+          pagination,
+          ResourceType.DataGateway,
+        ),
+      ),
     );
   }
 
+  @ApiResponse({ status: Http.Ok, type: DataGatewayEnvelopeDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.DataGateway))
   @Get(':id')
   getById(@Param('id') id: string) {
-    return from(this.dataGatewayService.getById(id)).pipe(map((dataGateway) => ({ dataGateway })));
+    return from(this.dataGatewayService.getById(id)).pipe(
+      map((dataGateway) => ({ dataGateway: toDataGatewayView(dataGateway) })),
+    );
   }
 
+  @ApiResponse({ status: Http.Created, type: DataGatewayConnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.create, ResourceType.DataGateway))
@@ -60,7 +90,7 @@ export class DataGatewayController {
         gateway.enabled
           ? this.connectToGateway(gateway)
           : of({
-              dataGateway: gateway,
+              dataGateway: toDataGatewayView(gateway),
               connection_response: null,
               connection_attempt: false,
             }),
@@ -68,6 +98,18 @@ export class DataGatewayController {
     );
   }
 
+  @ApiExtraModels(DataGatewayConnectAnswerDto, DataGatewayDisconnectAnswerDto)
+  @ApiResponse({
+    status: Http.Ok,
+    description:
+      'The connect answer when `enabled` is true, the disconnect answer when false, and either with no attempt otherwise',
+    schema: {
+      oneOf: [
+        { $ref: getSchemaPath(DataGatewayConnectAnswerDto) },
+        { $ref: getSchemaPath(DataGatewayDisconnectAnswerDto) },
+      ],
+    },
+  })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.DataGateway))
@@ -78,7 +120,7 @@ export class DataGatewayController {
       concatMap((gateway) => {
         if (updateDataGatewayDto.enabled === undefined) {
           return of({
-            dataGateway: gateway,
+            dataGateway: toDataGatewayView(gateway),
             connection_response: null,
             connection_attempt: false,
           });
@@ -89,6 +131,7 @@ export class DataGatewayController {
     );
   }
 
+  @ApiResponse({ status: Http.Ok, type: DataGatewayDisconnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.delete, ResourceType.DataGateway))
@@ -100,7 +143,7 @@ export class DataGatewayController {
         gateway.enabled
           ? this.disconnectFromGateway(gateway)
           : of({
-              dataGateway: gateway,
+              dataGateway: toDataGatewayView(gateway),
               disconnection_response: null,
               disconnection_attempt: false,
             }),
@@ -108,6 +151,7 @@ export class DataGatewayController {
     );
   }
 
+  @ApiResponse({ status: Http.Created, type: DataGatewayConnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.DataGateway))
@@ -131,7 +175,7 @@ export class DataGatewayController {
     // the call itself fails, but never surface it to the client — return a
     // generic, translated message instead (§6).
     const failedAnswer = () => ({
-      dataGateway: gateway,
+      dataGateway: toDataGatewayView(gateway),
       connection_response: { success: false, message: t('errors.data_gateway.connect_failed') },
       connection_attempt: true,
     });
@@ -146,7 +190,7 @@ export class DataGatewayController {
         }
 
         this.logger.log(`Connect gateway response for ${gateway.id}: ${JSON.stringify(response)}`);
-        return { dataGateway: gateway, connection_response: response, connection_attempt: true };
+        return { dataGateway: toDataGatewayView(gateway), connection_response: response, connection_attempt: true };
       }),
       catchError((error) => {
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
@@ -155,6 +199,7 @@ export class DataGatewayController {
     );
   }
 
+  @ApiResponse({ status: Http.Created, type: DataGatewayDisconnectAnswerDto })
   @ApiResponse({ status: 401, description: 'Authentication required' })
   @ApiResponse({ status: 403, description: 'Insufficient permissions' })
   @CheckPolicies((ability) => ability.can(Action.update, ResourceType.DataGateway))
@@ -172,7 +217,7 @@ export class DataGatewayController {
 
     // As on connect, the coordinator's error stays in the server log (§6).
     const failedAnswer = () => ({
-      dataGateway: gateway,
+      dataGateway: toDataGatewayView(gateway),
       disconnection_response: { success: false, message: t('errors.data_gateway.disconnect_failed') },
       disconnection_attempt: true,
     });
@@ -187,7 +232,11 @@ export class DataGatewayController {
         }
 
         this.logger.log(`Disconnect gateway response for ${gateway.id}: ${JSON.stringify(response)}`);
-        return { dataGateway: gateway, disconnection_response: response, disconnection_attempt: true };
+        return {
+          dataGateway: toDataGatewayView(gateway),
+          disconnection_response: response,
+          disconnection_attempt: true,
+        };
       }),
       catchError((error) => {
         this.logger.error(`Error disconnecting from gateway ${gateway.id}`, error);
