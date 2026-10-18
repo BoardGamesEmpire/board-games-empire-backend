@@ -100,6 +100,12 @@ export function revokeEnvelope(response: HttpResponseLike, request: RequestDescr
   return { message, invite: invite as unknown as PendingInviteProjection };
 }
 
+/**
+ * `POST /api/households/:householdId/invites/:inviteId/approve`: `{ message, invite }`
+ * (#166), in the context shape, as a revoke answers. An approver is not a party either.
+ */
+export const approveEnvelope = revokeEnvelope;
+
 /** `GET /api/households/:householdId/invites`: `{ invites: [...], pagination }`. */
 export function inviteListEnvelope(response: HttpResponseLike, request: RequestDescription): ListInvitesEnvelope {
   if (!isRecord(response.body)) {
@@ -181,3 +187,9 @@ export function receivedInvitesEnvelope(
 
   return { invites: invites as unknown as ReceivedInviteWire[], pagination };
 }
+
+/**
+ * `GET /api/invites/sent` (#751): the inbox's shape, each row the party shape
+ * and the household it is into.
+ */
+export const sentInvitesEnvelope = receivedInvitesEnvelope;

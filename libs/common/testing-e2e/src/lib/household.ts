@@ -1,4 +1,10 @@
-import { SystemRole, type Household, type HouseholdMember, type PrismaClient } from '@bge/database';
+import {
+  SystemRole,
+  type Household,
+  type HouseholdMember,
+  type MemberInvitePolicy,
+  type PrismaClient,
+} from '@bge/database';
 import type { HouseholdRoleName, SessionActor } from './types.js';
 
 export interface HouseholdRosterEntry {
@@ -15,6 +21,9 @@ export interface HouseholdWithMembersOptions {
 
   readonly name?: string;
   readonly description?: string;
+
+  /** The household's member invite policy (#166). The schema's default when omitted, as a created household has. */
+  readonly memberInvitePolicy?: MemberInvitePolicy;
 }
 
 export interface HouseholdRosterMember {
@@ -115,6 +124,8 @@ export async function createHouseholdWithMembers(
         name: options.name ?? `e2e-household-${options.owner.user.id}`,
         description: options.description,
         createdById: plan.ownerEntry.userId,
+        // Every household the api creates has its settings row (#166).
+        settings: { create: { memberInvitePolicy: options.memberInvitePolicy } },
       },
     });
 

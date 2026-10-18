@@ -1,4 +1,4 @@
-import { InviteStatus, InviteType, SystemRole } from '@bge/database';
+import { InviteStatus, InviteType, MemberInvitePolicy, SystemRole } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -60,10 +60,12 @@ describe('household invites', () => {
     });
 
   describe('creating', () => {
-    it('lets an owner and an admin invite, and refuses a member and a guest', async () => {
+    it('lets an owner and an admin invite, and refuses a guest, and a member where members may not', async () => {
       const [owner, admin, member, guest, first, second, third] = await Promise.all(
         Array.from({ length: 7 }, () => actors.user()),
       );
+      // How a member's invite opens under the other policies is
+      // `household-invite-approval.spec.ts`'s (#166).
       const { household } = await actors.householdWithMembers({
         owner,
         members: [
@@ -71,6 +73,7 @@ describe('household invites', () => {
           { actor: member, role: SystemRole.HouseholdMember },
           { actor: guest, role: SystemRole.HouseholdGuest },
         ],
+        memberInvitePolicy: MemberInvitePolicy.Off,
       });
 
       const byOwner = await createdInvite(owner, household.id, { inviteeId: first.user.id, message: 'Join us' });
@@ -123,9 +126,10 @@ describe('household invites', () => {
 
     it('refuses the owner of another household, who passes the type-only check', async () => {
       const [owner, elsewhereOwner, invitee] = await Promise.all(Array.from({ length: 3 }, () => actors.user()));
+      // A guest here, who may not invite here (#166).
       const { household } = await actors.householdWithMembers({
         owner,
-        members: [{ actor: elsewhereOwner, role: SystemRole.HouseholdMember }],
+        members: [{ actor: elsewhereOwner, role: SystemRole.HouseholdGuest }],
       });
       await actors.householdWithMembers({ owner: elsewhereOwner });
 

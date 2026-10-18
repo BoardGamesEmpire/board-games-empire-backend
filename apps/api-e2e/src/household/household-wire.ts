@@ -1,4 +1,4 @@
-import type { Household, HouseholdMember, Invite } from '@bge/database';
+import type { Household, HouseholdMember, HouseholdSettings, Invite } from '@bge/database';
 import { envelopeFailure, isRecord, type HttpResponseLike, type RequestDescription, type Wire } from '../support/wire';
 
 /**
@@ -117,11 +117,15 @@ export interface LanguageTagProjection {
   readonly tag: string;
 }
 
-/** `getHouseholdById`'s shape: the row plus its member and language embeds. */
+/** A household's settings as the detail, the lists and `PATCH` publish them (#166). */
+export type HouseholdSettingsProjection = Wire<Pick<HouseholdSettings, 'memberInvitePolicy'>>;
+
+/** `getHouseholdById`'s shape: the row plus its member, language and settings embeds. */
 export interface HouseholdDetail extends HouseholdWire {
   readonly languageTag: LanguageTagProjection | null;
   readonly members: readonly HouseholdMemberProjection[];
   readonly invites: readonly PendingInviteProjection[];
+  readonly settings: HouseholdSettingsProjection | null;
 }
 
 export interface CreateHouseholdEnvelope {

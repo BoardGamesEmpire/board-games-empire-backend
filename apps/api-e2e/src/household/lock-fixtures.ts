@@ -95,8 +95,9 @@ export async function arrangeHouseholdWithRoles(
     const users = await Promise.all(roles.map(() => createUser(tx)));
     const creator = users[0];
 
+    // With its settings row, as every household the api creates has (#166).
     const household = await tx.household.create({
-      data: { name: `lock-fixture-${randomUUID()}`, createdById: creator.id },
+      data: { name: `lock-fixture-${randomUUID()}`, createdById: creator.id, settings: { create: {} } },
     });
 
     const members: LockFixtureMember[] = [];
@@ -124,7 +125,7 @@ export async function arrangeHouseholdWithRoles(
 export async function arrangeEmptyHousehold(prisma: PrismaClient): Promise<{ householdId: string; userId: string }> {
   const user = await createUser(prisma);
   const household = await prisma.household.create({
-    data: { name: `lock-fixture-${randomUUID()}`, createdById: user.id },
+    data: { name: `lock-fixture-${randomUUID()}`, createdById: user.id, settings: { create: {} } },
   });
 
   return { householdId: household.id, userId: user.id };
