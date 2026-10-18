@@ -16,12 +16,11 @@ import {
   type DataMigrationEntry,
 } from '@bge/database';
 import { PermissionsService } from '@bge/permissions';
-import KeyvValkey from '@keyv/valkey';
+import { createCacheStore } from '@bge/redis';
 import type { Logger } from '@nestjs/common';
 import { RedisContainer, type StartedRedisContainer } from '@testcontainers/redis';
 import Redis from 'iovalkey';
-import Keyv from 'keyv';
-import { API_CACHE_NAMESPACE } from '../support/api-cache';
+import { API_CACHE_NAMESPACE, apiCacheKey } from '../support/api-cache';
 import { REDIS_IMAGE } from '../support/e2e-env';
 import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../support/test-db';
 
@@ -33,9 +32,9 @@ import { createTestDatabase, requireDatabaseUrl, type TestDatabase } from '../su
  * later entry; a boot that wrote neither leaves them, and keys outside the
  * patterns are never touched.
  * The graphs are written the way the api's CacheModule writes them, through
- * Keyv and the Valkey adapter under the api's namespace, so the physical keys
- * here are the ones production has (the api's own spec pins its namespace
- * constant to these patterns). DB-only on the harness database, which is in
+ * the store `createCacheStore` builds under the api's namespace, so the
+ * physical keys here are the ones production has (the api's own spec pins its
+ * patterns to the same names). DB-only on the harness database, which is in
  * sync and seeded, so removing one grant is what makes the next reconcile
  * write. The DB-only runner provisions no Redis, so this spec starts its own
  * container.
@@ -59,8 +58,8 @@ const neverMigrates: Migrator = {
 /** The api composes its flush patterns from `API_CACHE_NAMESPACE` exactly as below. */
 const PATTERNS = [PermissionsService.userGraphCacheKey('*'), PermissionsService.apiKeyScopeCacheKey('*')]
   .flatMap((key) => [key, PermissionsService.cacheVersionKey(key)])
-  .map((key) => `${API_CACHE_NAMESPACE}:${key}`);
-/** Logical keys, as the CacheModule's callers pass them; Keyv puts the namespace in front. */
+  .map(apiCacheKey);
+/** Logical keys, as the CacheModule's callers pass them; the store puts its prefix and namespace in front. */
 const GRAPHS = [
   PermissionsService.userGraphCacheKey('u1'),
   PermissionsService.userGraphCacheKey('u2'),
@@ -68,8 +67,8 @@ const GRAPHS = [
 ];
 /** Each graph's version token: a load writes one beside its graph when the key holds none. */
 const TOKENS = GRAPHS.map((key) => PermissionsService.cacheVersionKey(key));
-const CACHED = [...GRAPHS, ...TOKENS].map((key) => `${API_CACHE_NAMESPACE}:${key}`);
-const BYSTANDERS = [`${API_CACHE_NAMESPACE}:bge:session:other`, 'bge:user:permissions:no-namespace'];
+const CACHED = [...GRAPHS, ...TOKENS].map(apiCacheKey);
+const BYSTANDERS = [apiCacheKey('bge:session:other'), 'bge:user:permissions:no-namespace'];
 /** A data migration this spec registers and applies; its ledger row is removed after each test. */
 const ENTRY = '20260901000000_e2e_flush_probe';
 
@@ -120,11 +119,13 @@ describe('the cache flush after a reconcile that wrote rows or a data migration 
 
   /** Writes the graphs the way the api does, and the bystanders: one inside the namespace, one raw. */
   async function prime(): Promise<void> {
-    const keyv = new Keyv({ store: new KeyvValkey(redis), namespace: API_CACHE_NAMESPACE });
-    await Promise.all([...GRAPHS, 'bge:session:other'].map((key) => keyv.set(key, { primed: true })));
-    await Promise.all(TOKENS.map((key) => keyv.set(key, 'token')));
+    const store = createCacheStore(redis, API_CACHE_NAMESPACE);
+    await Promise.all([...GRAPHS, 'bge:session:other'].map((key) => store.set(key, { primed: true })));
+    await Promise.all(TOKENS.map((key) => store.set(key, 'token')));
     await redis.set('bge:user:permissions:no-namespace', '{}');
     expect(await present(CACHED)).toEqual([1, 1, 1, 1, 1, 1]);
+    // The name docs/BOOTSTRAP.md gives operators, as the real adapter writes it.
+    expect(await redis.exists('namespace:api:cache:bge:user:permissions:u1')).toBe(1);
   }
 
   const present = (keys: readonly string[]) => Promise.all(keys.map((key) => redis.exists(key)));

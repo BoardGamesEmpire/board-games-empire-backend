@@ -51,6 +51,9 @@
     },
     {
       "path": "../../libs/database"
+    },
+    {
+      "path": "../../libs/common/redis"
     }
   ]
 }

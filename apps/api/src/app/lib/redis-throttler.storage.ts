@@ -33,8 +33,8 @@ const REQUEST_UNIT = '{request}';
  * Deliberately not fixed by namespacing this prefix, because throttle buckets
  * are the newest of four things that collide in that configuration and the
  * least costly of them: the same database carries better-auth's sessions
- * (`api:cache:auth_*`), the cached ability graphs
- * (`api:cache:bge:user:permissions:*`), and the bootstrap advisory lock
+ * (`namespace:api:cache:auth_*`), the cached ability graphs
+ * (`namespace:api:cache:bge:user:permissions:*`), and the bootstrap advisory lock
  * (`bge:bootstrap`). A throttle-only namespace would leave sessions and
  * permission graphs shared while making the arrangement look isolated, which is
  * worse than a collision everyone can see. What that configuration actually

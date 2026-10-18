@@ -1,13 +1,19 @@
+import { cacheStoreKey } from '@bge/redis';
 import { connectToHarnessRedis, requireDisposableRedis } from './redis-reset';
 
 /**
  * The api's `API_CACHE_NAMESPACE` (`apps/api/src/app/configuration/cache.config.ts`).
- * Keyv stores a logical key as `${namespace}:${key}`, so this is the prefix of
- * every physical key the api's cache writes. Spelled out rather than imported,
- * as `THROTTLE_KEY_PATTERN` is in `redis-reset.ts`: `api-e2e` has no path to
- * `apps/api`.
+ * The api's store keeps a logical key under `cacheStoreKey(API_CACHE_NAMESPACE, key)`,
+ * and {@link apiCacheKey} composes the same name. Spelled out rather than
+ * imported, as `THROTTLE_KEY_PATTERN` is in `redis-reset.ts`: `api-e2e` has no
+ * path to `apps/api`.
  */
 export const API_CACHE_NAMESPACE = 'api:cache';
+
+/** The Redis key the api's cache keeps `logicalKey` under. */
+export function apiCacheKey(logicalKey: string): string {
+  return cacheStoreKey(API_CACHE_NAMESPACE, logicalKey);
+}
 
 /**
  * The logical key the api's response cache writes for a request, laid out as
@@ -35,7 +41,7 @@ export async function apiCacheHas(logicalKey: string, env: NodeJS.ProcessEnv = p
   const client = connectToHarnessRedis(env);
 
   try {
-    return (await client.exists(`${API_CACHE_NAMESPACE}:${logicalKey}`)) === 1;
+    return (await client.exists(apiCacheKey(logicalKey))) === 1;
   } finally {
     await client.quit();
   }
@@ -52,7 +58,7 @@ export async function apiCacheReadRaw(
   const client = connectToHarnessRedis(env);
 
   try {
-    return await client.get(`${API_CACHE_NAMESPACE}:${logicalKey}`);
+    return await client.get(apiCacheKey(logicalKey));
   } finally {
     await client.quit();
   }
@@ -83,8 +89,31 @@ export async function apiCacheWriteRaw(
   const client = connectToHarnessRedis(env);
 
   try {
-    await client.set(`${API_CACHE_NAMESPACE}:${logicalKey}`, raw, 'PX', ttlMs);
+    await client.set(apiCacheKey(logicalKey), raw, 'PX', ttlMs);
   } finally {
     await client.quit();
   }
+}
+
+/**
+ * The size of every set under `namespace:` on the Redis the harness pointed
+ * the api at, by name. `@keyv/valkey` keeps such a set per store when its
+ * index is on, adds every key the store writes, and removes one only on a
+ * delete through the store, so a key that expires stays a member (#449).
+ */
+export async function cacheIndexSizes(env: NodeJS.ProcessEnv = process.env): Promise<Record<string, number>> {
+  const client = connectToHarnessRedis(env);
+  const sizes: Record<string, number> = {};
+
+  try {
+    for await (const page of client.scanStream({ match: 'namespace:*', type: 'set', count: 500 })) {
+      for (const key of page as string[]) {
+        sizes[key] = await client.scard(key);
+      }
+    }
+  } finally {
+    await client.quit();
+  }
+
+  return sizes;
 }

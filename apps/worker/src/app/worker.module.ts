@@ -7,10 +7,9 @@ import { MediaSweepModule } from '@bge/media';
 import { BullMQQueueDepthRecorderModule, createBullMQTelemetry, DbPoolMetricsRecorderModule } from '@bge/otel';
 import { FeedbackQueueConsumerModule } from '@bge/queue-feedback';
 import { WebhookQueueConsumerModule, WebhookQueueProducerModule } from '@bge/queue-webhooks';
-import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, Redis, RedisModule } from '@bge/redis';
 import { StorageModule } from '@bge/storage';
 import { WebhooksModule } from '@bge/webhooks';
-import KeyvValkey from '@keyv/valkey';
 import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { Module } from '@nestjs/common';
@@ -18,7 +17,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
 import type { RedisClient } from 'bullmq';
-import Keyv from 'keyv';
 import { ClsModule } from 'nestjs-cls';
 import { LoggerModule } from 'nestjs-pino';
 import * as crypto from 'node:crypto';
@@ -56,12 +54,7 @@ import { baseLogger } from './lib/logger';
       isGlobal: true,
       inject: [CACHE_REDIS_CLIENT, ConfigService],
       useFactory: (cacheClient: Redis, configService: ConfigService) => ({
-        stores: [
-          new Keyv({
-            store: new KeyvValkey(cacheClient),
-            namespace: 'worker:cache',
-          }),
-        ],
+        stores: [createCacheStore(cacheClient, 'worker:cache')],
         ttl: configService.get<number>('cache.ttl'),
       }),
     }),

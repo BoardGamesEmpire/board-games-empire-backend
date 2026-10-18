@@ -32,7 +32,7 @@ import { PluginsApiModule } from '@bge/plugins';
 import { FeedbackQueueProducerModule } from '@bge/queue-feedback';
 import { WebhookQueueProducerModule } from '@bge/queue-webhooks';
 import { QuotasModule } from '@bge/quotas';
-import { CACHE_REDIS_CLIENT, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
+import { CACHE_REDIS_CLIENT, createCacheStore, QUEUE_REDIS_CLIENT, RedisModule, type Redis } from '@bge/redis';
 import { SafeHttpModule } from '@bge/safe-http';
 import { SecureHttpModule } from '@bge/secure-http';
 import { SystemSettingsModule } from '@bge/system-settings';
@@ -40,7 +40,6 @@ import { UserModule } from '@bge/user';
 import { BGE_VERSION } from '@bge/version';
 import { WebhookSubscriptionModule } from '@bge/webhook-subscription';
 import { WellKnownModule } from '@bge/well-known';
-import KeyvValkey from '@keyv/valkey';
 import { BullModule } from '@nestjs/bullmq';
 import { CacheModule } from '@nestjs/cache-manager';
 import { MiddlewareConsumer, Module } from '@nestjs/common';
@@ -51,7 +50,6 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import type { RedisClient } from 'bullmq';
 import type { Request } from 'express';
-import Keyv from 'keyv';
 import { ClsMiddleware, ClsModule } from 'nestjs-cls';
 import { I18nValidationExceptionFilter } from 'nestjs-i18n';
 import { LoggerModule } from 'nestjs-pino';
@@ -119,12 +117,7 @@ import { createThrottlers } from './lib/throttlers';
       isGlobal: true,
       inject: [CACHE_REDIS_CLIENT, ConfigService],
       useFactory: (cacheClient: Redis, configService: ConfigService) => ({
-        stores: [
-          new Keyv({
-            store: new KeyvValkey(cacheClient),
-            namespace: API_CACHE_NAMESPACE,
-          }),
-        ],
+        stores: [createCacheStore(cacheClient, API_CACHE_NAMESPACE)],
         ttl: configService.get<number>('cache.ttl'),
       }),
     }),
