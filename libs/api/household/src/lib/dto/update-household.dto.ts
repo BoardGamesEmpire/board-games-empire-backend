@@ -2,12 +2,16 @@ import { MemberInvitePolicy } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsObject, IsOptional, ValidateNested } from 'class-validator';
+import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
 import { CreateHouseholdDto } from './create-household.dto';
 
 /**
  * A household's own settings (#166), as its owners and admins change them.
  * Each one is optional, so a patch names only the settings it changes.
+ *
+ * `ValidateIf` rather than `IsOptional`, which skips `null` as well as a
+ * missing key: no setting can be unset, so `null` answers 400 here instead of
+ * reaching the write.
  */
 export class UpdateHouseholdSettingsDto {
   @ApiPropertyOptional({
@@ -17,7 +21,7 @@ export class UpdateHouseholdSettingsDto {
       'default): their invites wait for an owner or admin to approve them. `Off`: members cannot invite. Owners ' +
       'and admins always invite directly, and guests never invite. A change applies to invites sent after it.',
   })
-  @IsOptional()
+  @ValidateIf((_, value) => value !== undefined)
   @IsEnum(MemberInvitePolicy, { message: i18nValidationMessage('validation.isEnum') })
   memberInvitePolicy?: MemberInvitePolicy;
 }

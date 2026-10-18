@@ -65,6 +65,16 @@ describe('UpdateHouseholdDto', () => {
       await expect(propertiesWithErrors({ settings: { joinPolicy: 'Open' } })).resolves.toEqual(['settings']);
     });
 
+    it('refuses a null policy, since no setting can be unset', async () => {
+      // The column has no null, so one let through would fail at the write
+      // instead of answering 400.
+      await expect(propertiesWithErrors({ settings: { memberInvitePolicy: null } })).resolves.toEqual(['settings']);
+    });
+
+    it('accepts settings that leave the policy out', async () => {
+      await expect(propertiesWithErrors({ name: 'Renamed', settings: {} })).resolves.toEqual([]);
+    });
+
     it('refuses settings that are not an object', async () => {
       await expect(propertiesWithErrors({ settings: 'Direct' })).resolves.toEqual(['settings']);
     });
