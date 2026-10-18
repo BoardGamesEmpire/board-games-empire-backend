@@ -79,6 +79,12 @@ function answersUntil(silentFrom: string, last?: Buffer) {
   };
 }
 
+/** `onConnection`, but only `ms` after the connection opens: a database slow to answer the startup. */
+function slowToStart(ms: number, onConnection: (socket: Socket) => void) {
+  // Until a listener reads it, the startup message waits in the socket's buffer.
+  return (socket: Socket) => void setTimeout(() => onConnection(socket), ms);
+}
+
 /** A local TCP server; `onConnection` decides what each socket hears. */
 async function fakeDatabase(onConnection: (socket: Socket) => void) {
   const sockets = new Set<Socket>();
@@ -148,12 +154,33 @@ describe('the advisory lock', () => {
         connectionString: database.url,
         logger: silent,
         applicationName: 'bge-bootstrap:test',
+        attemptGraceMs: 100,
       });
 
       try {
         const started = performance.now();
         await expect(lock.acquire({ deadlineAt: started + 300 })).rejects.toBeInstanceOf(LockConnectionTimeoutError);
         expect(performance.now() - started).toBeLessThan(2_000);
+      } finally {
+        await lock.close();
+        await database.close();
+      }
+    });
+
+    it('is given the grace at the deadline, so a free lock is still taken there', async () => {
+      // A connection opened at the deadline: after an abandoned step, or after
+      // the connection failed between acquires. Cut to the time left, it gave
+      // up before its attempt, and the refusal named neither holder nor queue.
+      const database = await fakeDatabase(slowToStart(50, answersUntil('COMMIT')));
+      const lock = new PgAdvisoryLock({
+        connectionString: database.url,
+        logger: silent,
+        applicationName: 'bge-bootstrap:test',
+        attemptGraceMs: 500,
+      });
+
+      try {
+        await expect(lock.acquire({ deadlineAt: performance.now() })).resolves.toBeUndefined();
       } finally {
         await lock.close();
         await database.close();

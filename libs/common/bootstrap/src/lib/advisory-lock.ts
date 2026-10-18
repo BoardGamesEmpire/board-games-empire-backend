@@ -15,10 +15,10 @@ export const LOCK_ATTEMPT_MS = 5_000;
 
 /**
  * How much longer than its `lock_timeout` an attempt may go unanswered before
- * it is abandoned with its connection, and how long a read of the holder or the
- * COMMIT that releases the lock may. `lock_timeout` runs in Postgres, so it
- * cannot bound a wait to reach Postgres: a connection pooler queues an attempt
- * until a server connection is free.
+ * it is abandoned with its connection, and how long a read of the holder, the
+ * COMMIT that releases the lock, or a connection opened at the deadline may.
+ * `lock_timeout` runs in Postgres, so it cannot bound a wait to reach Postgres:
+ * a connection pooler queues an attempt until a server connection is free.
  */
 export const LOCK_ATTEMPT_GRACE_MS = 1_000;
 
@@ -134,8 +134,11 @@ const UNANSWERED = Symbol('unanswered');
  * Connecting spends from the same budget. node-postgres has no connect timeout
  * of its own, so a database that accepts the TCP connection and never answers
  * (a black-holed endpoint, a proxy with nothing behind it) would otherwise hang
- * the boot past any deadline. The client is kept across re-acquires, so this
- * is paid once per sequence unless a step was abandoned.
+ * the boot past any deadline. A connection opened near the deadline still gets
+ * the grace, so the attempt after it can take a free lock or name the holder,
+ * and it can add the grace to the overrun. The client is kept across
+ * re-acquires, so this is paid once per sequence unless a step was abandoned
+ * or the connection failed.
  *
  * A holder that dies loses the lock with its connection: Postgres ends its
  * transaction, and a pooler closes a server connection whose client left
@@ -163,7 +166,9 @@ export class PgAdvisoryLock implements BootstrapLock {
     const waitMs = deadlineAt - started;
 
     for (;;) {
-      const client = await this.connect(deadlineAt - clock.now());
+      // Never less than the grace: a connection opened at the deadline, as
+      // after an abandoned step, would otherwise give up before its attempt.
+      const client = await this.connect(Math.max(graceMs, deadlineAt - clock.now()));
       // Never past the deadline: at or after it the attempt is 1ms, which
       // still takes a free lock and only reports a held one.
       const attempt = attemptWithin(attemptMs, deadlineAt - clock.now());
