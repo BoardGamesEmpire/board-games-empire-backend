@@ -43,6 +43,11 @@ type BbNode = BbElement | BbText | BbItem;
 /** An element still open while parsing, with the tag that opened it. */
 interface OpenElement extends BbElement {
   readonly openingTag: string;
+  /**
+   * How many opening tags of each name inside it were nested too deep, and
+   * are still waiting for their closing tags. Those close nothing either.
+   */
+  readonly tooDeep: Map<string, number>;
 }
 
 /**
@@ -58,7 +63,14 @@ export function bbcodeTree(bbcode: string): Root {
 }
 
 function parse(source: string): BbNode[] {
-  const root: OpenElement = { kind: 'element', name: '', attribute: undefined, children: [], openingTag: '' };
+  const root: OpenElement = {
+    kind: 'element',
+    name: '',
+    attribute: undefined,
+    children: [],
+    openingTag: '',
+    tooDeep: new Map(),
+  };
   const stack: OpenElement[] = [root];
   const top = () => stack[stack.length - 1];
 
@@ -108,9 +120,19 @@ function parse(source: string): BbNode[] {
     if (!closing) {
       if (stack.length > MAX_NESTING) {
         append(top(), { kind: 'text', value: tag });
+        top().tooDeep.set(name, (top().tooDeep.get(name) ?? 0) + 1);
       } else {
-        stack.push({ kind: 'element', name, attribute, children: [], openingTag: tag });
+        stack.push({ kind: 'element', name, attribute, children: [], openingTag: tag, tooDeep: new Map() });
       }
+      continue;
+    }
+
+    // Nothing opens while the stack is full, so the innermost opening tag of
+    // this name is one of those nested too deep, if any is still waiting.
+    const waiting = top().tooDeep.get(name) ?? 0;
+    if (waiting > 0) {
+      top().tooDeep.set(name, waiting - 1);
+      append(top(), { kind: 'text', value: tag });
       continue;
     }
 

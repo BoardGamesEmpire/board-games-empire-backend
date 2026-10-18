@@ -285,6 +285,14 @@ Next`,
 
       expect(convertToMarkdown(bbcode, ContentFormat.BBCode)).toContain(String.raw`\[i]`);
     });
+
+    it('leaves the closing tag of one nested too deep as text, so it closes none outside it', () => {
+      const bbcode = '[quote]'.repeat(32) + '[quote]inner[/quote]tail' + '[/quote]'.repeat(32);
+
+      expect(convertToMarkdown(bbcode, ContentFormat.BBCode)).toBe(
+        '> '.repeat(32) + String.raw`\[quote]inner\[/quote]tail`,
+      );
+    });
   });
 
   describe('Markdown', () => {
