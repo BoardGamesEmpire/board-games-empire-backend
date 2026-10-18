@@ -4,6 +4,12 @@ import { ConfigService } from '@nestjs/config';
 import { PgAdvisoryLock } from './advisory-lock';
 import { BOOTSTRAP_OPTIONS, CACHE_FLUSH, type BootstrapModuleOptions } from './bootstrap-options';
 import { RegistryDataMigrations } from './data-migrations-phase';
+import {
+  databaseRoleIn,
+  MIGRATION_URL_VARIABLE,
+  resolveMigrationCredential,
+  unusedMigrationCredentialWarning,
+} from './migration-credential';
 import { structuredLogMessage } from './nest-logger';
 import type { BootstrapLogger, CacheFlush } from './ports';
 import { PrismaSchemaLedger } from './prisma-ledger';
@@ -13,9 +19,9 @@ import { RunSeedsSeeder } from './seeder';
 /**
  * Wires the real ports to the runner: the app's Prisma client for the ledger,
  * the seeds and the data migrations, a dedicated pg connection for the lock,
- * the api-only migrator from the module options, and the cache flush when the
- * module was given a cache, handed to both DML phases. One `run()` per
- * process boot.
+ * the api-only migrator from the module options over the migration credential,
+ * and the cache flush when the module was given a cache, handed to both DML
+ * phases. One `run()` per process boot.
  */
 @Injectable()
 export class BootstrapService {
@@ -31,6 +37,17 @@ export class BootstrapService {
   async run(): Promise<BootstrapSummary> {
     const logger = this.bootstrapLogger();
     const databaseUrl = this.config.getOrThrow<string>('database.url');
+    const migration = resolveMigrationCredential({
+      databaseUrl,
+      migrationUrl: this.config.get<string>('database.migrationUrl'),
+    });
+
+    // Per process, not per process role: a process that runs the api has the
+    // migrator, whatever else runs beside it.
+    if (!this.options.migrator && migration.credential.variable === MIGRATION_URL_VARIABLE) {
+      logger.warn(unusedMigrationCredentialWarning(this.options.applicationName));
+    }
+
     const lock = new PgAdvisoryLock({
       connectionString: databaseUrl,
       logger,
@@ -40,11 +57,12 @@ export class BootstrapService {
     try {
       const summary = await runBootstrapSequence({
         expected: MIGRATION_NAMES,
-        ledger: new PrismaSchemaLedger(this.db),
+        ledger: new PrismaSchemaLedger(this.db, { databaseRole: databaseRoleIn(databaseUrl) }),
         lock,
         seeder: new RunSeedsSeeder(this.db, { flush: this.cacheFlush }),
         dataMigrations: new RegistryDataMigrations(this.db, { flush: this.cacheFlush }),
-        migrator: this.options.migrator?.({ databaseUrl, logger }),
+        migrator: this.options.migrator?.({ migrationUrl: migration.url, logger }),
+        migrationCredential: migration.credential,
         logger,
         waitMs: this.options.waitMs,
         schemaPollMs: this.options.schemaPollMs,

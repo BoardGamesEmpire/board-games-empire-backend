@@ -33,8 +33,9 @@ const READINESS_TIMEOUT_MS = 90_000;
 const READINESS_POLL_MS = 250;
 
 /**
- * Runs the Prisma CLI as a child process with `DATABASE_URL` overridden to
- * the ephemeral database. The CLI is the honest programmatic surface for
+ * Runs the Prisma CLI as a child process with `DATABASE_URL` and
+ * `DATABASE_MIGRATION_URL` overridden to the ephemeral database; the CLI
+ * prefers the second. The CLI is the honest programmatic surface for
  * migrations in Prisma 7 (no supported in-process API); #236's bootstrap
  * orchestration is expected to converge on the same invocation rather than
  * growing a parallel path.
@@ -45,7 +46,7 @@ function runPrisma(args: readonly string[], databaseUrl: string): void {
 
   const result = spawnSync('npx', ['prisma', ...args], {
     cwd: WORKSPACE_ROOT,
-    env: { ...process.env, DATABASE_URL: databaseUrl },
+    env: { ...process.env, DATABASE_URL: databaseUrl, DATABASE_MIGRATION_URL: databaseUrl },
     stdio: 'inherit',
     shell: process.platform === 'win32',
   });
@@ -115,8 +116,8 @@ async function launchApi(env: NodeJS.ProcessEnv): Promise<LaunchedApi> {
  *  1. Postgres and Redis testcontainers (or the `BGE_E2E_*` escape-hatch
  *     endpoints — treated as DISPOSABLE: they are migrated, seeded, and
  *     swept exactly like a container).
- *  2. `process.env` overrides for `DATABASE_URL` and all three Redis
- *     connection prefixes. Jest spawns its workers AFTER globalSetup
+ *  2. `process.env` overrides for `DATABASE_URL`, `DATABASE_MIGRATION_URL`
+ *     and all three Redis connection prefixes. Jest spawns its workers AFTER globalSetup
  *     resolves, so the workers inherit these values; the API child process
  *     receives them explicitly. `.env` (gitignored, developer-owned) is
  *     never written, and dotenv semantics mean it never overrides an
@@ -175,6 +176,11 @@ export default async function globalSetup(): Promise<void> {
     }
 
     process.env['DATABASE_URL'] = databaseUrl;
+    // The migration credential too, to the same database: a developer's `.env`
+    // may set one for their own database, and Nx loads `.env` into this
+    // process. Unset or empty, the children would read it from there (Nest's
+    // variable expansion treats '' as unset), and migrate that database.
+    process.env['DATABASE_MIGRATION_URL'] = databaseUrl;
     // Ownership is assigned unconditionally alongside the connection
     // details, not inside the branch above: a branch that sets the flag
     // only on one path leaves an inherited value standing on the other,

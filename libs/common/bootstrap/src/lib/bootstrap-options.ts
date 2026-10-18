@@ -22,7 +22,8 @@ export interface BootstrapCacheOptions {
 }
 
 export interface MigratorContext {
-  readonly databaseUrl: string;
+  /** The migration credential: `DATABASE_MIGRATION_URL`, or `DATABASE_URL` when it is unset (#445). */
+  readonly migrationUrl: string;
   readonly logger: BootstrapLogger;
 }
 

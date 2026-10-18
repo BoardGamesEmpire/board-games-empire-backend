@@ -14,7 +14,8 @@ import { RedisKeyFlush } from './redis-key-flush';
  * URL, the database, and the service; with a cache (the api), the same Redis
  * connection config its `CacheModule` will use and the flush over a client of
  * its own. It reads the same `.env` the application reads outside production,
- * so a developer's `DATABASE_URL` is the one that gets migrated.
+ * so a developer's own database is the one that gets migrated: through
+ * `DATABASE_MIGRATION_URL` when it is set, and `DATABASE_URL` otherwise.
  */
 @Module({})
 export class BootstrapModule {

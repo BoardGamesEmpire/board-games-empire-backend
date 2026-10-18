@@ -1,5 +1,6 @@
 import { classifyMigrationState, type MigrationState, type MigrationStateKind } from '@bge/database';
 import { SpanStatusCode, trace, type Span, type Tracer } from '@opentelemetry/api';
+import { DATABASE_URL_VARIABLE, MIGRATION_URL_VARIABLE, type MigrationCredential } from './migration-credential';
 import {
   DEFAULT_WAIT_MS,
   systemClock,
@@ -28,6 +29,8 @@ export interface BootstrapSequenceOptions {
   readonly logger: BootstrapLogger;
   /** Present only in the api build. See {@link Migrator}. */
   readonly migrator?: Migrator;
+  /** Where the migrator's URL came from; named in the summary and in the refusals after migrating. */
+  readonly migrationCredential?: MigrationCredential;
   readonly clock?: Clock;
   readonly tracer?: Tracer;
   /** See {@link DEFAULT_WAIT_MS}. */
@@ -39,6 +42,12 @@ export interface BootstrapSummary {
   /** What the first read of the ledger found. */
   readonly state: MigrationStateKind;
   readonly migrationsApplied: readonly string[];
+  /**
+   * The credential that applied {@link migrationsApplied}: whether migrations
+   * reached Postgres directly or through the connection pooler is in its host.
+   * Absent when none were applied.
+   */
+  readonly migrationCredential?: MigrationCredential;
   readonly unknownMigrations: readonly string[];
   /** False for every process without a migrator, and for the api over a database that is ahead of it. */
   readonly seedsRun: boolean;
@@ -81,27 +90,50 @@ export class FailedMigrationError extends Error {
   }
 }
 
-/** This build cannot apply migrations and nobody else did within the deadline. */
+/**
+ * This build cannot apply migrations and nobody else did within the deadline.
+ * A ledger that never appeared may also be one this process cannot see: a
+ * schema its database role lacks USAGE on is skipped when Postgres looks the
+ * table up, so a migrated ledger reads as absent.
+ */
 export class SchemaNotReadyError extends Error {
   constructor(
     readonly pending: readonly string[],
     readonly waitedMs: number,
+    ledgerSeen = true,
   ) {
     super(
       `Refusing to boot: the schema is behind by ${pending.length} migration(s) (${pending.join(', ')}) and this process ` +
         `cannot apply migrations. Waited ${Math.round(waitedMs / 1000)}s for the migrating process (api) without it ` +
-        'arriving. Start the api, or run `prisma migrate deploy` against this database, and boot again.',
+        'arriving. Start the api, or run `prisma migrate deploy` against this database, and boot again.' +
+        (ledgerSeen
+          ? ''
+          : ` If the api reports this database migrated, the database role in ${DATABASE_URL_VARIABLE} may lack USAGE ` +
+            'on the schema, which hides the ledger from it.'),
     );
     this.name = 'SchemaNotReadyError';
   }
 }
 
-/** The migrator returned without applying everything the ledger said was pending. */
+/**
+ * The migrator returned without applying everything the ledger said was
+ * pending. With a migration credential of its own, Prisma's output can show a
+ * clean run: the migrations reached another database, or the database role
+ * that reads the ledger cannot see the schema they went to.
+ */
 export class MigrationsStillPendingError extends Error {
-  constructor(readonly pending: readonly string[]) {
+  constructor(
+    readonly pending: readonly string[],
+    readonly migrationCredential?: MigrationCredential,
+  ) {
     super(
       `Refusing to boot: the migrator ran but ${pending.length} migration(s) are still pending (${pending.join(', ')}). ` +
-        'Read its output above; a half-migrated schema is not seeded.',
+        (migrationCredential?.variable === MIGRATION_URL_VARIABLE
+          ? `If its output above shows them applied, either ${MIGRATION_URL_VARIABLE} and ${DATABASE_URL_VARIABLE} ` +
+            'name different databases or schemas, so the migrations went to one and this process reads the other, ' +
+            `or the database role in ${DATABASE_URL_VARIABLE} lacks USAGE on the schema, which hides the ledger from it. ` +
+            'A half-migrated schema is not seeded.'
+          : 'Read its output above; a half-migrated schema is not seeded.'),
     );
     this.name = 'MigrationsStillPendingError';
   }
@@ -196,7 +228,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
 
           const after = await phase('schema.read', readState);
           if (after.kind === 'failed') throw new FailedMigrationError(after.failed);
-          if (after.pending.length > 0) throw new MigrationsStillPendingError(after.pending);
+          if (after.pending.length > 0) {
+            throw new MigrationsStillPendingError(after.pending, options.migrationCredential);
+          }
 
           migrationsApplied = state.pending;
           settledState = after.kind;
@@ -210,7 +244,7 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
         waitedMs = clock.now() - started;
 
         if (clock.now() >= deadlineAt) {
-          throw new SchemaNotReadyError(state.pending, waitedMs);
+          throw new SchemaNotReadyError(state.pending, waitedMs, state.pending.length < expected.length);
         }
 
         logger.log(
@@ -276,6 +310,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
     return {
       state: firstState ?? 'in-sync',
       migrationsApplied,
+      ...(migrationsApplied.length > 0 && options.migrationCredential
+        ? { migrationCredential: options.migrationCredential }
+        : {}),
       unknownMigrations,
       seedsRun,
       reconcile,

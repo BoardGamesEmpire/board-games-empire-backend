@@ -36,12 +36,45 @@ describe('createPrismaCliMigrator', () => {
     const logger = { log: () => undefined, warn: (message: string) => void warnings.push(message) };
 
     try {
-      const migrator = createPrismaCliMigrator({ databaseUrl: 'postgres://unused', logger, projectRoot: root });
+      const migrator = createPrismaCliMigrator({ migrationUrl: 'postgres://unused', logger, projectRoot: root });
 
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toMatch(/cannot apply migrations/);
       await expect(migrator.apply(['20260109_init'])).rejects.toThrow(/prisma\/build\/index\.js/);
     } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('hands the CLI its credential as DATABASE_MIGRATION_URL, over whatever the environment already holds', async () => {
+    // `prisma.config.ts` prefers DATABASE_MIGRATION_URL, so that is the one
+    // variable the child must see. A stand-in CLI prints what it received.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-fake-prisma-'));
+    const cli = path.join(root, 'node_modules', 'prisma', 'build');
+    fs.mkdirSync(cli, { recursive: true });
+    fs.writeFileSync(path.join(root, 'package.json'), '{"name":"fake-root"}');
+    fs.writeFileSync(path.join(root, 'node_modules', 'prisma', 'package.json'), '{"name":"prisma"}');
+    fs.writeFileSync(
+      path.join(cli, 'index.js'),
+      'console.log(`${process.argv.slice(2).join(" ")} with ${process.env.DATABASE_MIGRATION_URL}`);',
+    );
+    const lines: string[] = [];
+    const logger = { log: (message: string) => void lines.push(message), warn: () => undefined };
+    const inherited = process.env['DATABASE_MIGRATION_URL'];
+    process.env['DATABASE_MIGRATION_URL'] = 'postgresql://someone-else@elsewhere/other';
+
+    try {
+      const migrator = createPrismaCliMigrator({
+        migrationUrl: 'postgresql://bge_migrator@bge-rw/bge',
+        logger,
+        projectRoot: root,
+      });
+      await migrator.apply(['20260109_init']);
+
+      expect(lines).toContain('[prisma] migrate deploy with postgresql://bge_migrator@bge-rw/bge');
+    } finally {
+      if (inherited === undefined) delete process.env['DATABASE_MIGRATION_URL'];
+      else process.env['DATABASE_MIGRATION_URL'] = inherited;
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

@@ -21,7 +21,60 @@ Two things the api's seeds phase guarantees. Every reconcile write is compared w
 
 Only the api applies migrations. Every role runs from the same image, so every container carries the Prisma CLI and the migration chain (#593). The api's entry point is the one place that hands the sequence a migrator: it passes `createPrismaCliMigrator` to `runBootstrap`. The others pass none, and nothing configures them into one: there is no setting to change. A lint rule keeps it that way: importing `createPrismaCliMigrator` from `@bge/bootstrap` anywhere but `apps/api/src/main.ts` fails lint, and so CI (`no-restricted-imports` in `eslint.config.mjs`; the e2e spec that drives the real CLI is the one other exception). In the image, a migrator built anywhere else would also find nothing to run: it looks for `prisma.config.ts` in the working directory and beside the entry script, and only the api's bundle has one beside it. When the whole stack starts at once on an empty database, the api migrates while the others log that they are waiting; they fail their boot only if the schema has not arrived within ten minutes of their start, time spent waiting for the lock included. The lock's connection is opened from the same budget, so a database that accepts connections and never answers fails the boot instead of hanging it.
 
-The api's database role therefore holds DDL rights, exactly as the `prisma migrate deploy` you would otherwise run by hand requires. Only the schema step needs DDL; the lock, the reconcile and the seeds are ordinary reads and writes. A least-privilege split (a DML-only serving role and a separate migration credential) is #445, post-alpha.
+Only the schema step needs DDL; the lock, the reads of `_prisma_migrations`, the reconcile and the seeds are ordinary reads and writes. So the migrations may have a database role of their own: give the api `DATABASE_MIGRATION_URL`, and `prisma migrate deploy` connects with it, while everything else, in the api and in every other process role, connects with `DATABASE_URL`. Without it, the migrations use `DATABASE_URL`, whose database role then needs the DDL rights a `prisma migrate deploy` run by hand would.
+
+## The migration credential
+
+`DATABASE_MIGRATION_URL` is optional, and set for the api only. Empty counts as unset.
+
+- **The Prisma CLI follows the same rule.** `prisma.config.ts` uses `DATABASE_MIGRATION_URL` when it is set and `DATABASE_URL` otherwise, so a `prisma migrate resolve` run by hand after a refused boot reaches the same database, as the same database role. Set the variable in the shell you run it from.
+- **It must be a direct connection or session pooling.** Prisma Migrate needs one session for its whole run, and transaction pooling does not keep one: Prisma's documentation sends migrations to a direct connection, since through a transaction pooler they fail on locks and session state.
+- **The boot summary names it.** When migrations were applied, `Bootstrap complete` carries `migrationCredential`: the variable the URL came from, and its user and host, never its password. The host tells whether the migrations reached Postgres directly.
+- **Other processes warn.** A process that applies no migrations (the worker, the coordinator, a gateway worker) logs a warning when it is given `DATABASE_MIGRATION_URL`, and boots. Remove the variable from its configuration.
+
+The migration database role creates every table, so it owns them; the database role in `DATABASE_URL` holds only what it is granted. Grant it before the first boot, with default privileges, which apply to every table the migration database role creates afterwards. With `bge_migrator` and `bge_app` standing for the two:
+
+```sql
+CREATE ROLE bge_migrator LOGIN PASSWORD '...';
+CREATE ROLE bge_app LOGIN PASSWORD '...';
+-- The owner may create in the database and, on Postgres 15 and later, in its
+-- public schema: the tables, the pg_trgm extension and the trigger functions.
+CREATE DATABASE bge OWNER bge_migrator;
+
+-- Inside the new database, as a superuser or as bge_migrator (on Postgres 14
+-- and earlier, see below first):
+GRANT USAGE ON SCHEMA public TO bge_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE bge_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO bge_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE bge_migrator IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO bge_app;
+```
+
+- **A database created for you**, by a hosting provider or an operator, may have another owner. Make `bge_migrator` its owner (`ALTER DATABASE bge OWNER TO bge_migrator`), or grant it `CREATE` on the database and on the `public` schema.
+- **`_prisma_migrations` is the first table every process role reads.** Without these grants, the read after the api migrates is refused, and so is every boot after it, each naming the database role in `DATABASE_URL`.
+- **Default privileges do not reach tables that already exist.** For a database migrated before they were set, grant those too: `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO bge_app`, and the same `ON ALL SEQUENCES` with `USAGE, SELECT`.
+- **The ledger needs only `SELECT`.** Every process role reads `_prisma_migrations` and none writes it, but the default privileges grant the rest too. Once the first boot has created it, and after any grant on all tables, take that back as `bge_migrator`: `REVOKE INSERT, UPDATE, DELETE ON _prisma_migrations FROM bge_app`. A `prisma migrate resolve` run without the migration credential is then refused instead of rewriting the ledger.
+- **The tables have no sequences yet** (their ids are generated by the application); the grant covers one a later migration adds.
+- **On Postgres 14 and earlier**, `public` belongs to the superuser, and everyone may create in it. Before the statements above, as a superuser inside the database, do what Postgres 15 does by default: `ALTER SCHEMA public OWNER TO bge_migrator`, then `REVOKE CREATE ON SCHEMA public FROM PUBLIC`. Revoking alone takes `CREATE` from `bge_migrator` too, and the first migration fails.
+- **A database migrated by another database role** keeps what its migrations created owned by that database role: the tables, the enum types and the trigger functions. `bge_migrator` cannot alter them, so the next migration that renames an enum value, adds one, or replaces a trigger function fails. Start from an empty database, or change the owner of each. `REASSIGN OWNED BY` would be shorter, but run inside one database it also hands over every database and tablespace that database role owns, and Postgres refuses it for the superuser its Postgres server was created with, such as `bge` in `compose.yaml`. In `psql`, inside the database, as a superuser, this query writes one `ALTER` for each, and `\gexec` runs them; set `owner` on its first line to the database role that migrated the database. It leaves the pg_trgm extension's own functions and type with the extension, which no migration alters:
+
+  ```sql
+  \set owner bge
+  SELECT format('ALTER TABLE %s OWNER TO bge_migrator', oid::regclass)
+    FROM pg_class
+   WHERE relnamespace = 'public'::regnamespace AND relkind = 'r' AND relowner = :'owner'::regrole
+  UNION ALL
+  SELECT format('ALTER TYPE %s OWNER TO bge_migrator', oid::regtype)
+    FROM pg_type
+   WHERE typnamespace = 'public'::regnamespace AND typtype = 'e' AND typowner = :'owner'::regrole
+  UNION ALL
+  SELECT format('ALTER FUNCTION %s OWNER TO bge_migrator', oid::regprocedure)
+    FROM pg_proc p
+   WHERE pronamespace = 'public'::regnamespace AND proowner = :'owner'::regrole
+     AND NOT EXISTS (SELECT FROM pg_depend
+                      WHERE classid = 'pg_proc'::regclass AND objid = p.oid AND deptype = 'e')
+  \gexec
+  ```
 
 ## The database connection
 
@@ -30,7 +83,7 @@ The lock is a Postgres session lock: it belongs to the server connection that to
 - It lands on the server connection that already holds the lock and takes it again, since a session may hold one lock more than once. Its migrations and seeds then run beside another boot's instead of after them.
 - It lands on another connection and waits on a lock whose release was sent to a different connection, where it did nothing (`pg_advisory_unlock` returns false). It waits until its ten-minute budget runs out, and the boot fails.
 
-#445's separate migration credential does not change this: it would cover only the migrator's child, while every role still takes the lock on `DATABASE_URL`.
+The migration credential does not change this: it covers only the migrations, while every process role still takes the lock on `DATABASE_URL`. It must itself be a direct connection or session pooling ("The migration credential", above).
 
 ## Forward only
 
