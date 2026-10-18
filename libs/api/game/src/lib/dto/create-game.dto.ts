@@ -5,6 +5,18 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsPositive, IsString, ValidateIf } from 'class-validator';
 
 const GAME_VISIBILITIES = [Visibility.Public, Visibility.Private] as const;
+
+/**
+ * The longest new or changed description a game may be sent with. The
+ * server sanitizes it within the request, and even text kept as plain text
+ * takes time in proportion to its length: up to 3 µs a character, 0.8 s at
+ * the body limit. At this cap the slowest input found takes about 70 ms.
+ *
+ * The game service holds a description to it, not validation, as a game may
+ * already have a longer one, from an import, and a client sending that back
+ * unchanged isn't refused.
+ */
+export const GAME_DESCRIPTION_MAX_LENGTH = 20_000;
 export type GameVisibility = (typeof GAME_VISIBILITIES)[number];
 
 /**
@@ -41,7 +53,12 @@ export class CreateGameDto {
   @IsString({ message: i18nValidationMessage('validation.isString') })
   subtitle?: string;
 
-  @ApiPropertyOptional({ description: 'Description of the game' })
+  @ApiPropertyOptional({
+    description:
+      'Description of the game, in Markdown. Raw HTML is removed, and a link that is not http, https or mailto is ' +
+      `reduced to its text. A new or changed description may be at most ${GAME_DESCRIPTION_MAX_LENGTH} characters; ` +
+      'the one a game already has is accepted unchanged, however long.',
+  })
   @IsOptional()
   @IsString({ message: i18nValidationMessage('validation.isString') })
   description?: string;

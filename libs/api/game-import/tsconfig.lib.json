@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/content-format/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/utils/tsconfig.lib.json"
     },
     {
@@ -30,16 +33,19 @@
       "path": "../../gateway/driver/runtime/tsconfig.lib.json"
     },
     {
-      "path": "../../common/shared/tsconfig.lib.json"
+      "path": "../../common/testing/tsconfig.lib.json"
     },
     {
-      "path": "../../common/testing/tsconfig.lib.json"
+      "path": "../../common/shared/tsconfig.lib.json"
     },
     {
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {
       "path": "../gateway-coordinator-client/tsconfig.lib.json"
+    },
+    {
+      "path": "../../common/services/tsconfig.lib.json"
     },
     {
       "path": "../../common/notifications/tsconfig.lib.json"
@@ -58,9 +64,6 @@
     },
     {
       "path": "../../common/i18n/tsconfig.lib.json"
-    },
-    {
-      "path": "../../common/services/tsconfig.lib.json"
     }
   ],
   "exclude": ["jest.config.ts", "jest.config.cts", "src/**/*.spec.ts", "src/**/*.test.ts"]

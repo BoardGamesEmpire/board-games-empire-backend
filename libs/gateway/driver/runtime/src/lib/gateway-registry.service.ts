@@ -2,6 +2,7 @@ import { SystemActorScope } from '@bge/actor-context';
 import {
   DatabaseService,
   DataGatewayCapability,
+  type ContentFormat,
   type ContentType,
   type CoverageAxis,
   type PlatformType,
@@ -51,6 +52,7 @@ interface RoutingRow {
   coveragePlatformTypes: PlatformType[];
   coverageContentTypes: ContentType[];
   filterableAxes: CoverageAxis[];
+  contentFormat: ContentFormat | null;
 }
 
 const ROUTING_FIELDS = {
@@ -61,6 +63,7 @@ const ROUTING_FIELDS = {
   coveragePlatformTypes: true,
   coverageContentTypes: true,
   filterableAxes: true,
+  contentFormat: true,
 } as const;
 
 /** A DataGateway's coverage, as its row stores it. */
@@ -82,6 +85,9 @@ export type SearchRoute =
       /** The coverage axes its search narrows by. The filter it's sent carries only these. */
       readonly filterableAxes: readonly CoverageAxis[];
 
+      /** The content format its results' summaries arrive in, null when it declared none. */
+      readonly contentFormat: ContentFormat | null;
+
       /**
        * Its driver, connecting it first if this process hasn't, for a search
        * that must ask it after all. Its row isn't read again.
@@ -89,9 +95,17 @@ export type SearchRoute =
       readonly driver: () => Promise<DataGatewayDriver>;
     };
 
-/** A DataGateway a search will ask, and the coverage axes its search narrows by. */
-export interface SearchResolution {
+/**
+ * A DataGateway resolved for one operation, with the content format its free
+ * text arrives in, null when it declared none.
+ */
+export interface GatewayResolution {
   readonly driver: DataGatewayDriver;
+  readonly contentFormat: ContentFormat | null;
+}
+
+/** A DataGateway a search will ask, and the coverage axes its search narrows by. */
+export interface SearchResolution extends GatewayResolution {
   readonly filterableAxes: readonly CoverageAxis[];
 }
 
@@ -446,9 +460,18 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
    * failed interaction.
    */
   async resolve(gatewayId: string, capability: DataGatewayCapability): Promise<DataGatewayDriver> {
-    await this.routedRow(gatewayId, capability);
+    return (await this.resolveWithContentFormat(gatewayId, capability)).driver;
+  }
 
-    return this.driverFor(gatewayId);
+  /**
+   * {@link resolve}, with the content format the DataGateway's free text
+   * arrives in, from the same read of its row: for a caller that converts
+   * that text, as a search's results' summaries are.
+   */
+  async resolveWithContentFormat(gatewayId: string, capability: DataGatewayCapability): Promise<GatewayResolution> {
+    const row = await this.routedRow(gatewayId, capability);
+
+    return { driver: await this.driverFor(gatewayId), contentFormat: row.contentFormat };
   }
 
   /**
@@ -466,7 +489,11 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       return null;
     }
 
-    return { driver: await this.driverFor(gatewayId), filterableAxes: row.filterableAxes };
+    return {
+      driver: await this.driverFor(gatewayId),
+      filterableAxes: row.filterableAxes,
+      contentFormat: row.contentFormat,
+    };
   }
 
   /**
@@ -487,6 +514,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       routable: true,
       covers: coverageOverlaps(row, filter),
       filterableAxes: row.filterableAxes,
+      contentFormat: row.contentFormat,
       driver: () => this.driverFor(gatewayId),
     };
   }

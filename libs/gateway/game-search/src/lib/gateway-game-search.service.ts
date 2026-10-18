@@ -1,4 +1,5 @@
-import { type CoverageAxis, DatabaseService, DataGatewayCapability } from '@bge/database';
+import { convertToMarkdown } from '@bge/content-format';
+import { type ContentFormat, type CoverageAxis, DatabaseService, DataGatewayCapability } from '@bge/database';
 import {
   type CoverageFilter,
   GatewayRegistryService,
@@ -254,11 +255,18 @@ export class GatewayGameSearchService {
               return this.fetchFromGateway(gatewayId, request, coverageFilter, async () => ({
                 driver: await route.driver(),
                 filterableAxes: route.filterableAxes,
+                contentFormat: route.contentFormat,
               }));
             }
 
             this.logger.debug(`Cache hit for gateway ${gatewayId} and query '${request.query}'`);
-            return this.emitCachedResults(gatewayId, request.correlationId, cached, coverageFilter);
+            return this.emitCachedResults(
+              gatewayId,
+              request.correlationId,
+              cached,
+              coverageFilter,
+              route.contentFormat,
+            );
           }),
         );
       }),
@@ -300,7 +308,7 @@ export class GatewayGameSearchService {
           // source early. Serializing preserves gateway emission order (and
           // caps dedup concurrency on the live path as a side effect).
           concatMap((result: proto.GatewaySearchResult) =>
-            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, coverageFilter),
+            this.mapGatewayResult(gatewayId, result, accumulator, cacheKey, coverageFilter, resolved.contentFormat),
           ),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -333,6 +341,7 @@ export class GatewayGameSearchService {
     accumulator: SearchAccumulator,
     cacheKey: string,
     coverageFilter: CoverageFilter,
+    contentFormat: ContentFormat | null,
   ): Observable<proto.SearchGameResult> {
     this.logger.debug(`Received search result from gateway ${gatewayId} with status ${result.status}`);
     const base = { correlationId: result.correlationId, gatewayId };
@@ -352,9 +361,9 @@ export class GatewayGameSearchService {
           return EMPTY;
         }
 
-        // The cache holds whatever the DataGateway answered, so the filter
-        // applies again on replay, and two searches it would have answered
-        // alike share the entry.
+        // The cache holds whatever the DataGateway answered, its summaries
+        // unconverted, so the filter applies again on replay, and two
+        // searches it would have answered alike share the entry.
         this.logger.debug(`Accumulating game with externalId ${result.game.externalId} from gateway ${gatewayId}`);
         accumulator.games.push(result.game);
 
@@ -363,7 +372,7 @@ export class GatewayGameSearchService {
         }
 
         // Async dedup check
-        return this.toResultFrame(gatewayId, result.correlationId, result.game);
+        return this.toResultFrame(gatewayId, result.correlationId, result.game, contentFormat);
       }
 
       case proto.ResultStatus.RESULT_STATUS_SOURCE_DONE: {
@@ -432,6 +441,7 @@ export class GatewayGameSearchService {
     correlationId: string,
     cached: proto.GameSearchData[],
     coverageFilter: CoverageFilter,
+    contentFormat: ContentFormat | null,
   ): Observable<proto.SearchGameResult> {
     const matching = cached.filter((game) => matchesFilter(game, coverageFilter));
 
@@ -439,7 +449,10 @@ export class GatewayGameSearchService {
       // Bounded: an unbounded fan-out here issues one findUnique per cached
       // game simultaneously and can saturate the Prisma pool on hot queries.
       // endWith keeps SOURCE_DONE last regardless (appended on completion).
-      mergeMap((game: proto.GameSearchData) => this.toResultFrame(gatewayId, correlationId, game), DEDUP_CONCURRENCY),
+      mergeMap(
+        (game: proto.GameSearchData) => this.toResultFrame(gatewayId, correlationId, game, contentFormat),
+        DEDUP_CONCURRENCY,
+      ),
     );
 
     return resultFrames$.pipe(
@@ -460,8 +473,8 @@ export class GatewayGameSearchService {
     correlationId: string,
     locale?: string,
   ): Observable<proto.SearchGameResult> {
-    return from(this.registry.resolve(gatewayId, DataGatewayCapability.FetchExpansions)).pipe(
-      mergeMap((driver) =>
+    return from(this.registry.resolveWithContentFormat(gatewayId, DataGatewayCapability.FetchExpansions)).pipe(
+      mergeMap(({ driver, contentFormat }) =>
         driver.fetchExpansions({ correlationId, baseExternalId, locale }).pipe(
           // Same ordering rationale as fetchFromGateway: async RESULT frames
           // must not be overtaken by synchronously-mapped status frames.
@@ -475,7 +488,7 @@ export class GatewayGameSearchService {
                 retryAfter: result.retryAfter,
               });
             }
-            return this.toResultFrame(gatewayId, correlationId, result.game);
+            return this.toResultFrame(gatewayId, correlationId, result.game, contentFormat);
           }),
           catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -529,19 +542,25 @@ export class GatewayGameSearchService {
    * inSystem/gameId dedup metadata fresh (the cache never stores it — it
    * changes over time). Shared by the live gateway stream, the cache-replay
    * path, and fetchExpansions so the frame shape lives in exactly one place.
+   *
+   * Its summary is sent as Markdown, converted from the DataGateway's content
+   * format, as a stored description is (#714), so one renderer shows both.
    */
   private toResultFrame(
     gatewayId: string,
     correlationId: string,
     game: proto.GameSearchData,
+    contentFormat: ContentFormat | null,
   ): Observable<proto.SearchGameResult> {
+    const sent = { ...game, summary: convertToMarkdown(game.summary, contentFormat) };
+
     return from(this.resolveDedup(gatewayId, game.externalId)).pipe(
       map(
         ({ inSystem, gameId }): proto.SearchGameResult => ({
           correlationId,
           gatewayId,
           status: proto.ResultStatus.RESULT_STATUS_RESULT,
-          game,
+          game: sent,
           inSystem,
           gameId,
         }),
