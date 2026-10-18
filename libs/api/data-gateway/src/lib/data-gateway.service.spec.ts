@@ -1,6 +1,6 @@
 import type { DataGateway } from '@bge/database';
-import { Action, Prisma, ResourceType } from '@bge/database';
-import { GatewayConfigEventsService } from '@bge/gateway-registry';
+import { Action, DataGatewayCapability, Prisma, ResourceType } from '@bge/database';
+import { GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
   batchTransactionCall,
@@ -131,6 +131,68 @@ describe('DataGatewayService', () => {
     expect(db.dataGateway.count).toHaveBeenCalledWith({ where: { id: 'gw-1', deletedAt: null } });
     expect(db.dataGateway.update).not.toHaveBeenCalled();
     expect(configEvents.publish).not.toHaveBeenCalled();
+  });
+
+  // #715: the switches are stored the way the interview stores its lists, in
+  // the enum's order with no repeats, so an unchanged list writes identically.
+  describe('capability switches', () => {
+    const stored = {
+      id: 'gw-1',
+      connectionUrl: 'localhost',
+      connectionPort: 50051,
+      authType: 'None',
+      authParameters: { apiKey: 'secret' },
+    } as unknown as DataGateway;
+
+    beforeEach(() => {
+      db.dataGateway.count.mockResolvedValue(1);
+      db.dataGateway.update.mockResolvedValue(stored);
+    });
+
+    it('stores the list de-duplicated, in enum order', async () => {
+      await service.update('gw-1', {
+        disabledCapabilities: [
+          DataGatewayCapability.ListLanguages,
+          DataGatewayCapability.Search,
+          DataGatewayCapability.Search,
+        ],
+      });
+
+      expect(db.dataGateway.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            disabledCapabilities: [DataGatewayCapability.Search, DataGatewayCapability.ListLanguages],
+          }),
+        }),
+      );
+    });
+
+    it('stores an empty list, switching every capability back on', async () => {
+      await service.update('gw-1', { disabledCapabilities: [] });
+
+      expect(db.dataGateway.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ disabledCapabilities: [] }) }),
+      );
+    });
+
+    it('leaves the list alone when the patch does not name it', async () => {
+      await service.update('gw-1', { name: 'x' });
+
+      expect(db.dataGateway.update.mock.calls[0][0].data).not.toHaveProperty('disabledCapabilities');
+    });
+
+    // A switch changes no connection setting, so the worker's reconnect check
+    // sees the same hash and leaves the connection up.
+    it('publishes updated with the connection hash unchanged', async () => {
+      const before = { ...stored, disabledCapabilities: [] } as DataGateway;
+      db.dataGateway.update.mockResolvedValue({ ...stored, disabledCapabilities: [DataGatewayCapability.Search] });
+
+      await service.update('gw-1', { disabledCapabilities: [DataGatewayCapability.Search] });
+
+      expect(configEvents.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ changeType: 'updated', configHash: hashGatewayConfig(before) }),
+      );
+    });
   });
 
   it('update rejects an empty patch', async () => {

@@ -1,5 +1,12 @@
 import type { DataGateway } from '@bge/database';
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  DataGatewayCapability,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+} from '@bge/database';
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer, Unscoped } from '@bge/permissions';
@@ -126,6 +133,15 @@ export class DataGatewayService {
 
       if (!update.authParameters) {
         delete update.authParameters;
+      }
+
+      // Stored like the interview's lists, in the enum's order with no
+      // repeats, so an unchanged list writes identically (#715).
+      const switchedOff = updateDataGatewayDTO.disabledCapabilities;
+      if (switchedOff) {
+        update.disabledCapabilities = Object.values(DataGatewayCapability).filter((capability) =>
+          switchedOff.includes(capability),
+        );
       }
 
       const gateway = await this.db.dataGateway.update({
