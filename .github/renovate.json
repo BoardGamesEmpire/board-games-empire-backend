@@ -2,7 +2,7 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "description": [
     "Keeps the Dockerfile's images and the workflows' action pins current (#599). Each action stays pinned to a commit SHA, with its full release as a trailing comment.",
-    "Only the dockerfile and github-actions managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e.",
+    "Only the dockerfile and github-actions managers are enabled, with one regex manager for the BuildKit image ci.yml pins (#600). npm comes under Renovate in #613. The postgres and redis tags in compose.yaml move by hand, together with the e2e harness's copies in apps/api-e2e and the postgres service in ci.yml's main job.",
     "branchPrefix restates Renovate's default because ci.yml matches it, as well as the app's account: CI on Renovate's PRs runs without Nx Cloud."
   ],
   "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver"],
@@ -73,6 +73,12 @@
       "matchDepNames": ["moby/buildkit"],
       "semanticCommitType": "ci",
       "minimumReleaseAge": "5 days"
+    },
+    {
+      "description": "The github-actions manager reads a job's service images too, so it would move the postgres service in ci.yml's main job on its own. That service is the shadow database the migration check replays into (#586), and it runs the image Compose and the e2e harness run, whose tags move by hand, together.",
+      "matchManagers": ["github-actions"],
+      "matchDepNames": ["postgres"],
+      "enabled": false
     },
     {
       "description": "The pin names a full BuildKit release, so a digest update means that release's tag now points at a different image, one that would hold the token that writes the packages.",

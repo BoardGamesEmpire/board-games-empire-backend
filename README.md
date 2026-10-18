@@ -212,6 +212,7 @@ npm run lint
 
 ```bash
 npm run db:migrate:new <migration-name>   # create and run a new migration
+npm run db:migrate:check                  # fail if the migrations and the models disagree (needs SHADOW_DATABASE_URL)
 npm run db:seed                           # re-run all seeds (idempotent)
 npm run db:reset                          # drop, recreate, migrate, and seed
 npm run db:generate                       # regenerate Prisma client after schema changes

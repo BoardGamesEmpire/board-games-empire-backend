@@ -10,6 +10,7 @@ Nothing imports this library. Its entrypoints are invoked by path, from Nx targe
 | `src/bin/buf-export.js`             | `@boardgamesempire/proto-gateway:buf-export`                     |
 | `src/bin/generate-bge-version.js`   | `@board-games-empire/version:generate`                           |
 | `src/bin/check-spec-swcrc.js`       | the "Check spec swcrc source maps" step in `ci.yml`'s `main` job |
+| `src/bin/check-migrations.js`       | `npm run db:migrate:check`, which `ci.yml`'s `main` job runs     |
 | `src/bin/check-bundle-externals.js` | the root `Dockerfile`, after its production-only install         |
 | `src/bin/find-published-images.js`  | `ci.yml`'s `build-push` job, on `master`                         |
 | `src/bin/publish-images.js`         | `ci.yml`'s `publish` job, on `master`                            |
@@ -68,6 +69,14 @@ installed under one app's own `node_modules` (found for that app only), text
 that mentions `require` without being an external, and a bundle with no
 externals it can read, which it reports instead of passing. The header of
 `src/bundle-externals/check.js` explains why the image needs it (#593).
+
+`src/migration-check/shadow-database.spec.js` covers the check
+`db:migrate:check` makes before Prisma runs. It covers an unset shadow database,
+one of its own, and the main database under every spelling Prisma reads as the
+same: scheme, port, database role, loopback address, socket directory, `host`
+parameter, and no database named. It also covers a URL it can't read, which it
+refuses rather than guess at. The header of
+`src/migration-check/shadow-database.js` explains why Prisma 7.8 needs it (#586).
 
 `src/eslint-rules/no-nested-ceiling.spec.js` tests a rule that lives in the
 root `eslint.config.mjs`, not in this library. Every project's lint target
