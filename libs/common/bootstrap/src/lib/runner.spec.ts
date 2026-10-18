@@ -652,6 +652,32 @@ describe('the boot sequence', () => {
   describe('when the lock is lost while it is held', () => {
     const lost = new Error("the bootstrap lock's connection failed");
 
+    it('before migrating: refuses the boot without applying the migrations, which another boot may already be applying', async () => {
+      const ledger = new FakeLedger([finished('20260109_init')]);
+      // The ledger has a connection of its own, so its read still succeeds.
+      const readWhileLosing: SchemaLedger = {
+        readApplied: async () => {
+          lock.lost = lost;
+          return ledger.readApplied();
+        },
+      };
+      const migrator = new FakeMigrator(ledger);
+
+      const run = runBootstrapSequence({
+        expected: CHAIN,
+        ledger: readWhileLosing,
+        lock,
+        seeder,
+        dataMigrations: noDataMigrations,
+        logger,
+        clock,
+        migrator,
+      });
+
+      await expect(run).rejects.toBe(lost);
+      expect(migrator.calls).toEqual([]);
+    });
+
     it('while migrating: refuses the boot before the seeds, which another boot may already be running', async () => {
       const ledger = new FakeLedger([finished('20260109_init')]);
       const migrator: Migrator = {

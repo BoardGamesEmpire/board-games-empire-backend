@@ -155,7 +155,8 @@ async function slowLink(connectionString: string, delayMs: number) {
   };
   const server = createServer((client) => {
     connections += 1;
-    const database = connect(Number(target.port || 5432), target.hostname);
+    // A URL keeps an IPv6 address in brackets, which a socket would look up as a host name.
+    const database = connect(Number(target.port || 5432), target.hostname.replace(/^\[(.*)\]$/, '$1'));
     sockets.add(client).add(database);
     relay(client, database);
     relay(database, client);
@@ -484,6 +485,12 @@ describe('the boot sequence against Postgres', () => {
     });
 
     it("keeps the lock through Postgres 17's transaction timeout, however long the sequence holds its transaction", async () => {
+      // Before 17 there is no such setting, and a connection that sets one is refused.
+      const setting = await db.client.$queryRaw<
+        unknown[]
+      >`SELECT 1 FROM pg_settings WHERE name = 'transaction_timeout'`;
+      if (setting.length === 0) return;
+
       const lock = new PgAdvisoryLock({
         connectionString: withSetting(requireDatabaseUrl(), 'transaction_timeout', '200'),
         logger: silent,

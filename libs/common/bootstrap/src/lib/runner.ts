@@ -224,6 +224,9 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
           logger.log(
             `Schema is behind by ${state.pending.length} migration(s): ${state.pending.join(', ')}. Applying.`,
           );
+          // The ledger is read on a connection of its own, so the read can succeed
+          // while the lock's connection fails beside it.
+          lock.assertHeld();
           await phase('schema.migrate', () => migrator.apply(state.pending));
 
           const after = await phase('schema.read', readState);
@@ -275,8 +278,8 @@ export async function runBootstrapSequence(options: BootstrapSequenceOptions): P
             'Seeds and data migrations skipped: the database is ahead of this build, so the newer build owns the data.',
           );
         } else {
-          // Each write phase only under a lock still held: one lost while
-          // migrating or seeding may already be another boot's.
+          // Each write phase only under a lock still held, as the migrations
+          // above: one lost while migrating or seeding may already be another boot's.
           lock.assertHeld();
           reconcile = await phase('seeds', () => seeder.run());
           seedsRun = true;
