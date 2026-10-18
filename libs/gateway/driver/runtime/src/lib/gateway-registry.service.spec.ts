@@ -554,6 +554,26 @@ describe('GatewayRegistryService', () => {
       expect(table.row('bgg')?.firstInterviewedAt).toEqual(expect.any(Date));
     });
 
+    // A config change abandons a connect under way, and the connect returns
+    // without throwing. For one never interviewed that connect was the
+    // interview, so the caller must hear that none happened (#715).
+    it('fails for a DataGateway never interviewed when its connect is abandoned', async () => {
+      table.seed({ id: 'bgg' });
+      const driver = stubFactory(makeDriver());
+      let answer!: () => void;
+      const answered = new Promise<void>((resolve) => (answer = resolve));
+      const describe = driver.describe.bind(driver);
+      driver.describe = (request) => from(answered).pipe(concatMap(() => describe(request)));
+      const asked = service.reinterview('bgg');
+      await settle();
+
+      await dispatch({ gatewayId: 'bgg', configHash: 'x', changeType: 'updated', timestamp: 0 });
+      answer();
+
+      await expect(asked).rejects.toThrow(/abandoned/);
+      expect(service.isConnected('bgg')).toBe(false);
+    });
+
     it('refuses a disabled DataGateway', async () => {
       interviewedRow('bgg');
       table.patch('bgg', { enabled: false });

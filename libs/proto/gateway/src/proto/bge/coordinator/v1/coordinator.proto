@@ -19,6 +19,11 @@ service CoordinatorService {
   rpc ConnectGateway(ConnectGatewayRequest) returns (ConnectGatewayResponse);
   rpc DisconnectGateway(DisconnectGatewayRequest) returns (DisconnectGatewayResponse);
 
+  // Interviews a DataGateway now, however recent its answers (#715). Refused
+  // for one that's unknown, deleted or disabled. A failed interview is
+  // recorded on its row.
+  rpc ReinterviewGateway(ReinterviewGatewayRequest) returns (ReinterviewGatewayResponse);
+
   // Fan-out across selected gateways (see SearchGamesRequest). Streams lean
   // GameSearchData frames as they arrive. Terminates when all selected
   // gateways have emitted SOURCE_DONE or ERROR.
@@ -67,6 +72,16 @@ message DisconnectGatewayRequest {
 }
 
 message DisconnectGatewayResponse {
+  bool success = 1;
+  optional string error = 2;
+}
+
+message ReinterviewGatewayRequest {
+  string gateway_id = 1;
+}
+
+// The error is for the server's logs, never for a client.
+message ReinterviewGatewayResponse {
   bool success = 1;
   optional string error = 2;
 }

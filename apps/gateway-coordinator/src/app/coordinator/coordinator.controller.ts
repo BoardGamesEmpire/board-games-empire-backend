@@ -41,6 +41,10 @@ export class CoordinatorController implements CoordinatorServiceController {
     return this.coordinatorService.disconnectGateway(request);
   }
 
+  reinterviewGateway(request: proto.ReinterviewGatewayRequest): Promise<proto.ReinterviewGatewayResponse> {
+    return this.coordinatorService.reinterviewGateway(request);
+  }
+
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     return this.gameSearchService.searchGames(request);
   }
