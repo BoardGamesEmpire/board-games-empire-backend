@@ -63,7 +63,6 @@ import { baseLogger } from './lib/logger';
           }),
         ],
         ttl: configService.get<number>('cache.ttl'),
-        max: configService.get<number>('cache.max'),
       }),
     }),
 

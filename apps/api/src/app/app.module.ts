@@ -126,7 +126,6 @@ import { createThrottlers } from './lib/throttlers';
           }),
         ],
         ttl: configService.get<number>('cache.ttl'),
-        max: configService.get<number>('cache.max'),
       }),
     }),
 

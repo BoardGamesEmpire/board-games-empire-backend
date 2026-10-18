@@ -23,10 +23,9 @@ import { GatewayGameSearchService } from './gateway-game-search.service';
       inject: [CACHE_REDIS_CLIENT],
       useFactory: (redis: Redis) => ({
         stores: [new KeyvValkey(redis)],
-        // cache-manager v7 interprets ttl in MILLISECONDS. The coordinator's
-        // original block said `300 // seconds`, which actually configured a
-        // 300ms default — every consumer here passes an explicit ms TTL, but
-        // the default should not be a trap for the next caller.
+        // cache-manager v7 interprets ttl in MILLISECONDS, so a `300` meant as
+        // seconds is a 300ms default. Every consumer here passes an explicit
+        // ms TTL, but the default should not be a trap for the next caller.
         ttl: 5 * 60 * 1000,
       }),
     }),
