@@ -29,8 +29,12 @@ export class HouseholdInviteController {
   // The type-only check below passes any holder of `create:event_invite`;
   // the service asks again about an invite into this household.
   @ApiOperation({
-    summary: 'Invite someone to the household (owner or admin)',
+    summary: 'Invite someone to the household',
     description:
+      'An owner or admin invites directly. A member invites as the household’s `settings.memberInvitePolicy` ' +
+      'says: under `Direct` the invite goes straight to the invitee; under `NeedsApproval` it opens as ' +
+      '`AwaitingApproval`, unseen by the invitee until an owner or admin approves it; under `Off` a member ' +
+      'cannot invite. A member may offer the member or guest role, not admin. A guest never invites. ' +
       'Name the invitee by `inviteeId` or by `inviteeEmail`, exactly one. An address opens an email-only ' +
       'invite whether or not an account holds it, and nothing in the answer says which. No email is sent yet. ' +
       'The invite expires after seven days. A second outstanding invite to the same id or address is refused, ' +
@@ -39,13 +43,14 @@ export class HouseholdInviteController {
       "them refuses. By address, only the server's policy does: under `Friends`, every address is refused.",
   })
   @ApiParam({ name: 'householdId', type: String })
-  @ApiResponse({ status: Http.Created, description: 'Invite created' })
+  @ApiResponse({ status: Http.Created, description: 'Invite created, `Pending` or `AwaitingApproval`' })
   @ApiResponse({ status: Http.BadRequest, description: 'Not exactly one invitee, an invalid field, or yourself' })
   @ApiResponse({
     status: Http.Forbidden,
     description:
-      "Not an owner or admin of this household; or the server's invitee policy refuses this invitee, or, " +
-      "named by id, a block between the two or the invitee's preference does",
+      'Not a member of this household who may invite, or a member offering the admin role; or the ' +
+      "server's invitee policy refuses this invitee, or, named by id, a block between the two or the " +
+      "invitee's preference does",
   })
   @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no user with that id' })
   @ApiResponse({
@@ -112,6 +117,36 @@ export class HouseholdInviteController {
   revokeInvite(@Param('householdId') householdId: string, @Param('inviteId') inviteId: string) {
     return from(this.inviteService.revokeInvite(householdId, inviteId)).pipe(
       map((invite) => ({ message: t('success.household.invite_revoked'), invite })),
+    );
+  }
+
+  // The type-only check below passes the Owner or Admin of any household; the
+  // service asks again about an invite into this one, and about the column an
+  // approval writes, so the revoke permission does not pass for it.
+  @ApiOperation({
+    summary: "Approve a member's invite (owner or admin)",
+    description:
+      'Opens an invite awaiting approval to its invitee, who sees it from then on and may accept it. Find the ' +
+      'invites waiting with `GET /households/:householdId/invites?status=AwaitingApproval`; turn one down by ' +
+      'revoking it. An invite you sent yourself, before you could invite directly, may be approved too. The ' +
+      'answer carries the invite as the household sees it, without the address or the message.',
+  })
+  @ApiParam({ name: 'householdId', type: String })
+  @ApiParam({ name: 'inviteId', type: String })
+  @ApiResponse({ status: Http.Ok, description: 'Approved: `{ message, invite }`, the invite now `Pending`.' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not an owner or admin of this household' })
+  @ApiResponse({ status: Http.NotFound, description: 'Household not found or deleted, or no such invite in it' })
+  @ApiResponse({
+    status: Http.Conflict,
+    description: 'The invite is not awaiting approval, or changed while it was being approved',
+  })
+  @ApiResponse({ status: Http.Gone, description: 'The invite has expired' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.Invite))
+  @HttpCode(Http.Ok)
+  @Post(':inviteId/approve')
+  approveInvite(@Param('householdId') householdId: string, @Param('inviteId') inviteId: string) {
+    return from(this.inviteService.approveInvite(householdId, inviteId)).pipe(
+      map((invite) => ({ message: t('success.household.invite_approved'), invite })),
     );
   }
 }

@@ -3,6 +3,7 @@ import {
   FriendshipStatus,
   InviteStatus,
   InviteType,
+  MemberInvitePolicy,
   Prisma,
   QuotaScope,
   ResourceType,
@@ -12,6 +13,7 @@ import {
 import {
   CONTEXT_INVITE_SELECT,
   InviteService,
+  type InviteApproval,
   type InviteContextView,
   type InviteCreation,
   type InvitePartyView,
@@ -52,6 +54,16 @@ const ROSTER: RosterRow[] = [
   rosterRow('member-1', SystemRole.HouseholdMember),
 ];
 
+const SETTINGS = { memberInvitePolicy: MemberInvitePolicy.NeedsApproval };
+
+/** What a create asks about: an invite into `hh-1` offering the member role, opened directly or for approval. */
+const createInstance = (needsApproval: boolean, members: RosterRow[] = ROSTER) => ({
+  householdId: 'hh-1',
+  needsApproval,
+  role: { name: SystemRole.HouseholdMember },
+  household: { settings: SETTINGS, members },
+});
+
 const contextView = (overrides: Partial<InviteContextView> = {}): InviteContextView => ({
   id: 'invite-1',
   status: InviteStatus.Pending,
@@ -89,17 +101,22 @@ describe('HouseholdInviteService', () => {
   let service: HouseholdInviteService;
   let db: MockDatabaseService;
   let abilityService: jest.Mocked<
-    Pick<AbilityService, 'getActingUserId' | 'assertCurrentActorCan' | 'getCurrentResourceConditions'>
+    Pick<
+      AbilityService,
+      'getActingUserId' | 'assertCurrentActorCan' | 'currentActorCan' | 'getCurrentResourceConditions'
+    >
   >;
-  let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'revokeWithin' | 'emit'>>;
+  let invites: jest.Mocked<Pick<InviteService, 'createWithin' | 'revokeWithin' | 'approveWithin' | 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
   let creation: InviteCreation;
   let revocation: InviteRevocation;
+  let approval: InviteApproval;
 
   beforeEach(async () => {
     abilityService = {
       getActingUserId: jest.fn().mockReturnValue('owner-1'),
       assertCurrentActorCan: jest.fn(),
+      currentActorCan: jest.fn().mockReturnValue(true),
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
     };
     creation = {
@@ -114,9 +131,14 @@ describe('HouseholdInviteService', () => {
       }),
       event: { eventName: 'invite.revoked' } as never,
     };
+    approval = {
+      invite: contextView({ inviter: { id: 'member-1', username: 'member', profile: null } }),
+      event: { eventName: 'invite.approved' } as never,
+    };
     invites = {
       createWithin: jest.fn().mockImplementation(() => Promise.resolve(creation)),
       revokeWithin: jest.fn().mockImplementation(() => Promise.resolve(revocation)),
+      approveWithin: jest.fn().mockImplementation(() => Promise.resolve(approval)),
       emit: jest.fn(),
     };
     quotas = {
@@ -143,6 +165,7 @@ describe('HouseholdInviteService', () => {
     unwrapTransaction(db);
     db.$queryRaw.mockResolvedValue([{ id: 'hh-1' }] as never);
     db.householdMember.findMany.mockResolvedValue(resolves(ROSTER));
+    db.household.findUnique.mockResolvedValue(resolves({ settings: SETTINGS, members: ROSTER }));
     db.role.findUnique.mockImplementation(((args: { where: { name: string } }) =>
       Promise.resolve({ id: `role-${args.where.name}` })) as never);
     db.household.count.mockResolvedValue(1);
@@ -205,12 +228,13 @@ describe('HouseholdInviteService', () => {
         steps.push('lock');
         return Promise.resolve([{ id: 'hh-1' }]);
       }) as never);
-      db.householdMember.findMany.mockImplementation((() => {
-        steps.push('roster');
-        return Promise.resolve(ROSTER);
+      db.household.findUnique.mockImplementation((() => {
+        steps.push('household');
+        return Promise.resolve({ settings: SETTINGS, members: ROSTER });
       }) as never);
-      abilityService.assertCurrentActorCan.mockImplementation(() => {
+      abilityService.currentActorCan.mockImplementation(() => {
         steps.push('check');
+        return true;
       });
       invites.createWithin.mockImplementation(() => {
         steps.push('insert');
@@ -219,14 +243,18 @@ describe('HouseholdInviteService', () => {
 
       await service.createInvite('hh-1', byId());
 
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'insert']);
-      expect(db.householdMember.findMany).toHaveBeenCalledWith({
-        where: { householdId: 'hh-1' },
-        select: { userId: true, role: { select: { role: { select: { name: true } } } } },
+      // The roster and the policy in one read, each time.
+      expect(steps).toEqual(['household', 'check', 'lock', 'household', 'check', 'insert']);
+      expect(db.household.findUnique).toHaveBeenCalledWith({
+        where: { id: 'hh-1' },
+        select: {
+          settings: { select: { memberInvitePolicy: true } },
+          members: { select: { userId: true, role: { select: { role: { select: { name: true } } } } } },
+        },
       });
-      expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
-        [Action.create, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
-        [Action.create, ResourceType.Invite, { householdId: 'hh-1', household: { members: ROSTER } }],
+      expect(abilityService.currentActorCan.mock.calls).toEqual([
+        [Action.create, ResourceType.Invite, createInstance(false)],
+        [Action.create, ResourceType.Invite, createInstance(false)],
       ]);
     });
 
@@ -235,11 +263,12 @@ describe('HouseholdInviteService', () => {
 
       await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(NotFoundException);
 
-      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledTimes(1);
+      expect(abilityService.currentActorCan).toHaveBeenCalledTimes(1);
       expect(invites.createWithin).not.toHaveBeenCalled();
     });
 
     it('refuses a caller with no say here with 403 before taking the lock, and writes nothing', async () => {
+      abilityService.currentActorCan.mockReturnValue(false);
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         throw new ForbiddenException();
       });
@@ -253,10 +282,15 @@ describe('HouseholdInviteService', () => {
     });
 
     it('decides from the roster read under the lock, where a demotion that landed first is seen', async () => {
-      const demoted = [rosterRow('owner-1', SystemRole.HouseholdMember)];
-      db.householdMember.findMany.mockResolvedValueOnce(resolves(ROSTER)).mockResolvedValueOnce(resolves(demoted));
+      const demoted = [rosterRow('owner-1', SystemRole.HouseholdGuest)];
+      const isDemoted = (instance: unknown) =>
+        (instance as { household: { members: RosterRow[] } }).household.members === demoted;
+      db.household.findUnique
+        .mockResolvedValueOnce(resolves({ settings: SETTINGS, members: ROSTER }))
+        .mockResolvedValueOnce(resolves({ settings: SETTINGS, members: demoted }));
+      abilityService.currentActorCan.mockImplementation((_action, _type, instance) => !isDemoted(instance));
       abilityService.assertCurrentActorCan.mockImplementation((_action, _type, instance) => {
-        if ((instance as { household: { members: RosterRow[] } }).household.members === demoted) {
+        if (isDemoted(instance)) {
           throw new ForbiddenException();
         }
       });
@@ -265,6 +299,64 @@ describe('HouseholdInviteService', () => {
 
       expect(db.$queryRaw).toHaveBeenCalledTimes(1);
       expect(invites.createWithin).not.toHaveBeenCalled();
+    });
+
+    describe('how the invite opens (#166)', () => {
+      beforeEach(() => userById());
+
+      it('opens it directly when the acting user may invite directly, asking nothing more', async () => {
+        await service.createInvite('hh-1', byId());
+
+        expect(createdWith()?.needsApproval).toBe(false);
+        expect(abilityService.assertCurrentActorCan).not.toHaveBeenCalled();
+      });
+
+      it('opens it awaiting approval when the acting user may only invite for approval', async () => {
+        abilityService.currentActorCan.mockReturnValue(false);
+
+        await service.createInvite('hh-1', byId());
+
+        expect(createdWith()?.needsApproval).toBe(true);
+        // Asked about opening it directly first, then for approval, each time.
+        expect(abilityService.currentActorCan.mock.calls).toEqual([
+          [Action.create, ResourceType.Invite, createInstance(false)],
+          [Action.create, ResourceType.Invite, createInstance(false)],
+        ]);
+        expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
+          [Action.create, ResourceType.Invite, createInstance(true)],
+          [Action.create, ResourceType.Invite, createInstance(true)],
+        ]);
+      });
+
+      it('decides from the answer under the lock, where a policy change that landed first is seen', async () => {
+        abilityService.currentActorCan.mockReturnValueOnce(true).mockReturnValueOnce(false);
+
+        await service.createInvite('hh-1', byId());
+
+        expect(createdWith()?.needsApproval).toBe(true);
+      });
+
+      it('asks about the role the invite offers', async () => {
+        abilityService.currentActorCan.mockReturnValue(false);
+
+        await service.createInvite('hh-1', byId({ role: SystemRole.HouseholdGuest }));
+
+        expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Invite, {
+          ...createInstance(true),
+          role: { name: SystemRole.HouseholdGuest },
+        });
+      });
+
+      it('asks with no settings when the household has no settings row, which no member permission matches', async () => {
+        db.household.findUnique.mockResolvedValue(resolves({ settings: null, members: ROSTER }));
+
+        await service.createInvite('hh-1', byId());
+
+        expect(abilityService.currentActorCan).toHaveBeenCalledWith(Action.create, ResourceType.Invite, {
+          ...createInstance(false),
+          household: { settings: null, members: ROSTER },
+        });
+      });
     });
 
     describe('by id', () => {
@@ -292,6 +384,7 @@ describe('HouseholdInviteService', () => {
           roleId: `role-${SystemRole.HouseholdMember}`,
           message: 'Join us',
           withheld: false,
+          needsApproval: false,
         });
       });
 
@@ -800,11 +893,13 @@ describe('HouseholdInviteService', () => {
 
       // The household row, then the invite: the order a soft delete takes them in.
       expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
-      // Named by its id, so a key scoped to this one invite is asked about it.
+      // Named by its id, so a key scoped to this one invite is asked about it,
+      // and asked about `status`, the column a revoke changes, so the approve
+      // permission does not pass for it.
       const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
-        [Action.update, ResourceType.Invite, instance],
-        [Action.update, ResourceType.Invite, instance],
+        [Action.update, ResourceType.Invite, instance, 'status'],
+        [Action.update, ResourceType.Invite, instance, 'status'],
       ]);
       // The revoker is named so the lib refuses an inviter revoking their own invite.
       expect(invites.revokeWithin).toHaveBeenCalledWith(db, {
@@ -873,6 +968,113 @@ describe('HouseholdInviteService', () => {
     });
   });
 
+  describe('approveInvite (#166)', () => {
+    it('asks about approving an invite of the household before the lock, and again of the roster read under it', async () => {
+      const steps: string[] = [];
+      db.$queryRaw.mockImplementation((() => {
+        steps.push('lock');
+        return Promise.resolve([{ id: 'hh-1' }]);
+      }) as never);
+      db.householdMember.findMany.mockImplementation((() => {
+        steps.push('roster');
+        return Promise.resolve(ROSTER);
+      }) as never);
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        steps.push('check');
+      });
+      invites.approveWithin.mockImplementation(() => {
+        steps.push('approve');
+        return Promise.resolve(approval);
+      });
+
+      await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toBe(approval.invite);
+
+      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'approve']);
+      // Asked about `approvedById`, the column only an approval writes, so the
+      // revoke permission does not pass for it.
+      const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
+      expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
+        [Action.update, ResourceType.Invite, instance, 'approvedById'],
+        [Action.update, ResourceType.Invite, instance, 'approvedById'],
+      ]);
+      expect(invites.approveWithin).toHaveBeenCalledWith(db, {
+        inviteId: 'invite-1',
+        approverId: 'owner-1',
+        scope: { householdId: 'hh-1' },
+        expiresAt: expect.any(Date),
+      });
+    });
+
+    it('gives the invitee a full week from the approval, whatever time the wait for it took', async () => {
+      const week = 7 * 24 * 60 * 60 * 1_000;
+      const before = Date.now();
+
+      await service.approveInvite('hh-1', 'invite-1');
+
+      const [[, params]] = invites.approveWithin.mock.calls;
+      const expiresAt = params.expiresAt?.getTime() ?? Number.NaN;
+      expect(expiresAt).toBeGreaterThanOrEqual(before + week);
+      expect(expiresAt).toBeLessThanOrEqual(Date.now() + week);
+    });
+
+    it('refuses an actor with no say here with 403 before taking the lock, and approves nothing', async () => {
+      abilityService.assertCurrentActorCan.mockImplementation(() => {
+        throw new ForbiddenException();
+      });
+
+      await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(db.$queryRaw).not.toHaveBeenCalled();
+      expect(invites.approveWithin).not.toHaveBeenCalled();
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+
+    it('decides from the roster read under the lock, where a demotion that landed first is seen', async () => {
+      const demoted = [rosterRow('owner-1', SystemRole.HouseholdMember)];
+      db.householdMember.findMany.mockResolvedValueOnce(resolves(ROSTER)).mockResolvedValueOnce(resolves(demoted));
+      abilityService.assertCurrentActorCan.mockImplementation((_action, _type, instance) => {
+        if ((instance as { household: { members: RosterRow[] } }).household.members === demoted) {
+          throw new ForbiddenException();
+        }
+      });
+
+      await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(invites.approveWithin).not.toHaveBeenCalled();
+    });
+
+    it('answers 404 for a missing or deleted household, and approves nothing', async () => {
+      db.$queryRaw.mockResolvedValue([] as never);
+
+      await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(invites.approveWithin).not.toHaveBeenCalled();
+    });
+
+    it('announces the approval after the transaction, and nothing when the lib refuses', async () => {
+      let emittedInside: boolean | undefined;
+      db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await work(db);
+        emittedInside = invites.emit.mock.calls.length > 0;
+
+        return result;
+      }) as never);
+
+      await service.approveInvite('hh-1', 'invite-1');
+
+      expect(emittedInside).toBe(false);
+      expect(invites.emit).toHaveBeenCalledWith([approval.event]);
+
+      invites.emit.mockClear();
+      invites.approveWithin.mockRejectedValue(new ConflictException());
+
+      await expect(service.approveInvite('hh-1', 'invite-1')).rejects.toBeInstanceOf(ConflictException);
+
+      expect(invites.emit).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listInvites', () => {
     const query = (overrides: Partial<ListHouseholdInvitesQueryDto> = {}) =>
       Object.assign(paginationQuery({ limit: 10 }), overrides) as ListHouseholdInvitesQueryDto;
@@ -908,10 +1110,13 @@ describe('HouseholdInviteService', () => {
 
       await expect(service.listInvites('hh-1', query())).rejects.toBeInstanceOf(ForbiddenException);
 
-      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(Action.read, ResourceType.Invite, {
-        householdId: 'hh-1',
-        household: { members: ROSTER },
-      });
+      // A read changes no column, so it names none.
+      expect(abilityService.assertCurrentActorCan).toHaveBeenCalledWith(
+        Action.read,
+        ResourceType.Invite,
+        { householdId: 'hh-1', household: { members: ROSTER } },
+        undefined,
+      );
       expect(db.invite.findMany).not.toHaveBeenCalled();
     });
 

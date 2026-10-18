@@ -103,9 +103,11 @@ export const INVITE_SCALARS_OMITTED = {
   householdId:
     'Redundant: a context read is nested under the context it belongs to, and a party already knows which invite they acted on.',
   metadata: 'Untyped internal payload for system invites (#161). Never a client contract.',
-  needsApproval: 'Approval bookkeeping for #231; internal to the join-policy flow.',
-  approvedById: 'Approval bookkeeping (#231). Same social-inference concern as `HouseholdMember.addedById`.',
-  approvedAt: 'Approval bookkeeping (#231).',
+  needsApproval:
+    "Approval bookkeeping: set when the consumer wanted an approver first, as a household does for a member's invite (#166). `status` already says whether it still waits.",
+  approvedById:
+    'Who approved the invite (#166). Same social-inference concern as `HouseholdMember.addedById`.',
+  approvedAt: 'Approval bookkeeping (#166); `status` is the client-facing answer.',
   respondedAt: 'Lifecycle bookkeeping; `status` is the client-facing answer.',
   updatedAt: 'Row bookkeeping. `expiresAt` and `createdAt` are what a pending invite is judged by.',
   withheld:

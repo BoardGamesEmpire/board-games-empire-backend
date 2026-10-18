@@ -1,6 +1,11 @@
 import { Prisma } from '@bge/database';
 import { CONTEXT_INVITE_SELECT } from '@bge/invites';
-import { MEMBER_SCALARS_OMITTED, MEMBER_SELECT } from './read-shapes';
+import {
+  HOUSEHOLD_SETTINGS_SCALARS_OMITTED,
+  HOUSEHOLD_SETTINGS_SELECT,
+  MEMBER_SCALARS_OMITTED,
+  MEMBER_SELECT,
+} from './read-shapes';
 
 /**
  * The scalar keys of a select object: the ones written `field: true`, as
@@ -60,6 +65,23 @@ describe('household read shapes', () => {
       // client sees one spelling of a user on the detail view, so that is
       // what is pinned.
       expect(CONTEXT_INVITE_SELECT.inviter.select).toEqual(MEMBER_SELECT.user.select);
+    });
+  });
+
+  describe('HOUSEHOLD_SETTINGS_SELECT (#166)', () => {
+    it('classifies every HouseholdSettings scalar as either selected or deliberately omitted', () => {
+      const declared = Object.values(Prisma.HouseholdSettingsScalarFieldEnum).sort();
+      const classified = [
+        ...scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT),
+        ...Object.keys(HOUSEHOLD_SETTINGS_SCALARS_OMITTED),
+      ].sort();
+
+      // A new setting lands here first: publish it or withhold it, with the reason.
+      expect(classified).toEqual(declared);
+    });
+
+    it('publishes the member invite policy, which a member needs to know whether they may invite', () => {
+      expect(scalarKeysOf(HOUSEHOLD_SETTINGS_SELECT)).toContain('memberInvitePolicy');
     });
   });
 });

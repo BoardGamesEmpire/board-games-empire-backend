@@ -64,10 +64,11 @@ export class PartyInviteController {
     summary: 'List the household invites you have received',
     description:
       'The invites still open to you: sent to your user id, or to your email address once it is verified; ' +
-      '`Pending`, or `AwaitingApproval` until an approver opens it to you, and not expired; into a household that ' +
-      'exists and that you are not already in. Newest first. Each carries the household that sent it, the role it ' +
-      'offers, the inviter, and the message. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
-      'envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
+      '`Pending` and not expired; into a household that exists and that you are not already in. A member’s ' +
+      'invite that waits for an owner or admin to approve it is not listed until it is approved. Newest first. ' +
+      'Each carries the household that sent it, the role it offers, the inviter, and the message. Paginated: ' +
+      '`?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
+      '`hasMore`. See #230.',
   })
   @ApiPaginatedEnvelope('invites')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })

@@ -22,7 +22,8 @@
     "invite_accepted": "Invite accepted; you are now a member of the household",
     "invite_declined": "Invite declined",
     "invite_withdrawn": "Invite withdrawn",
-    "invite_revoked": "Invite revoked"
+    "invite_revoked": "Invite revoked",
+    "invite_approved": "Invite approved; the invitee can now accept it"
   },
   "event": {
     "created": "Event created successfully",

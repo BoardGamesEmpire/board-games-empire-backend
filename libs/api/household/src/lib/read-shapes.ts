@@ -30,14 +30,14 @@ import { Prisma } from '@bge/database';
  *
  * ## What this does NOT cover
  *
- * Exactly one model: `HouseholdMember`. The invite shapes this file used to
- * carry live in `@bge/invites`, which owns every invite read so the
- * household detail, the invite routes and the lib's own transitions cannot
- * drift into three spellings of an invite. The `Household` row that carries
- * both is still `include:`-shaped in `household.service.ts` — both the detail
- * read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to `Household` still
- * reaches clients with this suite green. Nothing sensitive ships today
- * (`clientRequestId` is a per-creator idempotency key, and `deletedAt` is null
+ * Two models: `HouseholdMember`, and `HouseholdSettings` (#166). The invite
+ * shapes this file used to carry live in `@bge/invites`, which owns every
+ * invite read so the household detail, the invite routes and the lib's own
+ * transitions cannot drift into three spellings of an invite. The `Household`
+ * row that carries them is still `include:`-shaped in `household.service.ts`
+ * — both the detail read and `HOUSEHOLD_LIST_INCLUDE` — so a column added to
+ * `Household` still reaches clients with this suite green. Nothing sensitive
+ * ships today (`clientRequestId` is a per-creator idempotency key, and `deletedAt` is null
  * on every read but `GET /households/restorable`, where telling the household
  * owners who can restore it when it was deleted is intended), which is why it
  * was left rather than folded in: converting it changes the exported
@@ -113,3 +113,23 @@ export const MEMBER_SCALARS_OMITTED = {
   addedById:
     'Audit surface (#276). Who-invited-whom is social information nobody decided to publish; it also undercuts the separation #278 is built to keep. Stripped by D-296-1.',
 } as const satisfies Partial<Record<Prisma.HouseholdMemberScalarFieldEnum, string>>;
+
+/**
+ * A household's settings as the household's detail, its lists and its update
+ * return them (#166), to every reader of the household: a member's client
+ * needs the member invite policy to know whether to offer an invite.
+ */
+export const HOUSEHOLD_SETTINGS_SELECT = {
+  memberInvitePolicy: true,
+} as const satisfies Prisma.HouseholdSettingsSelect;
+
+/**
+ * `HouseholdSettings` scalars withheld from clients, and why. A setting added
+ * to the model fails `read-shapes.spec.ts` until it is published above or
+ * withheld here.
+ */
+export const HOUSEHOLD_SETTINGS_SCALARS_OMITTED = {
+  householdId: 'Redundant: the settings are nested under the household they belong to.',
+  createdAt: 'Row bookkeeping; it is the household’s own creation time.',
+  updatedAt: 'Row bookkeeping. Nothing a client decides depends on when a setting last changed.',
+} as const satisfies Partial<Record<Prisma.HouseholdSettingsScalarFieldEnum, string>>;

@@ -301,7 +301,9 @@ describe('PartyInviteService', () => {
               inviterId: { not: INVITEE_ID },
               OR: [{ inviteeId: INVITEE_ID }, { inviteeId: null, inviteeEmail: ADDRESS, withheld: false }],
             },
-            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] } },
+            // Pending only: one awaiting approval is not yet the household's
+            // offer, and the invitee does not see it until it is (#166).
+            { status: InviteStatus.Pending },
             { expiresAt: { gt: NOW } },
             { household: { is: { deletedAt: null, members: { none: { userId: INVITEE_ID } } } } },
           ],

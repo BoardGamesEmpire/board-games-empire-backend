@@ -144,6 +144,7 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'update:event:household',
   'update:game_play_session:household',
   'update:household',
+  'update:household_invite:approve',
   'update:household_invite:revoke',
   'update:household_role:transfer-ownership',
 ];
@@ -388,6 +389,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // guests do not. Revisiting who holds it is #168's matrix.
     'create:event:household',
     'create:game_play_session:household',
+    // Members invite under the household's member invite policy (#166);
+    // guests never invite.
+    'create:household_invite:member-approval',
+    'create:household_invite:member-direct',
     'create:play_record:household',
     'read:attendee_game_list:household',
     'read:event_attendee:household',

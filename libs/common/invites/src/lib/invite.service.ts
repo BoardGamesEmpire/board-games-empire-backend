@@ -313,8 +313,9 @@ export class InviteService {
   }
 
   /**
-   * Opens an invite. `Pending`, or `AwaitingApproval` when the context's join
-   * policy wants an approver first (#166).
+   * Opens an invite. `Pending`, or `AwaitingApproval` when the consumer wants
+   * an approver first (`needsApproval`), as a household does for a member's
+   * invite under its member invite policy (#166).
    *
    * A second outstanding invite to the same invitee for the same context is
    * refused by the database, not by a lookup here: the partial unique indexes
@@ -481,12 +482,18 @@ export class InviteService {
   /**
    * An approver opens an `AwaitingApproval` invite to its invitee, stamping
    * who approved and when (#166). The caller has asserted the approver's
-   * authority over `scope`, and the read binds to it as a revoke's does.
+   * authority over `scope`, and the read binds to it as a revoke's does. An
+   * `expiresAt` restarts the invitee's window; an invite that expired while it
+   * waited is refused 410 like any other, not reopened.
    */
-  approveWithin(
+  async approveWithin(
     tx: Prisma.TransactionClient,
-    { inviteId, approverId, scope }: ApproveInviteParams,
+    { inviteId, approverId, scope, expiresAt }: ApproveInviteParams,
   ): Promise<InviteApproval> {
+    if (expiresAt !== undefined && expiresAt <= new Date()) {
+      throw new BadRequestException(t('errors.invite.expires_in_past'));
+    }
+
     return this.transitionWithin(tx, {
       target: { inviteId },
       scope,
@@ -495,7 +502,12 @@ export class InviteService {
           throw new ConflictException(t('errors.invite.not_awaiting_approval', { id: row.id }));
         }
       },
-      data: (now) => ({ status: InviteStatus.Pending, approvedById: approverId, approvedAt: now }),
+      data: (now) => ({
+        status: InviteStatus.Pending,
+        approvedById: approverId,
+        approvedAt: now,
+        ...(expiresAt === undefined ? {} : { expiresAt }),
+      }),
       view: CONTEXT_INVITE_SELECT,
       event: InviteApprovedEvent,
     });

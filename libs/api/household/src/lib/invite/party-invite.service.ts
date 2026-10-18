@@ -1,9 +1,8 @@
 import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
-import { DatabaseService, HouseholdMembershipOrigin, InviteType, Prisma } from '@bge/database';
+import { DatabaseService, HouseholdMembershipOrigin, InviteStatus, InviteType, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import {
   InviteService,
-  OUTSTANDING_INVITE_STATUSES,
   PARTY_INVITE_SELECT,
   receivedInviteWhere,
   unexpiredInviteWhere,
@@ -40,8 +39,8 @@ export interface HouseholdInviteAcceptance {
 /**
  * A party's side of a household invite: the invites they have received,
  * accepting or declining one (#163, #164), and withdrawing one they sent
- * (#164). The household's side, creating, listing and revoking a household's
- * invites, is `HouseholdInviteService`.
+ * (#164). The household's side, creating, listing, revoking and approving a
+ * household's invites, is `HouseholdInviteService`.
  *
  * No CASL rule stands behind any of them: a party holds no grant on `Invite`,
  * and needs none, because `@bge/invites` binds every party read to the acting
@@ -67,10 +66,12 @@ export class PartyInviteService {
   /**
    * One page of the invites the acting user has received, newest first: those
    * naming them by id, and those to their verified address. Only the ones
-   * still open to them are listed: outstanding, unexpired, into a household
-   * that is live and that they are not already in. One awaiting approval is
-   * listed, though its accept is refused until it is approved (#166). A
-   * withheld invite never is (#278); the lib's filter leaves it out.
+   * still open to them are listed: `Pending`, unexpired, into a household that
+   * is live and that they are not already in. One awaiting approval is not:
+   * until an owner or admin approves it, it is a member's proposal rather than
+   * the household's offer, and showing it, then revoking it, would tell the
+   * invitee about the household's own deliberations (#166). A withheld invite
+   * never is (#278); the lib's filter leaves it out.
    *
    * An invite into a household they already belong to stays outstanding (an
    * accept of it is refused), so it is hidden rather than offered.
@@ -84,7 +85,7 @@ export class PartyInviteService {
       type: InviteType.Household,
       AND: [
         receivedInviteWhere(userId, vouchedEmail),
-        { status: { in: [...OUTSTANDING_INVITE_STATUSES] } },
+        { status: InviteStatus.Pending },
         unexpiredInviteWhere(now),
         { household: { is: { deletedAt: null, members: { none: { userId } } } } },
       ],

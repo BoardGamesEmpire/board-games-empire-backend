@@ -1,7 +1,7 @@
 import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
-import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
+import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   CreateGameCollectionDto,
@@ -10,10 +10,6 @@ import {
   RemoveGameCollectionQueryDto,
   UpdateGameCollectionDto,
 } from './dto';
-
-/** Keeps only the keys the caller actually sent (undefined = "not provided"). */
-const pickDefined = <T extends object>(obj: T): Partial<T> =>
-  Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as Partial<T>;
 
 /** Joined summary needed to render a collection list/detail without extra fetches. */
 const COLLECTION_INCLUDE = {

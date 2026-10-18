@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { MemberInvitePolicy, Visibility } from '@bge/database';
 import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -48,5 +48,25 @@ describe('UpdateHouseholdDto', () => {
 
     expect(published).toEqual(expect.arrayContaining([':name', ':visibility', ':language']));
     expect(published).not.toContain(':clientRequestId');
+  });
+
+  describe('settings (#166)', () => {
+    it.each([MemberInvitePolicy.Off, MemberInvitePolicy.NeedsApproval, MemberInvitePolicy.Direct])(
+      'accepts the member invite policy %s',
+      async (memberInvitePolicy) => {
+        await expect(propertiesWithErrors({ settings: { memberInvitePolicy } })).resolves.toEqual([]);
+      },
+    );
+
+    it('refuses a policy that does not exist, and a setting it does not know', async () => {
+      await expect(propertiesWithErrors({ settings: { memberInvitePolicy: 'Sometimes' } })).resolves.toEqual([
+        'settings',
+      ]);
+      await expect(propertiesWithErrors({ settings: { joinPolicy: 'Open' } })).resolves.toEqual(['settings']);
+    });
+
+    it('refuses settings that are not an object', async () => {
+      await expect(propertiesWithErrors({ settings: 'Direct' })).resolves.toEqual(['settings']);
+    });
   });
 });
