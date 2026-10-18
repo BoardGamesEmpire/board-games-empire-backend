@@ -30,7 +30,43 @@ const ESM_PACKAGES = [
   'rou3',
 ];
 
-const esmPattern = ESM_PACKAGES.join('|');
+/**
+ * The unified packages behind @bge/content-format (micromark, mdast, hast and
+ * their helpers), all pure ESM. There are dozens, so most go by family: each
+ * entry is a pattern for a package name. `entities` and `parse5` are listed
+ * because hast-util-from-html nests ESM copies of them.
+ *
+ * Keep alphabetically sorted.
+ */
+const UNIFIED_ESM_PACKAGES = [
+  'ccount',
+  'character-entities(-[a-z0-9]+)?',
+  'comma-separated-tokens',
+  'decode-named-character-reference',
+  'devlop',
+  'entities',
+  'escape-string-regexp',
+  'hast-util-[a-z0-9-]+',
+  'hastscript',
+  'html-void-elements',
+  'longest-streak',
+  'markdown-table',
+  'mdast-util-[a-z0-9-]+',
+  'micromark(-[a-z0-9-]+)?',
+  'parse5',
+  'property-information',
+  'rehype-minify-whitespace',
+  'space-separated-tokens',
+  'stringify-entities',
+  'trim-lines',
+  'trim-trailing-lines',
+  'unist-util-[a-z0-9-]+',
+  'vfile(-[a-z0-9-]+)?',
+  'web-namespaces',
+  'zwitch',
+];
+
+const esmPattern = [...ESM_PACKAGES, ...UNIFIED_ESM_PACKAGES].join('|');
 
 module.exports = {
   ...nxPreset,
