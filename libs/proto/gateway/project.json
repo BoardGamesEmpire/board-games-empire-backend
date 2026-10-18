@@ -9,6 +9,8 @@
     "generate": {
       "executor": "nx:run-commands",
       "cache": true,
+      "// dependsOn": "generate doesn't read proto-export, but every app build that bundles the .proto files reaches this task through ^generate, so the edge is how the export gets made before webpack copies it (#313). The directory is gitignored, and the copy skips a missing one without a word, leaving a bundle that exits as it boots.",
+      "dependsOn": ["buf-export"],
       "options": {
         "command": "buf generate",
         "cwd": "libs/proto/gateway"
@@ -58,10 +60,23 @@
     },
     "buf-export": {
       "executor": "nx:run-commands",
+      "// cache": "Uncached, like @bge/database:generate (docs/NX_CACHING.md). npm start's six Nx processes each run this for themselves, and Nx restoring a cache hit rewrites the directory whenever its daemon is off or the files on disk differ, while another app's webpack may be copying it. The script writes the directory only when the export changed, so a run costs about a tenth of a second and, usually, touches nothing (#313).",
+      "cache": false,
       "options": {
-        "command": "buf export src/proto --exclude-imports=false -o proto-export",
-        "cwd": "libs/proto/gateway"
-      }
+        "command": "node libs/scripts/src/bin/buf-export.js"
+      },
+      "inputs": [
+        "{projectRoot}/src/proto/**/*.proto",
+        "{projectRoot}/buf.yaml",
+        "{projectRoot}/buf.lock",
+        "{workspaceRoot}/libs/scripts/src/bin/buf-export.js",
+        "{workspaceRoot}/libs/scripts/src/proto-export/**/*.js",
+        "!{workspaceRoot}/libs/scripts/src/proto-export/**/*.spec.js",
+        {
+          "externalDependencies": ["@bufbuild/buf"]
+        }
+      ],
+      "outputs": ["{projectRoot}/proto-export"]
     },
     "buf-format": {
       "executor": "nx:run-commands",
