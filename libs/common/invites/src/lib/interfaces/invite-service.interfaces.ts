@@ -140,6 +140,12 @@ export interface ApproveInviteParams {
   readonly inviteId: string;
   readonly approverId: string;
   readonly scope: InviteContextScope;
+  /**
+   * When the invitee's window to answer closes, set at approval so the wait
+   * for an approver does not come out of it. Unset keeps the one the invite
+   * was opened with. Must be in the future.
+   */
+  readonly expiresAt?: Date;
 }
 
 /**

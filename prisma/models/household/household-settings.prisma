@@ -1,0 +1,36 @@
+// Whether a household's member role may invite, and how (#166).
+//
+// It governs the member role only. A household owner or admin always invites
+// directly, and a household guest never invites. A change applies to the
+// invites sent after it: one already waiting stays waiting, and an
+// outstanding one stays outstanding.
+enum MemberInvitePolicy {
+  // Members cannot invite.
+  Off
+  // A member's invite waits for a household owner or admin to approve it
+  // before the invitee sees it.
+  NeedsApproval
+  // A member's invite goes straight to the invitee.
+  Direct
+
+  @@map("member_invite_policies")
+}
+
+// A household's own settings, one row per household (#166). Created with the
+// household, so every household has one; written by its owners and admins
+// through `PATCH /households/:id`. Which other household settings move here,
+// such as its visibility or join policy, is #231's.
+//
+// Keyed by the household itself: the row has no identity of its own, and the
+// migration that added it fills one in for every household with no id to mint.
+model HouseholdSettings {
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  householdId String    @id @map("household_id")
+
+  memberInvitePolicy MemberInvitePolicy @default(NeedsApproval) @map("member_invite_policy")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("household_settings")
+}

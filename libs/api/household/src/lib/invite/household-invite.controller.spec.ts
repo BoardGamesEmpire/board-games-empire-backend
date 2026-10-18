@@ -9,16 +9,20 @@ import type { HouseholdInviteService } from './household-invite.service';
 
 const INVITE = { id: 'invite-1', status: InviteStatus.Pending } as InvitePartyView;
 const REVOKED = { id: 'invite-1', status: InviteStatus.Revoked } as InviteContextView;
+const APPROVED = { id: 'invite-1', status: InviteStatus.Pending } as InviteContextView;
 
 describe('HouseholdInviteController (delegation)', () => {
   let controller: HouseholdInviteController;
-  let service: jest.Mocked<Pick<HouseholdInviteService, 'createInvite' | 'listInvites' | 'revokeInvite'>>;
+  let service: jest.Mocked<
+    Pick<HouseholdInviteService, 'createInvite' | 'listInvites' | 'revokeInvite' | 'approveInvite'>
+  >;
 
   beforeEach(() => {
     service = {
       createInvite: jest.fn().mockResolvedValue(INVITE),
       listInvites: jest.fn().mockResolvedValue({ rows: [INVITE], total: 1 }),
       revokeInvite: jest.fn().mockResolvedValue(REVOKED),
+      approveInvite: jest.fn().mockResolvedValue(APPROVED),
     };
     controller = new HouseholdInviteController(service as never);
   });
@@ -56,6 +60,16 @@ describe('HouseholdInviteController (delegation)', () => {
     expect(result).toEqual({
       message: expect.objectContaining({ key: 'success.household.invite_revoked' }),
       invite: REVOKED,
+    });
+  });
+
+  it('approveInvite forwards the household and the invite, wrapping the invite with a success message', async () => {
+    const result = await firstValueFrom(controller.approveInvite('hh-1', 'invite-1'));
+
+    expect(service.approveInvite).toHaveBeenCalledWith('hh-1', 'invite-1');
+    expect(result).toEqual({
+      message: expect.objectContaining({ key: 'success.household.invite_approved' }),
+      invite: APPROVED,
     });
   });
 });

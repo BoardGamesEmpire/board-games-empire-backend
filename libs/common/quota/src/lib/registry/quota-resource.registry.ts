@@ -62,11 +62,14 @@ export class QuotaResourceRegistry {
       },
     ],
     [
-      // A rate, measured as a count over a rolling window: the household
-      // invites created in the last 24 hours, by the inviter at User scope and
-      // into the household at Household scope. The window is fixed in code; a
-      // row sets only how many fit in it. Every invite counts whatever its
-      // status, so revoking one frees no slot, and a withheld invite (#278)
+      // A rate, measured as a count over a rolling window of 24 hours. At User
+      // scope, the invites the inviter sent in it. At Household scope, the
+      // invites the household made in it: one sent directly counts from when
+      // it was sent, and a member's invite that waited for approval (#166)
+      // counts from its approval, so the proposals an owner never approves
+      // take none of the household's. The window is fixed in code; a row sets
+      // only how many fit in it. A counted invite counts whatever its status
+      // since, so revoking one frees no slot, and a withheld invite (#278)
       // counts like any other, so the cap cannot tell the inviter which it was.
       'household_invite_daily_count',
       {
@@ -130,11 +133,14 @@ export class QuotaResourceRegistry {
     const client = db ?? this.databaseService;
     const since = new Date(Date.now() - HOUSEHOLD_INVITE_WINDOW_MS);
     const count = await client.invite.count({
-      where: {
-        type: InviteType.Household,
-        ...(scope === QuotaScope.User ? { inviterId: scopeId } : { householdId: scopeId }),
-        createdAt: { gt: since },
-      },
+      where:
+        scope === QuotaScope.User
+          ? { type: InviteType.Household, inviterId: scopeId, createdAt: { gt: since } }
+          : {
+              type: InviteType.Household,
+              householdId: scopeId,
+              OR: [{ needsApproval: false, createdAt: { gt: since } }, { approvedAt: { gt: since } }],
+            },
     });
     return BigInt(count);
   }

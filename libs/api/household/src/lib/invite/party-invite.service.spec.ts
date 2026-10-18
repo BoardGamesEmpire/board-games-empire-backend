@@ -147,6 +147,12 @@ describe('PartyInviteService', () => {
       expect(db.invite.findMany).not.toHaveBeenCalled();
     });
 
+    it('refuses the sent list with 403 before reading anything', async () => {
+      await expect(service.listSent(paginationQuery())).rejects.toThrow(ForbiddenException);
+
+      expect(db.invite.findMany).not.toHaveBeenCalled();
+    });
+
     it('refuses a decline with 403 before reading anything', async () => {
       await expect(service.decline({ inviteId: 'invite-1' })).rejects.toThrow(ForbiddenException);
 
@@ -301,7 +307,9 @@ describe('PartyInviteService', () => {
               inviterId: { not: INVITEE_ID },
               OR: [{ inviteeId: INVITEE_ID }, { inviteeId: null, inviteeEmail: ADDRESS, withheld: false }],
             },
-            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] } },
+            // Pending only: one awaiting approval is not yet the household's
+            // offer, and the invitee does not see it until it is (#166).
+            { status: InviteStatus.Pending },
             { expiresAt: { gt: NOW } },
             { household: { is: { deletedAt: null, members: { none: { userId: INVITEE_ID } } } } },
           ],
@@ -334,6 +342,93 @@ describe('PartyInviteService', () => {
         OR: [{ inviteeId: INVITEE_ID }],
       });
     });
+  });
+
+  describe('listSent (#751)', () => {
+    beforeEach(() => auditContext.getActor.mockReturnValue(INVITER_SESSION));
+
+    const withFakeNow = async (work: () => Promise<void>) => {
+      jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
+
+      try {
+        await work();
+      } finally {
+        jest.useRealTimers();
+      }
+    };
+
+    /** Where the inviter is no longer a member, only what they can still withdraw. */
+    const withdrawableOrStillMember = {
+      OR: [
+        { household: { is: { members: { some: { userId: INVITER_ID } } } } },
+        { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { gt: NOW } },
+      ],
+    };
+
+    it("lists the user's outstanding and expired household invites, newest first in one snapshot", () =>
+      withFakeNow(async () => {
+        db.invite.findMany.mockResolvedValue(
+          resolves([{ id: 'invite-1', status: InviteStatus.Pending, expiresAt: LATER }]),
+        );
+        db.invite.count.mockResolvedValue(1);
+
+        const page = await service.listSent(paginationQuery({ page: 2, limit: 10 }));
+
+        const where = {
+          type: InviteType.Household,
+          inviterId: INVITER_ID,
+          // An invite into a deleted household is not listed; the delete revoked it.
+          household: { is: { deletedAt: null } },
+          AND: [
+            // Expired whether or not the sweep has stamped it, so the inviter
+            // sees it lapse and can send another.
+            { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending, InviteStatus.Expired] } },
+            withdrawableOrStillMember,
+          ],
+        };
+        expect(db.invite.findMany).toHaveBeenCalledWith({
+          where,
+          select: { ...PARTY_INVITE_SELECT, household: { select: { id: true, name: true } } },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: 10,
+          take: 10,
+        });
+        expect(db.invite.count).toHaveBeenCalledWith({ where });
+        expect(batchTransactionCall(db).options).toEqual({
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        });
+        expect(page).toEqual({ rows: [{ id: 'invite-1', status: InviteStatus.Pending, expiresAt: LATER }], total: 1 });
+      }));
+
+    it('filters to any one status as it stands now, still only withdrawable rows where they left', () =>
+      withFakeNow(async () => {
+        await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Accepted }));
+        await service.listSent(Object.assign(paginationQuery(), { status: InviteStatus.Expired }));
+
+        const whereOf = (call: number) =>
+          (db.invite.findMany.mock.calls[call] as [{ where: Prisma.InviteWhereInput }])[0].where;
+        expect(whereOf(0).AND).toEqual([{ status: InviteStatus.Accepted }, withdrawableOrStillMember]);
+        expect(whereOf(1).AND).toEqual([
+          {
+            OR: [
+              { status: InviteStatus.Expired },
+              { status: { in: [InviteStatus.AwaitingApproval, InviteStatus.Pending] }, expiresAt: { lte: NOW } },
+            ],
+          },
+          withdrawableOrStillMember,
+        ]);
+      }));
+
+    it('reports an outstanding row past its expiry as Expired', () =>
+      withFakeNow(async () => {
+        const lapsed = { id: 'invite-1', status: InviteStatus.AwaitingApproval, expiresAt: new Date('2026-10-01') };
+        db.invite.findMany.mockResolvedValue(resolves([lapsed]));
+        db.invite.count.mockResolvedValue(1);
+
+        const page = await service.listSent(paginationQuery());
+
+        expect(page.rows).toEqual([{ ...lapsed, status: InviteStatus.Expired }]);
+      }));
   });
 
   describe('decline', () => {

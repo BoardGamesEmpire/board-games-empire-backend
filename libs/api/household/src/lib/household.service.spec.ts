@@ -1,5 +1,13 @@
 import type { Household } from '@bge/database';
-import { Action, HouseholdMembershipOrigin, InviteStatus, Prisma, ResourceType, SystemRole } from '@bge/database';
+import {
+  Action,
+  HouseholdMembershipOrigin,
+  InviteStatus,
+  MemberInvitePolicy,
+  Prisma,
+  ResourceType,
+  SystemRole,
+} from '@bge/database';
 import { uniqueViolation as sharedUniqueViolation, uniqueViolationWithoutMeta } from '@bge/database/testing';
 import { t } from '@bge/i18n';
 import { CONTEXT_INVITE_SELECT, InviteService, type InviteRevokedEvent } from '@bge/invites';
@@ -96,6 +104,18 @@ describe('HouseholdService', () => {
       where: { AND: [{ status: InviteStatus.Pending }, { expiresAt: { gt: expect.any(Date) } }] },
       select: CONTEXT_INVITE_SELECT,
     });
+  });
+
+  it("returns the household's settings to every reader of it, and only the settings it publishes (#166)", async () => {
+    db.household.findUnique.mockResolvedValue({ id: 'hh-1', members: [] } as unknown as HouseholdWithMembers);
+
+    await service.getHouseholdById('hh-1');
+
+    const [{ include }] = db.household.findUnique.mock.calls[0] as [{ include: Record<string, unknown> }];
+
+    // A member's client needs the invite policy to know whether to offer an
+    // invite, so it rides on the read every member already makes.
+    expect(include.settings).toEqual({ select: { memberInvitePolicy: true } });
   });
 
   it('shapes the detail roster with MEMBER_SELECT plus the exclusion join this read alone needs', async () => {
@@ -269,6 +289,8 @@ describe('HouseholdService', () => {
       expect.objectContaining({
         data: expect.objectContaining({
           createdBy: { connect: { id: 'user-1' } },
+          // Every household has its settings row, made with it (#166).
+          settings: { create: {} },
           members: {
             // Provenance is asserted, not merely `userId` (#276). Both columns are
             // nullable, so dropping either from the nested create would otherwise
@@ -462,6 +484,57 @@ describe('HouseholdService', () => {
 
   it('rejects an empty update patch', async () => {
     await expect(service.updateHousehold('hh-1', {} as never)).rejects.toThrow(BadRequestException);
+  });
+
+  describe('updateHousehold, its settings (#166)', () => {
+    beforeEach(() => {
+      db.household.count.mockResolvedValue(1);
+      db.household.update.mockResolvedValue({ id: 'hh-1' } as Household);
+    });
+
+    const written = () => (db.household.update.mock.calls[0] as [{ data: Record<string, unknown> }])[0].data;
+
+    it('writes the member invite policy under the same scoped update as the rest', async () => {
+      await service.updateHousehold('hh-1', { settings: { memberInvitePolicy: MemberInvitePolicy.Direct } });
+
+      expect(db.household.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ id: 'hh-1', AND: [COND] }) }),
+      );
+      // An upsert, so a household made before its settings row existed gets
+      // one rather than a 403 for a row nobody can see.
+      expect(written()).toEqual({
+        settings: {
+          upsert: {
+            create: { memberInvitePolicy: MemberInvitePolicy.Direct },
+            update: { memberInvitePolicy: MemberInvitePolicy.Direct },
+          },
+        },
+      });
+    });
+
+    it('writes no settings when the patch names none', async () => {
+      await service.updateHousehold('hh-1', { name: 'New' });
+
+      expect(written()).not.toHaveProperty('settings');
+    });
+
+    it('answers with the settings it publishes, so the acting user sees what they wrote', async () => {
+      await service.updateHousehold('hh-1', { name: 'New' });
+
+      expect(db.household.update).toHaveBeenCalledWith(
+        expect.objectContaining({ include: { settings: { select: { memberInvitePolicy: true } } } }),
+      );
+    });
+
+    it.each([
+      ['empty settings', { settings: {} }],
+      ['settings naming nothing', { settings: { memberInvitePolicy: undefined } }],
+      ['a household field naming nothing', { name: undefined }],
+    ])('rejects %s as an empty patch', async (_label, dto) => {
+      await expect(service.updateHousehold('hh-1', dto)).rejects.toThrow(BadRequestException);
+
+      expect(db.household.update).not.toHaveBeenCalled();
+    });
   });
 
   describe('a scoped write that matches nothing (#299)', () => {

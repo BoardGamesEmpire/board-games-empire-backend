@@ -588,5 +588,81 @@ describe('AbilityService', () => {
         service.assertCurrentActorCan(Action.create, ResourceType.EventOccurrence, { event: { householdId: 'hh-1' } }),
       ).toThrow(ForbiddenException);
     });
+
+    describe('naming a field', () => {
+      // Two permissions on the same action and resource type, told apart only
+      // by the column each may change: approving an invite and revoking one (#166).
+      const boundToColumn = (column: 'approvedById' | 'status') =>
+        ability([{ action: Action.update, subject: 'Invite', fields: [column], conditions: { householdId: 'hh-1' } }]);
+
+      it('allows the field the permission names', () => {
+        abilityContext.peek.mockReturnValue([boundToColumn('approvedById')]);
+
+        expect(() =>
+          service.assertCurrentActorCan(Action.update, ResourceType.Invite, { householdId: 'hh-1' }, 'approvedById'),
+        ).not.toThrow();
+      });
+
+      it('refuses a field the permission does not name', () => {
+        abilityContext.peek.mockReturnValue([boundToColumn('approvedById')]);
+
+        expect(() =>
+          service.assertCurrentActorCan(Action.update, ResourceType.Invite, { householdId: 'hh-1' }, 'status'),
+        ).toThrow(ForbiddenException);
+      });
+
+      it('still reads the conditions', () => {
+        abilityContext.peek.mockReturnValue([boundToColumn('status')]);
+
+        expect(() =>
+          service.assertCurrentActorCan(Action.update, ResourceType.Invite, { householdId: 'hh-2' }, 'status'),
+        ).toThrow(ForbiddenException);
+      });
+
+      it('passes either permission when no field is named — why a check must name the one it changes', () => {
+        abilityContext.peek.mockReturnValue([boundToColumn('approvedById')]);
+
+        expect(() =>
+          service.assertCurrentActorCan(Action.update, ResourceType.Invite, { householdId: 'hh-1' }),
+        ).not.toThrow();
+      });
+    });
+  });
+
+  describe('currentActorCan', () => {
+    const boundToHousehold = () =>
+      ability([{ action: Action.create, subject: 'Invite', conditions: { householdId: 'hh-1' } }]);
+
+    it('answers the instance question without throwing', () => {
+      abilityContext.peek.mockReturnValue([boundToHousehold()]);
+
+      expect(service.currentActorCan(Action.create, ResourceType.Invite, { householdId: 'hh-1' })).toBe(true);
+      expect(service.currentActorCan(Action.create, ResourceType.Invite, { householdId: 'hh-2' })).toBe(false);
+    });
+
+    it('requires every primed ability to allow it, and answers false for none', () => {
+      abilityContext.peek.mockReturnValue([
+        ability([{ action: Action.create, subject: 'Invite' }]),
+        boundToHousehold(),
+      ]);
+
+      expect(service.currentActorCan(Action.create, ResourceType.Invite, { householdId: 'hh-2' })).toBe(false);
+
+      abilityContext.peek.mockReturnValue([]);
+
+      expect(service.currentActorCan(Action.create, ResourceType.Invite, { householdId: 'hh-1' })).toBe(false);
+    });
+
+    // A `false` would send a caller on to its other permission, so a broken
+    // condition would change what the request does instead of refusing it.
+    it('refuses a condition the matcher cannot evaluate rather than answering false', () => {
+      abilityContext.peek.mockReturnValue([
+        ability([{ action: Action.create, subject: 'Invite', conditions: { household: { deletedAt: null } } }]),
+      ]);
+
+      expect(() =>
+        service.currentActorCan(Action.create, ResourceType.Invite, { household: { deletedAt: null } }),
+      ).toThrow(ForbiddenException);
+    });
   });
 });

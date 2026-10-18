@@ -150,6 +150,7 @@ export function createMockDatabaseService(): MockDatabaseService {
     householdMember: mockDelegate(),
     householdPlugin: mockDelegate(),
     householdRole: mockDelegate(),
+    householdSettings: mockDelegate(),
     invite: mockDelegate(),
     job: mockDelegate(),
     language: mockDelegate(),

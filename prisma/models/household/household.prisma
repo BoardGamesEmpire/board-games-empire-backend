@@ -30,6 +30,7 @@ model Household {
   members              HouseholdMember[]
   mediaShares          MediaShare[]
   ruleVariants         RuleVariant[]
+  settings             HouseholdSettings?
   webhookSubscriptions WebhookSubscription[]
   quotas               Quota[]
 

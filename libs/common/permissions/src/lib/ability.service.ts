@@ -178,28 +178,54 @@ export class AbilityService {
    * also takes in a query throws here. Every catalog grant writes its
    * traversals in the operator form, and `findShorthandRelationConditions`
    * (`@bge/database`) fails the catalog's specs on one that does not (#458).
+   *
+   * `field` names the column the action changes. A permission bound to fields
+   * matches a check naming one of them and no other, and matches EVERY check
+   * that names none, so two permissions on one action and resource type are
+   * told apart only by a check that names its field: approving an invite and
+   * revoking one (#166).
    */
   assertCurrentActorCan<TResource extends ModelResourceType>(
     action: Action,
     resourceType: TResource,
     instance: SubjectInstance<TResource>,
+    field?: string,
   ): void {
+    if (!this.currentActorCan(action, resourceType, instance, field)) {
+      throw new ForbiddenException(t('common.forbidden.action'));
+    }
+  }
+
+  /**
+   * The question {@link assertCurrentActorCan} asks, answered rather than
+   * thrown: for a service that picks between two permissions, such as an
+   * invite opened directly or one opened for approval (#166). Every primed ability
+   * must allow it, and an empty array allows nothing.
+   *
+   * A condition the matcher cannot evaluate is logged and refused with 403, as
+   * the assert refuses it, never answered `false`: a caller that took `false`
+   * as "no" would move on to its other permission, and a broken condition
+   * would quietly change what the request does instead of refusing it.
+   */
+  currentActorCan<TResource extends ModelResourceType>(
+    action: Action,
+    resourceType: TResource,
+    instance: SubjectInstance<TResource>,
+    field?: string,
+  ): boolean {
     const abilities = this.getCurrentAbilities();
 
-    let allowed: boolean;
     try {
-      allowed =
-        abilities.length > 0 && abilities.every((ability) => ability.can(action, subject(resourceType, instance)));
+      return (
+        abilities.length > 0 &&
+        abilities.every((ability) => ability.can(action, subject(resourceType, instance), field))
+      );
     } catch (error) {
       this.logger.error(
         `Failed to evaluate '${action}' on a ${resourceType} instance; treating as denied.`,
         error instanceof Error ? error.stack : String(error),
       );
 
-      throw new ForbiddenException(t('common.forbidden.action'));
-    }
-
-    if (!allowed) {
       throw new ForbiddenException(t('common.forbidden.action'));
     }
   }

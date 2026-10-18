@@ -5,3 +5,4 @@ export * from './lib/interfaces/index.js';
 export * from './lib/scope/index.js';
 export * from './lib/transformers/index.js';
 export * from './lib/types/index.js';
+export * from './lib/utils/index.js';

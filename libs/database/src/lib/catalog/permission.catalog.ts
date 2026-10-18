@@ -59,13 +59,30 @@ const attendingRoleInEvent = {
 
 // The acting user's membership row, holding `HouseholdOwner` or
 // `HouseholdAdmin`, in the household whose `members.some` it is spliced into.
-// Four grants gate on it, and one fragment keeps an edit to who counts from
-// missing a copy. Typed and module-private for the reasons
+// Several permissions gate on it, and one fragment keeps an edit to who counts
+// from missing a copy. Typed and module-private for the reasons
 // `acceptedFriendOfActingUser` gives.
 const ownerOrAdminMembershipOfActingUser = {
   userId: '{{ user.id }}',
   role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
 } satisfies Prisma.HouseholdMemberWhereInput;
+
+// A member's invite into their own household (#166): the acting user holds the
+// member role there, the household's settings let members invite in this way,
+// and the invite offers the member or guest role. Offering admin is refused, as
+// it would let a member make an admin; an owner or admin invites one directly.
+// Typed and module-private for the reasons `acceptedFriendOfActingUser` gives.
+const memberInviteUnder = (memberInvitePolicy: 'Direct' | 'NeedsApproval') =>
+  ({
+    householdId: '{{ householdId }}',
+    role: { is: { name: { in: ['HouseholdMember', 'HouseholdGuest'] } } },
+    household: {
+      is: {
+        settings: { is: { memberInvitePolicy } },
+        members: { some: { userId: '{{ user.id }}', role: { is: { role: { is: { name: 'HouseholdMember' } } } } } },
+      },
+    },
+  }) satisfies Prisma.InviteWhereInput;
 
 /**
  * The complete seeded permission catalog — the manifest of every permission
@@ -1254,9 +1271,8 @@ export const PERMISSION_CATALOG = [
   // `create:event_invite`, down to EventParticipant. The instance must carry
   // the household's members with their roles, or the role clause denies it.
   //
-  // Whether plain members may invite is a default for the household
-  // capability matrix (#168); a per-household override would be a household
-  // setting (#231).
+  // An owner or admin always invites directly, whatever the household's
+  // member invite policy.
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
@@ -1268,8 +1284,34 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Medium,
     reason: 'Invite to household',
   }),
-  // The audience that may invite is the audience that lists the invites, so
-  // the condition is `create:household_invite`'s. Without a `read` grant the
+  // A member invites under the household's own policy (#166), as two
+  // permissions the service asks about in turn: first whether the invite may
+  // open directly, then whether it may open awaiting approval. Whichever passes
+  // decides how it opens; the client never says. Under `Off` neither does.
+  // The instance carries the household's settings beside its roster, and the
+  // role the invite offers.
+  //
+  // Which household roles invite by default is #168's matrix.
+  permission({
+    action: Action.create,
+    subject: ResourceType.Invite,
+    conditions: memberInviteUnder('Direct'),
+    slug: 'create:household_invite:member-direct',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Invite to your household, when its members may invite directly',
+  }),
+  permission({
+    action: Action.create,
+    subject: ResourceType.Invite,
+    conditions: { ...memberInviteUnder('NeedsApproval'), needsApproval: true },
+    slug: 'create:household_invite:member-approval',
+    riskLevel: RiskLevel.Medium,
+    reason: "Invite to your household for an owner's or admin's approval",
+  }),
+  // The audience that may invite directly is the audience that lists the
+  // invites, so the condition is `create:household_invite`'s. A member who
+  // invites finds their own invites at `GET /invites/sent` (#751), which reads
+  // them as their inviter rather than through this. Without a `read` grant the
   // list's ceiling is empty for everyone below staff: the composer ANDs it in,
   // and an Owner would page through nothing (#162).
   //
@@ -1298,8 +1340,8 @@ export const PERMISSION_CATALOG = [
   //
   // Bound to `status`, the one column a revoke means to change, so a later
   // check for editing an invite's role or message does not pass on it. The
-  // slug alone cannot tell a revoke from another status change; an approver's
-  // grant is #166's to design.
+  // revoke route asks about `status`, so the approve permission below, bound to
+  // another column, does not pass it.
   permission({
     action: Action.update,
     subject: ResourceType.Invite,
@@ -1311,6 +1353,27 @@ export const PERMISSION_CATALOG = [
     slug: 'update:household_invite:revoke',
     riskLevel: RiskLevel.Medium,
     reason: 'Revoke an invite someone else sent to the household',
+  }),
+  // Approving opens a member's invite awaiting approval to its invitee (#166).
+  // The audience is revoke's, read off an instance for the same reason. It is
+  // a permission of its own, bound to `approvedById`, the column only an
+  // approval writes, and the approve route asks about that column: a role that
+  // may approve may not revoke on the strength of it, nor the reverse (#169).
+  //
+  // An approver may approve an invite they sent themselves, as a member
+  // promoted since: refusing would block nothing, since they could withdraw it
+  // and invite directly.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Invite,
+    fields: ['approvedById'],
+    conditions: {
+      householdId: '{{ householdId }}',
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'update:household_invite:approve',
+    riskLevel: RiskLevel.Medium,
+    reason: "Approve a member's invite to the household",
   }),
 
   // No grant here is a JOIN grant, and joining must not be gated on

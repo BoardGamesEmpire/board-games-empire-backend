@@ -6,7 +6,7 @@ import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@ne
 import { Http } from '@status/codes';
 import { from } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { InviteTokenDto } from '../dto';
+import { InviteTokenDto, ListSentInvitesQueryDto } from '../dto';
 import { PartyInviteService, type HouseholdInviteAcceptance } from './party-invite.service';
 
 /** The third case `UnscopedList` documents: bound by a rule of its own, with no ceiling to compose. */
@@ -14,6 +14,13 @@ const RECEIVED_INVITES_SCOPE = Unscoped(
   "bound to the acting user in its own query by the invites lib's party rule (receivedInviteWhere); an invitee " +
     'holds no grant on Invite, so no ability covers these rows, and every actor but a session user is refused ' +
     'before the read, so no delegated ceiling is dropped',
+);
+
+/** As the inbox, bound by the other party: the inviter, whom the query names by `inviterId`. */
+const SENT_INVITES_SCOPE = Unscoped(
+  'bound to the acting user in its own query as the inviter (inviterId); an inviter holds no grant on Invite, ' +
+    'so no ability covers these rows, and every actor but a session user is refused before the read, so no ' +
+    'delegated ceiling is dropped',
 );
 
 const ACCEPTED_DESCRIPTION =
@@ -43,9 +50,9 @@ function declinedResponse(invite: InvitePartyView) {
 
 // The actions a party takes on an invite of theirs, beside the household's own
 // routes under `/households/:householdId/invites`, as the invites lib splits a
-// party's primitives from a context authority's: the invitee accepts or
-// declines, and the inviter withdraws. Withdraw is not revoke, which is the
-// household's route for an invite someone else sent (#164).
+// party's primitives from a context authority's: the invitee lists, accepts or
+// declines, and the inviter lists (#751) and withdraws. Withdraw is not revoke,
+// which is the household's route for an invite someone else sent (#164).
 //
 // No API key: joining a household, or turning down or taking back an invite,
 // is the person's own act (#276), so the service refuses every actor but a
@@ -64,10 +71,11 @@ export class PartyInviteController {
     summary: 'List the household invites you have received',
     description:
       'The invites still open to you: sent to your user id, or to your email address once it is verified; ' +
-      '`Pending`, or `AwaitingApproval` until an approver opens it to you, and not expired; into a household that ' +
-      'exists and that you are not already in. Newest first. Each carries the household that sent it, the role it ' +
-      'offers, the inviter, and the message. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` ' +
-      'envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
+      '`Pending` and not expired; into a household that exists and that you are not already in. A member’s ' +
+      'invite that waits for an owner or admin to approve it is not listed until it is approved. Newest first. ' +
+      'Each carries the household that sent it, the role it offers, the inviter, and the message. Paginated: ' +
+      '`?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and ' +
+      '`hasMore`. See #230.',
   })
   @ApiPaginatedEnvelope('invites')
   @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
@@ -76,6 +84,27 @@ export class PartyInviteController {
   listReceived(@Query() query: DefaultPaginationQueryDto) {
     return from(this.partyInvites.listReceived(query)).pipe(
       map((page) => paginated('invites', page, query, RECEIVED_INVITES_SCOPE)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'List the household invites you have sent',
+    description:
+      'By default, the invites still open, `Pending` or `AwaitingApproval`, and those that expired, so you can ' +
+      'send another. `?status=` picks any status, judged as it stands now, so an outstanding invite past its ' +
+      'expiry is `Expired`. Into a household you have left or been removed from, only the invites you can still ' +
+      'withdraw are listed, whatever the filter; none into a household that was deleted. Newest first. Each ' +
+      'carries the household it is into, the role it offers, the address and the message you wrote. ' +
+      'Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope carrying `total`, ' +
+      '`totalPages` and `hasMore`. See #230.',
+  })
+  @ApiPaginatedEnvelope('invites')
+  @ApiResponse({ status: Http.Unauthorized, description: 'Authentication required' })
+  @ApiResponse({ status: Http.Forbidden, description: 'Not a signed-in user: API keys cannot read your invites' })
+  @Get('sent')
+  listSent(@Query() query: ListSentInvitesQueryDto) {
+    return from(this.partyInvites.listSent(query)).pipe(
+      map((page) => paginated('invites', page, query, SENT_INVITES_SCOPE)),
     );
   }
 

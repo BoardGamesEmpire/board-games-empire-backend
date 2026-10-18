@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { MemberInvitePolicy, Visibility } from '@bge/database';
 import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -48,5 +48,35 @@ describe('UpdateHouseholdDto', () => {
 
     expect(published).toEqual(expect.arrayContaining([':name', ':visibility', ':language']));
     expect(published).not.toContain(':clientRequestId');
+  });
+
+  describe('settings (#166)', () => {
+    it.each([MemberInvitePolicy.Off, MemberInvitePolicy.NeedsApproval, MemberInvitePolicy.Direct])(
+      'accepts the member invite policy %s',
+      async (memberInvitePolicy) => {
+        await expect(propertiesWithErrors({ settings: { memberInvitePolicy } })).resolves.toEqual([]);
+      },
+    );
+
+    it('refuses a policy that does not exist, and a setting it does not know', async () => {
+      await expect(propertiesWithErrors({ settings: { memberInvitePolicy: 'Sometimes' } })).resolves.toEqual([
+        'settings',
+      ]);
+      await expect(propertiesWithErrors({ settings: { joinPolicy: 'Open' } })).resolves.toEqual(['settings']);
+    });
+
+    it('refuses a null policy, since no setting can be unset', async () => {
+      // The column has no null, so one let through would fail at the write
+      // instead of answering 400.
+      await expect(propertiesWithErrors({ settings: { memberInvitePolicy: null } })).resolves.toEqual(['settings']);
+    });
+
+    it('accepts settings that leave the policy out', async () => {
+      await expect(propertiesWithErrors({ name: 'Renamed', settings: {} })).resolves.toEqual([]);
+    });
+
+    it('refuses settings that are not an object', async () => {
+      await expect(propertiesWithErrors({ settings: 'Direct' })).resolves.toEqual(['settings']);
+    });
   });
 });

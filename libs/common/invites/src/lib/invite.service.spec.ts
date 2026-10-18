@@ -1348,6 +1348,28 @@ describe('InviteService', () => {
       expectNoToken(event);
     });
 
+    it('restarts the invitee window when given one, so the wait for an approver does not shorten it', async () => {
+      tx.invite.findFirst.mockResolvedValue(rowWithToken({ status: InviteStatus.AwaitingApproval }) as never);
+      tx.invite.updateManyAndReturn.mockResolvedValue([{ ...rowWithToken(), status: InviteStatus.Pending }] as never);
+      const expiresAt = new Date(Date.now() + 60_000);
+
+      await service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope, expiresAt });
+
+      expect(tx.invite.updateManyAndReturn).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ status: InviteStatus.Pending, expiresAt }) }),
+      );
+    });
+
+    it('400s a window that has already closed, and reads nothing', async () => {
+      await expect(
+        service.approveWithin(asTx(tx), { inviteId: 'inv-1', approverId: 'user-admin', scope, expiresAt: PAST }),
+      ).rejects.toMatchObject({
+        status: 400,
+        response: expect.objectContaining({ key: 'errors.invite.expires_in_past' }),
+      });
+      expect(tx.invite.findFirst).not.toHaveBeenCalled();
+    });
+
     it.each([InviteStatus.Pending, ...TERMINAL])('409s an invite that is %s, not awaiting approval', async (status) => {
       tx.invite.findFirst.mockResolvedValue(rowWithToken({ status }) as never);
 

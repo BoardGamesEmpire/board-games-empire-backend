@@ -2,6 +2,7 @@ import { Action, DatabaseService, HUMAN_USER_WHERE, InviteType, Prisma, Resource
 import { t } from '@bge/i18n';
 import {
   CONTEXT_INVITE_SELECT,
+  DEFAULT_INVITE_TTL_MS,
   effectiveInviteStatusWhere,
   gateInvitee,
   INVITE_SCALARS_PARTY_ONLY,
@@ -10,14 +11,15 @@ import {
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
   type InviteContextView,
+  type InviteDomainEvent,
   type InvitePartyView,
   type StoredInvitee,
 } from '@bge/invites';
 import { AbilityService, resolveActingUserIdOrNull, ScopeComposer } from '@bge/permissions';
-import { QuotaExceededException, QuotaService } from '@bge/quota';
+import { QuotaExceededException, QuotaService, type QuotaCheckContext, type QuotaSoftOverageEvent } from '@bge/quota';
 import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto } from '../dto';
+import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
 
 /**
@@ -33,6 +35,20 @@ const ROSTER_ROLE_SELECT = {
 } as const satisfies Prisma.HouseholdMemberSelect;
 
 type RosterRow = Prisma.HouseholdMemberGetPayload<{ select: typeof ROSTER_ROLE_SELECT }>;
+
+/**
+ * The household setting a member's invite is asked about (#166): whether
+ * members may invite, and whether their invite waits for approval.
+ */
+const INVITE_SETTINGS_SELECT = { memberInvitePolicy: true } as const satisfies Prisma.HouseholdSettingsSelect;
+
+/**
+ * The column each existing-invite check names. A revoke and an approve share
+ * an action and a resource type, and their permissions are told apart by these
+ * alone (#166): a check that named none would pass either permission.
+ */
+const REVOKE_FIELD = Prisma.InviteScalarFieldEnum.status;
+const APPROVE_FIELD = Prisma.InviteScalarFieldEnum.approvedById;
 
 /**
  * The columns the party shape adds to the context shape, read only for rows
@@ -59,9 +75,10 @@ type InviteeRequest = { readonly inviteeId: string } | { readonly inviteeEmail: 
 type ResolvedInvitee = StoredInvitee & { readonly inviteeName: string | null };
 
 /**
- * Creates, lists and revokes a household's invites (#162, #164). The
- * lifecycle itself is `@bge/invites`'s; this is the household's side of it:
- * who may invite or revoke, whom an address names, and who sees which rows.
+ * Creates, lists, revokes and approves a household's invites (#162, #164,
+ * #166). The lifecycle itself is `@bge/invites`'s; this is the household's
+ * side of it: who may invite, revoke or approve, whether an invite waits for
+ * approval, whom an address names, and who sees which rows.
  */
 @Injectable()
 export class HouseholdInviteService {
@@ -88,7 +105,9 @@ export class HouseholdInviteService {
    *    `Pending` in a deleted household.
    * 3. The question is asked again of the roster read under the lock, and that
    *    answer decides: a role change can land between the first read and the
-   *    lock, and none can land after it.
+   *    lock, and none can land after it. It also decides whether the invite
+   *    waits for approval (#166), from the household's member invite policy
+   *    read beside the roster ({@link assertMayInvite}).
    * 4. The invitee is resolved: an id must be a person's, and an address is
    *    stored as it is, bound to no account. The inviter is refused, and so is
    *    a current member named by id.
@@ -98,9 +117,11 @@ export class HouseholdInviteService {
    *    store the invite withheld, and it answers like any other.
    * 6. The invite takes one of the inviter's and the household's invites for
    *    the day (#279), under the cap's advisory lock, so two invites at once
-   *    cannot both take the last one. A refused invite never gets here and
-   *    takes none; a withheld one takes one like any other. Past a hard cap
-   *    the answer is 402.
+   *    cannot both take the last one. One that waits for approval takes only
+   *    the inviter's: the household's is taken when it is approved, so a
+   *    member's proposals cannot spend the household's day. A refused invite
+   *    never gets here and takes none; a withheld one takes one like any
+   *    other. Past a hard cap the answer is 402.
    * 7. The lib inserts. A second outstanding invite to the same id, or to the
    *    same address, is the database's 409, through the lib.
    *
@@ -114,10 +135,10 @@ export class HouseholdInviteService {
     const role = dto.role ?? SystemRole.HouseholdMember;
 
     const { invite, event, expired, softOverages } = await this.db.$transaction(async (tx) => {
-      await this.assertInviteAuthority(tx, householdId, Action.create);
+      await this.assertMayInvite(tx, householdId, role);
       await lockExistingHousehold(tx, householdId);
 
-      const members = await this.assertInviteAuthority(tx, householdId, Action.create);
+      const { members, needsApproval } = await this.assertMayInvite(tx, householdId, role);
 
       const invitee = await this.resolveInvitee(tx, request, inviterId, dto.inviteeName ?? null);
 
@@ -134,23 +155,10 @@ export class HouseholdInviteService {
 
       const { withheld } = await gateInvitee(tx, InviteType.Household, inviterId, invitee);
 
-      const decision = await this.quotas.consume(
-        'household_invite_daily_count',
-        1n,
-        { userId: inviterId, householdId },
+      const softOverages = await this.takeDailyInvite(
         tx,
+        needsApproval ? { userId: inviterId } : { userId: inviterId, householdId },
       );
-
-      if (!decision.allowed) {
-        throw new QuotaExceededException(
-          // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
-          'household_invite_daily_count',
-          decision.scope!,
-          decision.limit!,
-          decision.currentUsage!,
-          1n,
-        );
-      }
 
       const created = await this.invites.createWithin(tx, {
         type: InviteType.Household,
@@ -160,9 +168,10 @@ export class HouseholdInviteService {
         roleId,
         message: dto.message ?? null,
         withheld,
+        needsApproval,
       });
 
-      return { ...created, softOverages: decision.softOverages };
+      return { ...created, softOverages };
     });
 
     this.invites.emit([...expired, event]);
@@ -192,22 +201,123 @@ export class HouseholdInviteService {
    *    once expired, 409 once settled.
    *
    * The revoked invite is announced after commit. The row stays, so it still
-   * counts against the day's invite quota (#279).
+   * counts against the day's invite quotas it was counted against (#279).
    */
   async revokeInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
     const revokerId = this.abilityService.getActingUserId();
 
-    const { invite, event } = await this.db.$transaction(async (tx) => {
-      await this.assertInviteAuthority(tx, householdId, Action.update, inviteId);
-      await lockExistingHousehold(tx, householdId);
-      await this.assertInviteAuthority(tx, householdId, Action.update, inviteId);
+    return this.transitionAsAuthority(householdId, inviteId, REVOKE_FIELD, (tx, scope) =>
+      this.invites.revokeWithin(tx, { inviteId, revokerId, scope }),
+    );
+  }
 
-      return this.invites.revokeWithin(tx, { inviteId, revokerId, scope: { householdId } });
+  /**
+   * Opens a member's invite awaiting approval to its invitee (#166), in the
+   * order a revoke takes:
+   *
+   * 1. The acting user must hold `update` on this invite's `approvedById` in
+   *    THIS household, asked of the instance before the lock. Naming the
+   *    column keeps the revoke permission, bound to `status`, from passing for
+   *    it.
+   * 2. The household row is share-locked, so no demotion lands between the
+   *    answer below and the approval.
+   * 3. The question is asked again of the roster read under the lock, and that
+   *    answer decides.
+   * 4. The invite takes one of the household's invites for the day (#279),
+   *    the one it did not take when it was sent: 402 past a hard cap. The
+   *    inviter's was taken then. A full cap answers ahead of the invite's own
+   *    state below.
+   * 5. The lib approves, bound to this household: 404 for an id from another
+   *    one, 410 once expired, 409 unless it is awaiting approval.
+   *
+   * The invitee gets the full window a direct invite opens with, counted from
+   * the approval, so the time the invite waited for an approver does not come
+   * out of the invitee's time to answer it.
+   *
+   * The household's member invite policy is not read: a change to it applies
+   * to the invites sent after it, so an invite sent for approval stays
+   * approvable after a switch to `Direct` or to `Off`. An approver may approve
+   * an invite they sent themselves, as a member promoted since.
+   *
+   * The approved invite is announced after commit, and any soft cap it went
+   * past is warned of after it.
+   */
+  async approveInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
+    const approverId = this.abilityService.getActingUserId();
+
+    return this.transitionAsAuthority(householdId, inviteId, APPROVE_FIELD, async (tx, scope) => {
+      const softOverages = await this.takeDailyInvite(tx, { householdId });
+      const approval = await this.invites.approveWithin(tx, {
+        inviteId,
+        approverId,
+        scope,
+        expiresAt: new Date(Date.now() + DEFAULT_INVITE_TTL_MS),
+      });
+
+      return { ...approval, softOverages };
+    });
+  }
+
+  /**
+   * One invite moved by the household's authority over it, as a revoke and an
+   * approve move one, in one transaction: asked of the instance about the
+   * column the transition changes, the household row share-locked, asked again
+   * of the roster read under the lock, then the lib's transition, bound to this
+   * household. Its domain event is announced after commit, then any soft cap
+   * the transition went past.
+   */
+  private async transitionAsAuthority(
+    householdId: string,
+    inviteId: string,
+    field: Prisma.InviteScalarFieldEnum,
+    transition: (
+      tx: Prisma.TransactionClient,
+      scope: { readonly householdId: string },
+    ) => Promise<{
+      readonly invite: InviteContextView;
+      readonly event: InviteDomainEvent;
+      readonly softOverages?: readonly QuotaSoftOverageEvent[];
+    }>,
+  ): Promise<InviteContextView> {
+    const { invite, event, softOverages } = await this.db.$transaction(async (tx) => {
+      await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
+      await lockExistingHousehold(tx, householdId);
+      await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
+
+      return transition(tx, { householdId });
     });
 
     this.invites.emit([event]);
+    this.quotas.emitSoftOverages(softOverages ?? []);
 
     return invite;
+  }
+
+  /**
+   * Takes one invite from the day's allowance of each scope `charged` names
+   * (#279), on the caller's transaction and under the cap's advisory lock, so
+   * the write that follows in it cannot overshoot a hard cap: 402 past one.
+   * Hands back the soft caps it went past, for the caller to warn of after
+   * commit.
+   */
+  private async takeDailyInvite(
+    tx: Prisma.TransactionClient,
+    charged: QuotaCheckContext,
+  ): Promise<readonly QuotaSoftOverageEvent[]> {
+    const decision = await this.quotas.consume('household_invite_daily_count', 1n, charged, tx);
+
+    if (!decision.allowed) {
+      throw new QuotaExceededException(
+        // eslint-disable-next-line no-restricted-syntax -- quota metric key, not user copy; QuotaExceededException localizes its message in @bge/quota
+        'household_invite_daily_count',
+        decision.scope!,
+        decision.limit!,
+        decision.currentUsage!,
+        1n,
+      );
+    }
+
+    return decision.softOverages;
   }
 
   /**
@@ -302,28 +412,80 @@ export class HouseholdInviteService {
   }
 
   /**
-   * Asks whether the caller may `action` an invite into this household, of the
-   * household's roster as `client` reads it, and hands the roster back.
+   * Whether the acting user may invite into this household, offering `role`,
+   * as `client` reads the household's roster and member invite policy (#166)
+   * in one query, and if so how the invite opens: directly, or awaiting
+   * approval. Refuses with 403 when they may do neither. A missing household
+   * reads as an empty roster with no policy, and the lock answers it 404.
+   *
+   * Two questions, in order, since the catalog holds the answer: whether they
+   * may open the invite directly, as an owner or admin always may and a member
+   * may under `Direct`; and if not, whether they may open it awaiting approval,
+   * as a member may under `NeedsApproval`. The client never says which. A
+   * household with no settings row has no policy for a member's permissions to
+   * match, so a member is refused there.
+   *
+   * The household lock does not order a policy change against this read, and
+   * need not: a change applies to the invites sent after it, and one that
+   * commits after this read finds this invite already sent.
+   */
+  private async assertMayInvite(
+    client: Prisma.TransactionClient,
+    householdId: string,
+    role: AssignableHouseholdRole,
+  ): Promise<{ readonly members: RosterRow[]; readonly needsApproval: boolean }> {
+    const household = await client.household.findUnique({
+      where: { id: householdId },
+      select: { settings: { select: INVITE_SETTINGS_SELECT }, members: { select: ROSTER_ROLE_SELECT } },
+    });
+    const settings = household?.settings ?? null;
+    const members = household?.members ?? [];
+
+    const invite = (needsApproval: boolean) => ({
+      householdId,
+      needsApproval,
+      role: { name: role },
+      household: { settings, members },
+    });
+
+    if (this.abilityService.currentActorCan(Action.create, ResourceType.Invite, invite(false))) {
+      return { members, needsApproval: false };
+    }
+
+    this.abilityService.assertCurrentActorCan(Action.create, ResourceType.Invite, invite(true));
+
+    return { members, needsApproval: true };
+  }
+
+  /**
+   * Asks whether the acting user may `action` an invite into this household,
+   * of the household's roster as `client` reads it.
    *
    * An action on an existing invite names it by `inviteId`. An API key scoped
    * to one invite holds its grant only on that id, so an instance without one
-   * would refuse the key even on the invite it was scoped to.
+   * would refuse the key even on the invite it was scoped to. It also names
+   * the column it changes (`field`), which is all that tells the revoke
+   * permission from the approve permission.
    */
   private async assertInviteAuthority(
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
-    action: typeof Action.create | typeof Action.read | typeof Action.update,
-    inviteId?: string,
-  ): Promise<RosterRow[]> {
-    const members = await client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
+    action: typeof Action.read | typeof Action.update,
+    existing?: { readonly inviteId: string; readonly field: Prisma.InviteScalarFieldEnum },
+  ): Promise<void> {
+    const members = await this.rosterOf(client, householdId);
 
-    this.abilityService.assertCurrentActorCan(action, ResourceType.Invite, {
-      ...(inviteId === undefined ? {} : { id: inviteId }),
-      householdId,
-      household: { members },
-    });
+    this.abilityService.assertCurrentActorCan(
+      action,
+      ResourceType.Invite,
+      { ...(existing === undefined ? {} : { id: existing.inviteId }), householdId, household: { members } },
+      existing?.field,
+    );
+  }
 
-    return members;
+  /** Each member's user id and household role, as `client` reads them. */
+  private rosterOf(client: DatabaseService | Prisma.TransactionClient, householdId: string): Promise<RosterRow[]> {
+    return client.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
   }
 
   /**

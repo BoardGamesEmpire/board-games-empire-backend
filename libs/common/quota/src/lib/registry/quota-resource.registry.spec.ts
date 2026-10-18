@@ -135,13 +135,17 @@ describe('QuotaResourceRegistry', () => {
         expect(usage).toBe(4n);
       });
 
-      it('counts the invites into a household, whoever sent them', async () => {
+      it('counts the invites a household made: sent directly, or approved, in the window', async () => {
         db.invite.count.mockResolvedValue(7);
 
         const usage = await registry.requireUsage('household_invite_daily_count')(QuotaScope.Household, 'hh_1');
 
         expect(db.invite.count).toHaveBeenCalledWith({
-          where: { type: InviteType.Household, householdId: 'hh_1', createdAt: { gt: DAY_BEFORE } },
+          where: {
+            type: InviteType.Household,
+            householdId: 'hh_1',
+            OR: [{ needsApproval: false, createdAt: { gt: DAY_BEFORE } }, { approvedAt: { gt: DAY_BEFORE } }],
+          },
         });
         expect(usage).toBe(7n);
       });

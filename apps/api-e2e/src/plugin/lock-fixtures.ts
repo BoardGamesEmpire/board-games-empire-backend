@@ -194,7 +194,7 @@ export async function arrangeHouseholdFor(prisma: PrismaClient): Promise<{ house
     select: { id: true },
   });
   const household = await prisma.household.create({
-    data: { name: `plugin-lock-fixture-${handle}`, createdById: user.id },
+    data: { name: `plugin-lock-fixture-${handle}`, createdById: user.id, settings: { create: {} } },
     select: { id: true },
   });
 

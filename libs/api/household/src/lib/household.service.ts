@@ -20,7 +20,7 @@ import {
   resolveScopeSubjectId,
   ScopeComposer,
 } from '@bge/permissions';
-import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
+import { PaginatedRows, PaginationQueryDto, pickDefined } from '@bge/shared';
 import {
   BadRequestException,
   ConflictException,
@@ -34,7 +34,7 @@ import assert from 'node:assert';
 import { HOUSEHOLD_RESTORE_PERMISSION_SLUG, HOUSEHOLD_RESTORE_WINDOW_MS } from './constants/household.constants';
 import { CreateHouseholdDto, UpdateHouseholdDto } from './dto';
 import { assertHouseholdExists, householdExists } from './household-access.helpers';
-import { MEMBER_SELECT } from './read-shapes';
+import { HOUSEHOLD_SETTINGS_SELECT, MEMBER_SELECT } from './read-shapes';
 
 /**
  * Relations returned with every household in the list read. Extracted so the
@@ -50,6 +50,10 @@ const HOUSEHOLD_LIST_INCLUDE = {
   },
 
   members: { select: MEMBER_SELECT },
+
+  // As the detail carries them, so a client deciding whether to offer a member
+  // the invite button need not read each household (#166).
+  settings: { select: HOUSEHOLD_SETTINGS_SELECT },
 } satisfies Prisma.HouseholdInclude;
 
 export type HouseholdWithRelations = Prisma.HouseholdGetPayload<{ include: typeof HOUSEHOLD_LIST_INCLUDE }>;
@@ -147,6 +151,10 @@ export class HouseholdService {
             name: true,
           },
         },
+
+        // To every reader of the household (#166): a member's client reads the
+        // member invite policy here to know whether to offer an invite.
+        settings: { select: HOUSEHOLD_SETTINGS_SELECT },
 
         members: {
           select: {
@@ -334,6 +342,11 @@ export class HouseholdService {
             },
           },
 
+          // Every household has its settings row, with each setting at its
+          // default (#166). In the same statement, so no household is ever
+          // without one.
+          settings: { create: {} },
+
           members: {
             create: {
               userId,
@@ -456,12 +469,27 @@ export class HouseholdService {
     return existing;
   }
 
+  /**
+   * Edits the household and its settings (#166) in one scoped update, under
+   * `update:household`: the owners and admins of the household.
+   *
+   * The settings are upserted rather than updated. Every household is created
+   * with its row, and the migration that added them filled one in for the
+   * rest, so the create half runs only for a row a write outside the api left
+   * out. A nested update would answer that row's absence as the scoped write's
+   * 403 to an owner, naming nothing that is wrong.
+   */
   async updateHousehold(id: string, updateHouseholdDto: UpdateHouseholdDto) {
-    if (Object.keys(updateHouseholdDto).length === 0) {
+    const { language, settings: rawSettings, ...rawFields } = updateHouseholdDto;
+    // The household's own fields and its settings judged alike: a key sent as
+    // `undefined` names nothing, in either half.
+    const fields = pickDefined(rawFields);
+    const settings = pickDefined(rawSettings ?? {});
+
+    if (Object.keys(fields).length === 0 && language === undefined && Object.keys(settings).length === 0) {
       throw new BadRequestException(t('common.at_least_one_field'));
     }
 
-    const { language, ...rest } = updateHouseholdDto;
     const languageTagId = await this.resolveLanguageTagId(language);
 
     try {
@@ -478,7 +506,7 @@ export class HouseholdService {
           AND: this.abilityService.getCurrentResourceConditions(ResourceType.Household, Action.update),
         },
         data: {
-          ...rest,
+          ...fields,
           languageTag: languageTagId
             ? {
                 connect: {
@@ -486,7 +514,11 @@ export class HouseholdService {
                 },
               }
             : undefined,
+          ...(Object.keys(settings).length === 0
+            ? {}
+            : { settings: { upsert: { create: settings, update: settings } } }),
         },
+        include: { settings: { select: HOUSEHOLD_SETTINGS_SELECT } },
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {

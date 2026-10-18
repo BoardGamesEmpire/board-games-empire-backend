@@ -1,4 +1,4 @@
-import { FriendshipStatus, InviteStatus, QuotaScope, SystemRole } from '@bge/database';
+import { FriendshipStatus, InviteStatus, MemberInvitePolicy, QuotaScope, SystemRole } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { createHash, randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -11,9 +11,12 @@ import { inviteEnvelope } from './household-invite-wire';
 const RESOURCE = 'household_invite_daily_count';
 
 /**
- * How many household invites a day (#279): a quota resource counting the
- * invites created in the last 24 hours, by the inviter at `User` scope and into
- * the household at `Household` scope. Past a hard cap the create answers 402.
+ * How many household invites a day (#279): a quota resource counting, over
+ * the last 24 hours, the invites an inviter sent at `User` scope and the
+ * invites a household made at `Household` scope. Past a hard cap the create
+ * answers 402. A member's invite that waits for approval (#166) is the
+ * household's from its approval, so it takes the household's slot then, and
+ * the approval answers 402 past the cap.
  *
  * Every invite counts whatever became of it, so withdrawing or revoking one
  * frees no slot, and a withheld one (#278) counts like any other. No row means no cap.
@@ -118,6 +121,70 @@ describe('household invite cap', () => {
     const refused = await createInvite(owner, household.id, { inviteeEmail: address() }).expect(402);
 
     expect(refused.body).toMatchObject({ scope: QuotaScope.Household, limit: '2', currentUsage: '2' });
+  });
+
+  describe("a member's invite that waits for approval (#166)", () => {
+    const approve = (actor: AuthenticatedActor, householdId: string, inviteId: string) =>
+      request(baseUrl)
+        .post(`${invitesPath(householdId)}/${inviteId}/approve`)
+        .set(actor.headers);
+
+    const status = async (id: string) =>
+      (await db.client.invite.findUniqueOrThrow({ where: { id }, select: { status: true } })).status;
+
+    const withMember = async () => {
+      const [owner, member] = await Promise.all([actors.user(), actors.user()]);
+      const { household } = await actors.householdWithMembers({
+        owner,
+        members: [{ actor: member, role: SystemRole.HouseholdMember }],
+        memberInvitePolicy: MemberInvitePolicy.NeedsApproval,
+      });
+
+      return { owner, member, household };
+    };
+
+    it("takes none of the household's day until it is approved, and is not refused by a full one", async () => {
+      const { owner, member, household } = await withMember();
+      await cap(QuotaScope.Household, household.id, 1);
+
+      const proposed = await invite(member, household.id);
+      expect(proposed.status).toBe(InviteStatus.AwaitingApproval);
+      await invite(owner, household.id);
+
+      const another = await invite(member, household.id);
+      expect(another.status).toBe(InviteStatus.AwaitingApproval);
+      await createInvite(owner, household.id, { inviteeEmail: address() }).expect(402);
+    });
+
+    it("still takes one of the member's own day", async () => {
+      const { member, household } = await withMember();
+      await cap(QuotaScope.User, member.user.id, 1);
+
+      await invite(member, household.id);
+
+      const refused = await createInvite(member, household.id, { inviteeEmail: address() }).expect(402);
+      expect(refused.body).toMatchObject({ scope: QuotaScope.User, limit: '1', currentUsage: '1' });
+    });
+
+    it("takes the household's slot when approved, and refuses an approval past the cap with 402", async () => {
+      const { owner, member, household } = await withMember();
+      await cap(QuotaScope.Household, household.id, 1);
+      const first = await invite(member, household.id);
+      const second = await invite(member, household.id);
+
+      await approve(owner, household.id, first.id).expect(200);
+      const refused = await approve(owner, household.id, second.id).expect(402);
+
+      expect(refused.body).toMatchObject({
+        resource: RESOURCE,
+        scope: QuotaScope.Household,
+        limit: '1',
+        currentUsage: '1',
+        attemptedAmount: '1',
+      });
+      expect(await status(second.id)).toBe(InviteStatus.AwaitingApproval);
+      await createInvite(owner, household.id, { inviteeEmail: address() }).expect(402);
+    });
   });
 
   it('frees no slot when an invite is withdrawn or revoked', async () => {

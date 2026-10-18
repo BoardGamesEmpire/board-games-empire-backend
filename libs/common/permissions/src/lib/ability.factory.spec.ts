@@ -1,6 +1,7 @@
 import type { Permission, PermissionSeedDefinition, PermissionSlug, RoleScope } from '@bge/database';
 import {
   Action,
+  MemberInvitePolicy,
   PERMISSION_CATALOG,
   PermissionOwner,
   RENDER_CONTEXT_VARIABLES,
@@ -1276,18 +1277,24 @@ describe('AbilityFactory', () => {
       },
     );
 
-    it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
-      'refuses a %s both, even on its own row in its own household',
-      (roleName) => {
-        const ability = holding(roleName);
-        const own = inviteInto('hh-1', [{ userId: 'user-1', role: roleName }]);
+    it('refuses a HouseholdGuest both, even on its own row in its own household', () => {
+      const ability = holding(SystemRole.HouseholdGuest);
+      const own = inviteInto('hh-1', [{ userId: 'user-1', role: SystemRole.HouseholdGuest }]);
 
-        expect(ability.can(Action.create, ResourceType.Invite)).toBe(false);
-        expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
-        expect(ability.can(Action.create, own)).toBe(false);
-        expect(ability.can(Action.read, own)).toBe(false);
-      },
-    );
+      expect(ability.can(Action.create, ResourceType.Invite)).toBe(false);
+      expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+      expect(ability.can(Action.create, own)).toBe(false);
+      expect(ability.can(Action.read, own)).toBe(false);
+    });
+
+    it("refuses a HouseholdMember the household's invites, and an invite that names no invite policy", () => {
+      const ability = holding(SystemRole.HouseholdMember);
+      const own = inviteInto('hh-1', [{ userId: 'user-1', role: SystemRole.HouseholdMember }]);
+
+      expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+      expect(ability.can(Action.read, own)).toBe(false);
+      expect(ability.can(Action.create, own)).toBe(false);
+    });
 
     it("refuses an owner's row that belongs to another user", () => {
       const ability = holding(SystemRole.HouseholdAdmin);
@@ -1306,6 +1313,137 @@ describe('AbilityFactory', () => {
       expect(ability.can(Action.create, ResourceType.Invite)).toBe(true);
       expect(ability.can(Action.create, inviteInto('hh-1', []))).toBe(false);
       expect(ability.can(Action.read, ResourceType.Invite)).toBe(false);
+    });
+  });
+
+  describe('member invites and their approval (#166)', () => {
+    // The household pass renders each role for `hh-1`; the invite routes ask
+    // about an instance carrying the roster, the household's settings, the
+    // role the invite offers, and whether it opens awaiting approval.
+    const holding = (roleName: SystemRole, slugs: readonly PermissionSlug[] = ROLE_PERMISSION_CATALOG[roleName]) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          householdMember: [{ householdId: 'hh-1', role: makeRole(roleName, [...slugs].map(catalogPermission)) }],
+        }),
+      );
+
+    const invite = (
+      roleName: SystemRole,
+      {
+        policy,
+        needsApproval,
+        offers = SystemRole.HouseholdMember,
+        householdId = 'hh-1',
+      }: {
+        policy: MemberInvitePolicy;
+        needsApproval: boolean;
+        offers?: SystemRole;
+        householdId?: string;
+      },
+    ) =>
+      subject(ResourceType.Invite, {
+        householdId,
+        needsApproval,
+        role: { name: offers },
+        household: {
+          settings: { memberInvitePolicy: policy },
+          members: [{ userId: 'user-1', role: { role: { name: roleName } } }],
+        },
+      });
+
+    /** How a member's invite opens under a policy: what the service asks, in its order. */
+    const opensAs = (roleName: SystemRole, policy: MemberInvitePolicy, offers?: SystemRole) => {
+      const ability = holding(roleName);
+
+      if (ability.can(Action.create, invite(roleName, { policy, needsApproval: false, offers }))) {
+        return 'direct';
+      }
+
+      return ability.can(Action.create, invite(roleName, { policy, needsApproval: true, offers }))
+        ? 'for approval'
+        : 'refused';
+    };
+
+    it.each([
+      [MemberInvitePolicy.Direct, 'direct'],
+      [MemberInvitePolicy.NeedsApproval, 'for approval'],
+      [MemberInvitePolicy.Off, 'refused'],
+    ] as const)("opens a HouseholdMember's invite under %s as %s", (policy, outcome) => {
+      expect(opensAs(SystemRole.HouseholdMember, policy)).toBe(outcome);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "opens a %s's invite directly whatever the policy",
+      (roleName) => {
+        for (const policy of Object.values(MemberInvitePolicy)) {
+          expect(opensAs(roleName, policy)).toBe('direct');
+          expect(opensAs(roleName, policy, SystemRole.HouseholdAdmin)).toBe('direct');
+        }
+      },
+    );
+
+    it('refuses a HouseholdGuest under every policy', () => {
+      for (const policy of Object.values(MemberInvitePolicy)) {
+        expect(opensAs(SystemRole.HouseholdGuest, policy)).toBe('refused');
+      }
+    });
+
+    it('lets a HouseholdMember offer the member or guest role, and never admin', () => {
+      for (const policy of [MemberInvitePolicy.Direct, MemberInvitePolicy.NeedsApproval]) {
+        expect(opensAs(SystemRole.HouseholdMember, policy, SystemRole.HouseholdGuest)).not.toBe('refused');
+        expect(opensAs(SystemRole.HouseholdMember, policy, SystemRole.HouseholdAdmin)).toBe('refused');
+        expect(opensAs(SystemRole.HouseholdMember, policy, SystemRole.HouseholdOwner)).toBe('refused');
+      }
+    });
+
+    it("refuses a HouseholdMember's invite into another household, whatever its policy", () => {
+      const ability = holding(SystemRole.HouseholdMember);
+
+      for (const needsApproval of [false, true]) {
+        const elsewhere = invite(SystemRole.HouseholdMember, {
+          policy: MemberInvitePolicy.Direct,
+          needsApproval,
+          householdId: 'hh-2',
+        });
+        expect(ability.can(Action.create, elsewhere)).toBe(false);
+      }
+    });
+
+    describe('approving and revoking', () => {
+      const awaiting = (roleName: SystemRole) =>
+        subject(ResourceType.Invite, {
+          id: 'invite-1',
+          householdId: 'hh-1',
+          household: { members: [{ userId: 'user-1', role: { role: { name: roleName } } }] },
+        });
+
+      it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])('lets a %s do both', (roleName) => {
+        const ability = holding(roleName);
+
+        expect(ability.can(Action.update, awaiting(roleName), 'approvedById')).toBe(true);
+        expect(ability.can(Action.update, awaiting(roleName), 'status')).toBe(true);
+      });
+
+      it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])('refuses a %s both', (roleName) => {
+        const ability = holding(roleName);
+
+        expect(ability.can(Action.update, awaiting(roleName), 'approvedById')).toBe(false);
+        expect(ability.can(Action.update, awaiting(roleName), 'status')).toBe(false);
+      });
+
+      // A role holding one permission and not the other, as a custom role
+      // could (#169): each is asked about its own column, so neither passes for
+      // the other.
+      it('keeps a holder of approve alone from revoking, and a holder of revoke alone from approving', () => {
+        const approver = holding(SystemRole.HouseholdAdmin, ['update:household_invite:approve']);
+        const revoker = holding(SystemRole.HouseholdAdmin, ['update:household_invite:revoke']);
+
+        expect(approver.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'approvedById')).toBe(true);
+        expect(approver.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'status')).toBe(false);
+        expect(revoker.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'status')).toBe(true);
+        expect(revoker.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'approvedById')).toBe(false);
+      });
     });
   });
 

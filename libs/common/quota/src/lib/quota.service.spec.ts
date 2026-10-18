@@ -287,6 +287,24 @@ describe('QuotaService', () => {
       expect(tx.$executeRaw).not.toHaveBeenCalled();
     });
 
+    it('charges only the household when the context names no user', async () => {
+      defineResource([QuotaScope.User, QuotaScope.Household], {
+        [QuotaScope.User]: 9n,
+        [QuotaScope.Household]: 1n,
+      });
+      const tx = makeTx();
+      (tx.quota.findMany as jest.Mock).mockResolvedValue([
+        makeQuota({ scope: QuotaScope.User, scopeId: '*', limit: 5n }),
+        makeQuota({ scope: QuotaScope.Household, scopeId: 'hh_1', limit: 5n }),
+      ]);
+
+      const result = await service.consume('storage_bytes', 1n, { householdId: 'hh_1' }, tx);
+
+      expect(result.allowed).toBe(true);
+      expect(result.constraints).toEqual([expect.objectContaining({ scope: QuotaScope.Household, scopeId: 'hh_1' })]);
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    });
+
     it('rejects a negative amount before touching the tx', async () => {
       defineResource([QuotaScope.User], { [QuotaScope.User]: 0n });
       const tx = makeTx();

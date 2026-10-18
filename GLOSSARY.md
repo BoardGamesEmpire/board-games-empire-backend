@@ -422,6 +422,9 @@ _Avoid_: consent path, provenance
 **Join policy**:
 Which ways into a household are open to people outside it.
 
+**Member invite policy**:
+A household setting that decides how holders of the member role may invite: directly, only once a household owner or admin approves each invite, or not at all. A household's owners and admins always invite directly, and its guests never do.
+
 **Join request**:
 Planned: a user asking to join a household, which its owners or admins approve or deny.
 _Avoid_: application
