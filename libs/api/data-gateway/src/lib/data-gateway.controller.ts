@@ -4,7 +4,20 @@ import { t } from '@bge/i18n';
 import { CheckPolicies, PoliciesGuard } from '@bge/permissions';
 import { DefaultPaginationQueryDto, paginated, PaginatedResponseDto } from '@bge/shared';
 import { ConnectGatewayRequest, DisconnectGatewayRequest } from '@boardgamesempire/proto-gateway';
-import { Body, Controller, Delete, Get, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Logger,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiExtraModels,
@@ -24,6 +37,7 @@ import {
   DataGatewayConnectAnswerDto,
   DataGatewayDisconnectAnswerDto,
   DataGatewayEnvelopeDto,
+  DataGatewayInterviewAnswerDto,
   DataGatewayResponseDto,
   UpdateDataGatewayDto,
 } from './dto';
@@ -159,6 +173,67 @@ export class DataGatewayController {
   connect(@Param('id') id: string) {
     return from(this.dataGatewayService.update(id, { enabled: true })).pipe(
       concatMap((gateway: DataGateway) => this.connectToGateway(gateway)),
+    );
+  }
+
+  @ApiOperation({
+    summary: 'Interview a DataGateway now',
+    description:
+      'However recent its answers. Waits for the interview, and the call has no deadline yet (#722). Answers with ' +
+      'the row read again, so `interview` shows the result. A failed interview is recorded on the row, and the ' +
+      "answer carries generic copy, never the coordinator's error.",
+  })
+  @ApiResponse({ status: Http.Ok, type: DataGatewayInterviewAnswerDto })
+  @ApiResponse({ status: 401, description: 'Authentication required' })
+  @ApiResponse({ status: 403, description: 'Insufficient permissions' })
+  @ApiResponse({ status: Http.NotFound, description: 'No such DataGateway, or it was deleted' })
+  @ApiResponse({ status: Http.Conflict, description: 'The DataGateway is disabled' })
+  @CheckPolicies((ability) => ability.can(Action.update, ResourceType.DataGateway))
+  @HttpCode(Http.Ok)
+  @Post(':id/interview')
+  interview(@Param('id') id: string) {
+    return from(this.dataGatewayService.getById(id)).pipe(
+      concatMap((gateway) => {
+        // The registry refuses a disabled DataGateway too, but saying so here
+        // gives the admin the reason rather than a generic failure.
+        if (!gateway.enabled) {
+          throw new ConflictException(t('errors.data_gateway.disabled', { id }));
+        }
+
+        return this.reinterviewGateway(id);
+      }),
+      // Read again whatever the outcome: a failure is recorded on the row too.
+      concatMap((interview_response) =>
+        from(this.dataGatewayService.getById(id)).pipe(
+          map((gateway) => ({
+            dataGateway: toDataGatewayView(gateway),
+            interview_attempt: true as const,
+            interview_response,
+          })),
+        ),
+      ),
+    );
+  }
+
+  private reinterviewGateway(gatewayId: string) {
+    // As on connect, the coordinator's error stays in the server log.
+    const failed = () => ({ success: false, message: t('errors.data_gateway.interview_failed') });
+
+    return this.coordinator.reinterviewGateway({ gatewayId }).pipe(
+      map((response) => {
+        if (!response.success) {
+          this.logger.error(
+            `Coordinator could not interview gateway ${gatewayId}: ${response.error ?? 'No additional info'}`,
+          );
+          return failed();
+        }
+
+        return { success: true };
+      }),
+      catchError((error) => {
+        this.logger.error(`Error interviewing gateway ${gatewayId}`, error);
+        return of(failed());
+      }),
     );
   }
 

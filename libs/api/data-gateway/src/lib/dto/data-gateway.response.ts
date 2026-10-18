@@ -214,3 +214,12 @@ export class DataGatewayDisconnectAnswerDto extends DataGatewayEnvelopeDto {
   @ApiProperty({ type: GatewayCallAnswerDto, nullable: true })
   disconnection_response!: GatewayCallAnswerDto | null;
 }
+
+/** The re-interview's answer: the row read again after the interview, and how the interview went (#715). */
+export class DataGatewayInterviewAnswerDto extends DataGatewayEnvelopeDto {
+  @ApiProperty({ enum: [true], description: 'Always true: the route answers 404 or 409 when it asks for nothing' })
+  interview_attempt!: true;
+
+  @ApiProperty({ type: GatewayCallAnswerDto })
+  interview_response!: GatewayCallAnswerDto;
+}

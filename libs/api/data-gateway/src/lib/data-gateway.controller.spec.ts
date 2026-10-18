@@ -4,17 +4,20 @@ import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { createTestingModuleWithDb, paginationQuery } from '@bge/testing';
-import { Logger } from '@nestjs/common';
+import { ConflictException, Logger, NotFoundException } from '@nestjs/common';
 import { ClsServiceManager } from 'nestjs-cls';
 import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 import { DataGatewayController } from './data-gateway.controller';
 import { DataGatewayService } from './data-gateway.service';
+import { toDataGatewayView } from './data-gateway.view';
 import { CreateDataGatewayDto } from './dto';
 
 describe('DataGatewayController', () => {
   let controller: DataGatewayController;
   let service: jest.Mocked<Pick<DataGatewayService, 'getById'>>;
-  let coordinator: jest.Mocked<Pick<GatewayCoordinatorClientService, 'connectGateway' | 'disconnectGateway'>>;
+  let coordinator: jest.Mocked<
+    Pick<GatewayCoordinatorClientService, 'connectGateway' | 'disconnectGateway' | 'reinterviewGateway'>
+  >;
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
@@ -35,6 +38,7 @@ describe('DataGatewayController', () => {
           useValue: {
             connectGateway: jest.fn().mockReturnValue(of({ success: true })),
             disconnectGateway: jest.fn().mockReturnValue(of({ success: true })),
+            reinterviewGateway: jest.fn().mockReturnValue(of({ success: true })),
           } satisfies Partial<jest.Mocked<GatewayCoordinatorClientService>>,
         },
       ],
@@ -166,6 +170,78 @@ describe('DataGatewayController', () => {
       expect(coordinator.connectGateway).toHaveBeenCalledWith(
         expect.objectContaining({ authParametersJson: '{"apiKey":"secret"}' }),
       );
+    });
+  });
+
+  // #715: an admin asks for an interview now, and the answer waits for it.
+  describe('interview', () => {
+    const T1 = new Date('2026-10-01T12:00:00.000Z');
+    const before = makeGateway();
+    const after = makeGateway({ firstInterviewedAt: T1, lastInterviewedAt: T1 });
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('answers 404 for an unknown or deleted DataGateway, and asks the coordinator nothing', async () => {
+      service.getById.mockRejectedValue(new NotFoundException());
+
+      await expect(firstValueFrom(controller.interview('gw-1'))).rejects.toThrow(NotFoundException);
+      expect(coordinator.reinterviewGateway).not.toHaveBeenCalled();
+    });
+
+    it('answers 409 for a disabled DataGateway, and asks the coordinator nothing', async () => {
+      service.getById.mockResolvedValue(makeGateway({ enabled: false }));
+
+      const refusal = await firstValueFrom(controller.interview('gw-1')).catch((error: unknown) => error);
+
+      expect(refusal).toBeInstanceOf(ConflictException);
+      expect((refusal as ConflictException).getResponse()).toEqual(t('errors.data_gateway.disabled', { id: 'gw-1' }));
+      expect(coordinator.reinterviewGateway).not.toHaveBeenCalled();
+    });
+
+    it('answers with the row read again after the interview', async () => {
+      service.getById.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+
+      const response = await firstValueFrom(controller.interview('gw-1'));
+
+      expect(coordinator.reinterviewGateway).toHaveBeenCalledWith({ gatewayId: 'gw-1' });
+      expect(service.getById).toHaveBeenCalledTimes(2);
+      expect(response).toEqual({
+        dataGateway: toDataGatewayView(after),
+        interview_attempt: true,
+        interview_response: { success: true },
+      });
+    });
+
+    it("sends generic copy for a failed interview, logs the coordinator's error, and still reads the row again", async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      service.getById.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      coordinator.reinterviewGateway.mockReturnValue(of({ success: false, error: 'raw detail' }));
+
+      const response = await firstValueFrom(controller.interview('gw-1'));
+
+      expect(response).toEqual({
+        dataGateway: toDataGatewayView(after),
+        interview_attempt: true,
+        interview_response: { success: false, message: t('errors.data_gateway.interview_failed') },
+      });
+      expect(JSON.stringify(response)).not.toContain('raw detail');
+      expect(logged).toHaveBeenCalledWith(expect.stringContaining('raw detail'));
+    });
+
+    it('sends the same generic copy when the coordinator call itself fails', async () => {
+      const logged = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      const failure = new Error('14 UNAVAILABLE: connect ECONNREFUSED 127.0.0.1:50051');
+      service.getById.mockResolvedValueOnce(before).mockResolvedValueOnce(after);
+      coordinator.reinterviewGateway.mockReturnValue(throwError(() => failure));
+
+      const response = await firstValueFrom(controller.interview('gw-1'));
+
+      expect(response.interview_response).toEqual({
+        success: false,
+        message: t('errors.data_gateway.interview_failed'),
+      });
+      expect(response.dataGateway).toEqual(toDataGatewayView(after));
+      expect(logged).toHaveBeenCalledWith(expect.any(String), failure);
     });
   });
 

@@ -22,7 +22,9 @@
     "not_found": "DataGateway with ID {id} not found.",
     "not_found_or_denied": "DataGateway with ID {id} not found or access denied.",
     "connect_failed": "Failed to connect to the DataGateway.",
-    "disconnect_failed": "Failed to disconnect from the DataGateway."
+    "disconnect_failed": "Failed to disconnect from the DataGateway.",
+    "disabled": "DataGateway with ID {id} is disabled. Enable it before asking for an interview.",
+    "interview_failed": "The DataGateway's interview failed."
   },
   "event": {
     "not_found": "Event with ID {id} not found",
