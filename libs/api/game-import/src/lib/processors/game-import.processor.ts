@@ -1,4 +1,4 @@
-import { DatabaseService, JobStatus, Prisma } from '@bge/database';
+import { type ContentFormat, DatabaseService, JobStatus, Prisma } from '@bge/database';
 import { ActorAwareWorkerHost, extractJobMeta } from '@bge/queue-actor-context';
 import { guardWorkerEvent } from '@bge/utils';
 import { WebhookEventType, webhookEnvelope } from '@bge/webhooks';
@@ -77,13 +77,15 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     // later to when this parent job ran.
     await this.markRunning(jobId, job.id!.toString());
 
+    const contentFormat = await this.contentFormatOf(gatewayId);
     const result = isExpansion
       ? await this.gameUpsert.upsertExpansion(
           gameData,
           (job.data as ExpansionImportJobPayload).baseGameExternalId,
           gatewayId,
+          contentFormat,
         )
-      : await this.gameUpsert.upsert(gameData, gatewayId);
+      : await this.gameUpsert.upsert(gameData, gatewayId, contentFormat);
 
     // The base GameSource now exists, so its expansions can resolve it. Spawn
     // their flows BEFORE marking this base Completed: the freshly-created
@@ -136,6 +138,20 @@ export class GameImportProcessor extends ActorAwareWorkerHost<
     await this.batchCompletion.checkAndEmit(batchId);
 
     return result;
+  }
+
+  /**
+   * The content format the DataGateway's free text arrives in, as its last
+   * interview stored it. Null when it declared none, or when its row is gone,
+   * and the text is then read as plain text.
+   */
+  private async contentFormatOf(gatewayId: string): Promise<ContentFormat | null> {
+    const gateway = await this.db.dataGateway.findUnique({
+      where: { id: gatewayId },
+      select: { contentFormat: true },
+    });
+
+    return gateway?.contentFormat ?? null;
   }
 
   /**

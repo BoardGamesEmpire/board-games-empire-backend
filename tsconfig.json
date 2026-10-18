@@ -233,6 +233,9 @@
     },
     {
       "path": "./libs/common/version"
+    },
+    {
+      "path": "./libs/common/content-format"
     }
   ]
 }

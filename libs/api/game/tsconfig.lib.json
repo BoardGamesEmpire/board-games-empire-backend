@@ -18,6 +18,9 @@
   "include": ["src/**/*.ts"],
   "references": [
     {
+      "path": "../../common/content-format/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/permissions/tsconfig.lib.json"
     },
     {

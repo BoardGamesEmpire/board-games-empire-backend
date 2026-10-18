@@ -37,7 +37,10 @@ export class GameDto implements Pick<
   @ApiPropertyOptional({ description: 'Subtitle of the game', nullable: true })
   subtitle!: string | null;
 
-  @ApiPropertyOptional({ description: 'Long-form description', nullable: true })
+  @ApiPropertyOptional({
+    description: 'Long-form description, in Markdown. Render it with raw HTML turned off.',
+    nullable: true,
+  })
   description!: string | null;
 
   @ApiPropertyOptional({ description: 'Full image URL', nullable: true })

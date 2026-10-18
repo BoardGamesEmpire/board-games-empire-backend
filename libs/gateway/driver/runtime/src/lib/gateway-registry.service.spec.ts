@@ -1,6 +1,7 @@
 import { SystemActorScope } from '@bge/actor-context';
 import {
   AuthType,
+  ContentFormat,
   ContentType,
   CoverageAxis,
   DatabaseService,
@@ -381,12 +382,14 @@ describe('GatewayRegistryService', () => {
         routable: true,
         covers: true,
         filterableAxes: [CoverageAxis.ContentType],
+        contentFormat: null,
         driver: expect.any(Function),
       });
       await expect(service.searchRoute('bgg', { platformTypes: new Set([PlatformType.PC]) })).resolves.toEqual({
         routable: true,
         covers: false,
         filterableAxes: [CoverageAxis.ContentType],
+        contentFormat: null,
         driver: expect.any(Function),
       });
       expect(factory.create).not.toHaveBeenCalled();
@@ -433,6 +436,7 @@ describe('GatewayRegistryService', () => {
       await expect(service.resolveSearch('bgg', { contentTypes: new Set([ContentType.Expansion]) })).resolves.toEqual({
         driver,
         filterableAxes: [CoverageAxis.ContentType],
+        contentFormat: null,
       });
     });
 
@@ -469,6 +473,32 @@ describe('GatewayRegistryService', () => {
         filterableAxes: [],
       });
       await expect(service.resolveSearch('bgg', { platformTypes: new Set([PlatformType.PC]) })).resolves.toBeNull();
+    });
+  });
+
+  describe('the content format', () => {
+    it('comes with each route and resolution, from the same read of the row', async () => {
+      coveringRow('bgg', TABLETOP_GAMES);
+      table.patch('bgg', { contentFormat: ContentFormat.Html });
+      const driver = stubFactory(makeDriver());
+
+      await expect(service.searchRoute('bgg', {})).resolves.toMatchObject({ contentFormat: ContentFormat.Html });
+      await expect(service.resolveSearch('bgg', {})).resolves.toMatchObject({ contentFormat: ContentFormat.Html });
+      await expect(service.resolveWithContentFormat('bgg', FetchExpansions)).resolves.toEqual({
+        driver,
+        contentFormat: ContentFormat.Html,
+      });
+    });
+
+    it('is refused with the DataGateway, as resolve refuses it', async () => {
+      interviewedRow('bgg');
+      table.patch('bgg', { disabledCapabilities: [FetchExpansions] });
+
+      await expect(service.resolveWithContentFormat('bgg', FetchExpansions)).rejects.toMatchObject({
+        name: GatewayRoutingRefusedError.name,
+        reason: 'switched_off',
+      });
+      expect(factory.create).not.toHaveBeenCalled();
     });
   });
 

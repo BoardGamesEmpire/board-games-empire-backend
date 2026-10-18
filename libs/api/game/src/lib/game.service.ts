@@ -1,3 +1,4 @@
+import { sanitizeMarkdown } from '@bge/content-format';
 import {
   Action,
   DatabaseService,
@@ -11,7 +12,7 @@ import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
 import { PaginationQueryDto, type PaginatedRows } from '@bge/shared';
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { CreateGameDto, UpdateGameDto } from './dto';
+import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH, UpdateGameDto } from './dto';
 import { gameListScope } from './game-list-scope';
 
 @Injectable()
@@ -204,11 +205,13 @@ export class GameService {
 
   async createGame(createGameDto: CreateGameDto) {
     const userId = this.abilityService.getActingUserId();
+    const description = this.sanitizedDescription(createGameDto.description);
 
     try {
       const game = await this.db.game.create({
         data: {
           ...createGameDto,
+          description,
 
           createdBy: {
             connect: {
@@ -244,7 +247,7 @@ export class GameService {
       // answer 400. The write binds the same conditions again.
       const existing = await this.db.game.findFirst({
         where: { id, AND: updateConditions },
-        select: { createdBy: { select: { isServiceAccount: true } } },
+        select: { description: true, createdBy: { select: { isServiceAccount: true } } },
       });
       if (existing === null) {
         const exists = await this.db.game.count({ where: { id } });
@@ -263,6 +266,14 @@ export class GameService {
         throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));
       }
 
+      // The description the game already has is left as it is. An import may
+      // have stored one longer than the cap, and it's Markdown the server
+      // wrote, which needs no sanitizing again.
+      const description =
+        updateGameDto.description === existing.description
+          ? undefined
+          : this.sanitizedDescription(updateGameDto.description);
+
       const game = await this.db.game.update({
         where: {
           id,
@@ -270,6 +281,7 @@ export class GameService {
         },
         data: {
           ...updateGameDto,
+          description,
           updatedById: userId,
         },
       });
@@ -324,5 +336,18 @@ export class GameService {
 
       throw error;
     }
+  }
+
+  /**
+   * A new or changed description as the game stores it: Markdown with
+   * nothing unsafe in it, as an imported one is (#714). One longer than
+   * {@link GAME_DESCRIPTION_MAX_LENGTH} is refused before it's parsed.
+   */
+  private sanitizedDescription<T extends null | undefined>(description: string | T): string | T {
+    if (typeof description === 'string' && description.length > GAME_DESCRIPTION_MAX_LENGTH) {
+      throw new BadRequestException(t('errors.game.description_too_long', { max: GAME_DESCRIPTION_MAX_LENGTH }));
+    }
+
+    return sanitizeMarkdown(description);
   }
 }

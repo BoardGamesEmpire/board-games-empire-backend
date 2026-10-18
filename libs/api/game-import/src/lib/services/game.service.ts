@@ -1,4 +1,6 @@
+import { convertToMarkdown } from '@bge/content-format';
 import {
+  ContentFormat,
   ContentType,
   DatabaseService,
   ExpansionType,
@@ -28,14 +30,24 @@ export class GameUpsertService {
     private readonly serviceAccount: ServiceAccountService,
   ) {}
 
-  async upsert(gameData: GameData, gatewayId: string): Promise<ImportJobResult> {
+  /**
+   * Imports a game from `gatewayId`, whose free text arrives in
+   * `contentFormat`, null when the DataGateway declared none.
+   */
+  async upsert(fetched: GameData, gatewayId: string, contentFormat: ContentFormat | null): Promise<ImportJobResult> {
+    const gameData = inMarkdown(fetched, contentFormat);
     const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
 
     const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
     return { gameId, gameCreated, sourceCreated, platformGames };
   }
 
-  async upsertExpansion(gameData: GameData, baseGameExternalId: string, gatewayId: string): Promise<ImportJobResult> {
+  async upsertExpansion(
+    fetched: GameData,
+    baseGameExternalId: string,
+    gatewayId: string,
+    contentFormat: ContentFormat | null,
+  ): Promise<ImportJobResult> {
     const baseSource = await this.db.gameSource.findUnique({
       where: { gatewayId_externalId: { gatewayId, externalId: baseGameExternalId } },
       select: { gameId: true },
@@ -48,6 +60,7 @@ export class GameUpsertService {
       );
     }
 
+    const gameData = inMarkdown(fetched, contentFormat);
     const { gameId, gameCreated, sourceCreated } = await this.upsertGameRecord(gameData, gatewayId);
     const platformGames = await this.upsertRelations(gameId, gameData, gatewayId);
 
@@ -373,6 +386,19 @@ export class GameUpsertService {
   private buildUpdateInput(game: GameData): Prisma.GameUpdateInput {
     return this.buildScalarInput(game);
   }
+}
+
+/**
+ * The game as it's stored: its description and its DLC's are Markdown,
+ * converted from the content format its DataGateway declared (#714). Its
+ * summary isn't stored.
+ */
+function inMarkdown(gameData: GameData, contentFormat: ContentFormat | null): GameData {
+  return {
+    ...gameData,
+    description: convertToMarkdown(gameData.description, contentFormat),
+    dlc: gameData.dlc?.map((dlc) => ({ ...dlc, description: convertToMarkdown(dlc.description, contentFormat) })),
+  };
 }
 
 /** A content type with no stored equivalent, UNSPECIFIED included, is stored as unknown. */

@@ -1,7 +1,7 @@
 import { Visibility } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
-import { CreateGameDto } from './create-game.dto';
+import { CreateGameDto, GAME_DESCRIPTION_MAX_LENGTH } from './create-game.dto';
 import { UpdateGameDto } from './update-game.dto';
 
 describe.each([
@@ -45,5 +45,17 @@ describe.each([
     const errors = await errorsFor({ visible: Visibility.Private });
 
     expect(errors.map((error) => error.property)).toEqual(['visible']);
+  });
+});
+
+describe.each([
+  ['CreateGameDto', CreateGameDto],
+  ['UpdateGameDto', UpdateGameDto],
+])('%s description', (_name, Dto) => {
+  const errorsFor = (description: string) => validate(plainToInstance(Dto, { title: 'Brass', description }));
+
+  // The cap is the game service's, since only a new or changed description is held to it.
+  it('accepts a description longer than the cap', async () => {
+    await expect(errorsFor('a'.repeat(GAME_DESCRIPTION_MAX_LENGTH + 1))).resolves.toHaveLength(0);
   });
 });

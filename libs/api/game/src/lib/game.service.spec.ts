@@ -12,7 +12,7 @@ import {
   type MockDatabaseService,
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
-import type { CreateGameDto, UpdateGameDto } from './dto';
+import { GAME_DESCRIPTION_MAX_LENGTH, type CreateGameDto, type UpdateGameDto } from './dto';
 import { GameService } from './game.service';
 
 const COND = { id: 'sentinel-condition' };
@@ -20,9 +20,10 @@ const COND = { id: 'sentinel-condition' };
 const dependentRecordNotFound = () =>
   new Prisma.PrismaClientKnownRequestError('Record to fetch not found', { code: 'P2025', clientVersion: 'test' });
 
-// The owner projection `updateGame` reads before it writes.
+// The projection `updateGame` reads before it writes.
 const userOwned = { createdBy: { isServiceAccount: false } } as never;
 const serviceOwned = { createdBy: { isServiceAccount: true } } as never;
+const userOwnedDescribed = (description: string) => ({ description, createdBy: { isServiceAccount: false } }) as never;
 
 describe('GameService', () => {
   let service: GameService;
@@ -187,6 +188,82 @@ describe('GameService', () => {
     });
   });
 
+  describe('a typed-in description', () => {
+    const unsafe = 'Trade <b>wisely</b>. [Rules](javascript:alert(1))';
+
+    it('createGame stores it as Markdown with raw HTML and unsafe links taken out', async () => {
+      db.game.create.mockResolvedValue({ id: 'game-1' } as Game);
+
+      await service.createGame({ title: 'X', description: unsafe });
+
+      expect(db.game.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ description: 'Trade wisely. Rules' }),
+      });
+    });
+
+    it('updateGame does the same', async () => {
+      db.game.findFirst.mockResolvedValue(userOwned);
+      db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+      await service.updateGame('game-1', { description: unsafe });
+
+      expect(db.game.update).toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ description: 'Trade wisely. Rules' }) }),
+      );
+    });
+
+    it('updateGame still clears it with null, and leaves it alone when left out', async () => {
+      db.game.findFirst.mockResolvedValue(userOwned);
+      db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+      await service.updateGame('game-1', { description: null as unknown as string });
+      await service.updateGame('game-1', { title: 'New' });
+
+      expect(db.game.update.mock.calls[0][0].data.description).toBeNull();
+      expect(db.game.update.mock.calls[1][0].data.description).toBeUndefined();
+    });
+
+    describe('longer than the cap', () => {
+      const tooLong = new BadRequestException(
+        t('errors.game.description_too_long', { max: GAME_DESCRIPTION_MAX_LENGTH }),
+      );
+
+      it('createGame refuses it, and accepts one at the cap', async () => {
+        db.game.create.mockResolvedValue({ id: 'game-1' } as Game);
+
+        await expect(
+          service.createGame({ title: 'X', description: 'a'.repeat(GAME_DESCRIPTION_MAX_LENGTH + 1) }),
+        ).rejects.toThrow(tooLong);
+        expect(db.game.create).not.toHaveBeenCalled();
+
+        await service.createGame({ title: 'X', description: 'a'.repeat(GAME_DESCRIPTION_MAX_LENGTH) });
+        expect(db.game.create).toHaveBeenCalledTimes(1);
+      });
+
+      it('updateGame refuses it when it changes the description', async () => {
+        db.game.findFirst.mockResolvedValue(userOwnedDescribed('Short'));
+
+        await expect(
+          service.updateGame('game-1', { description: 'a'.repeat(GAME_DESCRIPTION_MAX_LENGTH + 1) }),
+        ).rejects.toThrow(tooLong);
+        expect(db.game.update).not.toHaveBeenCalled();
+      });
+    });
+
+    it('updateGame keeps the description the game already has, however long, rather than sanitizing it again', async () => {
+      // An import stores what it converted, which can be longer than the cap,
+      // and a client may send it back unchanged with an edit to another field.
+      const stored = String.raw`\*Escaped\* ` + 'a'.repeat(GAME_DESCRIPTION_MAX_LENGTH);
+      db.game.findFirst.mockResolvedValue(userOwnedDescribed(stored));
+      db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
+
+      await service.updateGame('game-1', { title: 'New', description: stored });
+
+      expect(db.game.update.mock.calls[0][0].data).toEqual(expect.objectContaining({ title: 'New' }));
+      expect(db.game.update.mock.calls[0][0].data.description).toBeUndefined();
+    });
+  });
+
   it('updateGame → update, and evicts the updater’s permission graph', async () => {
     db.game.findFirst.mockResolvedValue(userOwned);
     db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
@@ -212,7 +289,7 @@ describe('GameService', () => {
 
     expect(db.game.findFirst).toHaveBeenCalledWith({
       where: { id: 'game-1', AND: [COND] },
-      select: { createdBy: { select: { isServiceAccount: true } } },
+      select: { description: true, createdBy: { select: { isServiceAccount: true } } },
     });
   });
 

@@ -1,4 +1,4 @@
-import { DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
+import { ContentFormat, DatabaseService, InitiatorType, JobStatus, ResourceType } from '@bge/database';
 import { wrapJobData, type JobActorMeta } from '@bge/queue-actor-context';
 import { WebhookEventType } from '@bge/webhooks';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -17,7 +17,7 @@ const extractMock = extractGameDataFromChildren as jest.MockedFunction<typeof ex
 
 describe('GameImportProcessor', () => {
   let processor: GameImportProcessor;
-  let db: { job: { update: jest.Mock; updateMany: jest.Mock } };
+  let db: { job: { update: jest.Mock; updateMany: jest.Mock }; dataGateway: { findUnique: jest.Mock } };
   let gameUpsert: jest.Mocked<Pick<GameUpsertService, 'upsert' | 'upsertExpansion'>>;
   let events: { emit: jest.Mock };
   let batchCompletion: { checkAndEmit: jest.Mock };
@@ -52,6 +52,7 @@ describe('GameImportProcessor', () => {
         update: jest.fn().mockResolvedValue(undefined),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      dataGateway: { findUnique: jest.fn().mockResolvedValue({ contentFormat: ContentFormat.PlainText }) },
     };
     gameUpsert = { upsert: jest.fn(), upsertExpansion: jest.fn() };
     events = { emit: jest.fn() };
@@ -86,7 +87,11 @@ describe('GameImportProcessor', () => {
       expect.objectContaining({ source: 'queue', actor: { kind: 'user', userId: 'user-7' }, correlationId: 'corr-1' }),
       expect.any(Function),
     );
-    expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.objectContaining({ externalId: 'ext-1' }), 'bgg');
+    expect(gameUpsert.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: 'ext-1' }),
+      'bgg',
+      ContentFormat.PlainText,
+    );
 
     const completedCall = events.emit.mock.calls.find(([name]) => name === ImportJobCompletedEvent.eventName);
     expect(completedCall).toBeDefined();
@@ -108,6 +113,42 @@ describe('GameImportProcessor', () => {
     // The acting user rides CLS, never the payload.
     expect(completed).not.toHaveProperty('userId');
     expect(returned).toBe(result);
+  });
+
+  describe('content format', () => {
+    const imported: ImportJobResult = { gameId: 'game-1', gameCreated: true, sourceCreated: true, platformGames: [] };
+
+    it("imports a game with its DataGateway's content format, read once for the job", async () => {
+      db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.Html });
+      gameUpsert.upsert.mockResolvedValue(imported);
+
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(db.dataGateway.findUnique).toHaveBeenCalledTimes(1);
+      expect(db.dataGateway.findUnique).toHaveBeenCalledWith({ where: { id: 'bgg' }, select: { contentFormat: true } });
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', ContentFormat.Html);
+    });
+
+    it("imports an expansion with its DataGateway's content format", async () => {
+      db.dataGateway.findUnique.mockResolvedValue({ contentFormat: ContentFormat.BBCode });
+      gameUpsert.upsertExpansion.mockResolvedValue({ ...imported, baseGameId: 'game-base' });
+
+      await processor.process(makeJob(JobNames.ExpansionImport, { ...basePayload, baseGameExternalId: 'base-1' }));
+
+      expect(gameUpsert.upsertExpansion).toHaveBeenCalledWith(expect.anything(), 'base-1', 'bgg', ContentFormat.BBCode);
+    });
+
+    it.each([
+      ['declared none', { contentFormat: null }],
+      ['is gone', null],
+    ])('imports with no content format when the DataGateway %s', async (_, row) => {
+      db.dataGateway.findUnique.mockResolvedValue(row);
+      gameUpsert.upsert.mockResolvedValue(imported);
+
+      await processor.process(makeJob(JobNames.GameImport, basePayload));
+
+      expect(gameUpsert.upsert).toHaveBeenCalledWith(expect.anything(), 'bgg', null);
+    });
   });
 
   it('spawns expansion flows after persisting a base that requested them, before marking it Completed', async () => {

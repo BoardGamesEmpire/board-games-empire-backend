@@ -1,9 +1,10 @@
-import { ContentType, CoverageAxis, DataGatewayCapability, PlatformType } from '@bge/database';
+import { ContentFormat, ContentType, CoverageAxis, DataGatewayCapability, PlatformType } from '@bge/database';
 import {
   coverageOverlaps,
   GatewayRegistryService,
   GatewayRoutingRefusedError,
   type CoverageFilter,
+  type GatewayResolution,
   type SearchResolution,
   type SearchRoute,
   type StoredCoverage,
@@ -97,6 +98,7 @@ interface Registration {
   capabilities: DataGatewayCapability[];
   coverage: StoredCoverage;
   filterableAxes: CoverageAxis[];
+  contentFormat: ContentFormat | null;
 }
 
 /**
@@ -110,23 +112,30 @@ interface Registration {
  */
 class FakeRegistry implements Pick<
   GatewayRegistryService,
-  'resolve' | 'resolveSearch' | 'routableGatewayIds' | 'searchRoute'
+  'resolve' | 'resolveWithContentFormat' | 'resolveSearch' | 'routableGatewayIds' | 'searchRoute'
 > {
   readonly resolved: string[] = [];
   private readonly drivers = new Map<string, Registration>();
 
   /**
    * Connects a DataGateway that may serve `capabilities`, every one unless
-   * given, and that covers every kind of game and narrows by no axis, unless
-   * its answers say otherwise.
+   * given, and that covers every kind of game, narrows by no axis and sends
+   * plain text, unless its answers say otherwise.
    */
   register(
     gatewayId: string,
     driver: DataGatewayDriver,
     capabilities = EVERY_CAPABILITY,
-    answers: Partial<Pick<Registration, 'coverage' | 'filterableAxes'>> = {},
+    answers: Partial<Pick<Registration, 'coverage' | 'filterableAxes' | 'contentFormat'>> = {},
   ): this {
-    this.drivers.set(gatewayId, { driver, capabilities, coverage: EVERYTHING, filterableAxes: [], ...answers });
+    this.drivers.set(gatewayId, {
+      driver,
+      capabilities,
+      coverage: EVERYTHING,
+      filterableAxes: [],
+      contentFormat: ContentFormat.PlainText,
+      ...answers,
+    });
     return this;
   }
 
@@ -148,6 +157,7 @@ class FakeRegistry implements Pick<
       routable: true,
       covers: coverageOverlaps(connected.coverage, filter),
       filterableAxes: connected.filterableAxes,
+      contentFormat: connected.contentFormat,
       driver: async () => {
         this.resolved.push(gatewayId);
         return connected.driver;
@@ -159,10 +169,16 @@ class FakeRegistry implements Pick<
     return this.routed(gatewayId, capability).driver;
   }
 
-  async resolveSearch(gatewayId: string, filter: CoverageFilter): Promise<SearchResolution | null> {
-    const { driver, coverage, filterableAxes } = this.routed(gatewayId, DataGatewayCapability.Search);
+  async resolveWithContentFormat(gatewayId: string, capability: DataGatewayCapability): Promise<GatewayResolution> {
+    const { driver, contentFormat } = this.routed(gatewayId, capability);
 
-    return coverageOverlaps(coverage, filter) ? { driver, filterableAxes } : null;
+    return { driver, contentFormat };
+  }
+
+  async resolveSearch(gatewayId: string, filter: CoverageFilter): Promise<SearchResolution | null> {
+    const { driver, coverage, filterableAxes, contentFormat } = this.routed(gatewayId, DataGatewayCapability.Search);
+
+    return coverageOverlaps(coverage, filter) ? { driver, filterableAxes, contentFormat } : null;
   }
 
   private routed(gatewayId: string, capability: DataGatewayCapability): Registration {
@@ -732,6 +748,7 @@ describe('GatewayGameSearchService', () => {
         routable: true,
         covers: true,
         filterableAxes: [],
+        contentFormat: null,
         driver: () => Promise.reject(new Error('connect ECONNREFUSED 10.0.0.7:50051')),
       });
 
@@ -763,6 +780,83 @@ describe('GatewayGameSearchService', () => {
       } finally {
         warn.mockRestore();
       }
+    });
+  });
+
+  describe('summaries', () => {
+    const summarized = (summary: string): proto.GameSearchData => ({ ...catan, summary });
+    const summaries = (frames: proto.SearchGameResult[]) =>
+      frames.filter((frame) => frame.status === RESULT).map((frame) => frame.game?.summary);
+
+    it("sends each result's summary as Markdown, converted from its DataGateway's content format", async () => {
+      registry
+        .register('bgg', new InMemoryGatewayDriver({ searchResults: [summarized('[b]Trade[/b] wisely')] }), undefined, {
+          contentFormat: ContentFormat.BBCode,
+        })
+        .register(
+          'html',
+          new InMemoryGatewayDriver({ searchResults: [summarized('<p>Trade <i>wisely</i></p>')] }),
+          undefined,
+          {
+            contentFormat: ContentFormat.Html,
+          },
+        );
+
+      const frames = await collect(service.searchGames(searchRequest()));
+
+      expect(summaries(frames.filter((frame) => frame.gatewayId === 'bgg'))).toEqual(['**Trade** wisely']);
+      expect(summaries(frames.filter((frame) => frame.gatewayId === 'html'))).toEqual(['Trade *wisely*']);
+    });
+
+    it('converts the summary of a DataGateway that declared no content format as plain text', async () => {
+      registry.register(
+        'bgg',
+        new InMemoryGatewayDriver({ searchResults: [summarized('#1 <b>pick</b>')] }),
+        undefined,
+        {
+          contentFormat: null,
+        },
+      );
+
+      const frames = await collect(service.searchGames(searchRequest()));
+
+      expect(summaries(frames)).toEqual([String.raw`\#1 \<b>pick\</b>`]);
+    });
+
+    it('caches summaries as the DataGateway sent them, and converts them by the content format it declares when replayed', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [summarized('<b>Trade</b>')] }));
+      const live = await collect(service.searchGames(searchRequest()));
+
+      registry.register('bgg', new InMemoryGatewayDriver(), undefined, { contentFormat: ContentFormat.Html });
+      const replay = await collect(service.searchGames(searchRequest()));
+
+      expect(cache.set).toHaveBeenCalledWith(expect.any(String), [summarized('<b>Trade</b>')], expect.any(Number));
+      expect(summaries(live)).toEqual([String.raw`\<b>Trade\</b>`]);
+      expect(summaries(replay)).toEqual(['**Trade**']);
+    });
+
+    it("sends an expansion's summary as Markdown too", async () => {
+      db.gameSource.findMany.mockResolvedValue([{ gatewayId: 'bgg', externalId: '13' }] as never);
+      registry.register(
+        'bgg',
+        new InMemoryGatewayDriver({ expansionsByBaseExternalId: { '13': [summarized('<i>More</i> players')] } }),
+        undefined,
+        { contentFormat: ContentFormat.Html },
+      );
+
+      const frames = await collect(service.fetchExpansions({ correlationId: 'corr-3', gameId: 'game-1' }));
+
+      expect(summaries(frames)).toEqual(['*More* players']);
+    });
+
+    it('sends a result with no summary without one', async () => {
+      registry.register('bgg', new InMemoryGatewayDriver({ searchResults: [catan] }), undefined, {
+        contentFormat: ContentFormat.Html,
+      });
+
+      const frames = await collect(service.searchGames(searchRequest()));
+
+      expect(summaries(frames)).toEqual([undefined]);
     });
   });
 

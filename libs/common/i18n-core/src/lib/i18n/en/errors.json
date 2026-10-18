@@ -5,7 +5,8 @@
   "game": {
     "not_found": "Game with ID {id} not found",
     "cannot_delete_in_collection": "Cannot delete game that is part of a collection",
-    "server_owned_stays_public": "Game with ID {id} was imported and must stay public"
+    "server_owned_stays_public": "Game with ID {id} was imported and must stay public",
+    "description_too_long": "A game's description must be at most {max} characters"
   },
   "game_collection": {
     "not_found": "Collection entry with ID {id} not found",
