@@ -142,11 +142,7 @@ describe('ScopeComposer', () => {
 
     composer.compose(ResourceType.Household, Action.read, { deletedAt: null });
 
-    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(
-      ResourceType.Household,
-      Action.read,
-      undefined,
-    );
+    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Household, Action.read);
   });
 
   it('asks for the ceiling on the field the read names', () => {

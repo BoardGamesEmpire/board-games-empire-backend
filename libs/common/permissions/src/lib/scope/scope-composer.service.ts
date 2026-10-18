@@ -67,7 +67,12 @@ export class ScopeComposer {
     intrinsicScope: WhereInput<TResource> | UnscopedList,
     field?: string,
   ): WhereInput<TResource> {
-    const conditions = this.abilityService.getCurrentResourceConditions(resourceType, action, field);
+    // Passed on only when named, so a read without one makes the same
+    // two-argument call it always has.
+    const conditions =
+      field === undefined
+        ? this.abilityService.getCurrentResourceConditions(resourceType, action)
+        : this.abilityService.getCurrentResourceConditions(resourceType, action, field);
 
     // Recorded before the return so `paginated()` can tell a composed read from
     // one that reached the database on its ceiling alone. Only `read` is
