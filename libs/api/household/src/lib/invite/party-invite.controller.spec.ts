@@ -5,22 +5,24 @@ import 'reflect-metadata';
 import { firstValueFrom } from 'rxjs';
 import type { HouseholdMemberWithRelations } from '../member/household-member.service';
 import { PartyInviteController } from './party-invite.controller';
-import type { PartyInviteService, ReceivedInviteView } from './party-invite.service';
+import type { ListedPartyInviteView, PartyInviteService } from './party-invite.service';
 
 const INVITE = { id: 'invite-1', status: InviteStatus.Accepted } as InvitePartyView;
-const RECEIVED = { id: 'invite-2', household: { id: 'hh-1', name: 'Home' } } as ReceivedInviteView;
+const RECEIVED = { id: 'invite-2', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
+const SENT = { id: 'invite-3', household: { id: 'hh-1', name: 'Home' } } as ListedPartyInviteView;
 const MEMBER = { id: 'member-1', householdId: 'hh-1' } as HouseholdMemberWithRelations;
 const DECLINED = { id: 'invite-1', status: InviteStatus.Declined } as InvitePartyView;
 const WITHDRAWN = { id: 'invite-1', status: InviteStatus.Withdrawn } as InvitePartyView;
 
 describe('PartyInviteController (delegation)', () => {
   let controller: PartyInviteController;
-  let service: jest.Mocked<Pick<PartyInviteService, 'accept' | 'listReceived' | 'decline' | 'withdraw'>>;
+  let service: jest.Mocked<Pick<PartyInviteService, 'accept' | 'listReceived' | 'listSent' | 'decline' | 'withdraw'>>;
 
   beforeEach(() => {
     service = {
       accept: jest.fn().mockResolvedValue({ invite: INVITE, member: MEMBER }),
       listReceived: jest.fn().mockResolvedValue({ rows: [RECEIVED], total: 1 }),
+      listSent: jest.fn().mockResolvedValue({ rows: [SENT], total: 1 }),
       decline: jest.fn().mockResolvedValue(DECLINED),
       withdraw: jest.fn().mockResolvedValue(WITHDRAWN),
     };
@@ -53,6 +55,18 @@ describe('PartyInviteController (delegation)', () => {
     expect(service.listReceived).toHaveBeenCalledWith(query);
     expect(result).toEqual({
       invites: [RECEIVED],
+      pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
+    });
+  });
+
+  it('listSent forwards the query, wrapping the page in the envelope', async () => {
+    const query = Object.assign(paginationQuery({ limit: 10 }), { status: InviteStatus.Expired });
+
+    const result = await firstValueFrom(controller.listSent(query));
+
+    expect(service.listSent).toHaveBeenCalledWith(query);
+    expect(result).toEqual({
+      invites: [SENT],
       pagination: { page: 1, limit: 10, total: 1, totalPages: 1, hasMore: false },
     });
   });

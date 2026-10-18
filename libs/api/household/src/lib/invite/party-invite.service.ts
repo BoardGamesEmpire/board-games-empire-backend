@@ -2,10 +2,13 @@ import { AuditContextService, requireSessionUserId } from '@bge/actor-context';
 import { DatabaseService, HouseholdMembershipOrigin, InviteStatus, InviteType, Prisma } from '@bge/database';
 import { t } from '@bge/i18n';
 import {
+  effectiveInviteStatusWhere,
   InviteService,
+  OUTSTANDING_INVITE_STATUSES,
   PARTY_INVITE_SELECT,
   receivedInviteWhere,
   unexpiredInviteWhere,
+  withEffectiveInviteStatus,
   type InvitePartyView,
   type InviteTarget,
   type RespondToInviteParams,
@@ -14,21 +17,30 @@ import { PermissionsService } from '@bge/permissions';
 import { QuotaService } from '@bge/quota';
 import { PaginatedRows, PaginationQueryDto } from '@bge/shared';
 import { ConflictException, Injectable } from '@nestjs/common';
-import { isAssignableHouseholdRole, type AssignableHouseholdRole } from '../dto';
+import { isAssignableHouseholdRole, ListSentInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { lockExistingHousehold } from '../household-access.helpers';
 import { HouseholdMemberService, type HouseholdMemberWithRelations } from '../member/household-member.service';
 
 /**
- * A received invite: the party shape, plus the household that sent it. The
- * party shape leaves the household's id out, which is right for an inviter
- * and leaves an invitee unable to tell which household is asking.
+ * A listed invite of the reader's, received or sent: the party shape, plus the
+ * household it is into. The party shape leaves the household's id out, which
+ * is right for a single invite its party acted on, and would leave a list
+ * unable to tell which household each row is about.
  */
-const RECEIVED_INVITE_SELECT = {
+const LISTED_PARTY_INVITE_SELECT = {
   ...PARTY_INVITE_SELECT,
   household: { select: { id: true, name: true } },
 } as const satisfies Prisma.InviteSelect;
 
-export type ReceivedInviteView = Prisma.InviteGetPayload<{ select: typeof RECEIVED_INVITE_SELECT }>;
+export type ListedPartyInviteView = Prisma.InviteGetPayload<{ select: typeof LISTED_PARTY_INVITE_SELECT }>;
+
+/**
+ * What the sent list shows by default (#751): the invites still open, and
+ * those that expired, whether or not the sweep has marked them so, so an
+ * inviter sees an invite lapse and can send another. Every outstanding row is
+ * in it whatever its date, and is reported `Expired` once past it.
+ */
+const SENT_DEFAULT_STATUSES = [...OUTSTANDING_INVITE_STATUSES, InviteStatus.Expired] as const;
 
 /** An accepted invite, and the membership it made. */
 export interface HouseholdInviteAcceptance {
@@ -38,9 +50,9 @@ export interface HouseholdInviteAcceptance {
 
 /**
  * A party's side of a household invite: the invites they have received,
- * accepting or declining one (#163, #164), and withdrawing one they sent
- * (#164). The household's side, creating, listing, revoking and approving a
- * household's invites, is `HouseholdInviteService`.
+ * accepting or declining one (#163, #164), the invites they have sent (#751),
+ * and withdrawing one (#164). The household's side, creating, listing,
+ * revoking and approving a household's invites, is `HouseholdInviteService`.
  *
  * No CASL rule stands behind any of them: a party holds no grant on `Invite`,
  * and needs none, because `@bge/invites` binds every party read to the acting
@@ -76,7 +88,7 @@ export class PartyInviteService {
    * An invite into a household they already belong to stays outstanding (an
    * accept of it is refused), so it is hidden rather than offered.
    */
-  async listReceived(query: PaginationQueryDto): Promise<PaginatedRows<ReceivedInviteView>> {
+  async listReceived(query: PaginationQueryDto): Promise<PaginatedRows<ListedPartyInviteView>> {
     const userId = requireSessionUserId(this.auditContext.getActor());
     const vouchedEmail = await this.vouchedEmailOf(this.db, userId);
     const now = new Date();
@@ -91,14 +103,75 @@ export class PartyInviteService {
       ],
     };
 
-    // REPEATABLE READ, so `total` and the rows come from one snapshot (#230).
-    // `id` breaks ties on `createdAt`, so a row cannot cross a page boundary
-    // between two requests.
+    return this.pageOf(where, query);
+  }
+
+  /**
+   * One page of the household invites the acting user has sent, newest first
+   * (#751): how a member who invited finds their invites, since only an owner
+   * or admin reads the household's list.
+   *
+   * By default, the invites still open and those that expired; `?status=`
+   * picks any one status as it stands now, as the household's list does. Each
+   * row reports its status as it stands now, so an outstanding row past its
+   * date reads `Expired`.
+   *
+   * Into a household the inviter no longer belongs to, only the invites they
+   * can still withdraw are listed, outstanding and unexpired, whatever the
+   * filter asks: a settled invite there would go on telling a former member
+   * who joined. An invite into a deleted household is never listed, as the
+   * inbox lists none; the delete revoked it.
+   *
+   * Bound to the acting user by `inviterId`, as the lib binds a party, so no
+   * grant on `Invite` is asked; only a person signed in as themself reads it.
+   * A withheld invite is listed like any other, since its inviter must not be
+   * able to tell (#278), and the row carries no sign of it.
+   */
+  async listSent(query: ListSentInvitesQueryDto): Promise<PaginatedRows<ListedPartyInviteView>> {
+    const userId = requireSessionUserId(this.auditContext.getActor());
+    const now = new Date();
+
+    const statusWhere: Prisma.InviteWhereInput =
+      query.status === undefined
+        ? { status: { in: [...SENT_DEFAULT_STATUSES] } }
+        : effectiveInviteStatusWhere(query.status, now);
+
+    const where: Prisma.InviteWhereInput = {
+      type: InviteType.Household,
+      inviterId: userId,
+      household: { is: { deletedAt: null } },
+      AND: [
+        statusWhere,
+        {
+          OR: [
+            { household: { is: { members: { some: { userId } } } } },
+            { status: { in: [...OUTSTANDING_INVITE_STATUSES] }, ...unexpiredInviteWhere(now) },
+          ],
+        },
+      ],
+    };
+
+    const { rows, total } = await this.pageOf(where, query);
+
+    return { rows: rows.map((row) => withEffectiveInviteStatus(row, now)), total };
+  }
+
+  /**
+   * One page of a party's invites, newest first, and how many match in all.
+   *
+   * REPEATABLE READ, so `total` and the rows come from one snapshot (#230).
+   * `id` breaks ties on `createdAt`, so a row cannot cross a page boundary
+   * between two requests.
+   */
+  private async pageOf(
+    where: Prisma.InviteWhereInput,
+    query: PaginationQueryDto,
+  ): Promise<PaginatedRows<ListedPartyInviteView>> {
     const [rows, total] = await this.db.$transaction(
       [
         this.db.invite.findMany({
           where,
-          select: RECEIVED_INVITE_SELECT,
+          select: LISTED_PARTY_INVITE_SELECT,
           orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           skip: query.skip,
           take: query.pageSize,
