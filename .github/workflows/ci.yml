@@ -4,9 +4,14 @@ on:
   push:
     branches:
       - master
+  # Every pull request, whatever its base branch (#481). Filtered to master, a
+  # PR stacked on another feature branch got no run at all. Its `affected` set
+  # is its own changes, since nx-set-shas takes the merge-base with the PR's
+  # base branch. When GitHub retargets it to master, no new run starts, and the
+  # `main` check on its head commit stands. Adding the `edited` activity type to
+  # rerun on a retarget would backfire: a title or body edit would then cancel
+  # the PR's real run (see concurrency, below).
   pull_request:
-    branches:
-      - master
 
 permissions:
   actions: read
