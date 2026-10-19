@@ -21,20 +21,7 @@ import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
-
-/**
- * Each member's user id and household role: what the invite grants' role
- * clause reads off an instance. Both routes ask about the household's whole
- * roster, as the condition is written over it: a roster cut down to the
- * caller's own row answers today's `some` clause the same, but would pass a
- * `none` or `every` clause it should refuse.
- */
-const ROSTER_ROLE_SELECT = {
-  userId: true,
-  role: { select: { role: { select: { name: true } } } },
-} as const satisfies Prisma.HouseholdMemberSelect;
-
-type RosterRow = Prisma.HouseholdMemberGetPayload<{ select: typeof ROSTER_ROLE_SELECT }>;
+import { isHouseholdAuthority, ROSTER_ROLE_SELECT, type RosterRow } from './household-authority';
 
 /**
  * The household setting a member's invite is asked about (#166): whether
@@ -63,10 +50,24 @@ const PARTY_COLUMNS_SELECT = {
 } as const satisfies Prisma.InviteSelect;
 
 /**
- * A listed invite: the party shape on a row the reader sent, the context shape
- * on every other.
+ * The column the authority shape adds to the context shape, read for the
+ * household's owners and admins (#167): the address, and never the message,
+ * which is addressed to the invitee and stays on the rows the reader sent.
  */
-export type HouseholdInviteView = InvitePartyView | InviteContextView;
+const AUTHORITY_COLUMNS_SELECT = { id: true, inviteeEmail: true } as const satisfies Prisma.InviteSelect;
+
+/**
+ * The context shape plus the address, for the household's own owners and
+ * admins (#167), who always see who is invited to their household.
+ */
+export type InviteAuthorityView = InviteContextView & { readonly inviteeEmail: string | null };
+
+/**
+ * A listed invite: the party shape on a row the reader sent; on every other,
+ * the authority shape for the household's owners and admins (#167), and the
+ * context shape for anyone else.
+ */
+export type HouseholdInviteView = InvitePartyView | InviteAuthorityView | InviteContextView;
 
 /** Who the request names, once exactly one of the two fields is known to be there. */
 type InviteeRequest = { readonly inviteeId: string } | { readonly inviteeEmail: string };
@@ -202,11 +203,13 @@ export class HouseholdInviteService {
    *
    * The revoked invite is announced after commit. The row stays, so it still
    * counts against the day's invite quotas it was counted against (#279).
+   * A revoker who is one of the household's owners or admins gets the address
+   * with it (#167).
    */
-  async revokeInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
+  async revokeInvite(householdId: string, inviteId: string): Promise<InviteContextView | InviteAuthorityView> {
     const revokerId = this.abilityService.getActingUserId();
 
-    return this.transitionAsAuthority(householdId, inviteId, REVOKE_FIELD, (tx, scope) =>
+    return this.transitionAsAuthority(householdId, inviteId, revokerId, REVOKE_FIELD, (tx, scope) =>
       this.invites.revokeWithin(tx, { inviteId, revokerId, scope }),
     );
   }
@@ -240,12 +243,13 @@ export class HouseholdInviteService {
    * an invite they sent themselves, as a member promoted since.
    *
    * The approved invite is announced after commit, and any soft cap it went
-   * past is warned of after it.
+   * past is warned of after it. An approver who is one of the household's
+   * owners or admins gets the address with it (#167).
    */
-  async approveInvite(householdId: string, inviteId: string): Promise<InviteContextView> {
+  async approveInvite(householdId: string, inviteId: string): Promise<InviteContextView | InviteAuthorityView> {
     const approverId = this.abilityService.getActingUserId();
 
-    return this.transitionAsAuthority(householdId, inviteId, APPROVE_FIELD, async (tx, scope) => {
+    return this.transitionAsAuthority(householdId, inviteId, approverId, APPROVE_FIELD, async (tx, scope) => {
       const softOverages = await this.takeDailyInvite(tx, { householdId });
       const approval = await this.invites.approveWithin(tx, {
         inviteId,
@@ -265,10 +269,18 @@ export class HouseholdInviteService {
    * of the roster read under the lock, then the lib's transition, bound to this
    * household. Its domain event is announced after commit, then any soft cap
    * the transition went past.
+   *
+   * The lib answers in the context shape. When that roster names the actor one
+   * of the household's owners or admins, the address is read on the same
+   * transaction and added (#167). It is read after the transition, which
+   * refuses an invite from another household, so no other household's address
+   * is read. The answer is decided by the roster, not by the grant that let the
+   * actor move the invite.
    */
   private async transitionAsAuthority(
     householdId: string,
     inviteId: string,
+    actorId: string,
     field: Prisma.InviteScalarFieldEnum,
     transition: (
       tx: Prisma.TransactionClient,
@@ -278,13 +290,21 @@ export class HouseholdInviteService {
       readonly event: InviteDomainEvent;
       readonly softOverages?: readonly QuotaSoftOverageEvent[];
     }>,
-  ): Promise<InviteContextView> {
+  ): Promise<InviteContextView | InviteAuthorityView> {
     const { invite, event, softOverages } = await this.db.$transaction(async (tx) => {
       await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
       await lockExistingHousehold(tx, householdId);
-      await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
+      const members = await this.assertInviteAuthority(tx, householdId, Action.update, { inviteId, field });
 
-      return transition(tx, { householdId });
+      const moved = await transition(tx, { householdId });
+
+      if (!isHouseholdAuthority(members, actorId)) {
+        return moved;
+      }
+
+      const address = await tx.invite.findUniqueOrThrow({ where: { id: inviteId }, select: AUTHORITY_COLUMNS_SELECT });
+
+      return { ...moved, invite: { ...moved.invite, ...address } };
     });
 
     this.invites.emit([event]);
@@ -333,17 +353,22 @@ export class HouseholdInviteService {
    * see this household's rows and no other household's.
    *
    * Every row is read in the context shape. The party columns, the address and
-   * the message, are then read for the rows the caller sent and no others, so
-   * another inviter's address never leaves the database for this request.
-   * Those columns do not change after the insert, so the second read needs no
-   * snapshot shared with the first. Each row's status is the one it has now,
-   * from the same `now` the filter used.
+   * the message, are then read for the rows the caller sent. When the roster
+   * names the caller one of the household's owners or admins, the address
+   * alone is read for every other row (#167): they always see who is invited
+   * to their household, and the message stays with the parties. Anyone else
+   * gets nothing more, so another inviter's address never leaves the database
+   * for them. Staff read every invite through a grant, and a grant is not a
+   * household role: they see the address only where the roster names them a
+   * household owner or household admin. Those columns do not change after the
+   * insert, so the later reads need no snapshot shared with the first. Each
+   * row's status is the one it has now, from the same `now` the filter used.
    */
   async listInvites(
     householdId: string,
     query: ListHouseholdInvitesQueryDto,
   ): Promise<PaginatedRows<HouseholdInviteView>> {
-    await this.assertInviteAuthority(this.db, householdId, Action.read);
+    const members = await this.assertInviteAuthority(this.db, householdId, Action.read);
     await assertHouseholdExists(this.db, householdId);
 
     const readerId = resolveActingUserIdOrNull(this.abilityService);
@@ -373,20 +398,30 @@ export class HouseholdInviteService {
     );
 
     const sent = readerId === null ? [] : rows.filter((row) => row.inviter.id === readerId).map((row) => row.id);
-    const partyColumns =
+    const others = isHouseholdAuthority(members, readerId)
+      ? rows.filter((row) => row.inviter.id !== readerId).map((row) => row.id)
+      : [];
+    const [partyColumns, addresses] = await Promise.all([
       readerId === null || sent.length === 0
         ? []
-        : await this.db.invite.findMany({
+        : this.db.invite.findMany({
             where: { id: { in: sent }, inviterId: readerId },
             select: PARTY_COLUMNS_SELECT,
-          });
-    const partyById = new Map(partyColumns.map((columns) => [columns.id, columns]));
+          }),
+      others.length === 0
+        ? []
+        : this.db.invite.findMany({
+            where: { id: { in: others }, householdId },
+            select: AUTHORITY_COLUMNS_SELECT,
+          }),
+    ]);
+    const columnsById = new Map([...partyColumns, ...addresses].map((columns) => [columns.id, columns]));
 
     return {
       rows: rows.map((row): HouseholdInviteView => {
-        const party = partyById.get(row.id);
+        const columns = columnsById.get(row.id);
 
-        return withEffectiveInviteStatus(party ? { ...row, ...party } : row, now);
+        return withEffectiveInviteStatus(columns ? { ...row, ...columns } : row, now);
       }),
       total,
     };
@@ -466,13 +501,16 @@ export class HouseholdInviteService {
    * would refuse the key even on the invite it was scoped to. It also names
    * the column it changes (`field`), which is all that tells the revoke
    * permission from the approve permission.
+   *
+   * Hands back the roster it asked of, which says whether the acting user is
+   * one of the household's owners or admins and so sees the address (#167).
    */
   private async assertInviteAuthority(
     client: DatabaseService | Prisma.TransactionClient,
     householdId: string,
     action: typeof Action.read | typeof Action.update,
     existing?: { readonly inviteId: string; readonly field: Prisma.InviteScalarFieldEnum },
-  ): Promise<void> {
+  ): Promise<RosterRow[]> {
     const members = await this.rosterOf(client, householdId);
 
     this.abilityService.assertCurrentActorCan(
@@ -481,6 +519,8 @@ export class HouseholdInviteService {
       { ...(existing === undefined ? {} : { id: existing.inviteId }), householdId, household: { members } },
       existing?.field,
     );
+
+    return members;
   }
 
   /** Each member's user id and household role, as `client` reads them. */

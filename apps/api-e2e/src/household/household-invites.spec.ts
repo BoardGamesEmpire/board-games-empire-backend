@@ -277,7 +277,7 @@ describe('household invites', () => {
   });
 
   describe('listing', () => {
-    it('shows each reader the address and message only on the rows they sent, and refuses a member', async () => {
+    it("shows the household's owners and admins every address, and each the message only on the rows they sent, and refuses a member (#167)", async () => {
       const [owner, admin, member] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({
         owner,
@@ -307,7 +307,9 @@ describe('household invites', () => {
         inviteeEmail: ownersInvite.inviteeEmail,
         message: 'From the owner',
       });
-      expect(asOwner.invites[0]).not.toHaveProperty('inviteeEmail');
+      // A household owner sees who another member invited (#167), and not what
+      // that member wrote to them.
+      expect(asOwner.invites[0]).toMatchObject({ inviteeEmail: adminsInvite.inviteeEmail });
       expect(asOwner.invites[0]).not.toHaveProperty('message');
       expect(asOwner.invites[0]).toMatchObject({ inviter: { id: admin.user.id }, status: InviteStatus.Pending });
 
@@ -315,8 +317,9 @@ describe('household invites', () => {
         await listInvites(admin, household.id).expect(200),
         'GET /api/households/:id/invites as admin',
       );
-      expect(asAdmin.invites[0]).toMatchObject({ inviteeEmail: adminsInvite.inviteeEmail });
-      expect(asAdmin.invites[1]).not.toHaveProperty('inviteeEmail');
+      expect(asAdmin.invites[0]).toMatchObject({ inviteeEmail: adminsInvite.inviteeEmail, message: 'From the admin' });
+      expect(asAdmin.invites[1]).toMatchObject({ inviteeEmail: ownersInvite.inviteeEmail });
+      expect(asAdmin.invites[1]).not.toHaveProperty('message');
 
       await listInvites(member, household.id).expect(403);
     });

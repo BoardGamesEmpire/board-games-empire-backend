@@ -11,21 +11,30 @@ import {
  * Wire-contract types and fail-loud parsers for the household invite routes
  * (#162), on the model of `household-wire.ts`.
  *
- * Two shapes reach a client. Every row carries the context shape, which is the
- * household detail's invite embed. A row the caller sent carries the party
- * shape: the context shape plus the address and the message they wrote. The
- * invitee's routes (#163) answer in the party shape too, and their inbox adds
- * the household that sent each invite.
+ * Three shapes reach a client. Every row carries the context shape, which is
+ * the household detail's invite embed. A row the caller sent carries the party
+ * shape: the context shape plus the address and the message they wrote. Any
+ * other row carries the authority shape for the household's owners and admins
+ * (#167): the context shape plus the address alone. The invitee's routes
+ * (#163) answer in the party shape too, and their inbox adds the household
+ * that sent each invite.
  */
 
-/** The two columns only a party sees. */
+/** The two columns the party shape adds; the authority shape adds the address alone (#167). */
 export type InvitePartyFieldsWire = Wire<Pick<Invite, 'inviteeEmail' | 'message'>>;
 
 /** An invite as its inviter sees it: what `POST` answers, and a listed row the caller sent. */
 export interface InvitePartyRowWire extends PendingInviteProjection, InvitePartyFieldsWire {}
 
-/** A listed row: the party shape on the caller's own rows, the context shape on the rest. */
-export type ListedInviteWire = PendingInviteProjection | InvitePartyRowWire;
+/** An invite as the household's owners and admins see one they did not send (#167): the address, not the message. */
+export interface InviteAuthorityRowWire extends PendingInviteProjection, Wire<Pick<Invite, 'inviteeEmail'>> {}
+
+/**
+ * A listed row: the party shape on the caller's own rows; the authority shape
+ * on the rest for the household's owners and admins, the context shape for
+ * anyone else.
+ */
+export type ListedInviteWire = PendingInviteProjection | InviteAuthorityRowWire | InvitePartyRowWire;
 
 export interface CreateInviteEnvelope {
   readonly message: string;
@@ -74,13 +83,14 @@ export function inviteEnvelope(response: HttpResponseLike, request: RequestDescr
 
 export interface RevokeInviteEnvelope {
   readonly message: string;
-  readonly invite: PendingInviteProjection;
+  readonly invite: PendingInviteProjection | InviteAuthorityRowWire;
 }
 
 /**
  * `POST /api/households/:householdId/invites/:inviteId/revoke`: `{ message, invite }`
- * (#164), in the context shape. A revoker is not a party, so the caller
- * asserts the party columns are absent; this checks only what a client joins on.
+ * (#164), in the authority shape for the household's owners and admins (#167)
+ * and the context shape for anyone else. A revoker is not a party, so the
+ * caller asserts the message is absent; this checks only what a client joins on.
  */
 export function revokeEnvelope(response: HttpResponseLike, request: RequestDescription): RevokeInviteEnvelope {
   if (!isRecord(response.body)) {
@@ -97,12 +107,12 @@ export function revokeEnvelope(response: HttpResponseLike, request: RequestDescr
     return fail("it carried no 'message' string", request, response);
   }
 
-  return { message, invite: invite as unknown as PendingInviteProjection };
+  return { message, invite: invite as unknown as RevokeInviteEnvelope['invite'] };
 }
 
 /**
  * `POST /api/households/:householdId/invites/:inviteId/approve`: `{ message, invite }`
- * (#166), in the context shape, as a revoke answers. An approver is not a party either.
+ * (#166), in the shape a revoke answers in. An approver is not a party either.
  */
 export const approveEnvelope = revokeEnvelope;
 

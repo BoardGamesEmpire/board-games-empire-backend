@@ -86,6 +86,13 @@ const partyView = (overrides: Partial<InvitePartyView> = {}): InvitePartyView =>
 /** Prisma's delegate types want full rows; the service selects narrower ones. */
 const resolves = (value: unknown) => value as never;
 
+/** The columns of a stored row that a read selects, as Prisma answers it. */
+const selected = (row: Readonly<Record<string, unknown>>, select: Readonly<Record<string, unknown>>) =>
+  Object.fromEntries(Object.keys(select).map((key) => [key, row[key]]));
+
+/** `invite-1`'s party columns as stored, of which a read gets what it selects. */
+const STORED_INVITE = { id: 'invite-1', inviteeEmail: 'sam@example.test', message: 'Join us' };
+
 /** What `consume` answers when no quota row applies. */
 const UNCONSTRAINED: QuotaCheckResult = {
   allowed: true,
@@ -169,6 +176,8 @@ describe('HouseholdInviteService', () => {
     db.role.findUnique.mockImplementation(((args: { where: { name: string } }) =>
       Promise.resolve({ id: `role-${args.where.name}` })) as never);
     db.household.count.mockResolvedValue(1);
+    db.invite.findUniqueOrThrow.mockImplementation(((args: { select: Record<string, unknown> }) =>
+      Promise.resolve(selected(STORED_INVITE, args.select))) as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -898,7 +907,7 @@ describe('HouseholdInviteService', () => {
         return Promise.resolve(revocation);
       });
 
-      await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toBe(revocation.invite);
+      await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toMatchObject(revocation.invite);
 
       // The household row, then the invite: the order a soft delete takes them in.
       expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
@@ -1000,7 +1009,7 @@ describe('HouseholdInviteService', () => {
         return Promise.resolve(approval);
       });
 
-      await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toBe(approval.invite);
+      await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toMatchObject(approval.invite);
 
       expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
       // Asked about `approvedById`, the column only an approval writes, so the
@@ -1150,11 +1159,91 @@ describe('HouseholdInviteService', () => {
     });
   });
 
+  describe('what a revoke or an approve answers (#167)', () => {
+    beforeEach(() => {
+      db.householdMember.findMany.mockResolvedValue(
+        resolves([...ROSTER, rosterRow('admin-1', SystemRole.HouseholdAdmin)]),
+      );
+    });
+
+    it('returns the address with an approve or revoke by a household admin (#167)', async () => {
+      abilityService.getActingUserId.mockReturnValue('admin-1');
+      const steps: string[] = [];
+      db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
+        const result = await work(db);
+        steps.push('commit');
+
+        return result;
+      }) as never);
+      invites.revokeWithin.mockImplementation(() => {
+        steps.push('revoke');
+        return Promise.resolve(revocation);
+      });
+      invites.approveWithin.mockImplementation(() => {
+        steps.push('approve');
+        return Promise.resolve(approval);
+      });
+      db.invite.findUniqueOrThrow.mockImplementation(((args: { select: Record<string, unknown> }) => {
+        steps.push('address');
+        return Promise.resolve(selected(STORED_INVITE, args.select));
+      }) as never);
+
+      const revoked = await service.revokeInvite('hh-1', 'invite-1');
+      const approved = await service.approveInvite('hh-1', 'invite-1');
+
+      // The address, and never the message, which stays with the parties.
+      expect(revoked).toEqual({ ...revocation.invite, inviteeEmail: 'sam@example.test' });
+      expect(approved).toEqual({ ...approval.invite, inviteeEmail: 'sam@example.test' });
+      // Read on the transaction, once the transition has bound the invite to
+      // this household, so a refused transition reads none.
+      expect(steps).toEqual(['revoke', 'address', 'commit', 'approve', 'address', 'commit']);
+    });
+
+    // Staff may hold a grant here, and a member a custom role (#169); only the
+    // roster's owner and admin roles show the address.
+    it.each([
+      ['staff, who hold no household role', 'staff-1'],
+      ['a plain member', 'member-1'],
+    ])('answers in the context shape, reading no address, to %s (#167)', async (_label, actorId) => {
+      abilityService.getActingUserId.mockReturnValue(actorId);
+
+      await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toBe(revocation.invite);
+      await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toBe(approval.invite);
+
+      expect(db.invite.findUniqueOrThrow).not.toHaveBeenCalled();
+    });
+  });
+
   describe('listInvites', () => {
     const query = (overrides: Partial<ListHouseholdInvitesQueryDto> = {}) =>
       Object.assign(paginationQuery({ limit: 10 }), overrides) as ListHouseholdInvitesQueryDto;
 
     const listedWhere = () => (db.invite.findMany.mock.calls[0]?.[0] as { where: Prisma.InviteWhereInput }).where;
+
+    /** A listed row that `inviterId` sent. */
+    const sentBy = (id: string, inviterId: string) =>
+      contextView({ id, inviter: { id: inviterId, username: inviterId, profile: null } });
+
+    /**
+     * Answers every read after the list's with the stored columns it selects,
+     * of the ids it names, so a row carries exactly what was read for it.
+     */
+    const storedColumns = (stored: ReadonlyArray<{ readonly id: string } & Record<string, unknown>>) =>
+      db.invite.findMany.mockImplementation(((args: {
+        where: { id: { in: string[] } };
+        select: Record<string, unknown>;
+      }) =>
+        Promise.resolve(
+          stored.filter((row) => args.where.id.in.includes(row.id)).map((row) => selected(row, args.select)),
+        )) as never);
+
+    /** The ids the reads after the list's asked `column` of. */
+    const idsRead = (column: string) =>
+      db.invite.findMany.mock.calls
+        .slice(1)
+        .map(([args]) => args as unknown as { where: { id: { in: string[] } }; select: Record<string, unknown> })
+        .filter((args) => args.select[column] === true)
+        .flatMap((args) => args.where.id.in);
 
     beforeEach(() => {
       jest.useFakeTimers({ now: NOW, doNotFake: ['nextTick', 'setImmediate'] });
@@ -1237,9 +1326,13 @@ describe('HouseholdInviteService', () => {
       expect(listedWhere()).toEqual({ householdId: 'hh-1', AND: [filter, COND] });
     });
 
-    it('reads the address and message for the rows the caller sent, and for no others', async () => {
-      const sent = contextView({ id: 'sent' });
-      const others = contextView({ id: 'others', inviter: { id: 'admin-1', username: 'admin', profile: null } });
+    // A plain member reads the list only through a grant beside their household
+    // role, as staff who belong to the household do. The address on a row they
+    // did not send is for the household's owners and admins (#167).
+    it('reads the address and message for the rows a plain member sent, and for no others (#167)', async () => {
+      abilityService.getActingUserId.mockReturnValue('member-1');
+      const sent = sentBy('sent', 'member-1');
+      const others = sentBy('others', 'owner-1');
       db.invite.findMany
         .mockResolvedValueOnce(resolves([sent, others]))
         .mockResolvedValueOnce(resolves([{ id: 'sent', inviteeEmail: 'sam@example.test', message: 'Join us' }]));
@@ -1248,22 +1341,59 @@ describe('HouseholdInviteService', () => {
       const { rows, total } = await service.listInvites('hh-1', query());
 
       expect(db.invite.findMany).toHaveBeenLastCalledWith({
-        where: { id: { in: ['sent'] }, inviterId: 'owner-1' },
+        where: { id: { in: ['sent'] }, inviterId: 'member-1' },
         select: { id: true, inviteeEmail: true, message: true },
       });
       expect(total).toBe(2);
-      expect(rows[0]).toEqual(partyView({ id: 'sent' }));
+      expect(rows[0]).toEqual(partyView({ id: 'sent', inviter: sent.inviter }));
       expect(rows[1]).toEqual(others);
     });
 
-    it('reads no party columns when the caller sent none of the rows', async () => {
-      db.invite.findMany.mockResolvedValue(
-        resolves([contextView({ inviter: { id: 'admin-1', username: 'admin', profile: null } })]),
-      );
+    it('reads no party columns when a plain member sent none of the rows (#167)', async () => {
+      abilityService.getActingUserId.mockReturnValue('member-1');
+      db.invite.findMany.mockResolvedValue(resolves([sentBy('invite-1', 'owner-1')]));
 
       await service.listInvites('hh-1', query());
 
       expect(db.invite.findMany).toHaveBeenCalledTimes(1);
+    });
+
+    describe("the address, for the household's owners and admins (#167)", () => {
+      const sent = sentBy('sent', 'reader');
+      const others = sentBy('others', 'member-1');
+
+      beforeEach(() => {
+        storedColumns([
+          { id: 'sent', inviteeEmail: 'sam@example.test', message: 'Join us' },
+          { id: 'others', inviteeEmail: 'kim@example.test', message: 'For Kim alone' },
+        ]);
+        db.invite.findMany.mockResolvedValueOnce(resolves([sent, others]));
+        db.invite.count.mockResolvedValue(2);
+        abilityService.getActingUserId.mockReturnValue('reader');
+      });
+
+      it('shows a household admin the address on an invite another member sent (#167)', async () => {
+        db.householdMember.findMany.mockResolvedValue(
+          resolves([...ROSTER, rosterRow('reader', SystemRole.HouseholdAdmin)]),
+        );
+
+        const { rows } = await service.listInvites('hh-1', query());
+
+        expect(rows[0]).toEqual({ ...sent, inviteeEmail: 'sam@example.test', message: 'Join us' });
+        expect(rows[1]).toEqual({ ...others, inviteeEmail: 'kim@example.test' });
+        // The message is the parties' alone, so it is read for the reader's own
+        // row and for no other.
+        expect(idsRead('message')).toEqual(['sent']);
+      });
+
+      it('keeps the address from staff, who read every invite but hold no household role (#167)', async () => {
+        // The roster does not name the reader: their read comes from a grant.
+        const { rows } = await service.listInvites('hh-1', query());
+
+        expect(rows[0]).toEqual({ ...sent, inviteeEmail: 'sam@example.test', message: 'Join us' });
+        expect(rows[1]).toEqual(others);
+        expect(idsRead('inviteeEmail')).toEqual(['sent']);
+      });
     });
 
     it('gives an actor with no user the context shape on every row', async () => {
