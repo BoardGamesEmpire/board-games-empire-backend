@@ -6,7 +6,6 @@ import {
   InviteService,
   OUTSTANDING_INVITE_STATUSES,
   PARTY_INVITE_SELECT,
-  receivedInviteWhere,
   unexpiredInviteWhere,
   withEffectiveInviteStatus,
   type InvitePartyView,
@@ -20,6 +19,7 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { isAssignableHouseholdRole, ListSentInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { lockExistingHousehold } from '../household-access.helpers';
 import { HouseholdMemberService, type HouseholdMemberWithRelations } from '../member/household-member.service';
+import { receivedHouseholdInviteWhere, vouchedEmailOf } from './received-invites';
 
 /**
  * A listed invite of the reader's, received or sent: the party shape, plus the
@@ -77,33 +77,14 @@ export class PartyInviteService {
 
   /**
    * One page of the invites the acting user has received, newest first: those
-   * naming them by id, and those to their verified address. Only the ones
-   * still open to them are listed: `Pending`, unexpired, into a household that
-   * is live and that they are not already in. One awaiting approval is not:
-   * until an owner or admin approves it, it is a member's proposal rather than
-   * the household's offer, and showing it, then revoking it, would tell the
-   * invitee about the household's own deliberations (#166). A withheld invite
-   * never is (#278); the lib's filter leaves it out.
-   *
-   * An invite into a household they already belong to stays outstanding (an
-   * accept of it is refused), so it is hidden rather than offered.
+   * open to them in their inbox. {@link receivedHouseholdInviteWhere} says
+   * which those are, and why.
    */
   async listReceived(query: PaginationQueryDto): Promise<PaginatedRows<ListedPartyInviteView>> {
     const userId = requireSessionUserId(this.auditContext.getActor());
-    const vouchedEmail = await this.vouchedEmailOf(this.db, userId);
-    const now = new Date();
+    const vouchedEmail = await vouchedEmailOf(this.db, userId);
 
-    const where: Prisma.InviteWhereInput = {
-      type: InviteType.Household,
-      AND: [
-        receivedInviteWhere(userId, vouchedEmail),
-        { status: InviteStatus.Pending },
-        unexpiredInviteWhere(now),
-        { household: { is: { deletedAt: null, members: { none: { userId } } } } },
-      ],
-    };
-
-    return this.pageOf(where, query);
+    return this.pageOf(receivedHouseholdInviteWhere(userId, vouchedEmail, new Date()), query);
   }
 
   /**
@@ -301,25 +282,9 @@ export class PartyInviteService {
     return {
       target,
       actingUserId: inviteeId,
-      vouchedEmail: await this.vouchedEmailOf(tx, inviteeId),
+      vouchedEmail: await vouchedEmailOf(tx, inviteeId),
       type: InviteType.Household,
     };
-  }
-
-  /**
-   * The address the household routes vouch is the user's: their own, once
-   * verified. Anyone can register an address they cannot read, and vouching
-   * for that one would hand them every invite sent to it. Whether more than a
-   * verified address should count is #724's question, and this is the one
-   * place it is answered.
-   */
-  private async vouchedEmailOf(
-    client: DatabaseService | Prisma.TransactionClient,
-    userId: string,
-  ): Promise<string | null> {
-    const user = await client.user.findUnique({ where: { id: userId }, select: { email: true, emailVerified: true } });
-
-    return user?.emailVerified ? user.email : null;
   }
 }
 
