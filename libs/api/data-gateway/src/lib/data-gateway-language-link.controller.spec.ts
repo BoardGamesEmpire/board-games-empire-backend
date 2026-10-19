@@ -1,4 +1,4 @@
-import { LanguageLinkStatus, ResourceType } from '@bge/database';
+import { Action, LanguageLinkStatus, ResourceType } from '@bge/database';
 import { DEFAULT_REVIEW_STATUSES, LanguageLinkReviewService } from '@bge/language';
 import { PoliciesGuard } from '@bge/permissions';
 import { createTestingModuleWithDb, paginationQuery, shippedReadReaches } from '@bge/testing';
@@ -53,11 +53,24 @@ describe('DataGatewayLanguageLinkController', () => {
 
       await expect(firstValueFrom(call(controller) as Observable<unknown>)).rejects.toThrow(NotFoundException);
 
-      expect(dataGateways.getById).toHaveBeenCalledWith('gw-1');
+      expect(dataGateways.getById).toHaveBeenCalledWith('gw-1', expect.anything());
       expect(review.list).not.toHaveBeenCalled();
       expect(review.link).not.toHaveBeenCalled();
       expect(review.ignore).not.toHaveBeenCalled();
       expect(review.accept).not.toHaveBeenCalled();
+    });
+
+    // A key's scope can pin update to one DataGateway beside read on all, so
+    // each route finds the DataGateway under its own action's conditions.
+    it.each([
+      ['list', (c: DataGatewayLanguageLinkController) => c.list('gw-1', query()), Action.read],
+      ['link', (c: DataGatewayLanguageLinkController) => c.link('gw-1', 'link-1', { tagId: 'tag-en' }), Action.update],
+      ['ignore', (c: DataGatewayLanguageLinkController) => c.ignore('gw-1', 'link-1'), Action.update],
+      ['accept', (c: DataGatewayLanguageLinkController) => c.accept('gw-1', 'link-1'), Action.update],
+    ] as const)("is looked up under %s's own action", async (_route, call, action) => {
+      await firstValueFrom(call(controller) as Observable<unknown>);
+
+      expect(dataGateways.getById.mock.calls).toEqual([['gw-1', action]]);
     });
   });
 

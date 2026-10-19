@@ -102,7 +102,7 @@ export class DataGatewayController {
       tap((gateway: DataGateway) => this.logger.log(`Created DataGateway with name: ${gateway.name}`)),
       concatMap((gateway) =>
         gateway.enabled
-          ? this.connectToGateway(gateway)
+          ? this.connectToGateway(gateway, Action.create)
           : of({
               dataGateway: toDataGatewayView(gateway),
               connection_response: null,
@@ -140,7 +140,9 @@ export class DataGatewayController {
           });
         }
 
-        return updateDataGatewayDto.enabled ? this.connectToGateway(gateway) : this.disconnectFromGateway(gateway);
+        return updateDataGatewayDto.enabled
+          ? this.connectToGateway(gateway, Action.update)
+          : this.disconnectFromGateway(gateway);
       }),
     );
   }
@@ -172,7 +174,7 @@ export class DataGatewayController {
   @Post(':id/connect')
   connect(@Param('id') id: string) {
     return from(this.dataGatewayService.update(id, { enabled: true })).pipe(
-      concatMap((gateway: DataGateway) => this.connectToGateway(gateway)),
+      concatMap((gateway: DataGateway) => this.connectToGateway(gateway, Action.update)),
     );
   }
 
@@ -192,7 +194,8 @@ export class DataGatewayController {
   @HttpCode(Http.Ok)
   @Post(':id/interview')
   interview(@Param('id') id: string) {
-    return from(this.dataGatewayService.getById(id)).pipe(
+    // Found and read again under update, the route's own action.
+    return from(this.dataGatewayService.getById(id, Action.update)).pipe(
       concatMap((gateway) => {
         // The registry refuses a disabled DataGateway too, but saying so here
         // gives the admin the reason rather than a generic failure.
@@ -204,7 +207,7 @@ export class DataGatewayController {
       }),
       // Read again whatever the outcome: a failure is recorded on the row too.
       concatMap((interview_response) =>
-        from(this.dataGatewayService.getById(id)).pipe(
+        from(this.dataGatewayService.getById(id, Action.update)).pipe(
           map((gateway) => ({
             dataGateway: toDataGatewayView(gateway),
             interview_attempt: true as const,
@@ -237,7 +240,7 @@ export class DataGatewayController {
     );
   }
 
-  private connectToGateway(gateway: DataGateway) {
+  private connectToGateway(gateway: DataGateway, write: Action) {
     const request: ConnectGatewayRequest = {
       gatewayId: gateway.id,
       connectionUrl: gateway.connectionUrl,
@@ -268,9 +271,10 @@ export class DataGatewayController {
         return of(failed());
       }),
       // Connecting waits for a first interview, and the row records how it
-      // went, so it's read again whatever the outcome.
+      // went, so it's read again whatever the outcome. It's read under the
+      // write that came before, so a key that may write but not read sees it.
       concatMap((connection_response) =>
-        from(this.dataGatewayService.getById(gateway.id)).pipe(
+        from(this.dataGatewayService.getById(gateway.id, write)).pipe(
           map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
         ),
       ),

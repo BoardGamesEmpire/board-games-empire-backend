@@ -45,7 +45,9 @@ export class DataGatewayLanguageLinkController {
   @CheckPolicies((ability) => ability.can(Action.read, ResourceType.DataGateway))
   @Get()
   list(@Param('id') id: string, @Query() query: LanguageLinkQueryDto) {
-    return this.forDataGateway(id, () => this.review.list(id, query.status ?? DEFAULT_REVIEW_STATUSES, query)).pipe(
+    return this.forDataGateway(id, Action.read, () =>
+      this.review.list(id, query.status ?? DEFAULT_REVIEW_STATUSES, query),
+    ).pipe(
       map((page) =>
         paginated(
           'languageLinks',
@@ -105,11 +107,14 @@ export class DataGatewayLanguageLinkController {
   }
 
   private answer(id: string, act: () => Promise<LanguageLinkView>) {
-    return this.forDataGateway(id, act).pipe(map((languageLink) => ({ languageLink })));
+    return this.forDataGateway(id, Action.update, act).pipe(map((languageLink) => ({ languageLink })));
   }
 
-  /** Runs `act` once the DataGateway is found: 404 for one unknown or deleted. */
-  private forDataGateway<T>(id: string, act: () => Promise<T>): Observable<T> {
-    return from(this.dataGatewayService.getById(id)).pipe(concatMap(() => from(act())));
+  /**
+   * Runs `act` once the DataGateway is found under `action`, the route's own:
+   * 404 for one unknown, deleted, or out of the caller's reach for it.
+   */
+  private forDataGateway<T>(id: string, action: Action, act: () => Promise<T>): Observable<T> {
+    return from(this.dataGatewayService.getById(id, action)).pipe(concatMap(() => from(act())));
   }
 }

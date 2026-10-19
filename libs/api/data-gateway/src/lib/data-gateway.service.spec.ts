@@ -100,6 +100,17 @@ describe('DataGatewayService', () => {
     );
   });
 
+  // A key's scope can pin update to one DataGateway beside read on all, so a
+  // route that writes finds its row under its own action's conditions.
+  it('getById → the action it is asked for', async () => {
+    db.dataGateway.findUniqueOrThrow.mockResolvedValue({ id: 'gw-1' } as DataGateway);
+
+    await service.getById('gw-1', Action.update);
+
+    expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.DataGateway, Action.update);
+    expect(abilityService.getCurrentResourceConditions).not.toHaveBeenCalledWith(ResourceType.DataGateway, Action.read);
+  });
+
   it('create does not filter by abilities and publishes a created event', async () => {
     db.dataGateway.create.mockResolvedValue({ id: 'gw-1' } as DataGateway);
 

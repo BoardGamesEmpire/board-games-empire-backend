@@ -4,11 +4,13 @@ import {
   LanguageCodeFormat,
   LanguageLinkOrigin,
   LanguageLinkStatus,
+  ResourceType,
   type DataGateway,
   type LanguageGatewayLink,
 } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
+import { mintApiKey } from '../support/api-key';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
 
@@ -356,6 +358,57 @@ describe('DataGateway review', () => {
         .post(`${links(gateway.id)}/${link.id}/ignore`)
         .set(user.headers)
         .expect(403);
+    });
+  });
+
+  // A key's scope narrows its owner's grants. This one reads every DataGateway
+  // and updates one, and the routes that write find theirs under update.
+  describe('through an API key that may update one DataGateway', () => {
+    const links = (gatewayId: string) => `${GATEWAYS}/${gatewayId}/language-links`;
+
+    const updatesOnly = (gatewayId: string) =>
+      mintApiKey(baseUrl, db.client, admin, [
+        { slugs: ['read:data_gateway'], resourceType: ResourceType.DataGateway },
+        { slugs: ['update:data_gateway'], resourceType: ResourceType.DataGateway, resourceId: gatewayId },
+      ]);
+
+    it("reviews that DataGateway's links, and is a 404 for another's, leaving them as they were", async () => {
+      const [mine, theirs, en] = await Promise.all([seedGateway(), seedGateway(), englishTag()]);
+      const [myLink, theirLink, key] = await Promise.all([
+        seedLink(mine.id),
+        seedLink(theirs.id),
+        updatesOnly(mine.id),
+      ]);
+
+      // The control: the key acts on its own DataGateway's link.
+      await request(baseUrl)
+        .post(`${links(mine.id)}/${myLink.id}/ignore`)
+        .set(key.headers)
+        .expect(200);
+
+      // It reads the other's worklist, but acts on none of it.
+      await request(baseUrl).get(links(theirs.id)).set(key.headers).expect(200);
+      for (const action of ['link', 'ignore', 'accept']) {
+        await request(baseUrl)
+          .post(`${links(theirs.id)}/${theirLink.id}/${action}`)
+          .set(key.headers)
+          .send({ tagId: en.id })
+          .expect(404);
+      }
+
+      await expect(db.client.languageGatewayLink.findUniqueOrThrow({ where: { id: theirLink.id } })).resolves.toEqual(
+        expect.objectContaining({ status: LanguageLinkStatus.Unresolved, tagId: null }),
+      );
+    });
+
+    // Both are disabled, so neither reaches the coordinator: its own is found
+    // and refused as disabled, and the other isn't found.
+    it('re-interviews only that DataGateway', async () => {
+      const [mine, theirs] = await Promise.all([seedGateway(), seedGateway()]);
+      const key = await updatesOnly(mine.id);
+
+      await request(baseUrl).post(`${GATEWAYS}/${mine.id}/interview`).set(key.headers).expect(409);
+      await request(baseUrl).post(`${GATEWAYS}/${theirs.id}/interview`).set(key.headers).expect(404);
     });
   });
 });
