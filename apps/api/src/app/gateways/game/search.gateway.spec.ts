@@ -1,7 +1,7 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, PlatformType, ResourceType, ContentType as StoredContentType, Visibility } from '@bge/database';
+import { Action, PlatformType, Reach, ResourceType, ContentType as StoredContentType } from '@bge/database';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -404,7 +404,7 @@ describe('GameSearchGateway', () => {
               AND: [
                 {
                   deletedAt: null,
-                  OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+                  OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
                   AND: [FRAME_READ],
                 },
                 { title: { contains: 'Gloomhaven', mode: 'insensitive' } },

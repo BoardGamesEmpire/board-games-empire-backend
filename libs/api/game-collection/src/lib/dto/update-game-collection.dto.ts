@@ -1,22 +1,11 @@
-import { Visibility } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsEnum,
-  IsInt,
-  IsNotEmpty,
-  IsOptional,
-  IsPositive,
-  IsString,
-  Max,
-  Min,
-  ValidateIf,
-} from 'class-validator';
+import { IsBoolean, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min, ValidateIf } from 'class-validator';
+import { CollectionReachProperty, type CollectionReach } from './create-game-collection.dto';
 
 /**
  * Standard REST PATCH semantics: omitted fields are preserved, explicit `null`
- * clears a nullable field. `quantity` and `visibility` are non-nullable, so
+ * clears a nullable field. `quantity` and `reach` are non-nullable, so
  * `null` is rejected for them (`@ValidateIf` keeps validation active for
  * `null`, unlike `@IsOptional`, which skips both `null` and `undefined`).
  *
@@ -62,8 +51,6 @@ export class UpdateGameCollectionDto {
   @IsNotEmpty({ message: i18nValidationMessage('validation.isNotEmpty') })
   releaseId?: string | null;
 
-  @ApiPropertyOptional({ enum: Visibility, description: 'Who may see this collection entry beyond the owner' })
-  @ValidateIf((o) => o.visibility !== undefined)
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
-  visibility?: Visibility;
+  @CollectionReachProperty()
+  reach?: CollectionReach;
 }

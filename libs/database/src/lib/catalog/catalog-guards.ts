@@ -10,7 +10,7 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * - **Fail-open.** A permission whose conditions carry no template variable
  *   binds to nothing about the actor: the scope coordinate its pass supplied
  *   has nowhere to land, and `applyRule` emits a `can(action, subject)` that
- *   reaches every row — or, for a static filter like `{ visibility: 'Public' }`,
+ *   reaches every row — or, for a static filter like `{ reach: 'Public' }`,
  *   every matching row install-wide. Granted through a household- or
  *   event-scoped role, that is an install-wide grant wearing a scoped role's
  *   name (#432). Granted through a GLOBAL role it may be exactly what was
@@ -34,7 +34,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * instance check can evaluate it (#458). See
  * {@link findShorthandRelationConditions}. And one judges the event roles:
  * every grant they hold names the event it was rendered for (#458). See
- * {@link findEventSpanningGrants}.
+ * {@link findEventSpanningGrants}. The reach guard, which judges the reads
+ * every user or guest holds against the `reach` their rows carry, sits beside
+ * the read classification it uses: `findReadsIgnoringReach` in
+ * `catalog-read-ceilings.ts` (#495).
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw
@@ -386,7 +389,7 @@ export function findTemplateDefects(
  *
  * Neither unconditioned-grant guard can say this. Both skip any slug the
  * everyone role holds, which is exactly where a floor role's slugs come from,
- * and both count a static filter such as `{ visibility: 'Public' }` as
+ * and both count a static filter such as `{ reach: 'Public' }` as
  * unconditioned, which is exactly the shape a floor grant should take. The
  * question here is only whether a grant narrows the rows at all, so a static
  * filter passes, a template passes, and no other holder of the slug excuses

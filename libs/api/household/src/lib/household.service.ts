@@ -549,8 +549,8 @@ export class HouseholdService {
    * client could not tell the cases apart either. That is the ambiguity #365
    * was filed about, removed here at its original instance.
    *
-   * Friend visibility is narrowed, not withdrawn. `read:households:friends`
-   * still reaches a friend's `Friends`-visible household through
+   * Friend reach is narrowed, not withdrawn. `read:households:friends`
+   * still reaches a friend's household whose reach admits friends through
    * {@link getHouseholdById}, which ANDs the ceiling exactly as before; what it
    * loses is its effect on this LIST. Reading another subject's households as a
    * list belongs on a path-parameterized route (#485), unbuilt until a consumer

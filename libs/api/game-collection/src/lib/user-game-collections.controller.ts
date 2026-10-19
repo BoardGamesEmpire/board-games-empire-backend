@@ -35,8 +35,10 @@ export class UserGameCollectionsController {
   @ApiOperation({
     summary: "List another user's visible collection",
     description:
-      'Entries filtered by visibility: household-shared, friend-shared, and public for signed-in viewers; ' +
-      'public only for an anonymous (guest) session. A session is required.',
+      'The entries the caller may see. A signed-in viewer sees what the owner shares with a household they ' +
+      'share (whatever its reach, unless the owner excluded it), what reaches the owner\u2019s friends when ' +
+      'they are one, and what is `Public`. An anonymous (guest) session sees `Public` entries only. A ' +
+      'session is required.',
   })
   @ApiParam({ name: 'userId', type: String })
   @ApiResponse({ status: Http.Ok, type: PaginatedGameCollectionResponse })

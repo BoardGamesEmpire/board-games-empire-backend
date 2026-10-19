@@ -1,4 +1,4 @@
-import { GameMedium, Visibility } from '@bge/database';
+import { GameMedium, Reach } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -69,7 +69,7 @@ describe('game collection authorization', () => {
         userId: ownerId,
         platformGameId: platformGame.id,
         medium: GameMedium.Physical,
-        visibility: Visibility.Public,
+        reach: Reach.Public,
       },
       select: { id: true },
     });
@@ -78,7 +78,7 @@ describe('game collection authorization', () => {
         userId: ownerId,
         platformGameId: platformGame.id,
         medium: GameMedium.Digital,
-        visibility: Visibility.Friends,
+        reach: Reach.Friends,
       },
       select: { id: true },
     });

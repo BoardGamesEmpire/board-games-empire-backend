@@ -1,5 +1,6 @@
-import { EventSchedulingMode, EventType, Visibility } from '@bge/database';
+import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -21,6 +22,25 @@ import { CreateEventPolicyDto } from './create-event-policy.dto';
  * amount of work with no bound.
  */
 export const MAX_INVITE_USER_IDS = 50;
+
+const EVENT_REACHES = [Reach.Private, Reach.Friends] as const;
+export type EventReach = (typeof EVENT_REACHES)[number];
+
+/**
+ * An event's reach: Private or Friends only, the rungs an event read rule
+ * serves. `Public` arrives with its rule (#809), and `FriendsOfFriends` with
+ * #496, which defines friends of friends. Shared with `UpdateEventDto`, which
+ * names no default.
+ */
+export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator {
+  return ReachProperty({
+    reaches: EVENT_REACHES,
+    default: defaultReach,
+    description:
+      "Who may read the event besides its attendees and its household's members. `Friends`: also its " +
+      "creator's friends. `Private`: no one else.",
+  });
+}
 
 export class CreateEventDto {
   @ApiProperty()
@@ -64,10 +84,8 @@ export class CreateEventDto {
   @IsOptional()
   type?: EventType;
 
-  @ApiPropertyOptional({ enum: Visibility, default: Visibility.Friends })
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
-  @IsOptional()
-  visibility?: Visibility;
+  @EventReachProperty(Reach.Friends)
+  reach?: EventReach;
 
   @ApiPropertyOptional({ enum: EventSchedulingMode, default: EventSchedulingMode.Fixed })
   @IsEnum(EventSchedulingMode, { message: i18nValidationMessage('validation.isEnum') })

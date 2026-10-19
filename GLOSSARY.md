@@ -189,7 +189,7 @@ One user shutting out another, whether or not they are friends.
 _Avoid_: blocked friendship
 
 **Reach**:
-How far from its owner an item can be seen: only the owner, friends, friends of friends, or everyone.
+How far from its owner an item can be seen: only the owner, friends, friends of friends, or everyone. The four form a ladder, each rung reaching everyone the rung below it does.
 _Avoid_: visibility
 
 **Share**:
@@ -442,7 +442,7 @@ The games a household's members share with each other.
 _Avoid_: pool on its own, household pool
 
 **Collection sharing**:
-A member's choice to put their games into a household's game pool. It is on by default, and single games can be held back as excluded games.
+A member's choice to put their games into a household's game pool. It is on by default, and single games can be held back as excluded games. It works apart from reach: a shared game is in the game pool even when its collection entry reaches only the owner.
 _Avoid_: show all games
 
 **Excluded game**:

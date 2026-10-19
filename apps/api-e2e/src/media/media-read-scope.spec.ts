@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -43,13 +43,13 @@ describe('media read scope', () => {
   const listMedia = (actor: AuthenticatedActor) => request(baseUrl).get(MEDIA_PATH).set(actor.headers);
 
   /** A media object row owned by `ownerId`, with no bytes behind it. */
-  const arrangeMedia = async (ownerId: string, visibility: Visibility) =>
+  const arrangeMedia = async (ownerId: string, reach: Reach) =>
     (
       await db.client.mediaObject.create({
         data: {
           ownerId,
           uploaderId: ownerId,
-          visibility,
+          reach,
           driverSlug: 'e2e',
           driverKey: `e2e/${randomUUID()}`,
           sizeBytes: 1n,
@@ -74,11 +74,11 @@ describe('media read scope', () => {
       actors.user(),
     ]);
 
-    const strangersPrivate = await arrangeMedia(stranger.user.id, Visibility.Private);
+    const strangersPrivate = await arrangeMedia(stranger.user.id, Reach.Private);
     const staff = [
-      ['an admin', admin, await arrangeMedia(admin.user.id, Visibility.Private)],
-      ['a moderator', moderator, await arrangeMedia(moderator.user.id, Visibility.Private)],
-      ["the server's Owner", serverOwner, await arrangeMedia(serverOwner.user.id, Visibility.Private)],
+      ['an admin', admin, await arrangeMedia(admin.user.id, Reach.Private)],
+      ['a moderator', moderator, await arrangeMedia(moderator.user.id, Reach.Private)],
+      ["the server's Owner", serverOwner, await arrangeMedia(serverOwner.user.id, Reach.Private)],
     ] as const;
 
     // The control. Admin and Moderator read the stranger's media through
@@ -105,9 +105,9 @@ describe('media read scope', () => {
     const user = await actors.user();
     const other = await actors.user();
 
-    const othersPublic = await arrangeMedia(other.user.id, Visibility.Public);
-    const ownPrivate = await arrangeMedia(user.user.id, Visibility.Private);
-    const ownPublic = await arrangeMedia(user.user.id, Visibility.Public);
+    const othersPublic = await arrangeMedia(other.user.id, Reach.Public);
+    const ownPrivate = await arrangeMedia(user.user.id, Reach.Private);
+    const ownPublic = await arrangeMedia(user.user.id, Reach.Public);
 
     // The control: the user reads the other user's Public media through
     // `read:media_object:public`.

@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { Action, Prisma, ResourceType, Visibility } from '@bge/database';
+import { Action, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -83,7 +83,7 @@ describe('GameService', () => {
 
       expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
         deletedAt: null,
-        OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+        OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
       });
     });
 
@@ -97,7 +97,7 @@ describe('GameService', () => {
         expect.objectContaining({
           where: {
             deletedAt: null,
-            OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+            OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
             AND: [COND],
           },
         }),
@@ -178,13 +178,13 @@ describe('GameService', () => {
     expect(permissions.invalidateUser).toHaveBeenCalledWith(MOCK_ACTING_USER_ID);
   });
 
-  it('createGame keeps the visibility it was sent, owned by the caller', async () => {
+  it('createGame keeps the reach it was sent, owned by the caller', async () => {
     db.game.create.mockResolvedValue({ id: 'game-1' } as Game);
 
-    await service.createGame({ title: 'X', visibility: Visibility.Private });
+    await service.createGame({ title: 'X', reach: Reach.Private });
 
     expect(db.game.create).toHaveBeenCalledWith({
-      data: { title: 'X', visibility: Visibility.Private, createdBy: { connect: { id: MOCK_ACTING_USER_ID } } },
+      data: { title: 'X', reach: Reach.Private, createdBy: { connect: { id: MOCK_ACTING_USER_ID } } },
     });
   });
 
@@ -313,18 +313,16 @@ describe('GameService', () => {
     db.game.findFirst.mockResolvedValue(userOwned);
     db.game.update.mockRejectedValue(dependentRecordNotFound());
 
-    await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(ForbiddenException);
+    await expect(service.updateGame('game-1', { reach: Reach.Private })).rejects.toThrow(ForbiddenException);
   });
 
   describe('a game the service account owns', () => {
-    // Only an import produces one, and re-import never rewrites visibility, so
+    // Only an import produces one, and re-import never rewrites reach, so
     // a server-owned game made private would stay private for good.
     it('refuses to be made private, before any write', async () => {
       db.game.findFirst.mockResolvedValue(serviceOwned);
 
-      await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(service.updateGame('game-1', { reach: Reach.Private })).rejects.toThrow(BadRequestException);
       expect(db.game.update).not.toHaveBeenCalled();
     });
 
@@ -333,14 +331,12 @@ describe('GameService', () => {
       db.game.findFirst.mockResolvedValue(null);
       db.game.count.mockResolvedValue(1);
 
-      await expect(service.updateGame('game-1', { visibility: Visibility.Private })).rejects.toThrow(
-        ForbiddenException,
-      );
+      await expect(service.updateGame('game-1', { reach: Reach.Private })).rejects.toThrow(ForbiddenException);
     });
 
     it.each<[string, UpdateGameDto]>([
-      ['kept Public', { visibility: Visibility.Public }],
-      ['edited without naming a visibility', { title: 'New' }],
+      ['kept Public', { reach: Reach.Public }],
+      ['edited without naming a reach', { title: 'New' }],
     ])('can still be %s', async (_label, patch) => {
       db.game.findFirst.mockResolvedValue(serviceOwned);
       db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
@@ -358,10 +354,10 @@ describe('GameService', () => {
     db.game.findFirst.mockResolvedValue(existing);
     db.game.update.mockResolvedValue({ id: 'game-1' } as Game);
 
-    await service.updateGame('game-1', { visibility: Visibility.Private });
+    await service.updateGame('game-1', { reach: Reach.Private });
 
     expect(db.game.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ visibility: Visibility.Private }) }),
+      expect.objectContaining({ data: expect.objectContaining({ reach: Reach.Private }) }),
     );
   });
 

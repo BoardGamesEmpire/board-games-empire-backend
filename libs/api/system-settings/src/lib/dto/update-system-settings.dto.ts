@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -28,11 +28,10 @@ const MAX_NAME_LENGTH = 100;
 
 /**
  * The levels the server's invitee policies take, for households (#278) and
- * events (#546). `FriendsOfFriends` waits for the second-degree rule (#496).
- * `Household` names no group an invitee could belong to, and `Private` would
- * turn every invite of that kind off.
+ * events (#546). `FriendsOfFriends` waits on #496, which defines friends of
+ * friends, and `Private` would turn every invite of that kind off.
  */
-const INVITEE_POLICIES = [Visibility.Public, Visibility.Friends] as const;
+const INVITEE_POLICIES = [Reach.Public, Reach.Friends] as const;
 
 /**
  * Partial update for the `SystemSetting` singleton row. A property the body

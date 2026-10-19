@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { ContentType, TimeMeasure, Visibility } from '@bge/database';
+import { ContentType, Reach, TimeMeasure } from '@bge/database';
 
 export function makeGame(overrides: Partial<Game> = {}): Game {
   return {
@@ -32,7 +32,7 @@ export function makeGame(overrides: Partial<Game> = {}): Game {
     totalPlayCount: 0,
     updatedById: null,
     updatedAt: new Date('2024-01-01T00:00:00.000Z'),
-    visibility: Visibility.Public,
+    reach: Reach.Public,
     ...overrides,
   };
 }

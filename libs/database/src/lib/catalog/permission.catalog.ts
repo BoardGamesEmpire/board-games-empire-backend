@@ -1,4 +1,4 @@
-import type { Prisma } from '../client';
+import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
@@ -19,6 +19,15 @@ const acceptedFriendOfActingUser = {
     { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
   ],
 } satisfies Prisma.UserWhereInput;
+
+// The rungs of the reach ladder that admit a friend: `Friends` and every rung
+// above it. The ladder reads upwards, so a wider reach keeps the readers of a
+// narrower one (#495). `FriendsOfFriends` admits direct friends only until
+// #496 defines friends of friends. Module-private for the reasons
+// `acceptedFriendOfActingUser` gives.
+const reachAdmittingFriends = {
+  in: ['Friends', 'FriendsOfFriends', 'Public'],
+} satisfies EnumReachFilter;
 
 // An EventGame hangs off the event itself or off one of its occurrences
 // (exactly one FK is set), so a grant bound to an event has to name both
@@ -227,13 +236,30 @@ export const PERMISSION_CATALOG = [
   }),
 
   // --- App Level / User ---
+  //
+  // A profile has a reach, split like the Game family: your own, whatever its
+  // reach, and everyone's `Public` ones. The unconditioned read these replace
+  // served every profile to every user, whatever its owner chose (#495). User
+  // search composes this read, so a profile is found only where it can be
+  // read. Friends reach arrives with its rule (#809). The public read rates
+  // `Medium`, as `read:user:searchable` does: it is other users' personal
+  // details, such as accessibility needs, that their owners chose to show.
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
     subject: ResourceType.UserProfile,
-    slug: 'read:user:profile',
-    riskLevel: RiskLevel.High,
-    reason: 'View user profiles',
+    conditions: { userId: '{{ user.id }}' },
+    slug: 'read:user:profile:own',
+    riskLevel: RiskLevel.Low,
+    reason: 'View your own profile',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UserProfile,
+    conditions: { reach: 'Public' },
+    slug: 'read:user:profile:public',
+    riskLevel: RiskLevel.Medium,
+    reason: 'View public user profiles',
   }),
   // The ceiling user search composes against. `banned: false` matches the
   // search's own filter, and `profile` is an optional relation, so its clause
@@ -292,28 +318,29 @@ export const PERMISSION_CATALOG = [
     riskLevel: RiskLevel.Low,
     reason: 'Remove a friendship you are part of',
   }),
-  // Friend visibility: read resources exposed to friends by their owner.
+  // Friends reach: read what a friend's reach admits their friends to. The
+  // ladder reads upwards, so `Public` admits a friend as `Friends` does (#495).
   permission({
     action: Action.read,
     subject: ResourceType.Event,
-    conditions: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } },
+    conditions: { reach: reachAdmittingFriends, createdBy: { is: acceptedFriendOfActingUser } },
     slug: 'read:event:friends',
     riskLevel: RiskLevel.Medium,
-    reason: "View a friend's friends-visible events",
+    reason: "View a friend's events that reach their friends",
   }),
   permission({
     action: Action.read,
     subject: ResourceType.Household,
-    conditions: { visibility: 'Friends', members: { some: { user: { is: acceptedFriendOfActingUser } } } },
+    conditions: { reach: reachAdmittingFriends, members: { some: { user: { is: acceptedFriendOfActingUser } } } },
     slug: 'read:households:friends',
     riskLevel: RiskLevel.Medium,
-    reason: "View a friend's friends-visible households",
+    reason: "View a friend's households that reach their friends",
   }),
 
   // --- Games ---
   //
   // Split like the GameCollection family: the bare slug is the creator's own
-  // rows, and `:public` is everyone else's view. A game carries a visibility
+  // rows, and `:public` is everyone else's view. A game carries a reach
   // its creator chooses, and `User` is held by every signed-in actor, so an
   // unconditioned read here would hand every private game to everyone (#472).
   // `:public` is static — no render variable — so a plugin can hold it; the
@@ -330,7 +357,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.Game,
-    conditions: { deletedAt: null, visibility: 'Public' },
+    conditions: { deletedAt: null, reach: 'Public' },
     slug: 'read:game:public',
     riskLevel: RiskLevel.Low,
     reason: 'View public games',
@@ -492,10 +519,10 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.EventOccurrence,
-    conditions: { event: { is: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } } } },
+    conditions: { event: { is: { reach: reachAdmittingFriends, createdBy: { is: acceptedFriendOfActingUser } } } },
     slug: 'read:event_occurrence:friends',
     riskLevel: RiskLevel.Medium,
-    reason: "View the occurrences of a friend's friends-visible events",
+    reason: "View the occurrences of a friend's events that reach their friends",
   }),
   permission({
     action: Action.create,
@@ -887,10 +914,10 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.EventPolicy,
-    conditions: { event: { is: { visibility: 'Friends', createdBy: { is: acceptedFriendOfActingUser } } } },
+    conditions: { event: { is: { reach: reachAdmittingFriends, createdBy: { is: acceptedFriendOfActingUser } } } },
     slug: 'read:event_policy:friends',
     riskLevel: RiskLevel.Medium,
-    reason: "View the policy configuration of a friend's friends-visible events",
+    reason: "View the policy configuration of a friend's events that reach their friends",
   }),
   permission({
     action: Action.update,
@@ -935,9 +962,13 @@ export const PERMISSION_CATALOG = [
     reason: 'View your own game collection',
   }),
   // Row visible when the owner shares a household with the acting user, the
-  // owner's membership in that household has `showAllGames`, the row is not
-  // excluded from a household the acting user belongs to, and the row's
-  // visibility admits household viewers.
+  // owner's membership in that household has `showAllGames`, and the row is
+  // not excluded from a household the acting user belongs to. Its reach is
+  // not read: a household shares its members' games, and the reach says who
+  // beyond the owner's households sees the row. A member keeps an entry from
+  // a household by excluding it, or all of them with `showAllGames` (#495).
+  // The shared household must be live: a deleted one keeps its member rows
+  // until it is purged, so membership alone would still match it.
   //
   // Known approximation: `showAllGames` and the ExcludedGame check cannot be
   // correlated to the *same* shared household from inside this flat Prisma
@@ -948,13 +979,12 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.GameCollection,
     conditions: {
       deletedAt: null,
-      visibility: { in: ['Household', 'Friends', 'FriendsOfFriends', 'Public'] },
       user: {
         is: {
           householdMember: {
             some: {
               showAllGames: true,
-              household: { is: { members: { some: { userId: '{{ user.id }}' } } } },
+              household: { is: { deletedAt: null, members: { some: { userId: '{{ user.id }}' } } } },
             },
           },
         },
@@ -972,13 +1002,13 @@ export const PERMISSION_CATALOG = [
   // Row visible to accepted friends of the owner when the owner's
   // preferences allow it (absent preferences row → schema default `true`,
   // mirroring FriendshipService). FriendsOfFriends currently grants to
-  // direct friends only — 2-hop traversal is deferred.
+  // direct friends only — 2-hop traversal is #496.
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,
     conditions: {
       deletedAt: null,
-      visibility: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+      reach: reachAdmittingFriends,
       user: {
         is: {
           AND: [
@@ -995,7 +1025,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.GameCollection,
-    conditions: { deletedAt: null, visibility: 'Public' },
+    conditions: { deletedAt: null, reach: 'Public' },
     slug: 'read:game_collection:public',
     riskLevel: RiskLevel.Low,
     reason: 'View public collections',
@@ -1057,7 +1087,7 @@ export const PERMISSION_CATALOG = [
 
   // --- Households ---
   //
-  // `Low`, though it takes `visibility` as `update:household` does. A new
+  // `Low`, though it takes `reach` as `update:household` does. A new
   // household's roster is its founder alone, so the reach this write sets
   // covers only the actor's own data, and anyone who joins later joins into
   // it. `update:household` changes the reach over members already on the
@@ -1101,15 +1131,15 @@ export const PERMISSION_CATALOG = [
   // role wider and it silently becomes membership-only. The role clause
   // makes the constraint self-describing (#160).
   //
-  // `Medium`, not `Low`, because this write sets `visibility` over a roster
+  // `Medium`, not `Low`, because this write sets `reach` over a roster
   // that already holds other members. It decides who outside the household
   // can read it and see each of them on it (`read:households:friends`,
   // `read:household_member:friends`, both `Medium`). The rubric's `Low` is
   // for writes to the actor's own resources, and this reach covers other
-  // users. The rating follows the field, not the slug: if `visibility` moves
+  // users. The rating follows the field, not the slug: if `reach` moves
   // into a settings write (#231), that write takes this rating, and the rule
-  // that makes `Public` a live reach for households (#495) is the point to
-  // re-rate it.
+  // that makes `Public` a live reach for households, which waits on #231
+  // (#495), is the point to re-rate it.
   permission({
     action: Action.update,
     subject: ResourceType.Household,
@@ -1181,16 +1211,18 @@ export const PERMISSION_CATALOG = [
   }),
   // Roster readability follows household readability: a friend can already
   // read the full member list through getHouseholdById's embed under
-  // read:households:friends, so the sub-resource grants the same visibility.
+  // read:households:friends, so the sub-resource grants the same reach.
   permission({
     action: Action.read,
     subject: ResourceType.HouseholdMember,
     conditions: {
-      household: { is: { visibility: 'Friends', members: { some: { user: { is: acceptedFriendOfActingUser } } } } },
+      household: {
+        is: { reach: reachAdmittingFriends, members: { some: { user: { is: acceptedFriendOfActingUser } } } },
+      },
     },
     slug: 'read:household_member:friends',
     riskLevel: RiskLevel.Medium,
-    reason: "View the member roster of a friend's friends-visible household",
+    reason: "View the member roster of a friend's household that reaches their friends",
   }),
   // Self-scoped by conditions: the `userId` pin means every household role
   // can hold this grant without conferring removal power over anyone else.
@@ -1404,10 +1436,11 @@ export const PERMISSION_CATALOG = [
   // reach this write sets covers the invitees' names and avatars in the
   // attendee embed as well as the creator's, and every attendee reads that
   // embed. The creator's friends read the event but not its attendees
-  // (#560). Two decisions re-rate it. Invitees will hold no role and not
-  // appear until they accept (#742); then the write covers the creator alone
-  // and goes back to `Low`. And the rule that makes public reach live for events
-  // (#495) is the point to rate it again, alongside the updates below (#533).
+  // (#560). One decision re-rates it: invitees will hold no role and not
+  // appear until they accept (#742), and then the write covers the creator
+  // alone and goes back to `Low`. Public reach for events (#809) leaves it as
+  // it is: a public reader sees the event, its dates and its policy, and no
+  // attendee (#495).
   permission({
     action: Action.create,
     subject: ResourceType.Event,
@@ -1453,14 +1486,14 @@ export const PERMISSION_CATALOG = [
     reason: "View your household's events",
   }),
 
-  // `Medium`, both. The PATCH sets `visibility`, which decides who outside
+  // `Medium`, both. The PATCH sets `reach`, which decides who outside
   // the event reads it, with its dates and rules (`read:event:friends`,
   // `Medium`). The rating was given, on `update:household`'s reasoning, when
   // that reach also showed each attendee, which is other users' data. Since
   // #560 a friend reads no attendees, so the reach is the event's own; the
   // rating is unchanged here. The household variant is the same write on any
-  // of the household's events. The rule that makes public reach live for
-  // events (#495) is the point to re-rate them (#533).
+  // of the household's events. Public reach for events (#809) leaves both as
+  // they are, for the reason `create:event` gives (#495).
   permission({
     action: Action.update,
     subject: ResourceType.Event,
@@ -1551,8 +1584,8 @@ export const PERMISSION_CATALOG = [
   // the event's reach over the attendees already on it. They re-rate with
   // `create:event`: once invitees hold no role and don't appear until they
   // accept (#742), an invite reaches no one else's data and both go back to
-  // `Low`. The rule that makes public reach live for events (#495) is the
-  // point to rate them again (#533).
+  // `Low`. Public reach for events (#809) leaves them as they are, for the
+  // reason `create:event` gives (#495).
   //
   // The direct add further down, `create:event_attendee:attending-role`,
   // stays `Low` by the decision at #544's reconcile, though it reaches at
@@ -1616,8 +1649,8 @@ export const PERMISSION_CATALOG = [
   // embed to every reader of the event's attendees, the event's other
   // attendees among them (see the invite grants above). The removal is
   // `Medium`: it deletes another user's attendee row, and their role and
-  // game list for the event go with it. The rule that makes public reach live
-  // for events (#495) is the point to rate the add again.
+  // game list for the event go with it. Public reach for events (#809) leaves
+  // the add `Low`: a public reader reads no attendees (#495).
   permission({
     action: Action.create,
     subject: ResourceType.EventAttendee,
@@ -1796,7 +1829,7 @@ export const PERMISSION_CATALOG = [
   permission({
     action: Action.read,
     subject: ResourceType.MediaObject,
-    conditions: { visibility: 'Public' },
+    conditions: { reach: 'Public' },
     slug: 'read:media_object:public',
     riskLevel: RiskLevel.Low,
     reason: 'View public media objects',

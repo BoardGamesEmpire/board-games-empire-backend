@@ -3,7 +3,7 @@ import { i18nValidationMessage } from '@bge/i18n';
 import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsEnum, IsObject, IsOptional, ValidateIf, ValidateNested } from 'class-validator';
-import { CreateHouseholdDto } from './create-household.dto';
+import { CreateHouseholdDto, HouseholdReachProperty, type HouseholdReach } from './create-household.dto';
 
 /**
  * A household's own settings (#166), as its owners and admins change them.
@@ -37,7 +37,12 @@ export class UpdateHouseholdSettingsDto {
  * ignored: under the global `forbidNonWhitelisted` pipe a PATCH carrying it
  * answers 400, and the published schema no longer offers it.
  */
-export class UpdateHouseholdDto extends PartialType(OmitType(CreateHouseholdDto, ['clientRequestId'] as const)) {
+export class UpdateHouseholdDto extends PartialType(
+  OmitType(CreateHouseholdDto, ['clientRequestId', 'reach'] as const),
+) {
+  @HouseholdReachProperty()
+  reach?: HouseholdReach;
+
   @ApiPropertyOptional({ type: UpdateHouseholdSettingsDto })
   @IsOptional()
   @IsObject({ message: i18nValidationMessage('validation.isObject') })

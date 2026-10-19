@@ -20,7 +20,8 @@ model Household {
   clientRequestId String? @map("client_request_id")
 
   // Members-only by default; an owner sets `Friends` to let members' friends view it.
-  visibility Visibility @default(Household)
+  // `Public` waits on #231, which decides what a non-member sees of a household.
+  reach Reach @default(Private)
 
   // campaigns        Campaign[]
   events               Event[]

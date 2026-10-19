@@ -1,5 +1,5 @@
 import type { GameCollection } from '@bge/database';
-import { GameMedium, GameRemovalReason, Visibility } from '@bge/database';
+import { GameMedium, GameRemovalReason, Reach } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CollectionGameSummaryDto {
@@ -66,7 +66,7 @@ export class GameCollectionDto implements Pick<
   | 'releaseId'
   | 'medium'
   | 'quantity'
-  | 'visibility'
+  | 'reach'
   | 'rating'
   | 'playCount'
   | 'playAgain'
@@ -97,8 +97,12 @@ export class GameCollectionDto implements Pick<
   @ApiProperty({ description: 'Number of copies owned' })
   quantity!: number;
 
-  @ApiProperty({ enum: Visibility, description: 'Who may see this entry beyond the owner' })
-  visibility!: Visibility;
+  @ApiProperty({
+    enum: Reach,
+    enumName: 'Reach',
+    description: 'Who may see this entry besides its owner and the households they share their games with',
+  })
+  reach!: Reach;
 
   @ApiPropertyOptional({ description: 'Personal rating (1-10)', nullable: true })
   rating!: number | null;

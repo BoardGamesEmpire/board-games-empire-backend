@@ -376,7 +376,8 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     // user
     'create:user_game_customization',
     'delete:user_game_customization',
-    'read:user:profile',
+    'read:user:profile:own',
+    'read:user:profile:public',
     'read:user:searchable',
     'update:user_game_customization',
     'update:user:profile:own',

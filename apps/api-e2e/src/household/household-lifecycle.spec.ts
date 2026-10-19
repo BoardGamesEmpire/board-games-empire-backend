@@ -1,4 +1,4 @@
-import { InviteStatus, InviteType, SystemRole, Visibility } from '@bge/database';
+import { InviteStatus, InviteType, Reach, SystemRole } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -81,7 +81,7 @@ describe('household lifecycle', () => {
       expect(created.household.createdById).toBe(actor.user.id);
       expect(created.household.deletedAt).toBeNull();
       // The schema default, not something the payload supplied.
-      expect(created.household.visibility).toBe(Visibility.Household);
+      expect(created.household.reach).toBe(Reach.Private);
 
       const members = await db.client.householdMember.findMany({
         where: { householdId: created.household.id },

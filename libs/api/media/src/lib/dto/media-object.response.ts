@@ -1,4 +1,4 @@
-import { Visibility, type MediaObject } from '@bge/database';
+import { Reach, type MediaObject } from '@bge/database';
 import { ApiProperty } from '@nestjs/swagger';
 
 /** Public shape of a MediaObject. Excludes the internal storage location
@@ -7,7 +7,7 @@ export interface MediaObjectResponse {
   id: string;
   ownerId: string;
   uploaderId: string;
-  visibility: Visibility;
+  reach: Reach;
   mimeType: string;
   sizeBytes: string;
   checksum: string;
@@ -25,7 +25,7 @@ export function toMediaObjectResponse(media: MediaObject): MediaObjectResponse {
     id: media.id,
     ownerId: media.ownerId,
     uploaderId: media.uploaderId,
-    visibility: media.visibility,
+    reach: media.reach,
     mimeType: media.mimeType,
     sizeBytes: media.sizeBytes.toString(),
     checksum: media.checksum,
@@ -62,8 +62,8 @@ export class MediaObjectResponseDto implements MediaObjectResponse {
   @ApiProperty({ description: 'Who uploaded it; permanent credit, never re-attributed' })
   uploaderId!: string;
 
-  @ApiProperty({ enum: Visibility, enumName: 'Visibility' })
-  visibility!: Visibility;
+  @ApiProperty({ enum: Reach, enumName: 'Reach' })
+  reach!: Reach;
 
   @ApiProperty({ example: 'image/png' })
   mimeType!: string;

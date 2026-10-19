@@ -1,22 +1,38 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH } from '../constants/household.constants';
+
+const HOUSEHOLD_REACHES = [Reach.Private, Reach.Friends] as const;
+export type HouseholdReach = (typeof HOUSEHOLD_REACHES)[number];
+
+/**
+ * A household's reach: Private or Friends only, the rungs a household read
+ * rule serves. `Public` waits on #231, which decides what someone outside a
+ * household sees of it (#495), and `FriendsOfFriends` on #496, which defines
+ * friends of friends. Shared with `UpdateHouseholdDto`, which names no
+ * default.
+ */
+export function HouseholdReachProperty(defaultReach?: HouseholdReach): PropertyDecorator {
+  return ReachProperty({
+    reaches: HOUSEHOLD_REACHES,
+    default: defaultReach,
+    description:
+      'Who may read the household and its roster besides its members. `Private`: no one. `Friends`: each ' +
+      "member's friends.",
+  });
+}
 
 export class CreateHouseholdDto {
   @ApiProperty()
   @IsString({ message: i18nValidationMessage('validation.isString') })
   name!: string;
 
-  @ApiPropertyOptional({
-    enum: Visibility,
-    description: "Set to 'Friends' to let members' friends view this household",
-  })
-  @IsOptional()
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
-  visibility?: Visibility;
+  @HouseholdReachProperty(Reach.Private)
+  reach?: HouseholdReach;
 
   @ApiPropertyOptional()
   @IsOptional()

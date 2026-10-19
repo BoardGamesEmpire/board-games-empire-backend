@@ -1,5 +1,5 @@
 import { OmitType, PartialType } from '@nestjs/swagger';
-import { CreateEventDto } from './create-event.dto';
+import { CreateEventDto, EventReachProperty, type EventReach } from './create-event.dto';
 
 /**
  * `householdId` is create-only (#454). Attaching an event to a household is
@@ -8,4 +8,7 @@ import { CreateEventDto } from './create-event.dto';
  * grant a PATCH can check expresses. The global pipe forbids unlisted
  * properties, so a PATCH carrying it answers 400.
  */
-export class UpdateEventDto extends PartialType(OmitType(CreateEventDto, ['householdId'] as const)) {}
+export class UpdateEventDto extends PartialType(OmitType(CreateEventDto, ['householdId', 'reach'] as const)) {
+  @EventReachProperty()
+  reach?: EventReach;
+}

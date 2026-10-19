@@ -6,9 +6,9 @@ import {
   HUMAN_USER_WHERE,
   NominationStatus,
   Prisma,
+  Reach,
   ResourceType,
   SystemRole,
-  Visibility,
 } from '@bge/database';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -444,8 +444,8 @@ describe('EventAttendeeService', () => {
 
     it("reads the user's preference for events, not for households", async () => {
       db.userPreferences.findFirst.mockResolvedValue({
-        allowHouseholdInvitesFrom: Visibility.Private,
-        allowEventInvitesFrom: Visibility.Public,
+        allowHouseholdInvitesFrom: Reach.Private,
+        allowEventInvitesFrom: Reach.Public,
       } as never);
 
       await service.addAttendee('event-1', { userId: 'user-2' });
@@ -453,8 +453,8 @@ describe('EventAttendeeService', () => {
       expect(db.eventAttendee.create).toHaveBeenCalled();
 
       db.userPreferences.findFirst.mockResolvedValue({
-        allowHouseholdInvitesFrom: Visibility.Public,
-        allowEventInvitesFrom: Visibility.Private,
+        allowHouseholdInvitesFrom: Reach.Public,
+        allowEventInvitesFrom: Reach.Private,
       } as never);
 
       await expect(service.addAttendee('event-1', { userId: 'user-2' })).rejects.toThrow(ForbiddenException);

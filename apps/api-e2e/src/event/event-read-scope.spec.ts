@@ -1,10 +1,4 @@
-import {
-  AvailabilityResponse,
-  EventParticipationStatus,
-  OccurrenceStatus,
-  SystemRole,
-  Visibility,
-} from '@bge/database';
+import { AvailabilityResponse, EventParticipationStatus, OccurrenceStatus, Reach, SystemRole } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -177,7 +171,7 @@ describe('event read scope', () => {
       const viewer = await actors.user();
       await befriend(db.client, viewer, friend);
 
-      const friendsEventId = await createdEventId(friend, { visibility: Visibility.Friends });
+      const friendsEventId = await createdEventId(friend, { reach: Reach.Friends });
       const ownId = await createdEventId(viewer);
 
       // Control: the viewer reads it through `read:event:friends`.
@@ -338,7 +332,7 @@ describe('event read scope', () => {
       const host = await actors.user();
       const friend = await actors.user();
       await befriend(db.client, friend, host);
-      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { visibility: Visibility.Friends });
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
 
       // Control: the host is served every attendee, the guest's email with
       // them, so the friend's empty list below is the friend's ceiling.
@@ -353,6 +347,34 @@ describe('event read scope', () => {
       expect(read.attendees).toEqual([]);
       expect(JSON.stringify(response.body)).not.toContain(guestEmail);
     });
+
+    // The ladder reads upwards (#495). The event, occurrence and policy rules
+    // once tested `Friends` alone, so an event widened past it hid from the
+    // host's friends. No route sets either reach until its rule lands (#809,
+    // #496), so the event is created at `Friends` and widened directly.
+    it.each([Reach.FriendsOfFriends, Reach.Public])(
+      "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
+      async (reach) => {
+        const host = await actors.user();
+        const friend = await actors.user();
+        const stranger = await actors.user();
+        await befriend(db.client, friend, host);
+        const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
+        await db.client.event.update({ where: { id: eventId }, data: { reach } });
+
+        const response = await readEvent(friend, eventId).expect(200);
+        const read = eventDetailEnvelope(response, `GET /api/events/:id as a friend of the host, at ${reach}`);
+        expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+        expect(read.policy?.eventId).toBe(eventId);
+        expect(read.attendees).toEqual([]);
+        expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+        await readOccurrence(friend, eventId, occurrenceId).expect(200);
+
+        // `Public` reaches a stranger only once its rule lands (#809).
+        await readEvent(stranger, eventId).expect(404);
+      },
+    );
 
     it("serves a household guest the household event's occurrences and policy, and none of its attendees", async () => {
       const owner = await actors.user();
@@ -414,7 +436,7 @@ describe('event read scope', () => {
       const host = await actors.user();
       const friend = await actors.user();
       await befriend(db.client, friend, host);
-      const { eventId, occurrenceId } = await arrangeEvent(host, { visibility: Visibility.Friends });
+      const { eventId, occurrenceId } = await arrangeEvent(host, { reach: Reach.Friends });
 
       // Control: the host is served the vote and the game.
       const own = listOccurrencesEnvelope(

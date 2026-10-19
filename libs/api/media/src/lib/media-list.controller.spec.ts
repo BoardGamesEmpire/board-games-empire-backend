@@ -1,10 +1,4 @@
-import {
-  MediaContributionStatus,
-  ResourceType,
-  Visibility,
-  type MediaContribution,
-  type MediaObject,
-} from '@bge/database';
+import { MediaContributionStatus, Reach, ResourceType, type MediaContribution, type MediaObject } from '@bge/database';
 import { ListScopeNotComposedError } from '@bge/shared';
 import { paginationQuery } from '@bge/testing';
 import { plainToInstance } from 'class-transformer';
@@ -18,7 +12,7 @@ const mediaRow = {
   id: 'm-1',
   ownerId: 'u-1',
   uploaderId: 'u-1',
-  visibility: Visibility.Public,
+  reach: Reach.Public,
   mimeType: 'image/png',
   // A BigInt, which is exactly why the mapper has to run before the envelope:
   // JSON cannot carry it, so the public shape stringifies it.

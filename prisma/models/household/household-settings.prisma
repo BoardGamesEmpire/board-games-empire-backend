@@ -19,7 +19,7 @@ enum MemberInvitePolicy {
 // A household's own settings, one row per household (#166). Created with the
 // household, so every household has one; written by its owners and admins
 // through `PATCH /households/:id`. Which other household settings move here,
-// such as its visibility or join policy, is #231's.
+// such as its reach or join policy, is #231's.
 //
 // Keyed by the household itself: the row has no identity of its own, and the
 // migration that added it fills one in for every household with no id to mint.

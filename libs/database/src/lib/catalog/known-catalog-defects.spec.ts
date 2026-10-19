@@ -1,4 +1,4 @@
-import { Action, ResourceType, SystemRole } from '../client';
+import { Action, Prisma, ResourceType, SystemRole } from '../client';
 import {
   findEventSpanningGrants,
   findShorthandRelationConditions,
@@ -8,6 +8,7 @@ import {
   findUnconditionedScopedGrants,
   findUnrenderableTemplateGrants,
 } from './catalog-guards';
+import { findReadsIgnoringReach, modelsWithField } from './catalog-read-ceilings';
 import type { PermissionSlug } from './permission.catalog';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -255,10 +256,33 @@ describe('the shipped catalog', () => {
   it('conditions every AnonymousUser grant, whatever User holds', () => {
     // No ledger, like the template guard's: a floor grant with no condition is
     // never declared, only removed. The unconditioned-grant guards excuse any
-    // slug `User` holds, and on the floor role that excuse is the danger —
-    // `read:user:profile` would pass them and serve every profile, whatever its
-    // visibility, to anyone with an anonymous session (#484).
+    // slug `User` holds, and on the floor role that excuse is the danger: an
+    // unconditioned read `User` holds would pass them and serve every row to
+    // anyone with an anonymous session (#484).
     expect(findUnboundedGrants(PERMISSION_CATALOG, ROLE_PERMISSION_CATALOG, SystemRole.AnonymousUser)).toEqual([]);
+  });
+
+  it('reads no row past its reach through a grant every user or guest holds', () => {
+    // No ledger: a read that ignores the reach its owner chose is never
+    // declared, only fixed (#495). The subjects are the models whose rows
+    // carry a `reach`, read from the generated client, so a model is covered
+    // the moment it gains the column. Each must also be a subject, or a grant
+    // on it would be named differently and pass unseen. A row whose reach is
+    // its parent's, such as an event's occurrence, is not checked here: a new
+    // unbounded read on it moves the read ceilings `known-read-ceilings.spec.ts`
+    // pins.
+    const reachSubjects = modelsWithField(Prisma, 'reach');
+    const subjects: readonly string[] = Object.values(ResourceType);
+
+    expect(reachSubjects.filter((model) => !subjects.includes(model))).toEqual([]);
+    expect(
+      findReadsIgnoringReach(
+        PERMISSION_CATALOG,
+        ROLE_PERMISSION_CATALOG,
+        [SystemRole.User, SystemRole.AnonymousUser],
+        reachSubjects,
+      ),
+    ).toEqual([]);
   });
 
   it('has no unconditioned grant on a scoped role — #432 emptied this ledger', () => {

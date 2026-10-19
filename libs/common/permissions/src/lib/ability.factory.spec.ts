@@ -796,7 +796,7 @@ describe('AbilityFactory', () => {
         expect(ability.rules.at(-1)?.conditions).toEqual({
           household: {
             is: {
-              visibility: 'Friends',
+              reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
               members: {
                 some: {
                   user: {
@@ -819,10 +819,10 @@ describe('AbilityFactory', () => {
 
         const conditions = factory.createForUser(user).rules.at(-1)?.conditions;
 
-        // HouseholdMember has no `visibility`/`members` of its own — those live
+        // HouseholdMember has no `reach`/`members` of its own — those live
         // on Household. A regression to the flat shape would make Prisma throw.
         expect(conditions).toHaveProperty('household');
-        expect(conditions).not.toHaveProperty('visibility');
+        expect(conditions).not.toHaveProperty('reach');
         expect(conditions).not.toHaveProperty('members');
       });
 
@@ -1575,7 +1575,7 @@ describe('AbilityFactory', () => {
 
       expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
         OR: [
-          { deletedAt: null, visibility: 'Public' },
+          { deletedAt: null, reach: 'Public' },
           { deletedAt: null, createdById: 'user-1' },
         ],
       });
@@ -1662,7 +1662,7 @@ describe('AbilityFactory', () => {
 
     it('reads the Public collection entries that are not tombstoned, and no other collection row', () => {
       expect(accessibleBy(anonymous(), Action.read).ofType('GameCollection')).toEqual({
-        OR: [{ deletedAt: null, visibility: 'Public' }],
+        OR: [{ deletedAt: null, reach: 'Public' }],
       });
     });
 
@@ -1961,7 +1961,7 @@ describe('AbilityFactory', () => {
         );
 
         expect(accessibleBy(ability, Action.read).ofType('Game')).toEqual({
-          OR: [{ deletedAt: null, visibility: 'Public' }],
+          OR: [{ deletedAt: null, reach: 'Public' }],
         });
       });
 

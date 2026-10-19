@@ -1,5 +1,5 @@
 import type { Event } from '@bge/database';
-import { Action, FriendshipStatus, HUMAN_USER_WHERE, Prisma, ResourceType, Visibility } from '@bge/database';
+import { Action, FriendshipStatus, HUMAN_USER_WHERE, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, PermissionsService, ScopeComposer } from '@bge/permissions';
 import {
@@ -463,8 +463,8 @@ describe('EventService', () => {
 
     it("answers 403 for an invitee the server's event policy keeps out, and writes nothing", async () => {
       db.systemSetting.findUnique.mockResolvedValue({
-        householdInviteePolicy: Visibility.Public,
-        eventInviteePolicy: Visibility.Friends,
+        householdInviteePolicy: Reach.Public,
+        eventInviteePolicy: Reach.Friends,
       } as never);
 
       await expect(service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto)).rejects.toThrow(
@@ -475,8 +475,8 @@ describe('EventService', () => {
 
     it("lets in an invitee the server's household policy alone would keep out", async () => {
       db.systemSetting.findUnique.mockResolvedValue({
-        householdInviteePolicy: Visibility.Friends,
-        eventInviteePolicy: Visibility.Public,
+        householdInviteePolicy: Reach.Friends,
+        eventInviteePolicy: Reach.Public,
       } as never);
 
       await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);
@@ -485,7 +485,7 @@ describe('EventService', () => {
     });
 
     it("lets in a friend under the server's Friends policy", async () => {
-      db.systemSetting.findUnique.mockResolvedValue({ eventInviteePolicy: Visibility.Friends } as never);
+      db.systemSetting.findUnique.mockResolvedValue({ eventInviteePolicy: Reach.Friends } as never);
       db.friendship.findFirst.mockResolvedValue({ status: FriendshipStatus.Accepted } as never);
 
       await service.createEvent({ title: 'X', inviteUserIds: ['user-2'] } as CreateEventDto);

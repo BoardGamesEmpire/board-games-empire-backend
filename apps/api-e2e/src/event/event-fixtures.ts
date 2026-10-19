@@ -1,4 +1,4 @@
-import { Visibility, type PrismaClient } from '@bge/database';
+import { Reach, type PrismaClient } from '@bge/database';
 import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtures';
 
 /**
@@ -8,7 +8,7 @@ import { arrangeCollectionEntry } from '../game-collection/game-collection-fixtu
  * after the actors' first requests is safe.
  *
  * The collection entry is the game-collection suites' own fixture, kept at the
- * schema's default visibility, so a change to how a collection entry is
+ * schema's default reach, so a change to how a collection entry is
  * arranged lands in one place.
  *
  * The result is exactly a direct-add body's two required fields, so a spec can
@@ -22,7 +22,7 @@ export async function arrangeListEntry(
   eventId: string,
   ownerId: string,
 ): Promise<{ platformGameId: string; suppliedById: string }> {
-  const collectionId = await arrangeCollectionEntry(prisma, ownerId, Visibility.Private);
+  const collectionId = await arrangeCollectionEntry(prisma, ownerId, Reach.Private);
   const { platformGameId } = await prisma.gameCollection.findUniqueOrThrow({
     where: { id: collectionId },
     select: { platformGameId: true },

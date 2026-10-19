@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH } from '../constants/household.constants';
@@ -27,7 +27,7 @@ describe('CreateHouseholdDto', () => {
   it('accepts a fully populated payload', async () => {
     const payload: PlainPayload = {
       ...VALID_PAYLOAD,
-      visibility: Visibility.Friends,
+      reach: Reach.Friends,
       description: 'Board game night crew',
       image: 'https://example.test/avatar.png',
       language: 'pt-BR',
@@ -35,6 +35,16 @@ describe('CreateHouseholdDto', () => {
     };
 
     await expect(propertiesWithErrors(payload)).resolves.toEqual([]);
+  });
+
+  it.each([Reach.Private, Reach.Friends])('accepts reach %s', async (reach) => {
+    await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual([]);
+  });
+
+  // The rungs a household read rule serves, and no others. `Public` waits on
+  // #231 (#495), and null would reach a non-nullable column as a 500.
+  it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
+    await expect(propertiesWithErrors({ ...VALID_PAYLOAD, reach })).resolves.toEqual(['reach']);
   });
 
   describe('clientRequestId (#210)', () => {

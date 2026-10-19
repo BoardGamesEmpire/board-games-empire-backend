@@ -2,7 +2,7 @@ jest.mock('image-size', () => ({ imageSize: jest.fn(() => ({ width: 800, height:
 import { imageSize } from 'image-size';
 
 import type { MediaObject } from '@bge/database';
-import { Action, ContributionOrigin, Prisma, QuotaScope, ResourceType, Visibility } from '@bge/database';
+import { Action, ContributionOrigin, Prisma, QuotaScope, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { QuotaExceededException, QuotaService } from '@bge/quota';
@@ -69,7 +69,7 @@ describe('MediaObjectService', () => {
     sizeBytes: 1234n,
     checksum: 'sha',
     etag: 'sha',
-    visibility: Visibility.Private,
+    reach: Reach.Private,
     originalName: 'cat.png',
     pageCount: 1,
     width: 800,
@@ -160,7 +160,7 @@ describe('MediaObjectService', () => {
         data: expect.objectContaining({
           ownerId: MOCK_ACTING_USER_ID,
           uploaderId: MOCK_ACTING_USER_ID,
-          visibility: Visibility.Private,
+          reach: Reach.Private,
           driverSlug: 'localdisk',
           sizeBytes: 1234n,
           checksum: 'sha',
@@ -310,7 +310,7 @@ describe('MediaObjectService', () => {
     const contributeDto = { subjectType: ResourceType.Game, subjectId: 'g1', category: 'rulebook' };
 
     it('uploads, creates the object, and records a DirectUpload contribution', async () => {
-      const postFlip = { ...row, visibility: Visibility.Public, ownerId: 'svc' };
+      const postFlip = { ...row, reach: Reach.Public, ownerId: 'svc' };
       storage.put.mockResolvedValue(stored);
       db.mediaObject.create.mockResolvedValue(row); // pre-flip
       db.mediaObject.findUniqueOrThrow.mockResolvedValue(postFlip); // post-flip re-read

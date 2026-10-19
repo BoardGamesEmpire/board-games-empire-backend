@@ -102,9 +102,9 @@ describe('UpdateSystemSettingsDto', () => {
       expect(await keysFor({ [property]: level })).toEqual({});
     });
 
-    // FriendsOfFriends waits for the second-degree rule (#496), Household
-    // never names a group an invitee belongs to, and Private would turn every
-    // invite of the kind off: none is a policy the server offers yet.
+    // FriendsOfFriends waits on #496, which defines friends of friends,
+    // Household is no reach at all (#495), and Private would turn every invite
+    // of the kind off: none is a policy the server offers yet.
     it.each(['FriendsOfFriends', 'Household', 'Private', 'Anyone'])('refuses %s', async (level) => {
       expect(await keysFor({ [property]: level })).toEqual({
         [`${property}.isIn`]: 'validation.isIn',

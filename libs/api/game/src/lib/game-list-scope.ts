@@ -1,8 +1,8 @@
-import { type Prisma, Visibility } from '@bge/database';
+import { type Prisma, Reach } from '@bge/database';
 
 /**
  * The set a collection read of games is about: the live Public games, and the
- * caller's own whatever their visibility. `GET /games` and both local title
+ * caller's own whatever their reach. `GET /games` and both local title
  * searches, REST and WebSocket, declare it through `ScopeComposer.compose`,
  * so the caller's ceiling clips it (#513).
  *
@@ -12,12 +12,12 @@ import { type Prisma, Visibility } from '@bge/database';
  * game staff can read stays readable by id. It is narrowed out of the lists,
  * not withdrawn.
  *
- * Written once, for the list and the search alike, because the visibility
- * tiers it reads are being replaced (#495), and that should be one edit.
+ * Written once, for the list and the search alike, so a change to the
+ * reaches it reads, such as friends' games (#809), is one edit.
  */
 export function gameListScope(subjectId: string): Prisma.GameWhereInput {
   return {
     deletedAt: null,
-    OR: [{ visibility: Visibility.Public }, { createdById: subjectId }],
+    OR: [{ reach: Reach.Public }, { createdById: subjectId }],
   };
 }

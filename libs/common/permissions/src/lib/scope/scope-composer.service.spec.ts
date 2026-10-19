@@ -35,7 +35,7 @@ describe('ScopeComposer', () => {
     });
 
     it('ANDs a restrictive ceiling, so the caller sees the intersection and not the union', () => {
-      abilityService.getCurrentResourceConditions.mockReturnValue([{ visibility: 'Public' }]);
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ reach: 'Public' }]);
 
       const where = composer.compose(ResourceType.Household, Action.read, {
         members: { some: { userId: 'u1' } },
@@ -43,7 +43,7 @@ describe('ScopeComposer', () => {
 
       expect(where).toEqual({
         members: { some: { userId: 'u1' } },
-        AND: [{ visibility: 'Public' }],
+        AND: [{ reach: 'Public' }],
       });
     });
 
@@ -63,7 +63,7 @@ describe('ScopeComposer', () => {
     });
 
     it('concatenates an intrinsic scope that carries its own AND instead of dropping it', () => {
-      abilityService.getCurrentResourceConditions.mockReturnValue([{ visibility: 'Public' }]);
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ reach: 'Public' }]);
 
       const where = composer.compose(ResourceType.Household, Action.read, {
         deletedAt: null,
@@ -72,14 +72,14 @@ describe('ScopeComposer', () => {
 
       expect(where).toEqual({
         deletedAt: null,
-        AND: [{ members: { some: { userId: 'u1' } } }, { visibility: 'Public' }],
+        AND: [{ members: { some: { userId: 'u1' } } }, { reach: 'Public' }],
       });
     });
   });
 
   describe('the unscoped opt-out', () => {
     it('still applies the ceiling, so an unscoped read is not an unfiltered one', () => {
-      abilityService.getCurrentResourceConditions.mockReturnValue([{ visibility: 'Public' }]);
+      abilityService.getCurrentResourceConditions.mockReturnValue([{ reach: 'Public' }]);
 
       // Deliberately NOT `Game`. A games list looks unscoped and is not: the
       // uniformity there is a missing condition, not a design (472), and this
@@ -92,7 +92,7 @@ describe('ScopeComposer', () => {
         Unscoped('egress policy is installation configuration, identical for every caller'),
       );
 
-      expect(where).toEqual({ AND: [{ visibility: 'Public' }] });
+      expect(where).toEqual({ AND: [{ reach: 'Public' }] });
     });
 
     it('refuses an opt-out with no reason', () => {

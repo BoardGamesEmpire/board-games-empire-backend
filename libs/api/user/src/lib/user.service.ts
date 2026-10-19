@@ -44,9 +44,10 @@ export class UserService {
    * Each row carries its profile's name and avatar, so both `User` and
    * `UserProfile` are composed, the second on the profile the row carries.
    * Every user's `User` ceiling is `read:user:searchable`, which repeats the
-   * opt-in and ban clauses, and their `UserProfile` one is every row, so for a
-   * session neither changes a row. An API key scoped to one user or one
-   * profile narrows the page to that user.
+   * opt-in and ban clauses. Their `UserProfile` one is their own profile and
+   * every `Public` one, so a profile whose reach is narrower is not found: a
+   * profile is found only where it can be read (#495). An API key scoped to
+   * one user or one profile narrows the page to that user.
    */
   async searchUsers(requestingUserId: string, query: UserSearchQueryDto): Promise<PaginatedRows<UserSearchResult>> {
     const where = this.scopeComposer.compose(ResourceType.User, Action.read, {

@@ -13,7 +13,7 @@ import type {
 
 /**
  * Byte-mover behind a stable interface. Implementations own only byte transport
- * and storage-level metadata; ownership, visibility, and CASL live on `MediaObject`.
+ * and storage-level metadata; ownership, reach, and CASL live on `MediaObject`.
  *
  * Implementations MUST:
  *  - compute an authoritative sha256 `checksum` and `size` during `put`

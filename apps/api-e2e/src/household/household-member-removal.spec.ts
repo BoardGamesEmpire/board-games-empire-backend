@@ -1,4 +1,4 @@
-import { SystemRole, Visibility } from '@bge/database';
+import { Reach, SystemRole } from '@bge/database';
 import {
   createActors,
   HOUSEHOLD_ROLE_NAMES,
@@ -301,11 +301,11 @@ describe('removing household members and leaving households', () => {
         data: [
           {
             householdMemberId: departingMembership.id,
-            gameCollectionId: await arrangeCollectionEntry(db.client, departing.user.id, Visibility.Household),
+            gameCollectionId: await arrangeCollectionEntry(db.client, departing.user.id, Reach.Private),
           },
           {
             householdMemberId: stayingMembership.id,
-            gameCollectionId: await arrangeCollectionEntry(db.client, staying.user.id, Visibility.Household),
+            gameCollectionId: await arrangeCollectionEntry(db.client, staying.user.id, Reach.Private),
           },
         ],
       });

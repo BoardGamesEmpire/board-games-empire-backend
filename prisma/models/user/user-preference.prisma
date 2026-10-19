@@ -18,11 +18,11 @@ model UserPreferences {
   // Who may invite this user to a household (#278): `Public`, `Friends`, or
   // `Private` for nobody. The server's policy still applies, so this can only
   // narrow it.
-  allowHouseholdInvitesFrom Visibility @default(Public) @map("allow_household_invites_from")
+  allowHouseholdInvitesFrom Reach @default(Public) @map("allow_household_invites_from")
 
   // Who may place this user on an event (#546), on the same terms as
   // `allowHouseholdInvitesFrom`.
-  allowEventInvitesFrom Visibility @default(Public) @map("allow_event_invites_from")
+  allowEventInvitesFrom Reach @default(Public) @map("allow_event_invites_from")
 
   // Notification preferences
   emailNotifications Json? @map("email_notifications") // Structured notification preferences
@@ -34,7 +34,7 @@ model UserPreferences {
   // option for automatically including chosen language for game searches and recommendations
   filterSearchByLanguage Boolean @default(false) @map("filter_search_by_language")
 
-  defaultReviewVisibility Visibility @default(Private) @map("default_review_visibility")
+  defaultReviewVisibility Reach @default(Private) @map("default_review_visibility")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

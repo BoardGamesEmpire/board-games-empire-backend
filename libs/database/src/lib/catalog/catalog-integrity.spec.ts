@@ -61,7 +61,7 @@ describe('catalog integrity assertions', () => {
           slug: 'read:game',
           conditions: {
             deletedAt: null,
-            visibility: { in: ['Public', 'Friends'] },
+            reach: { in: ['Public', 'Friends'] },
             OR: [{ minPlayers: 2 }, { isActive: true }],
           },
         }),

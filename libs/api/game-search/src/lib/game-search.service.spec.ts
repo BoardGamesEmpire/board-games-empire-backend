@@ -1,5 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, ContentType, PlatformType, ResourceType, Visibility } from '@bge/database';
+import { Action, ContentType, PlatformType, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -21,7 +21,7 @@ const READ = { id: 'sentinel-read-condition' };
 /** The live Public games and the caller's own, clipped by the caller's ceiling. */
 const COMPOSED = {
   deletedAt: null,
-  OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+  OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
   AND: [READ],
 };
 
@@ -77,7 +77,7 @@ describe('GameSearchService', () => {
 
       expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
         deletedAt: null,
-        OR: [{ visibility: Visibility.Public }, { createdById: MOCK_ACTING_USER_ID }],
+        OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
       });
     });
 

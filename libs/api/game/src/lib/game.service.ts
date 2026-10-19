@@ -4,8 +4,8 @@ import {
   DatabaseService,
   isPrismaDependentRecordNotFoundError,
   Prisma,
+  Reach,
   ResourceType,
-  Visibility,
   type Game,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -259,9 +259,9 @@ export class GameService {
       }
 
       // Only an import gives the service account a game, and imported games are
-      // public. Re-import never rewrites visibility, so one made private here
+      // public. Re-import never rewrites reach, so one made private here
       // would stay private for good.
-      const privatizes = updateGameDto.visibility !== undefined && updateGameDto.visibility !== Visibility.Public;
+      const privatizes = updateGameDto.reach !== undefined && updateGameDto.reach !== Reach.Public;
       if (privatizes && existing.createdBy?.isServiceAccount === true) {
         throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));
       }

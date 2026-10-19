@@ -27,10 +27,11 @@ model GameCollection {
 
   quantity Int @default(1)
 
-  // Who may see this row beyond the owner. Household visibility additionally
-  // honors the owner's HouseholdMember.showAllGames flag and ExcludedGame
-  // opt-outs; Friends visibility honors UserPreferences.showCollectionToFriends.
-  visibility Visibility @default(Private)
+  // Who may see this row beyond the owner and their households. Friends reach
+  // honors UserPreferences.showCollectionToFriends. A household sees the row
+  // whatever its reach, through the owner's HouseholdMember.showAllGames flag
+  // and ExcludedGame opt-outs instead (#495).
+  reach Reach @default(Private)
 
   rating      Int?
   playCount   Int?      @map("play_count")

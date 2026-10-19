@@ -40,7 +40,7 @@ describe('permission()', () => {
       slug: 'ok:null-and-relation-clause',
       conditions: {
         deletedAt: null,
-        visibility: { in: ['Friends', 'Public'] },
+        reach: { in: ['Friends', 'Public'] },
         user: { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
       },
     });

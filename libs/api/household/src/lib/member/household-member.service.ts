@@ -162,7 +162,7 @@ export class HouseholdMemberService {
   /**
    * Paginated member roster: the path household's members, clipped by the
    * actor's `read` ceiling on `HouseholdMember` (membership grant OR
-   * friends-visibility grant). The read always named its household, so
+   * friends-reach grant). The read always named its household, so
    * composing the scope (#515) changes no rows; it is what the envelope's guard
    * checks for.
    *
