@@ -1,4 +1,4 @@
-import { SystemRole } from '../client';
+import { Reach, SystemRole } from '../client';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
@@ -272,6 +272,49 @@ describe('the shipped catalogs', () => {
       expect(entry?.fields).toStrictEqual(['id', 'username', 'firstName', 'lastName', 'image']);
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:user:searchable');
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:searchable');
+    });
+
+    // A profile has a reach, and user search composes this read, so a profile
+    // that is not `Public` is its owner's alone, in search too (#495). Pinned
+    // exactly, as the game reads are: a lost clause hands every profile to
+    // every user.
+    it('let User read its own profile and everyone’s Public ones, and let no guest read them', () => {
+      const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
+
+      expect(conditionsOf('read:user:profile:own')).toStrictEqual({ userId: '{{ user.id }}' });
+      expect(conditionsOf('read:user:profile:public')).toStrictEqual({ reach: 'Public' });
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
+        expect.arrayContaining(['read:user:profile:own', 'read:user:profile:public']),
+      );
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:profile:public');
+    });
+
+    // The ladder reads upwards: a reach wider than `Friends` still admits a
+    // friend. Each of these but the collection rule once tested `Friends`
+    // alone, so widening a household or an event to `Public` hid it from the
+    // friends who could read it before (#495). `FriendsOfFriends` admits
+    // direct friends only until #496.
+    const rungsAdmittingFriends = ['Friends', 'FriendsOfFriends', 'Public'];
+
+    it.each([
+      ['read:event:friends', (reach: unknown) => ({ reach })],
+      ['read:households:friends', (reach: unknown) => ({ reach })],
+      ['read:event_occurrence:friends', (reach: unknown) => ({ event: { is: { reach } } })],
+      ['read:event_policy:friends', (reach: unknown) => ({ event: { is: { reach } } })],
+      ['read:household_member:friends', (reach: unknown) => ({ household: { is: { reach } } })],
+      ['read:game_collection:friends', (reach: unknown) => ({ reach })],
+    ])('let a friend read through %s at every rung from Friends up', (slug, at) => {
+      const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
+
+      expect(entry?.conditions).toMatchObject(at({ in: rungsAdmittingFriends }));
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+    });
+
+    // The ladder's order is written in the rules, not in the enum, which
+    // Prisma declares alphabetically. So a rung added to `Reach` fails here
+    // until someone decides whether it admits a friend.
+    it('leave only Private off the rungs that admit a friend', () => {
+      expect(Object.values(Reach).filter((rung) => !rungsAdmittingFriends.includes(rung))).toEqual([Reach.Private]);
     });
 
     // A household sees a member's collection through the member's

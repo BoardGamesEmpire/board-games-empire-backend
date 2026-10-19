@@ -796,7 +796,7 @@ describe('AbilityFactory', () => {
         expect(ability.rules.at(-1)?.conditions).toEqual({
           household: {
             is: {
-              reach: 'Friends',
+              reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
               members: {
                 some: {
                   user: {

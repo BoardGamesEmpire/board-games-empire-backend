@@ -68,11 +68,7 @@ export function deriveReadCeilings(
 
   for (const [role, slugs] of Object.entries(rolePermissions)) {
     for (const slug of slugs) {
-      const entry = bySlug.get(slug);
-      if (entry === undefined) {
-        throw new Error(`Role '${role}' holds '${slug}', which the permission catalog does not define`);
-      }
-
+      const entry = definedEntry(bySlug, role, slug);
       if (!GRANTS_READ.has(entry.action)) {
         continue;
       }
@@ -104,16 +100,128 @@ export function deriveReadCeilings(
 }
 
 /**
+ * A read that ignores the reach its rows' owners chose: held by a role every
+ * user or guest holds, on a subject whose rows carry a `reach` column, and
+ * neither bound to the caller nor testing that column. `reads` is the grant's
+ * `ReadReach`, how much of the subject it reads, which is the evidence. The
+ * two senses differ: `ReadReach` is a property of a grant, a row's `reach` is
+ * its owner's choice.
+ */
+export interface ReadIgnoringReach {
+  slug: string;
+  role: string;
+  subject: string;
+  reads: Exclude<ReadReach, `binds ${string}`>;
+}
+
+/**
+ * The reach guard (#495). A row's `reach` is its owner's choice of who beyond
+ * them may read it, so a read every user holds must either bind the caller (an
+ * own, membership or friends read, which answers who the caller is) or test
+ * the column. A read that does neither hands every row its filter admits to
+ * everyone, whatever its owner chose. `read:user:profile` was one: it had no
+ * condition, so a profile's reach decided nothing.
+ *
+ * A static filter passes only when `reach` is a top-level key of its
+ * conditions, where it constrains every row the grant admits. Inside an `OR`,
+ * the other branch admits rows past it. Like `findUnboundedGrants`, this is a
+ * tripwire, not a proof: `reach: { not: 'Private' }` passes and still reads
+ * friends-only rows. A grant that binds a variable passes whatever it tests,
+ * because whether its binding is the right one is the rule's own question.
+ *
+ * `roles` are the roles to judge: `User`, which every signed-in actor holds,
+ * and `AnonymousUser`, which anyone who opens an anonymous session holds.
+ * Staff read every row through the wildcard, and their own grants answer to
+ * the staff allowlist. `reachSubjects` comes from {@link modelsWithField}, so
+ * a subject is covered the moment its model gains the column.
+ */
+export function findReadsIgnoringReach(
+  catalog: readonly PermissionSeedDefinition[],
+  rolePermissions: Readonly<Record<string, readonly string[]>>,
+  roles: readonly string[],
+  reachSubjects: readonly string[],
+): ReadIgnoringReach[] {
+  const bySlug = new Map(catalog.map((entry) => [entry.slug, entry] as const));
+  const findings: ReadIgnoringReach[] = [];
+
+  for (const role of roles) {
+    for (const slug of new Set(rolePermissions[role] ?? [])) {
+      const entry = definedEntry(bySlug, role, slug);
+      if (!GRANTS_READ.has(entry.action) || !reachSubjects.includes(entry.subject)) {
+        continue;
+      }
+
+      const reads = reachOf(entry);
+      if (reads === 'every row' || (reads === 'fixed filter' && !testsReach(asStored(entry.conditions)))) {
+        findings.push({ slug, role, subject: entry.subject, reads });
+      }
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * The models whose scalar fields include `field`, read from a generated Prisma
+ * namespace: each model's `<Model>ScalarFieldEnum` is a runtime object, so a
+ * column is read from the client rather than listed beside it (#495). Takes
+ * the namespace as an argument, the convention of every function here.
+ *
+ * A model with no field enum is refused rather than left out: leaving it out
+ * would drop it from a guard without a word.
+ */
+export function modelsWithField(
+  prisma: { readonly ModelName: Readonly<Record<string, string>> },
+  field: string,
+): string[] {
+  const namespace: Readonly<Record<string, unknown>> = prisma;
+
+  return Object.values(prisma.ModelName).filter((model) => {
+    const fields = namespace[`${model}ScalarFieldEnum`];
+    if (typeof fields !== 'object' || fields === null) {
+      throw new Error(`No '${model}ScalarFieldEnum' for model '${model}'`);
+    }
+
+    return Object.hasOwn(fields, field);
+  });
+}
+
+/** The catalog entry a role's slug names, refused when the catalog does not define it. */
+function definedEntry(
+  bySlug: ReadonlyMap<string, PermissionSeedDefinition>,
+  role: string,
+  slug: string,
+): PermissionSeedDefinition {
+  const entry = bySlug.get(slug);
+  if (entry === undefined) {
+    throw new Error(`Role '${role}' holds '${slug}', which the permission catalog does not define`);
+  }
+
+  return entry;
+}
+
+/**
  * Variables a template may name that do not vary the rows between holders of
  * one role. See `ReadReach`.
  */
 const NOT_A_BINDING: ReadonlySet<string> = new Set(['role', '.']);
 
+/**
+ * Conditions as the factory will read them. The stored row went through JSON,
+ * which drops an `undefined` member, so `{ createdById: undefined }` is
+ * granted as `{}` — every row — whatever the object in memory looks like.
+ */
+function asStored(written: PermissionSeedDefinition['conditions']): unknown {
+  return written === undefined ? undefined : JSON.parse(JSON.stringify(written));
+}
+
+/** Whether `reach` is a top-level key of the conditions, where it constrains every row. */
+function testsReach(conditions: unknown): boolean {
+  return typeof conditions === 'object' && conditions !== null && Object.hasOwn(conditions, 'reach');
+}
+
 function reachOf({ slug, conditions: written }: PermissionSeedDefinition): ReadReach {
-  // Classified as the factory will read it. The stored row went through JSON,
-  // which drops an `undefined` member, so `{ createdById: undefined }` is
-  // granted as `{}` — every row — whatever the object in memory looks like.
-  const conditions: unknown = written === undefined ? undefined : JSON.parse(JSON.stringify(written));
+  const conditions = asStored(written);
   if (!hasBoundingConditions(conditions)) {
     return 'every row';
   }

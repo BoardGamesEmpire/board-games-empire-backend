@@ -704,10 +704,10 @@ describe('PermissionsService', () => {
         // household scope would otherwise become an unscoped type-level
         // rule — one unit's consent reading as server-wide authority.
         db.pluginGrant.findMany.mockResolvedValue([
-          grantRow('read:user:profile', RiskLevel.High, PluginGrantScope.Household),
+          grantRow('read:event', RiskLevel.High, PluginGrantScope.Household),
         ] as never);
         db.permission.findMany.mockResolvedValue([
-          makePermission({ slug: 'read:user:profile', riskLevel: RiskLevel.High, conditions: null }),
+          makePermission({ slug: 'read:event', riskLevel: RiskLevel.High, conditions: null }),
         ] as never);
 
         const snapshot = await service.getPluginGrantSnapshot('plugin-1', HOUSEHOLD_UNIT);

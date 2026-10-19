@@ -34,7 +34,10 @@ import type { PermissionSeedDefinition, RoleScope } from './seed-definitions';
  * instance check can evaluate it (#458). See
  * {@link findShorthandRelationConditions}. And one judges the event roles:
  * every grant they hold names the event it was rendered for (#458). See
- * {@link findEventSpanningGrants}.
+ * {@link findEventSpanningGrants}. The reach guard, which judges the reads
+ * every user or guest holds against the `reach` their rows carry, sits beside
+ * the read classification it uses: `findReadsIgnoringReach` in
+ * `catalog-read-ceilings.ts` (#495).
  *
  * These are specs, not module-scope assertions like `catalog-integrity.ts`.
  * They were written while both defect classes had live instances, when a throw

@@ -34,8 +34,9 @@ export class UserController {
   @ApiOperation({
     summary: 'Search searchable users by username, first name or display name',
     description:
-      'Case-insensitive partial match, alphabetical by username. Excludes the caller, banned accounts, and ' +
-      'anyone whose profile is not searchable. Paginated: `?page=` (1-based) and `?limit=` (default 10, max ' +
+      'Case-insensitive partial match, alphabetical by username. Excludes the caller, banned accounts, ' +
+      'anyone whose profile is not searchable, and anyone whose profile reach does not admit the caller ' +
+      '(today, a profile that is not `Public`). Paginated: `?page=` (1-based) and `?limit=` (default 10, max ' +
       '20 per page), with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`; `total` is ' +
       'the number of matches, so a client can say how deep the result set goes. The `q` the caller sent is ' +
       'no longer echoed in the body. See #230.',

@@ -348,6 +348,34 @@ describe('event read scope', () => {
       expect(JSON.stringify(response.body)).not.toContain(guestEmail);
     });
 
+    // The ladder reads upwards (#495). The event, occurrence and policy rules
+    // once tested `Friends` alone, so an event widened past it hid from the
+    // host's friends. No route sets either reach until its rule lands (#809,
+    // #496), so the event is created at `Friends` and widened directly.
+    it.each([Reach.FriendsOfFriends, Reach.Public])(
+      "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
+      async (reach) => {
+        const host = await actors.user();
+        const friend = await actors.user();
+        const stranger = await actors.user();
+        await befriend(db.client, friend, host);
+        const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
+        await db.client.event.update({ where: { id: eventId }, data: { reach } });
+
+        const response = await readEvent(friend, eventId).expect(200);
+        const read = eventDetailEnvelope(response, `GET /api/events/:id as a friend of the host, at ${reach}`);
+        expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+        expect(read.policy?.eventId).toBe(eventId);
+        expect(read.attendees).toEqual([]);
+        expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+        await readOccurrence(friend, eventId, occurrenceId).expect(200);
+
+        // `Public` reaches a stranger only once its rule lands (#809).
+        await readEvent(stranger, eventId).expect(404);
+      },
+    );
+
     it("serves a household guest the household event's occurrences and policy, and none of its attendees", async () => {
       const owner = await actors.user();
       const member = await actors.user();

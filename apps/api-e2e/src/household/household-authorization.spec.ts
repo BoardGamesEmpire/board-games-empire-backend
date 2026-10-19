@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
+import { membersPath } from './household-request';
 import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
 
 /**
@@ -99,6 +100,44 @@ describe('household authorization', () => {
     // moved is everything the union used to add on top — friends'
     // `Friends`-visible households, and every household on the server for
     // staff — which is asserted below.
+    // The ladder reads upwards (#495). The friends rules once tested `Friends`
+    // alone, so a household whose reach was widened past it hid from the
+    // friends who read it before. `Public` grants nobody further yet: what a
+    // stranger sees of a household is #231's, so no route sets it and the row
+    // is arranged directly.
+    it.each([Reach.Friends, Reach.FriendsOfFriends, Reach.Public])(
+      "admits a member's friend to a %s household and its roster, and refuses a stranger",
+      async (reach) => {
+        const friend = await actors.user();
+        const viewer = await actors.user();
+        const stranger = await actors.user();
+
+        const shared = await actors.householdWithMembers({ owner: friend, name: `Reaching ${reach}` });
+        await db.client.household.update({ where: { id: shared.household.id }, data: { reach } });
+        await befriend(db.client, viewer, friend);
+
+        await readHousehold(viewer, shared.household.id).expect(200);
+        const roster = await request(baseUrl).get(membersPath(shared.household.id)).set(viewer.headers).expect(200);
+        expect((roster.body.members as { userId: string }[]).map((member) => member.userId)).toEqual([friend.user.id]);
+
+        await readHousehold(stranger, shared.household.id).expect(403);
+        await request(baseUrl).get(membersPath(shared.household.id)).set(stranger.headers).expect(403);
+      },
+    );
+
+    it("refuses a member's friend a Private household and its roster", async () => {
+      const friend = await actors.user();
+      const viewer = await actors.user();
+
+      const kept = await actors.householdWithMembers({ owner: friend, name: 'Members only' });
+      await befriend(db.client, viewer, friend);
+
+      // Private is the default, so this is every household no one widened.
+      expect(kept.household.reach).toBe(Reach.Private);
+      await readHousehold(viewer, kept.household.id).expect(403);
+      await request(baseUrl).get(membersPath(kept.household.id)).set(viewer.headers).expect(403);
+    });
+
     it('lists only the actor\u2019s own households, and a non-member sees absence', async () => {
       const owner = await actors.user();
       const outsider = await actors.user();
