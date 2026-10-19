@@ -72,8 +72,9 @@ export class HouseholdInviteController {
       'Newest first. By default only the invites still open; `?status=` picks any status, judged as it stands ' +
       'now, so an outstanding invite past its expiry is `Expired`. Every row carries the role offered, the ' +
       'inviter, and `inviteeName`, which is null for an invite by address that was given no name. A row the ' +
-      'caller sent also carries the address and the message they wrote; nobody else’s rows do. Paginated: `?page=` (1-based) and `?limit=`, with a `pagination` envelope ' +
-      'carrying `total`, `totalPages` and `hasMore`. See #230.',
+      'caller sent also carries the address and the message they wrote. On every other row, the household’s ' +
+      'owners and admins see the address too, and nobody sees the message. Paginated: `?page=` (1-based) and ' +
+      '`?limit=`, with a `pagination` envelope carrying `total`, `totalPages` and `hasMore`. See #230.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiPaginatedEnvelope('invites')
@@ -96,7 +97,7 @@ export class HouseholdInviteController {
       'not they are still a member. An invite you sent yourself is refused here: withdraw it with ' +
       '`POST /invites/:inviteId/withdraw`, signed in. Through an API key, an invite the key’s owner sent is ' +
       'refused the same way, and withdraw does not take a key. The answer carries the invite as the household ' +
-      'sees it, without the address or the message.',
+      'sees it: with the address for the household’s owners and admins, and never with the message.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiParam({ name: 'inviteId', type: String })
@@ -129,7 +130,8 @@ export class HouseholdInviteController {
       'Opens an invite awaiting approval to its invitee, who sees it from then on and may accept it. Find the ' +
       'invites waiting with `GET /households/:householdId/invites?status=AwaitingApproval`; turn one down by ' +
       'revoking it. An invite you sent yourself, before you could invite directly, may be approved too. The ' +
-      'answer carries the invite as the household sees it, without the address or the message.',
+      'answer carries the invite as the household sees it: with the address for the household’s owners and ' +
+      'admins, and never with the message.',
   })
   @ApiParam({ name: 'householdId', type: String })
   @ApiParam({ name: 'inviteId', type: String })

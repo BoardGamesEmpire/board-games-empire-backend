@@ -268,8 +268,9 @@ describe('member invites, their approval, and the invites a user has sent', () =
       );
 
       expect(approved.invite).toMatchObject({ id: created.id, status: InviteStatus.Pending });
-      // An approver is not a party: no address, no message.
-      expect(approved.invite).not.toHaveProperty('inviteeEmail');
+      // An approving household admin sees who is invited (#167): the address,
+      // null on this invite by id. The message stays with the parties.
+      expect(approved.invite).toHaveProperty('inviteeEmail', null);
       expect(approved.invite).not.toHaveProperty('message');
       await expect(storedInvite(created.id)).resolves.toMatchObject({
         status: InviteStatus.Pending,

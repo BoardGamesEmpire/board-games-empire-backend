@@ -1,8 +1,11 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 
 export interface PollOptions {
-  /** What is being awaited — appears verbatim in the timeout error. */
-  readonly description: string;
+  /**
+   * What is being awaited — appears verbatim in the timeout error. A function
+   * is called only on timeout, so the error can say what the last probe saw.
+   */
+  readonly description: string | (() => string);
 
   /** Total budget before failing. Default {@link DEFAULT_POLL_TIMEOUT_MS}. */
   readonly timeoutMs?: number;
@@ -43,7 +46,9 @@ export async function pollUntil<T>(probe: () => Promise<T | undefined>, options:
     }
 
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out after ${timeoutMs}ms waiting for ${options.description}`);
+      const description = typeof options.description === 'function' ? options.description() : options.description;
+
+      throw new Error(`Timed out after ${timeoutMs}ms waiting for ${description}`);
     }
 
     await sleep(intervalMs);

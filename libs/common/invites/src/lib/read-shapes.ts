@@ -24,13 +24,15 @@ import { INVITE_SNAPSHOT_FIELDS, type InviteSnapshotField } from './events/invit
  * ## Two audiences, two shapes
  *
  * {@link CONTEXT_INVITE_SELECT} is what a context reader sees: the household
- * detail embed, and whatever an owner or admin is shown. {@link
+ * detail embed, and the base of what a household owner or admin sees. {@link
  * PARTY_INVITE_SELECT} is that plus the two columns that belong to the people
  * on the invite, `inviteeEmail` and `message`, rendered only on rows whose
  * inviter or invitee is the acting user (#459, option c). The lib's own
  * transitions return the party shape to a party and the context shape to a
  * context authority; a consumer listing invites for a context must not widen
- * to the party shape, since that re-opens #297's class for the address.
+ * to the party shape, since that re-opens #297's class for the address. The
+ * household lib adds the address alone, never the message, for the
+ * household's own owners and admins, as its roster names them (#167).
  */
 
 /**
@@ -115,11 +117,13 @@ export const INVITE_SCALARS_OMITTED = {
 
 /**
  * `Invite` scalars withheld from the context shape and published by the party
- * shape alone, and why (#161, answering #459 as its option c).
+ * shape, and why (#161, answering #459 as its option c). The household lib
+ * also publishes `inviteeEmail`, never `message`, to the household's own
+ * owners and admins (#167).
  */
 export const INVITE_SCALARS_PARTY_ONLY = {
   inviteeEmail:
-    'An address belonging to someone who may not be a registered user. Harvestable by every co-member under the old shape, and withheld from the context shape by #297. The inviter typed it and the invitee owns it, so each sees it on their own rows and nobody else does.',
+    "An address belonging to someone who may not be a registered user. Harvestable by every co-member under the old shape, and withheld from the context shape by #297. The inviter typed it and the invitee owns it, so each sees it on their own rows, and the household's owners and admins see it on their household's invites (#167).",
   // Not a response body: this key is the NAME of the `Invite.message` column,
   // and the string beside it is the reason the column is party-only. The i18n
   // rule (#144/#145) flags every `message:` key that holds a literal, because

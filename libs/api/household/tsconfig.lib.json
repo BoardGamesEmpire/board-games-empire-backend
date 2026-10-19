@@ -33,6 +33,9 @@
       "path": "../../common/invites/tsconfig.lib.json"
     },
     {
+      "path": "../../common/notifications/tsconfig.lib.json"
+    },
+    {
       "path": "../../common/shared/tsconfig.lib.json"
     },
     {

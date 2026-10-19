@@ -297,25 +297,34 @@ describe('declining, withdrawing and revoking a household invite', () => {
   });
 
   describe('revoking', () => {
-    it("lets an Admin revoke the Owner's invite and the Owner revoke the Admin's, in the context shape", async () => {
-      const [owner, admin, first, second] = await Promise.all(Array.from({ length: 4 }, () => actors.user()));
+    it("lets a household admin revoke the household owner's invite and the owner revoke the admin's, with the address and without the message (#167)", async () => {
+      const [owner, admin, first] = await Promise.all(Array.from({ length: 3 }, () => actors.user()));
       const { household } = await actors.householdWithMembers({
         owner,
         members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
       });
       const ownersInvite = await createdInvite(owner, household.id, { inviteeId: first.user.id, message: 'Hi' });
-      const adminsInvite = await createdInvite(admin, household.id, { inviteeId: second.user.id });
+      const adminsInvite = await createdInvite(admin, household.id, {
+        inviteeEmail: `admin-sent-${randomUUID()}@e2e.invalid`,
+        message: 'Hello',
+      });
 
       const revoked = revokeEnvelope(
         await revoke(admin, household.id, ownersInvite.id).expect(200),
         'POST /api/households/:id/invites/:inviteId/revoke',
       );
-      await revoke(owner, household.id, adminsInvite.id).expect(200);
+      const revokedByOwner = revokeEnvelope(
+        await revoke(owner, household.id, adminsInvite.id).expect(200),
+        'POST /api/households/:id/invites/:inviteId/revoke as owner',
+      );
 
       expect(revoked.invite).toMatchObject({ id: ownersInvite.id, status: InviteStatus.Revoked });
-      // A revoker is not a party: no address, no message.
-      expect(revoked.invite).not.toHaveProperty('inviteeEmail');
+      // A revoking household owner or admin sees who was invited (#167): the
+      // address, null on an invite by id. The message stays with the parties.
+      expect(revoked.invite).toHaveProperty('inviteeEmail', null);
       expect(revoked.invite).not.toHaveProperty('message');
+      expect(revokedByOwner.invite).toMatchObject({ id: adminsInvite.id, inviteeEmail: adminsInvite.inviteeEmail });
+      expect(revokedByOwner.invite).not.toHaveProperty('message');
       await expect(storedInvite(ownersInvite.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
       await expect(storedInvite(adminsInvite.id)).resolves.toMatchObject({ status: InviteStatus.Revoked });
     });

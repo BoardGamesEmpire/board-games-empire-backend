@@ -124,10 +124,58 @@ export interface OccurrenceChangePayload extends EventRefPayload {
   occurrenceLabel: string | null;
 }
 
-/** A user was invited to a household. Not yet emitted — shape is provisional. */
-export interface HouseholdInviteReceivedPayload {
+/** The minimal household reference every household-domain notification carries. */
+export interface HouseholdRefPayload {
   householdId: string;
-  householdName?: string;
+  householdName: string;
+}
+
+/**
+ * The invitee as the invite names them: a user only when the invite was
+ * sent by id, otherwise a name or an address (#682). Carried only by payloads
+ * that go to the inviter and to household owners and admins, since it can hold
+ * an address.
+ */
+export interface InviteeAsInvitedPayload {
+  inviteeId: string | null;
+  inviteeName: string | null;
+  inviteeEmail: string | null;
+}
+
+/** A user was invited to a household; sent to the invitee (#167). */
+export interface HouseholdInviteReceivedPayload extends HouseholdRefPayload {
+  inviteId: string;
+  inviterName: string;
+}
+
+/** A household invite is awaiting approval; sent to household owners and admins (#167). */
+export interface HouseholdInviteAwaitingApprovalPayload extends HouseholdRefPayload, InviteeAsInvitedPayload {
+  inviteId: string;
+  inviterName: string;
+}
+
+/** An invitee accepted and became a member of the household; sent to its other members (#682). */
+export interface HouseholdInviteAcceptedPayload extends HouseholdRefPayload {
+  inviteId: string;
+  memberUserId: string;
+  memberName: string;
+}
+
+/** An invitee declined a household invite; sent to the inviter and to household owners and admins (#682). */
+export interface HouseholdInviteDeclinedPayload extends HouseholdRefPayload, InviteeAsInvitedPayload {
+  inviteId: string;
+}
+
+/**
+ * Household ownership moved to another member; sent to the new household
+ * owner (#246). `previousOwnerName` is null when the previous household
+ * owner's user was deleted before the notification was written.
+ */
+export interface HouseholdOwnershipTransferredPayload extends HouseholdRefPayload {
+  previousOwnerMemberId: string;
+  previousOwnerName: string | null;
+  newOwnerMemberId: string;
+  newOwnerName: string;
 }
 
 /**
@@ -146,6 +194,10 @@ export type NotificationPayloadMap = {
   [NotificationType.MediaContributionReclaimExpired]: MediaContributionReclaimExpiredPayload;
   [NotificationType.AuditUnattributedEvent]: AuditUnattributedEventPayload;
   [NotificationType.HouseholdInviteReceived]: HouseholdInviteReceivedPayload;
+  [NotificationType.HouseholdInviteAwaitingApproval]: HouseholdInviteAwaitingApprovalPayload;
+  [NotificationType.HouseholdInviteAccepted]: HouseholdInviteAcceptedPayload;
+  [NotificationType.HouseholdInviteDeclined]: HouseholdInviteDeclinedPayload;
+  [NotificationType.HouseholdOwnershipTransferred]: HouseholdOwnershipTransferredPayload;
   [NotificationType.EventInviteReceived]: EventRefPayload;
   [NotificationType.EventCreated]: EventRefPayload;
   [NotificationType.EventRsvpReceived]: EventRsvpReceivedPayload;
