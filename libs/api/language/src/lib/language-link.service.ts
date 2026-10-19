@@ -329,6 +329,9 @@ export class LanguageLinkService {
       return row;
     }
 
+    // The upsert was a wait in which the interview may have been abandoned.
+    signal?.throwIfAborted();
+
     return this.writeWhileUnresolved(key, resolution, supplied);
   }
 

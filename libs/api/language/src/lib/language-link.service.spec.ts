@@ -512,6 +512,21 @@ describe('LanguageLinkService', () => {
       expect(db.languageGatewayLink.upsert).not.toHaveBeenCalled();
     });
 
+    it('settles no link another writer created meanwhile once its signal aborts', async () => {
+      const stop = new AbortController();
+      db.languageTag.findFirst.mockResolvedValue({ id: 'tag-cs' } as never);
+      db.languageGatewayLink.upsert.mockImplementationOnce((async () => {
+        stop.abort(new Error('abandoned'));
+        return { status: LanguageLinkStatus.Unresolved, tagId: null };
+      }) as never);
+
+      await expect(
+        service.interview(GW, [{ value: 'Czech', format: LanguageCodeFormat.Name }], stop.signal),
+      ).rejects.toThrow('abandoned');
+
+      expect(db.languageGatewayLink.updateMany).not.toHaveBeenCalled();
+    });
+
     it.each([
       ['a BCP 47 tag', { value: 'kk', format: LanguageCodeFormat.IetfBcp47 }],
       ['an ISO 639-3 code', { value: 'kaz', format: LanguageCodeFormat.Iso6393 }],
