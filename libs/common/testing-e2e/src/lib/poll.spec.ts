@@ -34,6 +34,20 @@ describe('pollUntil', () => {
     ).rejects.toThrow(/Timed out after 30ms waiting for user 'alice' to be provisioned/);
   });
 
+  it('calls a description function only on timeout, so it can say what the last probe saw', async () => {
+    let probes = 0;
+    const probe = async () => {
+      probes += 1;
+
+      return undefined;
+    };
+
+    // Read when the poll began, the count would still be 0.
+    await expect(
+      pollUntil(probe, { description: () => `a value after ${probes} probes`, timeoutMs: 30, intervalMs: 5 }),
+    ).rejects.toThrow(/Timed out after 30ms waiting for a value after [1-9]\d* probes/);
+  });
+
   it('propagates probe rejections immediately rather than retrying them', async () => {
     const probe = jest.fn<Promise<string | undefined>, []>().mockRejectedValue(new Error('database gone'));
 
