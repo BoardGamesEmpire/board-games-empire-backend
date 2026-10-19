@@ -1,7 +1,28 @@
 import { GameMedium, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
+import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+
+const COLLECTION_REACHES = [Reach.Private, Reach.Friends, Reach.Public] as const;
+export type CollectionReach = (typeof COLLECTION_REACHES)[number];
+
+/**
+ * A collection entry's reach: every rung a collection read rule serves.
+ * `FriendsOfFriends` waits on #496, which defines friends of friends. The
+ * owner's households see the entry whatever its reach (#495). Shared with
+ * `UpdateGameCollectionDto`, which names no default.
+ */
+export function CollectionReachProperty(defaultReach?: CollectionReach): PropertyDecorator {
+  return ReachProperty({
+    reaches: COLLECTION_REACHES,
+    default: defaultReach,
+    description:
+      'Who may see this entry besides its owner and the households they share their games with. `Private`: ' +
+      "no one. `Friends`: the owner's friends, unless the owner hides their collection from friends. " +
+      '`Public`: everyone on the server, guests included.',
+  });
+}
 
 export class CreateGameCollectionDto {
   @ApiProperty({ description: 'ID of the PlatformGame to add to the collection' })
@@ -47,12 +68,6 @@ export class CreateGameCollectionDto {
   @IsBoolean({ message: i18nValidationMessage('validation.isBoolean') })
   playAgain?: boolean;
 
-  @ApiPropertyOptional({
-    enum: Reach,
-    description: 'Who may see this collection entry beyond the owner',
-    default: Reach.Private,
-  })
-  @IsOptional()
-  @IsEnum(Reach, { message: i18nValidationMessage('validation.isEnum') })
-  reach?: Reach;
+  @CollectionReachProperty(Reach.Private)
+  reach?: CollectionReach;
 }

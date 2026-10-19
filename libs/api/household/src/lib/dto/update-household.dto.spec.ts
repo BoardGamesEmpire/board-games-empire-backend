@@ -27,6 +27,12 @@ describe('UpdateHouseholdDto', () => {
     await expect(propertiesWithErrors(payload)).resolves.toEqual([]);
   });
 
+  // The rungs a household read rule serves, and no others. `Public` waits on
+  // #231 (#495), and null would reach a non-nullable column as a 500.
+  it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
+    await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
+  });
+
   it('rejects clientRequestId, which belongs to the create it keys (#534)', async () => {
     // The key is how a retried create finds the row it already made. An edit
     // that rewrites it strands that retry, which then makes a second household;

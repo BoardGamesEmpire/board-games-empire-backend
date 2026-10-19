@@ -14,7 +14,13 @@ async function propertiesWithErrors(payload: PlainPayload): Promise<string[]> {
 
 describe('UpdateEventDto', () => {
   it('accepts a patch of the fields an update may change', async () => {
-    await expect(propertiesWithErrors({ title: 'Renamed', reach: 'Public' })).resolves.toEqual([]);
+    await expect(propertiesWithErrors({ title: 'Renamed', reach: 'Private' })).resolves.toEqual([]);
+  });
+
+  // The rungs an event read rule serves, and no others: an event saved with
+  // `Public` would claim readers it doesn't have until its rule lands (#809).
+  it.each([['Public'], ['FriendsOfFriends'], ['Household'], [null]])('rejects reach %p', async (reach) => {
+    await expect(propertiesWithErrors({ reach })).resolves.toEqual(['reach']);
   });
 
   // An event's household is set when it is created and never after (#454).

@@ -1,8 +1,8 @@
 import { Reach, TimeMeasure } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
-import { applyDecorators } from '@nestjs/common';
+import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsIn, IsOptional, IsPositive, IsString, ValidateIf } from 'class-validator';
+import { IsIn, IsOptional, IsPositive, IsString } from 'class-validator';
 
 const GAME_REACHES = [Reach.Public, Reach.Private] as const;
 
@@ -20,27 +20,18 @@ export const GAME_DESCRIPTION_MAX_LENGTH = 20_000;
 export type GameReach = (typeof GAME_REACHES)[number];
 
 /**
- * A game's reach: Public or Private only. The other tiers name audiences
- * no game read rule serves yet, so a game saved with one would be its
- * creator's alone while claiming otherwise; they arrive with #495's reach
- * rules.
- *
- * `ValidateIf` rather than `IsOptional`, which skips null as well as
- * undefined: left out, the column default applies, but an explicit null is
- * refused here instead of reaching a non-nullable column as a 500. Shared with
- * `UpdateGameDto`, which declares the field itself because `PartialType` would
- * add `IsOptional` back.
+ * A game's reach: Public or Private only. The other rungs name readers no
+ * game read rule serves yet, so a game saved with one would be its creator's
+ * alone while claiming otherwise. `Friends` arrives with its rule (#809), and
+ * `FriendsOfFriends` with #496, which defines friends of friends. Shared with
+ * `UpdateGameDto`, which names no default.
  */
-export function GameReachProperty(): PropertyDecorator {
-  return applyDecorators(
-    ApiPropertyOptional({
-      enum: GAME_REACHES,
-      description: 'Public games are visible to everyone; private games only to their creator',
-    }),
-    ValidateIf((_, value) => value !== undefined),
-    IsString({ message: i18nValidationMessage('validation.isString') }),
-    IsIn(GAME_REACHES, { message: i18nValidationMessage('validation.isIn') }),
-  );
+export function GameReachProperty(defaultReach?: GameReach): PropertyDecorator {
+  return ReachProperty({
+    reaches: GAME_REACHES,
+    default: defaultReach,
+    description: 'Who may read the game besides its creator. `Public`: every signed-in user. `Private`: no one.',
+  });
 }
 
 export class CreateGameDto {
@@ -131,6 +122,6 @@ export class CreateGameDto {
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   complexity?: number;
 
-  @GameReachProperty()
+  @GameReachProperty(Reach.Public)
   reach?: GameReach;
 }
