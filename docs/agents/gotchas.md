@@ -4,7 +4,7 @@ Traps in this repo that the code doesn't announce. Each one has produced a wrong
 
 ## WebSockets
 
-- **Global enhancers never run on gateway messages.** `APP_GUARD`, `APP_INTERCEPTOR` and `APP_FILTER` apply to HTTP only; Nest builds the WebSocket context without the global ones. Bind guards, interceptors and filters on the gateway class. `AuthenticatedGateway` (`apps/api/src/app/gateways/base/authenticated.gateway.ts`) carries `AuthGuard` and `WsErrorFilter`, and subclasses inherit them. An `APP_*` registration is never a WebSocket fix.
+- **Global enhancers never run on gateway messages.** `APP_GUARD`, `APP_INTERCEPTOR` and `APP_FILTER` apply to HTTP only; Nest builds the WebSocket context without the global ones. Bind guards, interceptors and filters on the gateway class. `AuthenticatedGateway` (`apps/api/src/app/gateways/base/authenticated.gateway.ts`) authenticates the handshake in namespace middleware, then binds `WsThrottlerGuard`, `WsSessionGuard`, `WsFrameScopeGuard` and `PoliciesGuard`, in that order, plus `WsErrorFilter`; subclasses inherit them. The HTTP `AuthGuard` plays no part. An `APP_*` registration is never a WebSocket fix.
 
 ## Auth routes
 
