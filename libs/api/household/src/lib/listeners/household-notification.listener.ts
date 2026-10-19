@@ -11,6 +11,8 @@ import type { HouseholdRefPayload } from '@bge/notifications-service';
 import { NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import { HouseholdEvents } from '../constants/household-events.constant';
+import type { HouseholdOwnershipSnapshot, HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import { HOUSEHOLD_AUTHORITY_ROLES } from '../invite/household-authority';
 import { receivedHouseholdInviteWhere, vouchedEmailOf } from '../invite/received-invites';
 import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
@@ -31,7 +33,8 @@ function isHouseholdInvite(invite: InviteSnapshot): invite is HouseholdInviteSna
  * Tells people about their households (#167): an invitee of an invite their
  * inbox now lists, household owners and admins of an invite waiting for their
  * approval, the members of a household of its new member, and the inviter and
- * the household owners and admins of an invite declined (#682).
+ * the household owners and admins of an invite declined (#682), and a new
+ * household owner of the household they were handed (#246).
  *
  * Every event it hears is emitted after its transaction commits, so the
  * request has already answered. A handler therefore never throws: it logs its
@@ -139,6 +142,26 @@ export class HouseholdNotificationListener {
     } catch (err) {
       this.logger.error(
         `Failed to notify on InviteDeclined inviteId=${invite.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * Household ownership changed hands (#246). The new household owner is told
+   * that the household is theirs and who held it before them. The previous
+   * household owner is not: only a household owner can transfer today, so they
+   * made the transfer and know.
+   */
+  @OnEvent(HouseholdEvents.OwnershipTransferred, { async: true })
+  async onOwnershipTransferred(event: HouseholdOwnershipTransferredEvent): Promise<void> {
+    const { before, after } = event;
+
+    try {
+      await this.notifyNewOwner(before, after);
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify on HouseholdOwnershipTransferred householdId=${after.householdId}`,
         err instanceof Error ? err.stack : String(err),
       );
     }
@@ -341,6 +364,42 @@ export class HouseholdNotificationListener {
         },
       })),
     );
+  }
+
+  /**
+   * Tells the new household owner that the household is theirs (#246), naming
+   * them and the previous household owner by member id and by name as it is
+   * shown now, since the snapshots carry ids only. Nothing is sent when the
+   * household, or the new household owner, is gone between the emit and the
+   * handler. A previous household owner whose user was deleted in that time
+   * is named by member id alone: what the new household owner must hear is
+   * that the household is theirs, and who held it before is a detail.
+   */
+  private async notifyNewOwner(before: HouseholdOwnershipSnapshot, after: HouseholdOwnershipSnapshot): Promise<void> {
+    const [named, previousOwnerName] = await Promise.all([
+      this.householdAndName(after.householdId, after.ownerUserId),
+      this.nameOf(before.ownerUserId),
+    ]);
+
+    if (!named) {
+      return this.logger.debug(
+        `Household or new household owner gone, skipping HouseholdOwnershipTransferred householdId=${after.householdId}`,
+      );
+    }
+
+    const { household, name: newOwnerName } = named;
+
+    await this.notifications.create({
+      userId: after.ownerUserId,
+      type: NotificationType.HouseholdOwnershipTransferred,
+      payload: {
+        ...household,
+        previousOwnerMemberId: before.ownerMemberId,
+        previousOwnerName,
+        newOwnerMemberId: after.ownerMemberId,
+        newOwnerName,
+      },
+    });
   }
 
   /**

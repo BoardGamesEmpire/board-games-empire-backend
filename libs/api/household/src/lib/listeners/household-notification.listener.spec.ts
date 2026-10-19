@@ -9,6 +9,7 @@ import {
 import { NotificationsService } from '@bge/notifications-service';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
+import { HouseholdOwnershipTransferredEvent } from '../events/household.events';
 import { receivedHouseholdInviteWhere } from '../invite/received-invites';
 import { HouseholdNotificationListener } from './household-notification.listener';
 
@@ -65,6 +66,14 @@ const accepted = (overrides: Partial<InviteSnapshot> = {}) =>
 
 const declined = (overrides: Partial<InviteSnapshot> = {}) =>
   new InviteDeclinedEvent(...responded(InviteStatus.Declined, overrides));
+
+/** Riley, the household owner, hands the household to Sam. */
+const transferred = () =>
+  new HouseholdOwnershipTransferredEvent(
+    { householdId: HOUSEHOLD_ID, ownerMemberId: 'member-riley', ownerUserId: INVITER_ID },
+    { householdId: HOUSEHOLD_ID, ownerMemberId: 'member-sam', ownerUserId: INVITEE_ID },
+    NOW,
+  );
 
 interface UserRow {
   id: string;
@@ -424,6 +433,58 @@ describe('HouseholdNotificationListener', () => {
     });
   });
 
+  describe('the new household owner, on an ownership transfer', () => {
+    it('tells the new household owner, and only them, that the household is theirs (#246)', async () => {
+      await listener.onOwnershipTransferred(transferred());
+
+      // The previous household owner made the transfer, so they are not told, and no
+      // roster is read to find anyone else: the event names the one recipient.
+      expect(db.householdMember.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+      expect(notifications.create).toHaveBeenCalledTimes(1);
+      expect(notifications.create).toHaveBeenCalledWith({
+        userId: INVITEE_ID,
+        type: NotificationType.HouseholdOwnershipTransferred,
+        payload: {
+          householdId: HOUSEHOLD_ID,
+          householdName: 'The Meeples',
+          previousOwnerMemberId: 'member-riley',
+          previousOwnerName: 'Riley',
+          newOwnerMemberId: 'member-sam',
+          newOwnerName: 'sam',
+        },
+      });
+    });
+
+    it('tells no one when the new household owner is no longer a user (#246)', async () => {
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+      seedUsers(RILEY);
+
+      await listener.onOwnershipTransferred(transferred());
+
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('still tells the new household owner when the previous one is no longer a user, naming them by member id alone (#246)', async () => {
+      seedUsers(SAM);
+
+      await listener.onOwnershipTransferred(transferred());
+
+      expect(notifications.create).toHaveBeenCalledWith({
+        userId: INVITEE_ID,
+        type: NotificationType.HouseholdOwnershipTransferred,
+        payload: {
+          householdId: HOUSEHOLD_ID,
+          householdName: 'The Meeples',
+          previousOwnerMemberId: 'member-riley',
+          previousOwnerName: null,
+          newOwnerMemberId: 'member-sam',
+          newOwnerName: 'sam',
+        },
+      });
+    });
+  });
+
   describe('every handler', () => {
     it('ignores an event invite (#742)', async () => {
       // A household id as well, so the type alone tells it apart.
@@ -505,6 +566,33 @@ describe('HouseholdNotificationListener', () => {
 
       expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteAccepted inviteId=invite-1', failure.stack);
       expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteDeclined inviteId=invite-1', failure.stack);
+      // Logged on purpose, so cleared: the check after each test is for any other error.
+      loggedError.mockClear();
+    });
+
+    it('sends nothing on an ownership transfer for a household deleted before the handler ran (#246)', async () => {
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+      db.household.findUnique.mockResolvedValue(resolves({ name: 'The Meeples', deletedAt: NOW }));
+
+      await listener.onOwnershipTransferred(transferred());
+
+      expect(db.household.findUnique).toHaveBeenCalledWith({
+        where: { id: HOUSEHOLD_ID },
+        select: { name: true, deletedAt: true },
+      });
+      expect(notifications.create).not.toHaveBeenCalled();
+    });
+
+    it('logs and resolves when the write fails on an ownership transfer (#246)', async () => {
+      const failure = new Error('DB down');
+      notifications.create.mockRejectedValue(failure);
+
+      await expect(listener.onOwnershipTransferred(transferred())).resolves.toBeUndefined();
+
+      expect(loggedError).toHaveBeenCalledWith(
+        'Failed to notify on HouseholdOwnershipTransferred householdId=hh-1',
+        failure.stack,
+      );
       // Logged on purpose, so cleared: the check after each test is for any other error.
       loggedError.mockClear();
     });
