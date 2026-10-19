@@ -50,7 +50,7 @@ model DataGateway {
   // The last interview that succeeded: its answers are the ones in use.
   lastInterviewedAt     DateTime?                    @map("last_interviewed_at") @db.Timestamptz(3)
   // The last interview that failed, or that succeeded with a section failing,
-  // and a coarse code for why. The admin routes return the whole row, so the
+  // and a coarse code for why. The admin routes return these columns, so the
   // raw error is only logged. A later success leaves both in place: the
   // failure is current while lastInterviewFailedAt isn't before
   // lastInterviewedAt.

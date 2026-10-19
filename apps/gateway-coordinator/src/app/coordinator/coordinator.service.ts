@@ -54,6 +54,22 @@ export class CoordinatorService {
   }
 
   /**
+   * Interviews a DataGateway now, for an admin who asks (#715). The registry
+   * refuses one that's unknown, deleted or disabled, and records a failed
+   * interview on the row. Either way the error goes back for the api to log.
+   */
+  async reinterviewGateway(request: proto.ReinterviewGatewayRequest): Promise<proto.ReinterviewGatewayResponse> {
+    try {
+      await this.registry.reinterview(request.gatewayId);
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`ReinterviewGateway failed for ${request.gatewayId}: ${message}`);
+      return { success: false, error: message };
+    }
+  }
+
+  /**
    * Basic ping handler for quick connectivity verification from the main application.
    *
    * @todo ping gateways on a schedule and track their health status, so we can return more accurate

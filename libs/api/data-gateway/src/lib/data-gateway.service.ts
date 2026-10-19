@@ -1,5 +1,12 @@
 import type { DataGateway } from '@bge/database';
-import { Action, DatabaseService, isPrismaDependentRecordNotFoundError, Prisma, ResourceType } from '@bge/database';
+import {
+  Action,
+  DatabaseService,
+  DataGatewayCapability,
+  isPrismaDependentRecordNotFoundError,
+  Prisma,
+  ResourceType,
+} from '@bge/database';
 import { GatewayConfigEvent, GatewayConfigEventsService, hashGatewayConfig } from '@bge/gateway-registry';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer, Unscoped } from '@bge/permissions';
@@ -69,14 +76,17 @@ export class DataGatewayService {
     return { rows, total };
   }
 
-  async getById(id: string) {
+  // Under the conditions of what the caller is about to do: a key's scope can
+  // grant update on one DataGateway beside read on all, so a route that writes
+  // finds its row under update, and one that wrote reads it back the same way.
+  async getById(id: string, action: Action = Action.read) {
     try {
       return await this.db.dataGateway.findUniqueOrThrow({
         where: {
           id,
           AND: [
             // eslint-disable-next-line no-restricted-syntax -- single-row fetch by id, not a collection read
-            ...this.abilityService.getCurrentResourceConditions(ResourceType.DataGateway, Action.read),
+            ...this.abilityService.getCurrentResourceConditions(ResourceType.DataGateway, action),
             { deletedAt: null },
           ],
         },
@@ -126,6 +136,15 @@ export class DataGatewayService {
 
       if (!update.authParameters) {
         delete update.authParameters;
+      }
+
+      // Stored like the interview's lists, in the enum's order with no
+      // repeats, so an unchanged list writes identically (#715).
+      const switchedOff = updateDataGatewayDTO.disabledCapabilities;
+      if (switchedOff) {
+        update.disabledCapabilities = Object.values(DataGatewayCapability).filter((capability) =>
+          switchedOff.includes(capability),
+        );
       }
 
       const gateway = await this.db.dataGateway.update({

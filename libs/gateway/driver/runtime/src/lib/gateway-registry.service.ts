@@ -560,9 +560,14 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       throw new GatewayRoutingRefusedError(gatewayId, refusal);
     }
 
-    // Connecting a DataGateway never interviewed interviews it.
+    // Connecting a DataGateway never interviewed interviews it. A config
+    // change abandons that connect without throwing, and then no interview
+    // happened: say so rather than answer as if one had (#715).
     if (!row?.firstInterviewedAt && !this.clients.has(gatewayId)) {
       await this.ensureConnected(gatewayId);
+      if (!this.clients.has(gatewayId)) {
+        throw new Error(`DataGateway ${gatewayId}'s interview was abandoned: its connect was invalidated`);
+      }
       return;
     }
 

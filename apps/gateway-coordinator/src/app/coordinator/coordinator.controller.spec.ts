@@ -6,6 +6,7 @@ import { GameImportEnqueuerService } from './services/game-import-enqueuer.servi
 
 describe('CoordinatorController', () => {
   let controller: CoordinatorController;
+  let coordinatorService: jest.Mocked<Pick<CoordinatorService, 'reinterviewGateway'>>;
 
   beforeEach(async () => {
     const { module } = await createTestingModuleWithDb({
@@ -18,6 +19,7 @@ describe('CoordinatorController', () => {
             healthCheck: jest.fn(),
             connectGateway: jest.fn(),
             disconnectGateway: jest.fn(),
+            reinterviewGateway: jest.fn().mockResolvedValue({ success: true }),
           } satisfies Partial<jest.Mocked<CoordinatorService>>,
         },
         {
@@ -38,9 +40,16 @@ describe('CoordinatorController', () => {
     });
 
     controller = module.get<CoordinatorController>(CoordinatorController);
+    coordinatorService = module.get(CoordinatorService);
   });
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  it('hands a re-interview to the coordinator service (#715)', async () => {
+    await expect(controller.reinterviewGateway({ gatewayId: 'gw-1' })).resolves.toEqual({ success: true });
+
+    expect(coordinatorService.reinterviewGateway).toHaveBeenCalledWith({ gatewayId: 'gw-1' });
   });
 });

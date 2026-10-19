@@ -75,9 +75,11 @@ enum LanguageTagSource {
 // canonical LanguageTag. Populated by the gateway capabilities interview and
 // lazily by imports that encounter values the interview didn't cover.
 //
-// Rows with `tagId = null` are the curation worklist:
-//   Pending    — valid BCP 47, awaiting review (reviewGatewayLanguages on)
-//   Unresolved — could not be auto-resolved; needs manual curation
+// Rows with `tagId = null` are the review worklist (#715):
+//   Pending    — a registered language, by BCP 47 tag or ISO code, that isn't
+//                in the vocabulary yet, awaiting review
+//                (reviewGatewayLanguages on). Accepting adds it.
+//   Unresolved — could not be auto-resolved; needs an admin to link it
 //   Ignored    — explicitly dismissed; suppresses further warnings
 model LanguageGatewayLink {
   id String @id @default(cuid(2))
@@ -97,6 +99,9 @@ model LanguageGatewayLink {
 
   // Metadata the gateway supplied alongside the value, retained so a
   // Pending/Unresolved link can be resolved later without re-interviewing.
+  // The tag is kept too: it can name a script or region the ISO codes
+  // can't, such as zh-Hant beside zho (#715).
+  suppliedIetfTag    String? @map("supplied_ietf_tag")
   suppliedIso6393    String? @map("supplied_iso6393") @db.VarChar(3)
   suppliedIso6391    String? @map("supplied_iso6391") @db.VarChar(2)
   suppliedName       String? @map("supplied_name")

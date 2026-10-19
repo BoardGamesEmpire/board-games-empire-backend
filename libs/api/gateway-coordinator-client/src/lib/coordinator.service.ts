@@ -60,6 +60,11 @@ export class GatewayCoordinatorClientService implements OnModuleInit, OnModuleDe
     return this.coordinatorService.disconnectGateway(request);
   }
 
+  // Waits for the interview, with no deadline yet (#722).
+  reinterviewGateway(request: proto.ReinterviewGatewayRequest): Observable<proto.ReinterviewGatewayResponse> {
+    return this.coordinatorService.reinterviewGateway(request);
+  }
+
   searchGames(request: proto.SearchGamesRequest): Observable<proto.SearchGameResult> {
     return this.coordinatorService.searchGames(request);
   }
