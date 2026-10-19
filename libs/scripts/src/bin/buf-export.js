@@ -10,6 +10,7 @@
 const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 
+const { createLock } = require('../prisma-generate/lock');
 const { exportProtos } = require('../proto-export/export');
 
 const workspaceRoot = path.resolve(__dirname, '..', '..', '..', '..');
@@ -29,11 +30,14 @@ function runBufExport(into) {
   return result.status ?? 1;
 }
 
+const cacheRoot = path.join(workspaceRoot, 'node_modules', '.cache');
+
 try {
   const { status, written } = exportProtos({
     outputDir: path.join(protoRoot, 'proto-export'),
-    stagingRoot: path.join(workspaceRoot, 'node_modules', '.cache', 'proto-export'),
+    stagingRoot: path.join(cacheRoot, 'proto-export'),
     runExport: runBufExport,
+    lock: createLock({ lockPath: path.join(cacheRoot, 'proto-export.lock.json'), task: 'proto export' }),
   });
 
   if (status === 0) console.log(written ? 'buf export: wrote proto-export' : 'buf export: proto-export is up to date');

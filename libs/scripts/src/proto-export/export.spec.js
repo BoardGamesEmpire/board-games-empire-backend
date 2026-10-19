@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { createLock } = require('../prisma-generate/lock');
 const { exportProtos } = require('./export');
 
 const PROTOS = {
@@ -46,15 +47,18 @@ describe('exportProtos (#313)', () => {
   let packageDir;
   let outputDir;
   let stagingRoot;
+  let lockPath;
 
   /** One run of the export, with `runExport` standing in for buf. */
-  const run = (runExport) => exportProtos({ outputDir, stagingRoot, runExport });
+  const run = (runExport, lock = createLock({ lockPath, task: 'proto export' })) =>
+    exportProtos({ outputDir, stagingRoot, runExport, lock });
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'bge-proto-export-'));
     packageDir = path.join(root, 'libs', 'proto', 'gateway');
     outputDir = path.join(packageDir, 'proto-export');
     stagingRoot = path.join(root, 'node_modules', '.cache', 'proto-export');
+    lockPath = path.join(root, 'node_modules', '.cache', 'proto-export.lock.json');
     fs.mkdirSync(packageDir, { recursive: true });
   });
 
@@ -146,5 +150,43 @@ describe('exportProtos (#313)', () => {
     expect(run(exporter(PROTOS))).toEqual({ status: 0, written: false });
     expect(readFiles(outputDir)).toEqual(PROTOS);
     expect(fs.readdirSync(stagingRoot)).toEqual([]);
+  });
+
+  // Compared before the other run moved its files in, this run deleted them,
+  // perhaps while that run's build was copying them.
+  it('compares only once it holds the lock, so it writes nothing when another run moved the same export in while it waited', () => {
+    const lock = createLock({ lockPath, task: 'proto export' });
+    let theirs;
+    const waiting = {
+      acquire: () => {
+        run(exporter(PROTOS));
+        theirs = fs.statSync(outputDir).ino;
+        lock.acquire();
+      },
+      release: () => lock.release(),
+    };
+
+    expect(run(exporter(PROTOS), waiting)).toEqual({ status: 0, written: false });
+    expect(fs.statSync(outputDir).ino).toBe(theirs);
+  });
+
+  it('runs buf without the lock, so the exports run side by side', () => {
+    const runExport = (into) => {
+      expect(fs.existsSync(lockPath)).toBe(false);
+      return exporter(PROTOS)(into);
+    };
+
+    run(runExport);
+  });
+
+  it('releases the lock whether the move succeeds or fails', () => {
+    run(exporter(PROTOS));
+    expect(fs.existsSync(lockPath)).toBe(false);
+
+    jest.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+    expect(() => run(exporter({ 'changed.proto': '' }))).toThrow('EACCES');
+    expect(fs.existsSync(lockPath)).toBe(false);
   });
 });

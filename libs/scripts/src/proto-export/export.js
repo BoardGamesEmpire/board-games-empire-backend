@@ -13,13 +13,16 @@
  * often none.
  *
  * So each run exports into a fresh directory of its own, and moves that into
- * place only when the files differ. The first run to finish moves its export
- * in, and the rest find the same files there and write nothing, as does every
- * later build until a .proto changes. What stays open, only while an export is
- * actually changing: a build copying the directory, or a linter walking it, can
- * land between the delete and the rename that replace it, and a .proto edited
- * while runs are in flight can leave the older export in place until the next
- * build.
+ * place only when the files differ. It compares and moves while holding
+ * prisma-generate's lock: a run that compared before another moved the same
+ * files in would otherwise delete them, perhaps while that run's own build
+ * copied them. The first run to finish moves its export in, and the rest find
+ * the same files there and write nothing, as does every later build until a
+ * .proto changes. What stays open, only while an export is actually changing:
+ * a build copying the directory, or a linter walking it, takes no lock, so it
+ * can land between the delete and the rename that replace it, and a .proto
+ * edited while runs are in flight can leave the older export in place until
+ * the next build.
  *
  * The fresh directories sit under node_modules/.cache, as prisma-generate's
  * lock does. Beside the export, one appeared and vanished under `eslint .` in
@@ -74,7 +77,8 @@ function moveIntoPlace(staging, outputDir) {
       fs.renameSync(staging, outputDir);
       return true;
     } catch (error) {
-      // Another run moved its export in between the delete and the rename.
+      // Something moved an export in between the delete and the rename: a run
+      // the lock let in once it judged this one stale, or one that takes no lock.
       const collided = error.code === 'ENOTEMPTY' || error.code === 'EEXIST';
       if (!collided || attempt === ATTEMPTS) throw error;
     }
@@ -84,17 +88,23 @@ function moveIntoPlace(staging, outputDir) {
 /**
  * Runs `runExport(dir)`, which exports into `dir` and returns buf's exit
  * status, against a fresh directory under `stagingRoot`, then moves the result
- * to `outputDir` if it differs. The fresh directory is gone afterwards either
- * way.
+ * to `outputDir` if it differs, holding `lock` while it compares and moves.
+ * The exports themselves run side by side. The fresh directory is gone
+ * afterwards either way.
  */
-function exportProtos({ outputDir, stagingRoot, runExport }) {
+function exportProtos({ outputDir, stagingRoot, runExport, lock }) {
   fs.mkdirSync(stagingRoot, { recursive: true });
   const staging = fs.mkdtempSync(path.join(stagingRoot, 'run-'));
   try {
     const status = runExport(staging);
     if (status !== 0) return { status, written: false };
 
-    return { status: 0, written: moveIntoPlace(staging, outputDir) };
+    lock.acquire();
+    try {
+      return { status: 0, written: moveIntoPlace(staging, outputDir) };
+    } finally {
+      lock.release();
+    }
   } finally {
     fs.rmSync(staging, { recursive: true, force: true });
   }

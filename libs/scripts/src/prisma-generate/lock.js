@@ -1,6 +1,7 @@
 'use strict';
 /**
- * Exclusive lock for `prisma generate`.
+ * Exclusive lock for `prisma generate`, which the proto export takes too
+ * (#313, proto-export/export.js).
  *
  * The lock is a single JSON file naming its holder, and two filesystem
  * guarantees carry the whole design:
@@ -121,6 +122,7 @@ function createLock({
   graceMs = LOCK_OWNER_GRACE_MS,
   pollIntervalMs = POLL_INTERVAL_MS,
   pid = process.pid,
+  task = 'prisma generate',
 }) {
   assertReclaimIsReachable(staleMs, timeoutMs);
 
@@ -279,7 +281,7 @@ function createLock({
         const holder = inspect();
 
         throw new Error(
-          `Timed out after ${timeoutMs}ms waiting for another prisma generate to finish` +
+          `Timed out after ${timeoutMs}ms waiting for another ${task} to finish` +
             `${holder === null ? '' : ` (held by pid ${holder.pid})`}. ` +
             `If nothing is running, remove ${lockPath}.`,
         );

@@ -72,6 +72,7 @@
         "{workspaceRoot}/libs/scripts/src/bin/buf-export.js",
         "{workspaceRoot}/libs/scripts/src/proto-export/**/*.js",
         "!{workspaceRoot}/libs/scripts/src/proto-export/**/*.spec.js",
+        "{workspaceRoot}/libs/scripts/src/prisma-generate/lock.js",
         {
           "externalDependencies": ["@bufbuild/buf"]
         }

@@ -50,8 +50,10 @@ directories, with a stand-in for buf. It covers a first export, an export that
 already matches (left untouched, down to the directory's inode), one whose files
 changed, one holding a `.proto` the sources no longer have, and a buf that fails
 or can't be started. It checks that a run stages outside the package and leaves
-nothing staged. It also covers the two ways another run can land first: while
-this one exports, and between its delete and its rename. The header of
+nothing staged. It also covers the ways another run can land first: while
+this one exports, while it waits for the lock it compares and moves under, and
+between its delete and its rename. buf runs outside that lock, and the lock is
+released when the move fails. The header of
 `src/proto-export/export.js` explains why `npm start` needs it (#313).
 
 `src/spec-swcrc/check.spec.js` runs the `.spec.swcrc` check against throwaway
