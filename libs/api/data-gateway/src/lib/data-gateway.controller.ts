@@ -249,11 +249,7 @@ export class DataGatewayController {
     // Log the coordinator's error server-side, whether it answers with one or
     // the call itself fails, but never surface it to the client — return a
     // generic, translated message instead (§6).
-    const failedAnswer = () => ({
-      dataGateway: toDataGatewayView(gateway),
-      connection_response: { success: false, message: t('errors.data_gateway.connect_failed') },
-      connection_attempt: true,
-    });
+    const failed = () => ({ success: false, message: t('errors.data_gateway.connect_failed') });
 
     return this.coordinator.connectGateway(request).pipe(
       map((response) => {
@@ -261,16 +257,23 @@ export class DataGatewayController {
           this.logger.error(
             `Coordinator could not connect gateway ${gateway.id}: ${response.error ?? 'No additional info'}`,
           );
-          return failedAnswer();
+          return failed();
         }
 
         this.logger.log(`Connect gateway response for ${gateway.id}: ${JSON.stringify(response)}`);
-        return { dataGateway: toDataGatewayView(gateway), connection_response: response, connection_attempt: true };
+        return response;
       }),
       catchError((error) => {
         this.logger.error(`Error connecting to gateway ${gateway.id}`, error);
-        return of(failedAnswer());
+        return of(failed());
       }),
+      // Connecting waits for a first interview, and the row records how it
+      // went, so it's read again whatever the outcome.
+      concatMap((connection_response) =>
+        from(this.dataGatewayService.getById(gateway.id)).pipe(
+          map((row) => ({ dataGateway: toDataGatewayView(row), connection_response, connection_attempt: true })),
+        ),
+      ),
     );
   }
 

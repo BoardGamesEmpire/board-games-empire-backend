@@ -1,5 +1,5 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { AuthType, DataGateway } from '@bge/database';
+import { AuthType, DataGateway, DataGatewayInterviewFailure } from '@bge/database';
 import { t } from '@bge/i18n';
 import { PoliciesGuard } from '@bge/permissions';
 import { ListScopeNotComposedError } from '@bge/shared';
@@ -27,7 +27,7 @@ describe('DataGatewayController', () => {
           provide: DataGatewayService,
           useValue: {
             getAll: jest.fn().mockResolvedValue({ rows: [], total: 0 }),
-            getById: jest.fn().mockResolvedValue(null),
+            getById: jest.fn().mockResolvedValue(makeGateway()),
             create: jest.fn().mockResolvedValue(makeGateway()),
             update: jest.fn().mockResolvedValue(makeGateway()),
             delete: jest.fn().mockResolvedValue(makeGateway()),
@@ -242,6 +242,61 @@ describe('DataGatewayController', () => {
       });
       expect(response.dataGateway).toEqual(toDataGatewayView(after));
       expect(logged).toHaveBeenCalledWith(expect.any(String), failure);
+    });
+  });
+
+  // Connecting waits for a first interview, and the row records its outcome
+  // (#715), so a connect answers with the row read again.
+  describe('the row a connect answers with', () => {
+    const T1 = new Date('2026-10-01T12:00:00.000Z');
+    const interviewed = makeGateway({ firstInterviewedAt: T1, lastInterviewedAt: T1 });
+    const failed = makeGateway({
+      lastInterviewFailedAt: T1,
+      lastInterviewFailure: DataGatewayInterviewFailure.DescribeFailed,
+    });
+    const connects = [
+      ['create', (c: DataGatewayController) => c.create({ name: 'Test Gateway' } as CreateDataGatewayDto)],
+      ['update, enabled', (c: DataGatewayController) => c.update('gw-1', { enabled: true })],
+      ['connect', (c: DataGatewayController) => c.connect('gw-1')],
+    ] as const;
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it.each(connects)('is read again after the interview, from %s', async (_action, call) => {
+      service.getById.mockResolvedValue(interviewed);
+
+      const response = await firstValueFrom<Record<string, unknown>>(
+        call(controller) as Observable<Record<string, unknown>>,
+      );
+
+      expect(service.getById).toHaveBeenCalledWith('gw-1');
+      expect(response['dataGateway']).toEqual(toDataGatewayView(interviewed));
+    });
+
+    it.each(connects)('is read again after a failed connect, from %s', async (_action, call) => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      service.getById.mockResolvedValue(failed);
+      coordinator.connectGateway.mockReturnValue(of({ success: false, error: 'raw detail' }));
+
+      const response = await firstValueFrom<Record<string, unknown>>(
+        call(controller) as Observable<Record<string, unknown>>,
+      );
+
+      expect(response['dataGateway']).toEqual(toDataGatewayView(failed));
+      expect(response['connection_response']).toEqual({
+        success: false,
+        message: t('errors.data_gateway.connect_failed'),
+      });
+    });
+
+    it('is read again when the coordinator call itself fails', async () => {
+      jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      service.getById.mockResolvedValue(failed);
+      coordinator.connectGateway.mockReturnValue(throwError(() => new Error('14 UNAVAILABLE')));
+
+      const response = await firstValueFrom(controller.connect('gw-1'));
+
+      expect(response.dataGateway).toEqual(toDataGatewayView(failed));
     });
   });
 
