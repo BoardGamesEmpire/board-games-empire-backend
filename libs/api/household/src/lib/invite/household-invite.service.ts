@@ -21,6 +21,7 @@ import { PaginatedRows } from '@bge/shared';
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { CreateHouseholdInviteDto, ListHouseholdInvitesQueryDto, type AssignableHouseholdRole } from '../dto';
 import { assertHouseholdExists, lockExistingHousehold, resolveHouseholdRoleId } from '../household-access.helpers';
+import { SHOWN_NAME_SELECT, shownName } from '../shown-name';
 import { isHouseholdAuthority, ROSTER_ROLE_SELECT, type RosterRow } from './household-authority';
 
 /**
@@ -568,7 +569,7 @@ export class HouseholdInviteService {
 
     const user = await tx.user.findUnique({
       where: { id: request.inviteeId, ...HUMAN_USER_WHERE },
-      select: { id: true, username: true, profile: { select: { displayName: true } } },
+      select: { id: true, ...SHOWN_NAME_SELECT },
     });
 
     if (!user) {
@@ -584,7 +585,7 @@ export class HouseholdInviteService {
     return {
       inviteeId: user.id,
       inviteeEmail: null,
-      inviteeName: inviteeName ?? (user.profile?.displayName || user.username),
+      inviteeName: inviteeName ?? shownName(user),
     };
   }
 }
