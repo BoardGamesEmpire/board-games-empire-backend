@@ -33,7 +33,9 @@ x-bge: &bge
 # What every role reads.
 x-bge-environment: &bge-environment
   NODE_ENV: production
-  # A direct connection (docs/BOOTSTRAP.md, #596), in the `public` schema.
+  # A direct connection, which the api's migrations need, since they have no
+  # DATABASE_MIGRATION_URL of their own here (docs/BOOTSTRAP.md); in the
+  # `public` schema.
   DATABASE_URL: postgresql://bge:bge@postgres:5432/bge
   REDIS_HOST: redis
   REDIS_BULLMQ_HOST: redis
