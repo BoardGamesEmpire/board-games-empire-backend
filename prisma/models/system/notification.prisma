@@ -46,7 +46,20 @@ enum NotificationType {
    */
   AuditUnattributedEvent
 
+  /**
+   * Household notifications, each sent to a different audience:
+   * HouseholdInviteReceived: the invitee.
+   * HouseholdInviteAwaitingApproval: household owners and admins.
+   * HouseholdInviteAccepted: the household's members.
+   * HouseholdInviteDeclined: the inviter plus household owners and admins.
+   * HouseholdOwnershipTransferred: the new household owner.
+   */
   HouseholdInviteReceived
+  HouseholdInviteAwaitingApproval
+  HouseholdInviteAccepted
+  HouseholdInviteDeclined
+  HouseholdOwnershipTransferred
+
   EventInviteReceived
 
   /**
