@@ -1,5 +1,11 @@
 import { DatabaseService, InviteStatus, InviteType, NotificationType } from '@bge/database';
-import type { InviteApprovedEvent, InviteCreatedEvent, InviteSnapshot } from '@bge/invites';
+import type {
+  InviteAcceptedEvent,
+  InviteApprovedEvent,
+  InviteCreatedEvent,
+  InviteDeclinedEvent,
+  InviteSnapshot,
+} from '@bge/invites';
 import { InviteEvents } from '@bge/invites';
 import type { HouseholdRefPayload } from '@bge/notifications-service';
 import { NotificationsService } from '@bge/notifications-service';
@@ -23,8 +29,9 @@ function isHouseholdInvite(invite: InviteSnapshot): invite is HouseholdInviteSna
 
 /**
  * Tells people about their households (#167): an invitee of an invite their
- * inbox now lists, and household owners and admins of an invite waiting for
- * their approval.
+ * inbox now lists, household owners and admins of an invite waiting for their
+ * approval, the members of a household of its new member, and the inviter and
+ * the household owners and admins of an invite declined (#682).
  *
  * Every event it hears is emitted after its transaction commits, so the
  * request has already answered. A handler therefore never throws: it logs its
@@ -90,6 +97,54 @@ export class HouseholdNotificationListener {
   }
 
   /**
+   * The invitee accepted and is a member now (#682). Every other member is
+   * told who, so a household hears of a new member from the server instead of
+   * finding them on the roster. The new member is the after-snapshot's
+   * invitee: an invite by address binds a user only on accept, so before it no
+   * one is named.
+   */
+  @OnEvent(InviteEvents.Accepted, { async: true })
+  async onInviteAccepted(event: InviteAcceptedEvent): Promise<void> {
+    const invite = event.after;
+
+    if (!isHouseholdInvite(invite)) {
+      return;
+    }
+
+    try {
+      await this.notifyMembers(invite);
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify on InviteAccepted inviteId=${invite.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * The invitee declined (#682). The inviter is told, if they are still a
+   * member, and so are the household owners and admins, who answer for who
+   * becomes a member. Each hears once, and the one declining never does.
+   */
+  @OnEvent(InviteEvents.Declined, { async: true })
+  async onInviteDeclined(event: InviteDeclinedEvent): Promise<void> {
+    const invite = event.after;
+
+    if (!isHouseholdInvite(invite)) {
+      return;
+    }
+
+    try {
+      await this.notifyDeclined(invite, event.before);
+    } catch (err) {
+      this.logger.error(
+        `Failed to notify on InviteDeclined inviteId=${invite.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
    * Tells the invitee of an invite, exactly when their inbox would list it
    * (#167). The inbox's own predicate is asked about this one invite, so no
    * one hears of an invite their inbox hides: one to an address they have not
@@ -104,19 +159,20 @@ export class HouseholdNotificationListener {
       return;
     }
 
-    const [listed, household, inviterName] = await Promise.all([
+    const [listed, named] = await Promise.all([
       this.inboxLists(invite.id, inviteeId, new Date()),
-      this.householdRef(invite.householdId),
-      this.nameOf(invite.inviterId),
+      this.householdAndName(invite.householdId, invite.inviterId),
     ]);
 
     if (!listed) {
       return;
     }
 
-    if (!household || inviterName === null) {
+    if (!named) {
       return this.logger.debug(`Household or inviter gone, skipping HouseholdInviteReceived inviteId=${invite.id}`);
     }
+
+    const { household, name: inviterName } = named;
 
     await this.notifications.create({
       userId: inviteeId,
@@ -164,10 +220,9 @@ export class HouseholdNotificationListener {
    * was sent by id.
    */
   private async notifyApprovers(invite: HouseholdInviteSnapshot): Promise<void> {
-    const [authorities, household, inviterName] = await Promise.all([
+    const [authorities, named] = await Promise.all([
       this.authorityUserIds(invite.householdId),
-      this.householdRef(invite.householdId),
-      this.nameOf(invite.inviterId),
+      this.householdAndName(invite.householdId, invite.inviterId),
     ]);
     const recipients = authorities.filter((userId) => userId !== invite.inviterId);
 
@@ -175,11 +230,13 @@ export class HouseholdNotificationListener {
       return;
     }
 
-    if (!household || inviterName === null) {
+    if (!named) {
       return this.logger.debug(
         `Household or inviter gone, skipping HouseholdInviteAwaitingApproval inviteId=${invite.id}`,
       );
     }
+
+    const { household, name: inviterName } = named;
 
     await this.notifications.createMany(
       recipients.map((userId) => ({
@@ -195,6 +252,109 @@ export class HouseholdNotificationListener {
         },
       })),
     );
+  }
+
+  /**
+   * Tells the members of a household who its new member is (#682), all but
+   * the new member, who knows. They are given the new member's name and never
+   * an address, even where the invite was sent to one.
+   */
+  private async notifyMembers(invite: HouseholdInviteSnapshot): Promise<void> {
+    const newMemberId = invite.inviteeId;
+
+    if (newMemberId === null) {
+      return this.logger.debug(`Accept names no new member, skipping HouseholdInviteAccepted inviteId=${invite.id}`);
+    }
+
+    const [members, named] = await Promise.all([
+      this.db.householdMember.findMany({
+        where: { householdId: invite.householdId, userId: { not: newMemberId } },
+        select: { userId: true },
+      }),
+      this.householdAndName(invite.householdId, newMemberId),
+    ]);
+
+    if (members.length === 0) {
+      return;
+    }
+
+    if (!named) {
+      return this.logger.debug(`Household or new member gone, skipping HouseholdInviteAccepted inviteId=${invite.id}`);
+    }
+
+    const { household, name: memberName } = named;
+
+    await this.notifications.createMany(
+      members.map(({ userId }) => ({
+        userId,
+        type: NotificationType.HouseholdInviteAccepted,
+        payload: { ...household, inviteId: invite.id, memberUserId: newMemberId, memberName },
+      })),
+    );
+  }
+
+  /**
+   * Tells the inviter, if they are still a member, and the household owners
+   * and admins that an invite was declined (#682), each once and never the
+   * person declining. They see the invitee as the invite named them, in the
+   * before-snapshot: declining binds the user to an invite sent by address,
+   * and the after-snapshot would then name a user the invite never did.
+   */
+  private async notifyDeclined(invite: HouseholdInviteSnapshot, invitedAs: InviteSnapshot): Promise<void> {
+    const [authorities, inviterMembership, household] = await Promise.all([
+      this.authorityUserIds(invite.householdId),
+      this.db.householdMember.findUnique({
+        where: { householdId_userId: { householdId: invite.householdId, userId: invite.inviterId } },
+        select: { userId: true },
+      }),
+      this.householdRef(invite.householdId),
+    ]);
+
+    const recipients = new Set(authorities);
+
+    if (inviterMembership) {
+      recipients.add(invite.inviterId);
+    }
+
+    if (invite.inviteeId !== null) {
+      recipients.delete(invite.inviteeId);
+    }
+
+    if (recipients.size === 0) {
+      return;
+    }
+
+    if (!household) {
+      return this.logger.debug(`Household gone, skipping HouseholdInviteDeclined inviteId=${invite.id}`);
+    }
+
+    await this.notifications.createMany(
+      [...recipients].map((userId) => ({
+        userId,
+        type: NotificationType.HouseholdInviteDeclined,
+        payload: {
+          ...household,
+          inviteId: invite.id,
+          inviteeId: invitedAs.inviteeId,
+          inviteeName: invitedAs.inviteeName,
+          inviteeEmail: invitedAs.inviteeEmail,
+        },
+      })),
+    );
+  }
+
+  /**
+   * The household and one user's name, as a notification names them, or null
+   * when either is gone: the household soft-deleted, or the user deleted,
+   * between the emit and the handler.
+   */
+  private async householdAndName(
+    householdId: string,
+    userId: string,
+  ): Promise<{ household: HouseholdRefPayload; name: string } | null> {
+    const [household, name] = await Promise.all([this.householdRef(householdId), this.nameOf(userId)]);
+
+    return household && name !== null ? { household, name } : null;
   }
 
   /**

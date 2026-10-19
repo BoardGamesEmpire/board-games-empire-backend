@@ -1,5 +1,11 @@
 import { InviteStatus, InviteType, NotificationType, SystemRole } from '@bge/database';
-import { InviteApprovedEvent, InviteCreatedEvent, type InviteSnapshot } from '@bge/invites';
+import {
+  InviteAcceptedEvent,
+  InviteApprovedEvent,
+  InviteCreatedEvent,
+  InviteDeclinedEvent,
+  type InviteSnapshot,
+} from '@bge/invites';
 import { NotificationsService } from '@bge/notifications-service';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
@@ -45,6 +51,20 @@ const approved = (overrides: Partial<InviteSnapshot> = {}) =>
     snapshot({ status: InviteStatus.Pending, ...overrides }),
     NOW,
   );
+
+/**
+ * Sam answers the invite. It was outstanding, and it ends having bound Sam
+ * whether it named them by id or by address, so only the after-snapshot is
+ * sure to hold their id.
+ */
+const responded = (status: InviteStatus, overrides: Partial<InviteSnapshot>) =>
+  [snapshot(overrides), snapshot({ ...overrides, status, inviteeId: INVITEE_ID, respondedAt: NOW }), NOW] as const;
+
+const accepted = (overrides: Partial<InviteSnapshot> = {}) =>
+  new InviteAcceptedEvent(...responded(InviteStatus.Accepted, overrides));
+
+const declined = (overrides: Partial<InviteSnapshot> = {}) =>
+  new InviteDeclinedEvent(...responded(InviteStatus.Declined, overrides));
 
 interface UserRow {
   id: string;
@@ -105,6 +125,7 @@ describe('HouseholdNotificationListener', () => {
 
     db.household.findUnique.mockResolvedValue(resolves({ name: 'The Meeples', deletedAt: null }));
     db.householdMember.findMany.mockResolvedValue([]);
+    db.householdMember.findUnique.mockResolvedValue(null);
     db.invite.count.mockResolvedValue(1);
     seedUsers(RILEY, SAM);
 
@@ -234,6 +255,175 @@ describe('HouseholdNotificationListener', () => {
     });
   });
 
+  describe('the household, on an accept', () => {
+    /** What a member is told of Sam becoming a member. It carries no address, by id or by address. */
+    const NEW_MEMBER = {
+      type: NotificationType.HouseholdInviteAccepted,
+      payload: {
+        householdId: HOUSEHOLD_ID,
+        householdName: 'The Meeples',
+        inviteId: 'invite-1',
+        memberUserId: INVITEE_ID,
+        memberName: 'sam',
+      },
+    };
+
+    it('tells every member but the new member that an invite was accepted (#682)', async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }, { userId: INVITER_ID }]));
+
+      await listener.onInviteAccepted(accepted());
+
+      // The new member is already on the roster when the event is heard, so the
+      // roster is asked for everyone else.
+      expect(db.householdMember.findMany).toHaveBeenCalledWith({
+        where: { householdId: HOUSEHOLD_ID, userId: { not: INVITEE_ID } },
+        select: { userId: true },
+      });
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        { userId: 'user-owner', ...NEW_MEMBER },
+        { userId: INVITER_ID, ...NEW_MEMBER },
+      ]);
+    });
+
+    it('finds the new member of an accept by address from the after-snapshot (#682)', async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: INVITER_ID }]));
+
+      // An invite by address binds the user only on accept, so the
+      // before-snapshot names no one.
+      const event = accepted(BY_ADDRESS);
+      expect(event.before.inviteeId).toBeNull();
+      expect(event.after.inviteeId).toBe(INVITEE_ID);
+
+      await listener.onInviteAccepted(event);
+
+      expect(db.householdMember.findMany).toHaveBeenCalledWith({
+        where: { householdId: HOUSEHOLD_ID, userId: { not: INVITEE_ID } },
+        select: { userId: true },
+      });
+      expect(db.user.findUnique).toHaveBeenCalledWith({
+        where: { id: INVITEE_ID },
+        select: { username: true, profile: { select: { displayName: true } } },
+      });
+      // The address the invite was sent to stays out of what members read.
+      expect(notifications.createMany).toHaveBeenCalledWith([{ userId: INVITER_ID, ...NEW_MEMBER }]);
+    });
+
+    it('tells no one when the new member is the only member, or is no longer a user (#682)', async () => {
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+
+      await listener.onInviteAccepted(accepted());
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: INVITER_ID }]));
+      seedUsers(RILEY);
+
+      await listener.onInviteAccepted(accepted());
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('tells no one of an accept that names no new member (#682)', async () => {
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+
+      await listener.onInviteAccepted(
+        new InviteAcceptedEvent(snapshot(), snapshot({ status: InviteStatus.Accepted, inviteeId: null }), NOW),
+      );
+
+      expect(db.householdMember.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('the inviter and the approvers, on a decline', () => {
+    it('tells the inviter and the household owners and admins of a decline, once each (#682)', async () => {
+      // The inviter is a household admin too, and so is named by both reads.
+      db.householdMember.findMany.mockResolvedValue(
+        resolves([{ userId: 'user-owner' }, { userId: 'user-admin' }, { userId: INVITER_ID }]),
+      );
+      db.householdMember.findUnique.mockResolvedValue(resolves({ userId: INVITER_ID }));
+
+      await listener.onInviteDeclined(declined());
+
+      expect(db.householdMember.findUnique).toHaveBeenCalledWith({
+        where: { householdId_userId: { householdId: HOUSEHOLD_ID, userId: INVITER_ID } },
+        select: { userId: true },
+      });
+
+      const payload = {
+        householdId: HOUSEHOLD_ID,
+        householdName: 'The Meeples',
+        inviteId: 'invite-1',
+        inviteeId: INVITEE_ID,
+        inviteeName: 'Sam',
+        inviteeEmail: null,
+      };
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        { userId: 'user-owner', type: NotificationType.HouseholdInviteDeclined, payload },
+        { userId: 'user-admin', type: NotificationType.HouseholdInviteDeclined, payload },
+        { userId: INVITER_ID, type: NotificationType.HouseholdInviteDeclined, payload },
+      ]);
+    });
+
+    it('tells a departed inviter nothing (#682)', async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }]));
+      db.householdMember.findUnique.mockResolvedValue(null);
+
+      await listener.onInviteDeclined(declined());
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-owner', type: NotificationType.HouseholdInviteDeclined }),
+      ]);
+    });
+
+    it('names no user on a decline by address, and gives the name and address the invite was sent to (#682)', async () => {
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }]));
+
+      // Declining bound Sam to the invite, but they are named only as the
+      // invite named them: by the address it was sent to.
+      const event = declined(BY_ADDRESS);
+      expect(event.before.inviteeId).toBeNull();
+      expect(event.after.inviteeId).toBe(INVITEE_ID);
+
+      await listener.onInviteDeclined(event);
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        {
+          userId: 'user-owner',
+          type: NotificationType.HouseholdInviteDeclined,
+          payload: {
+            householdId: HOUSEHOLD_ID,
+            householdName: 'The Meeples',
+            inviteId: 'invite-1',
+            inviteeId: null,
+            inviteeName: 'Sam',
+            inviteeEmail: ADDRESS,
+          },
+        },
+      ]);
+    });
+
+    it('never tells the person declining (#682)', async () => {
+      // However they came to be listed, and although an invite by address
+      // names them only in the after-snapshot.
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }, { userId: INVITEE_ID }]));
+      db.householdMember.findUnique.mockResolvedValue(resolves({ userId: INVITER_ID }));
+
+      await listener.onInviteDeclined(declined(BY_ADDRESS));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ userId: 'user-owner' }),
+        expect.objectContaining({ userId: INVITER_ID }),
+      ]);
+    });
+
+    it('tells no one when no household owner, household admin or inviter remains (#682)', async () => {
+      await listener.onInviteDeclined(declined());
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+  });
+
   describe('every handler', () => {
     it('ignores an event invite (#742)', async () => {
       // A household id as well, so the type alone tells it apart.
@@ -277,6 +467,44 @@ describe('HouseholdNotificationListener', () => {
 
       expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteCreated inviteId=invite-1', failure.stack);
       expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteApproved inviteId=invite-1', failure.stack);
+      // Logged on purpose, so cleared: the check after each test is for any other error.
+      loggedError.mockClear();
+    });
+
+    it('ignores an event invite on an accept or a decline (#742, #682)', async () => {
+      const eventInvite = { type: InviteType.Event, householdId: HOUSEHOLD_ID, eventId: 'ev-1' };
+
+      await listener.onInviteAccepted(accepted(eventInvite));
+      await listener.onInviteDeclined(declined(eventInvite));
+
+      expect(db.household.findUnique).not.toHaveBeenCalled();
+      expect(db.householdMember.findMany).not.toHaveBeenCalled();
+      expect(db.householdMember.findUnique).not.toHaveBeenCalled();
+      expect(db.user.findUnique).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('sends nothing on an accept or a decline for a household deleted before the handler ran (#682)', async () => {
+      jest.spyOn(Logger.prototype, 'debug').mockImplementation(() => undefined);
+      db.household.findUnique.mockResolvedValue(resolves({ name: 'The Meeples', deletedAt: NOW }));
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }]));
+
+      await listener.onInviteAccepted(accepted());
+      await listener.onInviteDeclined(declined());
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('logs and resolves when the write fails on an accept or a decline (#682)', async () => {
+      const failure = new Error('DB down');
+      db.householdMember.findMany.mockResolvedValue(resolves([{ userId: 'user-owner' }]));
+      notifications.createMany.mockRejectedValue(failure);
+
+      await expect(listener.onInviteAccepted(accepted())).resolves.toBeUndefined();
+      await expect(listener.onInviteDeclined(declined())).resolves.toBeUndefined();
+
+      expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteAccepted inviteId=invite-1', failure.stack);
+      expect(loggedError).toHaveBeenCalledWith('Failed to notify on InviteDeclined inviteId=invite-1', failure.stack);
       // Logged on purpose, so cleared: the check after each test is for any other error.
       loggedError.mockClear();
     });
