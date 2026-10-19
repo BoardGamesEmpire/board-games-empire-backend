@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { createActors, type Actors } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -50,7 +50,7 @@ describe('game descriptions', () => {
   it('sanitizes a description sent on update, and keeps safe Markdown exactly as sent', async () => {
     const creator = await actors.user();
     const { id } = await db.client.game.create({
-      data: { title: 'Edited prototype', visibility: Visibility.Public, createdById: creator.user.id },
+      data: { title: 'Edited prototype', reach: Reach.Public, createdById: creator.user.id },
       select: { id: true },
     });
     const update = (description: string) =>
@@ -80,7 +80,7 @@ describe('game descriptions', () => {
       data: {
         title: 'Imported prototype',
         description: stored,
-        visibility: Visibility.Public,
+        reach: Reach.Public,
         createdById: creator.user.id,
       },
       select: { id: true },

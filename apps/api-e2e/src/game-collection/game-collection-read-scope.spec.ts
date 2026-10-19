@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -18,7 +18,7 @@ import { listCollectionsEnvelope, readCollectionEnvelope } from './game-collecti
  * a list that left the entry out because nobody could read it would pass too.
  *
  * Another user's collection moved to `GET /api/users/:userId/game-collections`.
- * Its rows are the path user's for every caller; its visibility tests are in
+ * Its rows are the path user's for every caller; its reach tests are in
  * `game-collection-authorization.spec.ts`.
  *
  * Collection reads are not response-cached, but no test lists before the
@@ -45,8 +45,7 @@ describe('game collection read scope', () => {
 
   const listOwnCollection = (actor: AuthenticatedActor) => request(baseUrl).get(COLLECTIONS_PATH).set(actor.headers);
 
-  const arrangeEntry = (ownerId: string, visibility: Visibility) =>
-    arrangeCollectionEntry(db.client, ownerId, visibility);
+  const arrangeEntry = (ownerId: string, reach: Reach) => arrangeCollectionEntry(db.client, ownerId, reach);
 
   describe('GET /api/game-collections', () => {
     it("lists staff only their own entries, while each still reads a stranger's Private entry by id", async () => {
@@ -58,11 +57,11 @@ describe('game collection read scope', () => {
         actors.user(),
       ]);
 
-      const strangersEntry = await arrangeEntry(stranger.user.id, Visibility.Private);
+      const strangersEntry = await arrangeEntry(stranger.user.id, Reach.Private);
       const staff = [
-        ['an admin', admin, await arrangeEntry(admin.user.id, Visibility.Private)],
-        ['a moderator', moderator, await arrangeEntry(moderator.user.id, Visibility.Private)],
-        ["the server's Owner", serverOwner, await arrangeEntry(serverOwner.user.id, Visibility.Private)],
+        ['an admin', admin, await arrangeEntry(admin.user.id, Reach.Private)],
+        ['a moderator', moderator, await arrangeEntry(moderator.user.id, Reach.Private)],
+        ["the server's Owner", serverOwner, await arrangeEntry(serverOwner.user.id, Reach.Private)],
       ] as const;
 
       // The control. Admin and Moderator read the stranger's entry through
@@ -95,7 +94,7 @@ describe('game collection read scope', () => {
     it('is no longer served at its old path', async () => {
       const owner = await actors.user();
       const viewer = await actors.user();
-      await arrangeEntry(owner.user.id, Visibility.Public);
+      await arrangeEntry(owner.user.id, Reach.Public);
 
       // The control: the same caller reads the same collection at the new path.
       const page = listCollectionsEnvelope(

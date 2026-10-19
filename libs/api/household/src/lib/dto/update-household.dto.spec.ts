@@ -1,4 +1,4 @@
-import { MemberInvitePolicy, Visibility } from '@bge/database';
+import { MemberInvitePolicy, Reach } from '@bge/database';
 import { DECORATORS } from '@nestjs/swagger';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
@@ -18,7 +18,7 @@ describe('UpdateHouseholdDto', () => {
   it('accepts every field a household edit may change', async () => {
     const payload: PlainPayload = {
       name: 'Renamed',
-      visibility: Visibility.Friends,
+      reach: Reach.Friends,
       description: 'Board game night crew',
       image: 'https://example.test/avatar.png',
       language: 'pt-BR',
@@ -46,7 +46,7 @@ describe('UpdateHouseholdDto', () => {
       UpdateHouseholdDto.prototype,
     );
 
-    expect(published).toEqual(expect.arrayContaining([':name', ':visibility', ':language']));
+    expect(published).toEqual(expect.arrayContaining([':name', ':reach', ':language']));
     expect(published).not.toContain(':clientRequestId');
   });
 

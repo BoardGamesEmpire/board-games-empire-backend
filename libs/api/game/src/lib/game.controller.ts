@@ -25,7 +25,7 @@ export class GameController {
   @ApiOperation({
     summary: 'List games',
     description:
-      'The live Public games and the caller’s own, whatever their visibility — one rule for every role, ' +
+      'The live Public games and the caller’s own, whatever their reach — one rule for every role, ' +
       'and the set the local half of `GET /games/search` searches. Soft-deleted games are excluded. ' +
       '**Breaking change (#513).** Owner/Admin/Moderator previously also received every private game on the ' +
       'server, with `pagination.total` counting them. A private game they can read is still readable at ' +

@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
@@ -11,12 +11,12 @@ export class CreateHouseholdDto {
   name!: string;
 
   @ApiPropertyOptional({
-    enum: Visibility,
+    enum: Reach,
     description: "Set to 'Friends' to let members' friends view this household",
   })
   @IsOptional()
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
-  visibility?: Visibility;
+  @IsEnum(Reach, { message: i18nValidationMessage('validation.isEnum') })
+  reach?: Reach;
 
   @ApiPropertyOptional()
   @IsOptional()

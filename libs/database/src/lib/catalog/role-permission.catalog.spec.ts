@@ -234,7 +234,7 @@ describe('the shipped catalogs', () => {
       // than by shape, so a clause that goes missing fails here instead of
       // widening the read unnoticed.
       expect(conditionsOf('read:game')).toStrictEqual({ deletedAt: null, createdById: '{{ user.id }}' });
-      expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, visibility: 'Public' });
+      expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, reach: 'Public' });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
         expect.arrayContaining(['read:game', 'read:game:public']),
       );
@@ -272,6 +272,17 @@ describe('the shipped catalogs', () => {
       expect(entry?.fields).toStrictEqual(['id', 'username', 'firstName', 'lastName', 'image']);
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain('read:user:searchable');
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:searchable');
+    });
+
+    // A household sees a member's collection through the member's
+    // `showAllGames` and its excluded games, whatever the entry's reach: the
+    // reach says who beyond the owner's households sees it (#495).
+    it('let a household read a member’s collection whatever its reach', () => {
+      const entry = PERMISSION_CATALOG.find(({ slug }) => slug === 'read:game_collection:household');
+
+      expect(entry?.conditions).toBeDefined();
+      expect(entry?.conditions).not.toHaveProperty('reach');
+      expect(entry?.conditions).toMatchObject({ deletedAt: null, excludedFromHouseholds: expect.anything() });
     });
 
     it.each(

@@ -1,5 +1,5 @@
 import type { GameCollection, GameRelease, PlatformGame } from '@bge/database';
-import { Action, GameMedium, GameRemovalReason, Prisma, ResourceType, Visibility } from '@bge/database';
+import { Action, GameMedium, GameRemovalReason, Prisma, Reach, ResourceType } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -25,7 +25,7 @@ const entry = (overrides: Partial<GameCollection> = {}): GameCollection =>
     releaseId: null,
     medium: GameMedium.Physical,
     quantity: 1,
-    visibility: Visibility.Private,
+    reach: Reach.Private,
     rating: null,
     playCount: 3,
     playAgain: true,

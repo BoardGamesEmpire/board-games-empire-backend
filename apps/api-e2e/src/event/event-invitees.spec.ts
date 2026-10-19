@@ -1,4 +1,4 @@
-import { FriendshipStatus, Visibility } from '@bge/database';
+import { FriendshipStatus, Reach } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -43,10 +43,10 @@ describe('placing a user on an event', () => {
   const readPolicy = async () =>
     (await db.client.systemSetting.findUniqueOrThrow({ where: { singleton: true } })).eventInviteePolicy;
 
-  const setPolicy = (eventInviteePolicy: Visibility) =>
+  const setPolicy = (eventInviteePolicy: Reach) =>
     db.client.systemSetting.update({ where: { singleton: true }, data: { eventInviteePolicy } });
 
-  let originalPolicy: Visibility;
+  let originalPolicy: Reach;
 
   beforeEach(async () => {
     originalPolicy = await readPolicy();
@@ -91,7 +91,7 @@ describe('placing a user on an event', () => {
   /** No route writes a preference yet (#725), so it is written here. */
   const prefer = (
     actor: SessionActor,
-    preferences: { allowEventInvitesFrom?: Visibility; allowHouseholdInvitesFrom?: Visibility },
+    preferences: { allowEventInvitesFrom?: Reach; allowHouseholdInvitesFrom?: Reach },
   ) =>
     db.client.userPreferences.upsert({
       where: { userId: actor.user.id },
@@ -166,8 +166,8 @@ describe('placing a user on an event', () => {
 
     it('refuses a user whose event preference is Private on both paths, and ignores their household one', async () => {
       const [host, closed, householdOnly] = await Promise.all([actors.user(), actors.user(), actors.user()]);
-      await prefer(closed, { allowEventInvitesFrom: Visibility.Private });
-      await prefer(householdOnly, { allowHouseholdInvitesFrom: Visibility.Private });
+      await prefer(closed, { allowEventInvitesFrom: Reach.Private });
+      await prefer(householdOnly, { allowHouseholdInvitesFrom: Reach.Private });
       const eventId = await createdEventId(host);
 
       expect((await createEvent(host, { inviteUserIds: [closed.user.id] }).expect(403)).body.message).toBe(REFUSED);
@@ -183,7 +183,7 @@ describe('placing a user on an event', () => {
       const [host, friend, stranger] = await Promise.all([actors.user(), actors.user(), actors.user()]);
       await befriend(host, friend);
       const eventId = await createdEventId(host);
-      await setPolicy(Visibility.Friends);
+      await setPolicy(Reach.Friends);
 
       expect((await createEvent(host, { inviteUserIds: [stranger.user.id] }).expect(403)).body.message).toBe(
         FRIENDS_ONLY,
@@ -200,7 +200,7 @@ describe('placing a user on an event', () => {
         .householdInviteePolicy;
       await db.client.systemSetting.update({
         where: { singleton: true },
-        data: { householdInviteePolicy: Visibility.Friends },
+        data: { householdInviteePolicy: Reach.Friends },
       });
 
       try {

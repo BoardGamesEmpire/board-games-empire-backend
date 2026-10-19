@@ -6,7 +6,7 @@ describe('toMediaObjectResponse', () => {
     id: 'm1',
     ownerId: 'u1',
     uploaderId: 'u1',
-    visibility: 'Private',
+    reach: 'Private',
     mimeType: 'image/png',
     sizeBytes: 1234n,
     checksum: 'abc',

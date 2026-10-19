@@ -1,4 +1,4 @@
-import { Action, ContributionOrigin, MediaContributionStatus, Prisma, ResourceType, Visibility } from '@bge/database';
+import { Action, ContributionOrigin, MediaContributionStatus, Prisma, Reach, ResourceType } from '@bge/database';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import { ServiceAccountService } from '@bge/services';
 import {
@@ -80,7 +80,7 @@ describe('MediaContributionService', () => {
       );
       expect(db.mediaObject.update).toHaveBeenCalledWith({
         where: { id: 'm1' },
-        data: { ownerId: 'svc', visibility: Visibility.Public },
+        data: { ownerId: 'svc', reach: Reach.Public },
       });
     });
 
@@ -170,7 +170,7 @@ describe('MediaContributionService', () => {
 
       expect(db.mediaObject.update).toHaveBeenCalledWith({
         where: { id: 'm1' },
-        data: { ownerId: 'svc', visibility: Visibility.Public },
+        data: { ownerId: 'svc', reach: Reach.Public },
       });
       expect(db.mediaContribution.update).toHaveBeenCalledWith(
         expect.objectContaining({

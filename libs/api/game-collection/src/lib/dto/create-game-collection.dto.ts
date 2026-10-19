@@ -1,4 +1,4 @@
-import { GameMedium, Visibility } from '@bge/database';
+import { GameMedium, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
@@ -48,11 +48,11 @@ export class CreateGameCollectionDto {
   playAgain?: boolean;
 
   @ApiPropertyOptional({
-    enum: Visibility,
+    enum: Reach,
     description: 'Who may see this collection entry beyond the owner',
-    default: Visibility.Private,
+    default: Reach.Private,
   })
   @IsOptional()
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
-  visibility?: Visibility;
+  @IsEnum(Reach, { message: i18nValidationMessage('validation.isEnum') })
+  reach?: Reach;
 }

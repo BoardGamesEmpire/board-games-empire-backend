@@ -1,4 +1,4 @@
-import { SystemRole, Visibility } from '@bge/database';
+import { Reach, SystemRole } from '@bge/database';
 import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -197,7 +197,7 @@ describe('household authorization', () => {
       const shared = await actors.householdWithMembers({ owner: friend, name: 'Visible to friends' });
       await db.client.household.update({
         where: { id: shared.household.id },
-        data: { visibility: Visibility.Friends },
+        data: { reach: Reach.Friends },
       });
       await befriend(db.client, viewer, friend);
 
@@ -205,7 +205,7 @@ describe('household authorization', () => {
       expect(page.households).toEqual([]);
       expect(page.pagination).toMatchObject({ total: 0, totalPages: 0, hasMore: false });
 
-      // #417: friend visibility is NARROWED, not withdrawn, and this is the
+      // #417: friend reach is NARROWED, not withdrawn, and this is the
       // assertion that makes deferring #485 safe rather than merely convenient.
       // `read:households:friends` still reaches the household through the
       // detail route — it has only lost its effect on a first-person LIST. A

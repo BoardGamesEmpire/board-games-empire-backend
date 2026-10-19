@@ -6,9 +6,9 @@ import {
   MemberInvitePolicy,
   Prisma,
   QuotaScope,
+  Reach,
   ResourceType,
   SystemRole,
-  Visibility,
 } from '@bge/database';
 import {
   CONTEXT_INVITE_SELECT,
@@ -484,7 +484,7 @@ describe('HouseholdInviteService', () => {
     });
 
     describe('who may be invited (#278)', () => {
-      const serverPolicy = (householdInviteePolicy: Visibility) =>
+      const serverPolicy = (householdInviteePolicy: Reach) =>
         db.systemSetting.findUnique.mockResolvedValue(resolves({ householdInviteePolicy }));
 
       /** Whether a user filter names the invitee: `user-2` by id, or as the holder of `sam@example.test`. */
@@ -506,13 +506,13 @@ describe('HouseholdInviteService', () => {
           )) as never);
 
       /** The invitee's preference row says this. */
-      const preference = (allowHouseholdInvitesFrom: Visibility) =>
+      const preference = (allowHouseholdInvitesFrom: Reach) =>
         db.userPreferences.findFirst.mockImplementation(((args: { where: { user: unknown } }) =>
           Promise.resolve(namesInvitee(args.where.user) ? { allowHouseholdInvitesFrom } : null)) as never);
 
       describe('the server policy', () => {
         it('refuses a non-friend by id under Friends with 403, and writes nothing', async () => {
-          serverPolicy(Visibility.Friends);
+          serverPolicy(Reach.Friends);
           friendship(null);
           userById();
 
@@ -524,7 +524,7 @@ describe('HouseholdInviteService', () => {
         it.each([FriendshipStatus.Pending, FriendshipStatus.Declined, FriendshipStatus.Withdrawn])(
           'counts a %s friendship as no friendship under Friends',
           async (status) => {
-            serverPolicy(Visibility.Friends);
+            serverPolicy(Reach.Friends);
             friendship(status);
             userById();
 
@@ -533,7 +533,7 @@ describe('HouseholdInviteService', () => {
         );
 
         it('lets a friend be invited by id under Friends', async () => {
-          serverPolicy(Visibility.Friends);
+          serverPolicy(Reach.Friends);
           friendship(FriendshipStatus.Accepted);
           userById();
 
@@ -543,7 +543,7 @@ describe('HouseholdInviteService', () => {
         });
 
         it('refuses every invite by address under Friends, before reading anything about it', async () => {
-          serverPolicy(Visibility.Friends);
+          serverPolicy(Reach.Friends);
           inviterAddress('owner@example.test');
 
           await expect(service.createInvite('hh-1', byAddress())).rejects.toBeInstanceOf(ForbiddenException);
@@ -557,7 +557,7 @@ describe('HouseholdInviteService', () => {
         });
 
         it('lets anyone be invited under Public, by id or by address', async () => {
-          serverPolicy(Visibility.Public);
+          serverPolicy(Reach.Public);
           friendship(null);
           userById();
 
@@ -580,8 +580,8 @@ describe('HouseholdInviteService', () => {
         });
 
         // FriendsOfFriends reads as Friends until #496 defines the second
-        // degree; Household, which names no group here, and Private as nobody.
-        it.each([Visibility.FriendsOfFriends, Visibility.Household, Visibility.Private])(
+        // degree, and Private as nobody.
+        it.each([Reach.FriendsOfFriends, Reach.Private])(
           'fails closed on %s, a level the PATCH refuses',
           async (level) => {
             serverPolicy(level);
@@ -609,7 +609,7 @@ describe('HouseholdInviteService', () => {
         };
 
         beforeEach(() => {
-          serverPolicy(Visibility.Public);
+          serverPolicy(Reach.Public);
           userById();
         });
 
@@ -623,11 +623,11 @@ describe('HouseholdInviteService', () => {
 
         it('honours a preference stricter than the server’s', async () => {
           friendship(null);
-          preference(Visibility.Friends);
+          preference(Reach.Friends);
           await refusal(byId());
 
           friendship(FriendshipStatus.Accepted);
-          preference(Visibility.Private);
+          preference(Reach.Private);
           await refusal(byId());
 
           expect(invites.createWithin).not.toHaveBeenCalled();
@@ -635,7 +635,7 @@ describe('HouseholdInviteService', () => {
 
         it('lets a friend through a Friends preference, and anyone through no preference row', async () => {
           friendship(FriendshipStatus.Accepted);
-          preference(Visibility.Friends);
+          preference(Reach.Friends);
           await service.createInvite('hh-1', byId());
 
           friendship(null);
@@ -650,7 +650,7 @@ describe('HouseholdInviteService', () => {
           const blocked = await refusal(byId());
 
           friendship(null);
-          preference(Visibility.Private);
+          preference(Reach.Private);
           const declined = await refusal(byId());
 
           expect(blocked).toBe(declined);
@@ -660,9 +660,9 @@ describe('HouseholdInviteService', () => {
           friendship(FriendshipStatus.Blocked);
           const blocked = await refusal(byId());
 
-          serverPolicy(Visibility.Friends);
+          serverPolicy(Reach.Friends);
           friendship(null);
-          preference(Visibility.Public);
+          preference(Reach.Public);
           const byPolicy = await refusal(byId());
 
           expect(byPolicy).not.toBe(blocked);
@@ -671,7 +671,7 @@ describe('HouseholdInviteService', () => {
 
       describe('by address, a block and the invitee’s preference', () => {
         beforeEach(() => {
-          serverPolicy(Visibility.Public);
+          serverPolicy(Reach.Public);
           inviterAddress('owner@example.test');
         });
 
@@ -685,8 +685,8 @@ describe('HouseholdInviteService', () => {
 
         it.each([
           ['a block between the pair', () => friendship(FriendshipStatus.Blocked)],
-          ['a Friends preference, to a non-friend', () => preference(Visibility.Friends)],
-          ['a Private preference', () => preference(Visibility.Private)],
+          ['a Friends preference, to a non-friend', () => preference(Reach.Friends)],
+          ['a Private preference', () => preference(Reach.Private)],
         ])('stores the invite withheld for %s, and answers as it answers any other', async (_label, arrange) => {
           arrange();
 
@@ -698,11 +698,11 @@ describe('HouseholdInviteService', () => {
 
         it('withholds nothing when no account holds the address, or its holder lets the inviter in', async () => {
           friendship(FriendshipStatus.Blocked);
-          preference(Visibility.Private);
+          preference(Reach.Private);
           await service.createInvite('hh-1', byAddress({ inviteeEmail: 'nobody@example.test' }));
 
           friendship(FriendshipStatus.Accepted);
-          preference(Visibility.Friends);
+          preference(Reach.Friends);
           await service.createInvite('hh-1', byAddress());
 
           expect(invites.createWithin.mock.calls.map(([, params]) => params.withheld)).toEqual([false, false]);
@@ -815,7 +815,7 @@ describe('HouseholdInviteService', () => {
       });
 
       it('takes no slot for an invite the gate refuses, so it never waits on the cap', async () => {
-        db.systemSetting.findUnique.mockResolvedValue(resolves({ householdInviteePolicy: Visibility.Friends }));
+        db.systemSetting.findUnique.mockResolvedValue(resolves({ householdInviteePolicy: Reach.Friends }));
 
         await expect(service.createInvite('hh-1', byId())).rejects.toBeInstanceOf(ForbiddenException);
 

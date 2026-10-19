@@ -35,9 +35,12 @@ model UserProfile {
   accessibilityNeeds  String? @map("accessibility_needs")
   hostingCapability   Boolean @default(false) @map("hosting_capability")
 
-  // Visibility
-  visibility   Visibility @default(Public)
-  isSearchable Boolean    @default(true) @map("is_searchable")
+  // Who may read the profile, and so find it in user search (#495).
+  // `isSearchable` decides whether it is offered to search at all. The
+  // display name and avatar are not covered: they show with the user
+  // wherever the user appears, such as a roster or an invite.
+  reach        Reach   @default(Public)
+  isSearchable Boolean @default(true) @map("is_searchable")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

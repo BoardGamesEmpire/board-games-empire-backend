@@ -28,7 +28,7 @@ export class EventController {
       'same kind of result for every caller. The row counts whatever its RSVP status, so events the caller is ' +
       'only invited to, or has declined, are listed too. Newest first, soft-deleted events excluded. ' +
       '**Breaking change (#512).** This route previously widened with the caller: a household member also received every event ' +
-      'in their households, a friend received friends\u2019 `Friends`-visible events, and Owner/Admin/Moderator ' +
+      'in their households, a friend received the events whose reach admits friends, and Owner/Admin/Moderator ' +
       'received every event on the server, with `pagination.total` scoped the same way (#365). Each of those ' +
       'events is still readable at `GET /events/:id`. An **API key** is additionally floored by its own ' +
       'permissions (effective access is key ∩ owner). Paginated: `?page=` (1-based) and `?limit=`, with a ' +

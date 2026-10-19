@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -124,8 +124,8 @@ describe('system settings update', () => {
         contributionReclaimDays: differentFrom(original.contributionReclaimDays, 7, 8),
         auditLogRetentionDays: differentFrom(original.auditLogRetentionDays, 7, 8),
         reviewGatewayLanguages: !original.reviewGatewayLanguages,
-        householdInviteePolicy: differentFrom(original.householdInviteePolicy, Visibility.Friends, Visibility.Public),
-        eventInviteePolicy: differentFrom(original.eventInviteePolicy, Visibility.Friends, Visibility.Public),
+        householdInviteePolicy: differentFrom(original.householdInviteePolicy, Reach.Friends, Reach.Public),
+        eventInviteePolicy: differentFrom(original.eventInviteePolicy, Reach.Friends, Reach.Public),
       };
 
       const { body } = await patch(admin, changed).expect(200);
@@ -206,11 +206,11 @@ describe('system settings update', () => {
       ['a name past the length limit', { name: 'x'.repeat(MAX_NAME_LENGTH + 1) }],
       ['the retention under its old name', { feedbackRetentionDays: 30 }],
       // #496 has not defined the second degree, and the others are no policy.
-      ['an invitee policy of FriendsOfFriends', { householdInviteePolicy: Visibility.FriendsOfFriends }],
-      ['an invitee policy of Household', { householdInviteePolicy: Visibility.Household }],
-      ['an invitee policy of Private', { householdInviteePolicy: Visibility.Private }],
-      ['an event invitee policy of FriendsOfFriends', { eventInviteePolicy: Visibility.FriendsOfFriends }],
-      ['an event invitee policy of Private', { eventInviteePolicy: Visibility.Private }],
+      ['an invitee policy of FriendsOfFriends', { householdInviteePolicy: Reach.FriendsOfFriends }],
+      ['an invitee policy of Household, which is no longer a reach', { householdInviteePolicy: 'Household' }],
+      ['an invitee policy of Private', { householdInviteePolicy: Reach.Private }],
+      ['an event invitee policy of FriendsOfFriends', { eventInviteePolicy: Reach.FriendsOfFriends }],
+      ['an event invitee policy of Private', { eventInviteePolicy: Reach.Private }],
     ])('answers 400 to %s and writes nothing', async (_, body) => {
       await expectRefused(await actors.admin(), body);
     });

@@ -1,10 +1,4 @@
-import {
-  AvailabilityResponse,
-  EventParticipationStatus,
-  OccurrenceStatus,
-  SystemRole,
-  Visibility,
-} from '@bge/database';
+import { AvailabilityResponse, EventParticipationStatus, OccurrenceStatus, Reach, SystemRole } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -177,7 +171,7 @@ describe('event read scope', () => {
       const viewer = await actors.user();
       await befriend(db.client, viewer, friend);
 
-      const friendsEventId = await createdEventId(friend, { visibility: Visibility.Friends });
+      const friendsEventId = await createdEventId(friend, { reach: Reach.Friends });
       const ownId = await createdEventId(viewer);
 
       // Control: the viewer reads it through `read:event:friends`.
@@ -338,7 +332,7 @@ describe('event read scope', () => {
       const host = await actors.user();
       const friend = await actors.user();
       await befriend(db.client, friend, host);
-      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { visibility: Visibility.Friends });
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Friends });
 
       // Control: the host is served every attendee, the guest's email with
       // them, so the friend's empty list below is the friend's ceiling.
@@ -414,7 +408,7 @@ describe('event read scope', () => {
       const host = await actors.user();
       const friend = await actors.user();
       await befriend(db.client, friend, host);
-      const { eventId, occurrenceId } = await arrangeEvent(host, { visibility: Visibility.Friends });
+      const { eventId, occurrenceId } = await arrangeEvent(host, { reach: Reach.Friends });
 
       // Control: the host is served the vote and the game.
       const own = listOccurrencesEnvelope(

@@ -1,4 +1,4 @@
-import { GameMedium, type PrismaClient, type Visibility } from '@bge/database';
+import { GameMedium, type PrismaClient, type Reach } from '@bge/database';
 import { randomUUID } from 'node:crypto';
 
 /**
@@ -10,11 +10,7 @@ import { randomUUID } from 'node:crypto';
  * Extracted when a second suite needed it (#514), on the concrete-first rule
  * `../support/wire.ts` describes.
  */
-export async function arrangeCollectionEntry(
-  prisma: PrismaClient,
-  ownerId: string,
-  visibility: Visibility,
-): Promise<string> {
+export async function arrangeCollectionEntry(prisma: PrismaClient, ownerId: string, reach: Reach): Promise<string> {
   const platform = await prisma.platform.findUniqueOrThrow({ where: { slug: 'tabletop' }, select: { id: true } });
   const game = await prisma.game.create({
     data: { title: `e2e game ${randomUUID().slice(0, 8)}` },
@@ -26,7 +22,7 @@ export async function arrangeCollectionEntry(
   });
 
   const entry = await prisma.gameCollection.create({
-    data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical, visibility },
+    data: { userId: ownerId, platformGameId: platformGame.id, medium: GameMedium.Physical, reach },
     select: { id: true },
   });
 

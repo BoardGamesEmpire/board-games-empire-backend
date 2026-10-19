@@ -2,7 +2,7 @@ import { type Actor, AuditContextModule, getActorSnapshotFromCls } from '@bge/ac
 import { injectActorContextMetadata, WsActorScope } from '@bge/actor-context-transport';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DatabaseModule, DatabaseService, ResourceType, Visibility } from '@bge/database';
+import { Action, DatabaseModule, DatabaseService, Reach, ResourceType } from '@bge/database';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import {
   FALLBACK_LOCALE,
@@ -97,7 +97,7 @@ const userActor = (userId: string): Actor => ({ kind: 'user', userId });
  */
 const scopeOf = (userId: string) => ({
   deletedAt: null,
-  OR: [{ visibility: Visibility.Public }, { createdById: userId }],
+  OR: [{ reach: Reach.Public }, { createdById: userId }],
   AND: [{ OR: [{ createdById: userId }] }],
 });
 

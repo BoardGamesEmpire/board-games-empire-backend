@@ -4,8 +4,8 @@ import {
   DatabaseService,
   MediaContributionStatus,
   Prisma,
+  Reach,
   ResourceType,
-  Visibility,
   type MediaContribution,
 } from '@bge/database';
 import { t } from '@bge/i18n';
@@ -271,10 +271,10 @@ export class MediaContributionService {
     serviceAccountId: string,
   ): Promise<void> {
     // owner → service account (quota re-attributes for free; usage sums by ownerId),
-    // visibility → Public. uploaderId is left untouched: credit is permanent.
+    // reach → Public. uploaderId is left untouched: credit is permanent.
     await tx.mediaObject.update({
       where: { id: mediaObjectId },
-      data: { ownerId: serviceAccountId, visibility: Visibility.Public },
+      data: { ownerId: serviceAccountId, reach: Reach.Public },
     });
   }
 

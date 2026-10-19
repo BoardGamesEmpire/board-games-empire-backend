@@ -1,5 +1,5 @@
 /// Storage/bytes + ownership layer. A row exists only after a successful
-/// driver `put`, so byte metadata is non-null. Access policy (owner, visibility,
+/// driver `put`, so byte metadata is non-null. Access policy (owner, reach,
 /// household shares, contribution state) lives here; presentation metadata lives
 /// on the 1:1 `Media` row. Byte access is authorized via signed URLs, not CASL;
 /// CASL gates metadata reads, signed-URL minting, and management.
@@ -16,8 +16,9 @@ model MediaObject {
   uploaderId String @map("uploader_id")
 
   // ─── Reach ──────────────────────────────────────────────
-  // Private (owner-only) → Household (+ MediaShare rows) → Public (site-wide).
-  visibility Visibility @default(Private)
+  // Private (owner-only) or Public (site-wide) today; MediaShare rows and the
+  // rest of the ladder arrive with #811.
+  reach Reach @default(Private)
 
   // ─── Storage location ───────────────────────────────────
   driverSlug String @map("driver_slug")
@@ -55,7 +56,8 @@ model MediaObject {
 }
 
 /// Explicit many-to-many share: scopes a MediaObject to specific households the
-/// owner belongs to (the middle reach tier). Moot once visibility is Public.
+/// owner belongs to. A share adds readers on top of the object's reach, so it
+/// is moot once the reach is Public. Nothing reads or writes it yet (#811).
 model MediaShare {
   id String @id @default(cuid(2))
 
@@ -78,7 +80,7 @@ model MediaShare {
 /// Tracks a "contribute to the server" request and its moderation lifecycle.
 /// Holds the intended subject until approval — the subject join row (e.g.
 /// GameDocument) is created on approve, alongside the owner→service-account flip
-/// and visibility→Public. `origin` drives reject cleanup: DirectUpload rejects
+/// and reach→Public. `origin` drives reject cleanup: DirectUpload rejects
 /// are swept after `reclaimDeadline`; ExistingMedia rejects are left untouched.
 model MediaContribution {
   id String @id @default(cuid(2))

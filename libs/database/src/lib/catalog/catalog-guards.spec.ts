@@ -45,7 +45,7 @@ describe('catalog guards', () => {
     it('finds nothing to render in static or absent conditions', () => {
       const nothing = { variables: [], problems: [] };
 
-      expect(parseTemplate({ deletedAt: null, visibility: { in: ['Public', 'Friends'] } })).toEqual(nothing);
+      expect(parseTemplate({ deletedAt: null, reach: { in: ['Public', 'Friends'] } })).toEqual(nothing);
       expect(parseTemplate(undefined)).toEqual(nothing);
       expect(parseTemplate({})).toEqual(nothing);
     });
@@ -85,7 +85,7 @@ describe('catalog guards', () => {
       definition({ slug: 'read:gadget' }),
       definition({ slug: 'read:audit' }),
       definition({ slug: 'read:member', conditions: { householdId: '{{ householdId }}' } }),
-      definition({ slug: 'read:public', conditions: { visibility: 'Public' } }),
+      definition({ slug: 'read:public', conditions: { reach: 'Public' } }),
       definition({ slug: 'read:broken', conditions: { id: '{{ unclosed' } }),
     ];
 
@@ -154,7 +154,7 @@ describe('catalog guards', () => {
       definition({ slug: 'manage:everything', action: Action.manage, subject: 'all' }),
       definition({ slug: 'read:audit', subject: ResourceType.AuditLog }),
       definition({ slug: 'read:gadget' }),
-      definition({ slug: 'read:public', conditions: { visibility: 'Public' } }),
+      definition({ slug: 'read:public', conditions: { reach: 'Public' } }),
       definition({ slug: 'read:member', conditions: { householdId: '{{ householdId }}' } }),
       definition({ slug: 'read:own', conditions: { createdById: '{{ user.id }}' } }),
       definition({ slug: 'read:broken', conditions: { id: '{{ unclosed' } }),
@@ -484,7 +484,7 @@ describe('catalog guards', () => {
     const catalog = [
       definition({ slug: 'read:gadget' }),
       definition({ slug: 'read:blank', conditions: {} }),
-      definition({ slug: 'read:public', conditions: { deletedAt: null, visibility: 'Public' } }),
+      definition({ slug: 'read:public', conditions: { deletedAt: null, reach: 'Public' } }),
       definition({ slug: 'read:own', conditions: { createdById: '{{ user.id }}' } }),
     ];
 

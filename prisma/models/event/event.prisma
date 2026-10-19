@@ -29,8 +29,8 @@ model Event {
   location    String? // event-level default; occurrences may override
   url         String?
 
-  type       EventType  @default(CasualGathering)
-  visibility Visibility @default(Friends)
+  type  EventType @default(CasualGathering)
+  reach Reach     @default(Friends)
 
   recurrenceRule   EventRecurrenceRule?      @relation("RecurringEventInstances", fields: [recurrenceRuleId], references: [id])
   recurrenceRuleId String?                   @map("recurrence_rule_id")

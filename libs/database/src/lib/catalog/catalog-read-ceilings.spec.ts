@@ -50,7 +50,7 @@ describe('deriveReadCeilings', () => {
     // could not see a grant lose its template and keep a static clause — the
     // change that makes a list install-wide for its holders.
     const catalog = [
-      definition({ slug: 'read:game:public', conditions: { deletedAt: null, visibility: 'Public' } }),
+      definition({ slug: 'read:game:public', conditions: { deletedAt: null, reach: 'Public' } }),
       definition({ slug: 'read:game', conditions: { deletedAt: null, createdById: '{{ user.id }}' } }),
     ];
 
@@ -78,7 +78,7 @@ describe('deriveReadCeilings', () => {
   it('does not count `role` as a binding, since it renders the same for every holder', () => {
     // The role pass renders `{{ role }}` as the holding role's own name, so a
     // clause on it gives every holder of that role the same rows.
-    const catalog = [definition({ slug: 'read:game', conditions: { visibility: '{{ role }}' } })];
+    const catalog = [definition({ slug: 'read:game', conditions: { reach: '{{ role }}' } })];
 
     expect(deriveReadCeilings(catalog, { [SystemRole.User]: ['read:game'] }, SUBJECTS).Game).toEqual({
       User: { 'read:game': 'fixed filter' },

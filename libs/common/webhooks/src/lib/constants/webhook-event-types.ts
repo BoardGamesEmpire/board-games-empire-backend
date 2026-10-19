@@ -93,9 +93,9 @@ export const WEBHOOK_EVENT_DESCRIPTORS: Record<WebhookEventType, WebhookEventMet
   [WebhookEventType.ImportJobFailed]: { subject: ResourceType.Job, requiredAction: Action.read },
   [WebhookEventType.ImportBatchCompleted]: { subject: ResourceType.Job, requiredAction: Action.read },
   // `read`, though #158's design called for `update`, reasoning that `read` on
-  // Household also admits friends-visibility readers (`read:households:friends`)
-  // and that who runs a household is not friends-visible material. It already
-  // is: a friend reads the roster of a friends-visible household
+  // Household also admits the friends its reach lets in (`read:households:friends`)
+  // and that who runs a household is not theirs to see. It already is: a
+  // friend reads the roster of a household whose reach admits friends
   // (`read:household_member:friends`), and the roster names each member's role,
   // `HouseholdOwner` included. `update` would withhold from the webhook what the
   // read already shows (#247). What a push to an outside URL adds over a read is

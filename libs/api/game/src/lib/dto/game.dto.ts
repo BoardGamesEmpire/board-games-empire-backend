@@ -1,5 +1,5 @@
 import type { Game } from '@bge/database';
-import { ContentType, TimeMeasure, Visibility } from '@bge/database';
+import { ContentType, Reach, TimeMeasure } from '@bge/database';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class GameDto implements Pick<
@@ -22,7 +22,7 @@ export class GameDto implements Pick<
   | 'averageRating'
   | 'ratingsCount'
   | 'ownedByCount'
-  | 'visibility'
+  | 'reach'
   | 'contentType'
   | 'createdById'
   | 'createdAt'
@@ -85,8 +85,8 @@ export class GameDto implements Pick<
   @ApiProperty({ description: 'Number of users who own this game' })
   ownedByCount!: number;
 
-  @ApiProperty({ enum: Visibility, description: 'Visibility scope of this game record' })
-  visibility!: Visibility;
+  @ApiProperty({ enum: Reach, enumName: 'Reach', description: 'Who may read the game besides its creator' })
+  reach!: Reach;
 
   @ApiProperty({ enum: ContentType, description: 'Content classification (base game, expansion, etc.)' })
   contentType!: ContentType;

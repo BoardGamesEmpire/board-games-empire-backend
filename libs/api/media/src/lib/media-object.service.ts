@@ -5,8 +5,8 @@ import {
   DatabaseService,
   isPrismaDependentRecordNotFoundError,
   Prisma,
+  Reach,
   ResourceType,
-  Visibility,
 } from '@bge/database';
 import { t } from '@bge/i18n';
 import { AbilityService, resolveScopeSubjectId, ScopeComposer } from '@bge/permissions';
@@ -114,7 +114,7 @@ export class MediaObjectService {
             ContributionOrigin.DirectUpload,
             userId,
           );
-          // Auto-approval flips ownerId + visibility in this same tx, so the create()
+          // Auto-approval flips ownerId + reach in this same tx, so the create()
           // result is stale — return the post-flip row.
           const media = await tx.mediaObject.findUniqueOrThrow({ where: { id: stored.media.id } });
           return { result: { media, contribution }, softOverages: stored.softOverages };
@@ -175,7 +175,7 @@ export class MediaObjectService {
         uploaderId: userId,
         width: dimensions?.width ?? null,
         height: dimensions?.height ?? null,
-        visibility: Visibility.Private,
+        reach: Reach.Private,
         driverSlug: stored.driverSlug,
         driverKey: key,
         sizeBytes: stored.size,
@@ -361,19 +361,19 @@ export class MediaObjectService {
   }
 
   async publish(id: string) {
-    return this.setVisibility(id, Visibility.Public);
+    return this.setReach(id, Reach.Public);
   }
 
   async unpublish(id: string) {
-    return this.setVisibility(id, Visibility.Private);
+    return this.setReach(id, Reach.Private);
   }
 
-  private async setVisibility(id: string, visibility: Visibility) {
+  private async setReach(id: string, reach: Reach) {
     try {
       return await this.db.mediaObject.update({
         // eslint-disable-next-line no-restricted-syntax -- single-row write by id, not a collection read
         where: { id, AND: this.ability.getCurrentResourceConditions(ResourceType.MediaObject, Action.update) },
-        data: { visibility },
+        data: { reach },
       });
     } catch (error) {
       if (isPrismaDependentRecordNotFoundError(error)) {

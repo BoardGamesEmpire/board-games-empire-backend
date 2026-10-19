@@ -1,4 +1,4 @@
-import { EventSchedulingMode, EventType, Visibility } from '@bge/database';
+import { EventSchedulingMode, EventType, Reach } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -64,10 +64,10 @@ export class CreateEventDto {
   @IsOptional()
   type?: EventType;
 
-  @ApiPropertyOptional({ enum: Visibility, default: Visibility.Friends })
-  @IsEnum(Visibility, { message: i18nValidationMessage('validation.isEnum') })
+  @ApiPropertyOptional({ enum: Reach, default: Reach.Friends })
+  @IsEnum(Reach, { message: i18nValidationMessage('validation.isEnum') })
   @IsOptional()
-  visibility?: Visibility;
+  reach?: Reach;
 
   @ApiPropertyOptional({ enum: EventSchedulingMode, default: EventSchedulingMode.Fixed })
   @IsEnum(EventSchedulingMode, { message: i18nValidationMessage('validation.isEnum') })

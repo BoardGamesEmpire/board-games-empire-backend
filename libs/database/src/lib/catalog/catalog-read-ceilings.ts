@@ -9,7 +9,7 @@ import type { PermissionSeedDefinition } from './seed-definitions';
  *
  * - `'every row'` — no conditions. Every holder reads the whole table.
  * - `'fixed filter'` — conditions with nothing templated, such as
- *   `{ visibility: 'Public' }`. Every holder reads the same rows.
+ *   `{ reach: 'Public' }`. Every holder reads the same rows.
  * - `'binds …'` — the template variables the conditions are rendered against,
  *   sorted. `user.id` varies the rows per caller, `householdId` per
  *   membership, `eventId` per attendance. `role` is not listed: the pass

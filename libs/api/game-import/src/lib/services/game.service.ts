@@ -6,7 +6,7 @@ import {
   ExpansionType,
   isPrismaUniqueConstraintError,
   Prisma,
-  Visibility,
+  Reach,
 } from '@bge/database';
 import { toStoredContentType } from '@bge/gateway-registry';
 import { ServiceAccountService } from '@bge/services';
@@ -354,7 +354,7 @@ export class GameUpsertService {
    * between insert and re-import. Returned as the inferred literal type
    * (plain scalars) so it stays assignable to both GameCreateInput and
    * GameUpdateInput — the only difference between the two paths is
-   * `visibility`, which is seeded on create but never reset on re-import.
+   * `reach`, which is seeded on create but never reset on re-import.
    */
   private buildScalarInput(game: GameData) {
     return {
@@ -379,7 +379,7 @@ export class GameUpsertService {
   private buildCreateInput(game: GameData): Prisma.GameCreateInput {
     return {
       ...this.buildScalarInput(game),
-      visibility: Visibility.Public,
+      reach: Reach.Public,
     };
   }
 

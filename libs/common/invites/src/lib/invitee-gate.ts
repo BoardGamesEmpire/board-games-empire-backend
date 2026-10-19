@@ -1,4 +1,4 @@
-import { FriendshipStatus, InviteType, Prisma, Visibility } from '@bge/database';
+import { FriendshipStatus, InviteType, Prisma, Reach } from '@bge/database';
 import { t } from '@bge/i18n';
 import { ForbiddenException } from '@nestjs/common';
 import { normalizeInviteeEmail } from './invite.service';
@@ -88,7 +88,7 @@ export async function gateInvitee(
   const policy = await serverInviteePolicy(tx, settings);
 
   if (invitee.inviteeId === null) {
-    if (policy !== Visibility.Public) {
+    if (policy !== Reach.Public) {
       throw new ForbiddenException(t(settings.friendsOnly));
     }
 
@@ -113,13 +113,13 @@ export async function gateInvitee(
  * The server's policy for the type, read in the caller's transaction. No
  * settings row reads as the column's default.
  */
-async function serverInviteePolicy(tx: Prisma.TransactionClient, settings: GateSettings): Promise<Visibility> {
+async function serverInviteePolicy(tx: Prisma.TransactionClient, settings: GateSettings): Promise<Reach> {
   const row = await tx.systemSetting.findUnique({
     where: { singleton: true },
     select: { householdInviteePolicy: true, eventInviteePolicy: true },
   });
 
-  return row?.[settings.policy] ?? Visibility.Public;
+  return row?.[settings.policy] ?? Reach.Public;
 }
 
 /**
@@ -153,7 +153,7 @@ async function addressHolderRefuses(
 }
 
 /** Whether a block between the pair, or the invitee's own preference, keeps the invite from them. */
-function refuses(status: FriendshipStatus | null, preference: Visibility): boolean {
+function refuses(status: FriendshipStatus | null, preference: Reach): boolean {
   return status === FriendshipStatus.Blocked || !reaches(preference, status);
 }
 
@@ -166,13 +166,13 @@ async function invitePreference(
   tx: Prisma.TransactionClient,
   settings: GateSettings,
   invitee: Invitee,
-): Promise<Visibility> {
+): Promise<Reach> {
   const preferences = await tx.userPreferences.findFirst({
     where: { user: invitee },
     select: { allowHouseholdInvitesFrom: true, allowEventInvitesFrom: true },
   });
 
-  return preferences?.[settings.preference] ?? Visibility.Public;
+  return preferences?.[settings.preference] ?? Reach.Public;
 }
 
 /**
@@ -206,19 +206,17 @@ async function friendshipStatus(
  * status to the person it protects.
  *
  * Only `Public` and `Friends`, and `Private` for the preference, can be set.
- * The other two fail closed if a write that skips the routes stores them:
- * `FriendsOfFriends` reads as `Friends` until #496 defines the second degree,
- * and `Household`, which names no group an inviter could be in, as `Private`.
+ * `FriendsOfFriends` fails closed if a write that skips the routes stores it:
+ * it reads as `Friends` until #496 defines friends of friends.
  */
-function reaches(level: Visibility, status: FriendshipStatus | null): boolean {
+function reaches(level: Reach, status: FriendshipStatus | null): boolean {
   switch (level) {
-    case Visibility.Public:
+    case Reach.Public:
       return true;
-    case Visibility.Friends:
-    case Visibility.FriendsOfFriends:
+    case Reach.Friends:
+    case Reach.FriendsOfFriends:
       return status === FriendshipStatus.Accepted;
-    case Visibility.Household:
-    case Visibility.Private:
+    case Reach.Private:
       return false;
   }
 }

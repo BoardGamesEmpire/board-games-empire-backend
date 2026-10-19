@@ -14,7 +14,7 @@ async function propertiesWithErrors(payload: PlainPayload): Promise<string[]> {
 
 describe('UpdateEventDto', () => {
   it('accepts a patch of the fields an update may change', async () => {
-    await expect(propertiesWithErrors({ title: 'Renamed', visibility: 'Public' })).resolves.toEqual([]);
+    await expect(propertiesWithErrors({ title: 'Renamed', reach: 'Public' })).resolves.toEqual([]);
   });
 
   // An event's household is set when it is created and never after (#454).

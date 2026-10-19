@@ -1,10 +1,10 @@
-import { TimeMeasure, Visibility } from '@bge/database';
+import { Reach, TimeMeasure } from '@bge/database';
 import { i18nValidationMessage } from '@bge/i18n';
 import { applyDecorators } from '@nestjs/common';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsPositive, IsString, ValidateIf } from 'class-validator';
 
-const GAME_VISIBILITIES = [Visibility.Public, Visibility.Private] as const;
+const GAME_REACHES = [Reach.Public, Reach.Private] as const;
 
 /**
  * The longest new or changed description a game may be sent with. The
@@ -17,10 +17,10 @@ const GAME_VISIBILITIES = [Visibility.Public, Visibility.Private] as const;
  * unchanged isn't refused.
  */
 export const GAME_DESCRIPTION_MAX_LENGTH = 20_000;
-export type GameVisibility = (typeof GAME_VISIBILITIES)[number];
+export type GameReach = (typeof GAME_REACHES)[number];
 
 /**
- * A game's visibility: Public or Private only. The other tiers name audiences
+ * A game's reach: Public or Private only. The other tiers name audiences
  * no game read rule serves yet, so a game saved with one would be its
  * creator's alone while claiming otherwise; they arrive with #495's reach
  * rules.
@@ -31,15 +31,15 @@ export type GameVisibility = (typeof GAME_VISIBILITIES)[number];
  * `UpdateGameDto`, which declares the field itself because `PartialType` would
  * add `IsOptional` back.
  */
-export function GameVisibilityProperty(): PropertyDecorator {
+export function GameReachProperty(): PropertyDecorator {
   return applyDecorators(
     ApiPropertyOptional({
-      enum: GAME_VISIBILITIES,
+      enum: GAME_REACHES,
       description: 'Public games are visible to everyone; private games only to their creator',
     }),
     ValidateIf((_, value) => value !== undefined),
     IsString({ message: i18nValidationMessage('validation.isString') }),
-    IsIn(GAME_VISIBILITIES, { message: i18nValidationMessage('validation.isIn') }),
+    IsIn(GAME_REACHES, { message: i18nValidationMessage('validation.isIn') }),
   );
 }
 
@@ -131,6 +131,6 @@ export class CreateGameDto {
   @IsPositive({ message: i18nValidationMessage('validation.isPositive') })
   complexity?: number;
 
-  @GameVisibilityProperty()
-  visibility?: GameVisibility;
+  @GameReachProperty()
+  reach?: GameReach;
 }

@@ -1,4 +1,4 @@
-import { FriendshipStatus, Visibility } from '@bge/database';
+import { FriendshipStatus, Reach } from '@bge/database';
 import { befriend, createActors, type Actors, type AuthenticatedActor, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -44,10 +44,10 @@ describe('household invite gating', () => {
   const readPolicy = async () =>
     (await db.client.systemSetting.findUniqueOrThrow({ where: { singleton: true } })).householdInviteePolicy;
 
-  const setPolicy = (householdInviteePolicy: Visibility) =>
+  const setPolicy = (householdInviteePolicy: Reach) =>
     db.client.systemSetting.update({ where: { singleton: true }, data: { householdInviteePolicy } });
 
-  let originalPolicy: Visibility;
+  let originalPolicy: Reach;
 
   beforeEach(async () => {
     originalPolicy = await readPolicy();
@@ -88,7 +88,7 @@ describe('household invite gating', () => {
     });
 
   /** No route writes a preference yet (#725), so it is written here. */
-  const prefer = (actor: SessionActor, allowHouseholdInvitesFrom: Visibility) =>
+  const prefer = (actor: SessionActor, allowHouseholdInvitesFrom: Reach) =>
     db.client.userPreferences.upsert({
       where: { userId: actor.user.id },
       create: { userId: actor.user.id, allowHouseholdInvitesFrom },
@@ -101,7 +101,7 @@ describe('household invite gating', () => {
       const { household } = await actors.householdWithMembers({ owner });
       await block(blocker, owner);
       await block(owner, blocked);
-      await prefer(closed, Visibility.Private);
+      await prefer(closed, Reach.Private);
 
       const messages = [
         await refusal(owner, household.id, { inviteeId: blocker.user.id }),
@@ -156,7 +156,7 @@ describe('household invite gating', () => {
       const [owner, friend, stranger] = await Promise.all(Array.from({ length: 3 }, () => actors.user()));
       const { household } = await actors.householdWithMembers({ owner });
       await befriend(db.client, owner, friend);
-      await setPolicy(Visibility.Friends);
+      await setPolicy(Reach.Friends);
 
       await createdInvite(owner, household.id, { inviteeId: friend.user.id });
 
@@ -176,7 +176,7 @@ describe('household invite gating', () => {
     it('under Public, lets in a non-friend by id and by address', async () => {
       const [owner, stranger] = await Promise.all([actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
-      await setPolicy(Visibility.Public);
+      await setPolicy(Reach.Public);
 
       await createdInvite(owner, household.id, { inviteeId: stranger.user.id });
       const byAddress = await createdInvite(owner, household.id, { inviteeEmail: stranger.user.email });
@@ -193,10 +193,10 @@ describe('household invite gating', () => {
       const { household } = await actors.householdWithMembers({ owner });
       await befriend(db.client, owner, friend);
       await befriend(db.client, owner, closedFriend);
-      await prefer(friendsOnly, Visibility.Friends);
-      await prefer(friend, Visibility.Friends);
-      await prefer(closedFriend, Visibility.Private);
-      await setPolicy(Visibility.Public);
+      await prefer(friendsOnly, Reach.Friends);
+      await prefer(friend, Reach.Friends);
+      await prefer(closedFriend, Reach.Private);
+      await setPolicy(Reach.Public);
 
       await createdInvite(owner, household.id, { inviteeId: friend.user.id });
       expect(await refusal(owner, household.id, { inviteeId: friendsOnly.user.id })).toBe(REFUSED);
@@ -216,8 +216,8 @@ describe('household invite gating', () => {
     it('does not widen the server’s policy when looser, which refuses in its own words', async () => {
       const [owner, stranger] = await Promise.all([actors.user(), actors.user()]);
       const { household } = await actors.householdWithMembers({ owner });
-      await prefer(stranger, Visibility.Public);
-      await setPolicy(Visibility.Friends);
+      await prefer(stranger, Reach.Public);
+      await setPolicy(Reach.Friends);
 
       expect(await refusal(owner, household.id, { inviteeId: stranger.user.id })).toBe(FRIENDS_ONLY);
     });

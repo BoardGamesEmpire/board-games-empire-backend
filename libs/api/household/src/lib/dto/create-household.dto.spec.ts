@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { HOUSEHOLD_MAX_CLIENT_REQUEST_ID_LENGTH } from '../constants/household.constants';
@@ -27,7 +27,7 @@ describe('CreateHouseholdDto', () => {
   it('accepts a fully populated payload', async () => {
     const payload: PlainPayload = {
       ...VALID_PAYLOAD,
-      visibility: Visibility.Friends,
+      reach: Reach.Friends,
       description: 'Board game night crew',
       image: 'https://example.test/avatar.png',
       language: 'pt-BR',

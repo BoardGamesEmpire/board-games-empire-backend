@@ -1,4 +1,4 @@
-import { ContentFormat, GameSource, Prisma, Visibility } from '@bge/database';
+import { ContentFormat, GameSource, Prisma, Reach } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import type { GameData } from '@boardgamesempire/proto-gateway';
@@ -251,14 +251,14 @@ describe('GameUpsertService', () => {
       expect(db.game.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
-            visibility: Visibility.Public,
+            reach: Reach.Public,
             createdBy: { connect: { id: SERVICE_ACCOUNT_ID } },
           }),
         }),
       );
     });
 
-    it('leaves ownership and visibility alone on re-import', async () => {
+    it('leaves ownership and reach alone on re-import', async () => {
       stubExistingGame('game-existing');
       stubPlatformGameMap(['platform-tabletop', 'pg-1']);
 
@@ -267,7 +267,7 @@ describe('GameUpsertService', () => {
       expect(serviceAccount.resolveOrEnsure).not.toHaveBeenCalled();
       const [{ data }] = db.game.update.mock.calls[0];
       expect(data).not.toHaveProperty('createdBy');
-      expect(data).not.toHaveProperty('visibility');
+      expect(data).not.toHaveProperty('reach');
     });
 
     it('updates an existing Game record on re-import', async () => {

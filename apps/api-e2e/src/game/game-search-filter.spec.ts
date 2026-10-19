@@ -1,4 +1,4 @@
-import { ContentType, PlatformType, Visibility } from '@bge/database';
+import { ContentType, PlatformType, Reach } from '@bge/database';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
@@ -65,7 +65,7 @@ describe('game search filter', () => {
 
   const arrangeGame = async (title: string, contentType: ContentType, platformIds: string[], createdById: string) => {
     const game = await db.client.game.create({
-      data: { title, contentType, visibility: Visibility.Public, createdById },
+      data: { title, contentType, reach: Reach.Public, createdById },
       select: { id: true },
     });
 

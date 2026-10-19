@@ -1,4 +1,4 @@
-import { Visibility } from '@bge/database';
+import { Reach } from '@bge/database';
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
 import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
@@ -69,8 +69,8 @@ describe('game search over WebSocket', () => {
     return socket;
   };
 
-  const arrangeGame = (createdById: string, visibility: Visibility, title: string) =>
-    db.client.game.create({ data: { title, visibility, createdById }, select: { id: true } });
+  const arrangeGame = (createdById: string, reach: Reach, title: string) =>
+    db.client.game.create({ data: { title, reach, createdById }, select: { id: true } });
 
   const localSearchFor = (query: string) => ({
     correlationId: randomUUID(),
@@ -153,7 +153,7 @@ describe('game search over WebSocket', () => {
   it('answers a search sent before its connection is accepted', async () => {
     const user = await actors.user();
     const token = randomUUID().slice(0, 8);
-    const game = await arrangeGame(user.user.id, Visibility.Public, `WS early ${token}`);
+    const game = await arrangeGame(user.user.id, Reach.Public, `WS early ${token}`);
 
     const socket = socketFor(user);
     const frame = localSearchFor(token);
@@ -172,8 +172,8 @@ describe('game search over WebSocket', () => {
     const other = await actors.user();
 
     const token = randomUUID().slice(0, 8);
-    const privateGame = await arrangeGame(creator.user.id, Visibility.Private, `WS search ${token} private`);
-    const publicGame = await arrangeGame(creator.user.id, Visibility.Public, `WS search ${token} public`);
+    const privateGame = await arrangeGame(creator.user.id, Reach.Private, `WS search ${token} private`);
+    const publicGame = await arrangeGame(creator.user.id, Reach.Public, `WS search ${token} public`);
 
     const [mine, theirs] = await Promise.all([connectedAs(creator), connectedAs(other)]);
 
@@ -188,8 +188,8 @@ describe('game search over WebSocket', () => {
     const admin = await actors.admin();
 
     const token = randomUUID().slice(0, 8);
-    const privateGame = await arrangeGame(creator.user.id, Visibility.Private, `WS staff ${token} private`);
-    const publicGame = await arrangeGame(creator.user.id, Visibility.Public, `WS staff ${token} public`);
+    const privateGame = await arrangeGame(creator.user.id, Reach.Private, `WS staff ${token} private`);
+    const publicGame = await arrangeGame(creator.user.id, Reach.Public, `WS staff ${token} public`);
 
     // The admin reads the private game by id, so the search leaving it out is
     // the search's scope (#513), not a missing grant.

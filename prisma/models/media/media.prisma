@@ -1,5 +1,5 @@
 /// Presentation layer for a stored object: 1:1 with MediaObject, attachable to
-/// many subjects via the typed join tables below. Ownership, visibility, and
+/// many subjects via the typed join tables below. Ownership, reach, and
 /// byte metadata live on MediaObject.
 model Media {
   id String @id @default(cuid(2))
