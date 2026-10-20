@@ -20,7 +20,7 @@ Work closes through PRs. The PR body carries one `Closes #<n>` line per issue th
 
 ## Other BoardGamesEmpire repos
 
-The web client's issues live in `BoardGamesEmpire/board-games-empire-client`. Reference them by full name (`BoardGamesEmpire/board-games-empire-client#<n>`); a bare `#<n>` resolves to this repo. Native `blocked_by` dependencies link across the two repos.
+The web client's issues live in `BoardGamesEmpire/board-games-empire-client`. Reference them by full name (`BoardGamesEmpire/board-games-empire-client#<n>`); a bare `#<n>` resolves to this repo. To read one, add `--repo BoardGamesEmpire/board-games-empire-client` to the **Read an issue** command, or pass the issue URL; `gh` rejects the `owner/repo#<n>` form. Native `blocked_by` dependencies link across the two repos.
 
 ## Pull requests as a triage surface
 

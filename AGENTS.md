@@ -60,7 +60,8 @@ GitHub epics carry the current state.
 
 - **Vocabulary**: name domain concepts with the terms in `GLOSSARY.md`, in
   code, tests, issues, docs and commit messages. Grep it for the noun you need;
-  each entry's `_Avoid_:` line lists the synonyms to leave out.
+  an entry's `_Avoid_:` line, where it has one, lists the synonyms to leave
+  out.
 - **Commands**: run Nx as `npm run nx <command>`, or a `package.json` script
   (`npm run typecheck`, `npm test`). The repo pins an Nx major that `npx nx` can
   bypass.
