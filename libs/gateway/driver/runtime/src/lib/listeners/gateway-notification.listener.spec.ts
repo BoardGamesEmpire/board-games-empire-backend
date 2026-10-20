@@ -1,8 +1,12 @@
-import { NotificationType } from '@bge/database';
+import { DataGatewayCapability, NotificationType } from '@bge/database';
 import { NotificationsService } from '@bge/notifications-service';
 import { createTestingModuleWithDb, type MockDatabaseService } from '@bge/testing';
 import { Logger } from '@nestjs/common';
-import { GatewayDisabledEvent, type GatewayAutoDisableFailure } from '../events/gateway-registry.events';
+import {
+  GatewayCapabilitiesChangedEvent,
+  GatewayDisabledEvent,
+  type GatewayAutoDisableFailure,
+} from '../events/gateway-registry.events';
 import { GatewayNotificationListener } from './gateway-notification.listener';
 
 const failure: GatewayAutoDisableFailure = {
@@ -21,6 +25,33 @@ const disabledEvent = (lastError = failure.lastError) =>
     new Date(),
   );
 
+const { Search, Fetch, FetchExpansions, ListLanguages } = DataGatewayCapability;
+
+const changedEvent = (before: DataGatewayCapability[], after: DataGatewayCapability[]) =>
+  new GatewayCapabilitiesChangedEvent(
+    { id: 'bgg', capabilities: before },
+    { id: 'bgg', capabilities: after },
+    new Date(),
+  );
+
+/**
+ * The repeat check for a loss of `lost`: which server admins already hold an
+ * unread notification for the DataGateway naming every one of them, among
+ * any others (#763).
+ */
+const repeatCheck = (lost: DataGatewayCapability[]) => ({
+  where: {
+    userId: { in: ['admin-1', 'admin-2'] },
+    read: false,
+    type: NotificationType.DataGatewayCapabilitiesLost,
+    AND: [
+      { payload: { path: ['gatewayId'], equals: 'bgg' } },
+      { payload: { path: ['lostCapabilities'], array_contains: lost } },
+    ],
+  },
+  select: { userId: true },
+});
+
 describe('GatewayNotificationListener', () => {
   let listener: GatewayNotificationListener;
   let db: MockDatabaseService;
@@ -38,6 +69,7 @@ describe('GatewayNotificationListener', () => {
 
     db.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }] as never);
     db.dataGateway.findFirst.mockResolvedValue({ name: 'BoardGameGeek', disabledCapabilities: [] } as never);
+    db.notification.findMany.mockResolvedValue([]);
     jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
   });
 
@@ -140,6 +172,126 @@ describe('GatewayNotificationListener', () => {
       await expect(listener.onGatewayDisabled(disabledEvent())).resolves.toBeUndefined();
 
       expect(error).toHaveBeenCalled();
+    });
+  });
+
+  describe('onCapabilitiesChanged', () => {
+    it('tells every server admin which capabilities a DataGateway lost at an interview (#763)', async () => {
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch, FetchExpansions], [Fetch]));
+
+      const payload = { gatewayId: 'bgg', gatewayName: 'BoardGameGeek', lostCapabilities: [Search, FetchExpansions] };
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        { userId: 'admin-1', type: NotificationType.DataGatewayCapabilitiesLost, payload },
+        { userId: 'admin-2', type: NotificationType.DataGatewayCapabilitiesLost, payload },
+      ]);
+    });
+
+    it('tells no one about a gained capability or a first interview, and reads nothing (#763, #709)', async () => {
+      await listener.onCapabilitiesChanged(changedEvent([], [Search]));
+      await listener.onCapabilitiesChanged(changedEvent([Fetch], [Fetch, Search]));
+
+      expect(db.dataGateway.findFirst).not.toHaveBeenCalled();
+      expect(db.user.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves out a capability a server admin switched off (#763, #715)', async () => {
+      db.dataGateway.findFirst.mockResolvedValue({ name: 'BoardGameGeek', disabledCapabilities: [Search] } as never);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, FetchExpansions], []));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ payload: expect.objectContaining({ lostCapabilities: [FetchExpansions] }) }),
+        expect.objectContaining({ payload: expect.objectContaining({ lostCapabilities: [FetchExpansions] }) }),
+      ]);
+    });
+
+    it('tells no one when only switched-off capabilities are gone, and runs no repeat check (#763, #715)', async () => {
+      db.dataGateway.findFirst.mockResolvedValue({ name: 'BoardGameGeek', disabledCapabilities: [Search] } as never);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]));
+
+      expect(db.notification.findMany).not.toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('skips a repeat for every server admin whose unread notification already names the capabilities lost now (#763)', async () => {
+      db.notification.findMany.mockResolvedValue([{ userId: 'admin-1' }, { userId: 'admin-2' }] as never);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch, FetchExpansions], [Fetch]));
+
+      expect(db.notification.findMany).toHaveBeenCalledWith(repeatCheck([Search, FetchExpansions]));
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('skips a server admin whose unread notification names the capabilities lost now among others, as after a switch-off (#763)', async () => {
+      db.dataGateway.findFirst.mockResolvedValue({ name: 'BoardGameGeek', disabledCapabilities: [Search] } as never);
+      db.notification.findMany.mockResolvedValue([{ userId: 'admin-1' }] as never);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, FetchExpansions], []));
+
+      expect(db.notification.findMany).toHaveBeenCalledWith(repeatCheck([FetchExpansions]));
+      expect(notifications.createMany).toHaveBeenCalledWith([expect.objectContaining({ userId: 'admin-2' })]);
+    });
+
+    it("tells a server admin who read theirs, though another server admin's copy is still unread (#763)", async () => {
+      db.notification.findMany.mockResolvedValue([{ userId: 'admin-2' }] as never);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        {
+          userId: 'admin-1',
+          type: NotificationType.DataGatewayCapabilitiesLost,
+          payload: { gatewayId: 'bgg', gatewayName: 'BoardGameGeek', lostCapabilities: [Search] },
+        },
+      ]);
+    });
+
+    it('lists the lost capabilities in the stored order, however the interview lists what remains (#763)', async () => {
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch, FetchExpansions], [ListLanguages, Fetch]));
+
+      expect(notifications.createMany).toHaveBeenCalledWith([
+        expect.objectContaining({ payload: expect.objectContaining({ lostCapabilities: [Search, FetchExpansions] }) }),
+        expect.objectContaining({ payload: expect.objectContaining({ lostCapabilities: [Search, FetchExpansions] }) }),
+      ]);
+    });
+
+    it('tells the server admins again once the earlier notifications were read (#763)', async () => {
+      db.notification.findMany.mockResolvedValue([]);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]));
+
+      expect(db.notification.findMany).toHaveBeenCalledWith(repeatCheck([Search]));
+      expect(notifications.createMany).toHaveBeenCalledTimes(1);
+    });
+
+    it('tells no one about a DataGateway deleted before the handler ran (#763)', async () => {
+      db.dataGateway.findFirst.mockResolvedValue(null);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]));
+
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('warns and sends nothing when the server has no server admins yet (#763)', async () => {
+      db.user.findMany.mockResolvedValue([]);
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]));
+
+      expect(warn).toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
+    });
+
+    it('logs and resolves when the repeat check fails (#763)', async () => {
+      db.notification.findMany.mockRejectedValue(new Error('db down'));
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      await expect(listener.onCapabilitiesChanged(changedEvent([Search, Fetch], [Fetch]))).resolves.toBeUndefined();
+
+      expect(error).toHaveBeenCalled();
+      expect(notifications.createMany).not.toHaveBeenCalled();
     });
   });
 });

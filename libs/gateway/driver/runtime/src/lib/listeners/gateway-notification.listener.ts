@@ -2,7 +2,7 @@ import { DatabaseService, NotificationType, type DataGateway } from '@bge/databa
 import { findServerAdminIds, NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { GatewayDisabledEvent } from '../events/gateway-registry.events';
+import { GatewayCapabilitiesChangedEvent, GatewayDisabledEvent } from '../events/gateway-registry.events';
 
 /** What a notification needs from the DataGateway's row. */
 type LiveGateway = Pick<DataGateway, 'name' | 'disabledCapabilities'>;
@@ -41,7 +41,8 @@ function storableError(text: string): string {
 
 /**
  * Tells the server admins about their DataGateways (#763): when repeated
- * failures auto-disable one.
+ * failures auto-disable one, and when an interview finds capabilities gone
+ * that the server was routing.
  *
  * Only the coordinator and the gateway worker host this lib, and only the
  * process whose conditional write lands emits, so each change is told once.
@@ -102,6 +103,91 @@ export class GatewayNotificationListener {
     } catch (err) {
       this.logger.error(
         `Failed to tell the server admins that DataGateway ${gatewayId} was auto-disabled`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
+  }
+
+  /**
+   * Only a capability that's gone notifies. One that's gained is routed at
+   * once and needs nothing from a server admin (#709), so a first interview,
+   * whose before is empty, never notifies either. A capability a server admin
+   * switched off (#715) isn't routed whether it's declared or not, so it's
+   * left out, and nothing is sent when only those are gone.
+   *
+   * The repeat check reads the database, so it holds across processes, and
+   * it's per server admin: one whose unread notification for the DataGateway
+   * already names every capability lost now, among any others, isn't told
+   * again, and one who has read theirs is, whoever else hasn't. A loss that
+   * names a capability no unread notification does is told. The check is a
+   * read before the write, not a lock: two handlers overlapping on one
+   * DataGateway could each send a copy, which takes the same capability
+   * coming back and going again within one handler's few queries.
+   */
+  @OnEvent(GatewayCapabilitiesChangedEvent.eventName, { async: true })
+  async onCapabilitiesChanged(event: GatewayCapabilitiesChangedEvent): Promise<void> {
+    const gatewayId = event.after.id;
+    const remaining = event.after.capabilities;
+    const gone = event.before.capabilities.filter((capability) => !remaining.includes(capability));
+
+    if (gone.length === 0) {
+      return;
+    }
+
+    try {
+      const gateway = await this.liveGateway(gatewayId);
+
+      if (!gateway) {
+        return;
+      }
+
+      const lost = gone.filter((capability) => !gateway.disabledCapabilities.includes(capability));
+
+      if (lost.length === 0) {
+        return;
+      }
+
+      const adminIds = await findServerAdminIds(this.db);
+
+      if (adminIds.length === 0) {
+        this.logger.warn(`No server admins to tell that DataGateway ${gatewayId} lost [${lost.join(', ')}]`);
+        return;
+      }
+
+      // Scoped to the server admins' ids so the query enters through the
+      // leading column of the (userId, read, createdAt) index instead of
+      // scanning the whole notifications table for the JSON payload match.
+      const pending = await this.db.notification.findMany({
+        where: {
+          userId: { in: adminIds },
+          read: false,
+          type: NotificationType.DataGatewayCapabilitiesLost,
+          AND: [
+            { payload: { path: ['gatewayId'], equals: gatewayId } },
+            { payload: { path: ['lostCapabilities'], array_contains: lost } },
+          ],
+        },
+        select: { userId: true },
+      });
+      const alreadyTold = new Set(pending.map((notification) => notification.userId));
+      const toTell = adminIds.filter((userId) => !alreadyTold.has(userId));
+
+      if (toTell.length === 0) {
+        return;
+      }
+
+      await this.notifications.createMany(
+        toTell.map((userId) => ({
+          userId,
+          type: NotificationType.DataGatewayCapabilitiesLost,
+          payload: { gatewayId, gatewayName: gateway.name, lostCapabilities: lost },
+        })),
+      );
+
+      this.logger.log(`Told ${toTell.length} server admin(s) that DataGateway ${gatewayId} lost [${lost.join(', ')}]`);
+    } catch (err) {
+      this.logger.error(
+        `Failed to tell the server admins that DataGateway ${gatewayId} lost capabilities`,
         err instanceof Error ? err.stack : String(err),
       );
     }
