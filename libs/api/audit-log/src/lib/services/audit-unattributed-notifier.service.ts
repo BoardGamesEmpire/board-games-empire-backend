@@ -1,6 +1,6 @@
 import type { EventSource } from '@bge/actor-context';
-import { DatabaseService, NotificationType, SystemRole } from '@bge/database';
-import { NotificationsService } from '@bge/notifications-service';
+import { DatabaseService, NotificationType } from '@bge/database';
+import { findServerAdminIds, NotificationsService } from '@bge/notifications-service';
 import { Injectable, Logger } from '@nestjs/common';
 
 /**
@@ -32,13 +32,10 @@ export class AuditUnattributedNotifierService {
 
   async notify(eventName: string, subject: string, source: EventSource | null): Promise<void> {
     try {
-      const admins = await this.db.user.findMany({
-        where: { roles: { some: { role: { name: { in: [SystemRole.Owner, SystemRole.Admin] } } } } },
-        select: { id: true },
-      });
+      const adminIds = await findServerAdminIds(this.db);
 
-      if (admins.length === 0) {
-        this.logger.warn(`No admin users to notify about unattributed audit event "${eventName}"`);
+      if (adminIds.length === 0) {
+        this.logger.warn(`No server admins to notify about unattributed audit event "${eventName}"`);
         return;
       }
 
@@ -47,7 +44,7 @@ export class AuditUnattributedNotifierService {
       // whole notifications table for the JSON payload match.
       const alreadyPending = await this.db.notification.findFirst({
         where: {
-          userId: { in: admins.map((admin) => admin.id) },
+          userId: { in: adminIds },
           read: false,
           type: NotificationType.AuditUnattributedEvent,
           payload: { path: ['eventName'], equals: eventName },
@@ -60,15 +57,15 @@ export class AuditUnattributedNotifierService {
       }
 
       await this.notifications.createMany(
-        admins.map((admin) => ({
-          userId: admin.id,
+        adminIds.map((userId) => ({
+          userId,
           type: NotificationType.AuditUnattributedEvent,
           payload: { eventName, subject, source },
         })),
       );
 
       this.logger.warn(
-        `Auditable event "${eventName}" (subject ${subject}) had no CLS actor scope; notified ${admins.length} admin(s)`,
+        `Auditable event "${eventName}" (subject ${subject}) had no CLS actor scope; notified ${adminIds.length} server admin(s)`,
       );
     } catch (err) {
       this.logger.error(

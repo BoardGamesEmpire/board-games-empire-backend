@@ -95,7 +95,7 @@ describe('AuditUnattributedNotifierService', () => {
     expect(notifications.createMany).not.toHaveBeenCalled();
   });
 
-  it('warns and skips when no admin users exist', async () => {
+  it('warns and skips when there are no server admins', async () => {
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     db.user.findMany.mockResolvedValue([] as never);
 
@@ -103,7 +103,16 @@ describe('AuditUnattributedNotifierService', () => {
 
     expect(db.notification.findFirst).not.toHaveBeenCalled();
     expect(notifications.createMany).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('No admin users'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('No server admins'));
+    warnSpy.mockRestore();
+  });
+
+  it('logs how many server admins it notified', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await service.notify('sample.created', 'Sample', null);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('notified 2 server admin(s)'));
     warnSpy.mockRestore();
   });
 
