@@ -780,7 +780,9 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       this.failures.delete(gatewayId);
 
       if (result.count === 0) {
-        this.logger.warn(`Gateway ${gatewayId} was already disabled by another process; skipping notification`);
+        this.logger.warn(
+          `DataGateway ${gatewayId} was already off (another process auto-disabled it, or a server admin switched it off); emitting nothing.`,
+        );
         return;
       }
 
@@ -811,7 +813,7 @@ export class GatewayRegistryService implements OnModuleInit, OnModuleDestroy, On
       );
 
       this.logger.error(
-        `Gateway ${gatewayId} auto-disabled after ${track.consecutiveFailures} consecutive failures (reason=${reason}). Admin notification emitted.`,
+        `DataGateway ${gatewayId} auto-disabled after ${track.consecutiveFailures} consecutive failures (reason=${reason}).`,
       );
     });
   }
