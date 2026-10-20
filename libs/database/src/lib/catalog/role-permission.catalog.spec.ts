@@ -4,6 +4,18 @@ import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
 import { ROLE_CATALOG, ROLE_SCOPE } from './role.catalog';
 
+/**
+ * "An accepted friend of the acting user", as a friends rule binds it, written
+ * out here rather than taken from the helper the catalog builds it with, so a
+ * change to that helper fails this file.
+ */
+const ACCEPTED_FRIEND_OF_ACTING_USER = {
+  OR: [
+    { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
+    { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
+  ],
+};
+
 // Importing the catalog modules IS the positive integrity case: each runs its
 // assertions at module scope, so a shipped catalog that violated one would fail
 // this file at import. The negative cases live in catalog-integrity.spec.ts.
@@ -278,15 +290,20 @@ describe('the shipped catalogs', () => {
     // that is not `Public` is its owner's alone, in search too (#495). Pinned
     // exactly, as the game reads are: a lost clause hands every profile to
     // every user.
-    it('let User read its own profile and everyone’s Public ones, and let no guest read them', () => {
+    it('let User read its own profile, a friend’s that reaches friends and everyone’s Public ones, and let no anonymous user read them', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
       expect(conditionsOf('read:user:profile:own')).toStrictEqual({ userId: '{{ user.id }}' });
+      expect(conditionsOf('read:user:profile:friends')).toStrictEqual({
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        user: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
+      });
       expect(conditionsOf('read:user:profile:public')).toStrictEqual({ reach: 'Public' });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
-        expect.arrayContaining(['read:user:profile:own', 'read:user:profile:public']),
+        expect.arrayContaining(['read:user:profile:own', 'read:user:profile:friends', 'read:user:profile:public']),
       );
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:profile:public');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:profile:friends');
     });
 
     // The ladder reads upwards: a reach wider than `Friends` still admits a
@@ -303,6 +320,7 @@ describe('the shipped catalogs', () => {
       ['read:event_policy:friends', (reach: unknown) => ({ event: { is: { reach } } })],
       ['read:household_member:friends', (reach: unknown) => ({ household: { is: { reach } } })],
       ['read:game_collection:friends', (reach: unknown) => ({ reach })],
+      ['read:user:profile:friends', (reach: unknown) => ({ reach })],
     ])('let a friend read through %s at every rung from Friends up', (slug, at) => {
       const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
 

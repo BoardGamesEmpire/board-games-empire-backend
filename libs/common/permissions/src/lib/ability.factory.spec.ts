@@ -874,6 +874,31 @@ describe('AbilityFactory', () => {
     });
   });
 
+  // No route reads a profile yet (#819), so this rendering is the proof that a
+  // friend reads a profile whose reach admits friends. User search composes it.
+  describe('read:user:profile:friends — relation-scoped rendering', () => {
+    it("renders the acting user id into both friendship directions of the profile's owner", () => {
+      const user = makeUser({
+        id: 'user-42',
+        roles: [makeRole('User', [catalogPermission('read:user:profile:friends')])],
+      });
+
+      const ability = factory.createForUser(user);
+
+      expect(ability.rules.at(-1)?.conditions).toEqual({
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        user: {
+          is: {
+            OR: [
+              { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+              { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+            ],
+          },
+        },
+      });
+    });
+  });
+
   describe('scoped event grants (#432, #436)', () => {
     // Real catalog entries again. An event role renders through the event
     // pass and binds on `{{ eventId }}`; a household role renders through the

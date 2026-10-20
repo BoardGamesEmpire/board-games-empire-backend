@@ -1,5 +1,5 @@
 import { Reach, ResourceType } from '@bge/database';
-import { createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
@@ -14,8 +14,9 @@ import { userSearchPage } from './user-wire';
  * whose username, first name or display name matches the term, the caller
  * left out. The caller's `User` and `UserProfile` ceilings clip it. Every
  * user's are `read:user:searchable`, which repeats the ban and opt-in clauses,
- * and the profile reads, their own and every `Public` one, so a profile whose
- * reach is narrower is not found (#495). An API key's scope narrows it.
+ * and the profile reads: their own, a friend's that reaches friends, and every
+ * `Public` one. So a profile whose reach shuts the acting user out is not
+ * found (#495). An API key's scope narrows it.
  *
  * The other users are arranged by the test itself: the database is reset
  * before each one, so no user but those below exists to be matched.
@@ -87,6 +88,49 @@ describe('user search', () => {
 
     expect(idsOf(page.users)).not.toContain(unreachable.user.id);
     expect(page.total).toBe(2);
+  });
+
+  describe("a friend's profile", () => {
+    /** An owner whose profile reaches friends, a friend of theirs, and a stranger to them. */
+    const arrangeFriends = async () => {
+      const term = `srch${randomUUID().replaceAll('-', '').slice(0, 8)}`;
+      const [friend, owner, stranger] = await Promise.all([
+        actors.user({ username: `${term}-friend` }),
+        actors.user({ username: `${term}-owner` }),
+        actors.user({ username: `${term}-stranger` }),
+      ]);
+      await db.client.userProfile.update({ where: { userId: owner.user.id }, data: { reach: Reach.Friends } });
+      await befriend(db.client, friend, owner);
+
+      return { term, friend, owner, stranger };
+    };
+
+    it("finds a friend's Friends profile, and leaves it out for a stranger", async () => {
+      const { term, friend, owner, stranger } = await arrangeFriends();
+
+      const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
+      expect(idsOf(asFriend.users)).toContain(owner.user.id);
+
+      const asStranger = userSearchPage(
+        await search(stranger, term).expect(200),
+        'GET /api/users/search as a stranger',
+      );
+      expect(idsOf(asStranger.users)).not.toContain(owner.user.id);
+      // Control: the stranger's search works, and finds the friend.
+      expect(idsOf(asStranger.users)).toContain(friend.user.id);
+    });
+
+    // `isSearchable` decides whether a readable profile is offered to search,
+    // for a friend as for anyone.
+    it("leaves out a friend's Friends profile that is not searchable", async () => {
+      const { term, friend, owner, stranger } = await arrangeFriends();
+      await db.client.userProfile.update({ where: { userId: owner.user.id }, data: { isSearchable: false } });
+
+      const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
+      expect(idsOf(asFriend.users)).not.toContain(owner.user.id);
+      // Control: the friend's search works, and finds the stranger.
+      expect(idsOf(asFriend.users)).toContain(stranger.user.id);
+    });
   });
 
   it('serves no column beyond the search columns and the profile name and avatar', async () => {

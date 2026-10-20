@@ -110,7 +110,11 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
     User: { 'read:user:searchable': 'fixed filter' },
   },
   UserProfile: {
-    User: { 'read:user:profile:own': 'binds user.id', 'read:user:profile:public': 'fixed filter' },
+    User: {
+      'read:user:profile:own': 'binds user.id',
+      'read:user:profile:friends': 'binds user.id',
+      'read:user:profile:public': 'fixed filter',
+    },
   },
   UserGameCustomization: {},
   Friendship: {

@@ -10,9 +10,10 @@ import { permission } from './permission-entry';
 // and evaluated live against the friendship table at query time. Typed as the
 // `User` where-clause it is spliced into (not `as const`: a readonly tuple is
 // not a `UserWhereInput[]`), so its paths are checked like any entry's — and
-// therefore module-private: that type is mutable, and the six entries below
-// hold this one object by reference, so exporting it would hand a consumer a
-// writable alias into shipped conditions the catalog presents as readonly.
+// therefore module-private: that type is mutable, and every entry below that
+// uses it holds this one object by reference, so exporting it would hand a
+// consumer a writable alias into shipped conditions the catalog presents as
+// readonly.
 const acceptedFriendOfActingUser = {
   OR: [
     { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
@@ -238,12 +239,13 @@ export const PERMISSION_CATALOG = [
   // --- App Level / User ---
   //
   // A profile has a reach, split like the Game family: your own, whatever its
-  // reach, and everyone's `Public` ones. The unconditioned read these replace
-  // served every profile to every user, whatever its owner chose (#495). User
-  // search composes this read, so a profile is found only where it can be
-  // read. Friends reach arrives with its rule (#809). The public read rates
-  // `Medium`, as `read:user:searchable` does: it is other users' personal
-  // details, such as accessibility needs, that their owners chose to show.
+  // reach, a friend's that reaches their friends, and everyone's `Public`
+  // ones. The unconditioned read these replace served every profile to every
+  // user, whatever its owner chose (#495). User search composes this read, so
+  // a profile is found only where it can be read. The friends and public reads
+  // rate `Medium`, as `read:user:searchable` does: they are other users'
+  // personal details, such as accessibility needs, that their owners chose to
+  // show.
   // TODO: consider the ability to block other users from viewing your profile, etc.
   permission({
     action: Action.read,
@@ -252,6 +254,14 @@ export const PERMISSION_CATALOG = [
     slug: 'read:user:profile:own',
     riskLevel: RiskLevel.Low,
     reason: 'View your own profile',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.UserProfile,
+    conditions: { reach: reachAdmittingFriends, user: { is: acceptedFriendOfActingUser } },
+    slug: 'read:user:profile:friends',
+    riskLevel: RiskLevel.Medium,
+    reason: "View a friend's profile that reaches their friends",
   }),
   permission({
     action: Action.read,
