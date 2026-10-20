@@ -1,5 +1,5 @@
-import { Reach, ResourceType } from '@bge/database';
-import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { FriendshipStatus, Reach, ResourceType } from '@bge/database';
+import { arrangeFriendship, befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { mintApiKey, type Caller } from '../support/api-key';
@@ -118,6 +118,43 @@ describe('user search', () => {
       expect(idsOf(asStranger.users)).not.toContain(owner.user.id);
       // Control: the stranger's search works, and finds the friend.
       expect(idsOf(asStranger.users)).toContain(friend.user.id);
+    });
+
+    // Which friendships admit a friend (#294). The owner's accepted friend
+    // finds the same profile first, so leaving it out is the friendship's
+    // state and not the profile.
+    it.each([
+      ['a pending request from the viewer', FriendshipStatus.Pending, 'viewer'],
+      ['a pending request from the owner', FriendshipStatus.Pending, 'owner'],
+      ['a block by the viewer', FriendshipStatus.Blocked, 'viewer'],
+      ['a block by the owner', FriendshipStatus.Blocked, 'owner'],
+    ] as const)('leaves a Friends profile out over %s', async (_case, status, requester) => {
+      const { term, friend, owner, stranger: viewer } = await arrangeFriends();
+      const [from, to] = requester === 'viewer' ? [viewer, owner] : [owner, viewer];
+      await arrangeFriendship(db.client, from, to, status);
+
+      const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
+      expect(idsOf(asFriend.users)).toContain(owner.user.id);
+
+      const asViewer = userSearchPage(await search(viewer, term).expect(200), 'GET /api/users/search as the viewer');
+      expect(idsOf(asViewer.users)).not.toContain(owner.user.id);
+    });
+
+    // `FriendsOfFriends` admits direct friends only until #496 defines a
+    // friend of a friend.
+    it('leaves a FriendsOfFriends profile out for a friend of a friend', async () => {
+      const { term, friend, owner, stranger: viewer } = await arrangeFriends();
+      await db.client.userProfile.update({ where: { userId: owner.user.id }, data: { reach: Reach.FriendsOfFriends } });
+      await befriend(db.client, viewer, friend);
+
+      const asFriend = userSearchPage(await search(friend, term).expect(200), 'GET /api/users/search as a friend');
+      expect(idsOf(asFriend.users)).toContain(owner.user.id);
+
+      const asViewer = userSearchPage(
+        await search(viewer, term).expect(200),
+        'GET /api/users/search as a friend of a friend',
+      );
+      expect(idsOf(asViewer.users)).not.toContain(owner.user.id);
     });
 
     // `isSearchable` decides whether a readable profile is offered to search,

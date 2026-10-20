@@ -1,6 +1,6 @@
-import { Reach, type DatabaseService } from '@bge/database';
+import { FriendshipStatus, Reach, type DatabaseService } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { arrangeFriendship, befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -168,6 +168,43 @@ describe('game authorization', () => {
       await readGame(stranger, game.id).expect(403);
       expect(await listedIds(stranger, 'a stranger')).not.toContain(game.id);
       expect(await searchedIds(stranger, token, 'a stranger')).not.toContain(game.id);
+    });
+
+    // Which friendships admit a friend (#294). An accepted friend of the same
+    // creator reads and is listed the same game first, so the refusal is the
+    // friendship's state and not the game.
+    it.each([
+      ['a pending request from the viewer', FriendshipStatus.Pending, 'viewer'],
+      ['a pending request from the creator', FriendshipStatus.Pending, 'creator'],
+      ['a block by the viewer', FriendshipStatus.Blocked, 'viewer'],
+      ['a block by the creator', FriendshipStatus.Blocked, 'creator'],
+    ] as const)('refuses a Friends game, by id and in the list, over %s', async (_case, status, requester) => {
+      const [creator, viewer, acceptedFriend] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      await befriend(db.client, acceptedFriend, creator);
+      const [from, to] = requester === 'viewer' ? [viewer, creator] : [creator, viewer];
+      await arrangeFriendship(db.client, from, to, status);
+      const game = await arrangeGame(creator.user.id, Reach.Friends);
+
+      await readGame(acceptedFriend, game.id).expect(200);
+      expect(await listedIds(acceptedFriend, 'an accepted friend')).toContain(game.id);
+
+      await readGame(viewer, game.id).expect(403);
+      expect(await listedIds(viewer, 'the viewer')).not.toContain(game.id);
+    });
+
+    // `FriendsOfFriends` admits direct friends only until #496 defines a
+    // friend of a friend.
+    it('refuses a friend of a friend a FriendsOfFriends game, by id and in the list', async () => {
+      const [creator, viewer, acceptedFriend] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+      await befriend(db.client, acceptedFriend, creator);
+      await befriend(db.client, viewer, acceptedFriend);
+      const game = await arrangeGame(creator.user.id, Reach.FriendsOfFriends);
+
+      await readGame(acceptedFriend, game.id).expect(200);
+      expect(await listedIds(acceptedFriend, 'an accepted friend')).toContain(game.id);
+
+      await readGame(viewer, game.id).expect(403);
+      expect(await listedIds(viewer, 'a friend of a friend')).not.toContain(game.id);
     });
 
     // The list names the friendship itself, so staff, who read every game,
