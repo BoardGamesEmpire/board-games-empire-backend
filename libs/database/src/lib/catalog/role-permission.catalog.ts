@@ -5,7 +5,9 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
 /**
  * Role → slug assignments. Two lists are DERIVED rather than enumerated:
  *
- * - `HouseholdAdmin` = the owner list minus `HOUSEHOLD_OWNER_ONLY`;
+ * - `HouseholdAdmin` = the owner list minus `HOUSEHOLD_OWNER_ONLY`, plus
+ *   `HOUSEHOLD_ADMIN_ONLY`: the household admin's own member, invite and
+ *   revoke permissions, which stop at the member role (#168);
  * - `EventCoHost` = the host list minus `EVENT_HOST_ONLY`.
  *
  * `Admin` used to be a third — every slug except `manage:all` — and is now
@@ -55,25 +57,33 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * `resolveActingAttendeeId` refuses a non-attendee before CASL is consulted. An
  * Admin attending as `EventSpectator` or `EventModerator` loses a vote it
  * should not have had — neither of those roles votes. `create:household_role`
- * and `delete:event` went the same way for a sharper reason: both are scoped
- * `{{ user.id }}` and both are already held by the role their own condition
- * demands — `HouseholdOwner`/`HouseholdAdmin` for the first, `EventHost` (which
- * an event's creator is seeded as) for the second — so each rendered a clause
- * identical to one the actor already had. `Admin` now carries no conditioned
- * slug at all, which is the shape a global role should have: a global role has
- * no scope coordinate, so anything it holds that binds to one is either inert
- * or a duplicate.
+ * and `delete:event` went the same way for a sharper reason: both were then
+ * scoped `{{ user.id }}` and held by the role their own condition demanded —
+ * `HouseholdOwner`/`HouseholdAdmin` for the first, `EventHost` (which an
+ * event's creator is seeded as) for the second — so each rendered a clause
+ * identical to one the actor already had. Neither is scoped that way now:
+ * `delete:event` binds to the event its host attends (#567), and
+ * `create:household_role` is gone from the catalog (#168). `Admin` now carries
+ * no conditioned slug at all, which is the shape a global role should have: a
+ * global role has no scope coordinate, so anything it holds that binds to one
+ * is either inert or a duplicate.
  *
  * Because those lists are derived, every Owner-/Host-only slug has to be
  * named in the exclusion, or it is granted to the derived role silently, with
  * no compile-time signal. `update:household_role:transfer-ownership` is the
  * gate that keeps owner transitions (both directions) out of #156's
- * change-role endpoint; an Admin holding it would defeat that separation.
+ * change-role endpoint; an Admin holding it would defeat that separation. The
+ * household owner's member, invite and revoke permissions are excluded too,
+ * because only a household owner acts on the household admin role (#168): a
+ * household admin holding those could promote another household admin, remove
+ * the rest, or revoke an invite a household owner sent with that role.
  *
  * Household roles hold the `:household` variant of every event sub-resource
  * grant, bound through the event's household; the event-bound original
  * belongs to the event roles alone, because the household pass never supplies
- * `{{ eventId }}` (#436, #432).
+ * `{{ eventId }}` (#436, #432). Household owners and admins edit and cancel the
+ * household's events, but delete neither an event nor its dates unless they
+ * host it, and then through the host's grant (#168).
  *
  * A household or event role holds nothing `User` holds. Every signed-in
  * user's ability is built in one pass that includes `User`, so a scoped role's
@@ -105,13 +115,10 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
   'create:event:household',
   'create:game_play_session:household',
   'create:household_invite',
-  'create:household_role',
   'create:play_record:household',
   'delete:event_game:household',
-  'delete:event_occurrence:household',
   'manage:quota:household_member',
   'delete:household_member:leave',
-  'delete:event',
   'read:quota:household',
   'delete:game_play_session:household',
   'delete:household',
@@ -150,8 +157,20 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
 ];
 
 const HOUSEHOLD_OWNER_ONLY: readonly PermissionSlug[] = [
+  'create:household_invite',
   'delete:household',
+  'manage:household_member',
+  'update:household_invite:revoke',
   'update:household_role:transfer-ownership',
+];
+
+// Only a household owner acts on the household admin role (#168). A household
+// admin holds these in place of the owner's member, invite and revoke
+// permissions: each stops at the member role.
+const HOUSEHOLD_ADMIN_ONLY: readonly PermissionSlug[] = [
+  'create:household_invite:as-admin',
+  'manage:household_member:as-admin',
+  'update:household_invite:revoke:as-admin',
 ];
 
 const EVENT_HOST: readonly PermissionSlug[] = [
@@ -252,9 +271,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'update:data_gateway',
     'delete:data_gateway',
 
-    // Events. Only the moderation variant: `delete:event` is scoped
-    // `createdById: '{{ user.id }}'` and an event's creator is seeded
-    // `EventHost` on it (`event.service.ts`), which carries that slug already.
+    // Events. Only the moderation variant: `delete:event` is bound to
+    // `{{ eventId }}`, which the global pass never supplies, and the host
+    // holds it through `EventHost` (#567).
     'read:event',
     'delete:event:moderate',
 
@@ -393,10 +412,14 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   ],
   [SystemRole.AnonymousUser]: ['read:game_collection:public'],
   [SystemRole.HouseholdOwner]: HOUSEHOLD_OWNER,
-  [SystemRole.HouseholdAdmin]: HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
+  [SystemRole.HouseholdAdmin]: [
+    ...HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
+    ...HOUSEHOLD_ADMIN_ONLY,
+  ],
   [SystemRole.HouseholdMember]: [
-    // Members create household events as they create household sessions;
-    // guests do not. Revisiting who holds it is #168's matrix.
+    // Members create household events as they record household plays, and
+    // host the events they create; guests do neither (#168). What each
+    // household role can do is the table in `libs/api/household/README.md`.
     'create:event:household',
     'create:game_play_session:household',
     // Members invite under the household's member invite policy (#166);
@@ -419,7 +442,8 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   ],
   [SystemRole.HouseholdGuest]: [
     // A guest reads the household's events with their dates and rules, but
-    // not who attends them. The rest of a guest's reach is #168's matrix.
+    // not who attends them, and leaves; the rest of a guest's reach comes from
+    // `User` (#168). See the table in `libs/api/household/README.md`.
     'delete:household_member:leave',
     'read:event:participant:household',
     'read:event_occurrence:household',

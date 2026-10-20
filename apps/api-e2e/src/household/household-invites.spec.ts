@@ -77,9 +77,11 @@ describe('household invites', () => {
       });
 
       const byOwner = await createdInvite(owner, household.id, { inviteeId: first.user.id, message: 'Join us' });
+      // Offering the guest role: only the owner invites with the household
+      // admin role (#168).
       const byAdmin = await createdInvite(admin, household.id, {
         inviteeId: second.user.id,
-        role: SystemRole.HouseholdAdmin,
+        role: SystemRole.HouseholdGuest,
       });
 
       const profile = await db.client.userProfile.findUnique({ where: { userId: first.user.id } });
@@ -93,7 +95,7 @@ describe('household invites', () => {
         inviter: { id: owner.user.id },
       });
       expect(byOwner).not.toHaveProperty('token');
-      expect(byAdmin.role).toMatchObject({ name: SystemRole.HouseholdAdmin });
+      expect(byAdmin.role).toMatchObject({ name: SystemRole.HouseholdGuest });
 
       const stored = await storedInvite(byOwner.id);
       expect(stored).toMatchObject({ inviteeId: first.user.id, inviteeEmail: null, householdId: household.id });

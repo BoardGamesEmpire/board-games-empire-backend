@@ -175,7 +175,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
       'read:household_member': 'binds householdId',
     },
     HouseholdAdmin: {
-      'manage:household_member': 'binds householdId, user.id',
+      'manage:household_member:as-admin': 'binds householdId, user.id',
       'read:household_member': 'binds householdId',
     },
     HouseholdMember: { 'read:household_member': 'binds householdId' },

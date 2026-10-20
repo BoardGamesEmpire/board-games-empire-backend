@@ -170,11 +170,20 @@ describe('concurrent household owner transitions', () => {
     // one happened, and branching on the transfer would assert nothing.
     expect(outcome(transfer)).toMatchObject({ status: 200 });
 
-    if (roleChange.status === 400) {
+    if (roleChange.status === 400 || roleChange.status === 403) {
       // The promotion landed first, so the role change is now aimed at an owner
       // and is refused. This is the arm the household lock exists for: without
-      // it the change would have overwritten the new owner back down.
-      expect(outcome(roleChange)).toMatchObject({ status: 400 });
+      // it the change would have overwritten the new owner back down. A
+      // household admin's grant stops at the member role (#168), so when the
+      // promotion lands before the scoped read, that read refuses it with 403;
+      // when it lands while the change waits on the lock, the owner check
+      // answers 400. Each status is held to its own refusal, so a 403 from
+      // anywhere else does not pass for the race.
+      expect(outcome(roleChange)).toMatchObject(
+        roleChange.status === 400
+          ? { status: 400, message: expect.stringMatching(/owner's role cannot be changed/i) }
+          : { status: 403, message: expect.stringMatching(/permission to update/i) },
+      );
     } else {
       // The demotion landed first; the transfer then promoted a guest.
       expect(outcome(roleChange)).toMatchObject({ status: 200 });
