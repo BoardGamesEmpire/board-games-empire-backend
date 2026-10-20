@@ -1,7 +1,8 @@
 import { AuditContextService } from '@bge/actor-context';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, PlatformType, Reach, ResourceType, ContentType as StoredContentType } from '@bge/database';
+import { Action, PlatformType, ResourceType, ContentType as StoredContentType } from '@bge/database';
+import { gameListScope } from '@bge/game';
 import type {
   WsClientData,
   WsRateLimitedPayload,
@@ -388,7 +389,7 @@ describe('GameSearchGateway', () => {
         expect(db.game.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 10, skip: 5 }));
       });
 
-      it('reads the live Public games and the frame actor’s own, clipped by what that actor may read', async () => {
+      it('reads the frame actor’s game list scope, clipped by what that actor may read', async () => {
         // Every frame runs with its actor's abilities primed, as a request
         // does over HTTP (#498), so the scope is the one `GET /games` lists
         // (#513).
@@ -402,11 +403,7 @@ describe('GameSearchGateway', () => {
           expect.objectContaining({
             where: {
               AND: [
-                {
-                  deletedAt: null,
-                  OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
-                  AND: [FRAME_READ],
-                },
+                { ...gameListScope(MOCK_ACTING_USER_ID), AND: [FRAME_READ] },
                 { title: { contains: 'Gloomhaven', mode: 'insensitive' } },
               ],
             },

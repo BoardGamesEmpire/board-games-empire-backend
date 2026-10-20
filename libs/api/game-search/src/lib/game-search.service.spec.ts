@@ -1,5 +1,6 @@
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, ContentType, PlatformType, Reach, ResourceType } from '@bge/database';
+import { Action, ContentType, PlatformType, ResourceType } from '@bge/database';
+import { gameListScope } from '@bge/game';
 import { t } from '@bge/i18n';
 import { AbilityService, ScopeComposer } from '@bge/permissions';
 import {
@@ -18,12 +19,8 @@ import { GameSearchService } from './game-search.service';
 
 const READ = { id: 'sentinel-read-condition' };
 
-/** The live Public games and the caller's own, clipped by the caller's ceiling. */
-const COMPOSED = {
-  deletedAt: null,
-  OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
-  AND: [READ],
-};
+/** The list scope of the acting user, clipped by their ceiling. */
+const COMPOSED = { ...gameListScope(MOCK_ACTING_USER_ID), AND: [READ] };
 
 const TITLE_BRASS = { title: { contains: 'brass', mode: 'insensitive' } };
 
@@ -72,13 +69,10 @@ describe('GameSearchService', () => {
    * declare the set `GET /games` lists, and the ceiling only clips it.
    */
   describe('localSearchScope', () => {
-    it('asks the composer for the live Public games and the caller’s own', () => {
+    it('asks the composer for the list scope of the acting user, as `GET /games` does', () => {
       service.localSearchScope();
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
-        deletedAt: null,
-        OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
-      });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, gameListScope(MOCK_ACTING_USER_ID));
     });
 
     it('answers with the composed clause, the ceiling clipping its scope rather than supplying it', () => {

@@ -33,9 +33,9 @@ export class GameService {
    * create between them makes `total` — and the `hasMore` derived from it —
    * describe a catalog the caller was never served.
    *
-   * The scope is {@link gameListScope}, the live Public games and the caller's
-   * own, and the ceiling only clips it (#513). For an `apiKey` actor it carries
-   * the key ∩ owner floor.
+   * The scope is {@link gameListScope}, the live Public games, the acting
+   * user's own and a friend's that reach friends, and the ceiling only clips
+   * it (#513). For an `apiKey` actor it carries the key ∩ owner floor.
    *
    * `resolveScopeSubjectId` refuses `plugin`, `system` and `external` actors:
    * half the scope is the caller's own games, which has no meaning without a
@@ -259,8 +259,8 @@ export class GameService {
       }
 
       // Only an import gives the service account a game, and imported games are
-      // public. Re-import never rewrites reach, so one made private here
-      // would stay private for good.
+      // public. Re-import never rewrites reach, so one narrowed here, to
+      // Friends or Private, would stay narrowed for good.
       const privatizes = updateGameDto.reach !== undefined && updateGameDto.reach !== Reach.Public;
       if (privatizes && existing.createdBy?.isServiceAccount === true) {
         throw new BadRequestException(t('errors.game.server_owned_stays_public', { id }));

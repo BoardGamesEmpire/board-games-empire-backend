@@ -82,10 +82,9 @@ npm run i18n:generate
 None of the three are committed. Run them once before the first build, and again any time the schema,
 the `.proto` files, or an i18n catalog changes.
 
-Two of the three — the Prisma client and the i18n types — are also produced automatically as
-task-graph dependencies, since `typecheck` and the app `build`s pull them in. **The protobuf step is
-not**: `buf-export` is outside the task graph, and the api build copies `.proto` assets from the
-directory it produces, so `npm run proto:generate` genuinely has to be run by hand.
+All three are also produced automatically as task-graph dependencies, since `typecheck` and the app
+`build`s pull them in. That includes the `.proto` export the app builds copy into their bundles
+(#313).
 
 Run all three anyway. It is what gets your editor to resolve `PrismaClient` / `I18nPath` immediately
 rather than after the first typecheck, and Nx cannot hash an untracked file, so a task that already
@@ -171,11 +170,10 @@ Requirements and knobs:
 - `.env` must exist (copy `.env.example`) — the harness passes the
   ephemeral `DATABASE_URL` and `REDIS_*`/`REDIS_WEBSOCKET_*`/`REDIS_BULLMQ_*`
   connection variables to the server process and never writes to the file.
-- Prisma client, protobuf types, and i18n types must be generated once
+- The Prisma client, protobuf types and i18n types come from generators
   (`npm run db:generate`, `npm run proto:generate`, `npm run i18n:generate`).
-  `api:build` pulls the Prisma and i18n generators in itself (#260), so it will
-  produce them if they are missing; the protobuf export step is not in the graph
-  and still has to be run by hand.
+  `api:build` runs all three itself (#260, #313), so none needs running by hand
+  first.
 - `BGE_E2E_DATABASE_URL` / `BGE_E2E_REDIS_URL` — escape hatches that skip
   container provisioning and use an existing endpoint instead. **Treated as
   disposable**: migrated, seeded, truncated (and, with
@@ -214,6 +212,7 @@ npm run lint
 
 ```bash
 npm run db:migrate:new <migration-name>   # create and run a new migration
+npm run db:migrate:check                  # fail if the migrations and the models disagree (needs SHADOW_DATABASE_URL)
 npm run db:seed                           # re-run all seeds (idempotent)
 npm run db:reset                          # drop, recreate, migrate, and seed
 npm run db:generate                       # regenerate Prisma client after schema changes

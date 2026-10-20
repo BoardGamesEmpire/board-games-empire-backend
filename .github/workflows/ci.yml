@@ -4,9 +4,14 @@ on:
   push:
     branches:
       - master
+  # Every pull request, whatever its base branch (#481). Filtered to master, a
+  # PR stacked on another feature branch got no run at all. Its `affected` set
+  # is its own changes, since nx-set-shas takes the merge-base with the PR's
+  # base branch. When GitHub retargets it to master, no new run starts, and the
+  # `main` check on its head commit stands. Adding the `edited` activity type to
+  # rerun on a retarget would backfire: a title or body edit would then cancel
+  # the PR's real run (see concurrency, below).
   pull_request:
-    branches:
-      - master
 
 permissions:
   actions: read
@@ -49,6 +54,26 @@ jobs:
       # One of the environments `@bge/env` knows, which the api's config
       # validates `NODE_ENV` against (#290).
       NODE_ENV: test
+
+    # The shadow database for the migration check below (#586): empty, thrown
+    # away with the job, and the image Compose and the e2e harness run. Its tag
+    # moves by hand with theirs (.github/renovate.json), and like theirs it comes
+    # from Docker Hub (#683). The host port is left to Docker so it can never be
+    # the `localhost:5432` that `.env`'s `DATABASE_URL` names.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: shadow
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
 
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -93,6 +118,18 @@ jobs:
       # the proto codegen straight back up. See the comment there.
       - name: Check formatting
         run: npx nx format:check --all
+
+      # The migrations and the models must agree (#586). The check replays
+      # prisma/migrations into the shadow database and compares the result with
+      # prisma/models. Exit 2 means they differ, and the output names what. A
+      # model changed with no migration: `npm run db:migrate:new <name>` writes
+      # it. A hand-written migration did something the models don't declare:
+      # declare it in the model as well. Whole-tree and uncached, like the
+      # formatting check: it is there for the change nobody thought to check.
+      - name: Check migrations match the models
+        env:
+          SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:${{ job.services.postgres.ports['5432'] }}/shadow
+        run: npm run db:migrate:check
 
       # Cached like every other step, catalog changes included (#330). The catalog
       # JSONs are inputs of `i18n-core:typecheck`, and every project that compiles

@@ -4,7 +4,7 @@ import { ReachProperty } from '@bge/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsPositive, IsString } from 'class-validator';
 
-const GAME_REACHES = [Reach.Public, Reach.Private] as const;
+const GAME_REACHES = [Reach.Public, Reach.Friends, Reach.Private] as const;
 
 /**
  * The longest new or changed description a game may be sent with. The
@@ -20,17 +20,18 @@ export const GAME_DESCRIPTION_MAX_LENGTH = 20_000;
 export type GameReach = (typeof GAME_REACHES)[number];
 
 /**
- * A game's reach: Public or Private only. The other rungs name readers no
- * game read rule serves yet, so a game saved with one would be its creator's
- * alone while claiming otherwise. `Friends` arrives with its rule (#809), and
- * `FriendsOfFriends` with #496, which defines friends of friends. Shared with
+ * A game's reach: the rungs a game read rule serves. `FriendsOfFriends` names
+ * readers no rule serves until #496 defines friends of friends, so a game
+ * saved with it would claim readers it doesn't have. Shared with
  * `UpdateGameDto`, which names no default.
  */
 export function GameReachProperty(defaultReach?: GameReach): PropertyDecorator {
   return ReachProperty({
     reaches: GAME_REACHES,
     default: defaultReach,
-    description: 'Who may read the game besides its creator. `Public`: every signed-in user. `Private`: no one.',
+    description:
+      'Who may read the game besides its creator. `Public`: every signed-in user. `Friends`: the ' +
+      "creator's friends. `Private`: no one.",
   });
 }
 

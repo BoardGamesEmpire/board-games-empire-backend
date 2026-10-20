@@ -350,9 +350,11 @@ describe('event read scope', () => {
 
     // The ladder reads upwards (#495). The event, occurrence and policy rules
     // once tested `Friends` alone, so an event widened past it hid from the
-    // host's friends. No route sets either reach until its rule lands (#809,
-    // #496), so the event is created at `Friends` and widened directly.
-    it.each([Reach.FriendsOfFriends, Reach.Public])(
+    // host's friends. No route sets `FriendsOfFriends` until #496 defines it,
+    // so the event is created at `Friends` and widened directly. A friend
+    // reading a `Public` event can't tell the friends rule from the public
+    // one, so `Public` is pinned on a stranger below.
+    it.each([Reach.FriendsOfFriends])(
       "serves a friend of the host a %s event's occurrences and policy, and still refuses a stranger",
       async (reach) => {
         const host = await actors.user();
@@ -371,10 +373,63 @@ describe('event read scope', () => {
 
         await readOccurrence(friend, eventId, occurrenceId).expect(200);
 
-        // `Public` reaches a stranger only once its rule lands (#809).
         await readEvent(stranger, eventId).expect(404);
       },
     );
+
+    it("serves any signed-in user a Public event's occurrences and policy, and none of its attendees", async () => {
+      const host = await actors.user();
+      const stranger = await actors.user();
+      // Created at `Public` through the route, so the DTO's acceptance is part
+      // of the test.
+      const { eventId, occurrenceId, guestEmail } = await arrangeEvent(host, { reach: Reach.Public });
+
+      const response = await readEvent(stranger, eventId).expect(200);
+      const read = eventDetailEnvelope(response, 'GET /api/events/:id as a stranger to a Public event');
+      expect(read.occurrences.map((occurrence) => occurrence.id)).toEqual([occurrenceId]);
+      expect(read.policy?.eventId).toBe(eventId);
+      expect(read.attendees).toEqual([]);
+      expect(JSON.stringify(response.body)).not.toContain(guestEmail);
+
+      // The occurrence routes serve the occurrence without the host's vote or
+      // the game, each of which names an attendee.
+      const page = listOccurrencesEnvelope(
+        await listOccurrences(stranger, eventId).expect(200),
+        'GET /api/events/:eventId/occurrences as a stranger to a Public event',
+      );
+      expect(page.occurrences.map(({ id, availabilityVotes, games }) => ({ id, availabilityVotes, games }))).toEqual([
+        { id: occurrenceId, availabilityVotes: [], games: [] },
+      ]);
+      const occurrence = occurrenceEnvelope(
+        await readOccurrence(stranger, eventId, occurrenceId).expect(200),
+        'GET /api/events/:eventId/occurrences/:occurrenceId as a stranger to a Public event',
+      );
+      expect(occurrence).toEqual(expect.objectContaining({ id: occurrenceId, availabilityVotes: [], games: [] }));
+
+      // No attendee read reaches a public reader, so the guard refuses the
+      // list. Control: the host is served it.
+      await request(baseUrl).get(`${EVENTS_PATH}/${eventId}/attendees`).set(host.headers).expect(200);
+      await request(baseUrl).get(`${EVENTS_PATH}/${eventId}/attendees`).set(stranger.headers).expect(403);
+    });
+
+    it('refuses an anonymous user a Public event', async () => {
+      const host = await actors.user();
+      const { eventId } = await arrangeEvent(host, { reach: Reach.Public });
+      const anonymous = await actors.anonymous();
+
+      await readEvent(host, eventId).expect(200);
+      await readEvent(anonymous, eventId).expect(403);
+    });
+
+    it('answers 404 to a stranger once a Public event is deleted', async () => {
+      const host = await actors.user();
+      const stranger = await actors.user();
+      const { eventId } = await arrangeEvent(host, { reach: Reach.Public });
+
+      await readEvent(stranger, eventId).expect(200);
+      await db.client.event.update({ where: { id: eventId }, data: { deletedAt: new Date() } });
+      await readEvent(stranger, eventId).expect(404);
+    });
 
     it("serves a household guest the household event's occurrences and policy, and none of its attendees", async () => {
       const owner = await actors.user();

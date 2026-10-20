@@ -1,0 +1,133 @@
+'use strict';
+/**
+ * Is SHADOW_DATABASE_URL safe to hand `prisma migrate diff --from-migrations`,
+ * and in which schema does the check compare (migrateDiffEnv, below)?
+ *
+ * Prisma empties the shadow database on every run, and Prisma 7.8 does so
+ * without a word when it is the main database: on a throwaway database, a diff
+ * given the main database as its shadow dropped the table already there,
+ * replayed the migrations over it and exited 0 (#586). `migrate dev` refuses
+ * that itself; `migrate diff` doesn't, so `npm run db:migrate:check` checks
+ * first.
+ *
+ * So the shadow database needs a name no main database URL can mean, whatever
+ * host or port either URL names: two host names, loopback spellings or ports
+ * can reach the same server, and no list of them is complete. Its name is free
+ * to choose, so that costs one rename. A URL naming no database is read every
+ * way the tools that use it read it. Another `schema` in the same database
+ * counts as the same: the rule is a database of its own. A URL this can't read
+ * is refused rather than guessed at.
+ */
+
+/** The variables whose database the Prisma CLI connects to (prisma.config.ts). */
+const MAIN_VARIABLES = ['DATABASE_URL', 'DATABASE_MIGRATION_URL'];
+
+/**
+ * Decodes the %XX runs that decode and keeps anything else as written, as
+ * Prisma's engine does, so a stray `%` can't throw.
+ */
+function decode(text) {
+  return text.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+}
+
+/**
+ * Every database name the URL can mean, or null when it isn't a Postgres URL
+ * this can read.
+ *
+ * Prisma's engine reads no database as `postgres`. libpq and the app's driver
+ * read no database as PGDATABASE, then as the database role's own name, and no
+ * database role as PGUSER, then as the login running them.
+ */
+function databaseNames(url, env) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') return null;
+
+  const database = decode(parsed.pathname.split('/')[1] ?? '');
+  if (database) return [database];
+
+  const databaseRole = decode(parsed.username) || env['PGUSER'] || env['USER'] || env['USERNAME'];
+  return [...new Set(['postgres', env['PGDATABASE'], databaseRole].filter(Boolean))];
+}
+
+/**
+ * Why the check can't run against this environment, or null when it can. An
+ * empty value counts as unset, as it does in prisma.config.ts.
+ */
+function shadowDatabaseProblem(env) {
+  const shadowUrl = env['SHADOW_DATABASE_URL'];
+  if (!shadowUrl) {
+    return (
+      'SHADOW_DATABASE_URL is not set. The check replays the migrations into it, ' +
+      'so set it to an empty database of its own; see .env.example.'
+    );
+  }
+
+  const shadow = databaseNames(shadowUrl, env);
+  if (shadow === null) {
+    return "SHADOW_DATABASE_URL isn't a postgresql:// URL this check can read; see .env.example.";
+  }
+
+  for (const variable of MAIN_VARIABLES) {
+    const value = env[variable];
+    if (!value) continue;
+
+    const main = databaseNames(value, env);
+    if (main === null) {
+      return (
+        `${variable} isn't a postgresql:// URL this check can read, so it can't tell whether ` +
+        'SHADOW_DATABASE_URL names the same database. Prisma empties the shadow database on every run, ' +
+        'so the check stops here.'
+      );
+    }
+
+    const same = shadow.find((name) => main.includes(name));
+    if (same) {
+      return (
+        `SHADOW_DATABASE_URL names the database ${same}, which ${variable} can mean too. ` +
+        'Prisma empties the shadow database on every run, and another host name or port can reach ' +
+        'the same server, so give it a name of its own.'
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * The environment to run `prisma migrate diff` in, so the migrations and the
+ * models are compared in one schema. Call it once shadowDatabaseProblem has
+ * passed the same environment.
+ *
+ * The migrations replay into the schema SHADOW_DATABASE_URL names, `public`
+ * when it names none, while Prisma places the models in the schema of the URL
+ * prisma.config.ts reads. `.env.example`'s DATABASE_URL names
+ * `board_games_empire`, so against CI's shadow URL every table differed by its
+ * schema alone. `migrate diff` doesn't connect to that URL, so this sets only
+ * its `schema`, to the shadow URL's. The migrations replay only into `public`
+ * until #624.
+ */
+function migrateDiffEnv(env) {
+  const schema = new URL(env['SHADOW_DATABASE_URL']).searchParams.get('schema') || 'public';
+
+  const result = { ...env };
+  for (const variable of MAIN_VARIABLES) {
+    if (!env[variable]) continue;
+
+    const url = new URL(env[variable]);
+    url.searchParams.set('schema', schema);
+    result[variable] = url.toString();
+  }
+  return result;
+}
+
+module.exports = { migrateDiffEnv, shadowDatabaseProblem };

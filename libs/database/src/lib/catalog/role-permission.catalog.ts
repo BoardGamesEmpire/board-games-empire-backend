@@ -326,6 +326,9 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   [SystemRole.User]: [
     // event
     'create:event',
+    'read:event:public',
+    'read:event_occurrence:public',
+    'read:event_policy:public',
 
     // feedback
     'create:feedback_report',
@@ -346,6 +349,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:game',
     'delete:game:own',
     'read:game',
+    'read:game:friends',
     'read:game:public',
     'read:job',
     'update:game:own',
@@ -396,6 +400,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:user_game_customization',
     'delete:user_game_customization',
     'read:user:profile:own',
+    'read:user:profile:friends',
     'read:user:profile:public',
     'read:user:searchable',
     'update:user_game_customization',

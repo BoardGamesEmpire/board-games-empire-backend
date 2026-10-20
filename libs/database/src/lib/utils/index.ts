@@ -1,5 +1,6 @@
 export * from './constraint-identity';
 export * from './deadlock';
+export * from './friendship-conditions';
 export * from './household-share-lock';
 export * from './human-user';
 export * from './permission-conditions';

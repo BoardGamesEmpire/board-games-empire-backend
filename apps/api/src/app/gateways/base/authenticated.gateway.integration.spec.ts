@@ -2,7 +2,8 @@ import { type Actor, AuditContextModule, getActorSnapshotFromCls } from '@bge/ac
 import { injectActorContextMetadata, WsActorScope } from '@bge/actor-context-transport';
 import { AuthService } from '@bge/auth';
 import { GatewayCoordinatorClientService } from '@bge/coordinator';
-import { Action, DatabaseModule, DatabaseService, Reach, ResourceType } from '@bge/database';
+import { Action, DatabaseModule, DatabaseService, ResourceType } from '@bge/database';
+import { gameListScope } from '@bge/game';
 import { GameSearchService, SearchEvents } from '@bge/game-search';
 import {
   FALLBACK_LOCALE,
@@ -89,15 +90,14 @@ function roleGraph(userId: string, canRead: boolean): UserWithRoles {
 const userActor = (userId: string): Actor => ({ kind: 'user', userId });
 
 /**
- * The scope a local search by `userId` reads within: the live Public games and
- * that user's own, clipped by the read conditions {@link roleGraph} gives them,
- * as CASL renders them for Prisma. The user is named twice, once by the scope
- * and once by the ceiling, so both halves are shown to come from the frame's
- * actor.
+ * The scope a local search by `userId` reads within: that user's
+ * {@link gameListScope}, clipped by the read conditions {@link roleGraph}
+ * gives them, as CASL renders them for Prisma. The user is named twice, once
+ * by the scope and once by the ceiling, so both halves are shown to come from
+ * the frame's actor.
  */
 const scopeOf = (userId: string) => ({
-  deletedAt: null,
-  OR: [{ reach: Reach.Public }, { createdById: userId }],
+  ...gameListScope(userId),
   AND: [{ OR: [{ createdById: userId }] }],
 });
 
