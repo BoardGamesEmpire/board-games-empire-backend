@@ -10,16 +10,14 @@
  * that itself; `migrate diff` doesn't, so `npm run db:migrate:check` checks
  * first.
  *
- * Two URLs name the same database when their host, port and database match,
- * whatever the scheme, database role, query parameters or loopback spelling.
- * Each URL is read as Prisma's engine reads it, and a URL naming no database
- * is read every way the tools that use it read it. Another `schema` on the
- * same database counts as the same: the rule is a database of its own. A
- * Postgres server reached under two different host names still gets through.
- * A URL this can't read is refused rather than guessed at.
+ * So the shadow database needs a name no main database URL can mean, whatever
+ * host or port either URL names: two host names, loopback spellings or ports
+ * can reach the same server, and no list of them is complete. Its name is free
+ * to choose, so that costs one rename. A URL naming no database is read every
+ * way the tools that use it read it. Another `schema` in the same database
+ * counts as the same: the rule is a database of its own. A URL this can't read
+ * is refused rather than guessed at.
  */
-
-const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
 /** The variables whose database the Prisma CLI connects to (prisma.config.ts). */
 const MAIN_VARIABLES = ['DATABASE_URL', 'DATABASE_MIGRATION_URL'];
@@ -39,15 +37,14 @@ function decode(text) {
 }
 
 /**
- * Every `host:port/database` the URL can mean, or null when it isn't a
- * Postgres URL this can read.
+ * Every database name the URL can mean, or null when it isn't a Postgres URL
+ * this can read.
  *
- * Prisma's engine takes the `host` parameter over the URL's host, and reads a
- * socket directory, or no host at all, as this machine. It reads no database
- * as `postgres`. libpq and the app's driver read no database as the database
- * role's own name, and no database role as the login running them.
+ * Prisma's engine reads no database as `postgres`. libpq and the app's driver
+ * read no database as PGDATABASE, then as the database role's own name, and no
+ * database role as PGUSER, then as the login running them.
  */
-function databaseIdentities(url, env) {
+function databaseNames(url, env) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -56,15 +53,11 @@ function databaseIdentities(url, env) {
   }
   if (parsed.protocol !== 'postgresql:' && parsed.protocol !== 'postgres:') return null;
 
-  const named = (parsed.searchParams.get('host') ?? parsed.hostname).toLowerCase();
-  const host = named === '' || named.startsWith('/') || LOOPBACK.has(named) ? 'localhost' : named;
-  const port = parsed.port || '5432';
-
   const database = decode(parsed.pathname.split('/')[1] ?? '');
-  const databaseRole = decode(parsed.username) || env['USER'] || env['USERNAME'];
-  const databases = database ? [database] : ['postgres', databaseRole].filter(Boolean);
+  if (database) return [database];
 
-  return [...new Set(databases)].map((name) => `${host}:${port}/${name}`);
+  const databaseRole = decode(parsed.username) || env['PGUSER'] || env['USER'] || env['USERNAME'];
+  return [...new Set(['postgres', env['PGDATABASE'], databaseRole].filter(Boolean))];
 }
 
 /**
@@ -80,7 +73,7 @@ function shadowDatabaseProblem(env) {
     );
   }
 
-  const shadow = databaseIdentities(shadowUrl, env);
+  const shadow = databaseNames(shadowUrl, env);
   if (shadow === null) {
     return "SHADOW_DATABASE_URL isn't a postgresql:// URL this check can read; see .env.example.";
   }
@@ -89,7 +82,7 @@ function shadowDatabaseProblem(env) {
     const value = env[variable];
     if (!value) continue;
 
-    const main = databaseIdentities(value, env);
+    const main = databaseNames(value, env);
     if (main === null) {
       return (
         `${variable} isn't a postgresql:// URL this check can read, so it can't tell whether ` +
@@ -98,11 +91,12 @@ function shadowDatabaseProblem(env) {
       );
     }
 
-    const same = shadow.find((identity) => main.includes(identity));
+    const same = shadow.find((name) => main.includes(name));
     if (same) {
       return (
-        `SHADOW_DATABASE_URL names the same database as ${variable} (${same}). ` +
-        'Prisma empties the shadow database on every run, so give it a database of its own.'
+        `SHADOW_DATABASE_URL names the database ${same}, which ${variable} can mean too. ` +
+        'Prisma empties the shadow database on every run, and another host name or port can reach ' +
+        'the same server, so give it a name of its own.'
       );
     }
   }

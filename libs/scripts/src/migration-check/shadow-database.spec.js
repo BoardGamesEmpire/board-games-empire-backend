@@ -36,61 +36,78 @@ describe('shadowDatabaseProblem (#586)', () => {
   // that is the main one and exits 0.
   it('refuses the main database, naming the variable it matched', () => {
     expect(shadowDatabaseProblem({ DATABASE_URL: MAIN, SHADOW_DATABASE_URL: MAIN })).toMatch(
-      /^SHADOW_DATABASE_URL names the same database as DATABASE_URL \(localhost:5432\/board_games_empire\)/,
+      /^SHADOW_DATABASE_URL names the database board_games_empire, which DATABASE_URL can mean too/,
     );
   });
 
-  // Read as Prisma's engine reads a URL: a `host` parameter wins over the URL's
-  // host, and a socket directory or no host at all means this machine.
+  // Two host names, loopback spellings or ports can reach the same server, and
+  // no list of them is complete, so the main database's name is refused
+  // wherever the shadow URL points.
   it.each([
-    ['another loopback address', 'postgresql://bge:password@127.0.0.1:5432/board_games_empire'],
+    ['another host name', 'postgresql://bge:password@10.0.0.5:5432/board_games_empire'],
+    ['an IPv4-mapped loopback address', 'postgresql://bge:password@[::ffff:127.0.0.1]:5432/board_games_empire'],
+    ['another port, as a forwarded one can be', 'postgresql://bge:password@localhost:15432/board_games_empire'],
+    ['a host parameter naming another machine', 'postgresql://bge@localhost/board_games_empire?host=db.internal'],
     ['the postgres:// scheme', 'postgres://bge:password@localhost:5432/board_games_empire'],
-    ['the default port left out', 'postgresql://bge:password@localhost/board_games_empire'],
-    ['other query parameters', 'postgresql://bge:password@localhost:5432/board_games_empire?connection_limit=1'],
     ['another schema', 'postgresql://bge:password@localhost:5432/board_games_empire?schema=shadow'],
     ['another database role', 'postgresql://migrator:secret@LOCALHOST:5432/board_games_empire'],
     ['no host at all', 'postgresql:///board_games_empire'],
-    ['a socket directory', 'postgresql://bge@db/board_games_empire?host=%2Fvar%2Frun%2Fpostgresql'],
-    ['a host parameter naming this machine', 'postgresql://bge@db.internal/board_games_empire?host=127.0.0.1'],
-  ])('refuses the main database spelled with %s', (_, shadow) => {
+  ])("refuses the main database's name with %s", (_, shadow) => {
     expect(shadowDatabaseProblem({ DATABASE_URL: MAIN, SHADOW_DATABASE_URL: shadow })).toMatch(
-      /^SHADOW_DATABASE_URL names the same database as DATABASE_URL/,
+      /^SHADOW_DATABASE_URL names the database board_games_empire, which DATABASE_URL can mean too/,
     );
   });
 
-  // Prisma's engine reads a URL with no database as `postgres`; libpq and the
-  // app's driver read it as the database role's own name.
+  // Prisma's engine reads a URL with no database as `postgres`. libpq and the
+  // app's driver read it as PGDATABASE, then as the database role's own name,
+  // and no database role as PGUSER, then as the login running them.
   it.each([
     [
       'the shadow names no database, and the main one is postgres',
+      {},
       MAIN.replace('/board_games_empire?', '/postgres?'),
       'postgresql://bge:password@localhost:5432',
     ],
     [
       'the main URL names no database, and the shadow is postgres',
+      {},
       'postgresql://bge:password@localhost:5432',
       'postgresql://bge:password@localhost:5432/postgres',
     ],
     [
       'the main URL names no database, and the shadow is named for its database role',
+      {},
       'postgresql://bge:password@localhost:5432/',
       'postgresql://other:secret@localhost:5432/bge',
     ],
     [
       'the main URL names no database role either, and the shadow is named for the login running the check',
+      {},
       'postgresql://localhost:5432',
       'postgresql://other:secret@localhost:5432/jo',
     ],
-  ])('refuses the same database when %s', (_, main, shadow) => {
-    expect(shadowDatabaseProblem({ USER: 'jo', DATABASE_URL: main, SHADOW_DATABASE_URL: shadow })).toMatch(
-      /^SHADOW_DATABASE_URL names the same database as DATABASE_URL/,
+    [
+      'the main URL names no database, and the shadow is PGDATABASE',
+      { PGDATABASE: 'production' },
+      'postgresql://app@localhost:5432',
+      'postgresql://app@localhost:5432/production',
+    ],
+    [
+      'the main URL names no database role, and the shadow is named for PGUSER',
+      { PGUSER: 'app' },
+      'postgresql://localhost:5432',
+      'postgresql://other:secret@localhost:5432/app',
+    ],
+  ])('refuses the same database when %s', (_, pg, main, shadow) => {
+    expect(shadowDatabaseProblem({ USER: 'jo', ...pg, DATABASE_URL: main, SHADOW_DATABASE_URL: shadow })).toMatch(
+      /^SHADOW_DATABASE_URL names the database \S+, which DATABASE_URL can mean too/,
     );
   });
 
   it('compares a stray % as written, as Prisma does, rather than throwing', () => {
     const stray = 'postgresql://bge%@localhost:5432/board_games_empire%zz';
     expect(shadowDatabaseProblem({ DATABASE_URL: stray, SHADOW_DATABASE_URL: stray })).toMatch(
-      /^SHADOW_DATABASE_URL names the same database as DATABASE_URL \(localhost:5432\/board_games_empire%zz\)/,
+      /^SHADOW_DATABASE_URL names the database board_games_empire%zz, which DATABASE_URL can mean too/,
     );
   });
 
@@ -101,14 +118,14 @@ describe('shadowDatabaseProblem (#586)', () => {
         DATABASE_MIGRATION_URL: 'postgresql://migrator:secret@db.internal:5432/bge',
         SHADOW_DATABASE_URL: 'postgresql://migrator:secret@db.internal:5432/bge',
       }),
-    ).toMatch(/same database as DATABASE_URL/);
+    ).toMatch(/which DATABASE_URL can mean too/);
     expect(
       shadowDatabaseProblem({
         DATABASE_URL: MAIN,
         DATABASE_MIGRATION_URL: 'postgresql://migrator:secret@db.internal:5432/bge',
         SHADOW_DATABASE_URL: 'postgresql://migrator:secret@db.internal:5432/bge',
       }),
-    ).toMatch(/same database as DATABASE_MIGRATION_URL \(db\.internal:5432\/bge\)/);
+    ).toMatch(/the database bge, which DATABASE_MIGRATION_URL can mean too/);
   });
 
   // A URL it can't read could still be the main database, and Prisma would

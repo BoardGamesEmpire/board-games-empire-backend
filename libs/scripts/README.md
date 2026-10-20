@@ -74,9 +74,10 @@ externals it can read, which it reports instead of passing. The header of
 
 `src/migration-check/shadow-database.spec.js` covers the check
 `db:migrate:check` makes before Prisma runs. It covers an unset shadow database,
-one of its own, and the main database under every spelling Prisma reads as the
-same: scheme, port, database role, loopback address, socket directory, `host`
-parameter, and no database named. It also covers a URL it can't read, which it
+one of its own, and the main database's name on another host or port, and
+under another scheme, schema or database role. It covers a URL naming no
+database, read as Prisma, libpq and the app's driver read it, PGDATABASE and
+PGUSER included. It also covers a URL it can't read, which it
 refuses rather than guess at, and the schema the comparison runs in: the shadow
 URL's, whatever `DATABASE_URL` names. The header of
 `src/migration-check/shadow-database.js` explains why Prisma 7.8 needs it (#586).

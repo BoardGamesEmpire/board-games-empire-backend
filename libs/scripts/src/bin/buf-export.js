@@ -16,13 +16,17 @@ const { exportProtos } = require('../proto-export/export');
 const workspaceRoot = path.resolve(__dirname, '..', '..', '..', '..');
 const protoRoot = path.join(workspaceRoot, 'libs', 'proto', 'gateway');
 
+/**
+ * Runs buf's npm launcher with Node itself, which needs no shell on any
+ * platform. Through Windows' `buf.cmd` shim it took one, which splits the
+ * command line at spaces, and both paths here are absolute (#313).
+ */
 function runBufExport(into) {
-  const bin = path.join(workspaceRoot, 'node_modules', '.bin', process.platform === 'win32' ? 'buf.cmd' : 'buf');
+  const bin = path.join(path.dirname(require.resolve('@bufbuild/buf/package.json')), 'bin', 'buf');
 
-  const result = spawnSync(bin, ['export', 'src/proto', '--exclude-imports=false', '-o', into], {
+  const result = spawnSync(process.execPath, [bin, 'export', 'src/proto', '--exclude-imports=false', '-o', into], {
     cwd: protoRoot,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
   });
 
   if (result.error) throw result.error;
