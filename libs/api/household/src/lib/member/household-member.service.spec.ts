@@ -121,7 +121,9 @@ const dependentRecordNotFound = () =>
 describe('HouseholdMemberService', () => {
   let service: HouseholdMemberService;
   let db: MockDatabaseService;
-  let abilityService: jest.Mocked<Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId'>>;
+  let abilityService: jest.Mocked<
+    Pick<AbilityService, 'getCurrentResourceConditions' | 'getActingUserId' | 'currentActorCan'>
+  >;
   let permissions: jest.Mocked<Pick<PermissionsService, 'invalidateUser' | 'invalidateUsers'>>;
   let events: jest.Mocked<Pick<EventEmitter2, 'emit'>>;
   let quotas: jest.Mocked<Pick<QuotaService, 'consume' | 'emitSoftOverages'>>;
@@ -181,6 +183,7 @@ describe('HouseholdMemberService', () => {
     abilityService = {
       getCurrentResourceConditions: jest.fn().mockReturnValue([COND]),
       getActingUserId: jest.fn().mockReturnValue('actor-1'),
+      currentActorCan: jest.fn().mockReturnValue(true),
     };
     permissions = {
       invalidateUser: jest.fn().mockResolvedValue(undefined),
@@ -523,10 +526,20 @@ describe('HouseholdMemberService', () => {
     });
 
     it('rejects changing your own role (400) without writing or invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember({ userId: 'actor-1' })));
+      db.householdMember.count.mockResolvedValue(1);
 
-      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
+      await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
+        status: Http.BadRequest,
+        response: expect.objectContaining({ key: 'errors.household.member_role_self' }),
+      });
 
+      // Asked of the actor's own membership before the scoped read, so a
+      // household admin, whose manage doesn't reach their own row, hears why
+      // rather than a 403 (#168).
+      expect(db.householdMember.count).toHaveBeenCalledWith({
+        where: { id: 'member-1', householdId: 'hh-1', userId: 'actor-1' },
+      });
+      expect(db.householdMember.findFirst).not.toHaveBeenCalled();
       expect(db.householdRole.upsert).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
@@ -608,9 +621,93 @@ describe('HouseholdMemberService', () => {
       expect(db.$transaction).not.toHaveBeenCalled();
     });
 
+    describe('the role it takes and the role it gives (#168)', () => {
+      // A household admin's manage stops at the member role, so the change
+      // asks, of the roster read under the lock, about the member as they
+      // stand and as it leaves them: or a household admin could make another
+      // one, or change one an owner made while this waited.
+      const ROSTER = [
+        { userId: 'actor-1', role: { role: { name: SystemRole.HouseholdAdmin } } },
+        { userId: 'user-1', role: { role: { name: SystemRole.HouseholdMember } } },
+      ];
+      const asRole = (name: string) => ({
+        id: 'member-1',
+        householdId: 'hh-1',
+        userId: 'user-1',
+        role: { role: { name } },
+        household: { members: ROSTER },
+      });
+
+      beforeEach(() => {
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
+        db.householdMember.findUniqueOrThrow.mockResolvedValue(resolves(makeMember()));
+        db.householdMember.findMany.mockResolvedValue(ROSTER as never);
+      });
+
+      it('asks whether the actor may manage the member as they stand and as the change leaves them, of the roster read under the lock', async () => {
+        await service.updateMemberRole('hh-1', 'member-1', DTO);
+
+        expect(abilityService.currentActorCan.mock.calls).toEqual([
+          [Action.manage, ResourceType.HouseholdMember, asRole(SystemRole.HouseholdMember)],
+          [Action.manage, ResourceType.HouseholdMember, asRole(SystemRole.HouseholdAdmin)],
+        ]);
+        expect(db.householdMember.findMany).toHaveBeenCalledWith({
+          where: { householdId: 'hh-1' },
+          select: { userId: true, role: { select: { role: { select: { name: true } } } } },
+        });
+        expect(db.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+          db.householdMember.findMany.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('refuses with 403, naming the update denial, when it may not, and writes nothing', async () => {
+        abilityService.currentActorCan.mockReturnValue(false);
+
+        await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
+          status: Http.Forbidden,
+          response: expect.objectContaining({ key: 'common.forbidden.update' }),
+        });
+
+        expect(db.householdRole.upsert).not.toHaveBeenCalled();
+        expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      });
+
+      it('refuses a member made household admin while this waited for the lock, whose read before it said otherwise', async () => {
+        // A household owner's promotion landed between the scoped read and
+        // the lock: the role the change takes away is now one the actor may
+        // not manage.
+        db.householdMember.findUnique.mockResolvedValue(
+          resolves(makeMember({ role: { role: { id: 'role-admin', name: SystemRole.HouseholdAdmin } } }) as never),
+        );
+        abilityService.currentActorCan.mockImplementation(
+          (_action, _type, instance) =>
+            (instance as { role?: { role: { name: string } } }).role?.role.name !== SystemRole.HouseholdAdmin,
+        );
+
+        await expect(
+          service.updateMemberRole('hh-1', 'member-1', { role: SystemRole.HouseholdGuest }),
+        ).rejects.toMatchObject({ status: Http.Forbidden });
+
+        expect(db.householdRole.upsert).not.toHaveBeenCalled();
+        expect(permissions.invalidateUser).not.toHaveBeenCalled();
+      });
+
+      it('still answers an owner target 400 before asking about the role it gives', async () => {
+        db.householdMember.findFirst.mockResolvedValue(resolves(makeOwner()));
+        db.householdMember.findUnique.mockResolvedValue(resolves(makeOwner() as never));
+        abilityService.currentActorCan.mockReturnValue(false);
+
+        await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toThrow(BadRequestException);
+
+        expect(abilityService.currentActorCan).not.toHaveBeenCalled();
+      });
+    });
+
     it('throws Forbidden — naming the UPDATE denial, not view — when the actor may not manage the member', async () => {
       db.householdMember.findFirst.mockResolvedValue(null);
-      db.householdMember.count.mockResolvedValue(1);
+      // Someone else's membership: present unscoped, not the actor's own.
+      db.householdMember.count.mockImplementation(((args: { where: { userId?: string } }) =>
+        Promise.resolve(args.where.userId === undefined ? 1 : 0)) as never);
 
       await expect(service.updateMemberRole('hh-1', 'member-1', DTO)).rejects.toMatchObject({
         status: Http.Forbidden,
@@ -670,9 +767,17 @@ describe('HouseholdMemberService', () => {
 
       expect(db.excludedGame.deleteMany).toHaveBeenCalledWith({ where: { householdMemberId: 'member-1' } });
       expect(db.householdRole.deleteMany).toHaveBeenCalledWith({ where: { householdMemberId: 'member-1' } });
-      expect(db.householdMember.delete).toHaveBeenCalledWith({
+      expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-1' } });
+
+      // The scope is asked again under the lock and before the first delete:
+      // a grant reading the member's role matches nothing once it's gone (#168).
+      expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: expect.objectContaining({ id: 'member-1', householdId: 'hh-1', AND: [COND] }),
+        select: { id: true },
       });
+      const recheckOrder = db.householdMember.findFirst.mock.invocationCallOrder[1];
+      expect(recheckOrder).toBeGreaterThan(db.$queryRaw.mock.invocationCallOrder[0]);
+      expect(recheckOrder).toBeLessThan(db.excludedGame.deleteMany.mock.invocationCallOrder[0]);
 
       // No cascades exist in the schema — dependents strictly before the member row.
       const excludedOrder = db.excludedGame.deleteMany.mock.invocationCallOrder[0];
@@ -747,11 +852,30 @@ describe('HouseholdMemberService', () => {
       await expect(service.removeMember('hh-1', 'member-missing')).rejects.toThrow(NotFoundException);
     });
 
-    it('maps a write-time scoped miss (P2025) to Forbidden without invalidating', async () => {
-      db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
-      db.householdMember.delete.mockRejectedValue(dependentRecordNotFound());
+    it('refuses the last owner with 403, not 400, when the locked state puts them out of reach', async () => {
+      // Authorization before validation: a caller the locked state refuses
+      // learns nothing of the household's owners, as when a household owner's
+      // transfer to the member being removed landed while this waited.
+      db.householdMember.findFirst.mockResolvedValueOnce(resolves(makeMember())).mockResolvedValueOnce(null);
+      db.$queryRaw.mockResolvedValue([{ household_member_id: 'member-1' }]);
 
-      await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toMatchObject({ status: Http.Forbidden });
+
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses with 403, deleting nothing, a member out of reach once the lock is held', async () => {
+      // A permission change that landed between the read and the lock.
+      db.householdMember.findFirst.mockResolvedValueOnce(resolves(makeMember())).mockResolvedValueOnce(null);
+
+      await expect(service.removeMember('hh-1', 'member-1')).rejects.toMatchObject({
+        status: Http.Forbidden,
+        response: expect.objectContaining({ key: 'common.forbidden.delete' }),
+      });
+
+      expect(db.excludedGame.deleteMany).not.toHaveBeenCalled();
+      expect(db.householdRole.deleteMany).not.toHaveBeenCalled();
+      expect(db.householdMember.delete).not.toHaveBeenCalled();
       expect(permissions.invalidateUser).not.toHaveBeenCalled();
     });
 
@@ -776,9 +900,8 @@ describe('HouseholdMemberService', () => {
         expect(errorSpy).not.toHaveBeenCalled();
       });
 
-      it('does not log an expected scoped-write miss (P2025) at error level', async () => {
-        db.householdMember.findFirst.mockResolvedValue(resolves(makeMember()));
-        db.householdMember.delete.mockRejectedValue(dependentRecordNotFound());
+      it('does not log an expected scoped miss under the lock at error level', async () => {
+        db.householdMember.findFirst.mockResolvedValueOnce(resolves(makeMember())).mockResolvedValueOnce(null);
 
         await expect(service.removeMember('hh-1', 'member-1')).rejects.toThrow(ForbiddenException);
 
@@ -820,9 +943,11 @@ describe('HouseholdMemberService', () => {
           where: expect.objectContaining({ householdId: 'hh-1', userId: 'actor-1', AND: [COND] }),
         }),
       );
-      expect(db.householdMember.delete).toHaveBeenCalledWith({
+      expect(db.householdMember.findFirst).toHaveBeenLastCalledWith({
         where: expect.objectContaining({ householdId: 'hh-1', userId: 'actor-1', AND: [COND], id: 'member-1' }),
+        select: { id: true },
       });
+      expect(db.householdMember.delete).toHaveBeenCalledWith({ where: { id: 'member-1' } });
       expect(permissions.invalidateUser).toHaveBeenCalledWith('actor-1');
     });
 

@@ -41,6 +41,7 @@ import {
   lockHouseholdForRoleTransition,
   resolveHouseholdRoleId,
 } from '../household-access.helpers';
+import { ROSTER_ROLE_SELECT } from '../invite/household-authority';
 import { MEMBER_SELECT } from '../read-shapes';
 
 export type HouseholdMemberWithRelations = Prisma.HouseholdMemberGetPayload<{ select: typeof MEMBER_SELECT }>;
@@ -252,14 +253,20 @@ export class HouseholdMemberService {
 
   /**
    * Changes a member's household role (#156). Row-scoped by the actor's
-   * `manage` conditions on `HouseholdMember` (`manage:household_member` —
-   * Owner/Admin of the same household).
+   * `manage` conditions on `HouseholdMember`: a household owner's reach every
+   * member of the household, and a household admin's only those with the
+   * member or guest role (#168).
    *
    * Guards:
-   * - The actor cannot change their own role (400).
+   * - The actor cannot change their own role (400), asked before the scoped
+   *   read so a household admin hears it too.
    * - A member holding `HouseholdOwner` cannot be changed here at all (400):
    *   every owner transition belongs to transfer-ownership (#158), so no
    *   owner-count reasoning is needed on this path.
+   * - The member's role as it stands, and the role the change gives, must
+   *   both be ones the actor may manage, asked of the roster read under the
+   *   lock (403): a household admin can't make another household admin, nor
+   *   change one a household owner made in the meantime (#168).
    *
    * The write is an upsert keyed on the 1:1 `householdMemberId` — the `role`
    * relation is optional on the model, so a role-less member row gets a role
@@ -284,6 +291,15 @@ export class HouseholdMemberService {
 
     try {
       const updated = await this.db.$transaction(async (tx) => {
+        // Asked of the actor's own membership before the scoped read, so the
+        // refusal says why whatever the actor's grants reach: a household
+        // admin's own row is outside their manage (#168), and the scoped read
+        // would answer it 403. A membership's user never changes, so no lock
+        // is needed for it.
+        if ((await tx.householdMember.count({ where: { id: memberId, householdId, userId: actorUserId } })) > 0) {
+          throw new BadRequestException(t('errors.household.member_role_self'));
+        }
+
         const member = await this.findScopedMemberOrThrow(
           tx,
           scopedWhere,
@@ -297,10 +313,6 @@ export class HouseholdMemberService {
             },
           },
         );
-
-        if (member.userId === actorUserId) {
-          throw new BadRequestException(t('errors.household.member_role_self'));
-        }
 
         // Taken AFTER the scoped read, so a 403 or 404 still costs no
         // household-wide lock, and BEFORE the owner check below, which is the
@@ -333,6 +345,27 @@ export class HouseholdMemberService {
 
         if (locked.role?.role.name === SystemRole.HouseholdOwner) {
           throw new BadRequestException(t('errors.household.member_role_owner'));
+        }
+
+        // Ask again, of the roster read under the lock, about the member as
+        // they stand and as the change leaves them. A household admin manages
+        // the member and guest roles alone (#168), so neither may be a
+        // household admin: not the role it gives, and not the role it takes
+        // away, which a household owner's promotion that landed while this
+        // waited would have made it. The scoped read asked only of the state
+        // before the lock.
+        const members = await tx.householdMember.findMany({ where: { householdId }, select: ROSTER_ROLE_SELECT });
+        const mayManageAs = (roleName: string | undefined) =>
+          this.abilityService.currentActorCan(Action.manage, ResourceType.HouseholdMember, {
+            id: member.id,
+            householdId,
+            userId: member.userId,
+            ...(roleName === undefined ? {} : { role: { role: { name: roleName } } }),
+            household: { members },
+          });
+
+        if (!mayManageAs(locked.role?.role.name) || !mayManageAs(updateMemberRoleDto.role)) {
+          throw new ForbiddenException(t('common.forbidden.update'));
         }
 
         const roleId = await resolveHouseholdRoleId(tx, updateMemberRoleDto.role);
@@ -370,9 +403,10 @@ export class HouseholdMemberService {
    *
    * Authorization is the Owner-only `update:household_role:transfer-ownership`
    * gate at the controller. Row scoping uses the actor's `manage` conditions on
-   * `HouseholdMember` (Owner AND Admin hold those, so scoping alone does not
-   * restrict this endpoint — the gate does, and the locked owner set backs it
-   * inside the transaction).
+   * `HouseholdMember`. A household admin's own copy of those reaches people
+   * with the member or guest role (#168), so scoping alone does not restrict
+   * this endpoint — the gate does, and the locked owner set backs it inside
+   * the transaction.
    *
    * Multiple owners are representable (`HouseholdRole` is 1:1 per *member*, but
    * N members may hold `HouseholdOwner`), so this is a swap and not a
@@ -856,9 +890,13 @@ export class HouseholdMemberService {
 
   /**
    * Removes another member (#157). Row-scoped by the actor's `manage`
-   * conditions on `HouseholdMember` (Owner/Admin). An Owner/Admin removing
-   * their own row is deliberately allowed — it is semantically identical to
-   * leaving, and the last-owner guard applies either way.
+   * conditions on `HouseholdMember`: a household owner's reach every member of
+   * the household, co-owners included, and a household admin's only those with
+   * the member or guest role, since only a household owner acts on the
+   * household admin role (#168). So a household owner removing their own row
+   * is allowed — it is semantically identical to leaving, and the last-owner
+   * guard applies either way — while a household admin leaves through `DELETE
+   * …/members/me`, which the leave grant covers.
    */
   async removeMember(householdId: string, memberId: string): Promise<HouseholdMemberWithRelations> {
     await assertHouseholdExists(this.db, householdId);
@@ -888,10 +926,11 @@ export class HouseholdMemberService {
    * The acting user leaves the household (#157). Row-scoped by the actor's
    * `delete` conditions on `HouseholdMember` (`delete:household_member:leave`)
    * — and additionally pinned to `userId` explicitly: CASL's `manage` implies
-   * every action, so an Owner/Admin's `delete` conditions cover ALL members of
-   * their household, and without the pin this endpoint would delete whichever
-   * row the conditions happened to match. The pin makes "me" mean me by
-   * construction, independent of how broad the actor's grants are.
+   * every action, so a household owner's `delete` conditions cover every
+   * member of their household, and a household admin's every one with the
+   * member or guest role (#168). Without the pin this endpoint would delete
+   * whichever row the conditions happened to match. The pin makes "me" mean me
+   * by construction, independent of how broad the actor's grants are.
    */
   async leaveHousehold(householdId: string): Promise<HouseholdMemberWithRelations> {
     const actorUserId = this.abilityService.getActingUserId();
@@ -926,9 +965,9 @@ export class HouseholdMemberService {
    *
    * Deletion order is mandatory — the schema declares no cascades, so
    * `ExcludedGame` and the 1:1 `HouseholdRole` must go before the
-   * `HouseholdMember` row. The final delete re-applies the scoped `where`, so
-   * authorization is enforced at write time as well as at read time
-   * (`P2025` → 403).
+   * `HouseholdMember` row. The scoped `where` is asked again under the lock,
+   * before the first delete, so authorization is decided from locked state as
+   * well as at read time (403).
    */
   private async deleteMembership(
     scopedWhere: Prisma.HouseholdMemberWhereInput & { householdId: string },
@@ -970,6 +1009,24 @@ export class HouseholdMemberService {
         await lockHouseholdForRoleTransition(tx, scopedWhere.householdId);
         const ownerMemberIds = await this.lockHouseholdOwnerRows(tx, scopedWhere.householdId);
 
+        // Re-applies the scoped `where` under the lock, so a permission change
+        // that landed between the read and the lock still surfaces as 403. It
+        // comes before the last-owner check, authorization before validation,
+        // so a caller the locked state refuses learns nothing of the
+        // household's owners. And it comes BEFORE the dependents go: a grant
+        // that reads the member's household role, as a household admin's does
+        // (#168), matches nothing once the role row is deleted. The lock keeps
+        // the answer standing through the deletes, since every role transition
+        // and every removal in this household takes it too.
+        const reachable = await tx.householdMember.findFirst({
+          where: { ...scopedWhere, id: member.id },
+          select: { id: true },
+        });
+
+        if (!reachable) {
+          denials.onHidden();
+        }
+
         if (ownerMemberIds.includes(member.id) && ownerMemberIds.length <= 1) {
           throw new BadRequestException(t('errors.household.last_owner', { householdId: scopedWhere.householdId }));
         }
@@ -979,10 +1036,7 @@ export class HouseholdMemberService {
         // must not turn the cleanup into a P2025.
         await tx.householdRole.deleteMany({ where: { householdMemberId: member.id } });
 
-        // Re-applies the scoped `where` at write time (extended unique where,
-        // same shape the read paths use) so a concurrent permission change
-        // between read and write still surfaces as P2025 → 403.
-        await tx.householdMember.delete({ where: { ...scopedWhere, id: member.id } });
+        await tx.householdMember.delete({ where: { id: member.id } });
 
         return member;
       });

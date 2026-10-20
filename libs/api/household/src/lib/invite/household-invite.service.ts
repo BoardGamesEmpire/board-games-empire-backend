@@ -189,8 +189,10 @@ export class HouseholdInviteService {
    * 1. The caller must hold `update` on this invite into THIS household, asked
    *    of the instance: the route's type-only check passes the Owner or Admin
    *    of any household. The instance carries the invite's id, so a key scoped
-   *    to this one invite is asked about it. Asked before the lock, so a caller
-   *    with no say here is refused without holding the household's row.
+   *    to this one invite is asked about it, and the role it offers, so an
+   *    admin is refused an invite the owner sent as admin (#168). Asked before
+   *    the lock, so a caller with no say here is refused without holding the
+   *    household's row.
    * 2. The household row is share-locked. A role transition takes the same
    *    row `FOR NO KEY UPDATE`, which conflicts, so no demotion lands between
    *    the answer below and the revoke; and a soft delete, which locks the row
@@ -501,7 +503,9 @@ export class HouseholdInviteService {
    * to one invite holds its grant only on that id, so an instance without one
    * would refuse the key even on the invite it was scoped to. It also names
    * the column it changes (`field`), which is all that tells the revoke
-   * permission from the approve permission.
+   * permission from the approve permission. And it carries the role the
+   * invite offers, which an admin's revoke reads: an admin revokes only an
+   * invite offering the member or guest role (#168).
    *
    * Hands back the roster it asked of, which says whether the acting user is
    * one of the household's owners or admins and so sees the address (#167).
@@ -513,15 +517,43 @@ export class HouseholdInviteService {
     existing?: { readonly inviteId: string; readonly field: Prisma.InviteScalarFieldEnum },
   ): Promise<RosterRow[]> {
     const members = await this.rosterOf(client, householdId);
+    const named =
+      existing === undefined
+        ? {}
+        : { id: existing.inviteId, ...(await this.offeredRoleOf(client, householdId, existing.inviteId)) };
 
     this.abilityService.assertCurrentActorCan(
       action,
       ResourceType.Invite,
-      { ...(existing === undefined ? {} : { id: existing.inviteId }), householdId, household: { members } },
+      { ...named, householdId, household: { members } },
       existing?.field,
     );
 
     return members;
+  }
+
+  /**
+   * The role an invite of this household offers, as the instance an action on
+   * it carries (#168). An invite naming no role admits its invitee as a
+   * member, so it offers the member role.
+   *
+   * An invite this household doesn't have is asked about as one offering the
+   * member role too: the question is then whether the actor may act on any
+   * invite here. An owner or admin goes on to the lib's 404, and anyone else is
+   * refused with 403 as before, so the answer says nothing about invites
+   * elsewhere.
+   */
+  private async offeredRoleOf(
+    client: DatabaseService | Prisma.TransactionClient,
+    householdId: string,
+    inviteId: string,
+  ): Promise<{ readonly role: { readonly name: string } }> {
+    const invite = await client.invite.findFirst({
+      where: { id: inviteId, householdId },
+      select: { role: { select: { name: true } } },
+    });
+
+    return { role: { name: invite?.role?.name ?? SystemRole.HouseholdMember } };
   }
 
   /** Each member's user id and household role, as `client` reads them. */
