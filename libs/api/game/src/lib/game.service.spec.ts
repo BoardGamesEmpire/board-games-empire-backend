@@ -13,6 +13,7 @@ import {
 } from '@bge/testing';
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { GAME_DESCRIPTION_MAX_LENGTH, type CreateGameDto, type UpdateGameDto } from './dto';
+import { gameListScope } from './game-list-scope';
 import { GameService } from './game.service';
 
 const COND = { id: 'sentinel-condition' };
@@ -78,13 +79,10 @@ describe('GameService', () => {
       db.game.count.mockResolvedValue(0);
     });
 
-    it('asks the composer for its where clause, declaring the live Public games and the caller’s own', async () => {
+    it('asks the composer for its where clause, declaring the list scope of the acting user', async () => {
       await read();
 
-      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, {
-        deletedAt: null,
-        OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
-      });
+      expect(compose).toHaveBeenCalledWith(ResourceType.Game, Action.read, gameListScope(MOCK_ACTING_USER_ID));
     });
 
     // Asking is not enough: the query has to use the answer. The ceiling stays
@@ -95,11 +93,7 @@ describe('GameService', () => {
       expect(abilityService.getCurrentResourceConditions).toHaveBeenCalledWith(ResourceType.Game, Action.read);
       expect(db.game.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: {
-            deletedAt: null,
-            OR: [{ reach: Reach.Public }, { createdById: MOCK_ACTING_USER_ID }],
-            AND: [COND],
-          },
+          where: { ...gameListScope(MOCK_ACTING_USER_ID), AND: [COND] },
         }),
       );
     });

@@ -874,6 +874,31 @@ describe('AbilityFactory', () => {
     });
   });
 
+  // No route reads a profile yet (#819), so this rendering is the proof that a
+  // friend reads a profile whose reach admits friends. User search composes it.
+  describe('read:user:profile:friends — relation-scoped rendering', () => {
+    it("renders the acting user id into both friendship directions of the profile's owner", () => {
+      const user = makeUser({
+        id: 'user-42',
+        roles: [makeRole('User', [catalogPermission('read:user:profile:friends')])],
+      });
+
+      const ability = factory.createForUser(user);
+
+      expect(ability.rules.at(-1)?.conditions).toEqual({
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        user: {
+          is: {
+            OR: [
+              { friendshipsRequested: { some: { addresseeId: 'user-42', status: 'Accepted' } } },
+              { friendshipsReceived: { some: { requesterId: 'user-42', status: 'Accepted' } } },
+            ],
+          },
+        },
+      });
+    });
+  });
+
   describe('scoped event grants (#432, #436)', () => {
     // Real catalog entries again. An event role renders through the event
     // pass and binds on `{{ eventId }}`; a household role renders through the
@@ -1562,7 +1587,7 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
-    it('lets an ordinary User read the games it created and every Public one, and no others', () => {
+    it('lets an ordinary User read the games it created, a friend’s that reach friends and every Public one, and no others', () => {
       // The clause the game list, the by-id read and search all put in their
       // `where` (#472). Before, `read:game` carried no condition, so this was
       // `{}`: every signed-in user read every private game.
@@ -1576,6 +1601,18 @@ describe('AbilityFactory', () => {
       expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
         OR: [
           { deletedAt: null, reach: 'Public' },
+          {
+            deletedAt: null,
+            reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+            createdBy: {
+              is: {
+                OR: [
+                  { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Accepted' } } },
+                  { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Accepted' } } },
+                ],
+              },
+            },
+          },
           { deletedAt: null, createdById: 'user-1' },
         ],
       });

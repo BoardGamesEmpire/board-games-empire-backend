@@ -23,14 +23,13 @@ import { CreateEventPolicyDto } from './create-event-policy.dto';
  */
 export const MAX_INVITE_USER_IDS = 50;
 
-const EVENT_REACHES = [Reach.Private, Reach.Friends] as const;
+const EVENT_REACHES = [Reach.Private, Reach.Friends, Reach.Public] as const;
 export type EventReach = (typeof EVENT_REACHES)[number];
 
 /**
- * An event's reach: Private or Friends only, the rungs an event read rule
- * serves. `Public` arrives with its rule (#809), and `FriendsOfFriends` with
- * #496, which defines friends of friends. Shared with `UpdateEventDto`, which
- * names no default.
+ * An event's reach: the rungs an event read rule serves. `FriendsOfFriends`
+ * waits on #496, which defines friends of friends. Shared with
+ * `UpdateEventDto`, which names no default.
  */
 export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator {
   return ReachProperty({
@@ -38,7 +37,7 @@ export function EventReachProperty(defaultReach?: EventReach): PropertyDecorator
     default: defaultReach,
     description:
       "Who may read the event besides its attendees and its household's members. `Friends`: also its " +
-      "creator's friends. `Private`: no one else.",
+      "creator's friends. `Public`: every signed-in user. `Private`: no one else.",
   });
 }
 
