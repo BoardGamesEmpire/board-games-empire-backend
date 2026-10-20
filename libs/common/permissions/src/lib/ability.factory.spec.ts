@@ -1587,7 +1587,7 @@ describe('AbilityFactory', () => {
       expect(user.can(Action.delete, asEntity('Game', { createdById: 'someone-else' }))).toBe(false);
     });
 
-    it('lets an ordinary User read the games it created and every Public one, and no others', () => {
+    it('lets an ordinary User read the games it created, a friend’s that reach friends and every Public one, and no others', () => {
       // The clause the game list, the by-id read and search all put in their
       // `where` (#472). Before, `read:game` carried no condition, so this was
       // `{}`: every signed-in user read every private game.
@@ -1601,6 +1601,18 @@ describe('AbilityFactory', () => {
       expect(accessibleBy(user, Action.read).ofType('Game')).toEqual({
         OR: [
           { deletedAt: null, reach: 'Public' },
+          {
+            deletedAt: null,
+            reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+            createdBy: {
+              is: {
+                OR: [
+                  { friendshipsRequested: { some: { addresseeId: 'user-1', status: 'Accepted' } } },
+                  { friendshipsReceived: { some: { requesterId: 'user-1', status: 'Accepted' } } },
+                ],
+              },
+            },
+          },
           { deletedAt: null, createdById: 'user-1' },
         ],
       });

@@ -238,7 +238,7 @@ describe('the shipped catalogs', () => {
       }
     });
 
-    it('let User read its own games and everyone’s Public ones, and nothing else', () => {
+    it('let User read its own games, a friend’s that reach friends and everyone’s Public ones, and nothing else', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
       // `User` is held by every signed-in actor, so an unconditioned read here
@@ -246,9 +246,14 @@ describe('the shipped catalogs', () => {
       // than by shape, so a clause that goes missing fails here instead of
       // widening the read unnoticed.
       expect(conditionsOf('read:game')).toStrictEqual({ deletedAt: null, createdById: '{{ user.id }}' });
+      expect(conditionsOf('read:game:friends')).toStrictEqual({
+        deletedAt: null,
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        createdBy: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
+      });
       expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, reach: 'Public' });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
-        expect.arrayContaining(['read:game', 'read:game:public']),
+        expect.arrayContaining(['read:game', 'read:game:friends', 'read:game:public']),
       );
     });
 
@@ -321,6 +326,7 @@ describe('the shipped catalogs', () => {
       ['read:household_member:friends', (reach: unknown) => ({ household: { is: { reach } } })],
       ['read:game_collection:friends', (reach: unknown) => ({ reach })],
       ['read:user:profile:friends', (reach: unknown) => ({ reach })],
+      ['read:game:friends', (reach: unknown) => ({ reach })],
     ])('let a friend read through %s at every rung from Friends up', (slug, at) => {
       const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
 

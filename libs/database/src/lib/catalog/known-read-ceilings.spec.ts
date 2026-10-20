@@ -131,7 +131,7 @@ const KNOWN_READ_CEILINGS: PinnedReadCeilings = {
   },
   Campaign: {},
   Game: {
-    User: { 'read:game': 'binds user.id', 'read:game:public': 'fixed filter' },
+    User: { 'read:game': 'binds user.id', 'read:game:friends': 'binds user.id', 'read:game:public': 'fixed filter' },
   },
   GameCollection: {
     User: {

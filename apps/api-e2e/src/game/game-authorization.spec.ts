@@ -1,6 +1,6 @@
 import { Reach, type DatabaseService } from '@bge/database';
 import { ServiceAccountService } from '@bge/services';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
@@ -11,10 +11,11 @@ import { gameEnvelope, listGamesEnvelope, localSearchGameIds } from './game-wire
  * Who may read and change a game (#472, #491), against real rows.
  *
  * A game carries a reach its creator chooses. A Public game is everyone's
- * to read; a Private one is its creator's, plus staff by id through
- * `read:public_content` and the Owner through `manage:all`. The list and the
- * search show every caller the same set, the Public games and their own
- * (#513). Before #472 `read:game` carried no condition, so every
+ * to read; a Friends one is its creator's and their friends'; a Private one is
+ * its creator's. Staff read each by id through `read:public_content`, and the
+ * Owner through `manage:all`. The list and the search show every acting user
+ * the same set: the Public games, their own, and their friends' that reach
+ * friends (#513, #809). Before #472 `read:game` carried no condition, so every
  * signed-in user read every private game; before #491 the create and update
  * DTOs declared the field under the wrong name, so no private game could be
  * made through the API at all.
@@ -149,6 +150,79 @@ describe('game authorization', () => {
     });
   });
 
+  describe("a friend's game", () => {
+    it('serves a friend a Friends game by id, in the list and in search, and refuses a stranger all three', async () => {
+      const creator = await actors.user();
+      const friend = await actors.user();
+      const stranger = await actors.user();
+      await befriend(db.client, friend, creator);
+      const token = randomUUID().slice(0, 8);
+      const game = await arrangeGame(creator.user.id, Reach.Friends, `e2e friends ${token}`);
+
+      await readGame(friend, game.id).expect(200);
+      expect(await listedIds(friend, 'a friend')).toContain(game.id);
+      expect(await searchedIds(friend, token, 'a friend')).toContain(game.id);
+
+      // The control for the list and the search is the friend's hits above:
+      // the same routes, the same row.
+      await readGame(stranger, game.id).expect(403);
+      expect(await listedIds(stranger, 'a stranger')).not.toContain(game.id);
+      expect(await searchedIds(stranger, token, 'a stranger')).not.toContain(game.id);
+    });
+
+    // The list names the friendship itself, so staff, who read every game,
+    // are still listed only their own friends' games.
+    it('lists staff no stranger’s Friends game, while each still reads it by id', async () => {
+      const [serverOwner, admin, moderator, creator, plainUser] = await Promise.all([
+        actors.owner(),
+        actors.admin(),
+        actors.moderator(),
+        actors.user(),
+        actors.user(),
+      ]);
+
+      const friendsGame = await arrangeGame(creator.user.id, Reach.Friends);
+      const publicGame = await arrangeGame(creator.user.id, Reach.Public);
+
+      const staff = [
+        ['an admin', admin],
+        ['a moderator', moderator],
+        ["the server's Owner", serverOwner],
+      ] as const;
+
+      for (const [who, actor] of staff) {
+        await readGame(actor, friendsGame.id).expect(200);
+        expect(await listedIds(actor, who)).toEqual([publicGame.id]);
+      }
+
+      // The control: a plain user is refused the same game, so the staff
+      // reads come from the staff grants.
+      await readGame(plainUser, friendsGame.id).expect(403);
+    });
+
+    it('lists staff their own friends’ Friends games', async () => {
+      const [serverOwner, admin, moderator, creator] = await Promise.all([
+        actors.owner(),
+        actors.admin(),
+        actors.moderator(),
+        actors.user(),
+      ]);
+
+      const staff = [
+        ['an admin', admin],
+        ['a moderator', moderator],
+        ["the server's Owner", serverOwner],
+      ] as const;
+
+      await Promise.all(staff.map(([, actor]) => befriend(db.client, actor, creator)));
+      const friendsGame = await arrangeGame(creator.user.id, Reach.Friends);
+
+      for (const [who, actor] of staff) {
+        expect(await listedIds(actor, who)).toContain(friendsGame.id);
+      }
+    });
+  });
+
   describe('creating a game', () => {
     it('keeps the reach it was sent, so a private game is its creator’s alone', async () => {
       const creator = await actors.user();
@@ -164,8 +238,18 @@ describe('game authorization', () => {
       await readGame(other, game.id).expect(403);
     });
 
-    it.each([Reach.Friends, Reach.FriendsOfFriends])(
-      'refuses %s with 400 — no game read rule honours it yet',
+    it('keeps Friends when a game is created with it', async () => {
+      const creator = await actors.user();
+
+      const created = await createGame(creator, { title: 'Friends prototype', reach: Reach.Friends }).expect(201);
+      const { game } = gameEnvelope(created, 'POST /api/games with reach Friends');
+
+      expect(game.reach).toBe(Reach.Friends);
+      expect(await reachOf(game.id)).toBe(Reach.Friends);
+    });
+
+    it.each([Reach.FriendsOfFriends])(
+      'refuses %s with 400 — no game read rule honours it until #496',
       async (reach) => {
         const creator = await actors.user();
 
@@ -215,22 +299,25 @@ describe('game authorization', () => {
       await readGame(other, game.id).expect(403);
     });
 
-    it('refuses to make an imported game private, even for an admin', async () => {
-      // Re-import never rewrites reach, so an imported game made private
-      // would stay private for good.
-      const admin = await actors.admin();
-      const user = await actors.user();
-      const imported = await arrangeImportedGame();
+    it.each([Reach.Private, Reach.Friends])(
+      'refuses to narrow an imported game to %s, even for an admin',
+      async (reach) => {
+        // Re-import never rewrites reach, so an imported game narrowed here
+        // would stay narrowed for good.
+        const admin = await actors.admin();
+        const user = await actors.user();
+        const imported = await arrangeImportedGame();
 
-      await updateGame(admin, imported.id, { reach: Reach.Private }).expect(400);
-      expect(await reachOf(imported.id)).toBe(Reach.Public);
+        await updateGame(admin, imported.id, { reach }).expect(400);
+        expect(await reachOf(imported.id)).toBe(Reach.Public);
 
-      // The control: the admin may edit the game, just not privatize it.
-      await updateGame(admin, imported.id, { title: 'Renamed import' }).expect(200);
+        // The control: the admin may edit the game, just not narrow it.
+        await updateGame(admin, imported.id, { title: 'Renamed import' }).expect(200);
 
-      // A user who may not edit it at all hears that, not the rule above.
-      await updateGame(user, imported.id, { reach: Reach.Private }).expect(403);
-    });
+        // A user who may not edit it at all hears that, not the rule above.
+        await updateGame(user, imported.id, { reach }).expect(403);
+      },
+    );
   });
 
   describe('contributing media to a game', () => {

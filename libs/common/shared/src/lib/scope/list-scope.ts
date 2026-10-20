@@ -20,10 +20,10 @@
  *   is lost.
  *
  * What it is NOT for: a read that only looks install-wide. `GET /games` returns
- * every Public game plus the caller's own private ones (#472), so its rows vary
- * by caller under the caller's ceiling. Declaring such a read unscoped would
- * state a fact that is false and drop that ceiling, which is worse than leaving
- * it undeclared.
+ * every Public game plus the acting user's own and their friends' (#472, #809),
+ * so its rows vary with the acting user, under their ceiling. Declaring such a
+ * read unscoped would state a fact that is false and drop that ceiling, which
+ * is worse than leaving it undeclared.
  */
 export interface UnscopedList {
   readonly kind: 'unscoped';

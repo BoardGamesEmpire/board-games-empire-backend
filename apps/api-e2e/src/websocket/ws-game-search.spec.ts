@@ -1,6 +1,6 @@
 import { Reach } from '@bge/database';
 import { WsErrorEvents, type WsErrorPayload } from '@bge/shared';
-import { createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
+import { befriend, createActors, type Actors, type AuthenticatedActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import type { Socket } from 'socket.io-client';
 import request from 'supertest';
@@ -181,6 +181,24 @@ describe('game search over WebSocket', () => {
 
     // The control is the Public hit: the search ran and matched for this user.
     expect(await search(theirs, token)).toEqual([publicGame.id]);
+  });
+
+  it("finds a friend's Friends game for the friend, and not for a stranger", async () => {
+    const creator = await actors.user();
+    const friend = await actors.user();
+    const stranger = await actors.user();
+    await befriend(db.client, friend, creator);
+
+    const token = randomUUID().slice(0, 8);
+    const friendsGame = await arrangeGame(creator.user.id, Reach.Friends, `WS friends ${token} friends`);
+    const publicGame = await arrangeGame(creator.user.id, Reach.Public, `WS friends ${token} public`);
+
+    const [asFriend, asStranger] = await Promise.all([connectedAs(friend), connectedAs(stranger)]);
+
+    expect(await search(asFriend, token)).toEqual([friendsGame.id, publicGame.id].sort());
+
+    // The control is the Public hit: the search ran and matched for the stranger.
+    expect(await search(asStranger, token)).toEqual([publicGame.id]);
   });
 
   it('finds an admin a stranger’s Public game and not their private one', async () => {

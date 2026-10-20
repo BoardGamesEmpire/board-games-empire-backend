@@ -330,6 +330,7 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
     'create:game',
     'delete:game:own',
     'read:game',
+    'read:game:friends',
     'read:game:public',
     'read:job',
     'update:game:own',

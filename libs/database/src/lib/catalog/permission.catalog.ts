@@ -1,33 +1,27 @@
 import type { EnumReachFilter, Prisma } from '../client';
 import { Action, ResourceType, RiskLevel } from '../client';
+import { acceptedFriendOf, REACHES_ADMITTING_FRIENDS } from '../utils/friendship-conditions';
 import { assertJsonConditions, assertUniqueSlugs, assertValidSubjects } from './catalog-integrity';
 import type { CatalogSubject, DefinedPermission } from './permission-entry';
 import { permission } from './permission-entry';
 
 // Relational clause meaning "this User node is an accepted friend of the
-// acting user". A friendship is a single directional row, so both directions
-// must be checked. Rendered by the ability factory against `{{ user.id }}`
-// and evaluated live against the friendship table at query time. Typed as the
-// `User` where-clause it is spliced into (not `as const`: a readonly tuple is
-// not a `UserWhereInput[]`), so its paths are checked like any entry's — and
-// therefore module-private: that type is mutable, and every entry below that
-// uses it holds this one object by reference, so exporting it would hand a
-// consumer a writable alias into shipped conditions the catalog presents as
-// readonly.
-const acceptedFriendOfActingUser = {
-  OR: [
-    { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
-    { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
-  ],
-} satisfies Prisma.UserWhereInput;
+// acting user", rendered by the ability factory against `{{ user.id }}` and
+// evaluated live against the friendship table at query time. Its shape is
+// `acceptedFriendOf`'s, which list scopes share, so a rule and a list agree on
+// who a friend is. Typed as the `User` where-clause it is spliced into (not
+// `as const`: a readonly tuple is not a `UserWhereInput[]`), so its paths are
+// checked like any entry's — and therefore module-private: that type is
+// mutable, and every entry below that uses it holds this one object by
+// reference, so exporting it would hand a consumer a writable alias into
+// shipped conditions the catalog presents as readonly.
+const acceptedFriendOfActingUser = acceptedFriendOf('{{ user.id }}');
 
-// The rungs of the reach ladder that admit a friend: `Friends` and every rung
-// above it. The ladder reads upwards, so a wider reach keeps the readers of a
-// narrower one (#495). `FriendsOfFriends` admits direct friends only until
-// #496 defines friends of friends. Module-private for the reasons
+// The rungs of the reach ladder that admit a friend
+// (`REACHES_ADMITTING_FRIENDS`). Module-private for the reasons
 // `acceptedFriendOfActingUser` gives.
 const reachAdmittingFriends = {
-  in: ['Friends', 'FriendsOfFriends', 'Public'],
+  in: [...REACHES_ADMITTING_FRIENDS],
 } satisfies EnumReachFilter;
 
 // An EventGame hangs off the event itself or off one of its occurrences
@@ -364,12 +358,13 @@ export const PERMISSION_CATALOG = [
   // --- Games ---
   //
   // Split like the GameCollection family: the bare slug is the creator's own
-  // rows, and `:public` is everyone else's view. A game carries a reach
-  // its creator chooses, and `User` is held by every signed-in actor, so an
-  // unconditioned read here would hand every private game to everyone (#472).
+  // rows, `:friends` is a friend's games that reach their friends, and
+  // `:public` is everyone else's view. A game carries a reach its creator
+  // chooses, and `User` is held by every signed-in actor, so an unconditioned
+  // read here would hand every private game to everyone (#472).
   // `:public` is static — no render variable — so a plugin can hold it; the
-  // bare slug's `user.id` is outside a plugin's render context. Staff read
-  // everything through `read:public_content`.
+  // other two bind `user.id`, which is outside a plugin's render context.
+  // Staff read everything through `read:public_content`.
   permission({
     action: Action.read,
     subject: ResourceType.Game,
@@ -385,6 +380,14 @@ export const PERMISSION_CATALOG = [
     slug: 'read:game:public',
     riskLevel: RiskLevel.Low,
     reason: 'View public games',
+  }),
+  permission({
+    action: Action.read,
+    subject: ResourceType.Game,
+    conditions: { deletedAt: null, reach: reachAdmittingFriends, createdBy: { is: acceptedFriendOfActingUser } },
+    slug: 'read:game:friends',
+    riskLevel: RiskLevel.Low,
+    reason: "View a friend's games that reach their friends",
   }),
   // Import jobs only (#479). An import job describes public content, so every
   // user may watch every import, as the import status route and the import
