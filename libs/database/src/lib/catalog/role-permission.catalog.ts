@@ -5,7 +5,9 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
 /**
  * Role → slug assignments. Two lists are DERIVED rather than enumerated:
  *
- * - `HouseholdAdmin` = the owner list minus `HOUSEHOLD_OWNER_ONLY`;
+ * - `HouseholdAdmin` = the owner list minus `HOUSEHOLD_OWNER_ONLY`, plus
+ *   `HOUSEHOLD_ADMIN_ONLY`: the household admin's own member, invite and
+ *   revoke permissions, which stop at the member role (#168);
  * - `EventCoHost` = the host list minus `EVENT_HOST_ONLY`.
  *
  * `Admin` used to be a third — every slug except `manage:all` — and is now
@@ -70,7 +72,11 @@ import { PERMISSION_CATALOG, type PermissionSlug } from './permission.catalog';
  * named in the exclusion, or it is granted to the derived role silently, with
  * no compile-time signal. `update:household_role:transfer-ownership` is the
  * gate that keeps owner transitions (both directions) out of #156's
- * change-role endpoint; an Admin holding it would defeat that separation.
+ * change-role endpoint; an Admin holding it would defeat that separation. The
+ * household owner's member, invite and revoke permissions are excluded too,
+ * because only a household owner acts on the household admin role (#168): a
+ * household admin holding those could promote another household admin, remove
+ * the rest, or revoke an invite a household owner sent with that role.
  *
  * Household roles hold the `:household` variant of every event sub-resource
  * grant, bound through the event's household; the event-bound original
@@ -151,8 +157,20 @@ const HOUSEHOLD_OWNER: readonly PermissionSlug[] = [
 ];
 
 const HOUSEHOLD_OWNER_ONLY: readonly PermissionSlug[] = [
+  'create:household_invite',
   'delete:household',
+  'manage:household_member',
+  'update:household_invite:revoke',
   'update:household_role:transfer-ownership',
+];
+
+// Only a household owner acts on the household admin role (#168). A household
+// admin holds these in place of the owner's member, invite and revoke
+// permissions: each stops at the member role.
+const HOUSEHOLD_ADMIN_ONLY: readonly PermissionSlug[] = [
+  'create:household_invite:as-admin',
+  'manage:household_member:as-admin',
+  'update:household_invite:revoke:as-admin',
 ];
 
 const EVENT_HOST: readonly PermissionSlug[] = [
@@ -389,7 +407,10 @@ export const ROLE_PERMISSION_CATALOG: Readonly<Record<SystemRole, readonly Permi
   ],
   [SystemRole.AnonymousUser]: ['read:game_collection:public'],
   [SystemRole.HouseholdOwner]: HOUSEHOLD_OWNER,
-  [SystemRole.HouseholdAdmin]: HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
+  [SystemRole.HouseholdAdmin]: [
+    ...HOUSEHOLD_OWNER.filter((slug) => !HOUSEHOLD_OWNER_ONLY.includes(slug)),
+    ...HOUSEHOLD_ADMIN_ONLY,
+  ],
   [SystemRole.HouseholdMember]: [
     // Members create household events as they create household sessions;
     // guests do not. Revisiting who holds it is #168's matrix.

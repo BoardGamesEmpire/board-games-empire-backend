@@ -235,10 +235,14 @@ describe('member invites, their approval, and the invites a user has sent', () =
         await db.client.householdSettings.update({ where: { householdId }, data: { memberInvitePolicy } });
         const [first, second, third] = await Promise.all([actors.user(), actors.user(), actors.user()]);
 
-        const byOwner = await createdInvite(owner, householdId, { inviteeId: first.user.id });
+        // Only the owner invites with the household admin role (#168).
+        const byOwner = await createdInvite(owner, householdId, {
+          inviteeId: first.user.id,
+          role: SystemRole.HouseholdAdmin,
+        });
         const byAdmin = await createdInvite(admin, householdId, {
           inviteeId: second.user.id,
-          role: SystemRole.HouseholdAdmin,
+          role: SystemRole.HouseholdGuest,
         });
         await invite(guest, householdId, { inviteeId: third.user.id }).expect(403);
 
@@ -373,7 +377,7 @@ describe('member invites, their approval, and the invites a user has sent', () =
         const waiting = await createdInvite(member, householdId, { inviteeId: invitee.user.id });
         const another = await createdInvite(member, householdId, { inviteeId: other.user.id });
 
-        await withoutAdminGrant('update:household_invite:revoke', async () => {
+        await withoutAdminGrant('update:household_invite:revoke:as-admin', async () => {
           await revoke(admin, householdId, waiting.id).expect(403);
           await approve(admin, householdId, another.id).expect(200);
         });

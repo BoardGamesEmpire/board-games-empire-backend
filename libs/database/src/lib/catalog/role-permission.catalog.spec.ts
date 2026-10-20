@@ -354,15 +354,21 @@ describe('the shipped catalogs', () => {
       expect(heldBy(SystemRole.Moderator)).toEqual(['read:public_content']);
     });
 
-    it('derive HouseholdAdmin from HouseholdOwner minus deletion and the ownership-transfer gate', () => {
+    it('derive HouseholdAdmin from HouseholdOwner minus the owner-only slugs, plus variants that stop at the Member role (#168)', () => {
       const owner = ROLE_PERMISSION_CATALOG[SystemRole.HouseholdOwner];
       const admin = ROLE_PERMISSION_CATALOG[SystemRole.HouseholdAdmin];
 
-      expect(admin).not.toContain('delete:household');
-      expect(admin).not.toContain('update:household_role:transfer-ownership');
-      expect(owner.filter((slug) => !admin.includes(slug))).toEqual([
+      expect(owner.filter((slug) => !admin.includes(slug)).sort()).toEqual([
+        'create:household_invite',
         'delete:household',
+        'manage:household_member',
+        'update:household_invite:revoke',
         'update:household_role:transfer-ownership',
+      ]);
+      expect(admin.filter((slug) => !owner.includes(slug)).sort()).toEqual([
+        'create:household_invite:as-admin',
+        'manage:household_member:as-admin',
+        'update:household_invite:revoke:as-admin',
       ]);
     });
 

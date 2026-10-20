@@ -396,7 +396,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
         owner,
         members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
       });
-      const key = await inviteKey(admin, ['update:household_invite:revoke']);
+      const key = await inviteKey(admin, ['update:household_invite:revoke:as-admin']);
       const ownersInvite = await createdInvite(owner, household.id, { inviteeId: first.user.id });
       const adminsInvite = await createdInvite(admin, household.id, { inviteeId: second.user.id });
 
@@ -422,7 +422,7 @@ describe('declining, withdrawing and revoking a household invite', () => {
       });
       const scopedTo = await createdInvite(owner, household.id, { inviteeId: first.user.id });
       const other = await createdInvite(owner, household.id, { inviteeId: second.user.id });
-      const key = await inviteKey(admin, ['update:household_invite:revoke'], scopedTo.id);
+      const key = await inviteKey(admin, ['update:household_invite:revoke:as-admin'], scopedTo.id);
 
       await revoke(key, household.id, other.id).expect(403);
       await revoke(key, household.id, scopedTo.id).expect(200);

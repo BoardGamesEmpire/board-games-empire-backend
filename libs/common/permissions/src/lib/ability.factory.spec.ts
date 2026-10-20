@@ -852,10 +852,9 @@ describe('AbilityFactory', () => {
           household: {
             is: {
               members: {
-                some: {
-                  userId: 'user-1',
-                  role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
-                },
+                // A household owner's alone: a household admin holds its own
+                // copy, which stops at the member role (#168).
+                some: { userId: 'user-1', role: { is: { role: { is: { name: 'HouseholdOwner' } } } } },
               },
             },
           },
@@ -1331,9 +1330,12 @@ describe('AbilityFactory', () => {
           ],
         }),
       );
+    // Offering the member role, as the create route's instance always names
+    // the role an invite offers; an admin is refused the admin offer (#168).
     const inviteInto = (householdId: string, members: { userId: string; role: string }[]) =>
       subject(ResourceType.Invite, {
         householdId,
+        role: { name: SystemRole.HouseholdMember },
         household: { members: members.map(({ userId, role }) => ({ userId, role: { role: { name: role } } })) },
       });
 
@@ -1454,7 +1456,7 @@ describe('AbilityFactory', () => {
       (roleName) => {
         for (const policy of Object.values(MemberInvitePolicy)) {
           expect(opensAs(roleName, policy)).toBe('direct');
-          expect(opensAs(roleName, policy, SystemRole.HouseholdAdmin)).toBe('direct');
+          expect(opensAs(roleName, policy, SystemRole.HouseholdGuest)).toBe('direct');
         }
       },
     );
@@ -1487,10 +1489,13 @@ describe('AbilityFactory', () => {
     });
 
     describe('approving and revoking', () => {
+      // Carrying the role the invite offers, as the service's instance does: an
+      // admin's revoke reads it (#168).
       const awaiting = (roleName: SystemRole) =>
         subject(ResourceType.Invite, {
           id: 'invite-1',
           householdId: 'hh-1',
+          role: { name: SystemRole.HouseholdMember },
           household: { members: [{ userId: 'user-1', role: { role: { name: roleName } } }] },
         });
 
@@ -1513,12 +1518,176 @@ describe('AbilityFactory', () => {
       // the other.
       it('keeps a holder of approve alone from revoking, and a holder of revoke alone from approving', () => {
         const approver = holding(SystemRole.HouseholdAdmin, ['update:household_invite:approve']);
-        const revoker = holding(SystemRole.HouseholdAdmin, ['update:household_invite:revoke']);
+        const revoker = holding(SystemRole.HouseholdAdmin, ['update:household_invite:revoke:as-admin']);
 
         expect(approver.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'approvedById')).toBe(true);
         expect(approver.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'status')).toBe(false);
         expect(revoker.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'status')).toBe(true);
         expect(revoker.can(Action.update, awaiting(SystemRole.HouseholdAdmin), 'approvedById')).toBe(false);
+      });
+    });
+  });
+
+  describe('acting on the household admin role (#168)', () => {
+    // Only a household owner makes someone a household admin, changes a
+    // household admin's role, removes one, invites with that role or revokes
+    // an invite offering it. A household admin does each for the member and
+    // guest roles, so one household admin can't promote another, remove the
+    // rest, or overturn the owner's offer. The routes ask about an instance
+    // carrying the target's or the offer's role beside the roster.
+    const holding = (roleName: SystemRole) =>
+      factory.createForUser(
+        makeUser({
+          id: 'user-1',
+          householdMember: [
+            {
+              householdId: 'hh-1',
+              role: makeRole(roleName, [...ROLE_PERMISSION_CATALOG[roleName]].map(catalogPermission)),
+            },
+          ],
+        }),
+      );
+    const roster = (actor: SystemRole) => ({ members: [{ userId: 'user-1', role: { role: { name: actor } } }] });
+    const memberRow = (actor: SystemRole, target: SystemRole, userId = 'user-2') =>
+      subject(ResourceType.HouseholdMember, {
+        householdId: 'hh-1',
+        userId,
+        role: { role: { name: target } },
+        household: roster(actor),
+      });
+    const inviteOffering = (actor: SystemRole, offers: SystemRole) =>
+      subject(ResourceType.Invite, { householdId: 'hh-1', role: { name: offers }, household: roster(actor) });
+    const openInviteOffering = (actor: SystemRole, offers: SystemRole) =>
+      subject(ResourceType.Invite, {
+        id: 'invite-1',
+        householdId: 'hh-1',
+        role: { name: offers },
+        household: roster(actor),
+      });
+
+    describe('changing a role and removing', () => {
+      it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+        'lets a HouseholdAdmin manage a %s',
+        (target) => {
+          const ability = holding(SystemRole.HouseholdAdmin);
+
+          expect(ability.can(Action.manage, memberRow(SystemRole.HouseholdAdmin, target))).toBe(true);
+        },
+      );
+
+      it.each([SystemRole.HouseholdAdmin, SystemRole.HouseholdOwner])('refuses a HouseholdAdmin a %s', (target) => {
+        const ability = holding(SystemRole.HouseholdAdmin);
+
+        expect(ability.can(Action.manage, memberRow(SystemRole.HouseholdAdmin, target))).toBe(false);
+        expect(ability.can(Action.delete, memberRow(SystemRole.HouseholdAdmin, target))).toBe(false);
+      });
+
+      it('refuses a HouseholdAdmin their own row, which they leave through the leave grant instead', () => {
+        const ability = holding(SystemRole.HouseholdAdmin);
+        const own = memberRow(SystemRole.HouseholdAdmin, SystemRole.HouseholdAdmin, 'user-1');
+
+        expect(ability.can(Action.manage, own)).toBe(false);
+        expect(ability.can(Action.delete, own)).toBe(true);
+      });
+
+      it.each([SystemRole.HouseholdAdmin, SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+        'lets a HouseholdOwner manage a %s',
+        (target) => {
+          const ability = holding(SystemRole.HouseholdOwner);
+
+          expect(ability.can(Action.manage, memberRow(SystemRole.HouseholdOwner, target))).toBe(true);
+        },
+      );
+
+      it("refuses a HouseholdOwner's grant once the roster names them a household admin", () => {
+        // The graph was built while they owned the household; the roster read
+        // under the lock, after their ownership transfer landed, decides.
+        const ability = holding(SystemRole.HouseholdOwner);
+
+        expect(ability.can(Action.manage, memberRow(SystemRole.HouseholdAdmin, SystemRole.HouseholdAdmin))).toBe(false);
+        expect(ability.can(Action.create, inviteOffering(SystemRole.HouseholdAdmin, SystemRole.HouseholdAdmin))).toBe(
+          false,
+        );
+        expect(
+          ability.can(
+            Action.update,
+            openInviteOffering(SystemRole.HouseholdAdmin, SystemRole.HouseholdAdmin),
+            'status',
+          ),
+        ).toBe(false);
+      });
+    });
+
+    describe('inviting', () => {
+      it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+        'lets a HouseholdAdmin invite as %s',
+        (offers) => {
+          const ability = holding(SystemRole.HouseholdAdmin);
+
+          expect(ability.can(Action.create, inviteOffering(SystemRole.HouseholdAdmin, offers))).toBe(true);
+        },
+      );
+
+      it.each([SystemRole.HouseholdAdmin, SystemRole.HouseholdOwner])(
+        'refuses a HouseholdAdmin an invite offering %s',
+        (offers) => {
+          const ability = holding(SystemRole.HouseholdAdmin);
+
+          expect(ability.can(Action.create, inviteOffering(SystemRole.HouseholdAdmin, offers))).toBe(false);
+        },
+      );
+
+      it('lets a HouseholdOwner invite as an admin', () => {
+        const ability = holding(SystemRole.HouseholdOwner);
+
+        expect(ability.can(Action.create, inviteOffering(SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin))).toBe(
+          true,
+        );
+      });
+    });
+
+    describe('revoking', () => {
+      it.each([SystemRole.HouseholdMember, SystemRole.HouseholdGuest])(
+        'lets a HouseholdAdmin revoke an invite offering %s',
+        (offers) => {
+          const ability = holding(SystemRole.HouseholdAdmin);
+
+          expect(ability.can(Action.update, openInviteOffering(SystemRole.HouseholdAdmin, offers), 'status')).toBe(
+            true,
+          );
+        },
+      );
+
+      it('refuses a HouseholdAdmin the revoke of an invite offering admin, and lets the owner revoke it', () => {
+        const admin = holding(SystemRole.HouseholdAdmin);
+        const owner = holding(SystemRole.HouseholdOwner);
+
+        expect(
+          admin.can(Action.update, openInviteOffering(SystemRole.HouseholdAdmin, SystemRole.HouseholdAdmin), 'status'),
+        ).toBe(false);
+        expect(
+          owner.can(Action.update, openInviteOffering(SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin), 'status'),
+        ).toBe(true);
+      });
+
+      it('refuses a HouseholdAdmin a revoke on an invite that carries no offered role', () => {
+        // Why the service reads the invite's role onto the instance: without
+        // it, the admin's grant matches nothing.
+        const ability = holding(SystemRole.HouseholdAdmin);
+        const roleless = subject(ResourceType.Invite, {
+          id: 'invite-1',
+          householdId: 'hh-1',
+          household: roster(SystemRole.HouseholdAdmin),
+        });
+
+        expect(ability.can(Action.update, roleless, 'status')).toBe(false);
+      });
+
+      it('leaves a HouseholdAdmin no revoke through another column', () => {
+        const ability = holding(SystemRole.HouseholdAdmin);
+        const offer = openInviteOffering(SystemRole.HouseholdAdmin, SystemRole.HouseholdMember);
+
+        expect(ability.can(Action.update, offer, 'role')).toBe(false);
       });
     });
   });

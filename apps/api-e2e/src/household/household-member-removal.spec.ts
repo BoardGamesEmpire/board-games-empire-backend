@@ -102,10 +102,10 @@ describe('removing household members and leaving households', () => {
   };
 
   it('seeds the leave permission on all four household roles', async () => {
-    // Only the member role and the household guest role rely on it. A
-    // household owner or admin also leaves through `manage:household_member`,
-    // which CASL reads as covering `delete`, and the route's own `userId` pin
-    // is what keeps that from reaching anyone else's membership.
+    // A household owner also leaves through `manage:household_member`, which
+    // CASL reads as covering `delete`, and the route's own `userId` pin is what
+    // keeps that from reaching anyone else's membership. A household admin's
+    // own copy stops at the member role (#168), so they rely on this one too.
     for (const roleName of HOUSEHOLD_ROLE_NAMES) {
       const role = await db.client.role.findUniqueOrThrow({
         where: { name: roleName },
@@ -120,21 +120,26 @@ describe('removing household members and leaving households', () => {
   });
 
   describe('removing a member', () => {
-    const REMOVERS = [SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin] as const;
-    // No household owner among the targets. The only one a route can make is
-    // the last owner, covered below; one the fixture could add is a co-owner,
-    // and whether a household admin may remove a co-owner is still open
-    // (#174). A case here would decide it.
-    const TARGETS = [SystemRole.HouseholdMember, SystemRole.HouseholdGuest, SystemRole.HouseholdAdmin] as const;
+    // A household owner removes anyone but the last owner, covered below, so
+    // a co-owner too. A household admin removes people with the member or
+    // guest role, and is refused another household admin or a household
+    // owner, as below: only a household owner acts on the household admin
+    // role (#168).
+    const REMOVALS: readonly (readonly [HouseholdRoleName, HouseholdRoleName])[] = [
+      [SystemRole.HouseholdOwner, SystemRole.HouseholdMember],
+      [SystemRole.HouseholdOwner, SystemRole.HouseholdGuest],
+      [SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin],
+      [SystemRole.HouseholdOwner, SystemRole.HouseholdOwner],
+      [SystemRole.HouseholdAdmin, SystemRole.HouseholdMember],
+      [SystemRole.HouseholdAdmin, SystemRole.HouseholdGuest],
+    ];
 
-    const removals = REMOVERS.flatMap((remover) =>
-      TARGETS.map((target) => ({
-        remover,
-        target,
-        removerLabel: ROLE_LABEL[remover],
-        targetLabel: ROLE_LABEL[target],
-      })),
-    );
+    const removals = REMOVALS.map(([remover, target]) => ({
+      remover,
+      target,
+      removerLabel: ROLE_LABEL[remover],
+      targetLabel: ROLE_LABEL[target],
+    }));
 
     it.each(removals)(
       'lets a $removerLabel remove a $targetLabel, deleting the membership and its household role',
@@ -168,6 +173,58 @@ describe('removing household members and leaving households', () => {
         await expect(roster(householdId)).resolves.toEqual(before.filter((row) => row.id !== removed.id));
       },
     );
+
+    it.each([
+      { target: SystemRole.HouseholdAdmin, label: ROLE_LABEL[SystemRole.HouseholdAdmin] },
+      { target: SystemRole.HouseholdOwner, label: 'household owner who is not the last' },
+    ])('refuses a household admin the removal of a $label with 403, and removes nothing (#168)', async ({ target }) => {
+      // Only a household owner acts on the household admin role, so one admin
+      // can't remove the rest, nor an owner. The admin holds `manage` on
+      // memberships and passes the route guard; the service refuses them,
+      // because their grant stops at the member role.
+      const owner = await actors.user();
+      const admin = await actors.user();
+      const targeted = await actors.user();
+
+      const fixture = await actors.householdWithMembers({
+        owner,
+        name: 'An admin reaching too far',
+        members: [
+          { actor: admin, role: SystemRole.HouseholdAdmin },
+          { actor: targeted, role: target },
+        ],
+      });
+      const before = await roster(fixture.household.id);
+
+      const response = await removeMember(admin, fixture.household.id, fixture.members[1].member.id).expect(403);
+
+      expect(messageOf(response)).toBe(REFUSED_BY_SERVICE);
+      await expect(roster(fixture.household.id)).resolves.toEqual(before);
+    });
+
+    it('refuses a household admin their own membership by id, and lets them leave through …/members/me (#168)', async () => {
+      // Their `manage` stops at the member role, so their own row is outside
+      // it; the leave grant is what reaches it.
+      const owner = await actors.user();
+      const admin = await actors.user();
+
+      const fixture = await actors.householdWithMembers({
+        owner,
+        name: 'An admin stepping down',
+        members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+      });
+      const adminMembership = fixture.members[0].member;
+      const before = await roster(fixture.household.id);
+
+      const refused = await removeMember(admin, fixture.household.id, adminMembership.id).expect(403);
+
+      expect(messageOf(refused)).toBe(REFUSED_BY_SERVICE);
+      await expect(roster(fixture.household.id)).resolves.toEqual(before);
+
+      await leave(admin, fixture.household.id).expect(200);
+
+      await expectMembershipGone(adminMembership.id);
+    });
 
     it.each([
       { role: SystemRole.HouseholdMember, label: ROLE_LABEL[SystemRole.HouseholdMember] },
@@ -348,9 +405,9 @@ describe('removing household members and leaving households', () => {
       },
     );
 
-    it("resolves …/members/me to a household admin's own membership, though their grants reach every one", async () => {
+    it("resolves …/members/me to a household admin's own membership, though their grants reach other ones", async () => {
       // `manage` covers `delete`, so a household admin's grants match every
-      // membership in the household; `me` must still mean their own. The
+      // member and guest in the household; `me` must still mean their own. The
       // message is the leave route's. A request that reached the remove route
       // instead would look for a membership with the id `me` and answer 404.
       //
@@ -424,19 +481,21 @@ describe('removing household members and leaving households', () => {
       await expect(roster(fixture.household.id)).resolves.toEqual(before);
     });
 
-    it('cannot be removed by a household admin, and keeps their membership', async () => {
+    it('cannot remove their own membership by id either, and keeps it', async () => {
+      // The remove route reaches the last-owner guard for an owner alone: a
+      // household admin is refused any owner before it (#168).
       const owner = await actors.user();
-      const admin = await actors.user();
+      const member = await actors.user();
 
       const fixture = await actors.householdWithMembers({
         owner,
-        name: 'One owner, one admin',
-        members: [{ actor: admin, role: SystemRole.HouseholdAdmin }],
+        name: 'One owner',
+        members: [{ actor: member, role: SystemRole.HouseholdMember }],
       });
       const before = await roster(fixture.household.id);
 
       expectLastOwnerRefusal(
-        await removeMember(admin, fixture.household.id, fixture.owner.member.id),
+        await removeMember(owner, fixture.household.id, fixture.owner.member.id),
         fixture.household.id,
       );
 

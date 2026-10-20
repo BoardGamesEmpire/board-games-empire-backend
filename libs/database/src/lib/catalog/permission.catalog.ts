@@ -76,6 +76,24 @@ const ownerOrAdminMembershipOfActingUser = {
   role: { is: { role: { is: { name: { in: ['HouseholdOwner', 'HouseholdAdmin'] } } } } },
 } satisfies Prisma.HouseholdMemberWhereInput;
 
+// The acting user's membership row holding `HouseholdOwner`, for the member,
+// invite and revoke permissions only a household owner holds (#168). The
+// services ask again of the roster read under the household lock, and this
+// clause is what lets that answer tell a household owner from a household
+// admin: an owner whose ownership transfer landed first is refused. Typed and
+// module-private for the reasons `acceptedFriendOfActingUser` gives.
+const ownerMembershipOfActingUser = {
+  userId: '{{ user.id }}',
+  role: { is: { role: { is: { name: 'HouseholdOwner' } } } },
+} satisfies Prisma.HouseholdMemberWhereInput;
+
+// The household roles a household admin acts on: the member and guest roles.
+// Only a household owner acts on the household admin role (#168), so the
+// household admin's copies of the member, invite and revoke permissions match
+// a target or an offer holding one of these. Typed and module-private for the
+// reasons `acceptedFriendOfActingUser` gives.
+const memberOrGuestRoleName = { in: ['HouseholdMember', 'HouseholdGuest'] } satisfies Prisma.StringFilter<'Role'>;
+
 // A member's invite into their own household (#166): the acting user holds the
 // member role there, the household's settings let members invite in this way,
 // and the invite offers the member or guest role. Offering admin is refused, as
@@ -84,7 +102,7 @@ const ownerOrAdminMembershipOfActingUser = {
 const memberInviteUnder = (memberInvitePolicy: 'Direct' | 'NeedsApproval') =>
   ({
     householdId: '{{ householdId }}',
-    role: { is: { name: { in: ['HouseholdMember', 'HouseholdGuest'] } } },
+    role: { is: { name: memberOrGuestRoleName } },
     household: {
       is: {
         settings: { is: { memberInvitePolicy } },
@@ -1187,14 +1205,33 @@ export const PERMISSION_CATALOG = [
     subject: ResourceType.HouseholdMember,
     conditions: {
       householdId: '{{ householdId }}',
-      // Defense-in-depth only: the `{{ householdId }}` pin already scopes to
-      // households where the actor holds the granting role. The relation path
-      // must go through `household` — HouseholdMember has no `members` field.
-      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+      // The `{{ householdId }}` pin already scopes to households where the
+      // actor holds the granting role; the roster clause is what the re-check
+      // under the household lock decides on (#168). The relation path must go
+      // through `household` — HouseholdMember has no `members` field.
+      household: { is: { members: { some: ownerMembershipOfActingUser } } },
     },
     slug: 'manage:household_member',
     riskLevel: RiskLevel.High,
     reason: 'Manage household members',
+  }),
+  // The household admin's copy, stopping at the member role (#168). Only a
+  // household owner acts on the household admin role, so one household admin
+  // can't promote another, or demote or remove the rest. The target's role is
+  // read off the row, so the role change asks again about the role it gives;
+  // a household admin's own row is outside it, and they leave through the
+  // leave grant below.
+  permission({
+    action: Action.manage,
+    subject: ResourceType.HouseholdMember,
+    conditions: {
+      householdId: '{{ householdId }}',
+      role: { is: { role: { is: { name: memberOrGuestRoleName } } } },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'manage:household_member:as-admin',
+    riskLevel: RiskLevel.High,
+    reason: "Change the role of, or remove, your household's members and guests",
   }),
   permission({
     action: Action.read,
@@ -1280,8 +1317,9 @@ export const PERMISSION_CATALOG = [
     reason: 'Transfer household ownership to another member',
   }),
 
-  // Owner/Admin only, with the role clause in the condition for the same
-  // reason as `update:household`.
+  // A household owner's, with the role clause in the condition for the same
+  // reason as `update:household`. A household admin holds the copy below,
+  // which stops at the member role (#168).
   //
   // The conditions bind only a check against an invite instance, so a route
   // gate cannot stop at the type: `Invite` also carries event invites, and a
@@ -1289,18 +1327,32 @@ export const PERMISSION_CATALOG = [
   // `create:event_invite`, down to EventParticipant. The instance must carry
   // the household's members with their roles, or the role clause denies it.
   //
-  // An owner or admin always invites directly, whatever the household's
-  // member invite policy.
+  // A household owner or admin always invites directly, whatever the
+  // household's member invite policy.
   permission({
     action: Action.create,
     subject: ResourceType.Invite,
     conditions: {
       householdId: '{{ householdId }}',
-      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+      household: { is: { members: { some: ownerMembershipOfActingUser } } },
     },
     slug: 'create:household_invite',
     riskLevel: RiskLevel.Medium,
     reason: 'Invite to household',
+  }),
+  // The household admin's copy, offering the member or guest role only: only
+  // a household owner invites someone as a household admin (#168).
+  permission({
+    action: Action.create,
+    subject: ResourceType.Invite,
+    conditions: {
+      householdId: '{{ householdId }}',
+      role: { is: { name: memberOrGuestRoleName } },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'create:household_invite:as-admin',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Invite to your household as a member or guest',
   }),
   // A member invites under the household's own policy (#166), as two
   // permissions the service asks about in turn: first whether the invite may
@@ -1348,8 +1400,9 @@ export const PERMISSION_CATALOG = [
   }),
   // Revoking cancels an invite someone else sent (#164). The audience and the
   // role clause are `create:household_invite`'s, read off an instance for the
-  // same reason, so a type-only check passes any household's Owner or Admin
-  // and the service asks again about THIS household.
+  // same reason, so a type-only check passes any household's owner, and the
+  // service asks again about THIS household. A household admin holds the
+  // copy below (#168).
   //
   // An inviter takes their own invite back by withdrawing it, which needs no
   // grant: it belongs to whoever sent the invite, whatever their role now. The
@@ -1366,11 +1419,29 @@ export const PERMISSION_CATALOG = [
     fields: ['status'],
     conditions: {
       householdId: '{{ householdId }}',
-      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+      household: { is: { members: { some: ownerMembershipOfActingUser } } },
     },
     slug: 'update:household_invite:revoke',
     riskLevel: RiskLevel.Medium,
     reason: 'Revoke an invite someone else sent to the household',
+  }),
+  // The household admin's copy, for an invite offering the member or guest
+  // role (#168). Revoking an invite a household owner sent with the household
+  // admin role would overturn the owner's decision on that role, which is the
+  // owner's alone. The service puts the role the invite offers on the
+  // instance it asks about.
+  permission({
+    action: Action.update,
+    subject: ResourceType.Invite,
+    fields: ['status'],
+    conditions: {
+      householdId: '{{ householdId }}',
+      role: { is: { name: memberOrGuestRoleName } },
+      household: { is: { members: { some: ownerOrAdminMembershipOfActingUser } } },
+    },
+    slug: 'update:household_invite:revoke:as-admin',
+    riskLevel: RiskLevel.Medium,
+    reason: 'Revoke an invite someone else sent that offers the member or guest role',
   }),
   // Approving opens a member's invite awaiting approval to its invitee (#166).
   // The audience is revoke's, read off an instance for the same reason. It is
