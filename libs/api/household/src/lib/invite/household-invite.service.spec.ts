@@ -178,6 +178,8 @@ describe('HouseholdInviteService', () => {
     db.household.count.mockResolvedValue(1);
     db.invite.findUniqueOrThrow.mockImplementation(((args: { select: Record<string, unknown> }) =>
       Promise.resolve(selected(STORED_INVITE, args.select))) as never);
+    // The role an existing invite offers, read for a revoke or an approval (#168).
+    db.invite.findFirst.mockResolvedValue({ role: { name: SystemRole.HouseholdMember } } as never);
   });
 
   afterEach(() => jest.clearAllMocks());
@@ -902,6 +904,10 @@ describe('HouseholdInviteService', () => {
       abilityService.assertCurrentActorCan.mockImplementation(() => {
         steps.push('check');
       });
+      db.invite.findFirst.mockImplementation((() => {
+        steps.push('offered role');
+        return Promise.resolve({ role: { name: SystemRole.HouseholdMember } });
+      }) as never);
       invites.revokeWithin.mockImplementation(() => {
         steps.push('revoke');
         return Promise.resolve(revocation);
@@ -910,11 +916,18 @@ describe('HouseholdInviteService', () => {
       await expect(service.revokeInvite('hh-1', 'invite-1')).resolves.toMatchObject(revocation.invite);
 
       // The household row, then the invite: the order a soft delete takes them in.
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'revoke']);
+      // The role the invite offers is set when it is sent, so it is read once,
+      // before the lock, and both questions ask of it.
+      expect(steps).toEqual(['offered role', 'roster', 'check', 'lock', 'roster', 'check', 'revoke']);
       // Named by its id, so a key scoped to this one invite is asked about it,
       // and asked about `status`, the column a revoke changes, so the approve
       // permission does not pass for it.
-      const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
+      const instance = {
+        id: 'invite-1',
+        householdId: 'hh-1',
+        role: { name: SystemRole.HouseholdMember },
+        household: { members: ROSTER },
+      };
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
         [Action.update, ResourceType.Invite, instance, 'status'],
         [Action.update, ResourceType.Invite, instance, 'status'],
@@ -962,6 +975,46 @@ describe('HouseholdInviteService', () => {
       expect(invites.revokeWithin).not.toHaveBeenCalled();
     });
 
+    describe('the role the invite offers (#168)', () => {
+      // An admin revokes only an invite offering the member or guest role, so
+      // the instance carries the role this household's invite offers.
+      const askedAbout = () =>
+        abilityService.assertCurrentActorCan.mock.calls.map(([, , instance]) => (instance as { role?: unknown }).role);
+
+      it('puts the role the invite offers on the instance, read of this household', async () => {
+        db.invite.findFirst.mockResolvedValue({ role: { name: SystemRole.HouseholdAdmin } } as never);
+
+        await service.revokeInvite('hh-1', 'invite-1');
+
+        expect(db.invite.findFirst).toHaveBeenCalledWith({
+          where: { id: 'invite-1', householdId: 'hh-1' },
+          select: { role: { select: { name: true } } },
+        });
+        expect(askedAbout()).toEqual([{ name: SystemRole.HouseholdAdmin }, { name: SystemRole.HouseholdAdmin }]);
+      });
+
+      it('asks about an invite this household does not have as one offering the member role, so the lib answers 404', async () => {
+        // The question then is whether the actor may revoke any invite here:
+        // an owner or admin reaches the lib's 404, and anyone else is refused
+        // as before, which says nothing about invites elsewhere.
+        db.invite.findFirst.mockResolvedValue(null);
+        invites.revokeWithin.mockRejectedValue(new NotFoundException());
+
+        await expect(service.revokeInvite('hh-1', 'invite-9')).rejects.toBeInstanceOf(NotFoundException);
+
+        expect(askedAbout()).toEqual([{ name: SystemRole.HouseholdMember }, { name: SystemRole.HouseholdMember }]);
+        expect(invites.revokeWithin).toHaveBeenCalled();
+      });
+
+      it('asks about an invite naming no role as offering the member role, which its accept admits with', async () => {
+        db.invite.findFirst.mockResolvedValue({ role: null } as never);
+
+        await service.revokeInvite('hh-1', 'invite-1');
+
+        expect(askedAbout()).toEqual([{ name: SystemRole.HouseholdMember }, { name: SystemRole.HouseholdMember }]);
+      });
+    });
+
     it('announces the revoke after the transaction', async () => {
       let emittedInside: boolean | undefined;
       db.$transaction.mockImplementation((async (work: (tx: MockDatabaseService) => Promise<unknown>) => {
@@ -1004,6 +1057,10 @@ describe('HouseholdInviteService', () => {
         steps.push('cap');
         return Promise.resolve(UNCONSTRAINED);
       });
+      db.invite.findFirst.mockImplementation((() => {
+        steps.push('offered role');
+        return Promise.resolve({ role: { name: SystemRole.HouseholdMember } });
+      }) as never);
       invites.approveWithin.mockImplementation(() => {
         steps.push('approve');
         return Promise.resolve(approval);
@@ -1011,10 +1068,15 @@ describe('HouseholdInviteService', () => {
 
       await expect(service.approveInvite('hh-1', 'invite-1')).resolves.toMatchObject(approval.invite);
 
-      expect(steps).toEqual(['roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
+      expect(steps).toEqual(['offered role', 'roster', 'check', 'lock', 'roster', 'check', 'cap', 'approve']);
       // Asked about `approvedById`, the column only an approval writes, so the
       // revoke permission does not pass for it.
-      const instance = { id: 'invite-1', householdId: 'hh-1', household: { members: ROSTER } };
+      const instance = {
+        id: 'invite-1',
+        householdId: 'hh-1',
+        role: { name: SystemRole.HouseholdMember },
+        household: { members: ROSTER },
+      };
       expect(abilityService.assertCurrentActorCan.mock.calls).toEqual([
         [Action.update, ResourceType.Invite, instance, 'approvedById'],
         [Action.update, ResourceType.Invite, instance, 'approvedById'],

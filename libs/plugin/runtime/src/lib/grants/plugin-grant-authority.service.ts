@@ -1,4 +1,4 @@
-import { DatabaseService, SystemRole } from '@bge/database';
+import { DatabaseService, SERVER_ADMIN_ROLE_WHERE, SystemRole } from '@bge/database';
 import { Injectable } from '@nestjs/common';
 
 /**
@@ -49,7 +49,7 @@ export class PluginGrantAuthorityService {
   /** Server-scope decisions: the decider holds a server admin role. */
   async isServerAdmin(userId: string): Promise<boolean> {
     const assignment = await this.db.userRole.findFirst({
-      where: { userId, role: { name: { in: [SystemRole.Owner, SystemRole.Admin] } } },
+      where: { userId, role: SERVER_ADMIN_ROLE_WHERE },
       select: { id: true },
     });
 

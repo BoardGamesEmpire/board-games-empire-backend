@@ -84,14 +84,11 @@ const INERT_HOUSEHOLD_EVENT_GRANTS: readonly Grant[] = [];
  * role is rendered once per attendance, so such a clause comes out the same
  * from every event the actor attends and reaches their rows in all of them,
  * including events where their role holds no such grant. #458 bound the two
- * votes, the RSVP and the withdrawal to the event. `delete:event` is the one
- * left, and it is an open question rather than a slip: it is bound to the
- * event's creator, and `HouseholdOwner` and `HouseholdAdmin` hold it too,
- * rendering the same clause from every household they run. Naming the event
- * in the host's copy alone would not settle who may delete an event (#567).
- * A new line here is a new defect, not a backlog.
+ * votes, the RSVP and the withdrawal to the event. Emptied by #567, which
+ * bound `delete:event` to the event its host attends and took it from the
+ * household roles (#168). A new line here is a new defect, not a backlog.
  */
-const EVENT_SPANNING_GRANTS: readonly Grant[] = [['delete:event', SystemRole.EventHost]];
+const EVENT_SPANNING_GRANTS: readonly Grant[] = [];
 
 /**
  * The DECLARED global staff grants: unconditioned permissions held by a global

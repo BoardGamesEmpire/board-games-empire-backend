@@ -13,5 +13,12 @@ export default defineConfig({
     // own variable when set, `DATABASE_URL` otherwise, empty counting as unset.
     // Migrate needs a direct connection or session pooling.
     url: process.env['DATABASE_MIGRATION_URL'] || process.env['DATABASE_URL'],
+    // The scratch database `npm run db:migrate:check` replays the migrations
+    // into, to compare them with the models (#586). `migrate dev` uses it too
+    // when it is set, and makes a temporary one when it isn't. Prisma empties it
+    // on every run, so it must never be the main database. `migrate dev` refuses
+    // one that is; for `migrate diff`, the check's script does
+    // (libs/scripts/src/migration-check).
+    shadowDatabaseUrl: process.env['SHADOW_DATABASE_URL'] || undefined,
   },
 });

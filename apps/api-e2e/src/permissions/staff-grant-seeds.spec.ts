@@ -180,9 +180,10 @@ describe('staff grant seeds', () => {
     // variable, and REDUNDANT when it names `user.id`, because the household or
     // event role whose condition renders identically already carries the slug.
     // `create:household_role` duplicated `HouseholdOwner`/`HouseholdAdmin`;
-    // `delete:event` duplicated `EventHost`, which an event's creator is seeded
-    // as. Neither granted anything. A global role should hold no TEMPLATED
-    // conditions at all.
+    // `delete:event`, then scoped to the event's creator, duplicated
+    // `EventHost`, which an event's creator is seeded as. Neither granted
+    // anything, and neither is scoped that way now (#168, #567). A global role
+    // should hold no TEMPLATED conditions at all.
     //
     // A static condition is the one exception, and there is one: restore's
     // (#175), which references nothing and so renders the same in every pass.

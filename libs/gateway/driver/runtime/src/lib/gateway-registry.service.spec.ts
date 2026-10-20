@@ -14,6 +14,7 @@ import { CACHE_REDIS_CLIENT } from '@bge/redis';
 import type { DataGatewayDriver } from '@boardgamesempire/gateway-driver-contract';
 import { InMemoryGatewayDriver, type InMemoryGatewayFixtures } from '@boardgamesempire/gateway-driver-contract-testing';
 import * as proto from '@boardgamesempire/proto-gateway';
+import { Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test } from '@nestjs/testing';
 import type { Redis } from 'iovalkey';
@@ -973,6 +974,17 @@ describe('GatewayRegistryService', () => {
       );
     });
 
+    it('logs the auto-disable without claiming a notification, which the listener sends (#763)', async () => {
+      table.seed({ id: 'bgg' });
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      await failUntilThreshold();
+
+      expect(error).toHaveBeenCalledWith(
+        `DataGateway bgg auto-disabled after ${FAILURE_THRESHOLD} consecutive failures (reason=repeated_call_failure).`,
+      );
+    });
+
     it('does not emit when another process already disabled the gateway', async () => {
       table.seed({ id: 'bgg', enabled: false });
       const emitSpy = jest.spyOn(emitter, 'emit');
@@ -980,6 +992,17 @@ describe('GatewayRegistryService', () => {
       await failUntilThreshold();
 
       expect(emitSpy).not.toHaveBeenCalled();
+    });
+
+    it('logs a lost race without claiming a notification, which only the winner’s listener sends (#763)', async () => {
+      table.seed({ id: 'bgg', enabled: false });
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await failUntilThreshold();
+
+      expect(warn).toHaveBeenCalledWith(
+        'DataGateway bgg was already off (another process auto-disabled it, or a server admin switched it off); emitting nothing.',
+      );
     });
 
     it('is transport-agnostic: a registered in-process driver trips the same threshold and is disposed on disable', async () => {

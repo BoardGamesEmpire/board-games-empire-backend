@@ -11,7 +11,7 @@ describe('AuditUnattributedNotifierService', () => {
 
   beforeEach(() => {
     db = createMockDatabaseService();
-    db.notification.findFirst.mockResolvedValue(null);
+    db.notification.findMany.mockResolvedValue([]);
     db.user.findMany.mockResolvedValue([{ id: 'admin-1' }, { id: 'admin-2' }] as never);
     notifications = { createMany: jest.fn().mockResolvedValue(undefined) };
     service = new AuditUnattributedNotifierService(db as never, notifications as unknown as NotificationsService);
@@ -39,18 +39,20 @@ describe('AuditUnattributedNotifierService', () => {
   });
 
   it('dedupes repeat occurrences through the DB unread check, not an in-process memo', async () => {
-    // First occurrence creates; while its notification is unread, repeats are suppressed.
-    db.notification.findFirst.mockResolvedValueOnce(null).mockResolvedValue({ id: 'n1' } as never);
+    // First occurrence creates; while its notifications are unread, repeats are suppressed.
+    db.notification.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ userId: 'admin-1' }, { userId: 'admin-2' }] as never);
 
     await service.notify('sample.created', 'Sample', null);
     await service.notify('sample.created', 'Sample', null);
 
-    expect(db.notification.findFirst).toHaveBeenCalledTimes(2);
+    expect(db.notification.findMany).toHaveBeenCalledTimes(2);
     expect(notifications.createMany).toHaveBeenCalledTimes(1);
   });
 
-  it('raises a fresh notification once admins mark the previous one read', async () => {
-    // findFirst finds no UNREAD notification either time (the first was read).
+  it('raises a fresh notification once the server admins mark the previous one read', async () => {
+    // findMany finds no UNREAD notification either time (the first was read).
     await service.notify('sample.created', 'Sample', null);
     await service.notify('sample.created', 'Sample', null);
 
@@ -76,40 +78,63 @@ describe('AuditUnattributedNotifierService', () => {
     expect(notifications.createMany).toHaveBeenCalledTimes(2);
   });
 
-  it('suppresses re-raising while an unread notification for the event exists', async () => {
-    db.notification.findFirst.mockResolvedValue({ id: 'n1' } as never);
+  it('suppresses re-raising for every server admin whose unread notification for the event exists', async () => {
+    db.notification.findMany.mockResolvedValue([{ userId: 'admin-1' }, { userId: 'admin-2' }] as never);
 
     await service.notify('sample.created', 'Sample', null);
 
-    // Scoped to the admin ids so the query can use the (userId, read,
-    // createdAt) index instead of scanning on the JSON payload match.
-    expect(db.notification.findFirst).toHaveBeenCalledWith({
+    // Scoped to the server admins' ids so the query can use the (userId,
+    // read, createdAt) index instead of scanning on the JSON payload match.
+    expect(db.notification.findMany).toHaveBeenCalledWith({
       where: {
         userId: { in: ['admin-1', 'admin-2'] },
         read: false,
         type: NotificationType.AuditUnattributedEvent,
         payload: { path: ['eventName'], equals: 'sample.created' },
       },
-      select: { id: true },
+      select: { userId: true },
     });
     expect(notifications.createMany).not.toHaveBeenCalled();
   });
 
-  it('warns and skips when no admin users exist', async () => {
+  it("tells a server admin who read theirs, though another server admin's copy is still unread", async () => {
+    db.notification.findMany.mockResolvedValue([{ userId: 'admin-2' }] as never);
+
+    await service.notify('sample.created', 'Sample', 'queue');
+
+    expect(notifications.createMany).toHaveBeenCalledWith([
+      {
+        userId: 'admin-1',
+        type: NotificationType.AuditUnattributedEvent,
+        payload: { eventName: 'sample.created', subject: 'Sample', source: 'queue' },
+      },
+    ]);
+  });
+
+  it('warns and skips when there are no server admins', async () => {
     const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     db.user.findMany.mockResolvedValue([] as never);
 
     await service.notify('sample.created', 'Sample', null);
 
-    expect(db.notification.findFirst).not.toHaveBeenCalled();
+    expect(db.notification.findMany).not.toHaveBeenCalled();
     expect(notifications.createMany).not.toHaveBeenCalled();
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('No admin users'));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('No server admins'));
+    warnSpy.mockRestore();
+  });
+
+  it('logs how many server admins it notified', async () => {
+    const warnSpy = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+    await service.notify('sample.created', 'Sample', null);
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('notified 2 server admin(s)'));
     warnSpy.mockRestore();
   });
 
   it('swallows lookup/creation failures', async () => {
     const errorSpy = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
-    db.notification.findFirst.mockRejectedValue(new Error('db down'));
+    db.notification.findMany.mockRejectedValue(new Error('db down'));
 
     await expect(service.notify('sample.created', 'Sample', null)).resolves.toBeUndefined();
 

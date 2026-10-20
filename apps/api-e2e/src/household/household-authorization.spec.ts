@@ -1,10 +1,10 @@
-import { Reach, SystemRole } from '@bge/database';
-import { befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
+import { FriendshipStatus, Reach, SystemRole } from '@bge/database';
+import { arrangeFriendship, befriend, createActors, type Actors, type SessionActor } from '@bge/testing-e2e';
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { requireBaseUrl } from '../support/e2e-env';
 import { createTestDatabase, type TestDatabase } from '../support/test-db';
-import { membersPath } from './household-request';
+import { createMemberClient, membersPath } from './household-request';
 import { createEnvelope, listEnvelope, readEnvelope } from './household-wire';
 
 /**
@@ -136,6 +136,76 @@ describe('household authorization', () => {
       expect(kept.household.reach).toBe(Reach.Private);
       await readHousehold(viewer, kept.household.id).expect(403);
       await request(baseUrl).get(membersPath(kept.household.id)).set(viewer.headers).expect(403);
+    });
+
+    /**
+     * Which friendships admit a member's friend (#294). Only an accepted one
+     * does, in either direction. In each case an accepted friend of the same
+     * member reads the same `Friends` household first, so the refusal is the
+     * friendship's state and not the household.
+     */
+    describe('which friendships admit a friend (#294)', () => {
+      const { leave } = createMemberClient(baseUrl);
+
+      const arrangeFriendsHousehold = async () => {
+        const [owner, viewer, acceptedFriend] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+        const shared = await actors.householdWithMembers({ owner, name: `Friends ${randomUUID().slice(0, 8)}` });
+        await db.client.household.update({ where: { id: shared.household.id }, data: { reach: Reach.Friends } });
+        await befriend(db.client, acceptedFriend, owner);
+
+        return { owner, viewer, acceptedFriend, householdId: shared.household.id };
+      };
+
+      it.each([
+        ['a pending request from the viewer', FriendshipStatus.Pending, 'viewer'],
+        ['a pending request from the member', FriendshipStatus.Pending, 'member'],
+        ['a block by the viewer', FriendshipStatus.Blocked, 'viewer'],
+        ['a block by the member', FriendshipStatus.Blocked, 'member'],
+      ] as const)('refuses %s', async (_case, status, requester) => {
+        const { owner, viewer, acceptedFriend, householdId } = await arrangeFriendsHousehold();
+        const [from, to] = requester === 'viewer' ? [viewer, owner] : [owner, viewer];
+        await arrangeFriendship(db.client, from, to, status);
+
+        await readHousehold(acceptedFriend, householdId).expect(200);
+        await readHousehold(viewer, householdId).expect(403);
+      });
+
+      // `FriendsOfFriends` admits direct friends only until #496 defines a
+      // friend of a friend.
+      it('refuses a friend of a friend, at FriendsOfFriends', async () => {
+        const { viewer, acceptedFriend, householdId } = await arrangeFriendsHousehold();
+        await db.client.household.update({ where: { id: householdId }, data: { reach: Reach.FriendsOfFriends } });
+        await befriend(db.client, viewer, acceptedFriend);
+
+        await readHousehold(acceptedFriend, householdId).expect(200);
+        await readHousehold(viewer, householdId).expect(403);
+      });
+
+      it('refuses a friend of a member who has left', async () => {
+        const [owner, member, viewer] = await Promise.all([actors.user(), actors.user(), actors.user()]);
+        const shared = await actors.householdWithMembers({
+          owner,
+          name: `Left ${randomUUID().slice(0, 8)}`,
+          members: [{ actor: member, role: SystemRole.HouseholdMember }],
+        });
+        const householdId = shared.household.id;
+        await db.client.household.update({ where: { id: householdId }, data: { reach: Reach.Friends } });
+        await befriend(db.client, viewer, member);
+
+        // Control: while the member belongs, their friend reads the household.
+        await readHousehold(viewer, householdId).expect(200);
+
+        await leave(member, householdId).expect(200);
+        await readHousehold(viewer, householdId).expect(403);
+      });
+
+      it('answers 404 to a friend once the household is deleted', async () => {
+        const { owner, acceptedFriend, householdId } = await arrangeFriendsHousehold();
+
+        await readHousehold(acceptedFriend, householdId).expect(200);
+        await deleteHousehold(owner, householdId).expect(200);
+        await readHousehold(acceptedFriend, householdId).expect(404);
+      });
     });
 
     it('lists only the actor\u2019s own households, and a non-member sees absence', async () => {

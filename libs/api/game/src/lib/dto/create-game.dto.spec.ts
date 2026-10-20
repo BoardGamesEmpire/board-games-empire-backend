@@ -16,12 +16,12 @@ describe.each([
       forbidNonWhitelisted: true,
     });
 
-  it.each([Reach.Public, Reach.Private])('accepts %s', async (reach) => {
+  it.each([Reach.Public, Reach.Friends, Reach.Private])('accepts %s', async (reach) => {
     await expect(errorsFor({ reach })).resolves.toHaveLength(0);
   });
 
-  it.each([Reach.Friends, Reach.FriendsOfFriends])(
-    'refuses %s — no read rule would honour it, so the game would be its creator’s alone',
+  it.each([Reach.FriendsOfFriends])(
+    'refuses %s — no read rule would honour it until #496, so the game would claim readers it doesn’t have',
     async (reach) => {
       const errors = await errorsFor({ reach });
 

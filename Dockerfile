@@ -51,9 +51,7 @@ RUN --mount=type=cache,target=/root/.npm \
     --mount=type=cache,target=/root/.cache/prisma \
     npm ci --omit=dev --no-audit --no-fund
 
-# The full install, and the builds. The protos are exported first because the
-# app builds copy them, and nothing in the task graph exports them (#313).
-# `.env` comes from `.env.example`, as in CI.
+# The full install, and the builds. `.env` comes from `.env.example`, as in CI.
 FROM node AS build
 WORKDIR /app
 ENV NX_DAEMON=false \
@@ -64,7 +62,6 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 COPY . .
 RUN cp .env.example .env \
- && npx nx run @boardgamesempire/proto-gateway:buf-export \
  && npx nx run-many -t build --skipSync -p \
       @boardgamesempire/launcher \
       @boardgamesempire/api \

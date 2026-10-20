@@ -1,4 +1,4 @@
-import type { JobType, ResourceType } from '@bge/database';
+import type { DataGatewayCapability, JobType, ResourceType } from '@bge/database';
 import { NotificationType } from '@bge/database';
 import type { I18nMessage } from '@bge/i18n';
 
@@ -87,6 +87,39 @@ export interface AuditUnattributedEventPayload {
   eventName: string;
   subject: string;
   source: string | null;
+}
+
+/** The DataGateway a server-admin notification is about (#763). */
+export interface DataGatewayRefPayload {
+  gatewayId: string;
+  gatewayName: string;
+}
+
+/**
+ * For server admins: repeated failures auto-disabled a DataGateway (#763).
+ * `reason` is `repeated_connection_failure` or `repeated_call_failure`, a
+ * stable code the client words; it is typed `string` so this common lib
+ * doesn't depend on the gateway registry. `lastError` is the upstream's own
+ * text, untranslated, so they needn't read it in the logs; it's cut to its
+ * first 1,000 characters, with U+FFFD in place of any character PostgreSQL
+ * can't store in JSON. Times are ISO 8601.
+ */
+export interface DataGatewayAutoDisabledPayload extends DataGatewayRefPayload {
+  reason: string;
+  consecutiveFailures: number;
+  firstFailureAt: string;
+  lastFailureAt: string;
+  lastError: string;
+}
+
+/**
+ * For server admins: an interview found capabilities gone that the server
+ * was routing (#763). Capabilities a server admin switched off are left out
+ * (#715). The list keeps the enum's order, the order the DataGateway row
+ * stores them in.
+ */
+export interface DataGatewayCapabilitiesLostPayload extends DataGatewayRefPayload {
+  lostCapabilities: DataGatewayCapability[];
 }
 
 /** The minimal event reference every event-domain notification carries. */
@@ -193,6 +226,8 @@ export type NotificationPayloadMap = {
   [NotificationType.MediaContributionRejected]: MediaContributionRejectedPayload;
   [NotificationType.MediaContributionReclaimExpired]: MediaContributionReclaimExpiredPayload;
   [NotificationType.AuditUnattributedEvent]: AuditUnattributedEventPayload;
+  [NotificationType.DataGatewayAutoDisabled]: DataGatewayAutoDisabledPayload;
+  [NotificationType.DataGatewayCapabilitiesLost]: DataGatewayCapabilitiesLostPayload;
   [NotificationType.HouseholdInviteReceived]: HouseholdInviteReceivedPayload;
   [NotificationType.HouseholdInviteAwaitingApproval]: HouseholdInviteAwaitingApprovalPayload;
   [NotificationType.HouseholdInviteAccepted]: HouseholdInviteAcceptedPayload;

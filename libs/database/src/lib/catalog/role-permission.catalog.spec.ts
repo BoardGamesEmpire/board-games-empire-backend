@@ -1,8 +1,20 @@
-import { Reach, SystemRole } from '../client';
+import { Action, Reach, ResourceType, RiskLevel, SystemRole } from '../client';
 import { parseTemplate } from './catalog-guards';
 import { PERMISSION_CATALOG } from './permission.catalog';
 import { ROLE_PERMISSION_CATALOG } from './role-permission.catalog';
 import { ROLE_CATALOG, ROLE_SCOPE } from './role.catalog';
+
+/**
+ * "An accepted friend of the acting user", as a friends rule binds it, written
+ * out here rather than taken from the helper the catalog builds it with, so a
+ * change to that helper fails this file.
+ */
+const ACCEPTED_FRIEND_OF_ACTING_USER = {
+  OR: [
+    { friendshipsRequested: { some: { addresseeId: '{{ user.id }}', status: 'Accepted' } } },
+    { friendshipsReceived: { some: { requesterId: '{{ user.id }}', status: 'Accepted' } } },
+  ],
+};
 
 // Importing the catalog modules IS the positive integrity case: each runs its
 // assertions at module scope, so a shipped catalog that violated one would fail
@@ -147,8 +159,10 @@ describe('the shipped catalogs', () => {
       // event role already grants, because that role's condition renders
       // identically. Both were shipped and both are gone (#244) —
       // `create:household_role` duplicated `HouseholdOwner`/`HouseholdAdmin`,
-      // `delete:event` duplicated `EventHost`, which an event's creator always
-      // is.
+      // and `delete:event`, then scoped to the event's creator, duplicated
+      // `EventHost`, which an event's creator always is. Both have moved on
+      // since: the first is gone (#168), and the second binds to the event's
+      // host (#567).
       //
       // A STATIC condition is neither. It references no variable, so it
       // renders the same in every pass, and it narrows an otherwise
@@ -226,7 +240,7 @@ describe('the shipped catalogs', () => {
       }
     });
 
-    it('let User read its own games and everyone’s Public ones, and nothing else', () => {
+    it('let User read its own games, a friend’s that reach friends and everyone’s Public ones, and nothing else', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
       // `User` is held by every signed-in actor, so an unconditioned read here
@@ -234,9 +248,14 @@ describe('the shipped catalogs', () => {
       // than by shape, so a clause that goes missing fails here instead of
       // widening the read unnoticed.
       expect(conditionsOf('read:game')).toStrictEqual({ deletedAt: null, createdById: '{{ user.id }}' });
+      expect(conditionsOf('read:game:friends')).toStrictEqual({
+        deletedAt: null,
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        createdBy: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
+      });
       expect(conditionsOf('read:game:public')).toStrictEqual({ deletedAt: null, reach: 'Public' });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
-        expect.arrayContaining(['read:game', 'read:game:public']),
+        expect.arrayContaining(['read:game', 'read:game:friends', 'read:game:public']),
       );
     });
 
@@ -278,15 +297,20 @@ describe('the shipped catalogs', () => {
     // that is not `Public` is its owner's alone, in search too (#495). Pinned
     // exactly, as the game reads are: a lost clause hands every profile to
     // every user.
-    it('let User read its own profile and everyone’s Public ones, and let no guest read them', () => {
+    it('let User read its own profile, a friend’s that reaches friends and everyone’s Public ones, and let no anonymous user read them', () => {
       const conditionsOf = (slug: string) => PERMISSION_CATALOG.find((entry) => entry.slug === slug)?.conditions;
 
       expect(conditionsOf('read:user:profile:own')).toStrictEqual({ userId: '{{ user.id }}' });
+      expect(conditionsOf('read:user:profile:friends')).toStrictEqual({
+        reach: { in: ['Friends', 'FriendsOfFriends', 'Public'] },
+        user: { is: ACCEPTED_FRIEND_OF_ACTING_USER },
+      });
       expect(conditionsOf('read:user:profile:public')).toStrictEqual({ reach: 'Public' });
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toEqual(
-        expect.arrayContaining(['read:user:profile:own', 'read:user:profile:public']),
+        expect.arrayContaining(['read:user:profile:own', 'read:user:profile:friends', 'read:user:profile:public']),
       );
       expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:profile:public');
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain('read:user:profile:friends');
     });
 
     // The ladder reads upwards: a reach wider than `Friends` still admits a
@@ -303,11 +327,30 @@ describe('the shipped catalogs', () => {
       ['read:event_policy:friends', (reach: unknown) => ({ event: { is: { reach } } })],
       ['read:household_member:friends', (reach: unknown) => ({ household: { is: { reach } } })],
       ['read:game_collection:friends', (reach: unknown) => ({ reach })],
+      ['read:user:profile:friends', (reach: unknown) => ({ reach })],
+      ['read:game:friends', (reach: unknown) => ({ reach })],
     ])('let a friend read through %s at every rung from Friends up', (slug, at) => {
       const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
 
       expect(entry?.conditions).toMatchObject(at({ in: rungsAdmittingFriends }));
       expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+    });
+
+    // A `Public` event is every signed-in user's to read, with its dates and
+    // its policy. An anonymous user is left out: anyone can open an anonymous
+    // session (#489), so a grant there would be signed-out access, which is a
+    // server setting of its own (#813).
+    it.each([
+      ['read:event:public', { reach: 'Public' }],
+      ['read:event_occurrence:public', { event: { is: { reach: 'Public' } } }],
+      ['read:event_policy:public', { event: { is: { reach: 'Public' } } }],
+    ])('let every signed-in user, and no anonymous user, read through %s', (slug, conditions) => {
+      const entry = PERMISSION_CATALOG.find((candidate) => candidate.slug === slug);
+
+      expect(entry?.conditions).toStrictEqual(conditions);
+      expect(entry?.riskLevel).toBe(RiskLevel.Medium);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.User]).toContain(slug);
+      expect(ROLE_PERMISSION_CATALOG[SystemRole.AnonymousUser]).not.toContain(slug);
     });
 
     // The ladder's order is written in the rules, not in the enum, which
@@ -352,15 +395,21 @@ describe('the shipped catalogs', () => {
       expect(heldBy(SystemRole.Moderator)).toEqual(['read:public_content']);
     });
 
-    it('derive HouseholdAdmin from HouseholdOwner minus deletion and the ownership-transfer gate', () => {
+    it('derive HouseholdAdmin from HouseholdOwner minus the owner-only slugs, plus variants that stop at the Member role (#168)', () => {
       const owner = ROLE_PERMISSION_CATALOG[SystemRole.HouseholdOwner];
       const admin = ROLE_PERMISSION_CATALOG[SystemRole.HouseholdAdmin];
 
-      expect(admin).not.toContain('delete:household');
-      expect(admin).not.toContain('update:household_role:transfer-ownership');
-      expect(owner.filter((slug) => !admin.includes(slug))).toEqual([
+      expect(owner.filter((slug) => !admin.includes(slug)).sort()).toEqual([
+        'create:household_invite',
         'delete:household',
+        'manage:household_member',
+        'update:household_invite:revoke',
         'update:household_role:transfer-ownership',
+      ]);
+      expect(admin.filter((slug) => !owner.includes(slug)).sort()).toEqual([
+        'create:household_invite:as-admin',
+        'manage:household_member:as-admin',
+        'update:household_invite:revoke:as-admin',
       ]);
     });
 
@@ -369,6 +418,31 @@ describe('the shipped catalogs', () => {
       const coHost = ROLE_PERMISSION_CATALOG[SystemRole.EventCoHost];
 
       expect(host.filter((slug) => !coHost.includes(slug))).toEqual(['delete:event']);
+    });
+
+    it.each([SystemRole.HouseholdOwner, SystemRole.HouseholdAdmin])(
+      "give %s no delete on an event or its dates: it edits and cancels the household's events, and deletes only what it hosts (#168, #567)",
+      (roleName) => {
+        const held = ROLE_PERMISSION_CATALOG[roleName];
+        const eventDeletes = PERMISSION_CATALOG.filter(
+          ({ slug, action, subject }) =>
+            held.includes(slug) &&
+            action === Action.delete &&
+            (subject === ResourceType.Event || subject === ResourceType.EventOccurrence),
+        ).map(({ slug }) => slug);
+
+        expect(eventDeletes).toEqual([]);
+        expect(held).toContain('update:event:household');
+        expect(held).toContain('update:event_occurrence:cancel:household');
+      },
+    );
+
+    it('grant create on household roles to nobody: adding a member writes its role row itself (#168)', () => {
+      const creates = PERMISSION_CATALOG.filter(
+        ({ action, subject }) => subject === ResourceType.HouseholdRole && action === Action.create,
+      ).map(({ slug }) => slug);
+
+      expect(creates).toEqual([]);
     });
   });
 });
