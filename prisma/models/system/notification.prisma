@@ -47,6 +47,19 @@ enum NotificationType {
   AuditUnattributedEvent
 
   /**
+   * DataGateway notifications, each sent to the server admins (#763):
+   * DataGatewayAutoDisabled: repeated failures switched the DataGateway off.
+   * Payload: { gatewayId, gatewayName, reason, consecutiveFailures,
+   * firstFailureAt, lastFailureAt, lastError }
+   * DataGatewayCapabilitiesLost: an interview found capabilities gone that the
+   * server was routing. Not sent again to a server admin whose unread one for
+   * the DataGateway already names every capability lost.
+   * Payload: { gatewayId, gatewayName, lostCapabilities }
+   */
+  DataGatewayAutoDisabled
+  DataGatewayCapabilitiesLost
+
+  /**
    * Household notifications, each sent to a different audience:
    * HouseholdInviteReceived: the invitee.
    * HouseholdInviteAwaitingApproval: household owners and admins.
